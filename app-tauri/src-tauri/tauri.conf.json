@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Slipstream",
-  "version": "0.1.9",
+  "mainBinaryName": "slipstream",
+  "version": "0.1.9-preview.23",
   "identifier": "dev.slipstream.tray",
   "build": {
     "frontendDist": "../src"
@@ -24,14 +25,16 @@
     ],
     "resources": [
       "icons/*.png",
-      "slipstreamd/**/*"
+      "slipstreamd/**/*",
+      "chromium-headless-shell/**/*"
     ],
     "externalBin": [
       "binaries/geph5-client"
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "infoPlist": "Info.plist"
     },
     "createUpdaterArtifacts": true
   },

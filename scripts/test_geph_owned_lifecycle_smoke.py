@@ -937,22 +937,16 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             ROOT / ".github/workflows/owned-geph-qualification.yml"
         ).read_text(encoding="utf-8")
         cleanup = workflow.index("Verify the user-level gate left no system path")
-        package = workflow.index("Package the exact qualified app")
+        package = workflow.index("Bind qualification proof to the exact candidate")
         upload = workflow.index(
             "name: Slipstream-owned-geph-qualified-${{ github.sha }}"
         )
         self.assertLess(cleanup, package)
         self.assertLess(package, upload)
-        self.assertIn(
-            "dist-qualified/Slipstream-owned-geph-qualified.zip.sha256",
-            workflow,
-        )
+        self.assertIn("dist-qualified/release-qualification.json", workflow)
         package_block = workflow[package:upload]
-        self.assertIn("cd dist-qualified", package_block)
-        self.assertIn(
-            "shasum -a 256 Slipstream-owned-geph-qualified.zip",
-            package_block,
-        )
+        self.assertIn("scripts/release_candidate.py create-proof", package_block)
+        self.assertIn('--qualification-run-id "$GITHUB_RUN_ID"', package_block)
         self.assertIn("if-no-files-found: error", workflow[upload:])
 
 

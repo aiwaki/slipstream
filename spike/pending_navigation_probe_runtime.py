@@ -11,12 +11,15 @@ import plistlib
 import pwd
 import re
 import secrets
+import signal
 import socket
 import stat
 import struct
 import subprocess
 import threading
 import time
+
+import route_preflight
 
 
 SCHEMA_VERSION = 1
@@ -45,7 +48,7 @@ PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
 )
 PENDING_NAVIGATION_BROWSER_WORKER = (
     os.environ.get("SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER")
-    or "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+    or "/Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe"
 )
 PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT = (
     "--pending-navigation-browser-probe"
@@ -55,6 +58,7 @@ PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
 )
 PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 120.0
 _BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
+_BROWSER_WORKER_FORCE_REAP_SECONDS = 1.0
 _BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
 _BROWSER_WORKER_UNCONFIRMED_CLEANUP_ERRORS = frozenset((
     "chrome_cleanup_failed",
@@ -103,6 +107,14 @@ _JOB_FIELDS = frozenset((
     "request_started_at_unix_ms",
     "issued_at_unix_ms",
     "expires_at_unix_ms",
+))
+_ROUTE_PREFLIGHT_JOB_FIELDS = frozenset((
+    "schema_version",
+    "capability",
+    "host",
+    "candidate_routes",
+    "issued_at_unix_ms",
+    "deadline_unix_ms",
 ))
 
 
@@ -262,7 +274,25 @@ def _valid_positive_int(value):
 
 
 def _validate_job(job, now_unix_ms):
-    if not isinstance(job, dict) or set(job) != _JOB_FIELDS:
+    if not isinstance(job, dict):
+        return None
+    if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
+        try:
+            parsed = route_preflight.parse_route_preflight_job_v1(
+                json.dumps(job, separators=(",", ":"), sort_keys=True)
+            )
+        except (TypeError, ValueError, route_preflight.RoutePreflightError):
+            return None
+        if (
+            parsed.host != job.get("host")
+            or "owned_geph" not in parsed.candidate_routes
+            or now_unix_ms < parsed.issued_at_unix_ms
+            or now_unix_ms - parsed.issued_at_unix_ms > MAX_ENQUEUE_AGE_MS
+            or parsed.deadline_unix_ms <= now_unix_ms
+        ):
+            return None
+        return dict(job)
+    if set(job) != _JOB_FIELDS:
         return None
     if type(job.get("schema_version")) is not int or job["schema_version"] != 1:
         return None
@@ -285,6 +315,12 @@ def _validate_job(job, now_unix_ms):
     ):
         return None
     return dict(job)
+
+
+def _job_expiry_unix_ms(job):
+    if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
+        return job["deadline_unix_ms"]
+    return job["expires_at_unix_ms"]
 
 
 class PendingNavigationProbeRuntime:
@@ -338,7 +374,7 @@ class PendingNavigationProbeRuntime:
             return False
         capability = validated["capability"]
         expires_at_monotonic = now_monotonic + (
-            validated["expires_at_unix_ms"] - now_unix_ms
+            _job_expiry_unix_ms(validated) - now_unix_ms
         ) / 1000.0
         with self._lock:
             self._prune_locked(now_monotonic)
@@ -931,6 +967,226 @@ def _run_browser_worker_command(command):
         raise PendingNavigationProbeRuntimeError(
             "browser_worker_command_failed"
         ) from error
+
+
+def _run_direct_headless_worker_command(
+    command,
+    timeout,
+    uid,
+    gid,
+    environment,
+    working_directory,
+):
+    """Run one non-Aqua worker and give its in-process cleanup a bounded exit."""
+    try:
+        process = subprocess.Popen(
+            tuple(command),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            cwd=working_directory,
+            env=dict(environment),
+            user=uid,
+            group=gid,
+            extra_groups=(),
+        )
+    except OSError as error:
+        raise PendingNavigationProbeRuntimeError(
+            "browser_worker_spawn_failed"
+        ) from error
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+        try:
+            returncode = process.wait(
+                timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+            try:
+                process.wait(timeout=_BROWSER_WORKER_FORCE_REAP_SECONDS)
+            except subprocess.TimeoutExpired as cleanup_error:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_cleanup_unconfirmed",
+                    worker_cleanup_confirmed=False,
+                ) from cleanup_error
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_timeout",
+                worker_cleanup_confirmed=False,
+            ) from error
+    return subprocess.CompletedProcess(tuple(command), returncode)
+
+
+class DirectHeadlessBrowserWorkerLauncher:
+    """Launch the packaged probe as the console user without AppKit/launchd.
+
+    The app binary exits through its probe entry point before Tauri is started;
+    that process directly owns the pinned Chromium headless shell.  No
+    LaunchAgent, Aqua session job, installed Chrome, or ``open`` invocation is
+    involved.
+    """
+
+    def __init__(
+        self,
+        *,
+        executable=PENDING_NAVIGATION_BROWSER_WORKER,
+        geph_port,
+        identity_probe=None,
+        command_runner=None,
+        codesign_runner=None,
+        timeout=20.0,
+        effective_uid=None,
+    ):
+        if (
+            not isinstance(executable, (str, os.PathLike))
+            or not os.fspath(executable)
+            or type(geph_port) is not int
+            or not 1 <= geph_port <= 65535
+            or not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not 8.0 <= timeout <= 30.0
+        ):
+            raise ValueError("direct headless browser launcher is invalid")
+        self._executable = Path(executable)
+        self._geph_port = geph_port
+        self._identity_probe = identity_probe or _active_console_user
+        self._command_runner = (
+            command_runner or _run_direct_headless_worker_command
+        )
+        self._codesign_runner = codesign_runner or subprocess.run
+        self._timeout = float(timeout)
+        self._effective_uid = os.geteuid if effective_uid is None else effective_uid
+
+    def _identity(self):
+        identity = self._identity_probe()
+        if (
+            not isinstance(identity, ConsoleUserIdentity)
+            or identity.uid <= 0
+            or identity.gid < 0
+            or not identity.username
+            or identity.username in {"root", "loginwindow", "_mbsetupuser"}
+            or not os.path.isabs(identity.home)
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "console_user_unavailable"
+            )
+        return identity
+
+    def _validate_executable(self, identity):
+        try:
+            metadata = os.lstat(self._executable)
+        except OSError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_unavailable"
+            ) from error
+        macos = self._executable.parent
+        contents = macos.parent
+        bundle = contents.parent
+        if (
+            self._effective_uid() != 0
+            or not self._executable.is_absolute()
+            or self._executable.name != "slipstream-browser-probe"
+            or macos.name != "MacOS"
+            or contents.name != "Contents"
+            or bundle.suffix != ".app"
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid not in {0, identity.uid}
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or not metadata.st_mode & 0o111
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_unowned"
+            )
+        signature_targets = (
+            (
+                "/usr/bin/codesign",
+                "--verify",
+                "--strict",
+                str(self._executable),
+            ),
+            (
+                "/usr/bin/codesign",
+                "--verify",
+                "--deep",
+                "--strict",
+                str(bundle),
+            ),
+        )
+        for command in signature_targets:
+            try:
+                result = self._codesign_runner(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3.0,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_signature_unavailable"
+                ) from error
+            if result.returncode != 0:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_signature_invalid"
+                )
+
+    def _command(self):
+        return (
+            str(self._executable),
+            PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+        )
+
+    def _environment(self, identity, launch_id):
+        return {
+            "HOME": identity.home,
+            "LOGNAME": identity.username,
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "USER": identity.username,
+            PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV: launch_id,
+            "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT": str(
+                self._geph_port
+            ),
+        }
+
+    def launch(self):
+        identity = self._identity()
+        self._validate_executable(identity)
+        launch_id = secrets.token_hex(8)
+        try:
+            result = self._command_runner(
+                self._command(),
+                self._timeout,
+                identity.uid,
+                identity.gid,
+                self._environment(identity, launch_id),
+                identity.home,
+            )
+        except PendingNavigationProbeRuntimeError as error:
+            error.worker_launch_id = launch_id
+            raise
+        if result.returncode != 0:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_failed",
+                worker_cleanup_confirmed=False,
+                worker_launch_id=launch_id,
+            )
+        if self._identity() != identity:
+            raise PendingNavigationProbeRuntimeError(
+                "console_user_changed",
+                worker_cleanup_confirmed=True,
+                worker_launch_id=launch_id,
+            )
+        return launch_id
 
 
 def _launchd_job_absent(result):

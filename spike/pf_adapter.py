@@ -335,6 +335,18 @@ def load_private_anchor(runner, anchor, rules_template, port):
             pass
 
 
+def _dual_stack_private_rules_loaded(nat, rules, port):
+    return (
+        f"port {port}" in nat
+        and "-> 127.0.0.1" in nat
+        and "inet6" in nat
+        and "-> ::1" in nat
+        and "route-to (lo0 127.0.0.1)" in rules
+        and "route-to (lo0 ::1)" in rules
+        and "inet6" in rules
+    )
+
+
 def private_rules_loaded(runner, anchor, port, parent_loaded):
     if not parent_loaded():
         return False
@@ -343,8 +355,7 @@ def private_rules_loaded(runner, anchor, port, parent_loaded):
     return (
         nat.returncode == 0
         and rules.returncode == 0
-        and f"port {port}" in nat.stdout
-        and "route-to (lo0 127.0.0.1)" in rules.stdout
+        and _dual_stack_private_rules_loaded(nat.stdout, rules.stdout, port)
     )
 
 
@@ -363,7 +374,10 @@ def state_snapshot(runner, anchor, port, applied, conflicts, parent_loaded):
             is_parent_loaded
             and anchor_nat.returncode == 0
             and anchor_rules.returncode == 0
-            and f"port {port}" in anchor_nat.stdout
-            and "route-to (lo0 127.0.0.1)" in anchor_rules.stdout
+            and _dual_stack_private_rules_loaded(
+                anchor_nat.stdout,
+                anchor_rules.stdout,
+                port,
+            )
         ),
     }

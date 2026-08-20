@@ -9,7 +9,52 @@ permissions:
   contents: read
 
 jobs:
-  checks:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      product: ${{ steps.scope.outputs.product }}
+      windows: ${{ steps.scope.outputs.windows }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          product=false
+          windows=false
+          changed=false
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            changed=true
+            case "$path" in
+              README.md|README.en.md|docs/*|*.md) ;;
+              *) product=true ;;
+            esac
+            case "$path" in
+              .github/workflows/ci.yml|.github/workflows/windows-packet-adapter-qualification.yml|contracts/*|crates/slipstream-core/*|crates/slipstream-userspace-stack-evaluation/*|crates/slipstream-userspace-stack-effect-evaluation/*|crates/slipstream-windows-adapter/*|vendor/wintun/*)
+                windows=true
+                ;;
+            esac
+          done < <(git diff --name-only "$base" "$GITHUB_SHA")
+          if [ "$changed" = false ]; then
+            echo "empty change set cannot bypass product gates"
+            product=true
+            windows=true
+          fi
+          echo "product=$product" >> "$GITHUB_OUTPUT"
+          echo "windows=$windows" >> "$GITHUB_OUTPUT"
+
+  product-checks:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -105,6 +150,7 @@ jobs:
         run: |
           python3 -m py_compile \
             spike/address_attempts.py \
+            spike/bootstrap_asset_preflight.py \
             spike/connection_probe.py \
             spike/connection_race.py \
             spike/connection_race_io.py \
@@ -135,6 +181,7 @@ jobs:
             spike/test_semantic_route_signal_runtime.py \
             spike/test_traffic_contracts.py \
             spike/test_baseline_startup.py \
+            spike/test_bootstrap_asset_preflight.py \
             spike/test_tproxy_doh.py \
             spike/test_xbox_dns.py \
             scripts/pf_anchor_smoke.py \
@@ -148,10 +195,14 @@ jobs:
             scripts/make_route_policy_bundle.py \
             scripts/package_chromium_companion.py \
             scripts/pending_navigation_browser_probe_smoke.py \
+            scripts/packaged_transport_mechanics_smoke.py \
+            scripts/release_transport_matrix.py \
             scripts/check_project_state.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
             scripts/test_pf_installed_lifecycle_smoke.py \
+            scripts/test_packaged_transport_mechanics_smoke.py \
+            scripts/test_release_transport_matrix.py \
             scripts/test_make_appcast.py \
             scripts/test_dependency_audit.py \
             scripts/test_make_release_manifest.py \
@@ -171,6 +222,16 @@ jobs:
       - name: Daemon unit tests
         run: python3 -m pytest -q spike
 
+      - name: Qualify deterministic exact-host TCP fallback and QUIC v1/v2 observation matrix
+        run: |
+          python3 -m pytest -q \
+            spike/test_tproxy_doh.py::test_quic_v1_v2_observation_and_exact_host_fallback_cover_ipv4_ipv6 \
+            spike/test_tproxy_doh.py::test_packaged_transport_mechanics_selftest_covers_fixed_matrix_without_network \
+            spike/test_tproxy_doh.py::test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped \
+            spike/test_tproxy_doh.py::test_quic_initial_sni_reassembles_publicly_decryptable_crypto_frames \
+            spike/test_tproxy_doh.py::test_quic_v2_initial_sni_uses_rfc9369_keys_and_packet_type \
+            spike/test_tproxy_doh.py::test_ipv6_quic_v2_fallback_is_exact_host_and_flow_scoped
+
       - name: Private PF anchor sentinel smoke
         run: sudo -E "$(command -v python3)" scripts/pf_anchor_smoke.py
 
@@ -185,7 +246,10 @@ jobs:
 
       - name: Rust tray tests
         working-directory: app-tauri/src-tauri
-        run: cargo test
+        run: |
+          cargo test --locked --lib --bin slipstream
+          cargo test --locked --bin slipstream-browser-probe
+          cargo test --locked --test updater_installer_mechanics -- --test-threads=1
 
       - name: Rust core tests
         run: cargo test --locked --manifest-path crates/slipstream-core/Cargo.toml
@@ -201,7 +265,7 @@ jobs:
 
       - name: Rust tray lint
         working-directory: app-tauri/src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Rust core lint
         run: cargo clippy --locked --manifest-path crates/slipstream-core/Cargo.toml --all-targets -- -D warnings
@@ -221,6 +285,8 @@ jobs:
         run: sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py
 
   chromium-webrequest-contract:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
     runs-on: macos-14
     timeout-minutes: 12
     steps:
@@ -250,6 +316,8 @@ jobs:
             --chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"
 
   windows-adapter-contract:
+    needs: changes
+    if: needs.changes.outputs.product == 'true' && needs.changes.outputs.windows == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -379,9 +447,15 @@ jobs:
       - name: Lint Windows contracts, ingress, worker host, ownership, lifecycle state, and SCM effects
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings
 
-  packaged-app-lifecycle:
+  packaged-app-build:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
     runs-on: macos-14
-    timeout-minutes: 45
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      updater-signing-artifact-digest: ${{ steps.upload-updater-signing-input.outputs.artifact-digest }}
     env:
       SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
     steps:
@@ -403,13 +477,6 @@ jobs:
           cache: pip
           cache-dependency-path: spike/requirements-build.txt
 
-      - name: Install proven Chrome for Testing for the packaged browser probe
-        id: packaged-browser-probe-chrome
-        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
-        with:
-          chrome-version: 151.0.7922.77
-          install-chromedriver: false
-
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -425,13 +492,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-
-      - name: Build the unsigned Safari companion
-        run: |
-          set -euo pipefail
-          swift test --package-path browser-companion/safari
-          bash scripts/build_safari_companion.sh \
-            "$RUNNER_TEMP/slipstream-safari-companion"
 
       - name: Build the frozen daemon
         run: |
@@ -477,24 +537,89 @@ jobs:
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin \
             -verify_arch arm64
 
-      - name: Build the packaged app
+      - name: Materialize pinned Chromium headless shell
+        run: |
+          set -euo pipefail
+          python3 scripts/materialize_chromium_headless_shell.py \
+            --output app-tauri/src-tauri/chromium-headless-shell
+          /usr/bin/lipo \
+            app-tauri/src-tauri/chromium-headless-shell/chrome-headless-shell \
+            -verify_arch arm64
+
+      - name: Install packaged app JavaScript dependencies without lifecycle scripts
+        working-directory: app-tauri
+        run: npm ci --ignore-scripts
+
+      - name: Synchronize package versions without signing credentials
+        working-directory: app-tauri
+        run: npm run sync-version
+
+      - name: Package the app for pull-request qualification
+        if: github.event_name == 'pull_request'
         working-directory: app-tauri
         run: |
           set -euo pipefail
-          npm ci
-          npm run build:local -- --target "$SLIPSTREAM_TAURI_TARGET" --bundles app
+          ./node_modules/.bin/tauri build \
+            --config src-tauri/tauri.local.conf.json \
+            --target "$SLIPSTREAM_TAURI_TARGET"
+
+      - name: Build the packaged app with a disposable updater key
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: app-tauri
+        run: |
+          set -euo pipefail
+          fixture_key="$RUNNER_TEMP/disposable-updater.key"
+          fixture_password="disposable-ci-only"
+          cleanup_disposable_key() {
+            rm -f "$fixture_key" "$fixture_key.pub"
+          }
+          trap cleanup_disposable_key EXIT
+          ./node_modules/.bin/tauri signer generate \
+            --ci \
+            --write-keys "$fixture_key" \
+            --password "$fixture_password"
+          TAURI_SIGNING_PRIVATE_KEY="$(<"$fixture_key")" \
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$fixture_password" \
+            ./node_modules/.bin/tauri build \
+              --target "$SLIPSTREAM_TAURI_TARGET"
 
       - name: Verify packaged resources
         run: |
           set -euo pipefail
           app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
           test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
+            = slipstream
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
             = "$(tr -d '[:space:]' < VERSION)"
           /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
           /usr/bin/lipo "$app/Contents/Resources/slipstreamd/slipstreamd" \
             -verify_arch arm64
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
+          helper="$app/Contents/MacOS/slipstream-browser-probe"
+          test -x "$helper"
+          /usr/bin/lipo "$helper" -verify_arch arm64
+          /usr/bin/codesign --verify --strict "$helper"
+          if /usr/bin/otool -L "$helper" | /usr/bin/grep -E \
+            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
+            echo "browser-probe helper links a GUI framework" >&2
+            exit 1
+          fi
+          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
+          test -x "$watchdog"
+          /usr/bin/lipo "$watchdog" -verify_arch arm64
+          /usr/bin/codesign --verify --strict "$watchdog"
+          if /usr/bin/otool -L "$watchdog" | /usr/bin/grep -E \
+            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
+            echo "update watchdog links a GUI framework" >&2
+            exit 1
+          fi
+          test -x "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell"
+          test -f "$app/Contents/Resources/chromium-headless-shell/LICENSE.headless_shell"
+          test -f "$app/Contents/Resources/chromium-headless-shell/manifest.json"
+          /usr/bin/lipo \
+            "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell" \
+            -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
           daemon="$app/Contents/Resources/slipstreamd/slipstreamd"
           test "$("$daemon" --classify-host rr1---sn-test.googlevideo.com)" = \
@@ -502,6 +627,595 @@ jobs:
           test "$("$daemon" --classify-host www.youtube.com)" = \
             '{"host": "www.youtube.com", "route_class": "local_bypass", "service_group": "youtube_video", "strategy_set": "fake_only"}'
 
+      - name: Freeze the updater archive and its exact-run signing identity
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          bundle="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle"
+          archive="$bundle/macos/Slipstream.app.tar.gz"
+          test -f "$archive"
+          mkdir -p dist-updater-signing-input
+          cp "$archive" dist-updater-signing-input/Slipstream.app.tar.gz
+          python3 - "$archive" dist-updater-signing-input/signing-input.json <<'PY'
+          import hashlib
+          import json
+          import os
+          import stat
+          import sys
+          from pathlib import Path
+
+          source = Path(sys.argv[1])
+          output = Path(sys.argv[2])
+          metadata = source.lstat()
+          if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+              raise SystemExit("updater signing input must be a non-empty regular file")
+          digest_builder = hashlib.sha256()
+          with source.open("rb") as stream:
+              for block in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest_builder.update(block)
+          digest = digest_builder.hexdigest()
+          manifest = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_commit": os.environ["GITHUB_SHA"],
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "workflow_run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "version": Path("VERSION").read_text(encoding="utf-8").strip(),
+              "target": os.environ["SLIPSTREAM_TAURI_TARGET"],
+              "archive": {
+                  "name": "Slipstream.app.tar.gz",
+                  "sha256": digest,
+                  "size": metadata.st_size,
+              },
+          }
+          output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - id: upload-updater-signing-input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: updater-signing-input-${{ github.sha }}
+          path: dist-updater-signing-input/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Seal the single packaged build for parallel qualification
+        run: |
+          set -euo pipefail
+          bundle="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle"
+          app="$bundle/macos/Slipstream.app"
+          test -d "$app"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            test -f "$bundle/macos/Slipstream.app.tar.gz"
+            test -f "$bundle/macos/Slipstream.app.tar.gz.sig"
+            dmg_count=0
+            for dmg in "$bundle"/dmg/*.dmg; do
+              [ -e "$dmg" ] || continue
+              dmg_count=$((dmg_count + 1))
+            done
+            [ "$dmg_count" -eq 1 ] || {
+              echo "main packaged build must contain exactly one DMG"
+              exit 1
+            }
+          fi
+          mkdir -p dist-build
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$bundle" \
+            dist-build/Slipstream-build-bundle.zip
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-app-build-${{ github.sha }}
+          path: dist-build/Slipstream-build-bundle.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-updater-archive:
+    needs: [changes, packaged-app-build]
+    if: >-
+      needs.changes.outputs.product == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    timeout-minutes: 8
+    permissions:
+      actions: read
+    outputs:
+      updater-signature-artifact-digest: ${{ steps.upload-updater-signature.outputs.artifact-digest }}
+    steps:
+      # Deliberately no checkout: production signing credentials must never
+      # coexist with repository code, build.rs, npm lifecycle code, or the
+      # workspace-controlled node_modules tree.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: updater-signing-input-${{ github.sha }}
+          path: updater-signing-input
+
+      - name: Verify exact-run signing input and artifact digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.packaged-app-build.outputs.updater-signing-artifact-digest }}
+          ARTIFACT_NAME: updater-signing-input-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/current-run-artifacts.json"
+          python3 - \
+            updater-signing-input/signing-input.json \
+            updater-signing-input/Slipstream.app.tar.gz \
+            "$RUNNER_TEMP/current-run-artifacts.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import stat
+          import sys
+          from pathlib import Path
+
+          manifest_path, archive_path, artifacts_path = map(Path, sys.argv[1:])
+          expected_files = {manifest_path.resolve(), archive_path.resolve()}
+          actual_files = {
+              path.resolve()
+              for path in manifest_path.parent.iterdir()
+              if path.is_file() and not path.is_symlink()
+          }
+          if actual_files != expected_files or any(path.is_symlink() for path in manifest_path.parent.iterdir()):
+              raise SystemExit("updater signing input contains an unexpected file or symlink")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          expected = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_commit": os.environ["GITHUB_SHA"],
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "workflow_run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "target": "aarch64-apple-darwin",
+          }
+          for key, value in expected.items():
+              if manifest.get(key) != value:
+                  raise SystemExit(f"updater signing input has invalid {key}")
+          if not re.fullmatch(r"\d+\.\d+\.\d+-preview\.[1-9]\d*", manifest.get("version", "")):
+              raise SystemExit("updater signing input version is not an exact preview semver")
+          metadata = archive_path.lstat()
+          digest_builder = hashlib.sha256()
+          with archive_path.open("rb") as stream:
+              for block in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest_builder.update(block)
+          digest = digest_builder.hexdigest()
+          archive = manifest.get("archive")
+          if not stat.S_ISREG(metadata.st_mode) or archive != {
+              "name": archive_path.name,
+              "sha256": digest,
+              "size": metadata.st_size,
+          }:
+              raise SystemExit("updater signing input archive identity mismatch")
+          expected_digest = os.environ["EXPECTED_ARTIFACT_DIGEST"]
+          # upload-artifact exposes a raw 64-hex output, while the Actions REST
+          # API prefixes the same digest with "sha256:". Validate both exact
+          # encodings instead of comparing unlike representations.
+          if not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+              raise SystemExit("updater signing artifact digest output is invalid")
+          artifacts = json.loads(artifacts_path.read_text(encoding="utf-8")).get("artifacts", [])
+          matches = [item for item in artifacts if item.get("name") == os.environ["ARTIFACT_NAME"]]
+          if len(matches) != 1 or matches[0].get("expired") is not False:
+              raise SystemExit("exact current-run updater signing artifact is unavailable")
+          if matches[0].get("digest") != f"sha256:{expected_digest}":
+              raise SystemExit("updater signing artifact service digest mismatch")
+          PY
+
+      - name: Bootstrap the independently checksummed Tauri signer
+        run: |
+          set -euo pipefail
+          trusted="$RUNNER_TEMP/trusted-tauri-signer"
+          wrapper="$RUNNER_TEMP/tauri-cli-2.11.3.tgz"
+          native="$RUNNER_TEMP/tauri-cli-darwin-arm64-2.11.3.tgz"
+          mkdir -p \
+            "$trusted/node_modules/@tauri-apps/cli" \
+            "$trusted/node_modules/@tauri-apps/cli-darwin-arm64"
+          /usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://registry.npmjs.org/@tauri-apps/cli/-/cli-2.11.3.tgz \
+            --output "$wrapper"
+          /usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://registry.npmjs.org/@tauri-apps/cli-darwin-arm64/-/cli-darwin-arm64-2.11.3.tgz \
+            --output "$native"
+          printf '%s  %s\n' \
+            1049507bccfcb83ecf8b9fbeb49fd47c4c16b8ad3caddde808361d7886c901bea9651af196a9a8179821e47e58bf39943e14b821109a2d2b1086f5a4adf2be19 \
+            "$wrapper" \
+            | shasum -a 512 -c -
+          printf '%s  %s\n' \
+            071a5a33c6ec0a85ecdf077858a6216acfc6d60b3bfabec1f9ee169f2464d8612854ea2e241d61a0be84e982d76435db61c8ba54576b367a1b430776b952f87b \
+            "$native" \
+            | shasum -a 512 -c -
+          tar -xzf "$wrapper" \
+            -C "$trusted/node_modules/@tauri-apps/cli" \
+            --strip-components=1
+          tar -xzf "$native" \
+            -C "$trusted/node_modules/@tauri-apps/cli-darwin-arm64" \
+            --strip-components=1
+          test "$(node "$trusted/node_modules/@tauri-apps/cli/tauri.js" --version)" \
+            = "tauri-cli 2.11.3"
+
+      - name: Sign only the frozen updater archive with the production key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${TAURI_SIGNING_PRIVATE_KEY:?main updater signing requires TAURI_SIGNING_PRIVATE_KEY}"
+          archive="$GITHUB_WORKSPACE/updater-signing-input/Slipstream.app.tar.gz"
+          signer="$RUNNER_TEMP/trusted-tauri-signer/node_modules/@tauri-apps/cli/tauri.js"
+          before="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          rm -f "$archive.sig"
+          (
+            cd "$GITHUB_WORKSPACE/updater-signing-input"
+            node "$signer" signer sign "$archive"
+          )
+          after="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          test "$before" = "$after"
+          test -s "$archive.sig"
+
+      - name: Seal the signature proof after credentials leave scope
+        env:
+          SIGNING_INPUT_ARTIFACT_DIGEST: ${{ needs.packaged-app-build.outputs.updater-signing-artifact-digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p updater-signature
+          cp updater-signing-input/Slipstream.app.tar.gz.sig updater-signature/
+          python3 - \
+            updater-signing-input/signing-input.json \
+            updater-signing-input/Slipstream.app.tar.gz \
+            updater-signature/Slipstream.app.tar.gz.sig \
+            updater-signature/signing-proof.json <<'PY'
+          import hashlib
+          import json
+          import os
+          import stat
+          import sys
+          from pathlib import Path
+
+          manifest_path, archive_path, signature_path, output_path = map(Path, sys.argv[1:])
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          signature_metadata = signature_path.lstat()
+          if not stat.S_ISREG(signature_metadata.st_mode) or not 0 < signature_metadata.st_size <= 65536:
+              raise SystemExit("updater signature must be a bounded non-empty regular file")
+          archive_hash = hashlib.sha256()
+          with archive_path.open("rb") as stream:
+              for block in iter(lambda: stream.read(1024 * 1024), b""):
+                  archive_hash.update(block)
+          archive_digest = archive_hash.hexdigest()
+          if archive_digest != manifest["archive"]["sha256"]:
+              raise SystemExit("updater archive changed during signing")
+          proof = {
+              "schema_version": 1,
+              "repository": manifest["repository"],
+              "source_commit": manifest["source_commit"],
+              "workflow_run_id": manifest["workflow_run_id"],
+              "workflow_run_attempt": manifest["workflow_run_attempt"],
+              "version": manifest["version"],
+              "archive_sha256": archive_digest,
+              "signature_sha256": hashlib.sha256(signature_path.read_bytes()).hexdigest(),
+              "signing_input_artifact_digest": os.environ["SIGNING_INPUT_ARTIFACT_DIGEST"],
+              "signer": {
+                  "name": "@tauri-apps/cli-darwin-arm64",
+                  "version": "2.11.3",
+                  "npm_tarball_sha512": "071a5a33c6ec0a85ecdf077858a6216acfc6d60b3bfabec1f9ee169f2464d8612854ea2e241d61a0be84e982d76435db61c8ba54576b367a1b430776b952f87b",
+              },
+          }
+          output_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - id: upload-updater-signature
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: updater-signature-${{ github.sha }}
+          path: updater-signature/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble-release-candidate:
+    needs: [changes, packaged-app-build, sign-updater-archive]
+    if: >-
+      needs.changes.outputs.product == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    timeout-minutes: 18
+    permissions:
+      actions: read
+      contents: read
+    env:
+      SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-app-build-${{ github.sha }}
+          path: dist-build
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: updater-signing-input-${{ github.sha }}
+          path: updater-signing-input
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: updater-signature-${{ github.sha }}
+          path: updater-signature
+
+      - name: Bind downloaded artifacts to this exact run and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_INPUT_ARTIFACT_DIGEST: ${{ needs.packaged-app-build.outputs.updater-signing-artifact-digest }}
+          SIGNATURE_ARTIFACT_DIGEST: ${{ needs.sign-updater-archive.outputs.updater-signature-artifact-digest }}
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/current-run-artifacts.json"
+          python3 - \
+            updater-signing-input/signing-input.json \
+            updater-signing-input/Slipstream.app.tar.gz \
+            updater-signature/signing-proof.json \
+            updater-signature/Slipstream.app.tar.gz.sig \
+            "$RUNNER_TEMP/current-run-artifacts.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import stat
+          import sys
+          from pathlib import Path
+
+          manifest_path, archive_path, proof_path, signature_path, artifacts_path = map(Path, sys.argv[1:])
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          proof = json.loads(proof_path.read_text(encoding="utf-8"))
+          archive_hash = hashlib.sha256()
+          with archive_path.open("rb") as stream:
+              for block in iter(lambda: stream.read(1024 * 1024), b""):
+                  archive_hash.update(block)
+          archive_digest = archive_hash.hexdigest()
+          signature_digest = hashlib.sha256(signature_path.read_bytes()).hexdigest()
+          expected_identity = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_commit": os.environ["GITHUB_SHA"],
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "workflow_run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "version": Path("VERSION").read_text(encoding="utf-8").strip(),
+          }
+          for key, value in expected_identity.items():
+              if manifest.get(key) != value or proof.get(key) != value:
+                  raise SystemExit(f"updater signing artifacts have invalid {key}")
+          if manifest.get("archive", {}).get("sha256") != archive_digest:
+              raise SystemExit("updater signing input digest mismatch")
+          if proof.get("archive_sha256") != archive_digest or proof.get("signature_sha256") != signature_digest:
+              raise SystemExit("updater signature proof digest mismatch")
+          if proof.get("signing_input_artifact_digest") != os.environ["SIGNING_INPUT_ARTIFACT_DIGEST"]:
+              raise SystemExit("updater signature proof escaped its input artifact")
+          for path in (archive_path, signature_path):
+              metadata = path.lstat()
+              if not stat.S_ISREG(metadata.st_mode) or path.is_symlink() or metadata.st_size <= 0:
+                  raise SystemExit("updater signing artifact is not a non-empty regular file")
+          expected_artifacts = {
+              f"updater-signing-input-{os.environ['GITHUB_SHA']}": os.environ["SIGNING_INPUT_ARTIFACT_DIGEST"],
+              f"updater-signature-{os.environ['GITHUB_SHA']}": os.environ["SIGNATURE_ARTIFACT_DIGEST"],
+          }
+          for digest in expected_artifacts.values():
+              if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                  raise SystemExit("updater artifact digest output is invalid")
+          artifacts = json.loads(artifacts_path.read_text(encoding="utf-8")).get("artifacts", [])
+          for name, digest in expected_artifacts.items():
+              matches = [item for item in artifacts if item.get("name") == name]
+              if (
+                  len(matches) != 1
+                  or matches[0].get("expired") is not False
+                  or matches[0].get("digest") != f"sha256:{digest}"
+              ):
+                  raise SystemExit(f"current-run artifact service identity mismatch for {name}")
+          PY
+
+      - name: Restore the single packaged build and production signature
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/packaged-build"
+          ditto -x -k dist-build/Slipstream-build-bundle.zip \
+            "$RUNNER_TEMP/packaged-build"
+          bundle="$RUNNER_TEMP/packaged-build/bundle"
+          cmp \
+            updater-signing-input/Slipstream.app.tar.gz \
+            "$bundle/macos/Slipstream.app.tar.gz"
+          rm -f "$bundle/macos/Slipstream.app.tar.gz.sig"
+          cp updater-signature/Slipstream.app.tar.gz.sig \
+            "$bundle/macos/Slipstream.app.tar.gz.sig"
+          python3 scripts/verify_updater_artifacts.py \
+            --release-dir "$bundle/macos" \
+            --version "$(tr -d '[:space:]' < VERSION)" \
+            --tauri-config app-tauri/src-tauri/tauri.conf.json
+
+      - name: Assemble immutable main release candidate without rebuilding
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/packaged-build/bundle"
+          candidate="dist-candidate"
+          mkdir -p "$candidate"
+          ditto -c -k --keepParent \
+            "$bundle/macos/Slipstream.app" \
+            "$candidate/Slipstream-macos-arm64.zip"
+          cp "$bundle/macos/Slipstream.app.tar.gz" "$candidate/"
+          cp "$bundle/macos/Slipstream.app.tar.gz.sig" "$candidate/"
+          dmg_count=0
+          for dmg in "$bundle"/dmg/*.dmg; do
+            [ -e "$dmg" ] || continue
+            cp "$dmg" "$candidate/"
+            dmg_count=$((dmg_count + 1))
+          done
+          [ "$dmg_count" -eq 1 ] || {
+            echo "expected exactly one release-candidate DMG, found $dmg_count"
+            exit 1
+          }
+          cargo metadata \
+            --manifest-path app-tauri/src-tauri/Cargo.toml \
+            --locked \
+            --filter-platform "$SLIPSTREAM_TAURI_TARGET" \
+            --format-version 1 \
+            > "$RUNNER_TEMP/slipstream-cargo-metadata.json"
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          version="$(tr -d '[:space:]' < VERSION)"
+          python3 scripts/make_release_sbom.py \
+            --version "$version" \
+            --tag "release-candidate-$GITHUB_SHA" \
+            --repository "${{ github.repository }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$source_date_epoch" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --cargo-lock app-tauri/src-tauri/Cargo.lock \
+            --cargo-metadata "$RUNNER_TEMP/slipstream-cargo-metadata.json" \
+            --npm-lock app-tauri/package-lock.json \
+            --python-lock spike/requirements-runtime.txt \
+            --geph-version-file vendor/geph/VERSION \
+            --geph-source-file vendor/geph/SOURCE.json \
+            --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
+            --chromium-headless-shell-source-file vendor/chromium-headless-shell/SOURCE.json \
+            --output "$candidate/Slipstream.spdx.json"
+          python3 scripts/dependency_audit.py fetch-scanner \
+            --policy security/dependency-audit-policy.json \
+            --platform darwin-arm64 \
+            --output "$RUNNER_TEMP/osv-scanner"
+          python3 scripts/dependency_audit.py scan \
+            --scanner "$RUNNER_TEMP/osv-scanner" \
+            --platform darwin-arm64 \
+            --sbom "$candidate/Slipstream.spdx.json" \
+            --policy security/dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --evaluation-date "$(date -u +%F)" \
+            --output "$candidate/dependency-audit.json"
+          python3 scripts/dependency_audit.py verify \
+            --report "$candidate/dependency-audit.json" \
+            --sbom "$candidate/Slipstream.spdx.json" \
+            --policy security/dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target "$SLIPSTREAM_TAURI_TARGET"
+          source_tree="$(git rev-parse "$GITHUB_SHA^{tree}")"
+          source_archive_sha256="$(git archive --format=tar "$GITHUB_SHA" | shasum -a 256 | awk '{print $1}')"
+          python3 scripts/release_candidate.py create \
+            --candidate-dir "$candidate" \
+            --repository "${{ github.repository }}" \
+            --version "$version" \
+            --source-commit "$GITHUB_SHA" \
+            --source-tree "$source_tree" \
+            --source-archive-sha256 "$source_archive_sha256" \
+            --source-date-epoch "$source_date_epoch" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --app-tree "$bundle/macos/Slipstream.app"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist-candidate/
+          if-no-files-found: error
+          retention-days: 14
+
+  attest-release-candidate:
+    needs: [changes, assemble-release-candidate]
+    if: >-
+      needs.changes.outputs.product == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist-candidate
+
+      - name: Attest immutable release candidate
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist-candidate/*
+
+      - name: Attest release-candidate SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: |
+            dist-candidate/Slipstream-macos-arm64.zip
+            dist-candidate/Slipstream.app.tar.gz
+            dist-candidate/Slipstream_*.dmg
+          sbom-path: dist-candidate/Slipstream.spdx.json
+
+  packaged-browser-qualification:
+    needs: [changes, packaged-app-build, assemble-release-candidate]
+    if: >-
+      always() &&
+      needs.changes.outputs.product == 'true' &&
+      needs.packaged-app-build.result == 'success' &&
+      (
+        github.event_name == 'pull_request' ||
+        (
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          needs.assemble-release-candidate.result == 'success'
+        )
+      )
+    runs-on: macos-14
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist-candidate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          name: packaged-app-build-${{ github.sha }}
+          path: dist-build
+      - name: Unpack the exact immutable candidate
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          mkdir -p "$RUNNER_TEMP/qualified-app"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            ditto -x -k dist-candidate/Slipstream-macos-arm64.zip \
+              "$RUNNER_TEMP/qualified-app"
+          else
+            mkdir -p "$RUNNER_TEMP/packaged-build"
+            ditto -x -k dist-build/Slipstream-build-bundle.zip \
+              "$RUNNER_TEMP/packaged-build"
+            ditto "$RUNNER_TEMP/packaged-build/bundle/macos/Slipstream.app" \
+              "$RUNNER_TEMP/qualified-app/Slipstream.app"
+          fi
+          test -d "$RUNNER_TEMP/qualified-app/Slipstream.app"
       - name: Qualify packaged lazy sandboxed browser observation
         env:
           CI: "true"
@@ -509,30 +1223,255 @@ jobs:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
           python3 scripts/pending_navigation_browser_probe_smoke.py \
-            --app-bundle \
-              "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app" \
-            --chrome-executable \
-              "${{ steps.packaged-browser-probe-chrome.outputs.chrome-path }}"
+            --app-bundle "$RUNNER_TEMP/qualified-app/Slipstream.app"
 
+  packaged-update-notification-qualification:
+    needs: [changes, assemble-release-candidate]
+    if: >-
+      always() &&
+      needs.changes.outputs.product == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.assemble-release-candidate.result == 'success'
+    runs-on: macos-14
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist-candidate
+      - name: Unpack the exact candidate for native notification qualification
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          mkdir -p "$RUNNER_TEMP/update-notification-app"
+          ditto -x -k dist-candidate/Slipstream-macos-arm64.zip \
+            "$RUNNER_TEMP/update-notification-app"
+          test -d "$RUNNER_TEMP/update-notification-app/Slipstream.app"
+      - name: Qualify exact attributed update notification without activation
+        env:
+          CI: "true"
+          GITHUB_ACTIONS: "true"
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/macos_update_notification_smoke.py \
+            --candidate-dir dist-candidate \
+            --app-bundle "$RUNNER_TEMP/update-notification-app/Slipstream.app" \
+            --repository "${{ github.repository }}" \
+            --source-commit "$GITHUB_SHA" \
+            --candidate-run-id "$GITHUB_RUN_ID" \
+            --candidate-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/update-notification-qualification.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Slipstream-update-notification-qualified-${{ github.sha }}
+          path: ${{ runner.temp }}/update-notification-qualification.json
+          if-no-files-found: error
+          retention-days: 7
+
+  packaged-app-lifecycle-heavy:
+    needs: [changes, packaged-app-build, assemble-release-candidate]
+    if: >-
+      always() &&
+      needs.changes.outputs.product == 'true' &&
+      needs.packaged-app-build.result == 'success' &&
+      (
+        github.event_name == 'pull_request' ||
+        (
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          needs.assemble-release-candidate.result == 'success'
+        )
+      )
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Install proven Chrome for Testing for packaged lifecycle
+        id: packaged-lifecycle-chrome
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        with:
+          chrome-version: 151.0.7922.77
+          install-chromedriver: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist-candidate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          name: packaged-app-build-${{ github.sha }}
+          path: dist-build
+      - name: Unpack the exact immutable candidate
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          mkdir -p "$RUNNER_TEMP/qualified-app"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            ditto -x -k dist-candidate/Slipstream-macos-arm64.zip \
+              "$RUNNER_TEMP/qualified-app"
+          else
+            mkdir -p "$RUNNER_TEMP/packaged-build"
+            ditto -x -k dist-build/Slipstream-build-bundle.zip \
+              "$RUNNER_TEMP/packaged-build"
+            ditto "$RUNNER_TEMP/packaged-build/bundle/macos/Slipstream.app" \
+              "$RUNNER_TEMP/qualified-app/Slipstream.app"
+          fi
+          test -d "$RUNNER_TEMP/qualified-app/Slipstream.app"
+      - name: Build the unsigned Safari companion
+        run: |
+          set -euo pipefail
+          swift test --package-path browser-companion/safari
+          bash scripts/build_safari_companion.sh \
+            "$RUNNER_TEMP/slipstream-safari-companion"
       - name: Packaged lifecycle, tray-crash, Chrome, and Safari sentinel smoke
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
           bash scripts/run_packaged_lifecycle_smoke.sh \
-            "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app" \
-            "${{ steps.packaged-browser-probe-chrome.outputs.chrome-path }}"
-
+            "$RUNNER_TEMP/qualified-app/Slipstream.app" \
+            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}"
       - name: Package the qualified app
+        if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
           mkdir -p dist-ci
           ditto -c -k --keepParent \
-            "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app" \
+            "$RUNNER_TEMP/qualified-app/Slipstream.app" \
             dist-ci/Slipstream-packaged-lifecycle.zip
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'pull_request'
         with:
           name: Slipstream-packaged-lifecycle-${{ github.sha }}
           path: dist-ci/Slipstream-packaged-lifecycle.zip
           if-no-files-found: error
           retention-days: 7
+
+  checks:
+    name: checks
+    if: always()
+    needs:
+      - changes
+      - product-checks
+      - chromium-webrequest-contract
+      - windows-adapter-contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Validate repository documentation
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          python3 scripts/check_project_state.py
+          python3 -m unittest discover -s scripts -p 'test_documentation.py'
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          git diff --check "$base" "$GITHUB_SHA"
+      - name: Require every applicable common CI gate
+        env:
+          PRODUCT: ${{ needs.changes.outputs.product }}
+          WINDOWS_SCOPE: ${{ needs.changes.outputs.windows }}
+          PRODUCT_CHECKS: ${{ needs.product-checks.result }}
+          CHROMIUM: ${{ needs.chromium-webrequest-contract.result }}
+          WINDOWS: ${{ needs.windows-adapter-contract.result }}
+        run: |
+          set -euo pipefail
+          if [ "$PRODUCT" = false ]; then
+            echo "documentation-only change: documentation validation passed"
+            exit 0
+          fi
+          for result in "$PRODUCT_CHECKS" "$CHROMIUM"; do
+            [ "$result" = success ] || {
+              echo "an applicable required CI gate did not succeed: $result"
+              exit 1
+            }
+          done
+          if [ "$WINDOWS_SCOPE" = true ]; then
+            [ "$WINDOWS" = success ] || {
+              echo "the applicable Windows gate did not succeed: $WINDOWS"
+              exit 1
+            }
+          else
+            [ "$WINDOWS" = skipped ] || {
+              echo "the Windows gate ran outside its path scope: $WINDOWS"
+              exit 1
+            }
+          fi
+
+  packaged-app-lifecycle:
+    name: packaged-app-lifecycle
+    if: always()
+    needs:
+      - changes
+      - packaged-app-build
+      - sign-updater-archive
+      - assemble-release-candidate
+      - attest-release-candidate
+      - packaged-browser-qualification
+      - packaged-update-notification-qualification
+      - packaged-app-lifecycle-heavy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Preserve the required packaged lifecycle context
+        env:
+          PRODUCT: ${{ needs.changes.outputs.product }}
+          BUILD: ${{ needs.packaged-app-build.result }}
+          SIGNER: ${{ needs.sign-updater-archive.result }}
+          ASSEMBLY: ${{ needs.assemble-release-candidate.result }}
+          ATTESTATION: ${{ needs.attest-release-candidate.result }}
+          BROWSER: ${{ needs.packaged-browser-qualification.result }}
+          UPDATE_NOTIFICATION: ${{ needs.packaged-update-notification-qualification.result }}
+          LIFECYCLE: ${{ needs.packaged-app-lifecycle-heavy.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$PRODUCT" = false ]; then
+            echo "documentation-only change: packaged product is unchanged"
+            exit 0
+          fi
+          for result in "$BUILD" "$BROWSER" "$LIFECYCLE"; do
+            [ "$result" = success ] || {
+              echo "an applicable packaged qualification did not succeed: $result"
+              exit 1
+            }
+          done
+          if [ "$EVENT_NAME" = push ] && [ "$EVENT_REF" = refs/heads/main ]; then
+            for result in "$SIGNER" "$ASSEMBLY" "$UPDATE_NOTIFICATION"; do
+              [ "$result" = success ] || {
+                echo "an exact-main updater signing/candidate/notification gate did not succeed: $result"
+                exit 1
+              }
+            done
+            [ "$ATTESTATION" = success ] || {
+              echo "the isolated release-candidate attestation did not succeed: $ATTESTATION"
+              exit 1
+            }
+          else
+            for result in "$SIGNER" "$ASSEMBLY" "$UPDATE_NOTIFICATION"; do
+              [ "$result" = skipped ] || {
+                echo "a main-only updater gate ran outside exact main: $result"
+                exit 1
+              }
+            done
+            [ "$ATTESTATION" = skipped ] || {
+              echo "release-candidate attestation ran outside exact main: $ATTESTATION"
+              exit 1
+            }
+          fi

@@ -28,6 +28,14 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 MAX_SCANNER_BYTES = 128 * 1024 * 1024
 VENDORED_TRANSITIVE_COVERAGE = ("top-level-only", "full")
+INTEGRITY_ONLY_FIELDS = {
+    "expires",
+    "name",
+    "purl",
+    "reason",
+    "sha256",
+    "version",
+}
 
 
 def hash_file(path: Path) -> str:
@@ -122,6 +130,41 @@ def load_policy(path: Path) -> dict:
                     f"{exception['package']} {exception['version']} {advisory_id}"
                 )
             exception_keys.add(key)
+
+    integrity_only = policy.get("integrity_only")
+    if integrity_only is not None:
+        if not isinstance(integrity_only, list):
+            raise ValueError("dependency audit integrity-only policy must be a list")
+        integrity_keys: set[tuple[str, str]] = set()
+        for package in integrity_only:
+            if not isinstance(package, dict) or set(package) != INTEGRITY_ONLY_FIELDS:
+                raise ValueError(
+                    "dependency audit integrity-only package is incomplete"
+                )
+            if not all(
+                isinstance(package.get(key), str) and package[key]
+                for key in INTEGRITY_ONLY_FIELDS
+            ):
+                raise ValueError(
+                    "dependency audit integrity-only package is incomplete"
+                )
+            if not SHA256_PATTERN.fullmatch(package["sha256"]):
+                raise ValueError("dependency audit integrity-only checksum is invalid")
+            expected_purl = f"pkg:generic/{package['name']}@{package['version']}"
+            if package["purl"] != expected_purl:
+                raise ValueError("dependency audit integrity-only purl is invalid")
+            try:
+                date.fromisoformat(package["expires"])
+            except ValueError as exc:
+                raise ValueError(
+                    "dependency audit integrity-only expiry is invalid"
+                ) from exc
+            key = (package["name"], package["version"])
+            if key in integrity_keys:
+                raise ValueError(
+                    "dependency audit integrity-only package identities overlap"
+                )
+            integrity_keys.add(key)
     return policy
 
 
@@ -306,18 +349,89 @@ def _matching_exception(
     return matches[0] if matches else None
 
 
+def _sbom_packages(path: Path) -> list[dict]:
+    sbom = _read_json_object(path, "release SBOM")
+    packages = sbom.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("release SBOM does not contain packages")
+    if not all(isinstance(package, dict) for package in packages):
+        raise ValueError("release SBOM contains an invalid package")
+    return packages
+
+
+def _matching_integrity_only_policy(
+    *, policy: dict, name: str, version: str
+) -> dict:
+    matches = [
+        package
+        for package in policy.get("integrity_only", [])
+        if package["name"] == name and package["version"] == version
+    ]
+    if not matches:
+        raise ValueError(
+            "OSV scanner incomplete package is not integrity-only allowlisted"
+        )
+    if len(matches) != 1:
+        raise ValueError("multiple integrity-only policies match an incomplete package")
+    return matches[0]
+
+
+def _verify_integrity_only_sbom_package(
+    *, sbom_packages: list[dict], policy_package: dict, evaluated_on: date
+) -> dict:
+    if evaluated_on > date.fromisoformat(policy_package["expires"]):
+        raise ValueError("dependency audit integrity-only policy is expired")
+    matches = [
+        package
+        for package in sbom_packages
+        if package.get("name") == policy_package["name"]
+        and package.get("versionInfo") == policy_package["version"]
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "integrity-only package does not have one exact SBOM identity"
+        )
+    package = matches[0]
+    external_refs = package.get("externalRefs")
+    if not isinstance(external_refs, list):
+        raise ValueError("integrity-only SBOM package purl is missing")
+    purls = [
+        reference.get("referenceLocator")
+        for reference in external_refs
+        if isinstance(reference, dict)
+        and reference.get("referenceCategory") == "PACKAGE-MANAGER"
+        and reference.get("referenceType") == "purl"
+    ]
+    if purls != [policy_package["purl"]]:
+        raise ValueError("integrity-only SBOM package purl does not match policy")
+    checksums = package.get("checksums")
+    if not isinstance(checksums, list):
+        raise ValueError("integrity-only SBOM package checksum is missing")
+    sha256_values = [
+        checksum.get("checksumValue")
+        for checksum in checksums
+        if isinstance(checksum, dict) and checksum.get("algorithm") == "SHA256"
+    ]
+    if sha256_values != [policy_package["sha256"]]:
+        raise ValueError("integrity-only SBOM package checksum does not match policy")
+    return {key: policy_package[key] for key in sorted(INTEGRITY_ONLY_FIELDS)}
+
+
 def evaluate_osv_result(
     *,
     result: dict,
     policy: dict,
     evaluated_on: date,
-) -> tuple[list[dict], int]:
+    sbom_path: Path,
+) -> tuple[list[dict], int, list[dict]]:
     results = result.get("results")
     if not isinstance(results, list):
         raise ValueError("OSV scanner result is missing results")
     findings: list[dict] = []
     packages_seen: set[tuple[str, str, str]] = set()
+    integrity_only_seen: dict[tuple[str, str], dict] = {}
     findings_seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
+    sbom_packages = _sbom_packages(sbom_path)
     for source in results:
         if not isinstance(source, dict) or not isinstance(source.get("packages"), list):
             raise ValueError("OSV scanner result contains an invalid package source")
@@ -327,15 +441,48 @@ def evaluate_osv_result(
             ):
                 raise ValueError("OSV scanner result contains an invalid package")
             package = entry["package"]
-            coordinates = tuple(
-                package.get(key) for key in ("ecosystem", "name", "version")
-            )
-            if not all(isinstance(value, str) and value for value in coordinates):
-                raise ValueError("OSV scanner package coordinates are incomplete")
-            packages_seen.add(coordinates)
             vulnerabilities = entry.get("vulnerabilities", [])
             if not isinstance(vulnerabilities, list):
                 raise ValueError("OSV scanner vulnerabilities must be a list")
+            ecosystem = package.get("ecosystem")
+            name = package.get("name")
+            version = package.get("version")
+            if (
+                ecosystem == ""
+                and isinstance(name, str)
+                and name
+                and isinstance(version, str)
+                and version
+            ):
+                if vulnerabilities:
+                    raise ValueError(
+                        "OSV scanner incomplete package contains vulnerabilities"
+                    )
+                policy_package = _matching_integrity_only_policy(
+                    policy=policy,
+                    name=name,
+                    version=version,
+                )
+                integrity_key = (name, version)
+                if integrity_key in integrity_only_seen:
+                    raise ValueError(
+                        "OSV scanner contains a duplicate integrity-only package"
+                    )
+                integrity_only_seen[integrity_key] = (
+                    _verify_integrity_only_sbom_package(
+                        sbom_packages=sbom_packages,
+                        policy_package=policy_package,
+                        evaluated_on=evaluated_on,
+                    )
+                )
+                continue
+            coordinates = (ecosystem, name, version)
+            if not all(
+                isinstance(value, str) and bool(value.strip())
+                for value in coordinates
+            ):
+                raise ValueError("OSV scanner package coordinates are incomplete")
+            packages_seen.add(coordinates)
             for vulnerability in vulnerabilities:
                 if not isinstance(vulnerability, dict):
                     raise ValueError("OSV scanner vulnerability is invalid")
@@ -388,7 +535,11 @@ def evaluate_osv_result(
             item["id"],
         )
     )
-    return findings, len(packages_seen)
+    integrity_only = sorted(
+        integrity_only_seen.values(),
+        key=lambda item: (item["name"].lower(), item["version"], item["purl"]),
+    )
+    return findings, len(packages_seen), integrity_only
 
 
 def build_audit_report(
@@ -409,15 +560,17 @@ def build_audit_report(
         raise ValueError("release target is required")
     if vendored_transitive_dependencies not in VENDORED_TRANSITIVE_COVERAGE:
         raise ValueError("vendored transitive dependency coverage is invalid")
-    findings, packages_scanned = evaluate_osv_result(
+    findings, packages_scanned, integrity_only = evaluate_osv_result(
         result=osv_result,
         policy=policy,
         evaluated_on=evaluated_on,
+        sbom_path=sbom_path,
     )
     sbom_package_count = _sbom_package_count(sbom_path)
-    if packages_scanned != sbom_package_count:
+    packages_integrity_only = len(integrity_only)
+    if packages_scanned + packages_integrity_only != sbom_package_count:
         raise ValueError(
-            "dependency scanner package count does not match the release SBOM"
+            "dependency audit package counts do not match the release SBOM"
         )
     counts = {
         classification: sum(
@@ -430,7 +583,7 @@ def build_audit_report(
             "withdrawn",
         )
     }
-    return {
+    report = {
         "coverage": {
             "sbom_packages": "all",
             "vendored_transitive_dependencies": vendored_transitive_dependencies,
@@ -452,6 +605,10 @@ def build_audit_report(
             "packages_scanned": packages_scanned,
         },
     }
+    if "integrity_only" in policy:
+        report["integrity_only"] = integrity_only
+        report["summary"]["packages_integrity_only"] = packages_integrity_only
+    return report
 
 
 def write_json_atomic(path: Path, data: dict) -> None:
@@ -473,11 +630,7 @@ def write_json_atomic(path: Path, data: dict) -> None:
 
 
 def _sbom_package_count(path: Path) -> int:
-    sbom = _read_json_object(path, "release SBOM")
-    packages = sbom.get("packages")
-    if not isinstance(packages, list) or not packages:
-        raise ValueError("release SBOM does not contain packages")
-    return len(packages)
+    return len(_sbom_packages(path))
 
 
 def validate_audit_report(
@@ -554,12 +707,62 @@ def validate_audit_report(
     if (
         not isinstance(packages_scanned, int)
         or isinstance(packages_scanned, bool)
-        or packages_scanned <= 0
+        or packages_scanned < 0
     ):
-        raise ValueError("dependency audit did not scan any packages")
-    if packages_scanned != _sbom_package_count(sbom_path):
+        raise ValueError("dependency audit scanned package count is invalid")
+    sbom_packages = _sbom_packages(sbom_path)
+    policy_has_integrity_only = "integrity_only" in policy
+    packages_integrity_only = 0
+    if policy_has_integrity_only:
+        integrity_only = report.get("integrity_only")
+        packages_integrity_only = summary.get("packages_integrity_only")
+        if not isinstance(integrity_only, list) or not isinstance(
+            packages_integrity_only, int
+        ) or isinstance(packages_integrity_only, bool):
+            raise ValueError("dependency audit integrity-only evidence is missing")
+        if packages_integrity_only < 0 or packages_integrity_only != len(
+            integrity_only
+        ):
+            raise ValueError("dependency audit integrity-only count is inconsistent")
+        policy_integrity = {
+            (item["name"], item["version"]): item
+            for item in policy["integrity_only"]
+        }
+        evidence_seen: set[tuple[str, str]] = set()
+        for evidence in integrity_only:
+            if not isinstance(evidence, dict):
+                raise ValueError("dependency audit integrity-only evidence is invalid")
+            name = evidence.get("name")
+            version = evidence.get("version")
+            if not isinstance(name, str) or not isinstance(version, str):
+                raise ValueError("dependency audit integrity-only evidence is invalid")
+            key = (name, version)
+            if key in evidence_seen:
+                raise ValueError(
+                    "dependency audit integrity-only evidence is duplicated"
+                )
+            evidence_seen.add(key)
+            policy_package = policy_integrity.get(key)
+            if policy_package is None or evidence != policy_package:
+                raise ValueError(
+                    "dependency audit integrity-only evidence does not match policy"
+                )
+            expected_evidence = _verify_integrity_only_sbom_package(
+                sbom_packages=sbom_packages,
+                policy_package=policy_package,
+                evaluated_on=evaluated_on,
+            )
+            if evidence != expected_evidence:
+                raise ValueError(
+                    "dependency audit integrity-only evidence does not match SBOM"
+                )
+    elif "integrity_only" in report or "packages_integrity_only" in summary:
         raise ValueError(
-            "dependency audit package count does not match the release SBOM"
+            "dependency audit report has integrity-only data without policy"
+        )
+    if packages_scanned + packages_integrity_only != len(sbom_packages):
+        raise ValueError(
+            "dependency audit package counts do not match the release SBOM"
         )
     exceptions = {item["id"]: item for item in policy["exceptions"]}
     for finding in findings:
@@ -606,6 +809,7 @@ def validate_audit_report(
         "advisories": len(findings),
         "accepted_exceptions": counts["accepted_exception"],
         "informational": counts["informational"],
+        "packages_integrity_only": packages_integrity_only,
         "packages_scanned": packages_scanned,
         "scanner_version": scanner["version"],
     }

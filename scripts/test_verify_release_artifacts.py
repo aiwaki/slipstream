@@ -13,6 +13,7 @@ import make_appcast
 import make_release_manifest
 import make_release_sbom
 import make_route_policy_bundle
+import test_verify_updater_artifacts
 import verify_release_artifacts
 
 
@@ -27,20 +28,23 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
         root: Path,
         *,
         tag: str = "v0.1.5",
+        version: str = "0.1.5",
         include_route_policy: bool = True,
     ) -> None:
-        version = "0.1.5"
         repository = "aiwaki/slipstream"
         (root / "Slipstream-macos-arm64.zip").write_bytes(b"zip")
-        (root / "Slipstream.app.tar.gz").write_bytes(b"archive")
-        (root / "Slipstream.app.tar.gz.sig").write_text("sig-value\n", encoding="utf-8")
+        config = test_verify_updater_artifacts.write_signed_updater_fixture(
+            root, version=version
+        )
+        config.replace(root.parent / "tauri.conf.json")
+        signature = (root / "Slipstream.app.tar.gz.sig").read_text(encoding="utf-8")
         (root / "latest.json").write_text(
             json.dumps(
                 make_appcast.build_appcast(
                     version=version,
                     tag=tag,
                     repository=repository,
-                    signature="sig-value\n",
+                    signature=signature,
                     pub_date="2026-07-09T12:00:00Z",
                 ),
                 indent=2,
@@ -139,6 +143,8 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
     def test_accepts_complete_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
 
             result = verify_release_artifacts.verify_release_artifacts(
@@ -148,12 +154,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                 version="0.1.5",
                 source_commit=SOURCE_COMMIT,
                 target=TARGET,
+                tauri_config=root.parent / "tauri.conf.json",
             )
 
             self.assertEqual(result["version"], "0.1.5")
             self.assertEqual(result["route_policy"]["key_id"], "release")
             self.assertEqual(result["route_policy_channel"]["source"], "bundled")
             self.assertEqual(result["artifact_manifest"]["target"], TARGET)
+            self.assertTrue(result["updater"]["verified"])
             self.assertEqual(
                 result["artifact_manifest"]["dependency_audit"]["packages_scanned"],
                 1,
@@ -162,17 +170,26 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
     def test_accepts_preview_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             tag = "v0.1.5-preview.42"
-            self._write_release_dir(root, tag=tag, include_route_policy=False)
+            version = "0.1.5-preview.42"
+            self._write_release_dir(
+                root,
+                tag=tag,
+                version=version,
+                include_route_policy=False,
+            )
 
             result = verify_release_artifacts.verify_release_artifacts(
                 release_dir=root,
                 repository="aiwaki/slipstream",
                 tag=tag,
-                version="0.1.5",
+                version=version,
                 channel="preview",
                 source_commit=SOURCE_COMMIT,
                 target=TARGET,
+                tauri_config=root.parent / "tauri.conf.json",
             )
 
             self.assertEqual(result["tag"], tag)
@@ -182,23 +199,29 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
     def test_rejects_preview_tag_for_stable_channel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             tag = "v0.1.5-preview.42"
-            self._write_release_dir(root, tag=tag)
+            version = "0.1.5-preview.42"
+            self._write_release_dir(root, tag=tag, version=version)
 
             with self.assertRaisesRegex(ValueError, "does not match tag"):
                 verify_release_artifacts.verify_release_artifacts(
                     release_dir=root,
                     repository="aiwaki/slipstream",
                     tag=tag,
-                    version="0.1.5",
+                    version=version,
                     channel="stable",
                     source_commit=SOURCE_COMMIT,
                     target=TARGET,
+                    tauri_config=root.parent / "tauri.conf.json",
                 )
 
     def test_rejects_route_policy_channel_hash_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
             channel_path = root / "route-policy-latest.json"
             channel = json.loads(channel_path.read_text(encoding="utf-8"))
@@ -213,11 +236,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     version="0.1.5",
                     source_commit=SOURCE_COMMIT,
                     target=TARGET,
+                    tauri_config=root.parent / "tauri.conf.json",
                 )
 
     def test_rejects_appcast_url_for_wrong_release(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
             appcast_path = root / "latest.json"
             appcast = json.loads(appcast_path.read_text(encoding="utf-8"))
@@ -235,11 +261,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     version="0.1.5",
                     source_commit=SOURCE_COMMIT,
                     target=TARGET,
+                    tauri_config=root.parent / "tauri.conf.json",
                 )
 
     def test_rejects_artifact_changed_after_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
             (root / "Slipstream-macos-arm64.zip").write_bytes(b"changed")
 
@@ -251,11 +280,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     version="0.1.5",
                     source_commit=SOURCE_COMMIT,
                     target=TARGET,
+                    tauri_config=root.parent / "tauri.conf.json",
                 )
 
     def test_rejects_manifest_for_different_source_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
 
             with self.assertRaisesRegex(ValueError, "source commit"):
@@ -266,11 +298,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     version="0.1.5",
                     source_commit="b" * 40,
                     target=TARGET,
+                    tauri_config=root.parent / "tauri.conf.json",
                 )
 
     def test_rejects_manifest_for_different_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
             manifest_path = root / make_release_manifest.MANIFEST_NAME
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -292,11 +327,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     version="0.1.5",
                     source_commit=SOURCE_COMMIT,
                     target=TARGET,
+                    tauri_config=root.parent / "tauri.conf.json",
                 )
 
     def test_cli_verifies_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            root = root / "release"
+            root.mkdir()
             self._write_release_dir(root)
 
             out = io.StringIO()
@@ -318,6 +356,8 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                             SOURCE_COMMIT,
                             "--target",
                             TARGET,
+                            "--tauri-config",
+                            str(root.parent / "tauri.conf.json"),
                         ]
                     ),
                     0,

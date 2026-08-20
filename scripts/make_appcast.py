@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+PREVIEW_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-preview\.[1-9][0-9]*$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 PLATFORM = "darwin-aarch64"
 
@@ -21,15 +22,16 @@ def utc_now() -> str:
 
 
 def release_channel_for_tag(version: str, tag: str) -> str:
-    if not VERSION_RE.match(version):
+    if not VERSION_RE.fullmatch(version):
         raise ValueError(f"invalid version: {version!r}")
-    stable_tag = f"v{version}"
-    preview_tag = re.compile(rf"^{re.escape(stable_tag)}-preview\.[1-9][0-9]*$")
-    if tag == stable_tag:
-        return "stable"
-    if preview_tag.match(tag):
+    expected_tag = f"v{version}"
+    if tag != expected_tag:
+        raise ValueError(f"tag {tag!r} must be {expected_tag}")
+    if PREVIEW_VERSION_RE.fullmatch(version):
         return "preview"
-    raise ValueError(f"tag {tag!r} must be {stable_tag} or {stable_tag}-preview.<run>")
+    if "-" in version or "+" in version:
+        raise ValueError("app releases support only stable or preview.<sequence> versions")
+    return "stable"
 
 
 def validate_release_inputs(version: str, tag: str, repository: str, signature: str) -> None:

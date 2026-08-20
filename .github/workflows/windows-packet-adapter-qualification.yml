@@ -34,6 +34,16 @@ on:
       - "vendor/wintun/**"
   push:
     branches: ["main"]
+    paths:
+      - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-*"
+      - "crates/slipstream-core/**"
+      - "crates/slipstream-userspace-stack-evaluation/**"
+      - "crates/slipstream-userspace-stack-effect-evaluation/**"
+      - "crates/slipstream-windows-adapter/**"
+      - "scripts/run_bounded_windows_cargo_test.ps1"
+      - "scripts/qualify_windows_production_host_reboot.ps1"
+      - "vendor/wintun/**"
 
 permissions:
   contents: read

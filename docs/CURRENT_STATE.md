@@ -10,6 +10,199 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-20: draft PR
+[#343](https://github.com/aiwaki/slipstream/pull/343) remains on
+`codex/p0-macos-reliability`. Its last pushed head `4ee7947b` passed every
+required PR check. Pushed head `c44dc447` then passed the app build, packaged
+lifecycle/browser, product and Windows gates, but the freshly updated advisory
+database blocked `quick-xml 0.32.0` in the app and `h2 0.3.27`/`0.4.15` in the
+immutable Geph r1 graph. The current local tree fixes the app dependency and
+records the narrow Geph transition policy; neither earlier green run approves
+this newer tree.
+
+The local tree now identifies the app and release as
+`0.1.9-preview.23` / `v0.1.9-preview.23`. It adds bounded background preview
+discovery, bundle-attributed native notification, explicit signed installation,
+and a durable non-AppKit update watchdog. Before replacement, the watchdog
+fsyncs an owner-private journal, a same-volume staged app, and an independently
+validated sibling backup. The successor is accepted only when its exact path,
+version, process birth identity, tray startup, owned daemon, and advancing
+heartbeat agree; otherwise the exact previous bundle is restored. Startup can
+resume a crash between journal publication and launchd bootstrap. `.22 -> .23`
+remains one manual install because `.22` reports `0.1.9`; automatic preview
+discovery begins with `.23 -> .24`.
+
+Required main CI builds the application once without the production updater
+secret. A separate no-checkout/no-repository-code signer job downloads and
+hash-binds the frozen updater archive, verifies pinned Tauri signer binaries,
+and exposes the production key only to the signing command. A no-secret
+assembler binds both service-artifact digests, cryptographically verifies the
+signature and archive contents against the exact packaged public key, and
+creates the immutable candidate without rebuilding. A parallel main-only
+packaged notification job binds the same candidate to a root-owned one-shot
+capability and requires exact `dev.slipstream.tray` macOS attribution (or an
+explicitly denied notification permission) with zero Dock, window, activation,
+or frontmost-app change.
+
+Current local evidence is green: `1030` routing/platform Python tests, `459`
+script tests plus `70` subtests, and `189` Rust tests pass; clippy is clean and
+version/project/workflow/diff checks pass. A fresh arm64 Tauri package has
+bundle identifier `dev.slipstream.tray`, version `0.1.9-preview.23`,
+`LSUIElement=true`, and the exact `slipstream`,
+`slipstream-browser-probe`, and `slipstream-update-watchdog` arm64 executables.
+The app and helpers pass strict local ad-hoc signature checks; both helpers
+link only `libiconv` and `libSystem`, never AppKit, Cocoa, or WebKit. This local
+package is not a release candidate and was neither installed nor published.
+
+The app now declares the honest Rust `1.88` floor and resolves `plist 1.10.0`
+to patched `quick-xml 0.41.0`; its exact macOS ARM OSV 2.3.8 scan covers `362`
+packages with `0` blockers and `0` vulnerability exceptions. Geph r1 still has
+the low-severity empty-DATA-frame advisory in `h2 0.3.27` and `0.4.15`. The
+unmaintained Hyper 0.14 / h2 0.3 branch has no fixed release and is accepted as
+an exact expiring availability risk. The readily fixed h2 0.4 finding has only
+a seven-day merge bridge: `.23` publication is explicitly blocked until a
+reviewed `geph-vendor-0.3.0-r2` replaces `0.4.15` with `0.4.16`, passes its own
+full audit, and is consumed by the exact release candidate.
+
+One pre-fix updater fault test called the production relaunch effect on its
+temporary `Slipstream.app`; macOS associated that direct executable with the
+fake bundle and displayed a misleading “damaged” dialog. Unified logging bound
+the dialog to the `.ctx-mode` TempDir and `ELOOP`, while the installed `.22`
+passed strict code-signature verification and had no quarantine attribute. The
+rollback effect is now injected in unit tests: they assert one relaunch request
+without executing an app, a static regression forbids any test-section
+`spawn_bundle`, and the post-fix full Rust run produced zero new Gatekeeper or
+CoreServicesUIAgent Slipstream records.
+
+The next verified action is to commit and push this dependency correction,
+pass every new PR check, and merge PR #343 unchanged. Immediately afterward,
+merge the reviewed Geph r2 source-contract/lock update, publish and attest r2,
+and require a new exact-main candidate that embeds it. That final candidate
+must pass production signing, packaged notification qualification, protected
+owned-Geph proof, Safari/Chrome live-site matrix, transport mechanics, and the
+measured 30-minute invisibility soak before `v0.1.9-preview.23` is published. A
+real public `.23 -> .24` notification/install/relaunch and forced rollback
+remains the release gate for `.24`; it cannot be honestly claimed before both
+public versions exist.
+
+## Superseded 2026-08-13 P0 Checkpoint
+
+Update 2026-08-13 P0 implementation is in draft PR
+[#343](https://github.com/aiwaki/slipstream/pull/343) on
+`codex/p0-macos-reliability`. Its second exact PR run again built the immutable
+candidate and passed the corrected dependency audit, then exposed four new
+packaged boundaries rather than a product pass: the PF smoke used an unroutable
+documentation-prefix IPv6 destination, lifecycle still expected an artificial
+scheduler stall to mean wake, the browser smoke launched the Tauri GUI
+executable and therefore registered it with LaunchServices, and a Windows
+checkout fed CRLF into an LF-only workflow parser. The branch fixes each cause
+without weakening its gate: PF uses a transaction-owned RFC3849 `lo0` `/128`
+and closes the inherited `/dev/pf` descriptor before dropping privileges; lifecycle
+injects one exact root-owned `0600` disposable system marker while production
+continues to use `kern.waketime`; the browser observer is a separate non-AppKit
+Cargo binary signed inside the same bundle; and the Windows parser normalizes
+line endings.
+
+The next exact-head run confirmed the dependency, Chromium, Windows contract,
+and complete Python suites, but also proved both attempted IPv6 targets were
+invalid fixtures: `fe80::1%interface` depended on a nonexistent neighbor, while
+the Mac's actually assigned scoped link-local address was a local identity and
+did not traverse the inbound `rdr on lo0` path. The follow-up now owns one fixed
+RFC3849 `/128` alias on `lo0`, after proving the address absent, the existing
+route not `lo0`, and recording the exact pre-test `lo0` IPv6 set. Both the
+high-port PF smoke and installed-candidate transport gate remove that alias in
+`finally` and require the address, derived route, and IPv6 set to be restored.
+This live proof covers the production-family `inet6` loopback `rdr` and
+DIOCNATLOOK path. The non-`lo0` IPv6 `route-to` branch remains an exact
+loaded-rule/static assertion rather than a claim based on external IPv6.
+
+Exact PR run `31711135993` for head `2d27b7aec170829db0cacd1d5e7b359865005968`
+then passed the candidate build, Windows adapter and packaged lifecycle but
+failed browser qualification after the navigation completed: the visibility
+sampler observed the pinned `chrome-headless-shell` in LaunchServices. A local
+`lsappinfo listen` trace of that exact pinned runtime proved this was neither
+the non-AppKit helper nor GUI Chrome. Chromium's macOS headless shell itself
+uses `NSApplication`, registers first as `BackgroundOnly`, changes to
+`UIElement`, and completes a 15-event hidden lifecycle. The corrected gate
+allows that sequence only when every event binds to the exact manifest-digest
+path and one observed process-group root. It still fails closed for every
+unknown, show, activation, frontmost or foreground event, any other path/PID,
+any Dock/CoreGraphics window or GUI Chrome sample, listener blindness, an
+incomplete exit, or a surviving process/registration. Deterministic fixtures
+cover each forbidden class, and the parser accepts the measured real 15-event
+sequence only after complete exit. The source bundle separately has
+`LSUIElement=true` before launch and runtime `Accessory`; its committed
+`icon.icns` is byte-identical to the current installed copy.
+
+The current local freeze has 1,404 Python tests plus 60 subtests, 374 script
+unittests, 89 tray-library tests, 29 browser-helper tests, 41 core tests, 40
+userspace-stack tests, 40 userspace-effect tests, and 241 Windows-adapter tests
+green. All Rust lints, Python compilation, project-state validation, workflow
+syntax, and diff checks pass. A real arm64 Tauri package contains
+`Contents/MacOS/slipstream-browser-probe`, keeps `CFBundleExecutable=slipstream`,
+passes helper and deep-bundle signature checks, and links the helper only to
+`libiconv` and `libSystem`, never AppKit/Cocoa/WebKit. Its bundle metadata has
+`LSUIElement=true`; the installed `.22` does not. Pinned OSV Scanner 2.3.8
+accounts for all 352 SPDX packages as 351 vulnerability-scanned plus one exact
+SHA-256/PURL/expiry-bound Chromium integrity-only entry, with zero blocking
+findings. Disposable CI must still prove the unchanged real visibility sensors
+and every required check on the new PR head.
+
+Workstation evidence invalidated the preceding
+headed-Chrome qualification as a production readiness claim: the installed
+preview launched 271 browser workers and 184 GUI Chrome processes, including
+background activity, while a 51-second status-publication gap made the tray
+show `Off` although the daemon PID/listener remained alive. Safari/Chrome
+reports added four generic gates: reviewed Geph first-payload recovery
+(`xpersonatoy.com`), original-navigation pending (`app.aikido.dev`), complete
+regional denial (`weather.com`), and independently confirmed edge denial
+(`capacitorjs.com`). These are classes, not hostname exceptions.
+
+The branch replaces production LaunchServices/branded Chrome with a pinned
+app-bundled headless shell, adds the route-preflight v1 contract, separates
+heartbeat from slow health publication, adds dual-stack TCP listener/PF/NATLOOK
+coverage, and removes direct fallback for a reviewed required-exit
+first-payload failure. Required main CI now builds the app exactly once and
+creates one immutable `release-candidate-${SHA}`; packaged lifecycle and browser
+qualification consume parallel copies without rebuilding. Protected
+owned-Geph qualification and protected release readiness independently consume
+that exact candidate. Their manifest-bound attestations cover owned-Geph,
+Safari/Chrome live origins, dual-stack PF/NATLOOK plus QUIC v1/v2 mechanics, and
+the measured 30-minute invisibility soak. The publisher verifies all three
+exact workflow identities, attempts and digests and performs no PyInstaller,
+Cargo, or Tauri rebuild. Those protected gates have not yet passed, so
+`v0.1.9-preview.23` must not be published or installed. Next: push the locally
+green follow-up, pass every required PR check, merge, pass the exact-main
+candidate and both protected qualifications, then promote that unchanged
+candidate.
+
+The same draft moves the package version to `0.1.9-preview.23` and adds the
+first honest preview updater channel. `.22 -> .23` remains a manual install
+because `.22` identifies itself as `0.1.9`; automatic discovery begins only at
+`.23 -> .24`. The tray now discovers a bounded immutable preview appcast in the
+background, persists per-channel notification/highest-seen state, submits a
+native Slipstream-identified notification, and exposes an explicit install
+action. Installation rechecks tag/version/archive identity, performs a bounded
+minisign-verified download, then validates the signed bundle identifier,
+executable, internal version and `LSUIElement` before installing the same
+bytes. Local unit and MockRuntime installer-mechanics tests pass, but they are
+not product completion evidence. Durable pre-install backup, automatic rollback
+with successor health acknowledgement, an OS-observed packaged
+notification/no-activation gate, and a real released `.23 -> .24` transition
+are still open. Until those exact gates pass, the repository must not claim
+that auto-update or native delivery is end-to-end proven.
+
+The legacy transport-idle browser broker remains disabled permanently. The
+replacement exact-host pre-routing path is implemented on this branch and can
+start only from an installed, sealed app bundle after signed foreground
+Safari/Chrome provenance, within one eight-second deadline, through the pinned
+headless shell and the owned-Geph candidate. It is not evidence that the
+currently published `.22` preview has this behavior: the new path is not
+release-ready until the packaged, live-site, transport, and 30-minute
+invisibility gates pass for the exact candidate.
+
+## Historical Evidence
+
 Update 2026-08-13: the macOS release gate is complete. Preview
 [`v0.1.9-preview.22`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.22)
 was published by successful `build-app` run `31630147863` from exact main and

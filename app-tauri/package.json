@@ -1,6 +1,6 @@
 {
   "name": "slipstream-tray",
-  "version": "0.1.9",
+  "version": "0.1.9-preview.23",
   "private": true,
   "description": "Slipstream menu-bar tray (Tauri v2)",
   "scripts": {
@@ -14,8 +14,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-shell": "^2",
-    "@tauri-apps/plugin-process": "^2",
-    "@tauri-apps/plugin-updater": "^2"
+    "@tauri-apps/plugin-updater": "2.9.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

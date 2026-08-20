@@ -19,6 +19,21 @@ Slipstream routing decisions and bounded recovery primitives.
   adapters without touching the network.
 - `status-v2-v1.json` freezes one complete privacy-bounded StatusV2 payload and
   its legacy tray projection, including additive-field preservation.
+- `route-preflight-v1.json` freezes the capability-bound exact-host pre-routing
+  request and its fixed bounded outcomes (`navigation_pending`, regional or
+  edge denial, challenge/auth, usable, and terminal error). It carries only
+  allowed candidate routes and a deadline; page text, paths, cookies, browser
+  errors, and arbitrary fields are outside the interface.
+- `release-readiness-v1.json` freezes the protected exact-candidate release
+  proof: source and app-tree identities, candidate/readiness run attempts,
+  fixed Safari/Chrome live-site outcomes, the measured 30-minute invisibility
+  soak, and protected exact-candidate transport mechanics. The latter proves
+  the installed dual-stack listener/PF rules and Darwin IPv4/IPv6 NATLOOK on
+  documentation-prefix transactions, plus private-anchor rollback on test
+  ports and deterministic encrypted QUIC v1/v2 observation/exact-host
+  fallback. It deliberately does not claim that the live origin
+  negotiated a particular QUIC version or address family; live usability is
+  proved separately by Safari and Chrome.
 - `semantic-route-signal-v1.json` freezes the strict browser-companion signal
   parser and pure decision boundary. Only a fresh, high-confidence top-level
   regional-denial category for an unknown host may request independent

@@ -311,6 +311,7 @@ def collect_components(
     geph_version_file: Path,
     geph_source_file: Path,
     tg_ws_proxy_version_file: Path,
+    chromium_headless_shell_source_file: Path | None = None,
 ) -> list[Component]:
     geph_version = _require_version_file(geph_version_file, "Geph")
     geph_source = geph_vendor_source.load_source_contract(geph_source_file)
@@ -319,6 +320,42 @@ def collect_components(
     tg_ws_proxy_version = _require_version_file(
         tg_ws_proxy_version_file, "tg-ws-proxy"
     )
+    chromium_source = None
+    if chromium_headless_shell_source_file is not None:
+        try:
+            chromium_source = json.loads(
+                chromium_headless_shell_source_file.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid Chromium headless-shell source contract") from exc
+        archive = chromium_source.get("archive")
+        if not isinstance(archive, dict):
+            raise ValueError("Chromium headless-shell source archive is missing")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                chromium_source.get("version"),
+                archive.get("url"),
+                archive.get("sha256"),
+            )
+        ):
+            raise ValueError("Chromium headless-shell source contract is incomplete")
+        if not re.fullmatch(r"[0-9a-f]{64}", archive["sha256"]):
+            raise ValueError("Chromium headless-shell archive SHA-256 is invalid")
+        if (
+            not isinstance(archive.get("length"), int)
+            or isinstance(archive.get("length"), bool)
+            or archive["length"] <= 0
+        ):
+            raise ValueError("Chromium headless-shell archive length is invalid")
+        if archive["url"] != (
+            "https://storage.googleapis.com/chrome-for-testing-public/"
+            f"{chromium_source['version']}/{chromium_source.get('platform')}/"
+            f"chrome-headless-shell-{chromium_source.get('platform')}.zip"
+        ):
+            raise ValueError("Chromium headless-shell source URL is not canonical")
+        if chromium_source.get("license_path") != "LICENSE.headless_shell":
+            raise ValueError("Chromium headless-shell license path is invalid")
     components = [
         *_cargo_components(cargo_metadata, cargo_lock),
         *_npm_components(npm_lock),
@@ -344,6 +381,25 @@ def collect_components(
             purpose="APPLICATION",
         ),
     ]
+    if chromium_source is not None:
+        components.append(
+            Component(
+                ecosystem="generic",
+                name="chromium-headless-shell",
+                version=chromium_source["version"],
+                download_location=chromium_source["archive"]["url"],
+                purl=_purl(
+                    "generic", "chromium-headless-shell", chromium_source["version"]
+                ),
+                # The upstream distribution ships a composite
+                # LICENSE.headless_shell covering Chromium and bundled
+                # third-party components; do not collapse it to one license.
+                license_declared="NOASSERTION",
+                purpose="APPLICATION",
+                checksum_algorithm="SHA256",
+                checksum_value=chromium_source["archive"]["sha256"],
+            )
+        )
 
     unique: dict[str, Component] = {}
     for component in components:
@@ -601,6 +657,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--geph-version-file", required=True, type=Path)
     parser.add_argument("--geph-source-file", required=True, type=Path)
     parser.add_argument("--tg-ws-proxy-version-file", required=True, type=Path)
+    parser.add_argument("--chromium-headless-shell-source-file", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args(argv)
 
@@ -615,6 +672,7 @@ def main(argv: list[str] | None = None) -> int:
         geph_version_file=args.geph_version_file,
         geph_source_file=args.geph_source_file,
         tg_ws_proxy_version_file=args.tg_ws_proxy_version_file,
+        chromium_headless_shell_source_file=args.chromium_headless_shell_source_file,
     )
     document = build_spdx_document(
         version=args.version,

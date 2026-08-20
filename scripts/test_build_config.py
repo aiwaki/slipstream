@@ -43,6 +43,10 @@ ACTION_PINS = {
         "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         "v7.0.1",
     ),
+    "actions/download-artifact": (
+        "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "v8.0.1",
+    ),
     "actions/attest": (
         "a1948c3f048ba23858d222213b7c278aabede763",
         "v4.1.1",
@@ -102,12 +106,85 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn(f"--target {TAURI_RELEASE_TARGET}", scripts["build:release"])
         self.assertEqual(scripts["build"], "npm run build:release")
 
-    def test_packaged_workflows_use_the_explicit_tauri_target(self) -> None:
-        workflow_names = (
-            "build-app.yml",
-            "ci.yml",
-            "owned-geph-qualification.yml",
+    def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
+        config = json.loads(
+            (ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text()
         )
+        cargo = (ROOT / "app-tauri/src-tauri/Cargo.toml").read_text(
+            encoding="utf-8"
+        )
+        app_main = (ROOT / "app-tauri/src-tauri/src/main.rs").read_text(
+            encoding="utf-8"
+        )
+        helper_main = (
+            ROOT
+            / "app-tauri/src-tauri/src/bin/slipstream-browser-probe.rs"
+        ).read_text(encoding="utf-8")
+        watchdog_main = (
+            ROOT
+            / "app-tauri/src-tauri/src/bin/slipstream-update-watchdog.rs"
+        ).read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+        owned_geph = (
+            ROOT / ".github/workflows/owned-geph-qualification.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(config["mainBinaryName"], "slipstream")
+        self.assertNotIn(
+            "browser-probe/slipstream-browser-probe",
+            config["bundle"]["resources"],
+        )
+        self.assertIn('name = "slipstream-browser-probe"', cargo)
+        self.assertNotIn("run_browser_probe_if_requested", app_main)
+        self.assertNotIn("use slipstream_lib", helper_main)
+        self.assertIn('#[path = "../browser_probe.rs"]', helper_main)
+        self.assertNotIn("use slipstream_lib", watchdog_main)
+        self.assertIn('#[path = "../updater_transaction.rs"]', watchdog_main)
+        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', workflow)
+        self.assertIn('/usr/bin/otool -L "$helper"', workflow)
+        self.assertIn(
+            'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
+            workflow,
+        )
+        self.assertIn('/usr/bin/codesign --verify --strict "$watchdog"', workflow)
+        self.assertIn('/usr/bin/otool -L "$watchdog"', workflow)
+        self.assertIn("Print :CFBundleExecutable", workflow)
+        self.assertIn(
+            'helper="$app/Contents/MacOS/slipstream-browser-probe"',
+            owned_geph,
+        )
+        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', owned_geph)
+        self.assertIn('/usr/bin/otool -L "$helper"', owned_geph)
+        self.assertIn(
+            'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
+            owned_geph,
+        )
+        self.assertIn(
+            '/usr/bin/codesign --verify --strict "$watchdog"', owned_geph
+        )
+        self.assertIn('/usr/bin/otool -L "$watchdog"', owned_geph)
+        self.assertIn("Print :CFBundleExecutable", owned_geph)
+        self.assertIn(
+            "cargo test --locked --bin slipstream-browser-probe",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked --test updater_installer_mechanics -- --test-threads=1",
+            workflow,
+        )
+        self.assertIn(
+            "cargo clippy --locked --all-targets -- -D warnings",
+            workflow,
+        )
+        self.assertNotIn(
+            "cargo clippy --locked --bin slipstream-browser-probe",
+            workflow,
+        )
+
+    def test_packaged_workflows_use_the_explicit_tauri_target(self) -> None:
+        workflow_names = ("ci.yml",)
         combined = ""
         for name in workflow_names:
             workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
@@ -126,6 +203,33 @@ class BuildConfigTests(unittest.TestCase):
             2,
         )
 
+    def test_exact_main_candidate_qualifies_native_update_notification(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+        job = workflow[
+            workflow.index("  packaged-update-notification-qualification:") :
+            workflow.index("  packaged-app-lifecycle-heavy:")
+        ]
+        aggregate = workflow[workflow.index("  packaged-app-lifecycle:") :]
+
+        self.assertIn("needs: [changes, assemble-release-candidate]", job)
+        self.assertIn("github.event_name == 'push'", job)
+        self.assertIn("github.ref == 'refs/heads/main'", job)
+        self.assertIn("release-candidate-${{ github.sha }}", job)
+        self.assertIn("scripts/macos_update_notification_smoke.py", job)
+        self.assertIn('--repository "${{ github.repository }}"', job)
+        self.assertIn('--source-commit "$GITHUB_SHA"', job)
+        self.assertIn('--candidate-run-id "$GITHUB_RUN_ID"', job)
+        self.assertIn('--candidate-run-attempt "$GITHUB_RUN_ATTEMPT"', job)
+        self.assertIn("SLIPSTREAM_DISPOSABLE_CI", job)
+        self.assertIn("update-notification-qualification.json", job)
+        self.assertIn("Slipstream-update-notification-qualified-${{ github.sha }}", job)
+        self.assertIn("packaged-update-notification-qualification", aggregate)
+        self.assertIn(
+            "needs.packaged-update-notification-qualification.result", aggregate
+        )
+
     def test_daemon_version_tracks_root_version(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         daemon = (ROOT / "spike/tproxy.py").read_text(encoding="utf-8")
@@ -140,39 +244,20 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("SPECPATH", spec)
         self.assertNotIn("os.getcwd()", spec)
 
-    def test_release_workflow_packages_signed_route_policy_channel(self) -> None:
+    def test_release_workflow_promotes_candidate_metadata(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
-        self.assertIn("Prepare route policy trust keys", workflow)
-        self.assertIn("SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON", workflow)
-        self.assertIn("spike/route-policy-keys.json", workflow)
-        self.assertIn("Package signed route policy channel", workflow)
-        self.assertIn("SLIP_ROUTE_POLICY_PRIVATE_KEY", workflow)
-        self.assertIn("spike/.buildvenv/bin/python -m unittest", workflow)
-        self.assertIn("--bundled-manifest", workflow)
-        self.assertIn("--channel-index", workflow)
-        self.assertIn("route-policy-latest.json", workflow)
-        self.assertIn("dist-release/route-policy.json", workflow)
-        self.assertIn("Verify release artifacts", workflow)
+        self.assertIn("Create tag-specific release metadata without rebuilding", workflow)
         self.assertIn("scripts/verify_release_artifacts.py", workflow)
         self.assertIn("--release-dir dist-release", workflow)
-        self.assertIn("Build deterministic target SPDX SBOM", workflow)
-        self.assertIn("scripts/make_release_sbom.py", workflow)
-        self.assertIn("Resolve target dependency graph", workflow)
-        self.assertIn("cargo metadata", workflow)
-        self.assertIn("--filter-platform \"$SLIPSTREAM_TAURI_TARGET\"", workflow)
-        self.assertIn("--cargo-metadata /tmp/slipstream-cargo-metadata.json", workflow)
-        self.assertIn("--geph-source-file vendor/geph/SOURCE.json", workflow)
-        self.assertIn("Audit release dependencies", workflow)
-        self.assertIn("scripts/dependency_audit.py scan", workflow)
-        self.assertIn("security/dependency-audit-policy.json", workflow)
         self.assertIn("dist-release/dependency-audit.json", workflow)
-        self.assertIn("Build release artifact manifest", workflow)
         self.assertIn("scripts/make_release_manifest.py", workflow)
         self.assertIn("dist-release/Slipstream.spdx.json", workflow)
         self.assertIn("dist-release/artifact-manifest.json", workflow)
         self.assertIn('--source-commit "$GITHUB_SHA"', workflow)
         self.assertIn('--target "$SLIPSTREAM_TAURI_TARGET"', workflow)
+        self.assertNotIn("npm run build", workflow)
+        self.assertNotIn(".buildvenv/bin/pyinstaller", workflow.lower())
 
     def test_dependency_audit_runs_on_changes_and_on_a_schedule(self) -> None:
         workflow = (
@@ -193,37 +278,251 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("security/geph-dependency-audit-policy.json", workflow)
         self.assertIn("--vendored-transitive-dependencies full", workflow)
 
-    def test_release_workflow_uses_the_recorded_verified_geph_artifact(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+    def test_release_pipeline_reuses_one_immutable_candidate(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        qualification = (
+            ROOT / ".github/workflows/owned-geph-qualification.yml"
+        ).read_text(encoding="utf-8")
+        readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        publisher = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
-        self.assertIn('version="$(tr -d \'[:space:]\' < vendor/geph/VERSION)"', workflow)
-        self.assertIn('json.load(open("vendor/geph/SOURCE.json"))["release_revision"]', workflow)
-        self.assertIn('tag="geph-vendor-$version-r$release_revision"', workflow)
-        self.assertIn("scripts/download_github_release_assets.py", workflow)
-        self.assertIn("--pattern 'geph5-client.VERSION'", workflow)
-        self.assertIn("--pattern 'geph5-client.LICENSE'", workflow)
-        self.assertIn("--pattern 'geph5-client.SOURCE.json'", workflow)
-        self.assertIn("--pattern 'geph5-client.Cargo.lock'", workflow)
-        self.assertIn("--pattern 'geph5-client.spdx.json'", workflow)
-        self.assertIn("--pattern 'geph5-client-dependency-audit.json'", workflow)
-        self.assertIn("--pattern 'SHA256SUMS'", workflow)
-        self.assertIn('asset_version="$(tr -d \'[:space:]\' < /tmp/geph/geph5-client.VERSION)"', workflow)
-        self.assertIn('"$asset_version" = "$version"', workflow)
-        self.assertIn("shasum -a 256 -c SHA256SUMS", workflow)
-        self.assertIn("cmp /tmp/geph/geph5-client.SOURCE.json vendor/geph/SOURCE.json", workflow)
-        self.assertIn("--vendored-transitive-dependencies full", workflow)
-        self.assertIn("release_revision", workflow)
-        self.assertIn("scripts/make_geph_vendor_sbom.py verify", workflow)
-        self.assertIn('commits/$tag" --jq .sha', workflow)
-        self.assertIn('"$vendor_commit" = "$tag_commit"', workflow)
-        self.assertIn(".github/workflows/build-geph.yml", workflow)
-        self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
-        self.assertIn("geph5-client-current-audit.json", workflow)
-        self.assertIn('--evaluation-date "$(date -u +%F)"', workflow)
-        self.assertNotIn("select(startswith(\"geph-vendor-\"))", workflow)
+        self.assertIn("release-candidate-${{ github.sha }}", ci)
+        self.assertIn("scripts/release_candidate.py create", ci)
+        self.assertIn("--source-tree", ci)
+        self.assertIn("--source-archive-sha256", ci)
+        self.assertIn("--app-tree", ci)
+        self.assertIn("actions/attest@", ci)
+        self.assertEqual(ci.count("Build the frozen daemon"), 1)
+        self.assertEqual(ci.count("Build the packaged app"), 1)
+        self.assertIn("Seal the single packaged build for parallel qualification", ci)
+        self.assertNotIn("--bundles app", ci)
+        self.assertIn('test -f "$bundle/macos/Slipstream.app.tar.gz"', ci)
+        self.assertIn("needs: [changes, packaged-app-build]", ci)
+        self.assertIn("Assemble immutable main release candidate", ci)
+        self.assertGreaterEqual(ci.count("name: release-candidate-${{ github.sha }}"), 3)
+
+        self.assertIn("release-candidate-${{ github.sha }}", qualification)
+        self.assertIn("scripts/release_candidate.py verify", qualification)
+        self.assertIn("scripts/release_candidate.py create-proof", qualification)
+        self.assertIn("Attest exact qualification proof", qualification)
+        proof_block = qualification[
+            qualification.index("Bind qualification proof to the exact candidate") :
+            qualification.index("Attest exact qualification proof")
+        ]
+        self.assertIn("--expected-candidate-run-attempt", proof_block)
+        self.assertIn(
+            '--app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"', proof_block
+        )
+        self.assertNotIn("Build the frozen daemon", qualification)
+        self.assertNotIn("Build the packaged app", qualification)
+
+        self.assertIn("release-candidate-${{ github.sha }}", readiness)
+        self.assertIn("scripts/live_site_release_smoke.py", readiness)
+        self.assertIn("scripts/packaged_invisibility_soak.py", readiness)
+        self.assertIn("--duration-seconds 1800", readiness)
+        self.assertIn("scripts/release_readiness.py create", readiness)
+        self.assertIn("scripts/packaged_transport_mechanics_smoke.py", readiness)
+        self.assertIn("dist-readiness/transport-mechanics.json", readiness)
+        self.assertNotIn("Slipstream-transport-matrix-${{ github.sha }}", readiness)
+        self.assertNotIn("scripts/release_transport_matrix.py create", ci)
+        self.assertIn("Attest exact release-readiness evidence", readiness)
+        self.assertIn("--expected-workflow-run-attempt", readiness)
+        self.assertNotIn("Build the frozen daemon", readiness)
+        self.assertNotIn("Build the packaged app", readiness)
+
+    def test_candidate_signing_and_attestation_have_least_privilege(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        publisher = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        build = workflow[
+            workflow.index("  packaged-app-build:") : workflow.index(
+                "  sign-updater-archive:"
+            )
+        ]
+        signer = workflow[
+            workflow.index("  sign-updater-archive:") : workflow.index(
+                "  assemble-release-candidate:"
+            )
+        ]
+        assembly = workflow[
+            workflow.index("  assemble-release-candidate:") : workflow.index(
+                "  attest-release-candidate:"
+            )
+        ]
+        attestation = workflow[
+            workflow.index("  attest-release-candidate:") : workflow.index(
+                "  packaged-browser-qualification:"
+            )
+        ]
+
+        self.assertIn("npm ci --ignore-scripts", build)
+        self.assertIn("Build the packaged app with a disposable updater key", build)
+        self.assertIn("tauri signer generate", build)
+        self.assertIn("trap cleanup_disposable_key EXIT", build)
+        self.assertNotIn("${{ secrets.", build)
+        self.assertNotIn("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.", assembly)
+        self.assertEqual(
+            workflow.count("${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"),
+            1,
+        )
+        self.assertEqual(
+            workflow.count("${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"),
+            1,
+        )
+        self.assertIn("node \"$signer\" signer sign", signer)
+        self.assertNotIn("actions/checkout@", signer)
+        self.assertNotIn("npm ci", signer)
+        self.assertNotIn("tauri build", signer)
+        self.assertNotIn("cargo ", signer)
+        self.assertIn("updater-signing-input-${{ github.sha }}", signer)
+        self.assertIn("EXPECTED_ARTIFACT_DIGEST", signer)
+        self.assertIn("actions/runs/$GITHUB_RUN_ID/artifacts", signer)
+        self.assertIn("artifact service digest mismatch", signer)
+        self.assertIn('re.fullmatch(r"[0-9a-f]{64}", expected_digest)', signer)
+        self.assertIn(
+            'matches[0].get("digest") != f"sha256:{expected_digest}"', signer
+        )
+        self.assertIn("@tauri-apps/cli/-/cli-2.11.3.tgz", signer)
+        self.assertIn("@tauri-apps/cli-darwin-arm64/-/cli-darwin-arm64-2.11.3.tgz", signer)
+        self.assertIn(
+            "1049507bccfcb83ecf8b9fbeb49fd47c4c16b8ad3caddde808361d7886c901bea9651af196a9a8179821e47e58bf39943e14b821109a2d2b1086f5a4adf2be19",
+            signer,
+        )
+        self.assertIn(
+            "071a5a33c6ec0a85ecdf077858a6216acfc6d60b3bfabec1f9ee169f2464d8612854ea2e241d61a0be84e982d76435db61c8ba54576b367a1b430776b952f87b",
+            signer,
+        )
+        self.assertLess(
+            signer.index("Bootstrap the independently checksummed Tauri signer"),
+            signer.index("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets."),
+        )
+        self.assertLess(
+            signer.index("Verify exact-run signing input and artifact digest"),
+            signer.index("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets."),
+        )
+        self.assertNotIn("id-token: write", build)
+        self.assertNotIn("attestations: write", build)
+        self.assertNotIn("actions/attest@", build)
+        self.assertNotIn("id-token: write", signer)
+        self.assertNotIn("attestations: write", signer)
+        self.assertIn("scripts/verify_updater_artifacts.py", assembly)
+        self.assertLess(
+            assembly.index("scripts/verify_updater_artifacts.py"),
+            assembly.index("Assemble immutable main release candidate"),
+        )
+        self.assertIn("cmp \\", assembly)
+        self.assertIn("signing-proof.json", assembly)
+        self.assertIn("current-run artifact service identity mismatch", assembly)
+        self.assertIn('re.fullmatch(r"[0-9a-f]{64}", digest)', assembly)
+        self.assertIn(
+            'matches[0].get("digest") != f"sha256:{digest}"', assembly
+        )
+        self.assertNotIn("tauri build", assembly)
+        self.assertNotIn("disposable-updater.key", assembly)
+
+        product_checks = workflow[
+            workflow.index("  product-checks:") : workflow.index(
+                "  chromium-webrequest-contract:"
+            )
+        ]
+        self.assertNotIn("id-token: write", product_checks)
+        self.assertNotIn("attestations: write", product_checks)
+        self.assertNotIn("artifact-metadata: write", product_checks)
+
+        self.assertIn("id-token: write", attestation)
+        self.assertIn("attestations: write", attestation)
+        self.assertEqual(attestation.count("actions/attest@"), 2)
+        self.assertNotIn("actions/checkout@", attestation)
+        self.assertNotIn("${{ secrets.", attestation)
+        self.assertNotIn("\n        run:", attestation)
+        self.assertIn("- attest-release-candidate", workflow)
+        self.assertIn("- sign-updater-archive", workflow)
+        self.assertIn("- assemble-release-candidate", workflow)
+
+        self.assertIn("release_candidate_run_id", publisher)
+        self.assertIn("release_candidate_run_attempt", publisher)
+        self.assertIn("qualification_run_id", publisher)
+        self.assertIn("qualification_run_attempt", publisher)
+        self.assertIn("readiness_run_id", publisher)
+        self.assertIn("readiness_run_attempt", publisher)
+        self.assertIn("scripts/release_candidate.py verify", publisher)
+        self.assertIn("scripts/release_candidate.py verify-proof", publisher)
+        self.assertIn("--expected-workflow-run-attempt", publisher)
+        self.assertIn("--expected-qualification-run-attempt", publisher)
+        self.assertIn("--expected-candidate-run-attempt", publisher)
+        self.assertIn("--source-ref refs/heads/main", publisher)
+        self.assertIn("scripts/release_readiness.py verify", publisher)
+        self.assertIn("--transport-report dist-readiness/transport-mechanics.json", publisher)
+        self.assertIn(
+            "cp dist-readiness/transport-mechanics.json dist-release/", publisher
+        )
+        self.assertIn("--require-passed", publisher)
+        self.assertIn(
+            "${{ github.repository }}/.github/workflows/release-readiness.yml",
+            publisher,
+        )
+        self.assertIn(
+            "${{ github.repository }}/.github/workflows/owned-geph-qualification.yml",
+            publisher,
+        )
+        self.assertNotIn("Build + sign the app", publisher)
+        self.assertNotIn("Build the self-contained daemon", publisher)
+        self.assertNotIn("run_packaged_lifecycle_smoke.sh", publisher)
+
+    def test_packaged_visibility_gate_measures_real_macos_state(self) -> None:
+        smoke = (ROOT / "scripts/pending_navigation_browser_probe_smoke.py").read_text(
+            encoding="utf-8"
+        )
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("CGWindowListCopyWindowInfo", smoke)
+        self.assertIn('(LSAPPINFO, "listen", "+all"', smoke)
+        self.assertIn("PostShowProcess", smoke)
+        self.assertIn("frontmost application", smoke)
+        self.assertIn("LaunchServices listener observed no owned lifecycle", smoke)
+        self.assertIn("LaunchServices lifecycle did not fully exit", smoke)
+        self.assertIn("_assert_pinned_executable_unchanged", smoke)
+        self.assertNotIn('"visible_window": False', smoke)
+        self.assertIn("packaged_chromium_headless_shell", smoke)
+        self.assertIn("Qualify packaged lazy sandboxed browser observation", ci)
+        browser_job = ci[ci.index("  packaged-browser-qualification:"):ci.index("  packaged-app-lifecycle-heavy:")]
+        self.assertNotIn("browser-actions/setup-chrome", browser_job)
+        self.assertNotIn("--chrome-executable", browser_job)
+
+    def test_required_workflows_keep_docs_only_checks_lightweight(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        audit = (ROOT / ".github/workflows/dependency-audit.yml").read_text(
+            encoding="utf-8"
+        )
+        windows = (
+            ROOT / ".github/workflows/windows-packet-adapter-qualification.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("changes:", ci)
+        self.assertIn("if: needs.changes.outputs.product == 'true'", ci)
+        self.assertIn("needs: [changes, packaged-app-build]", ci)
+        self.assertIn("packaged-browser-qualification:", ci)
+        self.assertIn("name: release-candidate-${{ github.sha }}", ci)
+        self.assertIn("Validate repository documentation", ci)
+        self.assertIn("test_documentation.py", ci)
+        self.assertIn('git diff --check "$base" "$GITHUB_SHA"', ci)
+        self.assertIn("\n  checks:\n", ci)
+        self.assertIn("  checks:\n    name: checks\n", ci)
+        self.assertIn("\n  packaged-app-lifecycle:\n", ci)
+        self.assertIn(
+            "  packaged-app-lifecycle:\n    name: packaged-app-lifecycle\n", ci
+        )
+        self.assertIn("name: Required dependency audit", audit)
+        self.assertIn("pull_request:\n    paths:", windows)
+        self.assertIn('branches: ["main"]', windows)
 
     def test_packaged_qualification_uses_the_same_revisioned_geph_release(self) -> None:
-        for name in ("ci.yml", "owned-geph-qualification.yml"):
+        for name in ("ci.yml",):
             workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
             self.assertIn(
                 'json.load(open("vendor/geph/SOURCE.json"))["release_revision"]',
@@ -247,29 +546,44 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(direct_downloads, [])
         self.assertEqual(
             sorted(helper_users),
-            [
-                "build-app.yml",
-                "build-geph.yml",
-                "ci.yml",
-                "owned-geph-qualification.yml",
-            ],
+            ["build-geph.yml", "ci.yml"],
         )
 
     def test_release_workflow_keeps_manual_previews_off_the_stable_feed(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
-        self.assertIn('tag="v${v}-preview.${GITHUB_RUN_NUMBER}"', workflow)
-        self.assertIn('prerelease="true"', workflow)
-        self.assertIn('prerelease="false"', workflow)
+        self.assertIn('tag="v${v}"', workflow)
+        self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
+        self.assertIn('[ "$preview_sequence" = 23 ]', workflow)
+        self.assertIn("release or Git tag already exists", workflow)
+        self.assertIn("git/matching-refs/tags/$tag", workflow)
+        self.assertIn("group: build-app-${{ github.ref }}", workflow)
+        resolve_tag = workflow[workflow.index("- name: Resolve version and tag"):]
+        self.assertIn("GH_TOKEN: ${{ github.token }}", resolve_tag[:500])
+        self.assertIn("prerelease=true", workflow)
+        self.assertIn("prerelease=false", workflow)
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
+
+    def test_common_ci_runs_windows_only_for_windows_or_shared_adapter_paths(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("windows: ${{ steps.scope.outputs.windows }}", workflow)
+        self.assertIn("crates/slipstream-core/*", workflow)
+        self.assertIn("crates/slipstream-windows-adapter/*", workflow)
+        self.assertIn("vendor/wintun/*", workflow)
+        self.assertIn(
+            "if: needs.changes.outputs.product == 'true' && needs.changes.outputs.windows == 'true'",
+            workflow,
+        )
+        self.assertIn("WINDOWS_SCOPE: ${{ needs.changes.outputs.windows }}", workflow)
+        self.assertIn('if [ "$WINDOWS_SCOPE" = true ]; then', workflow)
 
     def test_release_workflow_presents_dmg_and_archives_previous_preview(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
         self.assertIn("DMG для установки", workflow)
         self.assertIn("dmg_name=", workflow)
-        self.assertIn("gh attestation verify $dmg_name", workflow)
         self.assertIn("releases/download/${{ steps.ver.outputs.tag }}", workflow)
         self.assertIn("Mark previous preview as archival", workflow)
         self.assertIn(
@@ -288,7 +602,7 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("target_commitish: ${{ github.sha }}", workflow)
         self.assertIn("select(.draft | not)", workflow)
-        self.assertIn('[ "$GITHUB_REF" = "refs/heads/main" ]', workflow)
+        self.assertIn('[ "$GITHUB_REF" = refs/heads/main ]', workflow)
 
     def test_release_workflow_attests_only_verified_payloads(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
@@ -296,41 +610,20 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("id-token: write", workflow)
         self.assertIn("attestations: write", workflow)
         self.assertIn("artifact-metadata: write", workflow)
-        self.assertEqual(
-            workflow.count(
-                "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763"
-            ),
-            2,
-        )
-        self.assertIn("Attest verified release provenance", workflow)
-        self.assertIn("subject-path: dist-release/*", workflow)
-        self.assertIn("Attest application SBOM", workflow)
-        self.assertIn("sbom-path: dist-release/Slipstream.spdx.json", workflow)
-        self.assertIn("Verify stored release attestations", workflow)
+        self.assertEqual(workflow.count("uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763"), 1)
+        self.assertIn("Attest tag-specific release metadata", workflow)
         self.assertIn("gh attestation verify", workflow)
         self.assertIn('--source-digest "$GITHUB_SHA"', workflow)
         self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
         self.assertIn("--deny-self-hosted-runners", workflow)
-        self.assertIn(
-            "gh attestation verify $dmg_name --repo",
-            workflow,
-        )
-        self.assertLess(
-            workflow.index("Verify release artifacts"),
-            workflow.index("Attest verified release provenance"),
-        )
-        self.assertLess(
-            workflow.index("Attest application SBOM"),
-            workflow.index("Publish release"),
-        )
+        self.assertLess(workflow.index("scripts/verify_release_artifacts.py"), workflow.index("Attest tag-specific release metadata"))
 
     def test_release_workflow_requires_remote_policy_only_for_stable(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
-        self.assertIn("if: steps.ver.outputs.channel == 'stable'", workflow)
         self.assertIn('--channel "${{ steps.ver.outputs.channel }}"', workflow)
         self.assertIn("не содержит remote policy assets", workflow)
-        self.assertIn("подписанным каналом route policy", workflow)
+        self.assertNotIn("Package signed route policy channel", workflow)
 
     def test_release_workflow_qualifies_the_built_app_before_publish(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
@@ -341,19 +634,9 @@ class BuildConfigTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("Qualify the release app lifecycle", workflow)
-        self.assertIn('SLIPSTREAM_DISPOSABLE_CI: "1"', workflow)
-        self.assertIn("id: release-lifecycle-chrome", workflow)
-        self.assertIn(
-            "browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd",
-            workflow,
-        )
-        self.assertIn("chrome-version: 151.0.7922.77", workflow)
-        self.assertIn(
-            '"${{ steps.release-lifecycle-chrome.outputs.chrome-path }}"',
-            workflow,
-        )
-        self.assertIn("scripts/run_packaged_lifecycle_smoke.sh", workflow)
+        self.assertIn("scripts/release_candidate.py verify-proof", workflow)
+        self.assertIn("owned-geph-qualification.yml", workflow)
+        self.assertNotIn("scripts/run_packaged_lifecycle_smoke.sh", workflow)
         self.assertIn("scripts/pf_installed_lifecycle_smoke.py", wrapper)
         self.assertIn('--app-bundle "$app_bundle"', wrapper)
         self.assertIn("GITHUB_ACTIONS", wrapper)
@@ -365,11 +648,6 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("retrying once on a fresh loopback port", wrapper)
         self.assertIn("stalled_system_resolver", lifecycle)
         self.assertIn("dormant_before_query_then_active", lifecycle)
-        self.assertLess(
-            workflow.index("id: release-lifecycle-chrome"),
-            workflow.index("Qualify the release app lifecycle"),
-        )
-
         syntax = subprocess.run(
             ("/bin/bash", "-n", str(ROOT / "scripts/run_packaged_lifecycle_smoke.sh")),
             capture_output=True,
@@ -570,16 +848,14 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_python_install_paths_are_hash_locked_and_binary_only(self) -> None:
         build_sources = [
-            ROOT / ".github/workflows/build-app.yml",
             ROOT / ".github/workflows/ci.yml",
-            ROOT / ".github/workflows/owned-geph-qualification.yml",
             ROOT / "spike/build_daemon.sh",
         ]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in build_sources)
 
-        self.assertGreaterEqual(combined.count("requirements-build.txt"), 4)
-        self.assertGreaterEqual(combined.count("--require-hashes"), 5)
-        self.assertGreaterEqual(combined.count("--only-binary=:all:"), 5)
+        self.assertGreaterEqual(combined.count("requirements-build.txt"), 3)
+        self.assertGreaterEqual(combined.count("--require-hashes"), 3)
+        self.assertGreaterEqual(combined.count("--only-binary=:all:"), 3)
         self.assertNotIn("-r spike/requirements.txt pyinstaller", combined)
         self.assertNotIn("scapy cryptography certifi pyinstaller", combined)
         self.assertNotIn("pip install --quiet --upgrade pip", combined)
@@ -614,7 +890,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
     def test_release_workflows_use_checked_macos_build_dependencies(self) -> None:
-        for name in ("build-app.yml", "build-geph.yml"):
+        for name in ("build-geph.yml",):
             workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
             self.assertIn("bash scripts/ensure_macos_build_deps.sh", workflow)
             self.assertNotIn("brew install protobuf cmake pkg-config || true", workflow)
@@ -632,10 +908,10 @@ class BuildConfigTests(unittest.TestCase):
         app = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
         geph = (ROOT / ".github/workflows/build-geph.yml").read_text(encoding="utf-8")
 
-        self.assertIn('make_latest="true"', app)
-        self.assertIn('make_latest="false"', app)
+        self.assertIn("make_latest=true", app)
+        self.assertIn("make_latest=false", app)
         self.assertIn("make_latest: ${{ steps.ver.outputs.make_latest }}", app)
-        self.assertIn('release_name="Slipstream $v (preview ${GITHUB_RUN_NUMBER})"', app)
+        self.assertIn('release_name="Slipstream $v"', app)
         self.assertIn("body_path: dist-release/release-notes.md", app)
         self.assertIn("generate_release_notes: true", app)
         self.assertIn("Resolve previous app release tag", app)

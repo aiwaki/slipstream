@@ -7,14 +7,15 @@
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
 
-mod browser_probe;
+mod app_update;
 mod diagnostics;
 mod geph_config;
 mod install_attestation;
 mod native_messaging;
+mod notification_qualification;
 mod status_client;
+mod updater_transaction;
 
-pub use browser_probe::run_browser_probe_if_requested;
 pub use native_messaging::run_native_messaging_if_requested;
 pub use slipstream_core::{
     address_attempts, connection_race, route_circuit, route_circuit_registry,
@@ -27,7 +28,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicU64, AtomicU8, Ordering},
     Arc, Mutex,
 };
 use std::time::{Duration, Instant};
@@ -46,7 +47,7 @@ use install_attestation::{
     install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
 };
 use serde_json::{json, Value};
-use status_client::{read_status, STATUS_PATH};
+use status_client::{read_status, read_status_state, StatusRead, STATUS_PATH};
 use tauri::{
     image::Image,
     menu::{
@@ -58,6 +59,42 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
+
+const UPDATE_INITIAL_DELAY_SECS: u64 = 30;
+const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
+const UPDATE_STATE_FILE: &str = "app-update-state-v1.json";
+const NATIVE_NOTIFICATION_UNCONFIGURED: u8 = 0;
+const NATIVE_NOTIFICATION_CONFIGURING: u8 = 1;
+const NATIVE_NOTIFICATION_READY: u8 = 2;
+const NATIVE_NOTIFICATION_DISABLED: u8 = 3;
+static NATIVE_UPDATE_NOTIFICATION_STATE: AtomicU8 = AtomicU8::new(NATIVE_NOTIFICATION_UNCONFIGURED);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AppUpdateOffer {
+    version: String,
+    endpoint: Option<String>,
+    archive_url: String,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedAppUpdateStateV1 {
+    version: u8,
+    channel: String,
+    last_notified_version: Option<String>,
+    highest_seen_version: Option<String>,
+}
+
+#[derive(Default)]
+struct AppUpdateState {
+    offer: Option<AppUpdateOffer>,
+    last_notified_version: Option<String>,
+    highest_seen_version: Option<String>,
+    persistence_path: Option<PathBuf>,
+    channel: String,
+    busy: bool,
+}
 
 // Our bundled geph5-client runs an unprivileged SOCKS5 on this port; the root
 // daemon routes geo-blocked hosts to it. A dedicated port (not geph's default
@@ -852,13 +889,29 @@ fn command_matches_daemon(command: &str) -> bool {
 fn daemon_process_owned(user: &str, command: &str, executable: Option<&str>) -> bool {
     user == "root"
         && command_matches_daemon(command)
-        && executable.map_or(true, |path| path == INSTALLED_DAEMON)
+        && executable.is_none_or(|path| path == INSTALLED_DAEMON)
 }
 
 fn daemon_listener_owned() -> bool {
     let Some(pid) = listener_pid(1080) else {
         return false;
     };
+    let Some(user) = process_user(pid) else {
+        return false;
+    };
+    let Some(command) = process_command(pid) else {
+        return false;
+    };
+    daemon_process_owned(&user, &command, process_executable(pid).as_deref())
+}
+
+fn daemon_pid_owned(pid: i64) -> bool {
+    let Ok(pid) = u32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 1 {
+        return false;
+    }
     let Some(user) = process_user(pid) else {
         return false;
     };
@@ -1413,12 +1466,72 @@ fn daemon_state_text(state: &str, conns: i64, learned: i64, ru: bool) -> (String
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct TrayLiveness {
+    consecutive_failures: u8,
+    last_known_live: bool,
+}
+
+fn tray_status_with_hysteresis(
+    read: StatusRead,
+    liveness: bool,
+    state: &mut TrayLiveness,
+) -> Option<Value> {
+    match read {
+        StatusRead::Fresh(status) => {
+            state.consecutive_failures = 0;
+            state.last_known_live = true;
+            Some(status)
+        }
+        StatusRead::Stale(mut status) if liveness => {
+            state.consecutive_failures = 0;
+            state.last_known_live = true;
+            status["phase"] = Value::String("recovering".to_string());
+            Some(status)
+        }
+        StatusRead::Stale(mut status) => {
+            state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+            if state.consecutive_failures < DAEMON_WATCHDOG_MISSES {
+                status["phase"] = Value::String("recovering".to_string());
+                Some(status)
+            } else {
+                state.last_known_live = false;
+                None
+            }
+        }
+        StatusRead::Missing => {
+            state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+            if liveness {
+                state.last_known_live = true;
+                Some(json!({"state": "active", "phase": "recovering"}))
+            } else if state.consecutive_failures < DAEMON_WATCHDOG_MISSES {
+                Some(json!({"state": "active", "phase": "recovering"}))
+            } else {
+                state.last_known_live = false;
+                None
+            }
+        }
+    }
+}
+
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
 /// poll made the menu-bar mark visibly blink).
-fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>) -> String {
-    let st = read_status();
+fn refresh(
+    state_item: &MenuItem<tauri::Wry>,
+    detail_item: &MenuItem<tauri::Wry>,
+    liveness: &mut TrayLiveness,
+) -> String {
+    let read = read_status_state();
+    let needs_probe = !read.is_fresh();
+    let snapshot_pid = read
+        .value()
+        .and_then(|status| status.get("pid"))
+        .and_then(Value::as_i64);
+    let owned_daemon_live =
+        needs_probe && (daemon_listener_owned() || snapshot_pid.is_some_and(daemon_pid_owned));
+    let st = tray_status_with_hysteresis(read, owned_daemon_live, liveness);
     let get_str = |k: &str, d: &'static str| -> String {
         st.as_ref()
             .and_then(|v| v.get(k))
@@ -1433,6 +1546,7 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
             .unwrap_or(0)
     };
     let state = get_str("state", "off");
+    let phase = get_str("phase", "active");
     let conns = get_i64("conns");
     let learned = get_i64("hosts_learned");
     let geph = get_str("geph", "off");
@@ -1444,7 +1558,19 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         .unwrap_or(false);
 
     let ru = ui_ru();
-    let (title, mut detail) = daemon_state_text(&state, conns, learned, ru);
+    let (mut title, mut detail) = daemon_state_text(&state, conns, learned, ru);
+    if matches!(phase.as_str(), "starting" | "recovering" | "stopping") {
+        let (phase_title, phase_detail) = match (phase.as_str(), ru) {
+            ("starting", true) => ("Slipstream — запускается", "Запуск фонового прокси"),
+            ("starting", false) => ("Slipstream — Starting", "Starting background proxy"),
+            ("stopping", true) => ("Slipstream — останавливается", "Остановка фонового прокси"),
+            ("stopping", false) => ("Slipstream — Stopping", "Stopping background proxy"),
+            (_, true) => ("Slipstream — восстанавливается", "Проверка фонового прокси"),
+            (_, false) => ("Slipstream — Restoring", "Checking background proxy"),
+        };
+        title = phase_title.to_string();
+        detail = phase_detail.to_string();
+    }
     let recovery_detail = if matches!(state.as_str(), "active" | "dormant") {
         baseline_recovery_detail(st.as_ref(), ru)
     } else {
@@ -1454,7 +1580,7 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         detail.clone_from(recovery);
     }
     if matches!(state.as_str(), "active" | "dormant") {
-        if recovery_detail.is_none() {
+        if recovery_detail.is_none() && phase == "active" {
             if let Some(routing) = routing_health_summary(st.as_ref(), &geph, ru) {
                 push_detail_part(&mut detail, &routing);
             }
@@ -1501,7 +1627,7 @@ fn set_tray_icon(app: &AppHandle, state: &str) {
     }
 }
 
-/// Show a native notification (geph up/down, updates).
+/// Show a native notification without activating the accessory application.
 fn notify(app: &AppHandle, body: &str) {
     let _ = app
         .notification()
@@ -1509,6 +1635,586 @@ fn notify(app: &AppHandle, body: &str) {
         .title("Slipstream")
         .body(body)
         .show();
+}
+
+fn notify_update_available(body: &str) -> Result<(), String> {
+    if NATIVE_UPDATE_NOTIFICATION_STATE.load(Ordering::Acquire) != NATIVE_NOTIFICATION_READY {
+        let development = tauri::is_dev();
+        let identity = if development {
+            "com.apple.Terminal"
+        } else {
+            app_update::BUNDLE_IDENTIFIER
+        };
+        configure_native_notification_identity(identity, development)?;
+    }
+    let mut notification = notify_rust::Notification::new();
+    notification.summary("Slipstream").body(body);
+    notification
+        .show()
+        .map(|_| ())
+        .map_err(|error| format!("native update notification failed: {error}"))
+}
+
+/// Consume the exact-candidate, one-shot macOS notification qualification.
+///
+/// The shipped binary exposes no reusable notification command: this path is
+/// reachable only with a root-owned unlinked descriptor bound to the exact
+/// PID, UID, executable and release-candidate tree. It exits before Tauri,
+/// AppKit, the tray, daemon installation or updater discovery can start.
+pub fn run_update_notification_qualification_if_requested() -> bool {
+    if !notification_qualification::requested() {
+        return false;
+    }
+    let terminal = |reason: &str, capability_sha256: Option<&str>| {
+        let report = serde_json::json!({
+            "schema_version": 1,
+            "outcome": "terminal",
+            "identity": app_update::BUNDLE_IDENTIFIER,
+            "capability_sha256": capability_sha256.unwrap_or(""),
+            "reason": reason,
+        });
+        println!("{report}");
+    };
+    let capability = match notification_qualification::claim() {
+        Ok(capability) => capability,
+        Err(()) => {
+            terminal("capability_invalid", None);
+            return true;
+        }
+    };
+    if configure_native_notification_identity(app_update::BUNDLE_IDENTIFIER, false).is_err() {
+        terminal("identity_unavailable", Some(&capability.sha256));
+        return true;
+    }
+    let permission_status = match notification_qualification::permission_state() {
+        Ok(notification_qualification::PermissionState::Suppressed) => "suppressed",
+        Ok(notification_qualification::PermissionState::Allowed) => "allowed",
+        Err(()) => "unknown",
+    };
+    // Exercise the exact production notifier even when modern permission
+    // settings are denied or unavailable: notify-rust 4.12 uses the legacy
+    // NSUserNotificationCenter backend.  The external packaged gate decides
+    // whether macOS accepted an attributed record and never equates backend
+    // success with a visible banner.
+    if notify_update_available("A Slipstream update is available.").is_err() {
+        terminal("native_submission_failed", Some(&capability.sha256));
+        return true;
+    }
+    let report = serde_json::json!({
+        "schema_version": 1,
+        "outcome": "submitted",
+        "identity": app_update::BUNDLE_IDENTIFIER,
+        "capability_sha256": capability.sha256,
+        "permission_status": permission_status,
+    });
+    println!("{report}");
+    true
+}
+
+fn configure_native_notification_identity(
+    identifier: &str,
+    development: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let setter = || {
+        notify_rust::set_application(identifier)
+            .map_err(|error| format!("native notification identity unavailable: {error}"))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let setter = || Ok(());
+    configure_native_notification_identity_state(
+        &NATIVE_UPDATE_NOTIFICATION_STATE,
+        identifier,
+        development,
+        setter,
+    )
+}
+
+fn configure_native_notification_identity_state(
+    state: &AtomicU8,
+    identifier: &str,
+    development: bool,
+    setter: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if (!development && identifier != app_update::BUNDLE_IDENTIFIER)
+        || (development && identifier != "com.apple.Terminal")
+    {
+        return Err("native notification bundle identifier mismatch".into());
+    }
+    match state.load(Ordering::Acquire) {
+        NATIVE_NOTIFICATION_READY => return Ok(()),
+        NATIVE_NOTIFICATION_DISABLED => {
+            return Err("native notification identity is disabled for this process".into())
+        }
+        NATIVE_NOTIFICATION_CONFIGURING => {
+            return Err("native notification identity configuration is in progress".into())
+        }
+        NATIVE_NOTIFICATION_UNCONFIGURED => {}
+        _ => return Err("native notification identity state is invalid".into()),
+    }
+    state
+        .compare_exchange(
+            NATIVE_NOTIFICATION_UNCONFIGURED,
+            NATIVE_NOTIFICATION_CONFIGURING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .map_err(|_| "native notification identity state changed".to_string())?;
+    match setter() {
+        Ok(()) => {
+            state.store(NATIVE_NOTIFICATION_READY, Ordering::Release);
+            Ok(())
+        }
+        Err(error) => {
+            // mac-notification-sys consumes a process-global Once even when
+            // set_application fails. Retrying would misreport recoverability.
+            state.store(NATIVE_NOTIFICATION_DISABLED, Ordering::Release);
+            Err(error)
+        }
+    }
+}
+
+fn update_channel(version: &semver::Version) -> Result<String, String> {
+    if app_update::is_preview_version(version) {
+        Ok("preview".into())
+    } else if version.pre.is_empty() && version.build.is_empty() {
+        Ok("stable".into())
+    } else {
+        Err("unsupported application update channel".into())
+    }
+}
+
+fn load_app_update_state(path: PathBuf, current: &semver::Version) -> AppUpdateState {
+    let channel = update_channel(current).unwrap_or_default();
+    let mut state = AppUpdateState {
+        persistence_path: Some(path.clone()),
+        channel: channel.clone(),
+        ..Default::default()
+    };
+    let Ok(bytes) = fs::read(path) else {
+        return state;
+    };
+    let Ok(saved) = serde_json::from_slice::<PersistedAppUpdateStateV1>(&bytes) else {
+        return state;
+    };
+    if saved.version != 1 || saved.channel != channel {
+        return state;
+    }
+    let valid = |value: Option<String>| {
+        value.and_then(|value| {
+            semver::Version::parse(&value)
+                .ok()
+                .filter(|version| update_channel(version).ok().as_deref() == Some(channel.as_str()))
+                .map(|_| value)
+        })
+    };
+    state.last_notified_version = valid(saved.last_notified_version);
+    state.highest_seen_version = valid(saved.highest_seen_version);
+    state
+}
+
+fn persist_app_update_state(state: &AppUpdateState) -> Result<(), String> {
+    let Some(path) = state.persistence_path.as_ref() else {
+        return Ok(());
+    };
+    let saved = PersistedAppUpdateStateV1 {
+        version: 1,
+        channel: state.channel.clone(),
+        last_notified_version: state.last_notified_version.clone(),
+        highest_seen_version: state.highest_seen_version.clone(),
+    };
+    let bytes = serde_json::to_vec(&saved)
+        .map_err(|error| format!("update state serialization failed: {error}"))?;
+    write_private_atomic(path, &bytes)
+        .map_err(|error| format!("update state persistence failed: {error}"))
+}
+
+fn remember_update_offer(
+    state: &mut AppUpdateState,
+    offer: &AppUpdateOffer,
+) -> Result<bool, String> {
+    let candidate = semver::Version::parse(&offer.version)
+        .map_err(|_| "offered update version is invalid".to_string())?;
+    if update_channel(&candidate)? != state.channel {
+        return Err("offered update escaped its persisted channel".into());
+    }
+    let highest = state
+        .highest_seen_version
+        .as_deref()
+        .and_then(|value| semver::Version::parse(value).ok());
+    if highest.as_ref().is_some_and(|highest| candidate < *highest) {
+        return Ok(false);
+    }
+    if highest.as_ref() != Some(&candidate) {
+        // Persist a clone before committing the in-memory replay guard. A
+        // failed write must remain failed on every repeated offer and must not
+        // become an in-process-only admission that vanishes on restart.
+        let mut persisted = PersistedAppUpdateStateV1 {
+            version: 1,
+            channel: state.channel.clone(),
+            last_notified_version: state.last_notified_version.clone(),
+            highest_seen_version: Some(candidate.to_string()),
+        };
+        let Some(path) = state.persistence_path.as_ref() else {
+            return Err("update replay state has no durable path".into());
+        };
+        let bytes = serde_json::to_vec(&persisted)
+            .map_err(|error| format!("update state serialization failed: {error}"))?;
+        write_private_atomic(path, &bytes)
+            .map_err(|error| format!("update state persistence failed: {error}"))?;
+        state.highest_seen_version = persisted.highest_seen_version.take();
+    }
+    Ok(true)
+}
+
+fn update_menu_text(state: &AppUpdateState, ru: bool) -> String {
+    if state.busy {
+        return if ru {
+            "Обновление…".to_string()
+        } else {
+            "Updating…".to_string()
+        };
+    }
+    match state.offer.as_ref() {
+        Some(offer) if ru => format!("Установить Slipstream {}…", offer.version),
+        Some(offer) => format!("Install Slipstream {}…", offer.version),
+        None if ru => "Проверить обновления…".to_string(),
+        None => "Check for Updates…".to_string(),
+    }
+}
+
+fn set_update_menu_text(item: &MenuItem<tauri::Wry>, state: &AppUpdateState) {
+    let _ = item.set_text(update_menu_text(state, ui_ru()));
+}
+
+fn update_notification_needed(state: &AppUpdateState, version: &str) -> bool {
+    state.last_notified_version.as_deref() != Some(version)
+}
+
+fn record_update_notification(state: &mut AppUpdateState, version: &str) {
+    if state.offer.as_ref().map(|offer| offer.version.as_str()) == Some(version) {
+        let previous = state.last_notified_version.clone();
+        state.last_notified_version = Some(version.to_string());
+        if let Err(error) = persist_app_update_state(state) {
+            eprintln!("{error}");
+            // Persistence is part of successful deduplication. Keep this
+            // process retryable when the durable record could not be written.
+            state.last_notified_version = previous;
+        }
+    }
+}
+
+fn validate_checked_update(
+    current: &semver::Version,
+    update: &Update,
+    endpoint: Option<&str>,
+    expected: Option<(&semver::Version, &str)>,
+) -> Result<AppUpdateOffer, String> {
+    validate_update_metadata(
+        current,
+        &update.current_version,
+        &update.version,
+        update.download_url.as_str(),
+        endpoint,
+        expected,
+    )
+}
+
+fn validate_update_metadata(
+    current: &semver::Version,
+    update_current: &str,
+    update_version: &str,
+    archive_url: &str,
+    endpoint: Option<&str>,
+    expected: Option<(&semver::Version, &str)>,
+) -> Result<AppUpdateOffer, String> {
+    if update_current != current.to_string() {
+        return Err("updater current version mismatch".into());
+    }
+    let version = semver::Version::parse(update_version)
+        .map_err(|_| "updater returned an invalid version".to_string())?;
+    if version <= *current {
+        return Err("updater returned a non-newer version".into());
+    }
+    if let Some((expected_version, expected_archive)) = expected {
+        if version != *expected_version || archive_url != expected_archive {
+            return Err("preview updater metadata escaped its immutable tag".into());
+        }
+    } else {
+        if !version.pre.is_empty() || !version.build.is_empty() {
+            return Err("stable updater returned a prerelease version".into());
+        }
+        let expected_archive = format!(
+            "https://github.com/{}/releases/download/v{version}/Slipstream.app.tar.gz",
+            app_update::REPOSITORY
+        );
+        if archive_url != expected_archive {
+            return Err("stable updater archive is not bound to its version tag".into());
+        }
+    }
+    Ok(AppUpdateOffer {
+        version: version.to_string(),
+        endpoint: endpoint.map(str::to_string),
+        archive_url: archive_url.to_string(),
+    })
+}
+
+async fn checked_update(
+    app: &AppHandle,
+    endpoint: Option<&str>,
+    expected: Option<(&semver::Version, &str)>,
+) -> Result<Option<(AppUpdateOffer, Update)>, String> {
+    let current = app.package_info().version.clone();
+    let mut builder = app.updater_builder().timeout(app_update::DISCOVERY_TIMEOUT);
+    if let Some(endpoint) = endpoint {
+        let endpoint = endpoint
+            .parse()
+            .map_err(|_| "invalid immutable updater endpoint".to_string())?;
+        builder = builder
+            .endpoints(vec![endpoint])
+            .map_err(|error| format!("updater endpoint rejected: {error}"))?;
+    }
+    let updater = builder
+        .build()
+        .map_err(|error| format!("updater unavailable: {error}"))?;
+    let Some(update) = updater
+        .check()
+        .await
+        .map_err(|error| format!("update check failed: {error}"))?
+    else {
+        return Ok(None);
+    };
+    let offer = validate_checked_update(&current, &update, endpoint, expected)?;
+    Ok(Some((offer, update)))
+}
+
+async fn discover_app_update(app: &AppHandle) -> Result<Option<AppUpdateOffer>, String> {
+    let current = app.package_info().version.clone();
+    if app_update::is_preview_version(&current) {
+        let Some(release) = app_update::discover_preview_release(&current).await? else {
+            return Ok(None);
+        };
+        return checked_update(
+            app,
+            Some(&release.appcast_url),
+            Some((&release.version, &release.archive_url)),
+        )
+        .await
+        .map(|checked| checked.map(|(offer, _)| offer));
+    }
+    if !current.pre.is_empty() || !current.build.is_empty() {
+        return Err("unsupported application update channel".into());
+    }
+    checked_update(app, None, None)
+        .await
+        .map(|checked| checked.map(|(offer, _)| offer))
+}
+
+async fn install_app_update(app: &AppHandle, offer: &AppUpdateOffer) -> Result<(), String> {
+    let expected_version = semver::Version::parse(&offer.version)
+        .map_err(|_| "stored update version is invalid".to_string())?;
+    let expected = offer
+        .endpoint
+        .as_deref()
+        .map(|_| (&expected_version, offer.archive_url.as_str()));
+    let Some((checked_offer, update)) =
+        checked_update(app, offer.endpoint.as_deref(), expected).await?
+    else {
+        return Err("the selected update is no longer available".into());
+    };
+    if checked_offer != *offer {
+        return Err("the selected update changed before installation".into());
+    }
+    let updater_config = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .ok_or_else(|| "packaged updater configuration is missing".to_string())?;
+    let public_key = updater_config
+        .get("pubkey")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "packaged updater public key is missing".to_string())?;
+    let bytes = app_update::download_verified_archive(
+        update.download_url.as_str(),
+        &update.signature,
+        public_key,
+    )
+    .await?;
+    app_update::validate_macos_archive(&bytes, &expected_version)?;
+    let current_exe = std::env::current_exe()
+        .map_err(|error| format!("current executable unavailable: {error}"))?;
+    let state_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("update state directory unavailable: {error}"))?;
+    let launch_agents = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("user home directory unavailable: {error}"))?
+        .join("Library/LaunchAgents");
+    let prepared = updater_transaction::prepare_transaction(
+        &current_exe,
+        &state_dir,
+        &launch_agents,
+        &bytes,
+        &update.current_version,
+        &expected_version.to_string(),
+    )?;
+    if prepared.journal_path != state_dir.join(updater_transaction::JOURNAL_FILE) {
+        return Err("durable updater returned an unexpected journal path".into());
+    }
+    Ok(())
+}
+
+async fn refresh_app_update(
+    app: AppHandle,
+    item: MenuItem<tauri::Wry>,
+    state: Arc<Mutex<AppUpdateState>>,
+    manual: bool,
+) {
+    {
+        let mut state = state.lock().expect("update state lock poisoned");
+        if state.busy {
+            return;
+        }
+        state.busy = true;
+        set_update_menu_text(&item, &state);
+    }
+
+    let result = discover_app_update(&app).await;
+    let mut notification: Option<(Option<String>, String)> = None;
+    {
+        let mut state = state.lock().expect("update state lock poisoned");
+        state.busy = false;
+        match result {
+            Ok(Some(offer)) => {
+                let admitted = match remember_update_offer(&mut state, &offer) {
+                    Ok(admitted) => admitted,
+                    Err(error) => {
+                        eprintln!("update offer persistence unavailable: {error}");
+                        false
+                    }
+                };
+                if admitted && update_notification_needed(&state, &offer.version) {
+                    let version = offer.version.clone();
+                    let body = if ui_ru() {
+                        format!(
+                            "Доступна версия Slipstream {}. Откройте меню Slipstream, чтобы установить обновление.",
+                            offer.version
+                        )
+                    } else {
+                        format!(
+                            "Slipstream {} is available. Open the Slipstream menu to install it.",
+                            offer.version
+                        )
+                    };
+                    notification = Some((Some(version), body));
+                }
+                state.offer = admitted.then_some(offer);
+            }
+            Ok(None) => {
+                state.offer = None;
+                if manual {
+                    notification = Some((
+                        None,
+                        if ui_ru() {
+                            "У вас установлена последняя версия Slipstream.".to_string()
+                        } else {
+                            "Slipstream is up to date.".to_string()
+                        },
+                    ));
+                }
+            }
+            Err(error) => {
+                eprintln!("update discovery unavailable: {error}");
+                if manual {
+                    notification = Some((
+                        None,
+                        if ui_ru() {
+                            "Не удалось проверить обновления Slipstream.".to_string()
+                        } else {
+                            "Unable to check for Slipstream updates.".to_string()
+                        },
+                    ));
+                }
+            }
+        }
+        set_update_menu_text(&item, &state);
+    }
+    if let Some((version, body)) = notification {
+        match notify_update_available(&body) {
+            Ok(()) => {
+                if let Some(version) = version {
+                    let mut state = state.lock().expect("update state lock poisoned");
+                    record_update_notification(&mut state, &version);
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+            }
+        }
+    }
+}
+
+async fn install_or_discover_app_update(
+    app: AppHandle,
+    item: MenuItem<tauri::Wry>,
+    state: Arc<Mutex<AppUpdateState>>,
+) {
+    let offer = {
+        let mut guard = state.lock().expect("update state lock poisoned");
+        if guard.busy {
+            return;
+        }
+        let offer = guard.offer.clone();
+        if offer.is_some() {
+            guard.busy = true;
+            set_update_menu_text(&item, &guard);
+        }
+        offer
+    };
+    let Some(offer) = offer else {
+        refresh_app_update(app, item, state, true).await;
+        return;
+    };
+
+    match install_app_update(&app, &offer).await {
+        Ok(()) => {
+            notify(
+                &app,
+                if ui_ru() {
+                    "Обновление установлено — Slipstream перезапускается."
+                } else {
+                    "Update installed — restarting Slipstream."
+                },
+            );
+            // launchd now owns the separately packaged, non-AppKit watchdog.
+            // Exit with an explicit code so the normal tray exit guard does
+            // not keep the old executable alive across its atomic rename.
+            app.exit(0);
+        }
+        Err(error) => {
+            eprintln!("update installation unavailable: {error}");
+            {
+                let mut state = state.lock().expect("update state lock poisoned");
+                state.busy = false;
+                state.offer = None;
+                set_update_menu_text(&item, &state);
+            }
+            notify(
+                &app,
+                if ui_ru() {
+                    "Не удалось установить подписанное обновление Slipstream."
+                } else {
+                    "Unable to install the signed Slipstream update."
+                },
+            );
+            // Re-read the channel once so a mutable stable pointer or a removed
+            // preview offer cannot pin every later click to stale metadata.
+            refresh_app_update(app, item, state, false).await;
+        }
+    }
 }
 
 fn open_telegram_proxy_link() -> bool {
@@ -1563,18 +2269,6 @@ fn prompt_telegram_proxy_offer() -> bool {
         return false;
     }
     String::from_utf8_lossy(&out.stdout).contains(&format!("button returned:{connect}"))
-}
-
-/// Built-in signed updater: check the appcast, download + install if newer.
-async fn check_for_updates(app: AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
-    let Ok(updater) = app.updater() else { return };
-    if let Ok(Some(update)) = updater.check().await {
-        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
-            notify(&app, "Update installed — restarting");
-            app.restart();
-        }
-    }
 }
 
 /// geph exit_constraint for a menu exit value. Three shapes:
@@ -2554,11 +3248,93 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // If power loss or a crash happened after the durable Prepared
+            // journal (and possibly its plist) was fsynced but before launchd
+            // took ownership, resume that exact transaction before creating a
+            // tray, touching notification state, or starting any daemon/network
+            // work. The old process exits cleanly so the windowless watchdog
+            // can perform the already-authorized replacement.
+            #[cfg(target_os = "macos")]
+            {
+                let recovery = (|| -> Result<bool, String> {
+                    let current_exe = std::env::current_exe()
+                        .map_err(|error| format!("current executable unavailable: {error}"))?;
+                    let state_dir = app
+                        .path()
+                        .app_config_dir()
+                        .map_err(|error| format!("update state directory unavailable: {error}"))?;
+                    let launch_agents = app
+                        .path()
+                        .home_dir()
+                        .map_err(|error| format!("user home directory unavailable: {error}"))?
+                        .join("Library/LaunchAgents");
+                    updater_transaction::recover_prepared_transaction(
+                        &current_exe,
+                        &state_dir,
+                        &launch_agents,
+                    )
+                })();
+                match recovery {
+                    Ok(true) => {
+                        app.handle().exit(0);
+                        return Ok(());
+                    }
+                    Ok(false) => {}
+                    Err(error) => return Err(std::io::Error::other(error).into()),
+                }
+            }
+
+            // notify-rust's macOS application identity is process-global and
+            // immutable after the first notification. Set it before any
+            // daemon/setup path can notify so production can never inherit the
+            // backend's Finder fallback identity.
+            let development = tauri::is_dev();
+            let notification_identity = if development {
+                "com.apple.Terminal"
+            } else {
+                app.config().identifier.as_str()
+            };
+            if !development && notification_identity != app_update::BUNDLE_IDENTIFIER {
+                return Err(std::io::Error::other(
+                    "packaged notification bundle identifier mismatch",
+                )
+                .into());
+            }
+            if let Err(error) =
+                configure_native_notification_identity(notification_identity, development)
+            {
+                // mac-notification-sys consumes its process-global Once even
+                // when identity setup fails. Toasts therefore remain disabled
+                // for this process; routing and the explicit updater menu stay
+                // usable, and a fresh process may try once again.
+                eprintln!("{error}");
+            }
+
+            // A replacement may acknowledge only from the exact directly
+            // launched successor.  Merely reaching setup is insufficient:
+            // the status loop below waits until the tray exists and an owned
+            // daemon has published a fresh independent heartbeat.
+            let pending_update_ack = match std::env::current_exe().map_err(|error| error.to_string()) {
+                Ok(current_exe) => updater_transaction::pending_successor_ack(
+                    &current_exe,
+                    &app.package_info().version.to_string(),
+                )
+                .map_err(|error| {
+                    eprintln!("update successor acknowledgement unavailable: {error}");
+                    error
+                })
+                .ok()
+                .flatten(),
+                Err(error) => {
+                    eprintln!("update successor executable unavailable: {error}");
+                    None
+                }
+            };
 
             // First launch: self-install the background service (one password
             // prompt). Everything after this is automatic.
@@ -2628,6 +3404,13 @@ pub fn run() {
                 if ui_ru() { "Версия" } else { "Version" },
                 app.package_info().version
             );
+            let update_item =
+                MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?;
+            let update_state_path = app.path().app_config_dir()?.join(UPDATE_STATE_FILE);
+            let update_state = Arc::new(Mutex::new(load_app_update_state(
+                update_state_path,
+                &app.package_info().version,
+            )));
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
@@ -2639,7 +3422,7 @@ pub fn run() {
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Status")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_DIAGNOSTICS, tr("Copy Diagnostics")).build(app)?)
                 .separator()
-                .item(&MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?)
+                .item(&update_item)
                 .item(
                     &MenuItemBuilder::with_id("version", version_label)
                         .enabled(false)
@@ -2675,6 +3458,8 @@ pub fn run() {
             let exits_cache_menu = exits_cache.clone();
             let geph_menu_events = geph_menu.clone();
             let exit_refreshing_menu = exit_refreshing.clone();
+            let update_item_menu = update_item.clone();
+            let update_state_menu = update_state.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -2800,9 +3585,11 @@ pub fn run() {
                         }
                         ID_UPDATE => {
                             let app = app.clone();
-                            tauri::async_runtime::spawn(
-                                async move { check_for_updates(app).await },
-                            );
+                            let item = update_item_menu.clone();
+                            let state = update_state_menu.clone();
+                            tauri::async_runtime::spawn(async move {
+                                install_or_discover_app_update(app, item, state).await
+                            });
                         }
                         ID_UNINSTALL => {
                             if !prompt_uninstall() {
@@ -2853,6 +3640,27 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Discovery is delayed off the startup path, repeats on a long
+            // cadence, and never downloads or installs on its own. A native
+            // notification plus the changed tray item gives the user the
+            // explicit signed-install action without opening a window.
+            let update_app = app.handle().clone();
+            let update_item_watch = update_item.clone();
+            let update_state_watch = update_state.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(UPDATE_INITIAL_DELAY_SECS)).await;
+                loop {
+                    refresh_app_update(
+                        update_app.clone(),
+                        update_item_watch.clone(),
+                        update_state_watch.clone(),
+                        false,
+                    )
+                    .await;
+                    tokio::time::sleep(Duration::from_secs(UPDATE_CHECK_INTERVAL_SECS)).await;
+                }
+            });
+
             // ---- status poll every 2s ---------------------------------------
             let app_handle = app.handle().clone();
             let s = state_item.clone();
@@ -2873,13 +3681,48 @@ pub fn run() {
                 let mut has_seen_daemon_status = false;
                 let watchdog_started = Instant::now();
                 let mut next_daemon_recovery = Instant::now();
+                let mut tray_liveness = TrayLiveness::default();
+                let mut pending_update_ack = pending_update_ack;
+                let mut pending_update_heartbeat_baseline = None;
                 loop {
-                    let state = refresh(&s, &d);
+                    let state = refresh(&s, &d, &mut tray_liveness);
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
                     }
                     let status = read_status();
+                    if let (Some(context), Some(heartbeat_seq)) = (
+                        pending_update_ack.as_ref(),
+                        status
+                            .as_ref()
+                            .and_then(|value| value.get("heartbeat_seq"))
+                            .and_then(Value::as_u64)
+                            .filter(|value| *value > 0),
+                    ) {
+                        let owned_daemon = status
+                            .as_ref()
+                            .and_then(|value| value.get("pid"))
+                            .and_then(Value::as_i64)
+                            .is_some_and(daemon_pid_owned);
+                        let advanced = match pending_update_heartbeat_baseline {
+                            Some(baseline) => heartbeat_seq > baseline,
+                            None => {
+                                pending_update_heartbeat_baseline = Some(heartbeat_seq);
+                                false
+                            }
+                        };
+                        if owned_daemon && advanced {
+                            match updater_transaction::acknowledge_successor(
+                                context,
+                                heartbeat_seq,
+                            ) {
+                                Ok(()) => pending_update_ack = None,
+                                Err(error) => eprintln!(
+                                    "update successor acknowledgement failed: {error}"
+                                ),
+                            }
+                        }
+                    }
                     let now = Instant::now();
                     if status.is_some() {
                         has_seen_daemon_status = true;
@@ -3008,12 +3851,13 @@ mod tests {
         route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
         should_request_daemon_install, signal_uninstall_ready, sync_private_executable,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        uninstall_dialog_script_for, uninstall_ready_path, uninstall_shell_for_paths,
-        valid_bundled_daemon, write_atomic_if_changed, write_diagnostic_snapshot_file,
-        write_private_atomic, ExitCatalogAvailability, ExitMenuRefreshState,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL,
-        GEPH_STDERR_LOG_FILE,
+        tray_status_with_hysteresis, uninstall_dialog_script_for, uninstall_ready_path,
+        uninstall_shell_for_paths, valid_bundled_daemon, write_atomic_if_changed,
+        write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
+        ExitMenuRefreshState, TrayLiveness, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
+        GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
     };
+    use crate::status_client::StatusRead;
     use serde_json::json;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
@@ -3025,6 +3869,304 @@ mod tests {
             shell_quote("/Applications/Slipstream.app/slipstreamd"),
             "'/Applications/Slipstream.app/slipstreamd'"
         );
+    }
+
+    #[test]
+    fn macos_bundle_and_runtime_are_both_background_only() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["app"]["windows"], json!([]));
+        assert_eq!(config["bundle"]["macOS"]["infoPlist"], "Info.plist");
+        assert!(config["bundle"]["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|resource| resource == "chromium-headless-shell/**/*"));
+
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("<key>LSUIElement</key>"));
+        assert!(plist.contains("<true/>"));
+        let source = include_str!("lib.rs");
+        assert!(source.contains("ActivationPolicy::Accessory"));
+    }
+
+    #[test]
+    fn updater_is_background_discovery_with_explicit_install() {
+        let source = include_str!("lib.rs");
+        assert!(source.contains("UPDATE_CHECK_INTERVAL_SECS"));
+        assert!(source.contains("discover_app_update(&app).await"));
+        assert!(source.contains("notify_update_available(&body)"));
+        assert!(source.contains("install_or_discover_app_update"));
+        assert!(source.contains("download_verified_archive"));
+        assert!(source.contains("validate_macos_archive"));
+        assert!(source.contains(".install(&bytes)"));
+        assert!(source.contains("preview updater metadata escaped its immutable tag"));
+        assert!(source.contains("stable updater archive is not bound to its version tag"));
+        assert!(source.contains("signed update installation failed"));
+    }
+
+    #[test]
+    fn update_menu_is_an_explicit_install_action_after_discovery() {
+        let mut state = super::AppUpdateState::default();
+        assert_eq!(super::update_menu_text(&state, false), "Check for Updates…");
+        assert_eq!(
+            super::update_menu_text(&state, true),
+            "Проверить обновления…"
+        );
+
+        state.offer = Some(super::AppUpdateOffer {
+            version: "0.1.9-preview.24".into(),
+            endpoint: Some("https://example.invalid/latest.json".into()),
+            archive_url: "https://example.invalid/Slipstream.app.tar.gz".into(),
+        });
+        assert_eq!(
+            super::update_menu_text(&state, false),
+            "Install Slipstream 0.1.9-preview.24…"
+        );
+        assert_eq!(
+            super::update_menu_text(&state, true),
+            "Установить Slipstream 0.1.9-preview.24…"
+        );
+
+        state.busy = true;
+        assert_eq!(super::update_menu_text(&state, false), "Updating…");
+        assert_eq!(super::update_menu_text(&state, true), "Обновление…");
+    }
+
+    #[test]
+    fn preview_appcast_cannot_replay_a_signed_cross_tag_archive() {
+        let current = semver::Version::parse("0.1.9-preview.23").unwrap();
+        let expected = semver::Version::parse("0.1.9-preview.24").unwrap();
+        let expected_archive = "https://github.com/aiwaki/slipstream/releases/download/\
+v0.1.9-preview.24/Slipstream.app.tar.gz";
+        let replay_archive = "https://github.com/aiwaki/slipstream/releases/download/\
+v0.1.9-preview.25/Slipstream.app.tar.gz";
+
+        let error = super::validate_update_metadata(
+            &current,
+            "0.1.9-preview.23",
+            "0.1.9-preview.24",
+            replay_archive,
+            Some("https://example.invalid/latest.json"),
+            Some((&expected, expected_archive)),
+        )
+        .unwrap_err();
+        assert_eq!(error, "preview updater metadata escaped its immutable tag");
+    }
+
+    #[test]
+    fn failed_native_notification_remains_retryable() {
+        let mut state = super::AppUpdateState {
+            offer: Some(super::AppUpdateOffer {
+                version: "0.1.9-preview.24".into(),
+                endpoint: None,
+                archive_url: "https://example.invalid/archive".into(),
+            }),
+            channel: "preview".into(),
+            ..Default::default()
+        };
+
+        assert!(super::update_notification_needed(
+            &state,
+            "0.1.9-preview.24"
+        ));
+        // A failed native show does not call record_update_notification.
+        assert!(super::update_notification_needed(
+            &state,
+            "0.1.9-preview.24"
+        ));
+        super::record_update_notification(&mut state, "0.1.9-preview.24");
+        assert!(!super::update_notification_needed(
+            &state,
+            "0.1.9-preview.24"
+        ));
+
+        state.offer.as_mut().unwrap().version = "0.1.9-preview.25".into();
+        super::record_update_notification(&mut state, "0.1.9-preview.24");
+        assert!(super::update_notification_needed(
+            &state,
+            "0.1.9-preview.25"
+        ));
+    }
+
+    #[test]
+    fn persisted_highest_seen_rejects_offer_rollback() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = super::AppUpdateState {
+            channel: "preview".into(),
+            persistence_path: Some(root.path().join("state.json")),
+            ..Default::default()
+        };
+        let offer = |version: &str| super::AppUpdateOffer {
+            version: version.into(),
+            endpoint: None,
+            archive_url: "https://example.invalid/archive".into(),
+        };
+
+        assert!(super::remember_update_offer(&mut state, &offer("0.1.9-preview.25")).unwrap());
+        assert_eq!(
+            state.highest_seen_version.as_deref(),
+            Some("0.1.9-preview.25")
+        );
+        assert!(!super::remember_update_offer(&mut state, &offer("0.1.9-preview.24")).unwrap());
+        assert_eq!(
+            super::remember_update_offer(&mut state, &offer("0.1.9")).unwrap_err(),
+            "offered update escaped its persisted channel"
+        );
+    }
+
+    #[test]
+    fn failed_replay_state_write_never_mutates_or_admits_on_retry() {
+        let root = tempfile::tempdir().unwrap();
+        let unwritable = root.path().join("directory-not-file");
+        std::fs::create_dir(&unwritable).unwrap();
+        let mut state = super::AppUpdateState {
+            channel: "preview".into(),
+            persistence_path: Some(unwritable),
+            highest_seen_version: Some("0.1.9-preview.24".into()),
+            ..Default::default()
+        };
+        let offer = super::AppUpdateOffer {
+            version: "0.1.9-preview.25".into(),
+            endpoint: None,
+            archive_url: "https://example.invalid/archive".into(),
+        };
+        for _ in 0..2 {
+            assert!(super::remember_update_offer(&mut state, &offer).is_err());
+            assert_eq!(
+                state.highest_seen_version.as_deref(),
+                Some("0.1.9-preview.24")
+            );
+        }
+    }
+
+    #[test]
+    fn failed_notification_persistence_restores_previous_version() {
+        let root = tempfile::tempdir().unwrap();
+        let unwritable = root.path().join("directory-not-file");
+        std::fs::create_dir(&unwritable).unwrap();
+        let mut state = super::AppUpdateState {
+            offer: Some(super::AppUpdateOffer {
+                version: "0.1.9-preview.25".into(),
+                endpoint: None,
+                archive_url: "https://example.invalid/archive".into(),
+            }),
+            channel: "preview".into(),
+            persistence_path: Some(unwritable),
+            last_notified_version: Some("0.1.9-preview.24".into()),
+            ..Default::default()
+        };
+        super::record_update_notification(&mut state, "0.1.9-preview.25");
+        assert_eq!(
+            state.last_notified_version.as_deref(),
+            Some("0.1.9-preview.24")
+        );
+    }
+
+    #[test]
+    fn notification_identity_is_configured_before_any_setup_notification() {
+        let source = include_str!("lib.rs");
+        let identity = source
+            .find("configure_native_notification_identity(notification_identity")
+            .unwrap();
+        let daemon_setup = source
+            .find("ensure_daemon_installed(app.handle())")
+            .unwrap();
+        assert!(identity < daemon_setup);
+        assert!(source.contains("NATIVE_UPDATE_NOTIFICATION_STATE"));
+        assert!(source.contains("native update notification failed"));
+    }
+
+    #[test]
+    fn prepared_update_recovery_runs_before_notification_daemon_or_tray_setup() {
+        let source = include_str!("lib.rs");
+        let run = &source[source.find("pub fn run() {").unwrap()..];
+        let recovery = run
+            .find("updater_transaction::recover_prepared_transaction")
+            .unwrap();
+        let notification = run
+            .find("configure_native_notification_identity(notification_identity")
+            .unwrap();
+        let daemon = run.find("ensure_daemon_installed(app.handle())").unwrap();
+        let tray = run.find("TrayIconBuilder::new()").unwrap();
+        assert!(recovery < notification);
+        assert!(notification < daemon);
+        assert!(daemon < tray);
+    }
+
+    #[test]
+    fn failed_notification_identity_is_permanently_disabled_for_process() {
+        use std::sync::atomic::AtomicU8;
+        use std::sync::atomic::Ordering;
+
+        let state = AtomicU8::new(super::NATIVE_NOTIFICATION_UNCONFIGURED);
+        let first = super::configure_native_notification_identity_state(
+            &state,
+            super::app_update::BUNDLE_IDENTIFIER,
+            false,
+            || Err("backend rejected identity".into()),
+        );
+        assert!(first.is_err());
+        assert_eq!(
+            state.load(Ordering::Acquire),
+            super::NATIVE_NOTIFICATION_DISABLED
+        );
+
+        let setter_called = std::cell::Cell::new(false);
+        let second = super::configure_native_notification_identity_state(
+            &state,
+            super::app_update::BUNDLE_IDENTIFIER,
+            false,
+            || {
+                setter_called.set(true);
+                Ok(())
+            },
+        );
+        assert!(second.is_err());
+        assert!(!setter_called.get());
+    }
+
+    #[test]
+    fn notification_qualification_exits_before_tauri_or_native_messaging() {
+        let main = include_str!("main.rs");
+        let qualification = main
+            .find("run_update_notification_qualification_if_requested")
+            .unwrap();
+        let native_messaging = main.find("run_native_messaging_if_requested").unwrap();
+        let tauri = main.find("slipstream_lib::run()").unwrap();
+        assert!(qualification < native_messaging);
+        assert!(native_messaging < tauri);
+
+        let source = include_str!("lib.rs");
+        assert!(source.contains("A Slipstream update is available."));
+        let forbidden = ["notify_update_available(", "&capability"].concat();
+        assert!(!source.contains(&forbidden));
+    }
+
+    #[test]
+    fn stable_appcast_must_use_the_same_immutable_version_tag() {
+        let current = semver::Version::parse("0.1.9").unwrap();
+        assert!(super::validate_update_metadata(
+            &current,
+            "0.1.9",
+            "0.2.0",
+            "https://github.com/aiwaki/slipstream/releases/download/\
+v0.2.0/Slipstream.app.tar.gz",
+            None,
+            None,
+        )
+        .is_ok());
+        assert!(super::validate_update_metadata(
+            &current,
+            "0.1.9",
+            "0.2.0-preview.1",
+            "https://github.com/aiwaki/slipstream/releases/download/\
+v0.2.0-preview.1/Slipstream.app.tar.gz",
+            None,
+            None,
+        )
+        .unwrap_err()
+        .contains("prerelease"));
     }
 
     #[test]
@@ -3681,7 +4823,7 @@ mod tests {
         std::fs::write(
             &attestation,
             serde_json::to_vec(&json!({
-                "schema_version": 2,
+                "schema_version": 3,
                 "source_sha256": daemon_sha256,
                 "daemon": {
                     "path": installed,
@@ -3704,6 +4846,7 @@ mod tests {
                 },
                 "listener": {
                     "host": "127.0.0.1",
+                    "hosts": ["127.0.0.1", "::1"],
                     "port": 1080
                 },
                 "state": "active",
@@ -4014,6 +5157,35 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
             true,
             true
         ));
+    }
+
+    #[test]
+    fn tray_does_not_claim_off_for_a_live_daemon_with_stale_health() {
+        let mut state = TrayLiveness {
+            consecutive_failures: 0,
+            last_known_live: true,
+        };
+        let status = tray_status_with_hysteresis(
+            StatusRead::Stale(json!({"state": "active", "phase": "active"})),
+            true,
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(status["state"], "active");
+        assert_eq!(status["phase"], "recovering");
+        assert_eq!(state.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn tray_requires_three_failed_liveness_checks_before_off() {
+        let mut state = TrayLiveness::default();
+        for expected in 1..DAEMON_WATCHDOG_MISSES {
+            let status = tray_status_with_hysteresis(StatusRead::Missing, false, &mut state);
+            assert_eq!(status.unwrap()["phase"], "recovering");
+            assert_eq!(state.consecutive_failures, expected);
+        }
+        assert!(tray_status_with_hysteresis(StatusRead::Missing, false, &mut state).is_none());
+        assert!(!state.last_known_live);
     }
 
     #[test]

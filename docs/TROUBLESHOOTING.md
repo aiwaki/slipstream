@@ -18,10 +18,136 @@ unknown-host promotion.
 Use Geph only for services that need a foreign exit because the service rejects
 Russian IP addresses. Do not route Discord or YouTube through Geph as a fix.
 
-### A clean Chrome profile stays at `about:blank` after protected qualification
+### Slipstream briefly opens Chrome or takes focus while idle
 
-First verify that the exact Slipstream companion is installed and enabled in
-the affected branded-Chrome profile. The user native-host manifest proves only
+This is a defect in `v0.1.9-preview.22`, not expected background activity. Its
+generic pending-navigation admission could launch ordinary Google Chrome for a
+background TLS idle. Do not install a browser extension or register with Chrome
+Web Store as a workaround. The P0 replacement uses only the bundled pinned
+`Contents/Resources/chromium-headless-shell` runtime and must produce no Chrome
+window, Dock item, visible or activating LaunchServices event, retained profile,
+or focus change. The pinned shell itself uses macOS `NSApplication`, so an exact
+owned `BackgroundOnly`/`UIElement` registration may exist only for its bounded
+lifetime. Qualification binds that registration to the attested executable
+path, SHA-256, process-group root, complete exit, and zero actual frontmost,
+show, activation, Dock, or CoreGraphics-window evidence; any other registration
+fails closed.
+Its fresh owner-private temporary profile must disappear with the single owned
+process tree and never touches a user's Safari or Chrome profile.
+The legacy transport-idle broker is disabled permanently. Its replacement is
+an exact-host pre-routing path that additionally requires signed foreground
+Safari/Chrome provenance and recent input. That replacement is implemented in
+the `.23` candidate source but is not a claim about the installed `.22`; it
+must still pass packaged visibility, live-site, transport, and idle-soak gates
+before publication.
+
+The installed `.22` also lacks `LSUIElement`, so setting the Tauri runtime to
+`Accessory` can happen after macOS has already classified the process as an
+ordinary application. The `.23` source declares `LSUIElement=true` in the
+bundle before launch and runs browser observation through a separately signed
+non-AppKit helper; `Accessory` remains a second guard rather than the primary
+Dock fix.
+
+### macOS says “Slipstream is damaged” during development
+
+Do not assume the dialog names `/Applications/Slipstream.app`. First bind it to
+an exact path in unified logging, then verify the installed bundle separately.
+On 2026-08-20 an updater rollback unit test executed its temporary
+`.ctx-mode/.../apps/Slipstream.app`; the sandbox path contained a symlink loop,
+so CoreServicesUIAgent reported `ELOOP` and offered to trash a file that no
+longer existed. The installed `.22` was unrelated: its strict deep signature
+passed and it had no quarantine attribute.
+
+Unit rollback tests now inject and count a relaunch request without executing a
+temporary `.app`; a source regression rejects test-section `spawn_bundle`
+calls, and the post-fix full Rust run produced no new Slipstream Gatekeeper or
+CoreServicesUIAgent records. If unified logging instead names the real
+`/Applications/Slipstream.app`, treat that as an actual packaging/signature
+failure: preserve the evidence and do not bypass Gatekeeper or strip quarantine
+as a product fix.
+
+### A new-version notification does not appear
+
+Preview `.22` cannot discover `.23`: `.22` reports package version `0.1.9`,
+while the honest preview channel starts at `0.1.9-preview.23`. Install `.23`
+manually once; subsequent previews use ordinary semver precedence.
+
+From `.23` onward, Slipstream waits briefly after startup, then checks in the
+background and at a long cadence. It does not open a window, activate itself,
+or install/restart without the user. The tray item changes to “Install
+Slipstream …” when an offer is available; choosing it is the explicit action
+that downloads and installs the signed archive. “Check for Updates…” performs
+an immediate discovery when there is no cached offer.
+
+If the tray offers a version but no toast was shown, check System Settings →
+Notifications → Slipstream. macOS may suppress display when notifications are
+disabled or Focus is active. Slipstream records notification deduplication only
+after its bundle-bound native backend accepts the submission; it never
+impersonates Finder. An identity-initialization failure disables toasts for the
+current process instead of silently retrying with the wrong application, and a
+later Slipstream launch may try again. The tray action stays available even if
+notification registration fails.
+
+An installation failure leaves or restores the exact previous application and
+triggers a fresh channel check. The durable update watchdog keeps a verified
+sibling backup until the successor's exact version, process identity, tray,
+owned daemon, and advancing heartbeat are acknowledged. Wrong/cross-tag
+metadata, an unsafe redirect, oversized or tampered bytes, a signature/key
+mismatch, a replayed archive with the wrong internal version, a wrong bundle
+identity/executable, or missing `LSUIElement` all fail closed. Do not bypass
+these checks by replacing `latest.json` or the signature manually.
+
+Current P0 status is intentionally conservative: unit and MockRuntime mechanics
+tests do not prove native macOS delivery or a complete product transition.
+The durable rollback and successor acknowledgement are implemented and covered
+by fault tests, but `.23` release qualification still requires the exact
+packaged OS-observed notification gate with no activation. A real released
+`.23 -> .24` notification/download/install/relaunch plus forced rollback is the
+future `.24` gate. Until the applicable packaged gate passes, treat the feature
+as implemented but not end-to-end released.
+
+For a packaged candidate, verify the runtime without starting it:
+
+```bash
+test -x /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell
+test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' \
+  /Applications/Slipstream.app/Contents/Info.plist)" = true
+test -x /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
+/usr/bin/codesign --verify --strict \
+  /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
+python3 -m json.tool \
+  /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/manifest.json
+```
+
+### The menu flips to Off and then recovers by itself
+
+First distinguish a stale health snapshot from an absent service. If the daemon
+PID and owned listener remain alive while the status timestamp pauses, this is
+not `Off`; it is a health-publisher stall. P0 status carries an independent
+heartbeat and the menu retains the last confirmed active state as
+`Restoring/Updating` until repeated ping plus PID/listener checks prove absence.
+Do not restart Geph or reinstall merely because one snapshot is older than the
+former 15-second cutoff.
+
+### A page loads but shows a regional or security denial
+
+A complete denial page is not a successful user navigation. Current generic
+categories distinguish regional denial, edge-access denial, challenge/auth and
+usable content. Edge denial alone never learns a route: a fresh owned-Geph
+connection must independently return a complete non-denial response for the
+same exact host. Ordinary login pages, CAPTCHA, HTTP 403/429, truncated bodies,
+or the same denial on both routes remain non-actionable.
+
+### Historical `.22`: a clean Chrome profile stays at `about:blank`
+
+This section explains an archival preview failure; it is not a current setup
+instruction. The P0 architecture does not require or distribute a companion
+extension, so do not install one or enable Developer Mode to apply this old
+diagnosis.
+
+When reproducing that archival build, the first check was whether its exact
+Slipstream companion was installed and enabled in the affected branded-Chrome
+profile. The user native-host manifest proves only
 that an already installed extension with the allowed origin may start the
 host; it does not install the extension. The protected qualification uses a
 fresh profile with the reviewed source loaded as an unpacked extension, so its
@@ -33,8 +159,8 @@ clean browser profile had no companion, emitted no semantic/recovery event,
 and remained pending for 75 seconds. Exact rollback restored the previous
 application and all network/runtime invariants. Do not compensate by weakening
 the navigation signal, closing a quiet relay from byte count alone, or routing
-the host through Geph without the normal independent evidence. Production
-qualification requires the reviewed extension ID
+the host through Geph without the normal independent evidence. That historical
+qualification required the reviewed extension ID
 `cecdingohhpfggapnlbghppcegbaciam` to be installed and enabled in that actual
 profile.
 

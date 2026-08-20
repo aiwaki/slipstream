@@ -6,11 +6,14 @@ starts Slipstream, never targets TCP/443, and refuses to run while Slipstream
 state already exists. All rule writes are restricted to two owned anchors. If
 PF initially skips lo0, the smoke uses Slipstream's durable lease + private
 ioctl path and requires the exact original flag state after cleanup.
+IPv6 translation is exercised through one owned RFC3849 /128 alias on lo0;
+the alias, derived host route, and complete pre-test lo0 IPv6 set must roll back.
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import platform
@@ -28,6 +31,8 @@ from typing import Sequence
 ROOT = Path(__file__).resolve().parents[1]
 SPIKE = ROOT / "spike"
 PFCTL = Path("/sbin/pfctl")
+IFCONFIG = Path("/sbin/ifconfig")
+ROUTE = Path("/sbin/route")
 SLIPSTREAM_ANCHOR = "com.apple/slipstream"
 SENTINEL_ANCHOR = "com.apple/slipstream-smoke-sentinel"
 OWNED_ANCHORS = frozenset({SLIPSTREAM_ANCHOR, SENTINEL_ANCHOR})
@@ -37,6 +42,7 @@ PRODUCTION_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
 SMOKE_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-smoke-lo0-skip.json")
 STATUS_PATH = Path("/var/run/slipstream.status")
 TEST_DESTINATION = "198.51.100.1"
+IPV6_LOOPBACK_TEST_DESTINATION = "2001:db8:5354:5354::1"
 DEFAULT_TARGET_PORT = 18443
 DEFAULT_PROXY_PORT = 19443
 MARKER = b"slipstream-pf-smoke\n"
@@ -52,6 +58,190 @@ class PfSnapshot:
     nat_rules: str
     filter_rules: str
     loopback_skip: bool
+
+
+def _completed_command(
+    command: Sequence[str],
+) -> subprocess.CompletedProcess[str]:
+    rendered = tuple(map(str, command))
+    try:
+        return subprocess.run(
+            rendered,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SmokeError(f"fixture command failed: {' '.join(rendered)}: {exc}") from exc
+
+
+def _ipv6_address_snapshot(output: str) -> tuple[tuple[str, str, int], ...]:
+    """Return canonical (address, scope, prefix) entries from ifconfig output."""
+    addresses: list[tuple[str, str, int]] = []
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) < 4 or fields[0] != "inet6" or "prefixlen" not in fields:
+            continue
+        host, separator, scope = fields[1].partition("%")
+        try:
+            address = ipaddress.IPv6Address(host).compressed
+            prefix = int(fields[fields.index("prefixlen") + 1])
+        except (ValueError, IndexError):
+            continue
+        addresses.append((address, scope if separator else "", prefix))
+    return tuple(sorted(addresses))
+
+
+def _route_interface(output: str) -> str | None:
+    for line in output.splitlines():
+        field, separator, value = line.partition(":")
+        if separator and field.strip() == "interface":
+            return value.strip() or None
+    return None
+
+
+class IPv6LoopbackAliasFixture:
+    """Own one exact disposable lo0 /128 for the IPv6 rdr/NATLOOK probe."""
+
+    def __init__(self) -> None:
+        self.address = IPV6_LOOPBACK_TEST_DESTINATION
+        self._before_loopback: tuple[tuple[str, str, int], ...] | None = None
+        self._before_route_interface: str | None = None
+        self._add_attempted = False
+        self._owned = False
+
+    @staticmethod
+    def _run(*command: str) -> subprocess.CompletedProcess[str]:
+        return _completed_command(command)
+
+    def _all_addresses(self) -> tuple[tuple[str, str, int], ...]:
+        result = self._run(str(IFCONFIG), "-a")
+        if result.returncode != 0:
+            raise SmokeError(
+                f"ifconfig -a failed ({result.returncode}): {result.stderr.strip()}"
+            )
+        return _ipv6_address_snapshot(result.stdout)
+
+    def _loopback_addresses(self) -> tuple[tuple[str, str, int], ...]:
+        result = self._run(str(IFCONFIG), "lo0")
+        if result.returncode != 0:
+            raise SmokeError(
+                f"ifconfig lo0 failed ({result.returncode}): {result.stderr.strip()}"
+            )
+        return _ipv6_address_snapshot(result.stdout)
+
+    def _current_route_interface(self) -> str | None:
+        result = self._run(str(ROUTE), "-n", "get", "-inet6", self.address)
+        if "not in table" in result.stderr.lower():
+            return None
+        if result.returncode != 0:
+            raise SmokeError(
+                f"IPv6 fixture route lookup failed ({result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        interface = _route_interface(result.stdout)
+        if interface is None:
+            raise SmokeError("IPv6 fixture route lookup omitted its interface")
+        return interface
+
+    def install(self) -> str:
+        if self._owned or self._before_loopback is not None:
+            raise SmokeError("IPv6 loopback fixture was already installed")
+        expected = (self.address, "", 128)
+        if any(address == self.address for address, _, _ in self._all_addresses()):
+            raise SmokeError(
+                f"refusing to claim pre-existing IPv6 fixture address {self.address}"
+            )
+        self._before_loopback = self._loopback_addresses()
+        self._before_route_interface = self._current_route_interface()
+        if self._before_route_interface == "lo0":
+            raise SmokeError(
+                f"refusing to replace a pre-existing lo0 route for {self.address}"
+            )
+
+        self._add_attempted = True
+        result = self._run(
+            str(IFCONFIG),
+            "lo0",
+            "inet6",
+            self.address,
+            "prefixlen",
+            "128",
+            "alias",
+        )
+        after = self._loopback_addresses()
+        self._owned = expected in after and expected not in self._before_loopback
+        if result.returncode != 0 or not self._owned:
+            detail = result.stderr.strip() or "exact /128 alias was not installed"
+            raise SmokeError(f"failed to install IPv6 loopback fixture: {detail}")
+        if self._current_route_interface() != "lo0":
+            raise SmokeError("IPv6 loopback fixture did not create an exact lo0 route")
+        return self.address
+
+    def cleanup(self) -> None:
+        if not self._owned and not self._add_attempted:
+            return
+        if self._before_loopback is None:
+            raise SmokeError("IPv6 loopback fixture lost its pre-install snapshot")
+
+        expected = (self.address, "", 128)
+        if not self._owned:
+            current_loopback = self._loopback_addresses()
+            current_all = self._all_addresses()
+            self._owned = (
+                expected in current_loopback
+                and expected not in self._before_loopback
+            )
+            if not self._owned:
+                if any(address == self.address for address, _, _ in current_all):
+                    raise SmokeError(
+                        "IPv6 fixture address appeared without the exact owned lo0 /128"
+                    )
+                self._add_attempted = False
+                return
+
+        errors: list[str] = []
+        result: subprocess.CompletedProcess[str] | None = None
+        try:
+            result = self._run(
+                str(IFCONFIG),
+                "lo0",
+                "inet6",
+                self.address,
+                "-alias",
+            )
+        except BaseException as exc:
+            errors.append(f"ifconfig delete raised: {exc}")
+        if result is not None and result.returncode != 0:
+            errors.append(
+                f"ifconfig delete failed ({result.returncode}): {result.stderr.strip()}"
+            )
+        try:
+            after_loopback = self._loopback_addresses()
+        except BaseException as exc:
+            errors.append(f"unable to verify restored lo0 IPv6 snapshot: {exc}")
+        else:
+            if after_loopback != self._before_loopback:
+                errors.append("lo0 IPv6 address snapshot was not restored")
+        try:
+            after_all = self._all_addresses()
+        except BaseException as exc:
+            errors.append(f"unable to verify removal of IPv6 fixture address: {exc}")
+        else:
+            if any(address == self.address for address, _, _ in after_all):
+                errors.append("owned IPv6 fixture address remains assigned")
+        try:
+            route_interface = self._current_route_interface()
+        except BaseException as exc:
+            errors.append(f"unable to verify restored IPv6 route snapshot: {exc}")
+        else:
+            if route_interface != self._before_route_interface:
+                errors.append("IPv6 fixture route snapshot was not restored")
+        if errors:
+            raise SmokeError("; ".join(errors))
+        self._add_attempted = False
+        self._owned = False
 
 
 def validate_pfctl_args(args: Sequence[str]) -> None:
@@ -127,12 +317,20 @@ def build_redirect_rules(*, target_port: int, proxy_port: int) -> str:
     return (
         "rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 "
         f"port {target_port} -> 127.0.0.1 port {proxy_port}\n"
+        "rdr on lo0 inet6 proto tcp from any to ! ::1/128 "
+        f"port {target_port} -> ::1 port {proxy_port}\n"
         "pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp "
         f"from any to any port {target_port} user != root\n"
         "pass out quick on lo0 inet proto tcp from any to any "
         f"port {target_port} no state\n"
         "pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp "
         f"from any to 127.0.0.1 port {proxy_port}\n"
+        "pass out quick on ! lo0 route-to (lo0 ::1) inet6 proto tcp "
+        f"from any to any port {target_port} user != root\n"
+        "pass out quick on lo0 inet6 proto tcp from any to any "
+        f"port {target_port} no state\n"
+        "pass in quick on lo0 reply-to (lo0 ::1) inet6 proto tcp "
+        f"from any to ::1 port {proxy_port}\n"
     )
 
 
@@ -228,49 +426,90 @@ def _original_user() -> tuple[int, int]:
     return uid, gid
 
 
-def _open_listener(proxy_port: int) -> socket.socket:
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def _open_listener(proxy_port: int, family: int = socket.AF_INET) -> socket.socket:
+    if family not in {socket.AF_INET, socket.AF_INET6}:
+        raise SmokeError(f"unsupported listener family: {family}")
+    listener = socket.socket(family, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
     listener.settimeout(5)
-    listener.bind(("127.0.0.1", proxy_port))
+    host = "127.0.0.1" if family == socket.AF_INET else "::1"
+    listener.bind((host, proxy_port))
     listener.listen(1)
     return listener
 
 
-def _probe_redirect(
+def _run_unprivileged_test_client(
     *,
     listener: socket.socket,
     target_port: int,
     uid: int,
     gid: int,
+    destination: str,
+    inherited_descriptors: Sequence[int],
+) -> int:
+    try:
+        listener.close()
+        for descriptor in inherited_descriptors:
+            os.close(descriptor)
+        os.setgroups([])
+        os.setgid(gid)
+        os.setuid(uid)
+        with socket.create_connection((destination, target_port), timeout=4) as client:
+            received = client.recv(len(MARKER))
+        return 0 if received == MARKER else 2
+    except BaseException:
+        return 3
+
+
+def _probe_redirect(
+    *,
+    probe: str,
+    listener: socket.socket,
+    target_port: int,
+    uid: int,
+    gid: int,
     destination: str = TEST_DESTINATION,
+    inherited_descriptors: Sequence[int] = (),
+    original_destination_lookup=None,
+    expected_original_destination: tuple[str, int] | None = None,
 ) -> None:
 
     pid = os.fork()
     if pid == 0:
-        try:
-            listener.close()
-            os.setgroups([])
-            os.setgid(gid)
-            os.setuid(uid)
-            with socket.create_connection((destination, target_port), timeout=4) as client:
-                received = client.recv(len(MARKER))
-            os._exit(0 if received == MARKER else 2)
-        except BaseException:
-            os._exit(3)
+        os._exit(_run_unprivileged_test_client(
+            listener=listener,
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination=destination,
+            inherited_descriptors=inherited_descriptors,
+        ))
 
     child_status: int | None = None
     try:
         connection, _ = listener.accept()
         with connection:
+            if original_destination_lookup is not None:
+                original = original_destination_lookup(connection)
+                if original != expected_original_destination:
+                    raise SmokeError(
+                        "DIOCNATLOOK returned the wrong original destination: "
+                        f"actual={original!r}, expected={expected_original_destination!r}"
+                    )
             connection.sendall(MARKER)
     except (OSError, TimeoutError) as exc:
-        raise SmokeError("test-port redirect did not reach the local listener") from exc
+        raise SmokeError(
+            f"{probe} redirect did not reach the local listener"
+        ) from exc
     finally:
         listener.close()
         _, child_status = os.waitpid(pid, 0)
     if not os.WIFEXITED(child_status) or os.WEXITSTATUS(child_status) != 0:
-        raise SmokeError("unprivileged test client did not traverse the PF redirect")
+        raise SmokeError(
+            f"{probe} unprivileged client did not traverse the PF redirect"
+        )
 
 
 def _import_tproxy():
@@ -300,6 +539,21 @@ def _configure_tproxy_for_smoke(tproxy, runner: PfctlRunner, rules: str) -> None
     tproxy._geph_port = None
     tproxy._geph_backend_hold_until = 0.0
     tproxy._geph_backend_hold_reason = ""
+
+
+def _open_tproxy_pf_natlook(tproxy) -> int:
+    if tproxy._pf_fd is not None:
+        raise SmokeError("tproxy PF descriptor was already open")
+    descriptor = os.open("/dev/pf", os.O_RDWR)
+    tproxy._pf_fd = descriptor
+    return descriptor
+
+
+def _close_tproxy_pf_natlook(tproxy, descriptor: int) -> None:
+    if tproxy._pf_fd != descriptor:
+        raise SmokeError("tproxy PF descriptor identity changed")
+    os.close(descriptor)
+    tproxy._pf_fd = None
 
 
 def _preflight(runner: PfctlRunner) -> tuple[PfSnapshot, int, int]:
@@ -347,11 +601,15 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     rules = build_redirect_rules(target_port=target_port, proxy_port=proxy_port)
     runner = PfctlRunner()
     before, uid, gid = _preflight(runner)
+    ipv6_fixture = IPv6LoopbackAliasFixture()
+    ipv6_test_destination: str | None = None
     tproxy = None
     sentinel_before: tuple[str, str] | None = None
     cleanup_errors: list[str] = []
     failure: BaseException | None = None
-    listener: socket.socket | None = None
+    listener_v4: socket.socket | None = None
+    listener_v6: socket.socket | None = None
+    natlook_descriptor: int | None = None
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
@@ -360,7 +618,9 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        listener = _open_listener(proxy_port)
+        ipv6_test_destination = ipv6_fixture.install()
+        listener_v4 = _open_listener(proxy_port, socket.AF_INET)
+        listener_v6 = _open_listener(proxy_port, socket.AF_INET6)
         _load_anchor(runner, SENTINEL_ANCHOR, sentinel_rules())
         sentinel_before = _anchor_snapshot(runner, SENTINEL_ANCHOR)
         if not sentinel_before[1]:
@@ -368,6 +628,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
 
         tproxy = _import_tproxy()
         _configure_tproxy_for_smoke(tproxy, runner, rules)
+        natlook_descriptor = _open_tproxy_pf_natlook(tproxy)
         if not tproxy.arm_private_pf_if_ready(proxy_port):
             raise SmokeError("local routing did not arm without Geph")
         if tproxy.geo_exit_backend_ready():
@@ -385,26 +646,68 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             raise SmokeError("PF loopback lease was created without owning the skip flag")
 
         nat, filters = _anchor_snapshot(runner, SLIPSTREAM_ANCHOR)
-        if str(target_port) not in nat or str(proxy_port) not in nat:
+        if (
+            str(target_port) not in nat
+            or str(proxy_port) not in nat
+            or "-> 127.0.0.1" not in nat
+            or "inet6" not in nat
+            or "-> ::1" not in nat
+        ):
             raise SmokeError("private anchor did not load the test redirect")
-        if str(target_port) not in filters or "route-to" not in filters:
+        if (
+            str(target_port) not in filters
+            or "route-to (lo0 127.0.0.1)" not in filters
+            or "route-to (lo0 ::1)" not in filters
+            or "inet6" not in filters
+        ):
             raise SmokeError("private anchor did not load the test route rule")
         if _anchor_snapshot(runner, SENTINEL_ANCHOR) != sentinel_before:
             raise SmokeError("arming Slipstream changed the sentinel anchor")
 
         _probe_redirect(
-            listener=_open_listener(target_port),
+            probe="ipv4_loopback",
+            listener=_open_listener(target_port, socket.AF_INET),
             target_port=target_port,
             uid=uid,
             gid=gid,
             destination="127.0.0.1",
+            inherited_descriptors=(natlook_descriptor,),
         )
         _probe_redirect(
-            listener=listener,
+            probe="ipv4_pf_natlook",
+            listener=listener_v4,
             target_port=target_port,
             uid=uid,
             gid=gid,
+            inherited_descriptors=(natlook_descriptor,),
+            original_destination_lookup=tproxy.orig_dst,
+            expected_original_destination=(TEST_DESTINATION, target_port),
         )
+        listener_v4 = None
+        _probe_redirect(
+            probe="ipv6_loopback",
+            listener=_open_listener(target_port, socket.AF_INET6),
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination="::1",
+            inherited_descriptors=(natlook_descriptor,),
+        )
+        _probe_redirect(
+            probe="ipv6_pf_natlook",
+            listener=listener_v6,
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination=ipv6_test_destination,
+            inherited_descriptors=(natlook_descriptor,),
+            original_destination_lookup=tproxy.orig_dst,
+            expected_original_destination=(
+                ipv6_test_destination.partition("%")[0],
+                target_port,
+            ),
+        )
+        listener_v6 = None
         if not tproxy.suspend_geo_exit_backend("pf smoke runtime failure"):
             raise SmokeError("runtime failure did not cool down Geph")
         if _anchor_snapshot(runner, SLIPSTREAM_ANCHOR) != (nat, filters):
@@ -419,18 +722,29 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     finally:
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
-        if listener is not None:
-            listener.close()
+        if listener_v4 is not None:
+            listener_v4.close()
+        if listener_v6 is not None:
+            listener_v6.close()
         for anchor in (SLIPSTREAM_ANCHOR, SENTINEL_ANCHOR):
             try:
                 _flush_anchor(runner, anchor)
             except Exception as exc:  # cleanup must attempt every remaining step
                 cleanup_errors.append(f"flush {anchor}: {exc}")
         try:
+            ipv6_fixture.cleanup()
+        except Exception as exc:
+            cleanup_errors.append(f"restore IPv6 loopback fixture: {exc}")
+        try:
             if not _restore_loopback_before_token_release(tproxy, runner):
                 raise SmokeError("PF loopback skip restoration failed")
         except Exception as exc:
             cleanup_errors.append(f"restore PF loopback before token release: {exc}")
+        if tproxy is not None and natlook_descriptor is not None:
+            try:
+                _close_tproxy_pf_natlook(tproxy, natlook_descriptor)
+            except Exception as exc:
+                cleanup_errors.append(f"close PF NATLOOK descriptor: {exc}")
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
@@ -451,6 +765,10 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         "sentinel": "unchanged",
         "global_pf": "unchanged",
         "loopback_target": "excluded",
+        "ipv6_fixture": "owned_lo0_alias_restored",
+        "ipv6_runtime_proof": "lo0_rdr_and_natlook",
+        "ipv6_non_lo0_route_to": "loaded_rule_static_only",
+        "natlook_families": ["inet", "inet6"],
         "loopback_skip": "restored",
         "target_port": target_port,
         "proxy_port": proxy_port,
@@ -468,6 +786,9 @@ def dry_run(*, target_port: int, proxy_port: int) -> dict:
         "target_port": target_port,
         "proxy_port": proxy_port,
         "intercepts_tcp_443": False,
+        "ipv6_fixture": f"temporary lo0 {IPV6_LOOPBACK_TEST_DESTINATION}/128",
+        "ipv6_runtime_proof": "lo0 rdr and NATLOOK only",
+        "ipv6_non_lo0_route_to": "loaded-rule static verification only",
         "loopback_skip": "temporarily cleared only when present, then restored",
         "forbidden_operations": [
             "global ruleset reload",

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ast
 import io
 import json
 import os
 import plistlib
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -13,12 +15,34 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pf_installed_lifecycle_smoke as lifecycle
 
 
 class PfInstalledLifecycleSmokeTests(unittest.TestCase):
+    def test_install_attestation_schema_matches_daemon_contract(self) -> None:
+        tree = ast.parse(lifecycle.SOURCE_DAEMON.read_text(encoding="utf-8"))
+        daemon_schema_versions = [
+            node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "INSTALL_ATTESTATION_SCHEMA_VERSION"
+                for target in node.targets
+            )
+            and isinstance(node.value, ast.Constant)
+            and type(node.value.value) is int
+        ]
+
+        self.assertEqual(daemon_schema_versions, [3])
+        self.assertEqual(
+            lifecycle.INSTALL_ATTESTATION_SCHEMA_VERSION,
+            daemon_schema_versions[0],
+        )
+
     def test_stalled_resolver_restores_existing_config_and_captures_status(
         self,
     ) -> None:
@@ -145,6 +169,10 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             plist.write_text("plist")
             status = root / "status"
             status.write_text("status")
+            attestation_dir = root / "attestation"
+            attestation_dir.mkdir()
+            attestation = attestation_dir / "install-attestation.json"
+            attestation.write_text("{}")
             skip_lease = root / "skip-lease.json"
             skip_lease.write_text("lease")
             tgws_link = root / "tgws.link"
@@ -180,6 +208,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 PF_TOKEN_PATH=root / "pf.token",
                 PF_SKIP_LEASE_PATH=skip_lease,
                 TGWS_LINK_PATH=tgws_link,
+                INSTALL_ATTESTATION_DIR=attestation_dir,
+                INSTALL_ATTESTATION_PATH=attestation,
             ), mock.patch.object(
                 lifecycle.pf,
                 "_flush_anchor",
@@ -431,12 +461,104 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with path.open("rb") as handle:
                 updated = plistlib.load(handle)
             self.assertNotIn("SLIP_GEPH", updated["EnvironmentVariables"])
-            self.assertEqual(
-                updated["EnvironmentVariables"]["SLIP_RUNTIME_WAKE_GAP_SECONDS"],
-                "6",
+            self.assertNotIn(
+                "SLIP_RUNTIME_WAKE_GAP_SECONDS",
+                updated["EnvironmentVariables"],
+            )
+            self.assertNotIn(
+                lifecycle.DISPOSABLE_WAKE_MARKER_ENV,
+                updated["EnvironmentVariables"],
             )
             self.assertIn("--no-voice", updated["ProgramArguments"])
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+    def test_plist_patch_binds_explicit_wake_marker_to_disposable_ci(self) -> None:
+        marker = Path("/var/run/slipstream-lifecycle-wake-exact")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daemon.plist"
+            with path.open("wb") as handle:
+                plistlib.dump({"ProgramArguments": ["daemon"]}, handle)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CI": "true",
+                    "GITHUB_ACTIONS": "true",
+                    "SLIPSTREAM_DISPOSABLE_CI": "1",
+                },
+                clear=True,
+            ), mock.patch("os.geteuid", return_value=0):
+                lifecycle._patch_launchd_for_qualification(
+                    path,
+                    wake_marker_path=marker,
+                )
+            with path.open("rb") as handle:
+                updated = plistlib.load(handle)
+
+        environment = updated["EnvironmentVariables"]
+        self.assertEqual(environment["CI"], "true")
+        self.assertEqual(environment["GITHUB_ACTIONS"], "true")
+        self.assertEqual(environment["SLIPSTREAM_DISPOSABLE_CI"], "1")
+        self.assertEqual(
+            environment[lifecycle.DISPOSABLE_WAKE_MARKER_ENV],
+            str(marker),
+        )
+
+    def test_qualification_wake_marker_advances_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            lifecycle,
+            "DISPOSABLE_WAKE_MARKER_DIRECTORY",
+            Path(tmp),
+        ), mock.patch.object(
+            lifecycle,
+            "_require_disposable_ci",
+        ), mock.patch.object(
+            lifecycle.os,
+            "fchown",
+        ):
+            marker = lifecycle._create_qualification_wake_marker()
+            self.assertEqual(
+                marker.read_bytes(),
+                lifecycle._qualification_wake_marker_payload(0),
+            )
+            root_metadata = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o600,
+                st_uid=0,
+                st_gid=0,
+            )
+            with mock.patch.object(Path, "lstat", return_value=root_metadata):
+                lifecycle._advance_qualification_wake_marker(marker, 1)
+            self.assertEqual(
+                marker.read_bytes(),
+                lifecycle._qualification_wake_marker_payload(1),
+            )
+
+    def test_qualification_wake_marker_rejects_non_private_mode(self) -> None:
+        marker = Path("/var/run/slipstream-lifecycle-wake-exact")
+        metadata = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o644,
+            st_uid=0,
+            st_gid=0,
+        )
+        with mock.patch.object(
+            lifecycle,
+            "_require_disposable_ci",
+        ), mock.patch.object(
+            Path,
+            "lstat",
+            return_value=metadata,
+        ), self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "ownership changed",
+        ):
+            lifecycle._advance_qualification_wake_marker(marker, 1)
+
+    def test_lifecycle_injects_a_marker_not_an_awake_loop_stall(self) -> None:
+        daemon_source = lifecycle.SOURCE_DAEMON.read_text(encoding="utf-8")
+        lifecycle_source = Path(lifecycle.__file__).read_text(encoding="utf-8")
+
+        self.assertIn("_read_system_wake_marker", daemon_source)
+        self.assertIn("_advance_qualification_wake_marker", lifecycle_source)
+        self.assertNotIn("signal.SIGSTOP", lifecycle_source)
 
     def test_plist_patch_forwards_only_the_exact_disposable_browser_fixture(
         self,
@@ -1599,6 +1721,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             },
             "listener": {
                 "host": "127.0.0.1",
+                "hosts": ["127.0.0.1", "::1"],
                 "port": 1080,
             },
             "state": "dormant",
@@ -1610,6 +1733,17 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             {"state": "active", "pid": 4242},
         )
 
+        evidence["listener"]["hosts"] = ["127.0.0.1"]
+        with self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "listener attestation mismatch",
+        ):
+            lifecycle._assert_install_attestation_runtime(
+                evidence,
+                {"state": "active", "pid": 4242},
+            )
+        evidence["listener"]["hosts"] = ["127.0.0.1", "::1"]
+
         evidence["pf_active"] = True
         with self.assertRaisesRegex(
             lifecycle.LifecycleError,
@@ -1619,6 +1753,36 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 evidence,
                 {"state": "active", "pid": 4242},
             )
+
+    def test_active_anchor_requires_both_ip_families(self) -> None:
+        class Runner:
+            ipv6 = True
+
+            def run(self, *_args, **_kwargs):
+                if _args[-1] == "-sn":
+                    stdout = (
+                        "rdr inet proto tcp to any port 443 "
+                        "-> 127.0.0.1 port 1080\n"
+                    )
+                    if self.ipv6:
+                        stdout += (
+                            "rdr inet6 proto tcp to any port 443 "
+                            "-> ::1 port 1080\n"
+                        )
+                else:
+                    stdout = "route-to (lo0 127.0.0.1) inet port 443\n"
+                    if self.ipv6:
+                        stdout += "route-to (lo0 ::1) inet6 port 443\n"
+                return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        runner = Runner()
+        lifecycle._assert_anchor_active(runner)
+        runner.ipv6 = False
+        with self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "did not arm the production private anchor",
+        ):
+            lifecycle._assert_anchor_active(runner)
 
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()

@@ -6,11 +6,11 @@
 )]
 
 fn main() {
-    if slipstream_lib::run_native_messaging_if_requested() {
+    if slipstream_lib::run_update_notification_qualification_if_requested() {
         return;
     }
-    if let Some(status) = slipstream_lib::run_browser_probe_if_requested() {
-        std::process::exit(status);
+    if slipstream_lib::run_native_messaging_if_requested() {
+        return;
     }
     slipstream_lib::run()
 }

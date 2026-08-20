@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use slipstream_core::status_v2::{status_v2_from_value, STATUS_SCHEMA_V2};
+use slipstream_core::status_v2::{status_v2_from_value, DaemonPhaseV2, STATUS_SCHEMA_V2};
 
 const STATUS_V2_V1: &str = include_str!("../../../contracts/status-v2-v1.json");
 
@@ -33,9 +33,45 @@ fn status_v2_accepts_partial_transition_payloads_and_preserves_conflicts() {
 }
 
 #[test]
+fn status_v2_preserves_independent_heartbeat_and_health_timestamps() {
+    let raw = json!({
+        "schema_version": 2,
+        "daemon": {
+            "state": "active",
+            "updated_at": 100.0,
+            "heartbeat_at": "2026-08-13T10:00:00Z",
+            "heartbeat_seq": 17,
+            "health_updated_at": "2026-08-13T09:59:55Z",
+            "phase": "recovering"
+        }
+    });
+    let status = status_v2_from_value(raw.clone()).unwrap();
+    let daemon = status.daemon.as_ref().unwrap();
+
+    assert_eq!(daemon.heartbeat_at.as_deref(), Some("2026-08-13T10:00:00Z"));
+    assert_eq!(daemon.heartbeat_seq, Some(17));
+    assert_eq!(
+        daemon.health_updated_at.as_deref(),
+        Some("2026-08-13T09:59:55Z")
+    );
+    assert_eq!(daemon.phase, Some(DaemonPhaseV2::Recovering));
+    assert_eq!(serde_json::to_value(status).unwrap(), raw);
+}
+
+#[test]
 fn status_v2_rejects_a_different_schema() {
     let error = status_v2_from_value(json!({"schema_version": 1})).unwrap_err();
     assert!(error.contains("unsupported status schema 1"));
+}
+
+#[test]
+fn status_v2_rejects_an_unknown_daemon_phase() {
+    let error = status_v2_from_value(json!({
+        "schema_version": 2,
+        "daemon": {"phase": "flapping"}
+    }))
+    .unwrap_err();
+    assert!(error.contains("unknown variant `flapping`"));
 }
 
 #[test]

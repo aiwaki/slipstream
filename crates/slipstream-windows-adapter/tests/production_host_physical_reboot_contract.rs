@@ -1,5 +1,16 @@
 use serde_json::Value;
 
+fn quoted_path_entries(section: &str) -> Vec<&str> {
+    section
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("- \"")
+                .and_then(|path| path.strip_suffix('"'))
+        })
+        .collect()
+}
+
 fn contract() -> Value {
     serde_json::from_str(include_str!(
         "../../../contracts/windows-production-host-physical-reboot-v1.json"
@@ -166,8 +177,24 @@ fn native_workflow_parses_harness_on_both_windows_architectures() {
         .map(|(section, _)| section.trim())
         .expect("native workflow must define a bounded main push trigger");
     assert_eq!(
-        push_section, "branches: [\"main\"]",
-        "main push qualification must remain unfiltered"
+        push_section.lines().next(),
+        Some("branches: [\"main\"]"),
+        "native qualification must remain limited to main pushes"
+    );
+    assert_eq!(
+        quoted_path_entries(push_section).as_slice(),
+        &[
+            ".github/workflows/windows-packet-adapter-qualification.yml",
+            "contracts/windows-*",
+            "crates/slipstream-core/**",
+            "crates/slipstream-userspace-stack-evaluation/**",
+            "crates/slipstream-userspace-stack-effect-evaluation/**",
+            "crates/slipstream-windows-adapter/**",
+            "scripts/run_bounded_windows_cargo_test.ps1",
+            "scripts/qualify_windows_production_host_reboot.ps1",
+            "vendor/wintun/**",
+        ],
+        "main push qualification must remain bounded to Windows packet-adapter inputs"
     );
     assert!(workflow.contains("Parse physical reboot qualification harness"));
     assert!(workflow.contains("qualify_windows_production_host_reboot.ps1"));

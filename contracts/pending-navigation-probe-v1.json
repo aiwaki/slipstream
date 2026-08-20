@@ -127,9 +127,16 @@
   "outcomes": {
     "route_effect": [
       "navigation_pending",
-      "navigation_failed"
+      "navigation_failed",
+      "regional_access_denied",
+      "edge_access_denied"
     ],
-    "retry_same_route_without_route_effect": "navigation_complete"
+    "retry_same_route_without_route_effect": [
+      "navigation_complete",
+      "challenge_or_auth",
+      "usable",
+      "terminal_error"
+    ]
   },
   "invariants": {
     "one_shot": true,
@@ -140,6 +147,8 @@
     "response_headers_are_not_terminal_completion": true,
     "complete_observation_retries_same_route": true,
     "failed_observation_advances_after_bound_original_idle": true,
+    "denial_observation_advances_only_disposable_fixture_stage": true,
+    "challenge_auth_usable_terminal_never_learn_route": true,
     "disposable_fixture_jobs_exact_endpoint_only": true,
     "semantic_signal_v3_modified": false,
     "production_runtime_composition": true,

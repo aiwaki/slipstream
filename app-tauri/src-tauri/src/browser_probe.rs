@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -7,11 +8,12 @@ use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -26,16 +28,14 @@ const WORKER_LAUNCH_ID_HEX_CHARS: usize = 16;
 const WORKER_LAUNCH_ID_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_LAUNCH_ID";
 const CAPABILITY_TTL_MS: u64 = 30_000;
 const MAX_CLAIM_AGE_MS: u64 = 14_000;
-const MIN_PENDING_OBSERVATION: Duration = Duration::from_secs(8);
-const MIN_START_BUDGET_MS: u64 = 16_000;
+const MIN_START_BUDGET_MS: u64 = 6_000;
 const WORKER_START_ATTESTATION_GRACE: Duration = Duration::from_millis(200);
-const WORKER_EMPTY_QUEUE_GRACE: Duration = Duration::from_secs(15);
-const WORKER_RUNTIME_BUDGET: Duration = Duration::from_secs(100);
-const MIN_NEXT_JOB_BUDGET: Duration = Duration::from_secs(26);
+const WORKER_EMPTY_QUEUE_GRACE: Duration = Duration::from_millis(500);
+const CLASSIFICATION_BUDGET: Duration = Duration::from_secs(8);
 const EMPTY_QUEUE_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const CHROME_LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CHROME_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+const SIGNATURE_PROCESS_STOP_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_DEVTOOLS_FILE_BYTES: u64 = 4_096;
 const MAX_LAUNCH_DIAGNOSTIC_BYTES: u64 = 64 * 1_024;
 const MAX_HTTP_BYTES: u64 = 256 * 1024;
@@ -43,8 +43,76 @@ const MAX_WEBSOCKET_BYTES: usize = 1024 * 1024;
 const WEBSOCKET_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
 const WEBSOCKET_ACCEPT: &str = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
 const OUTCOME_PENDING: &str = "navigation_pending";
-const OUTCOME_COMPLETE: &str = "navigation_complete";
-const OUTCOME_FAILED: &str = "navigation_failed";
+const OUTCOME_REGIONAL_DENIAL: &str = "regional_access_denied";
+const OUTCOME_EDGE_DENIAL: &str = "edge_access_denied";
+const OUTCOME_CHALLENGE_OR_AUTH: &str = "challenge_or_auth";
+const OUTCOME_USABLE: &str = "usable";
+const OUTCOME_TERMINAL_ERROR: &str = "terminal_error";
+const ROUTE_PREFLIGHT_MAX_DEADLINE_MS: u64 = 8_000;
+const ROUTE_PREFLIGHT_MIN_START_BUDGET_MS: u64 = 2_000;
+const OWNED_GEPH_ROUTE: &str = "owned_geph";
+const OWNED_GEPH_PORT_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT";
+const DOM_CLASSIFICATION_COMMAND_ID: u64 = 4;
+const PINNED_HEADLESS_RUNTIME_VERSION: &str = "151.0.7922.77";
+const PINNED_HEADLESS_RUNTIME_ARCHIVE_SHA256: &str =
+    "44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e";
+const PINNED_HEADLESS_RUNTIME_MANIFEST: &str = "manifest.json";
+const DOM_CLASSIFIER: &str = concat!(
+    include_str!("../../../browser-companion/chromium/detector.js"),
+    r#"
+(() => {
+  const MAX_BODY = 16000;
+  const MAX_DIALOG = 8192;
+  const MAX_NODES = 512;
+  function boundedVisibleText(root, limit) {
+    let text = "";
+    let visited = 0;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      visited += 1;
+      if (visited > MAX_NODES) return { text, truncated: true };
+      const node = walker.currentNode;
+      const parent = node.parentElement;
+      if (!parent || parent.closest('script,style,noscript,template,[hidden],[aria-hidden="true"]')) continue;
+      const value = node.textContent || "";
+      if (!value.trim()) continue;
+      const remaining = limit - text.length;
+      if (remaining <= 0) return { text, truncated: true };
+      text += ` ${value.slice(0, remaining)}`;
+      if (value.length > remaining) return { text, truncated: true };
+    }
+    return { text, truncated: false };
+  }
+  function dialogText() {
+    let text = "";
+    for (const dialog of document.querySelectorAll('[role="dialog"],[aria-modal="true"]')) {
+      const style = getComputedStyle(dialog);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+      const remaining = MAX_DIALOG - text.length;
+      if (remaining <= 0) break;
+      const collected = boundedVisibleText(dialog, remaining);
+      text += collected.text;
+      if (collected.truncated) break;
+    }
+    return text;
+  }
+  const linkCount = document.links ? document.links.length : 0;
+  const formCount = document.forms ? document.forms.length : 0;
+  const bodyText = document.body && linkCount <= 40 && formCount <= 4
+    ? boundedVisibleText(document.body, MAX_BODY)
+    : { text: "", truncated: true };
+  const result = globalThis.SlipstreamRegionalDenialDetector.detectSemanticDenial({
+    title: document.title || "",
+    dialogText: dialogText(),
+    bodyText: bodyText.text,
+    bodyTextTruncated: bodyText.truncated,
+    linkCount,
+    formCount
+  });
+  return result ? result.category : "usable";
+})()
+"#,
+);
 
 #[derive(Debug, Clone, Copy)]
 struct ProbeError(&'static str);
@@ -74,6 +142,32 @@ struct ProbeJob {
     expires_at_unix_ms: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RoutePreflightProbeJob {
+    schema_version: u8,
+    capability: String,
+    host: String,
+    candidate_routes: Vec<String>,
+    issued_at_unix_ms: u64,
+    deadline_unix_ms: u64,
+}
+
+#[derive(Clone, Debug)]
+enum ClaimedProbeJob {
+    PendingNavigation(ProbeJob),
+    RoutePreflight(RoutePreflightProbeJob),
+}
+
+impl ClaimedProbeJob {
+    fn host(&self) -> &str {
+        match self {
+            Self::PendingNavigation(job) => &job.host,
+            Self::RoutePreflight(job) => &job.host,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IpcResponse {
@@ -81,7 +175,7 @@ struct IpcResponse {
     accepted: bool,
     operation: String,
     reason: String,
-    job: Option<ProbeJob>,
+    job: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,6 +187,17 @@ struct ProbeResultPayload<'a> {
     request_started_at_unix_ms: u64,
     observed_at_unix_ms: u64,
     outcome: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RoutePreflightResultPayload<'a> {
+    schema_version: u8,
+    capability: &'a str,
+    host: &'a str,
+    candidate_route: &'a str,
+    outcome: &'a str,
+    observed_at_unix_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,16 +214,16 @@ struct OwnedProcess {
     pid: u32,
     process_group: u32,
     command: String,
+    is_root: bool,
 }
 
 #[derive(Debug)]
 struct ChromeConfig {
     executable: PathBuf,
-    source_bundle: PathBuf,
-    application_bundle: PathBuf,
     target_url: String,
     host_resolver_rules: Option<String>,
     ignore_certificate_errors: bool,
+    proxy_server: Option<String>,
 }
 
 struct ChromeSession {
@@ -132,16 +237,16 @@ struct ChromeSession {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NavigationObservation {
     Pending,
-    Complete,
-    Failed,
+    RegionalAccessDenied,
+    EdgeAccessDenied,
+    ChallengeOrAuth,
+    Usable,
+    TerminalError,
 }
 
 fn failed_navigation_observation(request_elapsed: Option<Duration>) -> NavigationObservation {
-    if request_elapsed.is_some_and(|elapsed| elapsed >= MIN_PENDING_OBSERVATION) {
-        NavigationObservation::Pending
-    } else {
-        NavigationObservation::Failed
-    }
+    let _ = request_elapsed;
+    NavigationObservation::TerminalError
 }
 
 fn document_event_observation(
@@ -156,7 +261,7 @@ fn document_event_observation(
     match method {
         // Headers alone do not prove that the document body completed. A
         // blocked route can deliver them and then leave the body unfinished.
-        "Network.loadingFinished" => Some(NavigationObservation::Complete),
+        "Network.loadingFinished" => Some(NavigationObservation::Usable),
         "Network.loadingFailed" => Some(failed_navigation_observation(Some(request_elapsed))),
         _ => None,
     }
@@ -172,12 +277,68 @@ fn is_correlated_document_redirect(event: &Value, expected_request_id: Option<&s
         && event.pointer("/params/redirectResponse").is_some()
 }
 
+fn full_navigation_completed(
+    document_finished: bool,
+    stopped_frame_id: Option<&str>,
+    main_frame_id: Option<&str>,
+) -> bool {
+    document_finished && main_frame_id.is_some() && stopped_frame_id == main_frame_id
+}
+
 fn observation_outcome(observation: NavigationObservation) -> &'static str {
     match observation {
         NavigationObservation::Pending => OUTCOME_PENDING,
-        NavigationObservation::Complete => OUTCOME_COMPLETE,
-        NavigationObservation::Failed => OUTCOME_FAILED,
+        NavigationObservation::RegionalAccessDenied => OUTCOME_REGIONAL_DENIAL,
+        NavigationObservation::EdgeAccessDenied => OUTCOME_EDGE_DENIAL,
+        NavigationObservation::ChallengeOrAuth => OUTCOME_CHALLENGE_OR_AUTH,
+        NavigationObservation::Usable => OUTCOME_USABLE,
+        NavigationObservation::TerminalError => OUTCOME_TERMINAL_ERROR,
     }
+}
+
+fn classified_dom_observation(event: &Value) -> ProbeResult<NavigationObservation> {
+    if event.get("id").and_then(Value::as_u64) != Some(DOM_CLASSIFICATION_COMMAND_ID)
+        || event.get("error").is_some()
+    {
+        return Err(error("dom_classification_invalid"));
+    }
+    match event
+        .pointer("/result/result/value")
+        .and_then(Value::as_str)
+    {
+        Some(OUTCOME_REGIONAL_DENIAL) => Ok(NavigationObservation::RegionalAccessDenied),
+        Some(OUTCOME_EDGE_DENIAL) => Ok(NavigationObservation::EdgeAccessDenied),
+        Some(OUTCOME_CHALLENGE_OR_AUTH) => Ok(NavigationObservation::ChallengeOrAuth),
+        Some(OUTCOME_USABLE) => Ok(NavigationObservation::Usable),
+        _ => Err(error("dom_classification_invalid")),
+    }
+}
+
+fn classify_loaded_document(
+    websocket: &mut TcpStream,
+    deadline: Instant,
+) -> ProbeResult<NavigationObservation> {
+    websocket_send_json(
+        websocket,
+        &json!({
+            "id": DOM_CLASSIFICATION_COMMAND_ID,
+            "method": "Runtime.evaluate",
+            "params": {
+                "expression": DOM_CLASSIFIER,
+                "returnByValue": true,
+                "awaitPromise": false,
+            },
+        }),
+    )?;
+    while Instant::now() < deadline {
+        let Some(event) = websocket_read_json(websocket, deadline)? else {
+            continue;
+        };
+        if event.get("id").and_then(Value::as_u64) == Some(DOM_CLASSIFICATION_COMMAND_ID) {
+            return classified_dom_observation(&event);
+        }
+    }
+    Err(error("dom_classification_timeout"))
 }
 
 pub fn run_browser_probe_if_requested() -> Option<i32> {
@@ -199,6 +360,7 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
 }
 
 fn run_probe_worker() -> ProbeResult<()> {
+    let classification_deadline = Instant::now() + CLASSIFICATION_BUDGET;
     let termination_requested = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(
         signal_hook::consts::SIGTERM,
@@ -211,32 +373,31 @@ fn run_probe_worker() -> ProbeResult<()> {
     // Keep the exact worker process observable long enough for the root
     // launcher to attest its final Aqua UID and command even when the first
     // queued capability has already become too old to start safely.
-    std::thread::sleep(WORKER_START_ATTESTATION_GRACE);
-    let worker_started = Instant::now();
-    let mut empty_since = None;
+    if disposable_ci() {
+        std::thread::sleep(WORKER_START_ATTESTATION_GRACE);
+    }
+    let empty_deadline = Instant::now() + WORKER_EMPTY_QUEUE_GRACE;
     loop {
         require_not_terminated(&termination_requested)?;
-        if worker_started.elapsed() + MIN_NEXT_JOB_BUDGET >= WORKER_RUNTIME_BUDGET {
+        if Instant::now() >= classification_deadline {
             return Ok(());
         }
         let Some(job) = claim_job(&socket_path, uid, &launch_id)? else {
-            let idle_started = empty_since.get_or_insert_with(Instant::now);
-            if idle_started.elapsed() >= WORKER_EMPTY_QUEUE_GRACE {
+            if Instant::now() >= empty_deadline {
                 return Ok(());
             }
             std::thread::sleep(EMPTY_QUEUE_POLL_INTERVAL);
             continue;
         };
-        empty_since = None;
-        let accepted_result =
-            run_claimed_probe(&socket_path, uid, &launch_id, job, &termination_requested)?;
-        // A stale claim is skipped so the same Aqua process can claim a fresh
-        // job. Every accepted observation ends this launch after exact Chrome
-        // cleanup; the daemon's launch-completion callback then releases the
-        // exact-host guard before the unchanged-URL retry reaches its route.
-        if disposable_ci() || accepted_result {
-            return Ok(());
-        }
+        let _ = run_claimed_probe(
+            &socket_path,
+            uid,
+            &launch_id,
+            job,
+            &termination_requested,
+            classification_deadline,
+        )?;
+        return Ok(());
     }
 }
 
@@ -244,47 +405,81 @@ fn run_claimed_probe(
     socket_path: &Path,
     uid: u32,
     launch_id: &str,
-    job: ProbeJob,
+    job: ClaimedProbeJob,
     termination_requested: &AtomicBool,
+    classification_deadline: Instant,
 ) -> ProbeResult<bool> {
     let now = unix_now_ms()?;
-    if !job_has_start_budget(&job, now) {
+    if !claimed_job_has_start_budget(&job, now) {
         // The broker lease keeps this stale job from being reclaimed while the
         // same process drains fresher work. It expires naturally and is not a
         // worker-launch failure.
         return Ok(false);
     }
 
-    let config = ChromeConfig::discover(&job, uid)?;
-    let mut chrome = ChromeSession::launch(uid, config)?;
-    let observation = match chrome.observe_navigation(termination_requested) {
-        Ok(observation) => observation,
-        Err(failure) => {
-            chrome.cleanup()?;
-            return Err(failure);
-        }
-    };
+    let remaining_ms = claimed_job_remaining_budget_ms(&job, now);
+    let claimed_deadline = Instant::now() + Duration::from_millis(remaining_ms);
+    let classification_deadline = classification_deadline.min(claimed_deadline);
+
+    let config = ChromeConfig::discover(&job, uid, classification_deadline)?;
+    let mut chrome = ChromeSession::launch(uid, config, classification_deadline)?;
+    let observation =
+        match chrome.observe_navigation(termination_requested, classification_deadline) {
+            Ok(observation) => observation,
+            Err(failure) => {
+                chrome.cleanup()?;
+                return Err(failure);
+            }
+        };
     let outcome = observation_outcome(observation);
     let response = submit_before_cleanup(
         || {
             let observed_at_unix_ms = unix_now_ms()?;
-            submit_result(
-                socket_path,
-                uid,
-                launch_id,
-                &ProbeResultPayload {
-                    schema_version: SCHEMA_VERSION,
-                    capability: &job.capability,
-                    host: &job.host,
-                    request_started_at_unix_ms: job.request_started_at_unix_ms,
-                    observed_at_unix_ms,
-                    outcome,
-                },
-            )
+            let payload = match &job {
+                ClaimedProbeJob::PendingNavigation(job) => {
+                    serde_json::to_value(ProbeResultPayload {
+                        schema_version: SCHEMA_VERSION,
+                        capability: &job.capability,
+                        host: &job.host,
+                        request_started_at_unix_ms: job.request_started_at_unix_ms,
+                        observed_at_unix_ms,
+                        outcome,
+                    })
+                }
+                ClaimedProbeJob::RoutePreflight(job) => {
+                    serde_json::to_value(RoutePreflightResultPayload {
+                        schema_version: SCHEMA_VERSION,
+                        capability: &job.capability,
+                        host: &job.host,
+                        candidate_route: OWNED_GEPH_ROUTE,
+                        outcome,
+                        observed_at_unix_ms,
+                    })
+                }
+            }
+            .map_err(|_| error("ipc_encode_failed"))?;
+            submit_result(socket_path, uid, launch_id, &payload)
         },
         || chrome.cleanup(),
     )?;
     submission_ends_launch(observation, &response)
+}
+
+fn claimed_job_has_start_budget(job: &ClaimedProbeJob, now_unix_ms: u64) -> bool {
+    match job {
+        ClaimedProbeJob::PendingNavigation(job) => job_has_start_budget(job, now_unix_ms),
+        ClaimedProbeJob::RoutePreflight(job) => {
+            job.deadline_unix_ms.saturating_sub(now_unix_ms) >= ROUTE_PREFLIGHT_MIN_START_BUDGET_MS
+        }
+    }
+}
+
+fn claimed_job_remaining_budget_ms(job: &ClaimedProbeJob, now_unix_ms: u64) -> u64 {
+    let absolute_deadline_unix_ms = match job {
+        ClaimedProbeJob::PendingNavigation(job) => job.expires_at_unix_ms,
+        ClaimedProbeJob::RoutePreflight(job) => job.deadline_unix_ms,
+    };
+    absolute_deadline_unix_ms.saturating_sub(now_unix_ms)
 }
 
 fn job_has_start_budget(job: &ProbeJob, now_unix_ms: u64) -> bool {
@@ -295,19 +490,11 @@ fn submission_ends_launch(
     observation: NavigationObservation,
     response: &IpcResponse,
 ) -> ProbeResult<bool> {
-    match observation {
-        NavigationObservation::Pending if response.accepted && response.reason == "accepted" => {
-            Ok(true)
-        }
-        NavigationObservation::Pending => Err(error("submit_rejected")),
-        NavigationObservation::Complete if response.accepted && response.reason == "accepted" => {
-            Ok(true)
-        }
-        NavigationObservation::Complete => Err(error("submit_rejected")),
-        NavigationObservation::Failed if response.accepted && response.reason == "accepted" => {
-            Ok(true)
-        }
-        NavigationObservation::Failed => Err(error("submit_rejected")),
+    if response.accepted && response.reason == "accepted" {
+        let _ = observation;
+        Ok(true)
+    } else {
+        Err(error("submit_rejected"))
     }
 }
 
@@ -426,6 +613,43 @@ fn validate_job(job: &ProbeJob) -> ProbeResult<()> {
     Ok(())
 }
 
+fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()> {
+    let now = unix_now_ms()?;
+    let mut routes = job.candidate_routes.clone();
+    routes.sort();
+    routes.dedup();
+    if job.schema_version != SCHEMA_VERSION
+        || job.capability.len() != CAPABILITY_HEX_CHARS
+        || !job
+            .capability
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !canonical_host(&job.host)
+        || job.candidate_routes.is_empty()
+        || job.candidate_routes.len() > 4
+        || routes.len() != job.candidate_routes.len()
+        || !job.candidate_routes.iter().all(|route| {
+            matches!(
+                route.as_str(),
+                "system" | "app_doh" | "local_strategy" | OWNED_GEPH_ROUTE
+            )
+        })
+        || !job
+            .candidate_routes
+            .iter()
+            .any(|route| route == OWNED_GEPH_ROUTE)
+        || job.issued_at_unix_ms == 0
+        || job.deadline_unix_ms <= job.issued_at_unix_ms
+        || job.deadline_unix_ms - job.issued_at_unix_ms > ROUTE_PREFLIGHT_MAX_DEADLINE_MS
+        || now < job.issued_at_unix_ms
+        || now.saturating_sub(job.issued_at_unix_ms) > MAX_CLAIM_AGE_MS
+        || job.deadline_unix_ms <= now
+    {
+        return Err(error("claimed_job_invalid"));
+    }
+    Ok(())
+}
+
 fn socket_metadata(path: &Path, uid: u32) -> ProbeResult<fs::Metadata> {
     let metadata = fs::symlink_metadata(path).map_err(|_| error("socket_unavailable"))?;
     if !metadata.file_type().is_socket()
@@ -484,7 +708,7 @@ fn ipc_request(
     Ok(response)
 }
 
-fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<ProbeJob>> {
+fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<ClaimedProbeJob>> {
     let response = ipc_request(
         path,
         uid,
@@ -501,8 +725,14 @@ fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<Probe
     match (response.reason.as_str(), response.job) {
         ("no_job", None) => Ok(None),
         ("job_ready", Some(job)) => {
-            validate_job(&job)?;
-            Ok(Some(job))
+            if let Ok(job) = serde_json::from_value::<ProbeJob>(job.clone()) {
+                validate_job(&job)?;
+                return Ok(Some(ClaimedProbeJob::PendingNavigation(job)));
+            }
+            let job = serde_json::from_value::<RoutePreflightProbeJob>(job)
+                .map_err(|_| error("claimed_job_invalid"))?;
+            validate_route_preflight_job(&job)?;
+            Ok(Some(ClaimedProbeJob::RoutePreflight(job)))
         }
         _ => Err(error("claim_response_invalid")),
     }
@@ -512,7 +742,7 @@ fn submit_result(
     path: &Path,
     uid: u32,
     launch_id: &str,
-    result: &ProbeResultPayload<'_>,
+    result: &Value,
 ) -> ProbeResult<IpcResponse> {
     ipc_request(
         path,
@@ -528,43 +758,39 @@ fn submit_result(
 }
 
 impl ChromeConfig {
-    fn discover(job: &ProbeJob, uid: u32) -> ProbeResult<Self> {
+    fn discover(
+        job: &ClaimedProbeJob,
+        uid: u32,
+        classification_deadline: Instant,
+    ) -> ProbeResult<Self> {
         let ci_override = disposable_ci()
             .then(|| std::env::var_os("SLIPSTREAM_BROWSER_PROBE_CHROME"))
             .flatten()
             .map(PathBuf::from);
-        let require_google_identity = ci_override.is_none();
+        let production_runtime = ci_override.is_none();
         let executable = ci_override
-            .or_else(discover_production_chrome)
-            .ok_or_else(|| error("chrome_unavailable"))?
+            .or_else(discover_pinned_headless_runtime)
+            .ok_or_else(|| error("headless_runtime_unavailable"))?
             .canonicalize()
-            .map_err(|_| error("chrome_unavailable"))?;
-        let metadata = fs::metadata(&executable).map_err(|_| error("chrome_unavailable"))?;
+            .map_err(|_| error("headless_runtime_unavailable"))?;
+        let metadata =
+            fs::metadata(&executable).map_err(|_| error("headless_runtime_unavailable"))?;
         if !metadata.is_file()
             || metadata.uid() != 0 && metadata.uid() != uid
             || metadata.mode() & 0o111 == 0
             || metadata.mode() & 0o002 != 0
         {
-            return Err(error("chrome_untrusted"));
+            return Err(error("headless_runtime_untrusted"));
         }
-        let source_bundle = chrome_source_bundle(&executable, require_google_identity)?;
-        let bundle_metadata =
-            fs::metadata(&source_bundle).map_err(|_| error("chrome_untrusted"))?;
-        if bundle_metadata.uid() != 0 && bundle_metadata.uid() != uid
-            || bundle_metadata.mode() & 0o002 != 0
-        {
-            return Err(error("chrome_untrusted"));
+        if production_runtime {
+            verify_pinned_headless_runtime(&executable, classification_deadline)?;
         }
-        if require_google_identity {
-            verify_google_chrome_identity(&source_bundle)?;
-        }
-
-        let mut target_url = format!("https://{}/", job.host);
+        let mut target_url = format!("https://{}/", job.host());
         let mut host_resolver_rules = None;
         let mut ignore_certificate_errors = false;
         if disposable_ci() {
             if let Ok(origin) = std::env::var("SLIPSTREAM_BROWSER_PROBE_ORIGIN") {
-                validate_ci_origin(&origin, &job.host)?;
+                validate_ci_origin(&origin, job.host())?;
                 target_url = origin;
             }
             host_resolver_rules = std::env::var("SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES")
@@ -574,18 +800,31 @@ impl ChromeConfig {
                 std::env::var_os("SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS").as_deref()
                     == Some(OsStr::new("1"));
         }
+        let proxy_server = match job {
+            ClaimedProbeJob::PendingNavigation(_) => None,
+            ClaimedProbeJob::RoutePreflight(_) => {
+                let port = std::env::var(OWNED_GEPH_PORT_ENV)
+                    .ok()
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .filter(|port| *port > 0)
+                    .ok_or_else(|| error("owned_geph_proxy_invalid"))?;
+                Some(format!("socks5://127.0.0.1:{port}"))
+            }
+        };
         Ok(Self {
             executable,
-            application_bundle: source_bundle.clone(),
-            source_bundle,
             target_url,
             host_resolver_rules,
             ignore_certificate_errors,
+            proxy_server,
         })
     }
 
     fn chrome_arguments(&self, profile: &Path) -> Vec<OsString> {
         let mut arguments = vec![
+            OsString::from("--headless=new"),
+            OsString::from("--hide-scrollbars"),
+            OsString::from("--mute-audio"),
             OsString::from("--disable-background-networking"),
             OsString::from("--disable-component-update"),
             OsString::from("--disable-default-apps"),
@@ -596,12 +835,16 @@ impl ChromeConfig {
             OsString::from("--metrics-recording-only"),
             OsString::from("--no-default-browser-check"),
             OsString::from("--no-first-run"),
-            OsString::from("--no-proxy-server"),
             OsString::from("--password-store=basic"),
             OsString::from("--remote-debugging-address=127.0.0.1"),
             OsString::from("--remote-debugging-port=0"),
             OsString::from(format!("--user-data-dir={}", profile.display())),
         ];
+        if let Some(proxy) = &self.proxy_server {
+            arguments.push(OsString::from(format!("--proxy-server={proxy}")));
+        } else {
+            arguments.push(OsString::from("--no-proxy-server"));
+        }
         if let Some(rules) = &self.host_resolver_rules {
             arguments.push(OsString::from(format!("--host-resolver-rules={rules}")));
         }
@@ -611,104 +854,198 @@ impl ChromeConfig {
         arguments.push(OsString::from("about:blank"));
         arguments
     }
-
-    fn materialize_ci_application(&mut self, profile: &Path, uid: u32) -> ProbeResult<()> {
-        if self.application_bundle.extension() == Some(OsStr::new("app")) {
-            return Ok(());
-        }
-        if !disposable_ci() {
-            return Err(error("chrome_untrusted"));
-        }
-        let destination = profile.join("Chrome for Testing.app");
-        if destination.exists() || fs::symlink_metadata(&destination).is_ok() {
-            return Err(error("chrome_materialization_failed"));
-        }
-        let status = Command::new("/usr/bin/ditto")
-            .arg(&self.source_bundle)
-            .arg(&destination)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|_| error("chrome_materialization_failed"))?;
-        if !status.success() {
-            return Err(error("chrome_materialization_failed"));
-        }
-        let relative_executable = self
-            .executable
-            .strip_prefix(&self.source_bundle)
-            .map_err(|_| error("chrome_materialization_failed"))?;
-        let executable = destination.join(relative_executable);
-        let executable_metadata = fs::symlink_metadata(&executable)
-            .map_err(|_| error("chrome_materialization_failed"))?;
-        let bundle_metadata = fs::symlink_metadata(&destination)
-            .map_err(|_| error("chrome_materialization_failed"))?;
-        if !bundle_metadata.is_dir()
-            || bundle_metadata.file_type().is_symlink()
-            || bundle_metadata.uid() != uid
-            || bundle_metadata.mode() & 0o002 != 0
-            || !destination.join("Contents/Info.plist").is_file()
-            || !executable_metadata.is_file()
-            || executable_metadata.file_type().is_symlink()
-            || executable_metadata.uid() != uid
-            || executable_metadata.mode() & 0o111 == 0
-            || executable_metadata.mode() & 0o002 != 0
-        {
-            return Err(error("chrome_materialization_failed"));
-        }
-        self.application_bundle = destination;
-        self.executable = executable;
-        Ok(())
-    }
 }
 
-fn verify_google_chrome_identity(application_bundle: &Path) -> ProbeResult<()> {
-    let verification = Command::new("/usr/bin/codesign")
-        .arg("--verify")
+fn verify_pinned_headless_runtime(executable: &Path, deadline: Instant) -> ProbeResult<()> {
+    static VERIFICATION: OnceLock<ProbeResult<()>> = OnceLock::new();
+    *VERIFICATION.get_or_init(|| verify_pinned_headless_runtime_once(executable, deadline))
+}
+
+fn verify_pinned_headless_runtime_once(executable: &Path, deadline: Instant) -> ProbeResult<()> {
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
+    let executable_metadata =
+        fs::symlink_metadata(executable).map_err(|_| error("headless_runtime_untrusted"))?;
+    if !executable_metadata.is_file()
+        || executable_metadata.file_type().is_symlink()
+        || executable_metadata.mode() & 0o111 == 0
+        || executable_metadata.mode() & 0o022 != 0
+    {
+        return Err(error("headless_runtime_untrusted"));
+    }
+    let runtime_dir = executable
+        .parent()
+        .ok_or_else(|| error("headless_runtime_untrusted"))?;
+    let manifest_path = runtime_dir.join(PINNED_HEADLESS_RUNTIME_MANIFEST);
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|_| error("headless_runtime_manifest_invalid"))?;
+    if !manifest_metadata.is_file()
+        || manifest_metadata.file_type().is_symlink()
+        || manifest_metadata.mode() & 0o022 != 0
+        || manifest_metadata.len() == 0
+        || manifest_metadata.len() > 4096
+    {
+        return Err(error("headless_runtime_manifest_invalid"));
+    }
+    let manifest: Value = serde_json::from_slice(
+        &fs::read(&manifest_path).map_err(|_| error("headless_runtime_manifest_invalid"))?,
+    )
+    .map_err(|_| error("headless_runtime_manifest_invalid"))?;
+    let executable_sha = manifest
+        .get("executable_sha256")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .ok_or_else(|| error("headless_runtime_manifest_invalid"))?;
+    if manifest.get("version").and_then(Value::as_str) != Some(PINNED_HEADLESS_RUNTIME_VERSION)
+        || manifest.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || manifest.get("platform").and_then(Value::as_str) != Some("mac-arm64")
+        || manifest.get("archive_sha256").and_then(Value::as_str)
+            != Some(PINNED_HEADLESS_RUNTIME_ARCHIVE_SHA256)
+        || executable_sha.len() != 64
+    {
+        return Err(error("headless_runtime_digest_invalid"));
+    }
+    let observed_sha = sha256_regular_file_before(executable, &executable_metadata, deadline)?;
+    if observed_sha != executable_sha {
+        return Err(error("headless_runtime_digest_invalid"));
+    }
+    let application_bundle = runtime_dir
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .filter(|bundle| bundle.extension() == Some(OsStr::new("app")))
+        .ok_or_else(|| error("headless_runtime_untrusted"))?;
+    let mut bundle_verification = Command::new("/usr/bin/codesign");
+    bundle_verification
+        .args(["--verify", "--deep", "--strict"])
         .arg(application_bundle)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|_| error("chrome_signature_invalid"))?;
-    if !verification.success() {
-        return Err(error("chrome_signature_invalid"));
+        .stderr(Stdio::null());
+    if !command_succeeds_before(&mut bundle_verification, deadline)? {
+        return Err(error("headless_runtime_signature_invalid"));
     }
-    let identity = Command::new("/usr/bin/codesign")
-        .args(["-dv", "--verbose=4"])
-        .arg(application_bundle)
+    let mut verification = Command::new("/usr/bin/codesign");
+    verification
+        .args(["--verify", "--strict"])
+        .arg(executable)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .output()
-        .map_err(|_| error("chrome_signature_invalid"))?;
-    if !identity.status.success() {
-        return Err(error("chrome_signature_invalid"));
-    }
-    let details =
-        String::from_utf8(identity.stderr).map_err(|_| error("chrome_signature_invalid"))?;
-    if !google_chrome_identity(&details) {
-        return Err(error("chrome_signature_invalid"));
+        .stderr(Stdio::null());
+    if !command_succeeds_before(&mut verification, deadline)? {
+        return Err(error("headless_runtime_signature_invalid"));
     }
     Ok(())
 }
 
-fn google_chrome_identity(details: &str) -> bool {
-    let lines: BTreeSet<&str> = details.lines().collect();
-    lines.contains("Identifier=com.google.Chrome") && lines.contains("TeamIdentifier=EQHXZ8M8AV")
+fn same_runtime_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    left.is_file()
+        && right.is_file()
+        && left.dev() == right.dev()
+        && left.ino() == right.ino()
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
 }
 
-fn discover_production_chrome() -> Option<PathBuf> {
-    let system = PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    if system.is_file() {
-        return Some(system);
+fn sha256_regular_file_before(
+    executable: &Path,
+    path_metadata: &fs::Metadata,
+    deadline: Instant,
+) -> ProbeResult<String> {
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
     }
-    let home = std::env::var_os("HOME")?;
-    let user =
-        PathBuf::from(home).join("Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    user.is_file().then_some(user)
+    let mut source = File::open(executable).map_err(|_| error("headless_runtime_untrusted"))?;
+    let opened_metadata = source
+        .metadata()
+        .map_err(|_| error("headless_runtime_untrusted"))?;
+    if !same_runtime_identity(path_metadata, &opened_metadata) {
+        return Err(error("headless_runtime_untrusted"));
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        if Instant::now() >= deadline {
+            return Err(error("classification_deadline_exceeded"));
+        }
+        let count = source
+            .read(&mut buffer)
+            .map_err(|_| error("headless_runtime_untrusted"))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let final_metadata = source
+        .metadata()
+        .map_err(|_| error("headless_runtime_untrusted"))?;
+    if !same_runtime_identity(&opened_metadata, &final_metadata) {
+        return Err(error("headless_runtime_untrusted"));
+    }
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
-fn chrome_source_bundle(executable: &Path, require_app_suffix: bool) -> ProbeResult<PathBuf> {
+fn command_succeeds_before(command: &mut Command, deadline: Instant) -> ProbeResult<bool> {
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|_| error("headless_runtime_signature_invalid"))?;
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|_| error("headless_runtime_signature_invalid"))?
+        {
+            return Ok(status.success());
+        }
+        if Instant::now() >= deadline {
+            let _ = terminate_child_bounded(&mut child, SIGNATURE_PROCESS_STOP_TIMEOUT);
+            return Err(error("classification_deadline_exceeded"));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn discover_pinned_headless_runtime() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let macos = current.parent()?;
+    let contents = macos.parent()?;
+    if current.file_name() != Some(OsStr::new("slipstream-browser-probe"))
+        || macos.file_name() != Some(OsStr::new("MacOS"))
+        || contents.file_name() != Some(OsStr::new("Contents"))
+    {
+        return None;
+    }
+    let runtime = contents.join("Resources/chromium-headless-shell/chrome-headless-shell");
+    runtime.is_file().then_some(runtime)
+}
+
+#[cfg(test)]
+fn pinned_headless_runtime_for_helper(current: &Path) -> Option<PathBuf> {
+    let macos = current.parent()?;
+    let contents = macos.parent()?;
+    if current.file_name() != Some(OsStr::new("slipstream-browser-probe"))
+        || macos.file_name() != Some(OsStr::new("MacOS"))
+        || contents.file_name() != Some(OsStr::new("Contents"))
+    {
+        return None;
+    }
+    Some(contents.join("Resources/chromium-headless-shell/chrome-headless-shell"))
+}
+
+#[cfg(test)]
+fn chrome_source_bundle(executable: &Path) -> ProbeResult<PathBuf> {
     let macos = executable
         .parent()
         .ok_or_else(|| error("chrome_untrusted"))?;
@@ -716,7 +1053,7 @@ fn chrome_source_bundle(executable: &Path, require_app_suffix: bool) -> ProbeRes
     let bundle = contents.parent().ok_or_else(|| error("chrome_untrusted"))?;
     if macos.file_name() != Some(OsStr::new("MacOS"))
         || contents.file_name() != Some(OsStr::new("Contents"))
-        || require_app_suffix && bundle.extension() != Some(OsStr::new("app"))
+        || bundle.extension() != Some(OsStr::new("app"))
         || !contents.join("Info.plist").is_file()
     {
         return Err(error("chrome_untrusted"));
@@ -752,13 +1089,15 @@ fn validate_ci_origin(origin: &str, host: &str) -> ProbeResult<()> {
 }
 
 impl ChromeSession {
-    fn launch(uid: u32, config: ChromeConfig) -> ProbeResult<Self> {
-        let profile = create_private_profile()?;
-        let mut config = config;
-        if let Err(failure) = config.materialize_ci_application(&profile, uid) {
-            let _ = fs::remove_dir_all(&profile);
-            return Err(failure);
+    fn launch(
+        uid: u32,
+        config: ChromeConfig,
+        classification_deadline: Instant,
+    ) -> ProbeResult<Self> {
+        if Instant::now() >= classification_deadline {
+            return Err(error("classification_deadline_exceeded"));
         }
+        let profile = create_private_profile()?;
         let mut session = Self {
             uid,
             config,
@@ -766,7 +1105,7 @@ impl ChromeSession {
             launcher: None,
             rooted_process_groups: BTreeSet::new(),
         };
-        if let Err(failure) = session.start() {
+        if let Err(failure) = session.start(classification_deadline) {
             return match session.cleanup() {
                 Ok(()) => Err(failure),
                 Err(cleanup_failure) => Err(cleanup_failure),
@@ -775,61 +1114,46 @@ impl ChromeSession {
         Ok(session)
     }
 
-    fn start(&mut self) -> ProbeResult<()> {
+    fn start(&mut self, classification_deadline: Instant) -> ProbeResult<()> {
         let stdout_path = self.profile.join("chrome.stdout.log");
         let stderr_path = self.profile.join("chrome.stderr.log");
-        let launcher_stderr_path = self.profile.join("launcher.stderr.log");
         create_private_file(&stdout_path)?;
         create_private_file(&stderr_path)?;
-        create_private_file(&launcher_stderr_path)?;
-        let launcher_stderr = OpenOptions::new()
+        let stdout = OpenOptions::new()
             .write(true)
-            .open(&launcher_stderr_path)
+            .open(&stdout_path)
             .map_err(|_| error("profile_create_failed"))?;
-        let mut command = Command::new("/usr/bin/open");
+        let stderr = OpenOptions::new()
+            .write(true)
+            .open(&stderr_path)
+            .map_err(|_| error("profile_create_failed"))?;
+        let mut command = Command::new(&self.config.executable);
         command
-            .args(["-n", "-W", "-j", "--stdout"])
-            .arg(&stdout_path)
-            .arg("--stderr")
-            .arg(&stderr_path)
-            .arg("-a")
-            .arg(&self.config.application_bundle)
-            .arg("--args")
             .args(self.config.chrome_arguments(&self.profile))
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::from(launcher_stderr));
-        self.launcher = Some(command.spawn().map_err(|_| error("chrome_launch_failed"))?);
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+        // A fresh process group makes cleanup exact without LaunchServices,
+        // AppKit activation, or an Aqua application lifecycle.
+        command.process_group(0);
+        self.launcher = Some(
+            command
+                .spawn()
+                .map_err(|_| error("headless_runtime_launch_failed"))?,
+        );
 
-        let deadline = Instant::now() + CHROME_LAUNCH_TIMEOUT;
-        let mut launcher_exited = false;
+        let deadline = classification_deadline;
         let mut observed_owned_main = false;
         let mut owned_main_alive = false;
         let mut devtools_file_failure = None;
         while Instant::now() < deadline {
-            // Some Chrome builds let `open -W` return after LaunchServices has
-            // delegated the app. Readiness belongs to the exact owned Chrome
-            // process and DevTools file, not to the intermediary's lifetime.
-            launcher_exited |= self
-                .launcher
-                .as_mut()
-                .and_then(|launcher| launcher.try_wait().ok())
-                .is_some_and(|status| status.is_some());
             let processes = owned_chrome_processes(
                 self.uid,
                 &self.config.executable,
-                &self.config.application_bundle,
                 &self.profile,
                 &mut self.rooted_process_groups,
             )?;
-            let owned_main_count = processes
-                .iter()
-                .filter(|process| {
-                    process
-                        .command
-                        .starts_with(&self.config.executable.to_string_lossy().to_string())
-                })
-                .count();
+            let owned_main_count = processes.iter().filter(|process| process.is_root).count();
             if owned_main_count > 1 {
                 return Err(error("chrome_ownership_ambiguous"));
             }
@@ -844,11 +1168,6 @@ impl ChromeSession {
         }
         if let Some(failure) = devtools_file_failure {
             Err(failure)
-        } else if launcher_exited && !observed_owned_main {
-            Err(error(chrome_launch_failure_class(
-                &launcher_stderr_path,
-                self.uid,
-            )))
         } else if observed_owned_main && !owned_main_alive {
             Err(error("chrome_main_exited_before_devtools"))
         } else {
@@ -863,13 +1182,19 @@ impl ChromeSession {
     fn observe_navigation(
         &mut self,
         termination_requested: &AtomicBool,
+        classification_deadline: Instant,
     ) -> ProbeResult<NavigationObservation> {
         let port = read_devtools_port(&self.profile, self.uid)?
             .ok_or_else(|| error("devtools_unavailable"))?;
-        let target = wait_for_page_target(port)?;
+        let target = wait_for_page_target(port, classification_deadline)?;
         let (websocket_host, websocket_path) =
             parse_websocket_location(&target.web_socket_debugger_url, port)?;
-        let mut websocket = websocket_connect(port, websocket_host, &websocket_path)?;
+        let mut websocket = websocket_connect(
+            port,
+            websocket_host,
+            &websocket_path,
+            classification_deadline,
+        )?;
         websocket_send_json(
             &mut websocket,
             &json!({"id": 1, "method": "Network.enable"}),
@@ -885,24 +1210,18 @@ impl ChromeSession {
             }),
         )?;
 
-        let overall_deadline = Instant::now() + MIN_PENDING_OBSERVATION + Duration::from_secs(4);
+        let overall_deadline = classification_deadline;
         let mut request_id = None;
         let mut request_started = None;
+        let mut main_frame_id = None;
+        let mut document_finished = false;
+        let mut stopped_frame_id = None;
         while Instant::now() < overall_deadline {
             require_not_terminated(termination_requested)?;
             let event = match websocket_read_json(&mut websocket, overall_deadline)? {
                 Some(event) => event,
                 None => {
                     require_not_terminated(termination_requested)?;
-                    if request_started.is_some_and(|started: Instant| {
-                        Instant::now().duration_since(started) >= MIN_PENDING_OBSERVATION
-                    }) {
-                        let _ = websocket_send_json(
-                            &mut websocket,
-                            &json!({"id": 99, "method": "Browser.close"}),
-                        );
-                        return Ok(NavigationObservation::Pending);
-                    }
                     continue;
                 }
             };
@@ -921,16 +1240,13 @@ impl ChromeSession {
                     Instant::now().duration_since(request_started.unwrap_or(navigation_started)),
                 )));
             }
+            if event.get("id").and_then(Value::as_u64) == Some(3) {
+                main_frame_id = event
+                    .pointer("/result/frameId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
             let Some(method) = event.get("method").and_then(Value::as_str) else {
-                if request_started.is_some_and(|started: Instant| {
-                    Instant::now().duration_since(started) >= MIN_PENDING_OBSERVATION
-                }) {
-                    let _ = websocket_send_json(
-                        &mut websocket,
-                        &json!({"id": 99, "method": "Browser.close"}),
-                    );
-                    return Ok(NavigationObservation::Pending);
-                }
                 continue;
             };
             if is_correlated_document_redirect(&event, request_id.as_deref()) {
@@ -938,7 +1254,7 @@ impl ChromeSession {
                     &mut websocket,
                     &json!({"id": 99, "method": "Browser.close"}),
                 );
-                return Ok(NavigationObservation::Failed);
+                return Ok(NavigationObservation::TerminalError);
             }
             if method == "Network.requestWillBeSent"
                 && event.pointer("/params/type").and_then(Value::as_str) == Some("Document")
@@ -952,6 +1268,12 @@ impl ChromeSession {
                     request_started.get_or_insert_with(Instant::now);
                 }
             }
+            if method == "Page.frameStoppedLoading" {
+                stopped_frame_id = event
+                    .pointer("/params/frameId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
             if let Some(expected) = request_id.as_deref() {
                 let event_request_id = event.pointer("/params/requestId").and_then(Value::as_str);
                 if let Some(observation) = document_event_observation(
@@ -962,34 +1284,71 @@ impl ChromeSession {
                         .map(|started| Instant::now().duration_since(started))
                         .unwrap_or_default(),
                 ) {
-                    let _ = websocket_send_json(
-                        &mut websocket,
-                        &json!({"id": 99, "method": "Browser.close"}),
-                    );
-                    return Ok(observation);
+                    if observation == NavigationObservation::Usable {
+                        document_finished = true;
+                    } else {
+                        let _ = websocket_send_json(
+                            &mut websocket,
+                            &json!({"id": 99, "method": "Browser.close"}),
+                        );
+                        return Ok(observation);
+                    }
                 }
             }
-            if request_started.is_some_and(|started| {
-                Instant::now().duration_since(started) >= MIN_PENDING_OBSERVATION
-            }) {
+            if full_navigation_completed(
+                document_finished,
+                stopped_frame_id.as_deref(),
+                main_frame_id.as_deref(),
+            ) {
+                let observation = classify_loaded_document(&mut websocket, overall_deadline)
+                    .unwrap_or(NavigationObservation::TerminalError);
                 let _ = websocket_send_json(
                     &mut websocket,
                     &json!({"id": 99, "method": "Browser.close"}),
                 );
-                return Ok(NavigationObservation::Pending);
+                return Ok(observation);
             }
         }
-        Err(error("navigation_observation_timeout"))
+        let _ = websocket_send_json(
+            &mut websocket,
+            &json!({"id": 99, "method": "Browser.close"}),
+        );
+        Ok(if request_started.is_some() {
+            NavigationObservation::Pending
+        } else {
+            NavigationObservation::TerminalError
+        })
     }
 
     fn cleanup(&mut self) -> ProbeResult<()> {
         let mut cleanup_failed = false;
+        // Capture the rooted process group before reaping the direct child.
+        // A closed headless shell can otherwise remain as an owned zombie in
+        // `ps` until `Child::try_wait` runs, making the later absence proof
+        // time out even though no executable process survived.
+        match owned_chrome_processes(
+            self.uid,
+            &self.config.executable,
+            &self.profile,
+            &mut self.rooted_process_groups,
+        ) {
+            Ok(processes) => {
+                for process in processes.iter().rev() {
+                    signal_owned_process(process, self.uid, "TERM");
+                }
+            }
+            Err(_) => cleanup_failed = true,
+        }
+        if let Some(mut launcher) = self.launcher.take() {
+            if !terminate_child_bounded(&mut launcher, CHROME_STOP_TIMEOUT) {
+                cleanup_failed = true;
+            }
+        }
         let first_deadline = Instant::now() + CHROME_STOP_TIMEOUT;
         loop {
             let processes = match owned_chrome_processes(
                 self.uid,
                 &self.config.executable,
-                &self.config.application_bundle,
                 &self.profile,
                 &mut self.rooted_process_groups,
             ) {
@@ -1018,7 +1377,6 @@ impl ChromeSession {
             let processes = match owned_chrome_processes(
                 self.uid,
                 &self.config.executable,
-                &self.config.application_bundle,
                 &self.profile,
                 &mut self.rooted_process_groups,
             ) {
@@ -1040,12 +1398,6 @@ impl ChromeSession {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        if let Some(mut launcher) = self.launcher.take() {
-            if launcher.try_wait().ok().flatten().is_none() {
-                let _ = launcher.kill();
-            }
-            let _ = launcher.wait();
-        }
         let settle_deadline = Instant::now() + CHROME_STOP_TIMEOUT;
         let mut absent_since = None;
         let mut settled = false;
@@ -1053,7 +1405,6 @@ impl ChromeSession {
             let processes = match owned_chrome_processes(
                 self.uid,
                 &self.config.executable,
-                &self.config.application_bundle,
                 &self.profile,
                 &mut self.rooted_process_groups,
             ) {
@@ -1081,7 +1432,6 @@ impl ChromeSession {
         let final_absence = owned_chrome_processes(
             self.uid,
             &self.config.executable,
-            &self.config.application_bundle,
             &self.profile,
             &mut self.rooted_process_groups,
         )
@@ -1103,6 +1453,26 @@ impl ChromeSession {
     }
 }
 
+fn terminate_child_bounded(child: &mut Child, timeout: Duration) -> bool {
+    match child.try_wait() {
+        Ok(Some(_)) => return true,
+        Ok(None) => {
+            let _ = child.kill();
+        }
+        Err(_) => return false,
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(None) | Err(_) => return false,
+        }
+    }
+}
+
 fn create_private_profile() -> ProbeResult<PathBuf> {
     let root = std::env::temp_dir();
     for _ in 0..16 {
@@ -1112,8 +1482,13 @@ fn create_private_profile() -> ProbeResult<PathBuf> {
         builder.mode(0o700);
         match builder.create(&path) {
             Ok(()) => {
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
-                    .map_err(|_| error("profile_create_failed"))?;
+                if fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).is_err() {
+                    // The directory exists already, so returning immediately
+                    // would strand an otherwise unreferenced browser profile.
+                    // It is still empty and owned by this worker at this point.
+                    let _ = fs::remove_dir(&path);
+                    return Err(error("profile_create_failed"));
+                }
                 return Ok(path);
             }
             Err(failure) if failure.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -1133,6 +1508,7 @@ fn create_private_file(path: &Path) -> ProbeResult<()> {
         .map_err(|_| error("profile_create_failed"))
 }
 
+#[cfg(test)]
 fn classify_launch_diagnostic(diagnostic: &str) -> &'static str {
     if diagnostic.contains("Code=-10827") || diagnostic.contains("error -10827") {
         "chrome_launch_executable_missing"
@@ -1189,16 +1565,6 @@ fn read_private_diagnostic(path: &Path, uid: u32) -> Option<Vec<u8>> {
         return None;
     }
     Some(payload)
-}
-
-fn chrome_launch_failure_class(path: &Path, uid: u32) -> &'static str {
-    read_private_diagnostic(path, uid)
-        .and_then(|payload| {
-            std::str::from_utf8(&payload)
-                .ok()
-                .map(classify_launch_diagnostic)
-        })
-        .unwrap_or("chrome_launch_failed")
 }
 
 fn classify_chrome_start_diagnostic(diagnostic: &str) -> &'static str {
@@ -1296,10 +1662,24 @@ fn take_process_field(input: &str) -> Option<(&str, &str)> {
     (!field.is_empty()).then_some((field, &input[split..]))
 }
 
+fn chromium_process_role(command: &str, executable: &Path, profile: &Path) -> Option<(bool, bool)> {
+    let executable = executable.to_string_lossy();
+    if command != executable && !command.starts_with(&format!("{executable} ")) {
+        return None;
+    }
+    let profile_argument = format!("--user-data-dir={}", profile.display());
+    let mut is_root = true;
+    let mut has_profile = false;
+    for argument in command.split_whitespace().skip(1) {
+        is_root &= !argument.starts_with("--type=");
+        has_profile |= argument == profile_argument;
+    }
+    Some((is_root, has_profile))
+}
+
 fn owned_chrome_processes(
     uid: u32,
     executable: &Path,
-    application_bundle: &Path,
     profile: &Path,
     rooted_process_groups: &mut BTreeSet<u32>,
 ) -> ProbeResult<Vec<OwnedProcess>> {
@@ -1314,12 +1694,22 @@ fn owned_chrome_processes(
     }
     let listing =
         String::from_utf8(output.stdout).map_err(|_| error("process_enumeration_failed"))?;
-    let executable_prefix = executable.to_string_lossy();
-    let helper_prefix = application_bundle
-        .join("Contents/Frameworks")
-        .to_string_lossy()
-        .to_string();
-    let profile_argument = format!("--user-data-dir={}", profile.display());
+    Ok(owned_chrome_processes_from_listing(
+        &listing,
+        uid,
+        executable,
+        profile,
+        rooted_process_groups,
+    ))
+}
+
+fn owned_chrome_processes_from_listing(
+    listing: &str,
+    uid: u32,
+    executable: &Path,
+    profile: &Path,
+    rooted_process_groups: &mut BTreeSet<u32>,
+) -> Vec<OwnedProcess> {
     let mut candidates = Vec::new();
     for line in listing.lines() {
         let Some((pid, rest)) = take_process_field(line) else {
@@ -1339,38 +1729,31 @@ fn owned_chrome_processes(
             continue;
         };
         let command = command.trim_start();
-        let is_main =
-            command == executable_prefix || command.starts_with(&format!("{executable_prefix} "));
-        let is_helper = command.starts_with(&helper_prefix);
-        if observed_uid != uid || process_group == 0 || (!is_main && !is_helper) {
+        if observed_uid != uid || process_group == 0 {
             continue;
         }
-        let has_profile = command
-            .split_whitespace()
-            .any(|argument| argument == profile_argument);
-        if is_main && has_profile {
+        let is_root = chromium_process_role(command, executable, profile)
+            .is_some_and(|(is_root, has_profile)| is_root && has_profile);
+        if is_root {
             rooted_process_groups.insert(process_group);
         }
-        candidates.push((
-            OwnedProcess {
-                pid,
-                process_group,
-                command: command.to_string(),
-            },
-            is_main,
-            has_profile,
-        ));
+        candidates.push(OwnedProcess {
+            pid,
+            process_group,
+            command: command.to_string(),
+            is_root,
+        });
     }
     let mut owned: Vec<OwnedProcess> = candidates
         .into_iter()
-        .filter_map(|(process, is_main, has_profile)| {
-            ((is_main && has_profile)
-                || (!is_main && rooted_process_groups.contains(&process.process_group)))
-            .then_some(process)
+        .filter_map(|process| {
+            rooted_process_groups
+                .contains(&process.process_group)
+                .then_some(process)
         })
         .collect();
     owned.sort_by_key(|process| process.pid);
-    Ok(owned)
+    owned
 }
 
 fn signal_owned_process(process: &OwnedProcess, uid: u32, signal: &str) {
@@ -1424,6 +1807,14 @@ fn loopback_stream(port: u16, timeout: Duration) -> ProbeResult<TcpStream> {
     Ok(stream)
 }
 
+fn remaining_timeout(deadline: Instant, cap: Duration) -> ProbeResult<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .map(|remaining| remaining.min(cap))
+        .ok_or_else(|| error("classification_deadline_exceeded"))
+}
+
 fn http_response_extent(response: &[u8]) -> ProbeResult<Option<(usize, usize)>> {
     let Some(body_offset) = response
         .windows(4)
@@ -1463,11 +1854,11 @@ fn http_response_extent(response: &[u8]) -> ProbeResult<Option<(usize, usize)>> 
     Ok(Some((body_offset, response_length)))
 }
 
-fn http_get(port: u16, path: &str) -> ProbeResult<Vec<u8>> {
+fn http_get(port: u16, path: &str, deadline: Instant) -> ProbeResult<Vec<u8>> {
     if !path.starts_with('/') || path.bytes().any(|byte| byte.is_ascii_whitespace()) {
         return Err(error("devtools_http_invalid"));
     }
-    let mut stream = loopback_stream(port, CDP_CONNECT_TIMEOUT)?;
+    let mut stream = loopback_stream(port, remaining_timeout(deadline, CDP_CONNECT_TIMEOUT)?)?;
     write!(
         stream,
         "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
@@ -1501,10 +1892,9 @@ fn http_get(port: u16, path: &str) -> ProbeResult<Vec<u8>> {
     Ok(response[body_offset..].to_vec())
 }
 
-fn wait_for_page_target(port: u16) -> ProbeResult<DevToolsTarget> {
-    let deadline = Instant::now() + CDP_CONNECT_TIMEOUT;
+fn wait_for_page_target(port: u16, deadline: Instant) -> ProbeResult<DevToolsTarget> {
     while Instant::now() < deadline {
-        if let Ok(payload) = http_get(port, "/json/list") {
+        if let Ok(payload) = http_get(port, "/json/list", deadline) {
             if let Ok(targets) = serde_json::from_slice::<Vec<DevToolsTarget>>(&payload) {
                 let mut matching = targets
                     .into_iter()
@@ -1543,8 +1933,13 @@ fn parse_websocket_location(location: &str, expected_port: u16) -> ProbeResult<(
     Ok((host, format!("/{path}")))
 }
 
-fn websocket_connect(port: u16, host: &str, path: &str) -> ProbeResult<TcpStream> {
-    let mut stream = loopback_stream(port, CDP_CONNECT_TIMEOUT)?;
+fn websocket_connect(
+    port: u16,
+    host: &str,
+    path: &str,
+    deadline: Instant,
+) -> ProbeResult<TcpStream> {
+    let mut stream = loopback_stream(port, remaining_timeout(deadline, CDP_CONNECT_TIMEOUT)?)?;
     write!(
         stream,
         "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {WEBSOCKET_KEY}\r\nSec-WebSocket-Version: 13\r\n\r\n"
@@ -1696,6 +2091,17 @@ mod tests {
         }
     }
 
+    fn route_preflight_job(now: u64) -> RoutePreflightProbeJob {
+        RoutePreflightProbeJob {
+            schema_version: 1,
+            capability: "abcdef0123456789abcdef0123456789".to_string(),
+            host: "unknown.example".to_string(),
+            candidate_routes: vec!["system".to_string(), OWNED_GEPH_ROUTE.to_string()],
+            issued_at_unix_ms: now,
+            deadline_unix_ms: now + ROUTE_PREFLIGHT_MAX_DEADLINE_MS,
+        }
+    }
+
     #[test]
     fn hidden_mode_requires_the_exact_sole_argument() {
         assert!(is_browser_probe_invocation(&[
@@ -1724,15 +2130,116 @@ mod tests {
     }
 
     #[test]
-    fn one_aqua_worker_has_bounded_burst_and_idle_budgets() {
-        assert_eq!(WORKER_EMPTY_QUEUE_GRACE, Duration::from_secs(15));
-        assert_eq!(WORKER_RUNTIME_BUDGET, Duration::from_secs(100));
-        assert_eq!(MIN_NEXT_JOB_BUDGET, Duration::from_secs(26));
+    fn one_headless_worker_has_one_hard_classification_budget() {
+        assert_eq!(WORKER_EMPTY_QUEUE_GRACE, Duration::from_millis(500));
+        assert_eq!(CLASSIFICATION_BUDGET, Duration::from_secs(8));
         assert_eq!(EMPTY_QUEUE_POLL_INTERVAL, Duration::from_millis(250));
         assert_eq!(MAX_CLAIM_AGE_MS, 14_000);
+        assert_eq!(MIN_START_BUDGET_MS, 6_000);
         assert_eq!(WORKER_START_ATTESTATION_GRACE, Duration::from_millis(200));
-        assert!(MIN_NEXT_JOB_BUDGET < WORKER_RUNTIME_BUDGET);
-        assert!(WORKER_EMPTY_QUEUE_GRACE < MIN_NEXT_JOB_BUDGET);
+        assert!(WORKER_EMPTY_QUEUE_GRACE < CLASSIFICATION_BUDGET);
+    }
+
+    #[test]
+    fn route_preflight_claim_is_exact_owned_geph_and_eight_seconds() {
+        let now = unix_now_ms().expect("clock");
+        let valid = route_preflight_job(now);
+        assert!(validate_route_preflight_job(&valid).is_ok());
+        assert!(claimed_job_has_start_budget(
+            &ClaimedProbeJob::RoutePreflight(valid.clone()),
+            now,
+        ));
+        assert_eq!(
+            claimed_job_remaining_budget_ms(
+                &ClaimedProbeJob::RoutePreflight(valid.clone()),
+                now + 3_000,
+            ),
+            5_000,
+        );
+
+        let mut rebound = valid.clone();
+        rebound.candidate_routes = vec!["system".to_string()];
+        assert!(validate_route_preflight_job(&rebound).is_err());
+
+        let mut over_budget = valid;
+        over_budget.deadline_unix_ms += 1;
+        assert!(validate_route_preflight_job(&over_budget).is_err());
+    }
+
+    #[test]
+    fn usable_requires_document_and_main_frame_completion() {
+        assert!(!full_navigation_completed(
+            false,
+            Some("main"),
+            Some("main")
+        ));
+        assert!(!full_navigation_completed(true, None, Some("main")));
+        assert!(!full_navigation_completed(
+            true,
+            Some("subframe"),
+            Some("main"),
+        ));
+        assert!(full_navigation_completed(true, Some("main"), Some("main"),));
+    }
+
+    #[test]
+    fn root_process_is_distinct_from_same_binary_children() {
+        let executable = Path::new("/private/runtime/chrome-headless-shell");
+        let profile = Path::new("/private/tmp/probe");
+        assert_eq!(
+            chromium_process_role(
+                "/private/runtime/chrome-headless-shell --headless=new --user-data-dir=/private/tmp/probe about:blank",
+                executable,
+                profile,
+            ),
+            Some((true, true))
+        );
+        assert_eq!(
+            chromium_process_role(
+                "/private/runtime/chrome-headless-shell --type=renderer --user-data-dir=/private/tmp/probe",
+                executable,
+                profile,
+            ),
+            Some((false, true))
+        );
+        assert_eq!(
+            chromium_process_role(
+                "/private/runtime/chrome-headless-shell --type=gpu-process",
+                executable,
+                profile,
+            ),
+            Some((false, false))
+        );
+        assert_eq!(
+            chromium_process_role(
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=renderer",
+                executable,
+                profile,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn owned_process_fixture_has_one_root_and_all_process_group_children() {
+        let executable = Path::new("/private/runtime/chrome-headless-shell");
+        let profile = Path::new("/private/tmp/probe");
+        let listing = "\
+101 501 101 /private/runtime/chrome-headless-shell --headless=new --user-data-dir=/private/tmp/probe about:blank\n\
+102 501 101 /private/runtime/chrome-headless-shell --type=renderer\n\
+103 501 101 /private/runtime/Headless Helper --type=gpu-process\n\
+104 501 104 /private/runtime/chrome-headless-shell --type=renderer\n\
+105 502 101 /private/runtime/unrelated\n";
+        let mut groups = BTreeSet::new();
+        let owned =
+            owned_chrome_processes_from_listing(listing, 501, executable, profile, &mut groups);
+
+        assert_eq!(groups, BTreeSet::from([101]));
+        assert_eq!(
+            owned.iter().map(|process| process.pid).collect::<Vec<_>>(),
+            [101, 102, 103]
+        );
+        assert_eq!(owned.iter().filter(|process| process.is_root).count(), 1);
     }
 
     #[test]
@@ -1755,44 +2262,43 @@ mod tests {
             job: None,
         };
         assert!(submission_ends_launch(NavigationObservation::Pending, &accepted).unwrap());
-        assert!(submission_ends_launch(NavigationObservation::Complete, &accepted).unwrap());
-
-        assert!(submission_ends_launch(NavigationObservation::Failed, &accepted).unwrap());
+        assert!(submission_ends_launch(NavigationObservation::Usable, &accepted).unwrap());
+        assert!(submission_ends_launch(NavigationObservation::TerminalError, &accepted).unwrap());
     }
 
     #[test]
-    fn late_document_failure_confirms_pending_navigation() {
+    fn document_failure_is_terminal_instead_of_route_authority() {
         assert_eq!(
-            failed_navigation_observation(Some(MIN_PENDING_OBSERVATION)),
-            NavigationObservation::Pending
+            failed_navigation_observation(Some(Duration::from_secs(7))),
+            NavigationObservation::TerminalError
         );
         assert_eq!(
             document_event_observation(
                 "Network.loadingFailed",
                 Some("document-1"),
                 "document-1",
-                MIN_PENDING_OBSERVATION,
+                Duration::from_secs(7),
             ),
-            Some(NavigationObservation::Pending)
+            Some(NavigationObservation::TerminalError)
         );
     }
 
     #[test]
     fn response_headers_are_not_completion_but_finish_and_fast_failure_are_terminal() {
         assert_eq!(
-            failed_navigation_observation(Some(MIN_PENDING_OBSERVATION - Duration::from_millis(1))),
-            NavigationObservation::Failed
+            failed_navigation_observation(Some(Duration::from_secs(3))),
+            NavigationObservation::TerminalError
         );
         assert_eq!(
             failed_navigation_observation(None),
-            NavigationObservation::Failed
+            NavigationObservation::TerminalError
         );
         assert_eq!(
             document_event_observation(
                 "Network.responseReceived",
                 Some("document-1"),
                 "document-1",
-                MIN_PENDING_OBSERVATION,
+                Duration::from_secs(7),
             ),
             None
         );
@@ -1801,19 +2307,49 @@ mod tests {
                 "Network.loadingFinished",
                 Some("document-1"),
                 "document-1",
-                MIN_PENDING_OBSERVATION,
+                Duration::from_secs(7),
             ),
-            Some(NavigationObservation::Complete)
+            Some(NavigationObservation::Usable)
         );
         assert_eq!(
             document_event_observation(
                 "Network.loadingFailed",
                 Some("other-document"),
                 "document-1",
-                MIN_PENDING_OBSERVATION,
+                Duration::from_secs(7),
             ),
             None
         );
+    }
+
+    #[test]
+    fn dom_classifier_emits_only_route_preflight_outcomes() {
+        for (category, expected) in [
+            (
+                OUTCOME_REGIONAL_DENIAL,
+                NavigationObservation::RegionalAccessDenied,
+            ),
+            (OUTCOME_EDGE_DENIAL, NavigationObservation::EdgeAccessDenied),
+            (
+                OUTCOME_CHALLENGE_OR_AUTH,
+                NavigationObservation::ChallengeOrAuth,
+            ),
+            (OUTCOME_USABLE, NavigationObservation::Usable),
+        ] {
+            let event = json!({
+                "id": DOM_CLASSIFICATION_COMMAND_ID,
+                "result": {"result": {"value": category}}
+            });
+            assert_eq!(classified_dom_observation(&event).unwrap(), expected);
+        }
+        assert!(classified_dom_observation(&json!({
+            "id": DOM_CLASSIFICATION_COMMAND_ID,
+            "result": {"result": {"value": "navigation_complete"}}
+        }))
+        .is_err());
+        assert!(!DOM_CLASSIFIER.contains("chrome.runtime.sendMessage"));
+        assert!(!DOM_CLASSIFIER.contains("location.href"));
+        assert!(!DOM_CLASSIFIER.contains("document.cookie"));
     }
 
     #[test]
@@ -1950,20 +2486,21 @@ mod tests {
     fn production_arguments_keep_the_sandbox_and_private_profile() {
         let config = ChromeConfig {
             executable: PathBuf::from(
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell",
             ),
-            source_bundle: PathBuf::from("/Applications/Google Chrome.app"),
-            application_bundle: PathBuf::from("/Applications/Google Chrome.app"),
             target_url: "https://unknown.example/".to_string(),
             host_resolver_rules: None,
             ignore_certificate_errors: false,
+            proxy_server: None,
         };
         let arguments = config.chrome_arguments(Path::new("/private/tmp/probe"));
         let arguments: Vec<String> = arguments
             .iter()
             .map(|argument| argument.to_string_lossy().to_string())
             .collect();
-        assert!(!arguments.contains(&"--headless".to_string()));
+        assert!(arguments.contains(&"--headless=new".to_string()));
+        assert!(arguments.contains(&"--hide-scrollbars".to_string()));
+        assert!(arguments.contains(&"--mute-audio".to_string()));
         assert!(arguments.contains(&"--disable-extensions".to_string()));
         assert!(arguments.contains(&"--disable-quic".to_string()));
         assert!(arguments.contains(&"--user-data-dir=/private/tmp/probe".to_string()));
@@ -1974,16 +2511,141 @@ mod tests {
     }
 
     #[test]
-    fn production_chrome_identity_requires_google_bundle_and_team() {
-        assert!(google_chrome_identity(
-            "Identifier=com.google.Chrome\nTeamIdentifier=EQHXZ8M8AV\n"
+    fn launcher_cleanup_reaps_a_live_child_inside_one_bounded_wait() {
+        let mut child = Command::new("/bin/sleep").arg("5").spawn().unwrap();
+        let started = Instant::now();
+
+        assert!(terminate_child_bounded(&mut child, Duration::from_secs(1)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn signature_command_timeout_reaps_without_an_unbounded_wait() {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("5");
+        let started = Instant::now();
+        let failure =
+            command_succeeds_before(&mut command, Instant::now() + Duration::from_millis(20))
+                .unwrap_err();
+
+        assert_eq!(failure.0, "classification_deadline_exceeded");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn owned_geph_candidate_uses_only_the_loopback_socks_proxy() {
+        let config = ChromeConfig {
+            executable: PathBuf::from(
+                "/Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell",
+            ),
+            target_url: "https://unknown.example/".to_string(),
+            host_resolver_rules: None,
+            ignore_certificate_errors: false,
+            proxy_server: Some("socks5://127.0.0.1:9954".to_string()),
+        };
+        let arguments: Vec<String> = config
+            .chrome_arguments(Path::new("/private/tmp/probe"))
+            .iter()
+            .map(|argument| argument.to_string_lossy().to_string())
+            .collect();
+        assert!(arguments.contains(&"--proxy-server=socks5://127.0.0.1:9954".to_string()));
+        assert!(!arguments.contains(&"--no-proxy-server".to_string()));
+        assert!(!arguments.iter().any(|argument| argument == "--no-sandbox"));
+    }
+
+    #[test]
+    fn production_runtime_is_bundle_pinned_and_does_not_search_installed_browsers() {
+        let runtime = Path::new("/Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell");
+        assert_eq!(
+            runtime.file_name(),
+            Some(OsStr::new("chrome-headless-shell"))
+        );
+        assert_eq!(
+            runtime.parent().unwrap().file_name(),
+            Some(OsStr::new("chromium-headless-shell"))
+        );
+        assert_eq!(PINNED_HEADLESS_RUNTIME_VERSION, "151.0.7922.77");
+    }
+
+    #[test]
+    fn production_runtime_accepts_only_the_non_gui_helper_layout() {
+        let helper = Path::new("/Applications/Slipstream.app/Contents/MacOS/")
+            .join("slipstream-browser-probe");
+        assert_eq!(
+            pinned_headless_runtime_for_helper(&helper),
+            Some(
+                PathBuf::from("/Applications/Slipstream.app/Contents/Resources/")
+                    .join("chromium-headless-shell/chrome-headless-shell")
+            ),
+        );
+        assert_eq!(
+            pinned_headless_runtime_for_helper(Path::new(
+                "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+            )),
+            None,
+        );
+        assert_eq!(
+            pinned_headless_runtime_for_helper(
+                Path::new("/Applications/Slipstream.app/Contents/Resources/")
+                    .join("slipstream-browser-probe")
+                    .as_path()
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn production_runtime_rejects_manifest_digest_mismatch_before_codesign() {
+        let root = std::env::temp_dir().join(format!(
+            "slipstream-headless-digest-test-{}",
+            std::process::id()
         ));
-        assert!(!google_chrome_identity(
-            "Identifier=com.google.Chrome\nTeamIdentifier=OTHER\n"
+        let _ = fs::remove_dir_all(&root);
+        let executable = root
+            .join("Slipstream.app/Contents/Resources/chromium-headless-shell/")
+            .join("chrome-headless-shell");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"sealed runtime bytes").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let manifest = json!({
+            "schema_version": 1,
+            "version": PINNED_HEADLESS_RUNTIME_VERSION,
+            "platform": "mac-arm64",
+            "archive_sha256": PINNED_HEADLESS_RUNTIME_ARCHIVE_SHA256,
+            "executable_sha256": "0".repeat(64),
+        });
+        fs::write(
+            executable
+                .parent()
+                .unwrap()
+                .join(PINNED_HEADLESS_RUNTIME_MANIFEST),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let failure = verify_pinned_headless_runtime_once(
+            &executable,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert_eq!(failure.0, "headless_runtime_digest_invalid");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn runtime_digest_stream_obeys_the_absolute_deadline() {
+        let path = std::env::temp_dir().join(format!(
+            "slipstream-headless-digest-deadline-test-{}",
+            std::process::id()
         ));
-        assert!(!google_chrome_identity(
-            "Identifier=com.google.Chrome.canary\nTeamIdentifier=EQHXZ8M8AV\n"
-        ));
+        fs::write(&path, b"runtime").unwrap();
+        let metadata = fs::symlink_metadata(&path).unwrap();
+        let failure =
+            sha256_regular_file_before(&path, &metadata, Instant::now() - Duration::from_millis(1))
+                .unwrap_err();
+        assert_eq!(failure.0, "classification_deadline_exceeded");
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -1992,12 +2654,14 @@ mod tests {
             "slipstream-extensionless-chrome-test-{}",
             std::process::id()
         ));
-        let executable = root.join("Contents/MacOS/Google Chrome for Testing");
+        let executable = root.join("Probe.app/Contents/MacOS/Google Chrome for Testing");
         fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        fs::write(root.join("Contents/Info.plist"), b"plist").unwrap();
+        fs::write(root.join("Probe.app/Contents/Info.plist"), b"plist").unwrap();
         fs::write(&executable, b"chrome").unwrap();
-        assert_eq!(chrome_source_bundle(&executable, false).unwrap(), root);
-        assert!(chrome_source_bundle(&executable, true).is_err());
+        assert_eq!(
+            chrome_source_bundle(&executable).unwrap(),
+            root.join("Probe.app")
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

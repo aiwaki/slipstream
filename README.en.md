@@ -2,11 +2,23 @@
 
 <div align="center">
 
+<img src="app-tauri/src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Slipstream app icon">
+
 [Русский](README.md) · **English**
 
 [![preview](https://img.shields.io/badge/preview-macOS%20Apple%20Silicon-000000?logo=apple)](#install)
 [![ci](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+</div>
+
+<div align="center">
+
+## Install Slipstream — sites work
+
+**Fast. Automatic. Invisible.**
+
+[Download the current macOS Apple Silicon preview](https://github.com/aiwaki/slipstream/releases)
 
 </div>
 
@@ -44,16 +56,23 @@ becomes a general VPN fallback.
 - When a reviewed foreign-exit site attempts HTTP/3, only that flow is moved to
   the same managed TCP route through bundled Geph. Other QUIC/UDP traffic is not
   blocked.
-- A rare stuck navigation can be checked through installed Google Chrome in a
-  hidden local observation with a fresh private profile. It needs no extension,
-  headless service, or Chrome Web Store registration and sends no URL, path,
-  cookies, or page content elsewhere.
+- The next candidate includes a pinned local headless engine that checks rare
+  ambiguous failures only for one exact host and only after a foreground Safari
+  or Chrome navigation is verified. Known and healthy routes never start it;
+  the candidate can be published only after packaged, live-site, and measured
+  30-minute invisibility gates. It needs no installed Chrome, extension, or
+  Chrome Web Store registration, opens no window, and sends no paths, cookies,
+  or page content elsewhere.
 - With a full-tunnel VPN or another transparent filter active, Slipstream safely
   pauses its own interception and returns after the conflict disappears.
   External DNS, proxy, PAC, and VPN settings are detected but never changed.
 - The menu reports routing, Geph, and Telegram state; it can restart the service,
   copy redacted diagnostics, check for updates, and completely remove components
   owned by Slipstream.
+- Slipstream checks its signed update channel automatically and announces a new
+  version with a native notification. Installation starts only after the menu
+  action is chosen; the current app is backed up locally and restored if the
+  successor does not become healthy.
 
 ### Install
 

@@ -12,6 +12,7 @@ pub mod route_circuit_registry;
 pub mod route_policy_activation;
 pub mod route_policy_bundle;
 pub mod route_policy_manifest;
+pub mod route_preflight;
 pub mod routing_policy;
 pub mod routing_recovery;
 pub mod semantic_route_signal;

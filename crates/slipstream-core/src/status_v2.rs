@@ -8,6 +8,26 @@ pub const STATUS_SCHEMA_V2: u64 = 2;
 
 type ExtraFields = BTreeMap<String, Value>;
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonPhaseV2 {
+    Starting,
+    Active,
+    Recovering,
+    Stopping,
+}
+
+impl DaemonPhaseV2 {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Active => "active",
+            Self::Recovering => "recovering",
+            Self::Stopping => "stopping",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct DaemonStatusV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,6 +38,21 @@ pub struct DaemonStatusV2 {
     pub pid: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<f64>,
+    /// Wall-clock publication time for the lightweight daemon heartbeat.
+    ///
+    /// This is intentionally separate from `updated_at`: health collection can
+    /// be slow while the daemon and its listener remain alive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_at: Option<String>,
+    /// Monotonic sequence published by the independent heartbeat loop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_seq: Option<u64>,
+    /// Wall-clock time at which the slower health payload was last refreshed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_updated_at: Option<String>,
+    /// Coarse lifecycle phase (`starting`, `active`, `recovering`, `stopping`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<DaemonPhaseV2>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connections: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

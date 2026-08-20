@@ -11,6 +11,13 @@ spike/build/
 spike/dist/
 spike/*.spec
 !spike/slipstreamd.spec
+spike/route-policy-keys.json
+
+# Packaged macOS resources are materialized from pinned source contracts in CI.
+app-tauri/src-tauri/slipstreamd/
+app-tauri/src-tauri/binaries/
+app-tauri/src-tauri/chromium-headless-shell/*
+!app-tauri/src-tauri/chromium-headless-shell/README.md
 
 .DS_Store
 **/.DS_Store
