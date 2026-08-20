@@ -4,7 +4,7 @@ version = "0.1.9-preview.23"
 description = "Slipstream — local DPI-bypass tray"
 authors = ["Slipstream"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.88"
 
 [lib]
 name = "slipstream_lib"
@@ -28,21 +28,21 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"        # sidecar: bundled geph5-client
-tauri-plugin-updater = "=2.9.0" # last Rust-1.77-compatible signed updater line
+tauri-plugin-updater = "=2.9.0" # exact-pinned for reproducible signed updater builds
 tauri-plugin-single-instance = "2"   # one tray icon, not three
 tauri-plugin-autostart = "2"    # real Launch-at-Login (LoginItem)
 tauri-plugin-notification = "2" # geph up/down + update toasts
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
-# Keep direct updater dependencies inside the declared Rust 1.77 floor. Exact
-# pins prevent a compatible-looking minor release from silently raising MSRV.
+# Keep security-sensitive updater dependencies exact-pinned so release
+# candidates cannot silently change archive or signature handling.
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "stream", "rustls-tls"] }
 notify-rust = "=4.12.0"
 base64 = "0.22"
 flate2 = "1"
 tar = "0.4"
-plist = "=1.7.0"
+plist = "=1.10.0"
 minisign-verify = "=0.2.5"
 sha2 = "0.10"
 signal-hook = "0.3"

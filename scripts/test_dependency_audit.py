@@ -187,6 +187,26 @@ class DependencyAuditTests(unittest.TestCase):
         path.write_text(json.dumps(policy), encoding="utf-8")
         return path
 
+    def _policy_with_reviewed_exception(self, root: Path) -> Path:
+        policy = dependency_audit.load_policy(POLICY_PATH)
+        policy["exceptions"] = [
+            {
+                "advisories": [
+                    "RUSTSEC-2026-0194",
+                    "RUSTSEC-2026-0195",
+                ],
+                "ecosystem": "crates.io",
+                "expires": "2026-08-31",
+                "id": "reviewed-test-exception",
+                "package": "quick-xml",
+                "reason": "Exercise exact reviewed-exception handling.",
+                "version": "0.39.4",
+            }
+        ]
+        path = root / "policy-with-reviewed-exception.json"
+        path.write_text(json.dumps(policy), encoding="utf-8")
+        return path
+
     def _chromium_result(self, *, vulnerabilities: list[dict] | None = None) -> dict:
         return osv_result(
             (
@@ -215,6 +235,7 @@ class DependencyAuditTests(unittest.TestCase):
     def test_reviewed_exception_and_informational_advisory_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            policy_path = self._policy_with_reviewed_exception(root)
             result = osv_result(
                 (
                     {
@@ -236,14 +257,16 @@ class DependencyAuditTests(unittest.TestCase):
                     [vulnerability("RUSTSEC-2025-0080", informational="unmaintained")],
                 ),
             )
-            report, sbom = self._build_report(root, result)
+            report, sbom = self._build_report(
+                root, result, policy_path=policy_path
+            )
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["summary"]["accepted_exception"], 2)
             self.assertEqual(report["summary"]["informational"], 1)
             summary = dependency_audit.validate_audit_report(
                 report,
-                policy_path=POLICY_PATH,
+                policy_path=policy_path,
                 sbom_path=sbom,
                 source_commit=SOURCE_COMMIT,
                 target=TARGET,
@@ -255,7 +278,7 @@ class DependencyAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exception package"):
                 dependency_audit.validate_audit_report(
                     tampered,
-                    policy_path=POLICY_PATH,
+                    policy_path=policy_path,
                     sbom_path=sbom,
                     source_commit=SOURCE_COMMIT,
                     target=TARGET,
@@ -414,7 +437,9 @@ class DependencyAuditTests(unittest.TestCase):
     def test_policy_rejects_overlapping_exceptions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            policy = dependency_audit.load_policy(POLICY_PATH)
+            policy = dependency_audit.load_policy(
+                self._policy_with_reviewed_exception(root)
+            )
             duplicate = copy.deepcopy(policy["exceptions"][0])
             duplicate["id"] = "overlapping-review"
             policy["exceptions"].append(duplicate)
@@ -436,15 +461,24 @@ class DependencyAuditTests(unittest.TestCase):
             )
         )
         with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy_path = self._policy_with_reviewed_exception(root)
             report, _ = self._build_report(
-                Path(tmp), result, evaluated_on=date(2026, 9, 1)
+                root,
+                result,
+                evaluated_on=date(2026, 9, 1),
+                policy_path=policy_path,
             )
             self.assertEqual(report["status"], "fail")
             self.assertEqual(report["findings"][0]["reason"], "expired_exception")
 
         result["results"][0]["packages"][0]["package"]["version"] = "0.39.5"
         with tempfile.TemporaryDirectory() as tmp:
-            report, _ = self._build_report(Path(tmp), result)
+            root = Path(tmp)
+            policy_path = self._policy_with_reviewed_exception(root)
+            report, _ = self._build_report(
+                root, result, policy_path=policy_path
+            )
             self.assertEqual(report["status"], "fail")
 
     def test_report_validation_rejects_input_or_count_tampering(self) -> None:

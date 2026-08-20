@@ -13,10 +13,12 @@ file.
 Update 2026-08-20: draft PR
 [#343](https://github.com/aiwaki/slipstream/pull/343) remains on
 `codex/p0-macos-reliability`. Its last pushed head `4ee7947b` passed every
-required PR check, including packaged lifecycle/browser, dependency, Windows,
-and aggregate contexts. The current local tree is newer and intentionally
-uncommitted while the final updater and documentation batch is qualified; the
-old green run is therefore historical evidence, not approval of this tree.
+required PR check. Pushed head `c44dc447` then passed the app build, packaged
+lifecycle/browser, product and Windows gates, but the freshly updated advisory
+database blocked `quick-xml 0.32.0` in the app and `h2 0.3.27`/`0.4.15` in the
+immutable Geph r1 graph. The current local tree fixes the app dependency and
+records the narrow Geph transition policy; neither earlier green run approves
+this newer tree.
 
 The local tree now identifies the app and release as
 `0.1.9-preview.23` / `v0.1.9-preview.23`. It adds bounded background preview
@@ -52,6 +54,16 @@ The app and helpers pass strict local ad-hoc signature checks; both helpers
 link only `libiconv` and `libSystem`, never AppKit, Cocoa, or WebKit. This local
 package is not a release candidate and was neither installed nor published.
 
+The app now declares the honest Rust `1.88` floor and resolves `plist 1.10.0`
+to patched `quick-xml 0.41.0`; its exact macOS ARM OSV 2.3.8 scan covers `362`
+packages with `0` blockers and `0` vulnerability exceptions. Geph r1 still has
+the low-severity empty-DATA-frame advisory in `h2 0.3.27` and `0.4.15`. The
+unmaintained Hyper 0.14 / h2 0.3 branch has no fixed release and is accepted as
+an exact expiring availability risk. The readily fixed h2 0.4 finding has only
+a seven-day merge bridge: `.23` publication is explicitly blocked until a
+reviewed `geph-vendor-0.3.0-r2` replaces `0.4.15` with `0.4.16`, passes its own
+full audit, and is consumed by the exact release candidate.
+
 One pre-fix updater fault test called the production relaunch effect on its
 temporary `Slipstream.app`; macOS associated that direct executable with the
 fake bundle and displayed a misleading “damaged” dialog. Unified logging bound
@@ -62,14 +74,16 @@ without executing an app, a static regression forbids any test-section
 `spawn_bundle`, and the post-fix full Rust run produced zero new Gatekeeper or
 CoreServicesUIAgent Slipstream records.
 
-The next verified action is to commit and push this exact tree, pass every new
-PR check, merge it unchanged, then require the exact-main production-signed
-candidate, packaged notification qualification, protected owned-Geph proof,
-Safari/Chrome live-site matrix, transport mechanics, and measured 30-minute
-invisibility soak. Only that unchanged candidate may be published as
-`v0.1.9-preview.23`. A real public `.23 -> .24` notification/install/relaunch
-and forced rollback remains the release gate for `.24`; it cannot be honestly
-claimed before both public versions exist.
+The next verified action is to commit and push this dependency correction,
+pass every new PR check, and merge PR #343 unchanged. Immediately afterward,
+merge the reviewed Geph r2 source-contract/lock update, publish and attest r2,
+and require a new exact-main candidate that embeds it. That final candidate
+must pass production signing, packaged notification qualification, protected
+owned-Geph proof, Safari/Chrome live-site matrix, transport mechanics, and the
+measured 30-minute invisibility soak before `v0.1.9-preview.23` is published. A
+real public `.23 -> .24` notification/install/relaunch and forced rollback
+remains the release gate for `.24`; it cannot be honestly claimed before both
+public versions exist.
 
 ## Superseded 2026-08-13 P0 Checkpoint
 

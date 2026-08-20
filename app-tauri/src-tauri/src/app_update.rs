@@ -150,7 +150,7 @@ pub fn select_preview_release(
         };
         if selected
             .as_ref()
-            .map_or(true, |existing| candidate.version > existing.version)
+            .is_none_or(|existing| candidate.version > existing.version)
         {
             selected = Some(candidate);
         }
@@ -216,7 +216,7 @@ pub async fn discover_preview_release(current: &Version) -> Result<Option<Previe
         if let Some(candidate) = select_preview_release(current, &body)? {
             if selected
                 .as_ref()
-                .map_or(true, |existing| candidate.version > existing.version)
+                .is_none_or(|existing| candidate.version > existing.version)
             {
                 selected = Some(candidate);
             }

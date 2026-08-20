@@ -121,6 +121,16 @@ advisories and expired exceptions still block a later app release.
 `tg-ws-proxy` remains covered by its separate vendored-source review rather
 than a Rust dependency graph.
 
+An exception never changes an immutable Geph release in place. If a fix is
+lock-compatible, the reviewed lock digest and `release_revision` are bumped and
+a new `geph-vendor-X.Y.Z-rN` is built and attested after that change reaches
+`main`. The temporary h2 0.4.15 exception for Geph r1 exists only to let the P0
+source merge; it expires on 2026-08-27 and does not authorize publishing
+`v0.1.9-preview.23`. The release candidate must embed audited r2 with h2 0.4.16.
+The separate exact h2 0.3.27 exception documents the residual low-severity
+availability risk in Geph's Hyper 0.14 AWS client until upstream provides a
+fixed 0.3-compatible graph.
+
 ## Geph Dependency Artifacts
 
 | File | Purpose |

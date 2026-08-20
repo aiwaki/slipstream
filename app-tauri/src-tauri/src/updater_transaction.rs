@@ -1090,9 +1090,8 @@ fn successor_has_exited(
         return child_has_exited(child);
     }
     Ok(!process_exists(pid)
-        || process_snapshot(pid).map_or(true, |snapshot| {
-            !snapshot_matches_successor(&snapshot, journal)
-        }))
+        || process_snapshot(pid)
+            .is_none_or(|snapshot| !snapshot_matches_successor(&snapshot, journal)))
 }
 
 fn signal_exact_successor(journal: &UpdateJournalV1, signal: i32) -> Result<bool, String> {

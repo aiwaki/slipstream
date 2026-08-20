@@ -13,6 +13,30 @@
     },
     {
       "advisories": [
+        "GHSA-q83h-524g-xf6h",
+        "RUSTSEC-2026-0258"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-h2-0.3.27-upstream-hyper-014",
+      "package": "h2",
+      "reason": "The low-severity empty-DATA-frame denial of service is reachable in geph5-client's exact aws-config 1.5.4 / Hyper 0.14 client, but requires a malicious HTTP/2 peer. Slipstream fixes the AWS Lambda function and region, does not accept a user endpoint override, uses WebPKI TLS authentication, applies a 10-second operation timeout, and consumes the response payload. No fixed h2 0.3 release exists; this is accepted residual availability risk until upstream Geph moves the AWS connector off Hyper 0.14 / h2 0.3.",
+      "version": "0.3.27"
+    },
+    {
+      "advisories": [
+        "GHSA-q83h-524g-xf6h",
+        "RUSTSEC-2026-0258"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-08-27",
+      "id": "geph-h2-0.4.15-awaiting-vendor-r2",
+      "package": "h2",
+      "reason": "h2 0.4.16 is a verified lock-compatible fix, but changing the reviewed Geph lock requires a new immutable geph-vendor-0.3.0-r2 that can only be built after its source-contract change reaches main. This exception only permits the existing r1 artifact through the P0 merge; publishing Slipstream preview.23 remains blocked until r2 is built, audited with zero h2 0.4 finding, and consumed by the exact release candidate.",
+      "version": "0.4.15"
+    },
+    {
+      "advisories": [
         "CVE-2023-49092"
       ],
       "ecosystem": "crates.io",

@@ -889,7 +889,7 @@ fn command_matches_daemon(command: &str) -> bool {
 fn daemon_process_owned(user: &str, command: &str, executable: Option<&str>) -> bool {
     user == "root"
         && command_matches_daemon(command)
-        && executable.map_or(true, |path| path == INSTALLED_DAEMON)
+        && executable.is_none_or(|path| path == INSTALLED_DAEMON)
 }
 
 fn daemon_listener_owned() -> bool {

@@ -1,18 +1,5 @@
 {
-  "exceptions": [
-    {
-      "advisories": [
-        "RUSTSEC-2026-0194",
-        "RUSTSEC-2026-0195"
-      ],
-      "ecosystem": "crates.io",
-      "expires": "2026-08-31",
-      "id": "quick-xml-0.39.4-tauri-plist",
-      "package": "quick-xml",
-      "reason": "Tauri's plist dependency pins quick-xml 0.39.x. Slipstream does not parse network or user-supplied XML; replace the exception when plist permits quick-xml 0.41 or newer.",
-      "version": "0.39.4"
-    }
-  ],
+  "exceptions": [],
   "integrity_only": [
     {
       "expires": "2026-09-30",
