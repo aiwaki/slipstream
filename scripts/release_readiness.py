@@ -11,8 +11,8 @@ import make_release_sbom
 import release_candidate
 import release_transport_matrix
 
-
 SCHEMA_VERSION = 1
+LIVE_SITE_SCHEMA_VERSION = 2
 PROOF_NAME = "release-readiness.json"
 WORKFLOW = ".github/workflows/release-readiness.yml"
 REQUIRED_HOSTS = (
@@ -28,6 +28,18 @@ HOST_DEADLINES_MS = {
     "capacitorjs.com": 25_000,
 }
 REQUIRED_BROWSERS = ("chrome", "safari")
+TERMINAL_BROWSER_REASONS = frozenset(
+    {
+        "browser_observation_failed",
+        "document_invalid",
+        "document_too_short",
+        "navigation_denied",
+        "navigation_rejected",
+        "readiness_signals_invalid",
+        "readiness_timeout",
+        "session_unavailable",
+    }
+)
 MIN_SOAK_SECONDS = 1800
 SOAK_SAMPLE_INTERVAL_SECONDS = 0.5
 MAX_SOAK_SAMPLE_GAP_SECONDS = 2.0
@@ -66,7 +78,7 @@ def validate_live_report(report: dict, exit_status: int) -> str:
     }
     if set(report) != expected_keys:
         raise ValueError("live-site report fields are invalid")
-    if report.get("schema_version") != SCHEMA_VERSION:
+    if report.get("schema_version") != LIVE_SITE_SCHEMA_VERSION:
         raise ValueError("live-site report schema is invalid")
     if report.get("harness") != "safari_chrome_live_sites":
         raise ValueError("live-site harness identity is invalid")
@@ -103,6 +115,7 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                 "deadline_ms",
                 "elapsed_ms",
                 "outcome",
+                "reason",
                 "route",
             }:
                 raise ValueError("browser live-site result is invalid")
@@ -121,7 +134,9 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                 raise ValueError("browser live-site deadline evidence is invalid")
             if browser.get("route") != "slipstream_selected":
                 raise ValueError("browser live-site route is invalid")
-            if browser.get("outcome") not in {
+            outcome = browser.get("outcome")
+            reason = browser.get("reason")
+            if outcome not in {
                 "usable",
                 "regional_access_denied",
                 "edge_access_denied",
@@ -129,6 +144,17 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                 "terminal_error",
             }:
                 raise ValueError("browser live-site outcome is invalid")
+            expected_reason = {
+                "usable": "",
+                "regional_access_denied": "regional_access_denied",
+                "edge_access_denied": "edge_access_denied",
+                "challenge_or_auth": "challenge_or_auth",
+            }.get(outcome)
+            if outcome == "terminal_error":
+                if reason not in TERMINAL_BROWSER_REASONS:
+                    raise ValueError("browser terminal reason is invalid")
+            elif reason != expected_reason:
+                raise ValueError("browser live-site reason is invalid")
         if sorted(browser_names) != list(REQUIRED_BROWSERS):
             raise ValueError("live-site browsers are not the fixed Safari/Chrome pair")
         controls = site.get("controls")
@@ -138,9 +164,7 @@ def validate_live_report(report: dict, exit_status: int) -> str:
         }:
             raise ValueError("live-site control routes are invalid")
         site_result = site.get("result")
-        browser_usable = all(
-            browser.get("outcome") == "usable" for browser in browsers
-        )
+        browser_usable = all(browser.get("outcome") == "usable" for browser in browsers)
         if site_result == "usable":
             if not browser_usable or set(controls.values()) != {"not_needed"}:
                 raise ValueError("usable live-site result lacks two browser successes")
@@ -150,13 +174,18 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                     "inconclusive requires both independent control routes unavailable"
                 )
         elif site_result == "terminal_error":
-            if browser_usable or not set(controls.values()) <= {
-                "usable",
-                "denial",
-                "challenge",
-                "origin_error",
-                "unavailable",
-            } or set(controls.values()) == {"unavailable"}:
+            if (
+                browser_usable
+                or not set(controls.values())
+                <= {
+                    "usable",
+                    "denial",
+                    "challenge",
+                    "origin_error",
+                    "unavailable",
+                }
+                or set(controls.values()) == {"unavailable"}
+            ):
                 raise ValueError("terminal error has invalid control-route evidence")
         else:
             raise ValueError("live-site result is invalid")
@@ -166,9 +195,7 @@ def validate_live_report(report: dict, exit_status: int) -> str:
     derived = (
         "failed"
         if "terminal_error" in observed_results
-        else "inconclusive"
-        if "inconclusive" in observed_results
-        else "passed"
+        else "inconclusive" if "inconclusive" in observed_results else "passed"
     )
     if derived != result:
         raise ValueError("live-site aggregate result is invalid")
@@ -209,7 +236,9 @@ def validate_soak_report(report: dict, exit_status: int) -> str:
     counters = report.get("counters")
     if not isinstance(counters, dict) or set(counters) != set(ZERO_COUNTERS):
         raise ValueError("invisibility counters are incomplete")
-    zero = all(type(counters[name]) is int and counters[name] == 0 for name in ZERO_COUNTERS)
+    zero = all(
+        type(counters[name]) is int and counters[name] == 0 for name in ZERO_COUNTERS
+    )
     duration_ok = (
         type(requested) is int
         and requested >= MIN_SOAK_SECONDS
@@ -250,7 +279,15 @@ def build_proof(
     readiness_run_id: int,
     readiness_run_attempt: int,
 ) -> dict:
-    if min(candidate_run_id, candidate_run_attempt, readiness_run_id, readiness_run_attempt) <= 0:
+    if (
+        min(
+            candidate_run_id,
+            candidate_run_attempt,
+            readiness_run_id,
+            readiness_run_attempt,
+        )
+        <= 0
+    ):
         raise ValueError("readiness workflow identity must be positive")
     manifest = release_candidate._read_object(
         candidate_dir / release_candidate.MANIFEST_NAME, "candidate manifest"
@@ -286,8 +323,14 @@ def build_proof(
     )
     live_result = validate_live_report(live, live_exit_status)
     soak_result = validate_soak_report(soak, soak_exit_status)
-    result = "passed" if live_result == soak_result == "passed" else (
-        "inconclusive" if live_result == "inconclusive" and soak_result == "passed" else "failed"
+    result = (
+        "passed"
+        if live_result == soak_result == "passed"
+        else (
+            "inconclusive"
+            if live_result == "inconclusive" and soak_result == "passed"
+            else "failed"
+        )
     )
     manifest_sha256, _ = release_candidate.make_release_manifest.hash_regular_file(
         candidate_dir / release_candidate.MANIFEST_NAME

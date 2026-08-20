@@ -382,6 +382,17 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("scripts/live_site_release_smoke.py", readiness)
         self.assertIn("scripts/packaged_invisibility_soak.py", readiness)
         self.assertIn("--duration-seconds 1800", readiness)
+        self.assertIn(
+            "Require passed live-site matrix before the long soak", readiness
+        )
+        self.assertIn(
+            "Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}",
+            readiness,
+        )
+        self.assertLess(
+            readiness.index("Require passed live-site matrix before the long soak"),
+            readiness.index("Run measured 30-minute background invisibility soak"),
+        )
         self.assertIn("scripts/release_readiness.py create", readiness)
         self.assertIn("scripts/packaged_transport_mechanics_smoke.py", readiness)
         self.assertIn("dist-readiness/transport-mechanics.json", readiness)

@@ -94,11 +94,11 @@ def _snapshot(
 
 
 def test_launch_services_parser_distinguishes_uielement_from_dock_app() -> None:
-    listing = '''1) "Slipstream" ASN:0x0-0x1001:
+    listing = """1) "Slipstream" ASN:0x0-0x1001:
     bundleID="org.slipstream.slipstream"
     bundle path="/Applications/Slipstream.app"
     pid = 123 type="UIElement" flavor=3
-'''
+"""
     assert smoke._slipstream_launch_services_state(listing) == (True, False)
     assert smoke._slipstream_launch_services_entries(listing) == (
         smoke.LaunchServicesEntry(
@@ -121,6 +121,20 @@ def test_browser_process_snapshot_attributes_only_process_group_root() -> None:
         frozenset({731, 732}),
         frozenset({731}),
     )
+
+
+def test_coregraphics_visibility_ignores_menu_bar_and_overlay_layers() -> None:
+    assert smoke._is_visible_slipstream_window("Slipstream", 0)
+    assert smoke._is_visible_slipstream_window("Chromium", 0)
+    assert not smoke._is_visible_slipstream_window("Slipstream", 25)
+    assert not smoke._is_visible_slipstream_window("Window Server", 0)
+
+
+def test_coregraphics_snapshot_requests_only_onscreen_windows() -> None:
+    source = Path(smoke.__file__).read_text(encoding="utf-8")
+    call = "CGWindowListCopyWindowInfo(COREGRAPHICS_ON_SCREEN_ONLY, 0)"
+    assert call in source
+    assert 'b"kCGWindowLayer"' in source
 
 
 @pytest.mark.parametrize(
@@ -212,33 +226,39 @@ def test_hidden_launch_services_contract_accepts_quoted_lsasn_value() -> None:
         for event in events
     ]
 
-    assert smoke._assert_hidden_launch_services_events(
-        events,
-        expected_shell=EXPECTED_SHELL,
-        observed_root_pids=frozenset({731}),
-    ) == 3
+    assert (
+        smoke._assert_hidden_launch_services_events(
+            events,
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+        == 3
+    )
 
 
 def test_hidden_launch_services_contract_accepts_only_unique_asn_fallback() -> None:
     events = [
         _launch_event("kLSNotifyApplicationCreation").replace('"LSASN"=', ""),
-        _launch_event(
-            "kLSNotifyApplicationTypeChanged", include_path=False
-        ).replace('"LSASN"=', ""),
+        _launch_event("kLSNotifyApplicationTypeChanged", include_path=False).replace(
+            '"LSASN"=', ""
+        ),
         _launch_event("kLSNotifyApplicationDeath").replace('"LSASN"=', ""),
     ]
 
-    assert smoke._assert_hidden_launch_services_events(
-        events,
-        expected_shell=EXPECTED_SHELL,
-        observed_root_pids=frozenset({731}),
-    ) == 3
+    assert (
+        smoke._assert_hidden_launch_services_events(
+            events,
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+        == 3
+    )
 
 
 def test_hidden_launch_services_contract_rejects_ambiguous_asn_fallback() -> None:
     event = _launch_event("kLSNotifyApplicationCreation").replace(
         '"LSASN"=ASN:0x0-0x731731:',
-        'sourceASN=ASN:0x0-0x999999:',
+        "sourceASN=ASN:0x0-0x999999:",
     )
 
     with pytest.raises(
@@ -266,14 +286,19 @@ def test_hidden_launch_services_contract_accepts_unknown_single_asn_wrapper() ->
         for event in events
     ]
 
-    assert smoke._assert_hidden_launch_services_events(
-        events,
-        expected_shell=EXPECTED_SHELL,
-        observed_root_pids=frozenset({731}),
-    ) == 3
+    assert (
+        smoke._assert_hidden_launch_services_events(
+            events,
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+        == 3
+    )
 
 
-def test_hidden_launch_services_contract_accepts_owned_pid_when_lsasn_is_opaque() -> None:
+def test_hidden_launch_services_contract_accepts_owned_pid_when_lsasn_is_opaque() -> (
+    None
+):
     events = [
         _launch_event("kLSNotifyApplicationCreation"),
         _launch_event("kLSNotifyApplicationTypeChanged", include_path=False),
@@ -287,19 +312,22 @@ def test_hidden_launch_services_contract_accepts_owned_pid_when_lsasn_is_opaque(
         for event in events
     ]
 
-    assert smoke._assert_hidden_launch_services_events(
-        events,
-        expected_shell=EXPECTED_SHELL,
-        observed_root_pids=frozenset({731}),
-    ) == 3
+    assert (
+        smoke._assert_hidden_launch_services_events(
+            events,
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+        == 3
+    )
 
 
-def test_hidden_launch_services_contract_rejects_unowned_pid_with_opaque_lsasn() -> None:
+def test_hidden_launch_services_contract_rejects_unowned_pid_with_opaque_lsasn() -> (
+    None
+):
     events = [
         _launch_event("kLSNotifyApplicationCreation"),
-        _launch_event(
-            "kLSNotifyApplicationTypeChanged", pid=999, include_path=False
-        ),
+        _launch_event("kLSNotifyApplicationTypeChanged", pid=999, include_path=False),
         _launch_event("kLSNotifyApplicationDeath"),
     ]
     events = [

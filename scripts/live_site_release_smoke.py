@@ -18,8 +18,7 @@ import chromium_semantic_packaged_smoke as chromium
 import pf_anchor_smoke as pf
 import pf_installed_lifecycle_smoke as lifecycle
 
-
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SITES = {
     "xpersonatoy.com": {
         "deadline_ms": 20_000,
@@ -53,6 +52,18 @@ CHALLENGE_MARKERS = (
     "captcha",
     "just a moment",
     "cf-chl-",
+)
+TERMINAL_BROWSER_REASONS = frozenset(
+    {
+        "browser_observation_failed",
+        "document_invalid",
+        "document_too_short",
+        "navigation_denied",
+        "navigation_rejected",
+        "readiness_signals_invalid",
+        "readiness_timeout",
+        "session_unavailable",
+    }
 )
 
 
@@ -101,23 +112,35 @@ def _positive_readiness(host: str, signals: dict[str, object]) -> bool:
     return False
 
 
-def _classify_document(
+def _classify_document_evidence(
     host: str, document: str, signals: dict[str, object] | None = None
-) -> str:
+) -> tuple[str, str]:
     if len(document.encode("utf-8")) < MIN_DOCUMENT_BYTES:
-        return "terminal_error"
+        return "terminal_error", "document_too_short"
     lowered = document.casefold()
     if any(marker in lowered for marker in SITES[host]["denials"]):
         if host == "weather.com":
-            return "regional_access_denied"
+            return "regional_access_denied", "regional_access_denied"
         if host == "capacitorjs.com":
-            return "edge_access_denied"
-        return "terminal_error"
+            return "edge_access_denied", "edge_access_denied"
+        return "terminal_error", "navigation_denied"
     if any(marker in lowered for marker in CHALLENGE_MARKERS):
-        return "challenge_or_auth"
-    if signals is None or not _positive_readiness(host, signals):
-        return "terminal_error"
-    return "usable"
+        return "challenge_or_auth", "challenge_or_auth"
+    if signals is None:
+        return "terminal_error", "readiness_signals_invalid"
+    try:
+        ready = _positive_readiness(host, signals)
+    except (TypeError, ValueError):
+        return "terminal_error", "readiness_signals_invalid"
+    if not ready:
+        return "terminal_error", "readiness_timeout"
+    return "usable", ""
+
+
+def _classify_document(
+    host: str, document: str, signals: dict[str, object] | None = None
+) -> str:
+    return _classify_document_evidence(host, document, signals)[0]
 
 
 def _chrome_command(executable: Path, profile: Path) -> tuple[str, ...]:
@@ -181,6 +204,8 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     started = time.monotonic()
     finished = started
     outcome = "terminal_error"
+    reason = "session_unavailable"
+    failure_reason = reason
     failure: BaseException | None = None
     try:
         os.chown(profile, uid, gid)
@@ -207,11 +232,10 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             and item.get("type") == "page"
             and item.get("url") == "about:blank"
         ]
-        if len(pages) != 1 or not isinstance(
-            pages[0].get("webSocketDebuggerUrl"), str
-        ):
+        if len(pages) != 1 or not isinstance(pages[0].get("webSocketDebuggerUrl"), str):
             raise LiveSiteError("Chrome did not expose one clean page")
         debugger = pages[0]["webSocketDebuggerUrl"]
+        failure_reason = "navigation_rejected"
         navigation = chromium._devtools_command(
             debugger,
             port,
@@ -221,6 +245,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         )
         if navigation.get("errorText") not in (None, ""):
             raise LiveSiteError("Chrome rejected the HTTPS navigation")
+        failure_reason = "browser_observation_failed"
         deadline = started + SITES[host]["deadline_ms"] / 1000
         signals: dict[str, object] = {}
         document = ""
@@ -251,7 +276,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             value = html.get("value") if isinstance(html, dict) else None
             if isinstance(value, str):
                 document = value
-            outcome = _classify_document(host, document, signals)
+            outcome, reason = _classify_document_evidence(host, document, signals)
             # A static app shell reaches readyState=complete before its JS has
             # rendered a useful interface. Keep polling until a fixed positive
             # signal, denial/challenge, or the site deadline.
@@ -289,11 +314,13 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     elapsed_ms = round((finished - started) * 1000)
     if failure is not None:
         outcome = "terminal_error"
+        reason = failure_reason
     return {
         "browser": "chrome",
         "deadline_ms": SITES[host]["deadline_ms"],
         "elapsed_ms": elapsed_ms,
         "outcome": outcome,
+        "reason": reason,
         "route": "slipstream_selected",
     }
 
@@ -303,6 +330,8 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     safari_pid = None
     document = ""
     outcome = "terminal_error"
+    reason = "session_unavailable"
+    failure_reason = reason
     started = time.monotonic()
     finished = started
     failure: BaseException | None = None
@@ -342,6 +371,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             f"/session/{encoded}/cookie",
             timeout=5,
         )
+        failure_reason = "navigation_rejected"
         lifecycle._webdriver_request(
             driver_url,
             "POST",
@@ -349,6 +379,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             {"url": f"https://{host}/"},
             timeout=deadline / 1000 + 5,
         )
+        failure_reason = "browser_observation_failed"
         while time.monotonic() < absolute_deadline:
             remaining = max(0.1, absolute_deadline - time.monotonic())
             source = lifecycle._webdriver_request(
@@ -358,6 +389,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
                 timeout=min(2.0, remaining),
             ).get("value")
             if not isinstance(source, str):
+                failure_reason = "document_invalid"
                 raise LiveSiteError("SafariDriver returned a non-text document")
             document = source
             signals = lifecycle._webdriver_request(
@@ -368,8 +400,9 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
                 timeout=min(2.0, remaining),
             ).get("value")
             if not isinstance(signals, dict):
+                failure_reason = "readiness_signals_invalid"
                 raise LiveSiteError("Safari returned invalid readiness signals")
-            outcome = _classify_document(host, document, signals)
+            outcome, reason = _classify_document_evidence(host, document, signals)
             if outcome != "terminal_error":
                 break
             time.sleep(min(0.25, max(0.0, absolute_deadline - time.monotonic())))
@@ -398,11 +431,13 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     elapsed_ms = round((finished - started) * 1000)
     if failure is not None:
         outcome = "terminal_error"
+        reason = failure_reason
     return {
         "browser": "safari",
         "deadline_ms": SITES[host]["deadline_ms"],
         "elapsed_ms": elapsed_ms,
         "outcome": outcome,
+        "reason": reason,
         "route": "slipstream_selected",
     }
 
@@ -440,9 +475,7 @@ def _control_route(host: str, route: str) -> str:
     if not code.isdigit() or int(code) == 0:
         return "unavailable"
     lowered = body.decode("utf-8", errors="replace").casefold()
-    all_denials = tuple(
-        marker for site in SITES.values() for marker in site["denials"]
-    )
+    all_denials = tuple(marker for site in SITES.values() for marker in site["denials"])
     if any(marker in lowered for marker in all_denials):
         return "denial"
     if any(marker in lowered for marker in CHALLENGE_MARKERS) or int(code) in {
@@ -514,9 +547,7 @@ def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int
     finally:
         cleanup_failed = False
         try:
-            cleanup_failed = bool(
-                lifecycle._fallback_uninstall(system, runner, target)
-            )
+            cleanup_failed = bool(lifecycle._fallback_uninstall(system, runner, target))
         except BaseException:
             cleanup_failed = True
         try:
