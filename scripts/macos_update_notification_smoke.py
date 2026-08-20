@@ -6,12 +6,13 @@ to ordinary launches.  A disposable macOS runner mints an unlinked, root-owned
 capability file, passes its descriptor through a privilege-dropping exec, and
 binds it to the exact process, user, candidate tree, executable and deadline.
 
-The gate never reads notification content.  It observes only a new record
-count attributed by macOS to ``dev.slipstream.tray`` and samples CoreGraphics,
-LaunchServices, Dock classification and the frontmost application.  A native
-permission denial is reported separately from successful OS submission; the
-gate does not claim that macOS displayed a banner when notifications are
-disabled by the user or runner policy.
+The gate never reads notification content.  Its delivery authority is the
+bounded native result for one exact request identifier: macOS must report that
+identifier delivered and then confirm its removal before the hook exits.  A
+read-only notification-store snapshot is optional secondary diagnostics only.
+The gate also samples CoreGraphics, LaunchServices, Dock classification and
+the frontmost application.  A native permission denial is reported as a fixed
+failure and never satisfies release delivery qualification.
 """
 
 from __future__ import annotations
@@ -20,10 +21,12 @@ import argparse
 import ctypes
 import ctypes.util
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import plistlib
 import re
 import select
@@ -47,10 +50,11 @@ CAPABILITY_FD = 3
 CAPABILITY_MAX_BYTES = 16 * 1024
 CAPABILITY_MAX_LIFETIME_MS = 30_000
 INFO_PLIST_MAX_BYTES = 256 * 1024
+PRODUCER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024
 HOOK_TIMEOUT_SECONDS = 20.0
-OS_OBSERVATION_TIMEOUT_SECONDS = 8.0
 VISIBILITY_SAMPLE_SECONDS = 0.05
 LSAPPINFO = "/usr/bin/lsappinfo"
+GETCONF = "/usr/bin/getconf"
 LSREGISTER = (
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
     "LaunchServices.framework/Support/lsregister"
@@ -58,12 +62,28 @@ LSREGISTER = (
 PRIVILEGED_MODE = "--privileged-notification-capability-exec"
 HOOK_ARGUMENT = "--qualify-update-notification"
 HOOK_CAPABILITY_ENV = "SLIPSTREAM_UPDATE_NOTIFICATION_QUALIFICATION_FD"
-OUTCOMES = frozenset({"submitted", "terminal"})
+HOOK_SCHEMA_VERSION = 2
+REQUEST_IDENTIFIER_PREFIX = "slipstream.update.qualification."
+OUTCOMES = frozenset({"submitted", "permission_suppressed", "terminal"})
+PERMISSION_STATUSES = frozenset(
+    {
+        "allowed",
+        "provisional",
+        "denied",
+        "notification_center_disabled",
+        "not_determined",
+        "unknown",
+    }
+)
 TERMINAL_REASONS = frozenset(
     {
         "capability_invalid",
         "identity_unavailable",
+        "permission_unavailable",
+        "authorization_failed",
         "native_submission_failed",
+        "delivery_unobserved",
+        "cleanup_unconfirmed",
     }
 )
 GENERIC_FAILURE_CODE = "qualification_failed"
@@ -75,9 +95,12 @@ FAILURE_CODES = TERMINAL_REASONS | frozenset(
         INTERNAL_FAILURE_CODE,
         "hook_cleanup_failed",
         "hook_launch_failed",
+        "candidate_producer_invalid",
         "os_attribution_invalid",
         "os_attribution_missing",
         "os_observation_failed",
+        "os_observation_unavailable",
+        "permission_suppressed",
         "visibility_violation",
     }
 )
@@ -93,9 +116,10 @@ FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
     "kLSNotifyBecameFrontmost",
     "kLSNotifyBringForwardRequest",
 )
-USERNOTED_DB_RELATIVE = Path(
+MODERN_USERNOTED_DB_RELATIVE = Path(
     "Library/Group Containers/group.com.apple.usernoted/db2/db"
 )
+LEGACY_USERNOTED_DB_RELATIVE = Path("com.apple.notificationcenter/db2/db")
 
 
 class NotificationQualificationError(RuntimeError):
@@ -152,6 +176,15 @@ class CandidateIdentity:
     executable_sha256: str
     manifest_sha256: str
     candidate_id: str
+
+
+@dataclass(frozen=True)
+class CandidateProducerEvidence:
+    run_id: int
+    run_attempt: int
+    assemble_job_id: int
+    artifact_id: int
+    artifact_digest: str
 
 
 @dataclass(frozen=True)
@@ -262,6 +295,228 @@ def _require_disposable_macos_ci() -> None:
         raise NotificationQualificationError(
             "notification qualification requires disposable GitHub Actions"
         )
+
+
+def _producer_invalid(message: str) -> NotificationQualificationError:
+    return NotificationQualificationError(
+        message,
+        failure_code="candidate_producer_invalid",
+    )
+
+
+def _read_bounded_json_file(path: Path, *, label: str) -> dict:
+    try:
+        payload = _read_bounded_regular_file(path, PRODUCER_EVIDENCE_MAX_BYTES)
+
+        def unique_object(pairs: list[tuple[str, object]]) -> dict:
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate JSON field")
+                value[key] = item
+            return value
+
+        value = json.loads(payload, object_pairs_hook=unique_object)
+    except (NotificationQualificationError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise _producer_invalid(f"{label} is invalid") from exc
+    if not isinstance(value, dict):
+        raise _producer_invalid(f"{label} must be an object")
+    return value
+
+
+def _candidate_producer_attempt(
+    candidate_dir: Path,
+    *,
+    repository: str,
+    source_commit: str,
+    candidate_run_id: int,
+) -> int:
+    manifest = _read_bounded_json_file(
+        candidate_dir / release_candidate.MANIFEST_NAME,
+        label="candidate manifest selector",
+    )
+    source = manifest.get("source")
+    builder = manifest.get("builder")
+    if (
+        not isinstance(source, dict)
+        or source.get("repository") != repository
+        or source.get("commit") != source_commit
+        or not isinstance(builder, dict)
+        or set(builder) != {"workflow", "run_id", "run_attempt"}
+        or builder.get("workflow") != release_candidate.BUILD_WORKFLOW
+        or builder.get("run_id") != candidate_run_id
+        or type(builder.get("run_attempt")) is not int
+        or builder["run_attempt"] <= 0
+    ):
+        raise _producer_invalid("candidate producer selector is invalid")
+    return builder["run_attempt"]
+
+
+def _github_timestamp(value: object, *, label: str) -> datetime:
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+        value,
+    ):
+        raise _producer_invalid(f"{label} timestamp is invalid")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise _producer_invalid(f"{label} timestamp is invalid") from exc
+    if parsed.tzinfo != timezone.utc:
+        raise _producer_invalid(f"{label} timestamp is invalid")
+    return parsed
+
+
+def validate_candidate_producer_evidence(
+    *,
+    candidate_dir: Path,
+    repository: str,
+    source_commit: str,
+    candidate_run_id: int,
+    candidate_run_attempt: int,
+    qualification_run_attempt: int,
+    run_metadata_path: Path,
+    jobs_path: Path,
+    artifacts_path: Path,
+) -> CandidateProducerEvidence:
+    producer_attempt = _candidate_producer_attempt(
+        candidate_dir,
+        repository=repository,
+        source_commit=source_commit,
+        candidate_run_id=candidate_run_id,
+    )
+    if (
+        type(candidate_run_attempt) is not int
+        or candidate_run_attempt != producer_attempt
+        or type(qualification_run_attempt) is not int
+        or qualification_run_attempt < producer_attempt
+    ):
+        raise _producer_invalid("candidate producer attempt is invalid")
+
+    run = _read_bounded_json_file(run_metadata_path, label="workflow run evidence")
+    repository_value = run.get("repository")
+    head_repository = run.get("head_repository")
+    if (
+        type(run.get("id")) is not int
+        or run["id"] != candidate_run_id
+        or type(run.get("run_attempt")) is not int
+        or run["run_attempt"] != qualification_run_attempt
+        or run.get("head_sha") != source_commit
+        or run.get("head_branch") != "main"
+        or run.get("event") != "push"
+        or run.get("path") != release_candidate.BUILD_WORKFLOW
+        or run.get("status") not in {"in_progress", "completed"}
+        or not isinstance(repository_value, dict)
+        or repository_value.get("full_name") != repository
+        or type(repository_value.get("id")) is not int
+        or repository_value["id"] <= 0
+        or not isinstance(head_repository, dict)
+        or head_repository.get("full_name") != repository
+        or type(head_repository.get("id")) is not int
+        or head_repository["id"] != repository_value["id"]
+        or (
+            run.get("status") == "completed"
+            and run.get("conclusion") != "success"
+        )
+        or (
+            run.get("status") == "in_progress"
+            and run.get("conclusion") is not None
+        )
+    ):
+        raise _producer_invalid("workflow run evidence is invalid")
+
+    jobs_payload = _read_bounded_json_file(jobs_path, label="workflow jobs evidence")
+    jobs = jobs_payload.get("jobs")
+    if (
+        not isinstance(jobs, list)
+        or type(jobs_payload.get("total_count")) is not int
+        or jobs_payload["total_count"] != len(jobs)
+        or len(jobs) > 100
+    ):
+        raise _producer_invalid("workflow jobs evidence is incomplete")
+    assemble_jobs = [
+        job
+        for job in jobs
+        if isinstance(job, dict) and job.get("name") == "assemble-release-candidate"
+    ]
+    if len(assemble_jobs) != 1:
+        raise _producer_invalid("candidate producer job is not unique")
+    assemble_job = assemble_jobs[0]
+    if (
+        type(assemble_job.get("id")) is not int
+        or assemble_job["id"] <= 0
+        or type(assemble_job.get("run_id")) is not int
+        or assemble_job["run_id"] != candidate_run_id
+        or type(assemble_job.get("run_attempt")) is not int
+        or assemble_job["run_attempt"] != producer_attempt
+        or assemble_job.get("head_sha") != source_commit
+        or assemble_job.get("status") != "completed"
+        or assemble_job.get("conclusion") != "success"
+    ):
+        raise _producer_invalid("candidate producer job evidence is invalid")
+    job_started = _github_timestamp(
+        assemble_job.get("started_at"), label="candidate producer start"
+    )
+    job_completed = _github_timestamp(
+        assemble_job.get("completed_at"), label="candidate producer completion"
+    )
+    if job_completed < job_started:
+        raise _producer_invalid("candidate producer job timing is invalid")
+
+    artifacts_payload = _read_bounded_json_file(
+        artifacts_path,
+        label="workflow artifacts evidence",
+    )
+    artifacts = artifacts_payload.get("artifacts")
+    if (
+        not isinstance(artifacts, list)
+        or type(artifacts_payload.get("total_count")) is not int
+        or artifacts_payload["total_count"] != len(artifacts)
+        or len(artifacts) > 100
+    ):
+        raise _producer_invalid("workflow artifacts evidence is incomplete")
+    artifact_name = f"release-candidate-{source_commit}"
+    candidates = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("name") == artifact_name
+    ]
+    if len(candidates) != 1:
+        raise _producer_invalid("candidate artifact is not unique")
+    artifact = candidates[0]
+    workflow_run = artifact.get("workflow_run")
+    digest = artifact.get("digest")
+    if (
+        type(artifact.get("id")) is not int
+        or artifact["id"] <= 0
+        or type(artifact.get("size_in_bytes")) is not int
+        or artifact["size_in_bytes"] <= 0
+        or artifact.get("expired") is not False
+        or not isinstance(digest, str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+        or not isinstance(workflow_run, dict)
+        or type(workflow_run.get("id")) is not int
+        or workflow_run["id"] != candidate_run_id
+        or workflow_run.get("head_sha") != source_commit
+        or workflow_run.get("head_branch") != "main"
+        or type(workflow_run.get("repository_id")) is not int
+        or workflow_run["repository_id"] != repository_value["id"]
+        or type(workflow_run.get("head_repository_id")) is not int
+        or workflow_run["head_repository_id"] != head_repository["id"]
+    ):
+        raise _producer_invalid("candidate artifact evidence is invalid")
+    artifact_created = _github_timestamp(
+        artifact.get("created_at"), label="candidate artifact creation"
+    )
+    if not job_started <= artifact_created <= job_completed:
+        raise _producer_invalid("candidate artifact escaped its producer job")
+    return CandidateProducerEvidence(
+        run_id=candidate_run_id,
+        run_attempt=producer_attempt,
+        assemble_job_id=assemble_job["id"],
+        artifact_id=artifact["id"],
+        artifact_digest=digest,
+    )
 
 
 def _validate_packaged_bundle(app_bundle: Path) -> tuple[Path, dict]:
@@ -905,23 +1160,157 @@ class VisibilityMonitor:
         }
 
 
-def _notification_record_snapshot(home: Path) -> NotificationRecordSnapshot:
-    database = home / USERNOTED_DB_RELATIVE
+def _observation_unavailable(message: str) -> NotificationQualificationError:
+    return NotificationQualificationError(
+        message,
+        failure_code="os_observation_unavailable",
+    )
+
+
+def _macos_major_version() -> int:
+    version = platform.mac_ver()[0]
+    match = re.fullmatch(r"([0-9]+)(?:\.[0-9]+){1,2}", version)
+    if match is None:
+        raise _observation_unavailable("macOS version is unavailable")
+    major = int(match.group(1))
+    if major < 11:
+        raise _observation_unavailable("macOS version is unsupported")
+    return major
+
+
+def _legacy_notification_database() -> Path:
     try:
-        metadata = database.lstat()
-    except FileNotFoundError:
-        return NotificationRecordSnapshot(0, 0)
-    if database.is_symlink() or not stat.S_ISREG(metadata.st_mode):
-        raise NotificationQualificationError("usernoted database path is unsafe")
-    if metadata.st_uid != os.getuid():
-        raise NotificationQualificationError("usernoted database owner mismatch")
+        result = subprocess.run(
+            (GETCONF, "DARWIN_USER_DIR"),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _observation_unavailable(
+            "Darwin user directory is unavailable"
+        ) from exc
+    output = result.stdout
+    lines = output.splitlines()
+    if (
+        result.returncode != 0
+        or len(output.encode("utf-8")) > 4_096
+        or len(lines) != 1
+        or not lines[0].strip()
+    ):
+        raise _observation_unavailable("Darwin user directory is invalid")
+    directory = Path(lines[0].strip())
+    if not directory.is_absolute():
+        raise _observation_unavailable("Darwin user directory is invalid")
+    try:
+        directory = directory.resolve(strict=True)
+        metadata = directory.stat()
+    except OSError as exc:
+        raise _observation_unavailable(
+            "Darwin user directory is unavailable"
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
+        raise _observation_unavailable("Darwin user directory identity is invalid")
+    return directory / LEGACY_USERNOTED_DB_RELATIVE
+
+
+def _notification_database_path(home: Path) -> Path:
+    if _macos_major_version() >= 15:
+        return home / MODERN_USERNOTED_DB_RELATIVE
+    return _legacy_notification_database()
+
+
+def _database_identity(path: Path) -> os.stat_result:
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise _observation_unavailable(
+            "notification attribution store is unavailable"
+        ) from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink == 0
+        or before.st_uid != os.getuid()
+    ):
+        raise _observation_unavailable(
+            "notification attribution store identity is invalid"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise _observation_unavailable(
+            "notification attribution store is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or opened.st_nlink == 0
+        or opened.st_uid != os.getuid()
+        or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+    ):
+        raise _observation_unavailable(
+            "notification attribution store identity is invalid"
+        )
+    return before
+
+
+def _notification_record_snapshot(home: Path) -> NotificationRecordSnapshot:
+    requested_database = _notification_database_path(home)
+    requested_identity = _database_identity(requested_database)
+    try:
+        database = requested_database.resolve(strict=True)
+    except OSError as exc:
+        raise _observation_unavailable(
+            "notification attribution store is unavailable"
+        ) from exc
+    before = _database_identity(database)
+    if (before.st_dev, before.st_ino) != (
+        requested_identity.st_dev,
+        requested_identity.st_ino,
+    ):
+        raise _observation_unavailable(
+            "notification attribution store identity changed"
+        )
     try:
         connection = sqlite3.connect(
-            f"file:{database}?mode=ro",
+            f"{database.as_uri()}?mode=ro&nofollow=1",
             uri=True,
             timeout=0.5,
         )
         try:
+            connection.execute("PRAGMA query_only = ON")
+            query_only = connection.execute("PRAGMA query_only").fetchone()
+            attached = connection.execute("PRAGMA database_list").fetchall()
+            record_columns = {
+                value[1]
+                for value in connection.execute("PRAGMA table_info(record)")
+                if len(value) >= 2 and isinstance(value[1], str)
+            }
+            app_columns = {
+                value[1]
+                for value in connection.execute("PRAGMA table_info(app)")
+                if len(value) >= 2 and isinstance(value[1], str)
+            }
+            if (
+                query_only != (1,)
+                or len(attached) != 1
+                or len(attached[0]) != 3
+                or attached[0][1] != "main"
+                or Path(attached[0][2]) != database
+                or not {"rec_id", "app_id"}.issubset(record_columns)
+                or not {"app_id", "identifier"}.issubset(app_columns)
+            ):
+                raise _observation_unavailable(
+                    "notification attribution store schema is invalid"
+                )
             row = connection.execute(
                 """
                 SELECT COALESCE(MAX(record.rec_id), 0), COUNT(record.rec_id)
@@ -933,15 +1322,49 @@ def _notification_record_snapshot(home: Path) -> NotificationRecordSnapshot:
             ).fetchone()
         finally:
             connection.close()
-    except sqlite3.Error as exc:
-        raise NotificationQualificationError(
-            "usernoted attribution observation is unavailable"
+    except NotificationQualificationError:
+        raise
+    except (OSError, sqlite3.Error) as exc:
+        raise _observation_unavailable(
+            "notification attribution observation is unavailable"
         ) from exc
-    if row is None or len(row) != 2:
-        raise NotificationQualificationError(
-            "usernoted attribution observation is invalid"
+    after = _database_identity(database)
+    if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+        raise _observation_unavailable(
+            "notification attribution store identity changed"
         )
-    return NotificationRecordSnapshot(int(row[0]), int(row[1]))
+    if (
+        row is None
+        or len(row) != 2
+        or not all(isinstance(value, int) for value in row)
+        or row[0] < 0
+        or row[1] < 0
+        or (row[1] == 0 and row[0] != 0)
+    ):
+        raise _observation_unavailable(
+            "notification attribution observation is invalid"
+        )
+    return NotificationRecordSnapshot(row[0], row[1])
+
+
+def _optional_notification_record_snapshot(
+    home: Path,
+) -> tuple[NotificationRecordSnapshot | None, dict]:
+    try:
+        snapshot = _notification_record_snapshot(home)
+    except NotificationQualificationError as exc:
+        if exc.failure_code != "os_observation_unavailable":
+            raise
+        return None, {
+            "status": "unavailable",
+            "failure_code": "os_observation_unavailable",
+        }
+    return snapshot, {"status": "available", "failure_code": ""}
+
+
+def _request_identifier_sha256(capability_sha256: str) -> str:
+    identifier = f"{REQUEST_IDENTIFIER_PREFIX}{capability_sha256}"
+    return hashlib.sha256(identifier.encode("ascii")).hexdigest()
 
 
 def parse_hook_result(payload: str, *, capability_sha256: str) -> dict:
@@ -957,21 +1380,26 @@ def parse_hook_result(payload: str, *, capability_sha256: str) -> dict:
         raise NotificationQualificationError(
             "notification hook output must be an object"
         )
-    common = {
+    expected_keys = {
         "schema_version",
         "outcome",
         "identity",
         "capability_sha256",
+        "request_identifier_sha256",
+        "permission_status",
+        "delivered",
+        "removed",
+        "reason",
     }
     outcome = value.get("outcome")
-    expected_keys = common | (
-        {"reason"} if outcome == "terminal" else {"permission_status"}
-    )
     if set(value) != expected_keys:
         raise NotificationQualificationError(
             "notification hook output fields are invalid"
         )
-    if value.get("schema_version") != SCHEMA_VERSION:
+    if (
+        type(value.get("schema_version")) is not int
+        or value["schema_version"] != HOOK_SCHEMA_VERSION
+    ):
         raise NotificationQualificationError(
             "notification hook schema is invalid"
         )
@@ -983,22 +1411,102 @@ def parse_hook_result(payload: str, *, capability_sha256: str) -> dict:
         raise NotificationQualificationError(
             "notification hook identity is invalid"
         )
-    if value.get("capability_sha256") != capability_sha256:
+    if (
+        not isinstance(value.get("permission_status"), str)
+        or value["permission_status"] not in PERMISSION_STATUSES
+        or type(value.get("delivered")) is not bool
+        or type(value.get("removed")) is not bool
+        or not isinstance(value.get("reason"), str)
+        or not isinstance(value.get("capability_sha256"), str)
+        or not isinstance(value.get("request_identifier_sha256"), str)
+    ):
+        raise NotificationQualificationError(
+            "notification hook field types are invalid"
+        )
+    capability_invalid = (
+        outcome == "terminal" and value["reason"] == "capability_invalid"
+    )
+    if capability_invalid:
+        if (
+            value["capability_sha256"] != ""
+            or value["request_identifier_sha256"] != ""
+            or value["permission_status"] != "unknown"
+            or value["delivered"]
+            or value["removed"]
+        ):
+            raise NotificationQualificationError(
+                "invalid capability outcome is inconsistent"
+            )
+    elif (
+        not HEX_64.fullmatch(capability_sha256)
+        or value["capability_sha256"] != capability_sha256
+        or value["request_identifier_sha256"]
+        != _request_identifier_sha256(capability_sha256)
+    ):
         raise NotificationQualificationError(
             "notification hook capability binding failed"
         )
-    if outcome == "terminal" and value.get("reason") not in TERMINAL_REASONS:
+    if value["removed"] and not value["delivered"]:
         raise NotificationQualificationError(
-            "notification hook terminal reason is invalid"
+            "notification hook delivery state is invalid"
         )
-    if outcome != "terminal" and value.get("permission_status") not in {
-        "allowed",
-        "suppressed",
-        "unknown",
-    }:
-        raise NotificationQualificationError(
-            "notification hook permission status is invalid"
-        )
+    if outcome == "terminal":
+        if value["reason"] not in TERMINAL_REASONS:
+            raise NotificationQualificationError(
+                "notification hook terminal reason is invalid"
+            )
+        terminal_states = {
+            "capability_invalid": ({"unknown"}, False, False),
+            "identity_unavailable": ({"unknown"}, False, False),
+            "permission_unavailable": ({"unknown"}, False, False),
+            "authorization_failed": ({"not_determined"}, False, False),
+            "native_submission_failed": (
+                {"allowed", "provisional"},
+                False,
+                False,
+            ),
+            "delivery_unobserved": (
+                {"allowed", "provisional"},
+                False,
+                False,
+            ),
+            "cleanup_unconfirmed": (
+                {"allowed", "provisional"},
+                True,
+                False,
+            ),
+        }
+        permissions, delivered, removed = terminal_states[value["reason"]]
+        if (
+            value["permission_status"] not in permissions
+            or value["delivered"] is not delivered
+            or value["removed"] is not removed
+        ):
+            raise NotificationQualificationError(
+                "notification hook terminal state is inconsistent"
+            )
+    else:
+        if value["reason"] != "":
+            raise NotificationQualificationError(
+                "notification hook nonterminal reason is invalid"
+            )
+        if outcome == "submitted" and (
+            value["permission_status"] not in {"allowed", "provisional"}
+            or not value["delivered"]
+            or not value["removed"]
+        ):
+            raise NotificationQualificationError(
+                "submitted notification proof is incomplete"
+            )
+        if outcome == "permission_suppressed" and (
+            value["permission_status"]
+            not in {"denied", "notification_center_disabled"}
+            or value["delivered"]
+            or value["removed"]
+        ):
+            raise NotificationQualificationError(
+                "suppressed notification outcome is inconsistent"
+            )
     return value
 
 
@@ -1018,28 +1526,24 @@ def _terminal_hook_failure(hook_result: dict) -> NotificationQualificationError:
 def classify_os_observation(
     *,
     hook_result: dict,
-    before: NotificationRecordSnapshot,
-    after: NotificationRecordSnapshot,
 ) -> str:
-    delta = after.record_count - before.record_count
-    new_record = (
-        delta == 1 and after.maximum_record_id > before.maximum_record_id
-    )
     outcome = hook_result["outcome"]
     if outcome == "terminal":
         raise _terminal_hook_failure(hook_result)
-    if delta < 0 or delta > 1:
+    if outcome == "permission_suppressed":
         raise NotificationQualificationError(
-            "notification attribution count changed unexpectedly",
-            failure_code="os_attribution_invalid",
+            "notification delivery is suppressed by system permission",
+            failure_code="permission_suppressed",
         )
-    if new_record:
+    if (
+        outcome == "submitted"
+        and hook_result["delivered"]
+        and hook_result["removed"]
+    ):
         return "submitted"
-    if outcome == "submitted" and hook_result.get("permission_status") == "suppressed":
-        return "permission_suppressed"
     raise NotificationQualificationError(
-        "macOS did not record exactly one attributed notification",
-        failure_code="os_attribution_missing",
+        "native notification hook did not prove delivery and cleanup",
+        failure_code="os_observation_failed",
     )
 
 
@@ -1170,21 +1674,37 @@ def run_gate(
     source_commit: str,
     candidate_run_id: int,
     candidate_run_attempt: int,
+    qualification_run_attempt: int,
+    run_metadata_path: Path,
+    jobs_path: Path,
+    artifacts_path: Path,
 ) -> dict:
     _require_disposable_macos_ci()
+    producer = validate_candidate_producer_evidence(
+        candidate_dir=candidate_dir,
+        repository=repository,
+        source_commit=source_commit,
+        candidate_run_id=candidate_run_id,
+        candidate_run_attempt=candidate_run_attempt,
+        qualification_run_attempt=qualification_run_attempt,
+        run_metadata_path=run_metadata_path,
+        jobs_path=jobs_path,
+        artifacts_path=artifacts_path,
+    )
     identity = _validated_candidate_identity(
         candidate_dir=candidate_dir,
         app_bundle=app_bundle,
         repository=repository,
         source_commit=source_commit,
         candidate_run_id=candidate_run_id,
-        candidate_run_attempt=candidate_run_attempt,
+        candidate_run_attempt=producer.run_attempt,
     )
     try:
         _set_launch_services_registration(identity.app_bundle, register=True)
         home = Path.home().resolve(strict=True)
         uid = os.getuid()
         gid = os.getgid()
+        before, store_diagnostic = _optional_notification_record_snapshot(home)
         nonce = os.urandom(32).hex()
         template = build_capability_template(
             identity,
@@ -1194,7 +1714,6 @@ def run_gate(
             nonce=nonce,
             issued_at_unix_ms=time.time_ns() // 1_000_000,
         )
-        before = _notification_record_snapshot(home)
         monitor = VisibilityMonitor(
             app_bundle=identity.app_bundle,
             executable=identity.executable,
@@ -1202,17 +1721,17 @@ def run_gate(
         monitor.start()
         failure: BaseException | None = None
         hook_result: dict | None = None
-        after_records = before
+        after_records: NotificationRecordSnapshot | None = None
+        outcome: str | None = None
         try:
             hook_result, _ = _launch_hook(template=template, monitor=monitor)
-            if hook_result["outcome"] == "terminal":
-                raise _terminal_hook_failure(hook_result)
-            deadline = time.monotonic() + OS_OBSERVATION_TIMEOUT_SECONDS
-            while time.monotonic() < deadline:
-                after_records = _notification_record_snapshot(home)
-                if after_records.record_count - before.record_count == 1:
-                    break
-                time.sleep(0.1)
+            outcome = classify_os_observation(hook_result=hook_result)
+            if before is not None:
+                after_records, after_diagnostic = (
+                    _optional_notification_record_snapshot(home)
+                )
+                if after_records is None:
+                    store_diagnostic = after_diagnostic
         except BaseException as exc:
             failure = _with_failure_code(
                 exc,
@@ -1237,27 +1756,52 @@ def run_gate(
                 "notification hook produced no result",
                 failure_code="hook_launch_failed",
             )
-        outcome = classify_os_observation(
-            hook_result=hook_result,
-            before=before,
-            after=after_records,
-        )
+        if outcome is None:
+            raise NotificationQualificationError(
+                "notification hook produced no qualified outcome",
+                failure_code="os_observation_failed",
+            )
     finally:
         _set_launch_services_registration(identity.app_bundle, register=False)
+    record_delta = None
+    maximum_record_id_advanced = None
+    if before is not None and after_records is not None:
+        record_delta = after_records.record_count - before.record_count
+        maximum_record_id_advanced = (
+            after_records.maximum_record_id > before.maximum_record_id
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "candidate_id": identity.candidate_id,
         "candidate_manifest_sha256": identity.manifest_sha256,
         "app_tree_sha256": identity.app_tree_sha256,
         "executable_sha256": identity.executable_sha256,
+        "candidate_producer": {
+            "run_id": producer.run_id,
+            "run_attempt": producer.run_attempt,
+            "assemble_job_id": producer.assemble_job_id,
+            "artifact_id": producer.artifact_id,
+            "artifact_digest": producer.artifact_digest,
+        },
+        "qualification": {
+            "run_id": candidate_run_id,
+            "run_attempt": qualification_run_attempt,
+        },
         "notification": {
             "identity": BUNDLE_IDENTIFIER,
             "outcome": outcome,
             "permission_status": hook_result["permission_status"],
             "capability_sha256": hook_result["capability_sha256"],
-            "os_attributed_record_delta": (
-                after_records.record_count - before.record_count
-            ),
+            "request_identifier_sha256": hook_result[
+                "request_identifier_sha256"
+            ],
+            "delivered": hook_result["delivered"],
+            "removed": hook_result["removed"],
+            "private_store": {
+                **store_diagnostic,
+                "record_delta": record_delta,
+                "maximum_record_id_advanced": maximum_record_id_advanced,
+            },
             "visible_display_claimed": False,
         },
         "visibility": visibility,
@@ -1284,6 +1828,10 @@ def _main() -> int:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--candidate-run-id", type=int, required=True)
     parser.add_argument("--candidate-run-attempt", type=int, required=True)
+    parser.add_argument("--qualification-run-attempt", type=int, required=True)
+    parser.add_argument("--candidate-run-metadata", type=Path, required=True)
+    parser.add_argument("--candidate-run-jobs", type=Path, required=True)
+    parser.add_argument("--candidate-run-artifacts", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -1294,6 +1842,10 @@ def _main() -> int:
             source_commit=args.source_commit,
             candidate_run_id=args.candidate_run_id,
             candidate_run_attempt=args.candidate_run_attempt,
+            qualification_run_attempt=args.qualification_run_attempt,
+            run_metadata_path=args.candidate_run_metadata,
+            jobs_path=args.candidate_run_jobs,
+            artifacts_path=args.candidate_run_artifacts,
         )
         release_candidate._write_json(args.output, report)
     except Exception as exc:

@@ -81,12 +81,21 @@ an immediate discovery when there is no cached offer.
 
 If the tray offers a version but no toast was shown, check System Settings →
 Notifications → Slipstream. macOS may suppress display when notifications are
-disabled or Focus is active. Slipstream records notification deduplication only
-after its bundle-bound native backend accepts the submission; it never
-impersonates Finder. An identity-initialization failure disables toasts for the
-current process instead of silently retrying with the wrong application, and a
-later Slipstream launch may try again. The tray action stays available even if
-notification registration fails.
+disabled or Focus is active. On the first discovered update, a fresh installation
+requests only promptless provisional authorization: the notification can appear
+quietly in Notification Center without a banner. Slipstream never opens System
+Settings or shows the ordinary notification-permission prompt from background
+discovery. If permission was denied, the explicit tray offer remains available.
+
+Update alerts use `UNUserNotificationCenter` under the packaged
+`dev.slipstream.tray` identity. Slipstream records notification deduplication
+only after the bounded native submission succeeds; it never treats the legacy
+toast backend's return value as delivery evidence or impersonates Finder. The
+exact packaged gate goes further: it requires one capability-bound delivered
+request, removes exactly that test request, and proves zero Dock, window,
+activation, or frontmost-app change. The private `usernoted` database is only a
+version-specific secondary diagnostic and is not delivery authority. The tray
+action stays available when native notification delivery is unavailable.
 
 An installation failure leaves or restores the exact previous application and
 triggers a fresh channel check. The durable update watchdog keeps a verified
