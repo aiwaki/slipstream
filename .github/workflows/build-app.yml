@@ -20,6 +20,9 @@ on:
       release_candidate_run_id:
         description: "Optional successful ci.yml main run ID for this exact SHA."
         required: false
+      dependency_audit_run_id:
+        description: "Optional successful dependency-audit.yml main run ID for this exact SHA."
+        required: false
       qualification_run_id:
         description: "Optional successful protected qualification run ID for this exact SHA."
         required: false
@@ -137,16 +140,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_INPUT: ${{ github.event.inputs.release_candidate_run_id }}
+          DEPENDENCY_AUDIT_INPUT: ${{ github.event.inputs.dependency_audit_run_id }}
           QUALIFICATION_INPUT: ${{ github.event.inputs.qualification_run_id }}
           READINESS_INPUT: ${{ github.event.inputs.readiness_run_id }}
         run: |
           set -euo pipefail
           candidate_run="$CANDIDATE_INPUT"
+          dependency_audit_run="$DEPENDENCY_AUDIT_INPUT"
           qualification_run="$QUALIFICATION_INPUT"
           readiness_run="$READINESS_INPUT"
           if [ -z "$candidate_run" ]; then
             candidate_run="$(gh api --paginate \
               "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              | sed -n '1p')"
+          fi
+          if [ -z "$dependency_audit_run" ]; then
+            dependency_audit_run="$(gh api --paginate \
+              "repos/${{ github.repository }}/actions/workflows/dependency-audit.yml/runs?branch=main&event=push&status=completed&per_page=100" \
               --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
               | sed -n '1p')"
           fi
@@ -166,6 +177,10 @@ jobs:
             echo "missing successful ci.yml run for $GITHUB_SHA"
             exit 1
           }
+          [ -n "$dependency_audit_run" ] || {
+            echo "missing successful dependency-audit.yml run for $GITHUB_SHA"
+            exit 1
+          }
           [ -n "$qualification_run" ] || {
             echo "missing successful owned-geph-qualification.yml run for $GITHUB_SHA"
             exit 1
@@ -176,6 +191,8 @@ jobs:
           }
           candidate_metadata="$(gh api \
             "repos/${{ github.repository }}/actions/runs/$candidate_run")"
+          dependency_audit_metadata="$(gh api \
+            "repos/${{ github.repository }}/actions/runs/$dependency_audit_run")"
           qualification_metadata="$(gh api \
             "repos/${{ github.repository }}/actions/runs/$qualification_run")"
           readiness_metadata="$(gh api \
@@ -201,6 +218,58 @@ jobs:
               raise SystemExit("run attempt is invalid")
           ' "$GITHUB_SHA" "${{ github.repository }}" push ci.yml \
             <<< "$candidate_metadata"
+          python3 -c '
+          import json
+          import sys
+          run = json.load(sys.stdin)
+          expected_sha, repository, event, workflow = sys.argv[1:]
+          expected = {
+              "head_sha": expected_sha,
+              "head_branch": "main",
+              "event": event,
+              "conclusion": "success",
+              "path": f".github/workflows/{workflow}",
+          }
+          for key, value in expected.items():
+              if run.get(key) != value:
+                  raise SystemExit(f"run has invalid {key}: {run.get(key)!r}")
+          if (run.get("head_repository") or {}).get("full_name") != repository:
+              raise SystemExit("run belongs to a different repository")
+          if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
+              raise SystemExit("run attempt is invalid")
+          ' "$GITHUB_SHA" "${{ github.repository }}" push \
+            dependency-audit.yml <<< "$dependency_audit_metadata"
+          dependency_audit_attempt="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
+            <<< "$dependency_audit_metadata")"
+          dependency_audit_jobs="$(gh api \
+            "repos/${{ github.repository }}/actions/runs/$dependency_audit_run/jobs?filter=latest&per_page=100")"
+          python3 -c '
+          import json
+          import sys
+          payload = json.load(sys.stdin)
+          expected_attempt = int(sys.argv[1])
+          jobs = payload.get("jobs")
+          total = payload.get("total_count")
+          if not isinstance(jobs, list) or total != len(jobs):
+              raise SystemExit("dependency audit job list is incomplete")
+          required = ("audit", "geph-vendor-audit", "Required dependency audit")
+          for name in required:
+              matches = [job for job in jobs if job.get("name") == name]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"dependency audit must contain exactly one {name!r} job"
+                  )
+              job = matches[0]
+              if job.get("run_attempt") != expected_attempt:
+                  raise SystemExit(
+                      f"dependency audit job {name!r} belongs to another run attempt"
+                  )
+              if job.get("status") != "completed" or job.get("conclusion") != "success":
+                  raise SystemExit(
+                      f"dependency audit job {name!r} did not complete successfully"
+                  )
+          ' "$dependency_audit_attempt" <<< "$dependency_audit_jobs"
           python3 -c '
           import json
           import sys
@@ -254,6 +323,8 @@ jobs:
             <<< "$readiness_metadata")"
           echo "release_candidate_run_id=$candidate_run" >> "$GITHUB_OUTPUT"
           echo "release_candidate_run_attempt=$candidate_attempt" >> "$GITHUB_OUTPUT"
+          echo "dependency_audit_run_id=$dependency_audit_run" >> "$GITHUB_OUTPUT"
+          echo "dependency_audit_run_attempt=$dependency_audit_attempt" >> "$GITHUB_OUTPUT"
           echo "qualification_run_id=$qualification_run" >> "$GITHUB_OUTPUT"
           echo "qualification_run_attempt=$qualification_attempt" >> "$GITHUB_OUTPUT"
           echo "readiness_run_id=$readiness_run" >> "$GITHUB_OUTPUT"

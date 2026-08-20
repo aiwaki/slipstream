@@ -115,9 +115,15 @@ verification recomputes its SBOM and policy hashes. The application inventory
 lists Geph and `tg-ws-proxy` as top-level vendored applications. Geph
 additionally has its own reviewed source contract, `Cargo.lock`, full
 transitive SPDX inventory, and fail-closed audit in the `geph-vendor-*-r*` release.
-The app workflow verifies that exact vendor payload and its attestations before
-embedding it, then performs a fresh full-graph scan so newly published
-advisories and expired exceptions still block a later app release.
+Before embedding it, the app workflow requires an exact published internal
+prerelease, resolves its lightweight tag ref to one commit, and downloads the
+complete fixed asset set. It checks the strict `SHA256SUMS`, requires the
+release source, lock, version, and license to be byte-identical to the reviewed
+tree, verifies the release SPDX and audit against the policy stored at that
+tag commit, and verifies SLSA provenance for every asset plus the binary's SPDX
+attestation. The separately required dependency audit freshly scans the current
+full Geph graph and policy so newly published advisories and expired exceptions
+still block a later app release.
 `tg-ws-proxy` remains covered by its separate vendored-source review rather
 than a Rust dependency graph.
 
@@ -142,6 +148,7 @@ graph.
 | `geph5-client.spdx.json` | Deterministic SPDX 2.3 inventory for both macOS architectures |
 | `geph5-client-dependency-audit.json` | Full-coverage, policy-bound vulnerability result |
 | `geph5-client.LICENSE` | MPL-2.0 text |
+| `geph5-client.VERSION` | Exact embedded dependency version |
 | `SHA256SUMS` | SHA-256 for every Geph dependency asset |
 
 A new upstream Geph crate cannot publish a binary immediately. Automation first
@@ -190,8 +197,12 @@ Geph artifact.
 - A manual `build-app` run creates the next explicitly validated preview only
   from `main`; for this P0 release the accepted tag is exactly
   `v0.1.9-preview.23`, and publication fails if that tag already exists.
-  It verifies the exact successful main-CI, protected owned-Geph, and protected
-  release-readiness runs plus their stored attestations, creates only
+  It verifies the exact successful main-CI, dependency-audit, protected
+  owned-Geph, and protected release-readiness runs. The audit run must belong to
+  the same repository, main push, source SHA and workflow path, and its
+  application audit, full Geph-vendor audit, and required aggregator must each
+  have completed successfully; a skipped leaf cannot authorize publication.
+  The publisher then verifies the stored attestations, creates only
   `latest.json`, the public artifact manifest and release notes, and publishes
   the unchanged candidate. PyInstaller, Cargo/Tauri build and every
   qualification are prohibited in the publisher.

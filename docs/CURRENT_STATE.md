@@ -83,7 +83,14 @@ without executing an app, a static regression forbids any test-section
 CoreServicesUIAgent Slipstream records.
 
 The next verified action is to merge the narrow vendor-bootstrap and candidate
-tree-hashing corrections, qualify PR #280 with the now-required
+tree-hashing corrections. The same correction now closes a discovered Geph
+supply-chain gap: packaged builds no longer copy a release binary after only an
+architecture check. They first require exact non-draft internal-release
+metadata, a lightweight tag bound to the report's source commit, the complete
+eight-file release set, strict checksums, byte-identical reviewed source, lock,
+version and license, historical-policy SBOM and audit validity, SLSA provenance
+for every asset, and the binary's SPDX attestation. Only then may the universal
+binary enter the app bundle. Next, qualify PR #280 with the now-required
 dependency-audit context, publish and
 attest `geph-vendor-0.3.9-r1`, and require a new exact-main candidate that
 embeds it. The bootstrap applies only to a pull request containing the required

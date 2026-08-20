@@ -465,6 +465,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 35
     permissions:
+      attestations: read
       contents: read
     outputs:
       updater-signing-artifact-digest: ${{ steps.upload-updater-signing-input.outputs.artifact-digest }}
@@ -527,21 +528,132 @@ jobs:
           /usr/bin/lipo app-tauri/src-tauri/slipstreamd/slipstreamd \
             -verify_arch arm64
 
-      - name: Fetch the recorded Geph build
+      - name: Fetch and verify the recorded Geph build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
-          release_revision="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["release_revision"])')"
-          tag="geph-vendor-$version-r$release_revision"
+          umask 077
+          source_summary="$(python3 scripts/geph_vendor_source.py verify \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock)"
+          tag="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["release_tag"])' \
+            <<< "$source_summary")"
+          release_metadata="$(mktemp "$RUNNER_TEMP/geph-release.XXXXXX")"
+          gh api "repos/${{ github.repository }}/releases/tags/$tag" \
+            > "$release_metadata"
+          python3 scripts/verify_geph_release.py verify-metadata \
+            --metadata "$release_metadata" \
+            --expected-tag "$tag"
+          tag_ref="$(gh api \
+            "repos/${{ github.repository }}/git/ref/tags/$tag")"
+          tag_type="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["object"]["type"])' \
+            <<< "$tag_ref")"
+          [ "$tag_type" = commit ] || {
+            echo "recorded Geph tag must be an immutable lightweight commit ref"
+            exit 1
+          }
+          tag_commit="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["object"]["sha"])' \
+            <<< "$tag_ref")"
+          [[ "$tag_commit" =~ ^[0-9a-f]{40,64}$ ]] || {
+            echo "recorded Geph tag does not resolve to a full commit"
+            exit 1
+          }
           rm -rf /tmp/geph
           mkdir -p app-tauri/src-tauri/binaries
+          rm -f \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           python3 scripts/download_github_release_assets.py \
             --repo "${{ github.repository }}" \
             --tag "$tag" \
             --output /tmp/geph \
-            --pattern geph5-client
+            --pattern geph5-client \
+            --pattern geph5-client.LICENSE \
+            --pattern geph5-client.VERSION \
+            --pattern geph5-client.SOURCE.json \
+            --pattern geph5-client.Cargo.lock \
+            --pattern geph5-client.spdx.json \
+            --pattern geph5-client-dependency-audit.json \
+            --pattern SHA256SUMS
+          python3 scripts/verify_geph_release.py verify-assets \
+            --release-dir /tmp/geph \
+            --metadata "$release_metadata" \
+            --expected-tag "$tag" \
+            --source vendor/geph/SOURCE.json \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --version-file vendor/geph/VERSION \
+            --license vendor/geph/LICENSE
+          python3 scripts/make_geph_vendor_sbom.py verify \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --repository "${{ github.repository }}" \
+            --source-commit "$tag_commit" \
+            --target macos-universal \
+            --sbom /tmp/geph/geph5-client.spdx.json
+          historical_policy="$(mktemp \
+            "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
+            > "$historical_policy"
+          test -f "$historical_policy"
+          test ! -L "$historical_policy"
+          test -s "$historical_policy"
+          python3 -m json.tool "$historical_policy" >/dev/null
+          python3 scripts/dependency_audit.py verify \
+            --report /tmp/geph/geph5-client-dependency-audit.json \
+            --sbom /tmp/geph/geph5-client.spdx.json \
+            --policy "$historical_policy" \
+            --source-commit "$tag_commit" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full
+          signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
+          provenance_json="$(mktemp \
+            "$RUNNER_TEMP/geph-provenance.XXXXXX")"
+          spdx_attestation_json="$(mktemp \
+            "$RUNNER_TEMP/geph-spdx-attestation.XXXXXX")"
+          for artifact in /tmp/geph/*; do
+            if [ "$artifact" = /tmp/geph/SHA256SUMS ]; then
+              gh attestation verify "$artifact" \
+                --repo "${{ github.repository }}" \
+                --signer-workflow "$signer_workflow" \
+                --signer-digest "$tag_commit" \
+                --source-digest "$tag_commit" \
+                --source-ref refs/heads/main \
+                --predicate-type https://slsa.dev/provenance/v1 \
+                --deny-self-hosted-runners \
+                --format json > "$provenance_json"
+            else
+              gh attestation verify "$artifact" \
+                --repo "${{ github.repository }}" \
+                --signer-workflow "$signer_workflow" \
+                --signer-digest "$tag_commit" \
+                --source-digest "$tag_commit" \
+                --source-ref refs/heads/main \
+                --predicate-type https://slsa.dev/provenance/v1 \
+                --deny-self-hosted-runners >/dev/null
+            fi
+          done
+          gh attestation verify /tmp/geph/geph5-client \
+            --repo "${{ github.repository }}" \
+            --signer-workflow "$signer_workflow" \
+            --signer-digest "$tag_commit" \
+            --source-digest "$tag_commit" \
+            --source-ref refs/heads/main \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --deny-self-hosted-runners \
+            --format json > "$spdx_attestation_json"
+          python3 scripts/verify_geph_release.py verify-attestations \
+            --release-dir /tmp/geph \
+            --provenance-json "$provenance_json" \
+            --spdx-json "$spdx_attestation_json"
+          /usr/bin/lipo /tmp/geph/geph5-client \
+            -verify_arch arm64 x86_64
           cp /tmp/geph/geph5-client \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
