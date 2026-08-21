@@ -27,6 +27,14 @@ matrix passes, and `.23` remains unpublished. Do not retry the unchanged
 readiness workflow or weaken the four-host/two-browser policy. The next change
 must identify and repair the reusable SafariDriver/Chrome session lifecycle on
 the dedicated workflow runner while retaining complete bounded diagnostics.
+The active follow-up replaces the ambiguous setup result with a fixed bounded
+stage enum: Safari distinguishes driver readiness, pre-existing process,
+session creation, browser-process startup, and session configuration; Chrome
+distinguishes browser startup, DevTools readiness, and clean-target discovery.
+Navigation and document/readiness observation remain separate existing stages.
+No exception text, URL, page content, process argument, or driver log enters the
+report. The next protected report must identify the exact failing stage before
+any lifecycle retry or recovery is added.
 
 Update 2026-08-21 (actionable protected retry): PR #349 merged as current main
 `0d2e016967b1efeb204d1b687739a3435e3f255d`. Exact-main CI

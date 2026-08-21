@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest import mock
 
@@ -98,6 +99,72 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertEqual(result["route"], "slipstream_selected")
         stop.assert_called_once()
 
+    def test_chrome_setup_failures_keep_exact_bounded_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            executable = root / "chrome"
+            executable.touch()
+            process = mock.Mock(pid=1234)
+
+            def run(*patchers: object) -> dict[str, object]:
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        mock.patch.object(
+                            smoke.lifecycle,
+                            "_user_environment",
+                            return_value=({}, root),
+                        )
+                    )
+                    stack.enter_context(
+                        mock.patch.object(
+                            smoke.lifecycle,
+                            "_user_supplementary_groups",
+                            return_value=(),
+                        )
+                    )
+                    stack.enter_context(mock.patch.object(smoke.os, "chown"))
+                    for patcher in patchers:
+                        stack.enter_context(patcher)
+                    return smoke._run_chrome(
+                        "app.aikido.dev", executable, 501, 20
+                    )
+
+            result = run(
+                mock.patch.object(
+                    smoke.subprocess,
+                    "Popen",
+                    side_effect=OSError("private process diagnostic"),
+                )
+            )
+            self.assertEqual(result["reason"], "browser_start_failed")
+
+            result = run(
+                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
+                mock.patch.object(
+                    smoke.chromium,
+                    "_wait_for_devtools_port",
+                    side_effect=smoke.chromium.QualificationError(
+                        "private DevTools diagnostic"
+                    ),
+                ),
+                mock.patch.object(
+                    smoke.lifecycle, "_stop_owned_chrome_process_group"
+                ),
+            )
+            self.assertEqual(result["reason"], "devtools_unavailable")
+
+            result = run(
+                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
+                mock.patch.object(
+                    smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                ),
+                mock.patch.object(smoke.chromium, "_devtools_json", return_value=[]),
+                mock.patch.object(
+                    smoke.lifecycle, "_stop_owned_chrome_process_group"
+                ),
+            )
+            self.assertEqual(result["reason"], "target_unavailable")
+
     def test_chrome_retries_transient_execution_context_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
@@ -180,6 +247,94 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 )
 
         self.assertEqual(sleep.call_count, 2)
+
+    def test_safari_setup_failures_keep_exact_bounded_stages(self) -> None:
+        with (
+            mock.patch.object(
+                smoke,
+                "_wait_for_safaridriver_ready",
+                side_effect=smoke.LiveSiteError("private driver diagnostic"),
+            ),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+        self.assertEqual(result["reason"], "driver_unavailable")
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(
+                smoke.lifecycle,
+                "_assert_no_safari_process",
+                side_effect=smoke.lifecycle.LifecycleError(
+                    "private process diagnostic"
+                ),
+            ),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+        self.assertEqual(result["reason"], "browser_process_conflict")
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(
+                smoke.lifecycle,
+                "_webdriver_request",
+                side_effect=smoke.lifecycle.LifecycleError(
+                    "private session diagnostic"
+                ),
+            ),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+        self.assertEqual(result["reason"], "session_create_failed")
+
+        webdriver = mock.Mock(
+            side_effect=[
+                {"value": {"sessionId": "session-id"}},
+                {},
+            ]
+        )
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle,
+                "_wait_for_safari_process",
+                side_effect=smoke.lifecycle.LifecycleError(
+                    "private Safari startup diagnostic"
+                ),
+            ),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+        self.assertEqual(result["reason"], "browser_process_unavailable")
+
+        webdriver = mock.Mock(
+            side_effect=[
+                {"value": {"sessionId": "session-id"}},
+                smoke.lifecycle.LifecycleError("private timeout diagnostic"),
+                {},
+            ]
+        )
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+        self.assertEqual(result["reason"], "session_configuration_failed")
 
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"
