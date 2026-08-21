@@ -10,6 +10,24 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (readiness still blocked): PR #351 merged as
+`db2ab7a2b3f79df798e112ba11f0c8dcc4384475` and its exact-main CI
+`32433480829`, dependency audit `32433480861`, and sequential owned-Geph
+qualification `32434336197` passed. Readiness `32434527870` preserved a full
+failed report and skipped the long soak; publisher was not dispatched.
+
+The origin-free Safari warm-up succeeded, but every immediately following live
+Safari session still returned `session_unavailable`, so the warm-up did not fix
+the dedicated-runner boundary and is being reverted. Chrome proved Aikido
+usable; Weather's owned-Geph control was usable; Aikido and Capacitor were
+usable through both route controls. Chrome nevertheless ended in
+`readiness_timeout` for XPersonatoy, `browser_observation_failed` for Weather,
+and `session_unavailable` for Capacitor. This is not evidence that the release
+matrix passes, and `.23` remains unpublished. Do not retry the unchanged
+readiness workflow or weaken the four-host/two-browser policy. The next change
+must identify and repair the reusable SafariDriver/Chrome session lifecycle on
+the dedicated workflow runner while retaining complete bounded diagnostics.
+
 Update 2026-08-21 (actionable protected retry): PR #349 merged as current main
 `0d2e016967b1efeb204d1b687739a3435e3f255d`. Exact-main CI
 `32425390228`, dependency audit `32425390226`, and owned-Geph qualification
