@@ -10,25 +10,23 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-21 (Safari cold-start boundary): PR #350 merged as current main
-`507a859c4b354ffa20a7bc9ce6476ab28018b5c9`. Exact-main CI
-`32429034525` and dependency audit `32429034455` are green; the candidate's
-notification, browser, updater, attestation, and packaged lifecycle gates all
-passed. After the Geph broker's daily rate-limit reset, owned-Geph run
-`32431050900` passed. Readiness `32431052524` then preserved a complete failed
-live-site report and correctly skipped the long soak.
+Update 2026-08-21 (readiness still blocked): PR #351 merged as
+`db2ab7a2b3f79df798e112ba11f0c8dcc4384475` and its exact-main CI
+`32433480829`, dependency audit `32433480861`, and sequential owned-Geph
+qualification `32434336197` passed. Readiness `32434527870` preserved a full
+failed report and skipped the long soak; publisher was not dispatched.
 
-The exact packaged lifecycle had already completed four clean Safari sessions,
-but the separate live-site runner's first cold Safari session spent its full
-30-second WebDriver creation timeout and every later Safari result was
-`session_unavailable`. Chrome still proved Aikido usable and owned-Geph controls
-proved Aikido, Weather, and Capacitor reachable. The narrow follow-up primes the
-fresh hosted runner with the same owned Safari probe already proven by packaged
-lifecycle, including exact session/process cleanup, before opening any fixed
-live-site host. The four-host, two-browser pass policy remains unchanged. Next:
-merge that warm-up, rebuild one exact-main candidate, and rerun owned-Geph plus
-readiness; publisher remains blocked until the full live matrix and 30-minute
-soak pass.
+The origin-free Safari warm-up succeeded, but every immediately following live
+Safari session still returned `session_unavailable`, so the warm-up did not fix
+the dedicated-runner boundary and is being reverted. Chrome proved Aikido
+usable; Weather's owned-Geph control was usable; Aikido and Capacitor were
+usable through both route controls. Chrome nevertheless ended in
+`readiness_timeout` for XPersonatoy, `browser_observation_failed` for Weather,
+and `session_unavailable` for Capacitor. This is not evidence that the release
+matrix passes, and `.23` remains unpublished. Do not retry the unchanged
+readiness workflow or weaken the four-host/two-browser policy. The next change
+must identify and repair the reusable SafariDriver/Chrome session lifecycle on
+the dedicated workflow runner while retaining complete bounded diagnostics.
 
 Update 2026-08-21 (actionable protected retry): PR #349 merged as current main
 `0d2e016967b1efeb204d1b687739a3435e3f255d`. Exact-main CI
