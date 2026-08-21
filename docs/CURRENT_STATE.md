@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (Safari cold-start boundary): PR #350 merged as current main
+`507a859c4b354ffa20a7bc9ce6476ab28018b5c9`. Exact-main CI
+`32429034525` and dependency audit `32429034455` are green; the candidate's
+notification, browser, updater, attestation, and packaged lifecycle gates all
+passed. After the Geph broker's daily rate-limit reset, owned-Geph run
+`32431050900` passed. Readiness `32431052524` then preserved a complete failed
+live-site report and correctly skipped the long soak.
+
+The exact packaged lifecycle had already completed four clean Safari sessions,
+but the separate live-site runner's first cold Safari session spent its full
+30-second WebDriver creation timeout and every later Safari result was
+`session_unavailable`. Chrome still proved Aikido usable and owned-Geph controls
+proved Aikido, Weather, and Capacitor reachable. The narrow follow-up primes the
+fresh hosted runner with the same owned Safari probe already proven by packaged
+lifecycle, including exact session/process cleanup, before opening any fixed
+live-site host. The four-host, two-browser pass policy remains unchanged. Next:
+merge that warm-up, rebuild one exact-main candidate, and rerun owned-Geph plus
+readiness; publisher remains blocked until the full live matrix and 30-minute
+soak pass.
+
 Update 2026-08-21 (actionable protected retry): PR #349 merged as current main
 `0d2e016967b1efeb204d1b687739a3435e3f255d`. Exact-main CI
 `32425390228`, dependency audit `32425390226`, and owned-Geph qualification
