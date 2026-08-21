@@ -389,6 +389,21 @@ class BuildConfigTests(unittest.TestCase):
             "Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}",
             readiness,
         )
+        live_gate = readiness[
+            readiness.index("Run account-backed Safari and Chrome live-site gate") :
+            readiness.index("Preserve bounded live-site diagnostics for this attempt")
+        ]
+        marker = "live-sites.exit"
+        secret_guard = ': "${SLIPSTREAM_GEPH_ACCOUNT_SECRET:'
+        self.assertIn(marker, live_gate)
+        self.assertLess(
+            live_gate.index(marker),
+            live_gate.index(secret_guard),
+        )
+        self.assertLess(
+            live_gate.index(marker),
+            live_gate.index("python3 scripts/geph_owned_lifecycle_smoke.py"),
+        )
         self.assertIn('value.get("ready") is not True', readiness)
         self.assertLess(
             readiness.index("Require passed live-site matrix before the long soak"),
