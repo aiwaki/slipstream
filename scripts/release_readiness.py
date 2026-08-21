@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
+import live_site_contract
 import make_release_sbom
 import release_candidate
 import release_transport_matrix
@@ -28,26 +29,7 @@ HOST_DEADLINES_MS = {
     "capacitorjs.com": 25_000,
 }
 REQUIRED_BROWSERS = ("chrome", "safari")
-TERMINAL_BROWSER_REASONS = frozenset(
-    {
-        "browser_process_conflict",
-        "browser_process_unavailable",
-        "browser_start_failed",
-        "browser_observation_failed",
-        "devtools_unavailable",
-        "document_invalid",
-        "document_too_short",
-        "driver_unavailable",
-        "navigation_denied",
-        "navigation_rejected",
-        "readiness_signals_invalid",
-        "readiness_timeout",
-        "session_configuration_failed",
-        "session_create_failed",
-        "session_unavailable",
-        "target_unavailable",
-    }
-)
+TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
 MIN_SOAK_SECONDS = 1800
 SOAK_SAMPLE_INTERVAL_SECONDS = 0.5
 MAX_SOAK_SAMPLE_GAP_SECONDS = 2.0

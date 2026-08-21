@@ -15,6 +15,7 @@ import time
 import urllib.parse
 
 import chromium_semantic_packaged_smoke as chromium
+import live_site_contract
 import pf_anchor_smoke as pf
 import pf_installed_lifecycle_smoke as lifecycle
 
@@ -53,26 +54,7 @@ CHALLENGE_MARKERS = (
     "just a moment",
     "cf-chl-",
 )
-TERMINAL_BROWSER_REASONS = frozenset(
-    {
-        "browser_process_conflict",
-        "browser_process_unavailable",
-        "browser_start_failed",
-        "browser_observation_failed",
-        "devtools_unavailable",
-        "document_invalid",
-        "document_too_short",
-        "driver_unavailable",
-        "navigation_denied",
-        "navigation_rejected",
-        "readiness_signals_invalid",
-        "readiness_timeout",
-        "session_configuration_failed",
-        "session_create_failed",
-        "session_unavailable",
-        "target_unavailable",
-    }
-)
+TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
 
 
 class LiveSiteError(RuntimeError):
