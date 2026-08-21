@@ -11,7 +11,7 @@ file.
 ## Current Checkpoint
 
 Update 2026-08-21 (browser retry blocked by Geph broker quota): PR #355 merged
-as current main `ced62298ceb65c948e53dafa79ec6d32acf76299`; exact-main CI
+its product candidate as `ced62298ceb65c948e53dafa79ec6d32acf76299`; exact-main CI
 `32481509165`, dependency audit `32481509168`, and the sequential owned-Geph
 qualification `32482765687` passed. The Safari harness now returns its existing
 privacy-bounded readiness object through `JSON.stringify`, strictly decodes one
@@ -31,6 +31,17 @@ one exact-SHA owned-Geph qualification followed by release-readiness bound to
 candidate `32481509165`; inspect the full four-host/two-browser report if it
 fails, and dispatch the ad-hoc, unnotarized publisher only if every protected
 gate and the full readiness soak pass.
+
+Checkpoint PR #356 then merged as docs-only main
+`9df852508b5e59d7b60ce5b2a9a7ce489df04c99`; its scoped CI `32483427423`
+and dependency audit `32483427427` passed but correctly produced no release
+candidate. The user authorized an immediate protected retry despite the broker
+message. The active product-scoped follow-up initializes a fixed nonzero
+`live-sites.exit` marker before account-backed Geph starts, so a pre-browser
+failure preserves bounded evidence without a second artifact-upload failure.
+After this narrow workflow fix produces a fresh exact-main candidate, run one
+owned-Geph qualification and one readiness attempt immediately; the publisher
+remains conditional on the complete matrix and soak.
 
 Update 2026-08-21 (Safari sessions now reach document observation): PR #354
 merged as `5b87bb174eb8a68bb4ab038dce0fea095fafd464`; exact-main CI

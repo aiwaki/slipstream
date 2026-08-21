@@ -389,6 +389,12 @@ class BuildConfigTests(unittest.TestCase):
             "Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}",
             readiness,
         )
+        marker = "printf '%s\\n' 125 > dist-readiness/live-sites.exit"
+        self.assertIn(marker, readiness)
+        self.assertLess(
+            readiness.index(marker),
+            readiness.index("python3 scripts/geph_owned_lifecycle_smoke.py"),
+        )
         self.assertIn('value.get("ready") is not True', readiness)
         self.assertLess(
             readiness.index("Require passed live-site matrix before the long soak"),

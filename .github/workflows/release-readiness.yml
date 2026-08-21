@@ -166,6 +166,9 @@ jobs:
           set -euo pipefail
           : "${SLIPSTREAM_GEPH_ACCOUNT_SECRET:?missing protected Geph account}"
           mkdir -p dist-readiness
+          # Preserve a bounded nonzero marker even when account-backed Geph
+          # fails before SafariDriver or the browser matrix can start.
+          printf '%s\n' 125 > dist-readiness/live-sites.exit
           ready="$RUNNER_TEMP/readiness-geph.ready"
           release="$RUNNER_TEMP/readiness-geph.release"
           geph_log="$RUNNER_TEMP/readiness-geph.log"
