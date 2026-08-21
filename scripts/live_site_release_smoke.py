@@ -346,6 +346,59 @@ def _wait_for_safaridriver_ready(driver_url: str, timeout: float = 10.0) -> None
     raise LiveSiteError("SafariDriver did not become ready")
 
 
+def _warm_safari_session(driver_url: str, uid: int) -> None:
+    session_id = None
+    safari_pid = None
+    failure: BaseException | None = None
+    try:
+        _wait_for_safaridriver_ready(driver_url)
+        lifecycle._assert_no_safari_process(uid, "live-site-warmup")
+        created = lifecycle._webdriver_request(
+            driver_url,
+            "POST",
+            "/session",
+            {
+                "capabilities": {
+                    "alwaysMatch": {
+                        "browserName": "safari",
+                        "pageLoadStrategy": "normal",
+                    }
+                }
+            },
+        )
+        value = created.get("value")
+        session_id = value.get("sessionId") if isinstance(value, dict) else None
+        session_id = session_id or created.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            raise LiveSiteError("SafariDriver did not create a warm-up session")
+        safari_pid = lifecycle._wait_for_safari_process(uid, "live-site-warmup")
+    except BaseException as exc:
+        failure = exc
+    finally:
+        cleanup: list[BaseException] = []
+        if session_id is not None:
+            try:
+                encoded = urllib.parse.quote(session_id, safe="")
+                lifecycle._webdriver_request(
+                    driver_url, "DELETE", f"/session/{encoded}", timeout=10
+                )
+            except BaseException as exc:
+                cleanup.append(exc)
+        if safari_pid is not None:
+            try:
+                lifecycle._stop_owned_safari_process(
+                    safari_pid, uid, "live-site-warmup"
+                )
+            except BaseException as exc:
+                cleanup.append(exc)
+        if cleanup:
+            raise LiveSiteError("Safari warm-up cleanup failed") from (
+                failure or cleanup[0]
+            )
+    if failure is not None:
+        raise failure
+
+
 def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -539,12 +592,11 @@ def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int
         lifecycle._wait_for_status("active", timeout=90)
         failure_stage = "assert_anchor_active"
         lifecycle._assert_anchor_active(runner)
-        # The packaged lifecycle gate uses this same probe successfully before
-        # its repeated Safari checks.  Prime a fresh hosted runner through the
-        # proven WebDriver path before asking Safari to open the live matrix;
-        # the probe owns and removes its exact session and process.
-        failure_stage = "safari_warmup"
-        lifecycle._run_safari_probe(driver_url, "live-site-warmup", uid)
+        # Prime a fresh hosted runner through the same owned WebDriver session
+        # lifecycle used by packaged qualification, without navigating to an
+        # unrelated fifth origin.  Warm-up cleanup remains fail-closed.
+        failure_stage = "safari:warmup"
+        _warm_safari_session(driver_url, uid)
         for host in SITES:
             failure_stage = f"safari:{host}"
             safari = _run_safari(host, driver_url, uid)

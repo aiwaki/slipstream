@@ -181,6 +181,35 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(sleep.call_count, 2)
 
+    def test_safari_warmup_creates_and_cleans_a_session_without_navigation(
+        self,
+    ) -> None:
+        request = mock.Mock(
+            side_effect=[{"value": {"sessionId": "warm/session"}}, {"value": None}]
+        )
+        stop = mock.Mock()
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", request),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=123
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process", stop),
+        ):
+            smoke._warm_safari_session("http://127.0.0.1:12345", 501)
+
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[0].args[1:3], ("POST", "/session"))
+        self.assertEqual(
+            request.call_args_list[1].args[1:3],
+            ("DELETE", "/session/warm%2Fsession"),
+        )
+        self.assertFalse(
+            any("/url" in call.args[2] for call in request.call_args_list)
+        )
+        stop.assert_called_once_with(123, 501, "live-site-warmup")
+
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"
         edge = "x" * 600 + "Sorry, you have been blocked"
@@ -283,7 +312,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
-            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
+            mock.patch.object(smoke, "_warm_safari_session"),
             mock.patch.object(smoke, "_run_safari", return_value=browser_result),
             mock.patch.object(
                 smoke,
@@ -331,7 +360,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
-            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
+            mock.patch.object(smoke, "_warm_safari_session"),
             mock.patch.object(smoke, "_run_safari", safari),
             mock.patch.object(
                 smoke,
@@ -389,7 +418,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
-            mock.patch.object(smoke.lifecycle, "_run_safari_probe", warmup),
+            mock.patch.object(smoke, "_warm_safari_session", warmup),
             mock.patch.object(smoke.lifecycle, "_fallback_uninstall", fallback),
             mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
             mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
@@ -400,12 +429,10 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(
             str(raised.exception),
-            "live-site execution failed at safari_warmup (RuntimeError)",
+            "live-site execution failed at safari:warmup (RuntimeError)",
         )
         self.assertNotIn("private raw diagnostic", str(raised.exception))
-        warmup.assert_called_once_with(
-            "http://127.0.0.1:12345", "live-site-warmup", 501
-        )
+        warmup.assert_called_once_with("http://127.0.0.1:12345", 501)
         fallback.assert_called_once()
 
     def test_fallback_exception_cannot_skip_remaining_cleanup_proofs(self) -> None:
@@ -425,7 +452,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
-            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
+            mock.patch.object(smoke, "_warm_safari_session"),
             mock.patch.object(
                 smoke,
                 "_run_safari",
@@ -489,7 +516,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
-            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
+            mock.patch.object(smoke, "_warm_safari_session"),
             mock.patch.object(smoke, "_run_safari", side_effect=safari),
             mock.patch.object(smoke, "_run_chrome", side_effect=chrome),
             mock.patch.object(smoke.lifecycle, "_fallback_uninstall", return_value=[]),
@@ -544,7 +571,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
-            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
+            mock.patch.object(smoke, "_warm_safari_session"),
             mock.patch.object(smoke, "_run_safari", side_effect=safari),
             mock.patch.object(smoke, "_run_chrome", side_effect=chrome),
             mock.patch.object(smoke, "_control_route", return_value="usable"),
