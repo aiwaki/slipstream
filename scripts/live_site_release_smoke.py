@@ -338,15 +338,18 @@ def _wait_for_safaridriver_ready(driver_url: str, timeout: float = 10.0) -> None
     raise LiveSiteError("SafariDriver did not become ready")
 
 
+SAFARI_INVALID_READINESS_SIGNALS = "Safari returned invalid readiness signals"
+
+
 def _decode_safari_readiness_signals(value: object) -> dict[str, object]:
     if not isinstance(value, str):
-        raise LiveSiteError("Safari returned invalid readiness signals")
+        raise LiveSiteError(SAFARI_INVALID_READINESS_SIGNALS)
     try:
         signals = json.loads(value)
     except json.JSONDecodeError:
-        raise LiveSiteError("Safari returned invalid readiness signals") from None
+        raise LiveSiteError(SAFARI_INVALID_READINESS_SIGNALS) from None
     if not isinstance(signals, dict):
-        raise LiveSiteError("Safari returned invalid readiness signals")
+        raise LiveSiteError(SAFARI_INVALID_READINESS_SIGNALS)
     return signals
 
 
@@ -408,6 +411,10 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         )
         failure_reason = "browser_observation_failed"
         while time.monotonic() < absolute_deadline:
+            # A successful decode may still leave the current document pending.
+            # Reset before each later WebDriver request so an HTTP/timeout
+            # failure is not mislabeled as a prior serialization failure.
+            failure_reason = "browser_observation_failed"
             remaining = max(0.1, absolute_deadline - time.monotonic())
             source = lifecycle._webdriver_request(
                 driver_url,

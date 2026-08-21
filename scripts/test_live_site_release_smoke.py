@@ -383,6 +383,49 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         )
         self.assertIn(("DELETE", "/session/session-id"), calls)
 
+    def test_safari_later_webdriver_failure_is_not_a_decode_failure(self) -> None:
+        source_calls = 0
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            nonlocal source_calls
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "GET" and path.endswith("/source"):
+                source_calls += 1
+                if source_calls > 1:
+                    raise smoke.lifecycle.LifecycleError("private HTTP diagnostic")
+                return {"value": "<html>" + "x" * 600}
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": smoke.json.dumps(self._signals())}
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(
+                smoke,
+                "_classify_document_evidence",
+                return_value=("terminal_error", "readiness_timeout"),
+            ),
+            mock.patch.object(smoke.time, "sleep"),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual(result["reason"], "browser_observation_failed")
+
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"
         edge = "x" * 600 + "Sorry, you have been blocked"
