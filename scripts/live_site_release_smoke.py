@@ -338,6 +338,18 @@ def _wait_for_safaridriver_ready(driver_url: str, timeout: float = 10.0) -> None
     raise LiveSiteError("SafariDriver did not become ready")
 
 
+def _decode_safari_readiness_signals(value: object) -> dict[str, object]:
+    if not isinstance(value, str):
+        raise LiveSiteError("Safari returned invalid readiness signals")
+    try:
+        signals = json.loads(value)
+    except json.JSONDecodeError:
+        raise LiveSiteError("Safari returned invalid readiness signals") from None
+    if not isinstance(signals, dict):
+        raise LiveSiteError("Safari returned invalid readiness signals")
+    return signals
+
+
 def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -407,16 +419,18 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
                 failure_reason = "document_invalid"
                 raise LiveSiteError("SafariDriver returned a non-text document")
             document = source
-            signals = lifecycle._webdriver_request(
+            serialized_signals = lifecycle._webdriver_request(
                 driver_url,
                 "POST",
                 f"/session/{encoded}/execute/sync",
-                {"script": f"return {READINESS_EXPRESSION};", "args": []},
+                {
+                    "script": f"return JSON.stringify({READINESS_EXPRESSION});",
+                    "args": [],
+                },
                 timeout=min(2.0, remaining),
             ).get("value")
-            if not isinstance(signals, dict):
-                failure_reason = "readiness_signals_invalid"
-                raise LiveSiteError("Safari returned invalid readiness signals")
+            failure_reason = "readiness_signals_invalid"
+            signals = _decode_safari_readiness_signals(serialized_signals)
             outcome, reason = _classify_document_evidence(host, document, signals)
             if outcome != "terminal_error":
                 break

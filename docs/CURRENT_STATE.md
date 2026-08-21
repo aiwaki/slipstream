@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (Safari sessions now reach document observation): PR #354
+merged as `5b87bb174eb8a68bb4ab038dce0fea095fafd464`; exact-main CI
+`32477345215`, dependency audit `32477345253`, and owned-Geph qualification
+`32478432152` passed. Readiness `32478675507` again stopped before the soak and
+preserved the full matrix. Removing the originless cookie command fixed the
+previous setup boundary: all four Safari sessions now configured, navigated,
+and returned page source. They then reported `readiness_signals_invalid`
+because SafariDriver did not expose the returned JavaScript object in the
+shape assumed by the Python harness. The active fix returns only the same
+privacy-bounded readiness object through `JSON.stringify`, strictly parses the
+string as one JSON object, and keeps raw pages, URLs, exceptions, and driver
+logs out of evidence. Chrome still passed only Aikido; its other three outcomes
+remain independently release-blocking and unchanged.
+
 Update 2026-08-21 (exact lifecycle stage identified): PR #353 merged as
 `626202dee78b8bfb24f6ced0d77470f20bde3997`; exact-main CI `32473502028`,
 dependency audit `32473501940`, and owned-Geph qualification `32474600766`

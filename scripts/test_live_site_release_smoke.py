@@ -354,7 +354,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             if method == "GET" and path.endswith("/source"):
                 return {"value": "<html>" + "x" * 600}
             if method == "POST" and path.endswith("/execute/sync"):
-                return {"value": self._signals()}
+                return {"value": smoke.json.dumps(self._signals())}
             if (method, path) in {
                 ("POST", "/session/session-id/timeouts"),
                 ("POST", "/session/session-id/url"),
@@ -411,6 +411,20 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             ),
             ("usable", ""),
         )
+
+    def test_safari_readiness_signals_require_a_json_object_string(self) -> None:
+        signals = self._signals()
+        self.assertEqual(
+            smoke._decode_safari_readiness_signals(smoke.json.dumps(signals)),
+            signals,
+        )
+        for invalid in (None, signals, "not-json", "[]"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(
+                    smoke.LiveSiteError,
+                    "^Safari returned invalid readiness signals$",
+                ):
+                    smoke._decode_safari_readiness_signals(invalid)
 
     def test_short_or_tls_warning_documents_fail(self) -> None:
         self.assertEqual(
