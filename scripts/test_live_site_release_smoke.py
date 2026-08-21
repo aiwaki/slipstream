@@ -336,6 +336,53 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             )
         self.assertEqual(result["reason"], "session_configuration_failed")
 
+    def test_safari_clean_session_navigates_without_originless_cookie_delete(
+        self,
+    ) -> None:
+        calls: list[tuple[str, str]] = []
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            calls.append((method, path))
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "GET" and path.endswith("/source"):
+                return {"value": "<html>" + "x" * 600}
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": self._signals()}
+            if (method, path) in {
+                ("POST", "/session/session-id/timeouts"),
+                ("POST", "/session/session-id/url"),
+                ("DELETE", "/session/session-id"),
+            }:
+                return {}
+            self.fail(f"unexpected WebDriver call: {method} {path}")
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual(result["outcome"], "usable")
+        self.assertNotIn(
+            ("DELETE", "/session/session-id/cookie"),
+            calls,
+        )
+        self.assertIn(("DELETE", "/session/session-id"), calls)
+
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"
         edge = "x" * 600 + "Sorry, you have been blocked"

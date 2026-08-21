@@ -383,12 +383,9 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             f"/session/{encoded}/timeouts",
             {"pageLoad": deadline, "script": min(deadline, 10_000)},
         )
-        lifecycle._webdriver_request(
-            driver_url,
-            "DELETE",
-            f"/session/{encoded}/cookie",
-            timeout=5,
-        )
+        # The protected runner and WebDriver session are both fresh. Deleting
+        # cookies while Safari is still on about:blank has no origin and makes
+        # SafariDriver reject or stall an otherwise valid clean session.
         failure_reason = "navigation_rejected"
         lifecycle._webdriver_request(
             driver_url,
