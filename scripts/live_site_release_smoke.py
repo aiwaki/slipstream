@@ -539,6 +539,12 @@ def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int
         lifecycle._wait_for_status("active", timeout=90)
         failure_stage = "assert_anchor_active"
         lifecycle._assert_anchor_active(runner)
+        # The packaged lifecycle gate uses this same probe successfully before
+        # its repeated Safari checks.  Prime a fresh hosted runner through the
+        # proven WebDriver path before asking Safari to open the live matrix;
+        # the probe owns and removes its exact session and process.
+        failure_stage = "safari_warmup"
+        lifecycle._run_safari_probe(driver_url, "live-site-warmup", uid)
         for host in SITES:
             failure_stage = f"safari:{host}"
             safari = _run_safari(host, driver_url, uid)

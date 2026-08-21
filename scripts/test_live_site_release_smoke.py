@@ -283,6 +283,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
             mock.patch.object(smoke, "_run_safari", return_value=browser_result),
             mock.patch.object(
                 smoke,
@@ -330,6 +331,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
             mock.patch.object(smoke, "_run_safari", safari),
             mock.patch.object(
                 smoke,
@@ -370,6 +372,42 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         )
         self.assertNotIn("private raw diagnostic", str(raised.exception))
 
+    def test_safari_warmup_uses_the_proven_lifecycle_probe(self) -> None:
+        target = SimpleNamespace(install_command=("install",))
+        system = mock.Mock()
+        warmup = mock.Mock(side_effect=RuntimeError("private raw diagnostic"))
+        fallback = mock.Mock(return_value=[])
+        with (
+            mock.patch.object(smoke, "_require_protected_ci"),
+            mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
+            mock.patch.object(
+                smoke.lifecycle, "_preflight", return_value=("before", 501, 20)
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "packaged_app_target", return_value=target
+            ),
+            mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
+            mock.patch.object(smoke.lifecycle, "_wait_for_status"),
+            mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke.lifecycle, "_run_safari_probe", warmup),
+            mock.patch.object(smoke.lifecycle, "_fallback_uninstall", fallback),
+            mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
+            mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
+            mock.patch.object(smoke.pf, "_assert_same_snapshot"),
+        ):
+            with self.assertRaises(smoke.LiveSiteError) as raised:
+                smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:12345")
+
+        self.assertEqual(
+            str(raised.exception),
+            "live-site execution failed at safari_warmup (RuntimeError)",
+        )
+        self.assertNotIn("private raw diagnostic", str(raised.exception))
+        warmup.assert_called_once_with(
+            "http://127.0.0.1:12345", "live-site-warmup", 501
+        )
+        fallback.assert_called_once()
+
     def test_fallback_exception_cannot_skip_remaining_cleanup_proofs(self) -> None:
         target = SimpleNamespace(install_command=("install",))
         system = mock.Mock()
@@ -387,6 +425,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
             mock.patch.object(
                 smoke,
                 "_run_safari",
@@ -450,6 +489,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
             mock.patch.object(smoke, "_run_safari", side_effect=safari),
             mock.patch.object(smoke, "_run_chrome", side_effect=chrome),
             mock.patch.object(smoke.lifecycle, "_fallback_uninstall", return_value=[]),
@@ -504,6 +544,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke.lifecycle, "_run_safari_probe"),
             mock.patch.object(smoke, "_run_safari", side_effect=safari),
             mock.patch.object(smoke, "_run_chrome", side_effect=chrome),
             mock.patch.object(smoke, "_control_route", return_value="usable"),
