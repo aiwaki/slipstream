@@ -355,7 +355,13 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 return {"value": "<html>" + "x" * 600}
             if method == "POST" and path.endswith("/execute/sync"):
                 return {"value": self._signals()}
-            return {}
+            if (method, path) in {
+                ("POST", "/session/session-id/timeouts"),
+                ("POST", "/session/session-id/url"),
+                ("DELETE", "/session/session-id"),
+            }:
+                return {}
+            self.fail(f"unexpected WebDriver call: {method} {path}")
 
         with (
             mock.patch.object(smoke, "_wait_for_safaridriver_ready"),

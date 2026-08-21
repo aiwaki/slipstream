@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (exact lifecycle stage identified): PR #353 merged as
+`626202dee78b8bfb24f6ced0d77470f20bde3997`; exact-main CI `32473502028`,
+dependency audit `32473501940`, and owned-Geph qualification `32474600766`
+passed. Readiness `32474823013` stopped before the soak and preserved a full
+report. All four Safari results were `session_configuration_failed`: the
+driver was ready, a clean session existed, and the owned Safari process had
+started. The live harness then differed from the repeatedly green packaged
+lifecycle probe by issuing `DELETE /cookie` while the new session was still on
+`about:blank`, which has no cookie origin and can be rejected or stalled by
+SafariDriver. The active fix removes only that redundant command; disposable
+CI, a fresh browser process, a fresh WebDriver session, exact teardown, and the
+strict four-host/two-browser matrix remain required. Chrome separately passed
+Aikido, timed out on `xpersonatoy.com`, failed observation on Weather, and
+failed startup on Capacitor; those outcomes remain release-blocking evidence
+rather than being retried or reclassified.
+
 Update 2026-08-21 (readiness still blocked): PR #351 merged as
 `db2ab7a2b3f79df798e112ba11f0c8dcc4384475` and its exact-main CI
 `32433480829`, dependency audit `32433480861`, and sequential owned-Geph
@@ -33,24 +49,8 @@ session creation, browser-process startup, and session configuration; Chrome
 distinguishes browser startup, DevTools readiness, and clean-target discovery.
 Navigation and document/readiness observation remain separate existing stages.
 No exception text, URL, page content, process argument, or driver log enters the
-report. The next protected report must identify the exact failing stage before
-any lifecycle retry or recovery is added.
-
-Update 2026-08-21 (exact lifecycle stage identified): PR #353 merged as
-`626202dee78b8bfb24f6ced0d77470f20bde3997`; exact-main CI `32473502028`,
-dependency audit `32473501940`, and owned-Geph qualification `32474600766`
-passed. Readiness `32474823013` stopped before the soak and preserved a full
-report. All four Safari results were `session_configuration_failed`: the
-driver was ready, a clean session existed, and the owned Safari process had
-started. The live harness then differed from the repeatedly green packaged
-lifecycle probe by issuing `DELETE /cookie` while the new session was still on
-`about:blank`, which has no cookie origin and can be rejected or stalled by
-SafariDriver. The active fix removes only that redundant command; disposable
-CI, a fresh browser process, a fresh WebDriver session, exact teardown, and the
-strict four-host/two-browser matrix remain required. Chrome separately passed
-Aikido, timed out on XPersonatoy, failed observation on Weather, and failed
-startup on Capacitor; those outcomes remain release-blocking evidence rather
-than being retried or reclassified.
+report. That protected report produced the exact stage and active fix recorded
+above; this earlier diagnostic step is complete.
 
 Update 2026-08-21 (actionable protected retry): PR #349 merged as current main
 `0d2e016967b1efeb204d1b687739a3435e3f255d`. Exact-main CI
