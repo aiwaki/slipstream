@@ -55,14 +55,22 @@ CHALLENGE_MARKERS = (
 )
 TERMINAL_BROWSER_REASONS = frozenset(
     {
+        "browser_process_conflict",
+        "browser_process_unavailable",
+        "browser_start_failed",
         "browser_observation_failed",
+        "devtools_unavailable",
         "document_invalid",
         "document_too_short",
+        "driver_unavailable",
         "navigation_denied",
         "navigation_rejected",
         "readiness_signals_invalid",
         "readiness_timeout",
+        "session_configuration_failed",
+        "session_create_failed",
         "session_unavailable",
+        "target_unavailable",
     }
 )
 
@@ -204,7 +212,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     started = time.monotonic()
     finished = started
     outcome = "terminal_error"
-    reason = "session_unavailable"
+    reason = "browser_start_failed"
     failure_reason = reason
     failure: BaseException | None = None
     try:
@@ -223,7 +231,9 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             extra_groups=groups,
         )
         process_group = process.pid
+        failure_reason = "devtools_unavailable"
         port = chromium._wait_for_devtools_port(profile, uid, timeout=10)
+        failure_reason = "target_unavailable"
         targets = chromium._devtools_json(port, "/json/list")
         pages = [
             item
@@ -351,14 +361,16 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     safari_pid = None
     document = ""
     outcome = "terminal_error"
-    reason = "session_unavailable"
+    reason = "driver_unavailable"
     failure_reason = reason
     started = time.monotonic()
     finished = started
     failure: BaseException | None = None
     try:
         _wait_for_safaridriver_ready(driver_url)
+        failure_reason = "browser_process_conflict"
         lifecycle._assert_no_safari_process(uid, host)
+        failure_reason = "session_create_failed"
         created = lifecycle._webdriver_request(
             driver_url,
             "POST",
@@ -377,10 +389,12 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         session_id = session_id or created.get("sessionId")
         if not isinstance(session_id, str) or not session_id:
             raise LiveSiteError("SafariDriver did not create a clean session")
+        failure_reason = "browser_process_unavailable"
         safari_pid = lifecycle._wait_for_safari_process(uid, host)
         encoded = urllib.parse.quote(session_id, safe="")
         deadline = int(SITES[host]["deadline_ms"])
         absolute_deadline = started + deadline / 1000
+        failure_reason = "session_configuration_failed"
         lifecycle._webdriver_request(
             driver_url,
             "POST",
