@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (browser retry blocked by Geph broker quota): PR #355 merged
+as current main `ced62298ceb65c948e53dafa79ec6d32acf76299`; exact-main CI
+`32481509165`, dependency audit `32481509168`, and the sequential owned-Geph
+qualification `32482765687` passed. The Safari harness now returns its existing
+privacy-bounded readiness object through `JSON.stringify`, strictly decodes one
+JSON object, and preserves `browser_observation_failed` when a later WebDriver
+request fails after an earlier successful decode. Local validation included
+457 script tests plus focused, compile, diff, and continuity checks.
+
+Release-readiness `32483025885` bound exact candidate run `32481509165` but
+stopped before starting SafariDriver or the browser matrix. The protected Geph
+account authenticated far enough to obtain user and subkey state, then the
+broker rejected `get_connect_token` as rate limited and explicitly required a
+retry after the broker day resets. No live-site JSON existed, the bounded
+artifact upload correctly failed rather than inventing evidence, the soak and
+publisher did not run, and `.23` remains unpublished. Do not repeat this
+account-backed run before the broker day resets. Next: after that reset, run
+one exact-SHA owned-Geph qualification followed by release-readiness bound to
+candidate `32481509165`; inspect the full four-host/two-browser report if it
+fails, and dispatch the ad-hoc, unnotarized publisher only if every protected
+gate and the full readiness soak pass.
+
 Update 2026-08-21 (Safari sessions now reach document observation): PR #354
 merged as `5b87bb174eb8a68bb4ab038dce0fea095fafd464`; exact-main CI
 `32477345215`, dependency audit `32477345253`, and owned-Geph qualification
