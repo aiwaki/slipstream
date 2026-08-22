@@ -28,6 +28,25 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         value.update(changes)
         return value
 
+    def _chrome_evidence(
+        self,
+        *,
+        document_bytes: int = 1_000,
+        denial_detected: bool = False,
+        challenge_detected: bool = False,
+        signals: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "result": {
+                "value": {
+                    "challenge_detected": challenge_detected,
+                    "denial_detected": denial_detected,
+                    "document_bytes": document_bytes,
+                    "signals": self._signals() if signals is None else signals,
+                }
+            }
+        }
+
     def _fake_chrome_for_testing(self, root: smoke.Path) -> smoke.Path:
         contents = root / "Google Chrome for Testing.app" / "Contents"
         executable = contents / "MacOS" / "Google Chrome for Testing"
@@ -235,6 +254,48 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertFalse(any(argument.startswith("--headless") for argument in command))
         self.assertNotIn("--no-sandbox", command)
 
+    def test_chrome_navigation_timeout_is_not_an_observation_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                commands = stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_command",
+                        side_effect=TimeoutError("timed out"),
+                    )
+                )
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual(
+            (result["outcome"], result["reason"]),
+            ("terminal_error", "navigation_rejected"),
+        )
+        commands.assert_called_once()
+
     def test_chrome_setup_failures_keep_exact_bounded_stages(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
@@ -334,13 +395,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
     def test_chrome_retries_transient_execution_context_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
-            document = "<html><title>Aikido Security</title>" + "x" * 600
             commands = mock.Mock(
                 side_effect=[
                     {},
                     smoke.chromium.QualificationError("context replaced"),
-                    {"result": {"value": self._signals()}},
-                    {"result": {"value": document}},
+                    self._chrome_evidence(),
                 ]
             )
             with ExitStack() as stack:
@@ -373,7 +432,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(result["outcome"], "usable")
         self.assertEqual(result["reason"], "")
-        self.assertEqual(commands.call_count, 4)
+        self.assertEqual(commands.call_count, 3)
         lifecycle.popen.assert_not_called()
         lifecycle.stop.assert_called_once()
         lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
@@ -381,12 +440,10 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
     def test_chrome_navigation_deadline_starts_after_browser_setup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
-            document = "<html><title>Aikido Security</title>" + "x" * 600
             commands = mock.Mock(
                 side_effect=[
                     {},
-                    {"result": {"value": self._signals()}},
-                    {"result": {"value": document}},
+                    self._chrome_evidence(),
                 ]
             )
             with ExitStack() as stack:
@@ -418,7 +475,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     mock.patch.object(
                         smoke.time,
                         "monotonic",
-                        side_effect=(1.0, 101.0, 101.1, 102.0),
+                        side_effect=(1.0, 101.0, 101.1, 101.2, 102.0),
                     )
                 )
                 result = smoke._run_chrome(
@@ -427,7 +484,267 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(result["outcome"], "usable")
         self.assertEqual(result["elapsed_ms"], 1_000)
-        self.assertEqual(monotonic.call_count, 4)
+        self.assertEqual(monotonic.call_count, 5)
+
+    def test_chrome_uses_compact_evidence_for_a_large_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            commands = mock.Mock(
+                side_effect=[
+                    {},
+                    self._chrome_evidence(document_bytes=70_000),
+                ]
+            )
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.chromium, "_devtools_command", commands)
+                )
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+        self.assertEqual(commands.call_count, 2)
+        runtime_call = commands.call_args_list[1]
+        self.assertEqual(runtime_call.args[2], "Runtime.evaluate")
+        expression = runtime_call.args[3]["expression"]
+        self.assertIn("document_bytes", expression)
+        self.assertNotEqual(expression.strip(), "document.documentElement.outerHTML")
+
+    def test_chrome_compact_evidence_keeps_challenges_nonpassing(self) -> None:
+        evidence = self._chrome_evidence(
+            document_bytes=70_000,
+            challenge_detected=True,
+            signals=self._signals(
+                title="StarrToy",
+                main_text_length=80,
+            ),
+        )["result"]["value"]
+
+        self.assertEqual(
+            smoke._classify_chrome_evidence("xpersonatoy.com", evidence),
+            ("challenge_or_auth", "challenge_or_auth"),
+        )
+
+    def test_chrome_compact_evidence_has_a_fixed_private_envelope(self) -> None:
+        positive = self._chrome_evidence()["result"]["value"]
+        self.assertEqual(
+            set(positive),
+            {
+                "challenge_detected",
+                "denial_detected",
+                "document_bytes",
+                "signals",
+            },
+        )
+        self.assertEqual(
+            smoke._classify_chrome_evidence("app.aikido.dev", positive),
+            ("usable", ""),
+        )
+        self.assertEqual(
+            smoke._classify_chrome_evidence(
+                "weather.com",
+                self._chrome_evidence(
+                    denial_detected=True,
+                    signals=None,
+                )["result"]["value"],
+            ),
+            ("regional_access_denied", "regional_access_denied"),
+        )
+        self.assertEqual(
+            smoke._classify_chrome_evidence(
+                "app.aikido.dev",
+                self._chrome_evidence(document_bytes=0)["result"]["value"],
+            ),
+            ("terminal_error", "document_too_short"),
+        )
+        malformed = (
+            None,
+            {},
+            {
+                **positive,
+                "document": "private raw page content",
+            },
+            {**positive, "document_bytes": True},
+            {**positive, "document_bytes": -1},
+            {**positive, "denial_detected": "false"},
+            {**positive, "challenge_detected": 0},
+        )
+        for evidence in malformed:
+            with self.subTest(evidence=evidence):
+                self.assertEqual(
+                    smoke._classify_chrome_evidence("app.aikido.dev", evidence),
+                    ("terminal_error", "document_invalid"),
+                )
+        self.assertEqual(
+            smoke._classify_chrome_evidence(
+                "app.aikido.dev",
+                {**positive, "signals": None},
+            ),
+            ("terminal_error", "readiness_signals_invalid"),
+        )
+
+    def test_chrome_retries_one_bounded_devtools_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            commands = mock.Mock(
+                side_effect=[
+                    {},
+                    TimeoutError("timed out"),
+                    self._chrome_evidence(),
+                ]
+            )
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.chromium, "_devtools_command", commands)
+                )
+                stack.enter_context(mock.patch.object(smoke.time, "sleep"))
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+        self.assertLessEqual(commands.call_args_list[1].kwargs["response_timeout"], 2.0)
+        self.assertLessEqual(commands.call_args_list[2].kwargs["response_timeout"], 2.0)
+
+    def test_chrome_deadline_limited_devtools_timeout_remains_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            commands = mock.Mock(side_effect=[{}, TimeoutError("timed out")])
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.chromium, "_devtools_command", commands)
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.time,
+                        "monotonic",
+                        side_effect=(
+                            0.0,
+                            100.0,
+                            129.9,
+                            129.9,
+                            129.95,
+                            130.0,
+                            130.0,
+                        ),
+                    )
+                )
+                sleep = stack.enter_context(mock.patch.object(smoke.time, "sleep"))
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual(
+            (result["outcome"], result["reason"]),
+            ("terminal_error", "browser_observation_failed"),
+        )
+        self.assertAlmostEqual(
+            commands.call_args_list[1].kwargs["response_timeout"], 0.1
+        )
+        sleep.assert_called_once_with(mock.ANY)
+        self.assertAlmostEqual(sleep.call_args.args[0], 0.05)
+
+    def test_chrome_unexpected_devtools_error_remains_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            commands = mock.Mock(side_effect=[{}, OSError("unexpected")])
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.chromium, "_devtools_command", commands)
+                )
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual(
+            (result["outcome"], result["reason"]),
+            ("terminal_error", "browser_observation_failed"),
+        )
 
     def test_safari_waits_for_the_ready_status_not_only_http_success(self) -> None:
         ready = mock.Mock(
@@ -559,16 +876,19 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self,
     ) -> None:
         calls: list[tuple[str, str]] = []
+        session_payload: dict | None = None
 
         def webdriver(
             _base_url: str,
             method: str,
             path: str,
-            _payload: dict | None = None,
+            payload: dict | None = None,
             **_kwargs: object,
         ) -> dict:
+            nonlocal session_payload
             calls.append((method, path))
             if method == "POST" and path == "/session":
+                session_payload = payload
                 return {"value": {"sessionId": "session-id"}}
             if method == "GET" and path.endswith("/source"):
                 return {"value": "<html>" + "x" * 600}
@@ -601,6 +921,49 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             calls,
         )
         self.assertIn(("DELETE", "/session/session-id"), calls)
+        self.assertEqual(
+            session_payload,
+            {
+                "capabilities": {
+                    "alwaysMatch": {
+                        "browserName": "safari",
+                        "pageLoadStrategy": "none",
+                    }
+                }
+            },
+        )
+
+    def test_safari_navigation_rejection_remains_terminal(self) -> None:
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "POST" and path.endswith("/url"):
+                raise smoke.lifecycle.LifecycleError("private navigation diagnostic")
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual(
+            (result["outcome"], result["reason"]),
+            ("terminal_error", "navigation_rejected"),
+        )
 
     def test_safari_later_webdriver_failure_is_not_a_decode_failure(self) -> None:
         source_calls = 0
