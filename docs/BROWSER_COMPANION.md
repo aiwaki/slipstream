@@ -223,10 +223,11 @@ be papered over by accepting a second origin.
 
 ## Protected Chromium Qualification
 
-The manual, main-only `owned-geph-qualification` workflow composes the
-Chromium preview with the existing protected account-backed Geph gate. It
-starts the packaged tray and its exact user LaunchAgent, then runs a separate
-root-only harness against the packaged daemon.
+The manual, main-only `release-readiness` workflow composes the Chromium
+preview with the protected account-backed Geph gate. It starts the packaged
+tray and its exact user LaunchAgent, then runs a separate root-only harness
+against the packaged daemon while the same owned-Geph lifecycle remains held
+for the fixed Safari/Chrome live-site matrix.
 
 The browser side uses GUI Chrome for Testing in the disposable runner's user
 session, fresh owner-only profiles, the unpacked frozen-origin extension, the
@@ -428,12 +429,13 @@ uninstall, and an unsigned Safari app-extension build.
   cache/coalescing, one-tree headless launcher, bounded cleanup, and pinned
   runtime are implemented. They become release evidence only when the exact
   merged-main candidate passes packaged lifecycle and visibility checks.
-- The same immutable candidate must then pass protected account-backed
-  owned-Geph qualification and protected release readiness: clean-profile
-  Safari and Chrome live-origin scenarios for all four failure classes,
-  dual-stack PF/NATLOOK and QUIC v1/v2 mechanics, and a measured 30-minute idle
-  soak with zero window, Dock, focus, GUI Chrome, LaunchAgent, or retained
-  profile event. Inconclusive origins cannot become false passes.
+- The same immutable candidate must then pass one protected account-backed
+  release-readiness run: owned-Geph lifecycle and deterministic Chromium
+  semantic qualification, clean-profile Safari and Chrome live-origin
+  scenarios for all four failure classes, dual-stack PF/NATLOOK and QUIC v1/v2
+  mechanics, exact cleanup, and a measured 30-minute idle soak with zero window,
+  Dock, focus, GUI Chrome, LaunchAgent, or retained profile event. Inconclusive
+  origins cannot become false passes.
 - Chrome Web Store packaging, the unpacked Chromium extension, and the unsigned
   Safari extension remain historical/research qualification surfaces. They are
   not installed-product dependencies or `.23` release gates. Shipping either

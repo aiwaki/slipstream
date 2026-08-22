@@ -350,12 +350,14 @@ prove sleep/wake, updater orchestration, default route behavior, or broad VPN
 coexistence.
 
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
-It is invoked only by the protected, main-only `owned-geph-qualification`
-manual workflow, so account credentials are never available to pull-request
-code. The repository environment must allow deployments only from `main` and
-provide the `SLIPSTREAM_GEPH_ACCOUNT_SECRET` secret; the workflow fails closed
-when it is absent. The root daemon must be absent and durably disabled before
-the packaged tray starts. The harness writes a disposable Keychain item and private config,
+The release-critical invocation lives only in the protected, main-only
+`release-readiness` manual workflow, so account credentials are never available
+to pull-request code. The legacy standalone workflow requires an explicit
+diagnostic-only input and cannot emit release evidence. The repository
+environment must allow deployments only from `main` and provide the
+`SLIPSTREAM_GEPH_ACCOUNT_SECRET` secret; either workflow fails closed when it is
+absent. The root daemon must be absent and durably disabled before the packaged
+tray starts. The harness writes a disposable Keychain item and private config,
 verifies the exact LaunchAgent label, UID, PID, executable, config, listener,
 and file modes, then requires a real Steam HTTPS payload through SOCKS `:9954`.
 It crashes the tray and repeats the payload, signals only the revalidated owned

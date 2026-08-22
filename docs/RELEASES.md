@@ -72,8 +72,8 @@ presentation: doing so would also change the updater endpoint.
 | `latest.json` | Tauri updater index |
 | `artifact-manifest.json` | Target, source commit, byte size, and SHA-256 for every release payload asset |
 | `release-candidate-manifest.json` | Exact-main CI run, source Git tree/archive digest, and every immutable candidate file digest |
-| `release-qualification.json` | Protected owned-Geph result bound to the exact candidate manifest digest |
-| `release-readiness.json` | Protected Safari/Chrome live-origin and measured 30-minute invisibility results bound to the exact candidate and workflow attempt |
+| `release-qualification.json` | Protected owned-Geph and deterministic semantic result bound to the exact candidate and combined readiness workflow attempt |
+| `release-readiness.json` | Protected Safari/Chrome live-origin and measured 30-minute invisibility results bound to the same exact candidate and workflow attempt |
 | `transport-mechanics.json` | Protected exact-candidate dual-stack listener/PF evidence, Darwin IPv4/IPv6 NATLOOK test-port transaction, and deterministic encrypted QUIC v1/v2 mechanics; it does not claim a live origin's negotiated protocol or address family |
 | `Slipstream.spdx.json` | Deterministic SPDX 2.3 inventory for the resolved `aarch64-apple-darwin` graph, pinned runtime locks, and top-level vendored components |
 | `dependency-audit.json` | Source-, target-, SBOM-, policy-, and scanner-bound vulnerability audit result |
@@ -208,10 +208,14 @@ Geph artifact.
   verifier before candidate assembly. OIDC and attestation permissions live in
   another no-checkout, no-shell-command job that downloads the sealed
   candidate; build, signer, and assembly jobs do not inherit them.
-- Protected owned-Geph qualification downloads that exact artifact, verifies
+- One protected release-readiness run downloads that exact artifact, verifies
   its source commit, Git tree, source-archive digest, CI run ID and file hashes,
-  then runs against the unpacked candidate. Its proof is bound to the candidate
-  manifest digest; it does not rebuild the app.
+  then holds one account-backed owned-Geph lifecycle across the deterministic
+  Chromium semantic scenarios and fixed Safari/Chrome live-site matrix. After
+  exact Geph, browser, daemon, PF, Keychain, and user-state cleanup it runs the
+  measured invisibility soak. Separate qualification and readiness proofs bind
+  both result sets to the same candidate manifest and protected run attempt;
+  the workflow does not rebuild the app.
 - A manual `build-app` run creates the next explicitly validated preview only
   from `main`; for this P0 release the accepted tag is exactly
   `v0.1.9-preview.23`. A draft, tag-only collision or mismatched published
@@ -219,8 +223,8 @@ Geph artifact.
   already-published release left by this transaction: after the complete local
   and remote identity/digest proof, it may resume the idempotent post-publication
   finalizer.
-  It verifies the exact successful main-CI, dependency-audit, protected
-  owned-Geph, and protected release-readiness runs. The audit run must belong to
+  It verifies the exact successful main-CI, dependency-audit, and combined
+  protected release-readiness run. The audit run must belong to
   the same repository, main push, source SHA and workflow path, and its
   application audit, full Geph-vendor audit, and required aggregator must each
   have completed successfully; a skipped leaf cannot authorize publication.
@@ -271,12 +275,12 @@ GitHub Actions signs two attestations with its short-lived OIDC identity:
 
 Both attestations are stored in GitHub's attestation service. The publisher
 verifies them against the exact source commit, the `ci.yml` signer, and a
-GitHub-hosted runner before publishing the release. The protected owned-Geph
-workflow separately attests `release-qualification.json`; the protected
-release-readiness workflow attests its live/soak reports,
-`transport-mechanics.json`, and their manifest-bound aggregate proof. The
-publisher verifies both protected workflow identities, exact run attempts, and
-the exact candidate manifest before publication. A downloaded artifact can
+GitHub-hosted runner before publishing the release. The combined protected
+release-readiness workflow separately attests `release-qualification.json` and
+its live/soak reports, `transport-mechanics.json`, and manifest-bound readiness
+proof. The publisher requires both proof artifacts to name the same protected
+workflow run and attempt and verifies that signer plus the exact candidate
+manifest before publication. A downloaded artifact can
 be checked independently:
 
 ```bash

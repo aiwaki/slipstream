@@ -364,17 +364,14 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("release-candidate-${{ github.sha }}", qualification)
         self.assertIn("scripts/release_candidate.py verify", qualification)
-        self.assertIn("scripts/release_candidate.py create-proof", qualification)
-        self.assertIn("Attest exact qualification proof", qualification)
-        proof_block = qualification[
-            qualification.index(
-                "Bind qualification proof to the exact candidate"
-            ) : qualification.index("Attest exact qualification proof")
-        ]
-        self.assertIn("--expected-candidate-run-attempt", proof_block)
-        self.assertIn(
-            '--app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"', proof_block
-        )
+        self.assertIn("name: owned-geph-diagnostic", qualification)
+        self.assertIn("inputs.diagnostic_only == true", qualification)
+        self.assertIn("group: account-backed-geph", qualification)
+        self.assertNotIn("scripts/release_candidate.py create-proof", qualification)
+        self.assertNotIn("actions/attest@", qualification)
+        self.assertNotIn("id-token: write", qualification)
+        self.assertNotIn("attestations: write", qualification)
+        self.assertNotIn("artifact-metadata: write", qualification)
         self.assertNotIn("Build the frozen daemon", qualification)
         self.assertNotIn("Build the packaged app", qualification)
 
@@ -410,6 +407,51 @@ class BuildConfigTests(unittest.TestCase):
             readiness.index("Run measured 30-minute background invisibility soak"),
         )
         self.assertIn("scripts/release_readiness.py create", readiness)
+        self.assertIn("scripts/release_candidate.py create-proof", readiness)
+        self.assertIn("group: account-backed-geph", readiness)
+        self.assertEqual(
+            readiness.count("python3 scripts/geph_owned_lifecycle_smoke.py"),
+            1,
+        )
+        self.assertEqual(
+            readiness.count("scripts/chromium_semantic_packaged_smoke.py"),
+            1,
+        )
+        self.assertEqual(readiness.count("scripts/live_site_release_smoke.py"), 1)
+        self.assertEqual(
+            readiness.count("secrets.SLIPSTREAM_GEPH_ACCOUNT_SECRET"),
+            1,
+        )
+        self.assertIn(
+            "--qualification-workflow .github/workflows/release-readiness.yml",
+            readiness,
+        )
+        self.assertEqual(readiness.count("actions/attest@"), 2)
+        self.assertIn("timeout-minutes: 75", readiness)
+        self.assertLess(
+            live_gate.index("scripts/chromium_semantic_packaged_smoke.py"),
+            live_gate.index("scripts/live_site_release_smoke.py"),
+        )
+        self.assertIn(
+            "Verify the account-backed gate cleaned product-owned state",
+            readiness,
+        )
+        self.assertLess(
+            readiness.index(
+                "Verify the account-backed gate cleaned product-owned state"
+            ),
+            readiness.index("Run measured 30-minute background invisibility soak"),
+        )
+        self.assertLess(
+            readiness.index("Run measured 30-minute background invisibility soak"),
+            readiness.index("Verify the soak left no product-owned system path"),
+        )
+        self.assertLess(
+            readiness.index("Verify the soak left no product-owned system path"),
+            readiness.index(
+                "Bind qualification and measured readiness to one workflow attempt"
+            ),
+        )
         self.assertIn("scripts/packaged_transport_mechanics_smoke.py", readiness)
         self.assertIn("dist-readiness/transport-mechanics.json", readiness)
         self.assertNotIn("Slipstream-transport-matrix-${{ github.sha }}", readiness)
@@ -418,6 +460,16 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--expected-workflow-run-attempt", readiness)
         self.assertNotIn("Build the frozen daemon", readiness)
         self.assertNotIn("Build the packaged app", readiness)
+
+        for protected in (qualification, readiness):
+            self.assertNotRegex(
+                protected,
+                r"(?m)^\s+!\s+(?:sudo\s+)?launchctl\s+print\b",
+            )
+            self.assertNotRegex(
+                protected,
+                r"(?m)^\s+!\s+security\s+find-generic-password\b",
+            )
 
     def test_candidate_signing_and_attestation_have_least_privilege(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -551,8 +603,9 @@ class BuildConfigTests(unittest.TestCase):
             "${{ github.repository }}/.github/workflows/release-readiness.yml",
             publisher,
         )
+        self.assertNotIn("owned-geph-qualification.yml", publisher)
         self.assertIn(
-            "${{ github.repository }}/.github/workflows/owned-geph-qualification.yml",
+            "qualification and readiness must use one protected workflow run",
             publisher,
         )
         self.assertNotIn("Build + sign the app", publisher)
@@ -935,7 +988,11 @@ class BuildConfigTests(unittest.TestCase):
         )
 
         self.assertIn("scripts/release_candidate.py verify-proof", workflow)
-        self.assertIn("owned-geph-qualification.yml", workflow)
+        self.assertIn(
+            "--expected-qualification-workflow .github/workflows/release-readiness.yml",
+            workflow,
+        )
+        self.assertNotIn("owned-geph-qualification.yml", workflow)
         self.assertNotIn("scripts/run_packaged_lifecycle_smoke.sh", workflow)
         self.assertIn("scripts/pf_installed_lifecycle_smoke.py", wrapper)
         self.assertIn('--app-bundle "$app_bundle"', wrapper)

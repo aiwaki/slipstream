@@ -1,10 +1,11 @@
 # Promote an immutable, already built and qualified release candidate.
 #
 # Required main CI is the only workflow that runs PyInstaller/Tauri and creates
-# release-candidate-${SHA}.  The protected owned-Geph workflow consumes that
-# candidate and emits a proof bound to its manifest digest.  This publisher
-# fails closed unless both exact-SHA inputs verify; it creates only tag-specific
-# metadata and never rebuilds or re-qualifies the application.
+# release-candidate-${SHA}.  One protected release-readiness workflow holds one
+# account-backed Geph session across ownership proof, the live browser matrix,
+# and the measured soak.  This publisher fails closed unless every exact-SHA
+# proof verifies; it creates only tag-specific metadata and never rebuilds or
+# re-qualifies the application.
 name: build-app
 
 on:
@@ -24,7 +25,7 @@ on:
         description: "Optional successful dependency-audit.yml main run ID for this exact SHA."
         required: false
       qualification_run_id:
-        description: "Optional successful protected qualification run ID for this exact SHA."
+        description: "Deprecated compatibility input; if set, it must equal readiness_run_id."
         required: false
       readiness_run_id:
         description: "Optional successful protected release-readiness run ID for this exact SHA."
@@ -210,17 +211,14 @@ jobs:
               --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
               | sed -n '1p')"
           fi
-          if [ -z "$qualification_run" ]; then
-            qualification_run="$(gh api --paginate \
-              "repos/${{ github.repository }}/actions/workflows/owned-geph-qualification.yml/runs?branch=main&event=workflow_dispatch&status=completed&per_page=100" \
-              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
-              | sed -n '1p')"
-          fi
           if [ -z "$readiness_run" ]; then
             readiness_run="$(gh api --paginate \
               "repos/${{ github.repository }}/actions/workflows/release-readiness.yml/runs?branch=main&event=workflow_dispatch&status=completed&per_page=100" \
               --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
               | sed -n '1p')"
+          fi
+          if [ -z "$qualification_run" ]; then
+            qualification_run="$readiness_run"
           fi
           [ -n "$candidate_run" ] || {
             echo "missing successful ci.yml run for $GITHUB_SHA"
@@ -230,20 +228,18 @@ jobs:
             echo "missing successful dependency-audit.yml run for $GITHUB_SHA"
             exit 1
           }
-          [ -n "$qualification_run" ] || {
-            echo "missing successful owned-geph-qualification.yml run for $GITHUB_SHA"
-            exit 1
-          }
           [ -n "$readiness_run" ] || {
             echo "missing successful release-readiness.yml run for $GITHUB_SHA"
+            exit 1
+          }
+          [ "$qualification_run" = "$readiness_run" ] || {
+            echo "qualification and readiness must use one protected workflow run"
             exit 1
           }
           candidate_metadata="$(gh api \
             "repos/${{ github.repository }}/actions/runs/$candidate_run")"
           dependency_audit_metadata="$(gh api \
             "repos/${{ github.repository }}/actions/runs/$dependency_audit_run")"
-          qualification_metadata="$(gh api \
-            "repos/${{ github.repository }}/actions/runs/$qualification_run")"
           readiness_metadata="$(gh api \
             "repos/${{ github.repository }}/actions/runs/$readiness_run")"
           python3 -c '
@@ -339,37 +335,14 @@ jobs:
           if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
               raise SystemExit("run attempt is invalid")
           ' "$GITHUB_SHA" "${{ github.repository }}" workflow_dispatch \
-            owned-geph-qualification.yml <<< "$qualification_metadata"
-          python3 -c '
-          import json
-          import sys
-          run = json.load(sys.stdin)
-          expected_sha, repository, event, workflow = sys.argv[1:]
-          expected = {
-              "head_sha": expected_sha,
-              "head_branch": "main",
-              "event": event,
-              "conclusion": "success",
-              "path": f".github/workflows/{workflow}",
-          }
-          for key, value in expected.items():
-              if run.get(key) != value:
-                  raise SystemExit(f"run has invalid {key}: {run.get(key)!r}")
-          if (run.get("head_repository") or {}).get("full_name") != repository:
-              raise SystemExit("run belongs to a different repository")
-          if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
-              raise SystemExit("run attempt is invalid")
-          ' "$GITHUB_SHA" "${{ github.repository }}" workflow_dispatch \
             release-readiness.yml <<< "$readiness_metadata"
           candidate_attempt="$(python3 -c \
             'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
             <<< "$candidate_metadata")"
-          qualification_attempt="$(python3 -c \
-            'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
-            <<< "$qualification_metadata")"
           readiness_attempt="$(python3 -c \
             'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
             <<< "$readiness_metadata")"
+          qualification_attempt="$readiness_attempt"
           echo "release_candidate_run_id=$candidate_run" >> "$GITHUB_OUTPUT"
           echo "release_candidate_run_attempt=$candidate_attempt" >> "$GITHUB_OUTPUT"
           echo "dependency_audit_run_id=$dependency_audit_run" >> "$GITHUB_OUTPUT"
@@ -426,6 +399,7 @@ jobs:
             --proof dist-qualified/release-qualification.json \
             --expected-qualification-run-id "${{ steps.runs.outputs.qualification_run_id }}" \
             --expected-qualification-run-attempt "${{ steps.runs.outputs.qualification_run_attempt }}" \
+            --expected-qualification-workflow .github/workflows/release-readiness.yml \
             --expected-candidate-run-attempt "${{ steps.runs.outputs.release_candidate_run_attempt }}"
           python3 scripts/release_readiness.py verify \
             --candidate-dir dist-candidate \
@@ -450,7 +424,7 @@ jobs:
           done
           gh attestation verify dist-qualified/release-qualification.json \
             --repo "${{ github.repository }}" \
-            --signer-workflow "${{ github.repository }}/.github/workflows/owned-geph-qualification.yml" \
+            --signer-workflow "${{ github.repository }}/.github/workflows/release-readiness.yml" \
             --source-digest "$GITHUB_SHA" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners >/dev/null

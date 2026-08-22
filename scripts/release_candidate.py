@@ -30,6 +30,10 @@ SBOM_NAME = make_release_manifest.SBOM_NAME
 AUDIT_NAME = make_release_manifest.DEPENDENCY_AUDIT_NAME
 BUILD_WORKFLOW = ".github/workflows/ci.yml"
 QUALIFICATION_WORKFLOW = ".github/workflows/owned-geph-qualification.yml"
+READINESS_QUALIFICATION_WORKFLOW = ".github/workflows/release-readiness.yml"
+QUALIFICATION_WORKFLOWS = frozenset(
+    (QUALIFICATION_WORKFLOW, READINESS_QUALIFICATION_WORKFLOW)
+)
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_OBJECT = re.compile(r"[0-9a-f]{40,64}")
 REQUIRED_FILES = {
@@ -355,11 +359,17 @@ def build_qualification_proof(
     candidate_dir: Path,
     qualification_run_id: int,
     qualification_run_attempt: int,
+    qualification_workflow: str = QUALIFICATION_WORKFLOW,
     expected_candidate_run_attempt: int | None = None,
     app_tree: Path | None = None,
 ) -> dict:
     if qualification_run_id <= 0 or qualification_run_attempt <= 0:
         raise ValueError("qualification run identity must be positive")
+    if (
+        not isinstance(qualification_workflow, str)
+        or qualification_workflow not in QUALIFICATION_WORKFLOWS
+    ):
+        raise ValueError("qualification workflow is not an approved protected gate")
     manifest = _read_object(candidate_dir / MANIFEST_NAME, "candidate manifest")
     source = manifest.get("source")
     builder = manifest.get("builder")
@@ -390,7 +400,7 @@ def build_qualification_proof(
         "candidate_build_run_id": builder.get("run_id"),
         "candidate_build_run_attempt": builder.get("run_attempt"),
         "qualification": {
-            "workflow": QUALIFICATION_WORKFLOW,
+            "workflow": qualification_workflow,
             "run_id": qualification_run_id,
             "run_attempt": qualification_run_attempt,
             "result": "passed",
@@ -404,6 +414,7 @@ def validate_qualification_proof(
     proof_path: Path,
     expected_qualification_run_id: int | None = None,
     expected_qualification_run_attempt: int | None = None,
+    expected_qualification_workflow: str | None = None,
     expected_candidate_run_attempt: int | None = None,
 ) -> dict:
     proof = _read_object(proof_path, "release qualification proof")
@@ -412,10 +423,20 @@ def validate_qualification_proof(
         raise ValueError("qualification proof identity is invalid")
     run_id = qualification.get("run_id")
     run_attempt = qualification.get("run_attempt")
+    workflow = qualification.get("workflow")
     if not isinstance(run_id, int) or isinstance(run_id, bool):
         raise ValueError("qualification proof run ID is invalid")
     if not isinstance(run_attempt, int) or isinstance(run_attempt, bool):
         raise ValueError("qualification proof run attempt is invalid")
+    if not isinstance(workflow, str) or workflow not in QUALIFICATION_WORKFLOWS:
+        raise ValueError("qualification proof workflow is invalid")
+    if (
+        expected_qualification_workflow is not None
+        and workflow != expected_qualification_workflow
+    ):
+        raise ValueError(
+            "qualification proof workflow does not match downloaded workflow"
+        )
     expected = build_qualification_proof(
         candidate_dir=candidate_dir,
         qualification_run_id=(
@@ -424,6 +445,7 @@ def validate_qualification_proof(
             else run_id
         ),
         qualification_run_attempt=run_attempt,
+        qualification_workflow=workflow,
         expected_candidate_run_attempt=expected_candidate_run_attempt,
         app_tree=None,
     )
@@ -478,6 +500,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     proof.add_argument("--output", required=True, type=Path)
     proof.add_argument("--qualification-run-id", required=True, type=int)
     proof.add_argument("--qualification-run-attempt", required=True, type=int)
+    proof.add_argument(
+        "--qualification-workflow",
+        choices=tuple(sorted(QUALIFICATION_WORKFLOWS)),
+        default=QUALIFICATION_WORKFLOW,
+    )
     proof.add_argument("--expected-candidate-run-attempt", required=True, type=int)
     proof.add_argument("--app-tree", required=True, type=Path)
     verify_proof = subparsers.add_parser("verify-proof")
@@ -485,6 +512,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verify_proof.add_argument("--proof", required=True, type=Path)
     verify_proof.add_argument("--expected-qualification-run-id", type=int)
     verify_proof.add_argument("--expected-qualification-run-attempt", type=int)
+    verify_proof.add_argument(
+        "--expected-qualification-workflow",
+        choices=tuple(sorted(QUALIFICATION_WORKFLOWS)),
+    )
     verify_proof.add_argument("--expected-candidate-run-attempt", type=int)
     return parser.parse_args(argv)
 
@@ -537,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate_dir=args.candidate_dir,
             qualification_run_id=args.qualification_run_id,
             qualification_run_attempt=args.qualification_run_attempt,
+            qualification_workflow=args.qualification_workflow,
             expected_candidate_run_attempt=args.expected_candidate_run_attempt,
             app_tree=args.app_tree,
         )
@@ -549,6 +581,9 @@ def main(argv: list[str] | None = None) -> int:
             expected_qualification_run_id=args.expected_qualification_run_id,
             expected_qualification_run_attempt=(
                 args.expected_qualification_run_attempt
+            ),
+            expected_qualification_workflow=(
+                args.expected_qualification_workflow
             ),
             expected_candidate_run_attempt=args.expected_candidate_run_attempt,
         )
