@@ -48,6 +48,21 @@ bundle before launch and runs browser observation through a separately signed
 non-AppKit helper; `Accessory` remains a second guard rather than the primary
 Dock fix.
 
+### macOS says “A keychain cannot be found to store Chrome”
+
+Choose **Cancel**, not **Reset to Defaults**. This was caused by an early
+development version of the one-host diagnostic accepting consumer Google
+Chrome while replacing its `HOME` with a temporary directory. Chrome then
+asked macOS for a default Keychain in that empty home. It was not a Slipstream
+account prompt and resetting the user's Keychain is neither required nor safe.
+
+The corrected diagnostic rejects consumer Google Chrome before launch. It
+accepts only Chrome for Testing or `chrome-headless-shell`, uses Chromium's
+mock-Keychain mode, a disposable profile, and a temporary `HOME`, and verifies
+the complete process group is gone before deleting that profile. If the dialog
+was already open, cancelling it is sufficient; do not create or reset a
+Keychain for the diagnostic.
+
 ### macOS says “Slipstream is damaged” during development
 
 Do not assume the dialog names `/Applications/Slipstream.app`. First bind it to

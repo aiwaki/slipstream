@@ -86,8 +86,8 @@ crate is linked into the Windows production host.
 
 ### Targeted browser diagnostics
 
-For a current one-host browser/content question, use the separate direct
-diagnostic with an explicitly supplied Chrome for Testing executable:
+For a current one-host browser/content question, use the separate unverified
+local diagnostic with an explicitly supplied Chrome for Testing executable:
 
 ```bash
 python3 scripts/live_site_browser_diagnostic.py \
@@ -96,17 +96,24 @@ python3 scripts/live_site_browser_diagnostic.py \
   --output /tmp/slipstream-diagnostic.json
 ```
 
-It uses a fresh temporary headless Chrome profile and temporary `HOME`, disables
-proxy inheritance, and on verified cleanup removes only that profile and its
-process group. It does not install or
-start Slipstream, activate PF, start Geph, invoke `sudo`, enable Safari Remote
-Automation, change DNS/proxy/PAC/VPN settings, or use an account token. The
-bounded report is deliberately marked `diagnostic_only` and
-`release_eligible: false`: it can identify a current visible challenge or
-pending-document condition, but cannot prove a Slipstream route or replace a
-protected release gate. The matching `live-site-diagnostic` manual GitHub
-workflow has the same non-release boundary and can inspect one allowlisted host
-without running unrelated release jobs.
+It accepts only Chrome for Testing or `chrome-headless-shell`, uses a mock
+Keychain, a fresh temporary headless profile, and a temporary `HOME`. Consumer
+Google Chrome is rejected before launch so the diagnostic cannot prompt for or
+touch the user's Chrome Keychain. It disables proxy inheritance, and on
+verified cleanup removes only that profile and its process group. It does not
+install or start Slipstream, activate PF, start Geph, invoke `sudo`, enable
+Safari Remote Automation, change DNS/proxy/PAC/VPN settings, or use an account
+token. The bounded report is deliberately marked `diagnostic_only` and
+`release_eligible: false`. `diagnostic_completed: true` means the tool safely
+finished and wrote a finding backed by a valid semantic or fixed target-state
+observation; it does not mean the target was usable. Such a completed diagnostic
+exits zero by default, while `--require-usable` makes a non-usable target exit
+one. A CDP harness, report, or cleanup failure exits two. The finding can
+identify a current visible challenge or pending-document condition, but cannot
+prove a Slipstream route or replace a protected release gate. The
+matching `live-site-diagnostic` manual GitHub workflow has the same non-release
+boundary and can inspect one allowlisted host without running unrelated release
+jobs.
 
 ## Build
 

@@ -431,14 +431,14 @@ class BuildConfigTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("workflow_dispatch:", diagnostic)
-        self.assertIn("direct-browser-diagnostic:", diagnostic)
+        self.assertIn("local-browser-diagnostic:", diagnostic)
         self.assertIn("scripts/live_site_browser_diagnostic.py", diagnostic)
         self.assertIn("retention-days: 1", diagnostic)
         self.assertIn("persist-credentials: false", diagnostic)
         observation = diagnostic[
-            diagnostic.index("Observe one direct browser path") : diagnostic.index(
-                "Upload bounded diagnostic report"
-            )
+            diagnostic.index(
+                "Observe one unverified local browser path"
+            ) : diagnostic.index("Upload bounded diagnostic report")
         ]
         self.assertIn("DIAGNOSTIC_HOST: ${{ inputs.host }}", observation)
         self.assertIn('--host "$DIAGNOSTIC_HOST"', observation)
