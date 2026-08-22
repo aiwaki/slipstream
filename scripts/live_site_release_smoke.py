@@ -222,6 +222,7 @@ READINESS_EXPRESSION = r"""
     return style.display !== 'none' && style.visibility !== 'hidden' &&
       Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
   };
+  const boundedString = (value, maximum) => String(value || '').slice(0, maximum);
   const textLength = (node) => node ? (node.innerText || '').trim().length : 0;
   const navigation = performance.getEntriesByType('navigation')[0];
   const app = document.querySelector('#app');
@@ -231,11 +232,11 @@ READINESS_EXPRESSION = r"""
     body_text_length: textLength(document.body),
     https: location.protocol === 'https:',
     main_text_length: textLength(document.querySelector('main')),
-    next_hop_protocol: navigation ? navigation.nextHopProtocol : '',
+    next_hop_protocol: navigation ? boundedString(navigation.nextHopProtocol, 32) : '',
     preloader_visible: visible(preloader),
     ready_state: document.readyState,
     secure_context: window.isSecureContext === true,
-    title: document.title,
+    title: boundedString(document.title, 512),
     visible_app: visible(app),
     visible_body: visible(document.body)
   };

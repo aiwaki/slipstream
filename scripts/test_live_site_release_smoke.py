@@ -177,6 +177,16 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertIn("--remote-debugging-port=0", command)
         self.assertIn("--user-data-dir=/tmp/private-profile", command)
 
+    def test_readiness_expression_bounds_page_controlled_strings(self) -> None:
+        self.assertIn("const boundedString", smoke.READINESS_EXPRESSION)
+        self.assertIn(
+            "boundedString(navigation.nextHopProtocol, 32)",
+            smoke.READINESS_EXPRESSION,
+        )
+        self.assertIn(
+            "boundedString(document.title, 512)", smoke.READINESS_EXPRESSION
+        )
+
     def test_chrome_navigation_error_becomes_bounded_terminal_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
