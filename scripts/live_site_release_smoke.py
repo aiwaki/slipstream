@@ -113,19 +113,23 @@ def _positive_readiness(host: str, signals: dict[str, object]) -> bool:
     return _readiness_blocker(host, signals) is None
 
 
-def _classify_document_evidence(
-    host: str, document: str, signals: dict[str, object] | None = None
+def _classify_evidence(
+    host: str,
+    *,
+    document_bytes: int,
+    denial_detected: bool,
+    challenge_detected: bool,
+    signals: dict[str, object] | None = None,
 ) -> tuple[str, str]:
-    if len(document.encode("utf-8")) < MIN_DOCUMENT_BYTES:
+    if document_bytes < MIN_DOCUMENT_BYTES:
         return "terminal_error", "document_too_short"
-    lowered = document.casefold()
-    if any(marker in lowered for marker in SITES[host]["denials"]):
+    if denial_detected:
         if host == "weather.com":
             return "regional_access_denied", "regional_access_denied"
         if host == "capacitorjs.com":
             return "edge_access_denied", "edge_access_denied"
         return "terminal_error", "navigation_denied"
-    if any(marker in lowered for marker in CHALLENGE_MARKERS):
+    if challenge_detected:
         return "challenge_or_auth", "challenge_or_auth"
     if signals is None:
         return "terminal_error", "readiness_signals_invalid"
@@ -136,6 +140,51 @@ def _classify_document_evidence(
     if blocker is None:
         return "usable", ""
     return "terminal_error", blocker
+
+
+def _classify_document_evidence(
+    host: str, document: str, signals: dict[str, object] | None = None
+) -> tuple[str, str]:
+    lowered = document.casefold()
+    return _classify_evidence(
+        host,
+        document_bytes=len(document.encode("utf-8")),
+        denial_detected=any(marker in lowered for marker in SITES[host]["denials"]),
+        challenge_detected=any(marker in lowered for marker in CHALLENGE_MARKERS),
+        signals=signals,
+    )
+
+
+def _classify_chrome_evidence(host: str, evidence: object) -> tuple[str, str]:
+    expected = {
+        "challenge_detected",
+        "denial_detected",
+        "document_bytes",
+        "signals",
+    }
+    if not isinstance(evidence, dict) or set(evidence) != expected:
+        return "terminal_error", "document_invalid"
+    document_bytes = evidence.get("document_bytes")
+    denial_detected = evidence.get("denial_detected")
+    challenge_detected = evidence.get("challenge_detected")
+    signals = evidence.get("signals")
+    if (
+        isinstance(document_bytes, bool)
+        or not isinstance(document_bytes, int)
+        or document_bytes < 0
+        or not isinstance(denial_detected, bool)
+        or not isinstance(challenge_detected, bool)
+    ):
+        return "terminal_error", "document_invalid"
+    return _classify_evidence(
+        host,
+        document_bytes=document_bytes,
+        denial_detected=denial_detected,
+        challenge_detected=challenge_detected,
+        # Keep the prior classifier ordering: a fixed denial or challenge is
+        # still meaningful even if the accompanying readiness object is bad.
+        signals=signals if isinstance(signals, dict) else None,
+    )
 
 
 def _classify_document(
@@ -173,6 +222,7 @@ READINESS_EXPRESSION = r"""
     return style.display !== 'none' && style.visibility !== 'hidden' &&
       Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
   };
+  const boundedString = (value, maximum) => String(value || '').slice(0, maximum);
   const textLength = (node) => node ? (node.innerText || '').trim().length : 0;
   const navigation = performance.getEntriesByType('navigation')[0];
   const app = document.querySelector('#app');
@@ -182,15 +232,35 @@ READINESS_EXPRESSION = r"""
     body_text_length: textLength(document.body),
     https: location.protocol === 'https:',
     main_text_length: textLength(document.querySelector('main')),
-    next_hop_protocol: navigation ? navigation.nextHopProtocol : '',
+    next_hop_protocol: navigation ? boundedString(navigation.nextHopProtocol, 32) : '',
     preloader_visible: visible(preloader),
     ready_state: document.readyState,
     secure_context: window.isSecureContext === true,
-    title: document.title,
+    title: boundedString(document.title, 512),
     visible_app: visible(app),
     visible_body: visible(document.body)
   };
 })()
+"""
+
+
+def _chrome_evidence_expression(host: str) -> str:
+    denials = json.dumps(SITES[host]["denials"])
+    challenges = json.dumps(CHALLENGE_MARKERS)
+    # CDP transport has a strict bounded response size. Inspect the document
+    # inside the page and return only fixed booleans, a byte count, and the
+    # existing readiness object; raw page content never crosses DevTools.
+    return f"""
+(() => {{
+  const documentSource = document.documentElement.outerHTML;
+  const lowered = documentSource.toLowerCase();
+  return {{
+    challenge_detected: {challenges}.some((marker) => lowered.includes(marker)),
+    denial_detected: {denials}.some((marker) => lowered.includes(marker)),
+    document_bytes: new TextEncoder().encode(documentSource).length,
+    signals: ({READINESS_EXPRESSION})
+  }};
+}})()
 """
 
 
@@ -296,46 +366,33 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         failure_reason = "browser_observation_failed"
         reason = failure_reason
         deadline = observation_started + SITES[host]["deadline_ms"] / 1000
-        signals: dict[str, object] = {}
-        document = ""
         while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
                 evaluated = chromium._devtools_command(
                     debugger,
                     port,
                     "Runtime.evaluate",
                     {
-                        "expression": READINESS_EXPRESSION,
+                        "expression": _chrome_evidence_expression(host),
                         "returnByValue": True,
                     },
-                    response_timeout=2,
+                    response_timeout=min(2.0, remaining),
                 ).get("result")
-                value = (
+                evidence = (
                     evaluated.get("value") if isinstance(evaluated, dict) else None
                 )
-                if isinstance(value, dict):
-                    signals = value
-                html = chromium._devtools_command(
-                    debugger,
-                    port,
-                    "Runtime.evaluate",
-                    {
-                        "expression": "document.documentElement.outerHTML",
-                        "returnByValue": True,
-                    },
-                    response_timeout=2,
-                ).get("result")
-                value = html.get("value") if isinstance(html, dict) else None
-                if isinstance(value, str):
-                    document = value
-            except chromium.QualificationError:
-                # Navigation replaces the execution context. A single CDP
-                # evaluation can race that replacement; keep polling inside
-                # the existing host deadline instead of treating it as a
-                # terminal browser failure.
-                time.sleep(0.25)
+            except (chromium.QualificationError, TimeoutError):
+                # Navigation can replace the execution context and a bounded
+                # DevTools request can time out. Neither authorizes a pass;
+                # keep polling only inside the unchanged host deadline.
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(0.25, remaining))
                 continue
-            outcome, reason = _classify_document_evidence(host, document, signals)
+            outcome, reason = _classify_chrome_evidence(host, evidence)
             # A static app shell reaches readyState=complete before its JS has
             # rendered a useful interface. Keep polling until a fixed positive
             # signal, a fixed denial, or the site deadline. A challenge remains
@@ -346,7 +403,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
                 "edge_access_denied",
             }:
                 break
-            time.sleep(0.25)
+            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
         finished = time.monotonic()
     except BaseException as exc:
         failure = exc
@@ -445,6 +502,10 @@ def _decode_safari_readiness_signals(value: object) -> dict[str, object]:
     return signals
 
 
+def _is_safari_observation_timeout(error: lifecycle.LifecycleError) -> bool:
+    return isinstance(error.__cause__, TimeoutError)
+
+
 def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -469,7 +530,12 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
                 "capabilities": {
                     "alwaysMatch": {
                         "browserName": "safari",
-                        "pageLoadStrategy": "normal",
+                        # The live gate itself must observe incomplete and
+                        # challenge documents. "normal" blocks that poll
+                        # until load completes; this changes only WebDriver's
+                        # return condition, not the fixed observation window
+                        # or its strict pass criteria.
+                        "pageLoadStrategy": "none",
                     }
                 }
             },
@@ -510,27 +576,40 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             # Reset before each later WebDriver request so an HTTP/timeout
             # failure is not mislabeled as a prior serialization failure.
             failure_reason = "browser_observation_failed"
-            remaining = max(0.1, absolute_deadline - time.monotonic())
-            source = lifecycle._webdriver_request(
-                driver_url,
-                "GET",
-                f"/session/{encoded}/source",
-                timeout=min(2.0, remaining),
-            ).get("value")
-            if not isinstance(source, str):
-                failure_reason = "document_invalid"
-                raise LiveSiteError("SafariDriver returned a non-text document")
-            document = source
-            serialized_signals = lifecycle._webdriver_request(
-                driver_url,
-                "POST",
-                f"/session/{encoded}/execute/sync",
-                {
-                    "script": f"return JSON.stringify({READINESS_EXPRESSION});",
-                    "args": [],
-                },
-                timeout=min(2.0, remaining),
-            ).get("value")
+            try:
+                remaining = absolute_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                source = lifecycle._webdriver_request(
+                    driver_url,
+                    "GET",
+                    f"/session/{encoded}/source",
+                    timeout=min(2.0, remaining),
+                ).get("value")
+                if not isinstance(source, str):
+                    failure_reason = "document_invalid"
+                    raise LiveSiteError("SafariDriver returned a non-text document")
+                document = source
+                remaining = absolute_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                serialized_signals = lifecycle._webdriver_request(
+                    driver_url,
+                    "POST",
+                    f"/session/{encoded}/execute/sync",
+                    {
+                        "script": f"return JSON.stringify({READINESS_EXPRESSION});",
+                        "args": [],
+                    },
+                    timeout=min(2.0, remaining),
+                ).get("value")
+            except lifecycle.LifecycleError as exc:
+                if not _is_safari_observation_timeout(exc):
+                    raise
+                remaining = absolute_deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(0.25, remaining))
+                continue
             failure_reason = "readiness_signals_invalid"
             signals = _decode_safari_readiness_signals(serialized_signals)
             outcome, reason = _classify_document_evidence(host, document, signals)

@@ -10,55 +10,61 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-22 (release live-browser lifecycle correction active): exact
-product main `a2a2b89f6fe834e624a87f43bd82a20514ee9a34` passed
-[exact-main CI `32485833048`](https://github.com/aiwaki/slipstream/actions/runs/32485833048)
+Update 2026-08-22 (new live-browser evidence and targeted correction): exact
+product main `80c2585335d265447cd26e9f28e6233a3dd3541b` (PR #358) passed
+[exact-main CI `32555469232`](https://github.com/aiwaki/slipstream/actions/runs/32555469232)
 and
-[dependency audit `32485833077`](https://github.com/aiwaki/slipstream/actions/runs/32485833077).
-The same SHA then passed the complete account-backed
-[owned-Geph qualification `32553370295`](https://github.com/aiwaki/slipstream/actions/runs/32553370295).
-[Release-readiness `32553506502`](https://github.com/aiwaki/slipstream/actions/runs/32553506502)
-consumed that exact candidate but stopped before the 30-minute soak. Its bounded
-[live-site artifact `9470800711`](https://github.com/aiwaki/slipstream/actions/runs/32553506502/artifacts/9470800711)
-records the complete fixed matrix:
+[dependency audit `32555469304`](https://github.com/aiwaki/slipstream/actions/runs/32555469304).
+With the user's one-time immediate override, the same SHA passed the complete
+account-backed
+[owned-Geph qualification `32569080184`](https://github.com/aiwaki/slipstream/actions/runs/32569080184).
+The bound
+[release-readiness `32569192382`](https://github.com/aiwaki/slipstream/actions/runs/32569192382)
+then stopped at the fixed live-site matrix before the 30-minute soak. Its
+bounded
+[live-site artifact `9474913881`](https://github.com/aiwaki/slipstream/actions/runs/32569192382/artifacts/9474913881)
+has digest `sha256:6b5b9be513df108e12295e68118d38bb7fc2c5ffe7fd8c972ccf9e8bfd4ff195`
+and records:
 
-- `xpersonatoy.com`: Safari returned `challenge_or_auth`; Chrome reached its
-  navigation deadline with `readiness_timeout`; both route controls were
-  unavailable, so the site result was `inconclusive`.
-- `app.aikido.dev`: Safari and Chrome were both `usable`; controls were not
-  needed.
-- `weather.com`: Safari reached `readiness_timeout`; Chrome returned
-  `browser_observation_failed`; direct control was unavailable and the
-  owned-Geph control was `usable`, so the site result remained
-  `terminal_error`.
-- `capacitorjs.com`: Safari was `usable`; Chrome returned
-  `browser_start_failed`; both direct and owned-Geph controls were `usable`, so
-  the site result remained `terminal_error`.
+- `xpersonatoy.com`: Safari `navigation_rejected`, Chrome
+  `challenge_or_auth`; both controls unavailable, therefore `inconclusive`.
+- `app.aikido.dev`: both browsers `usable`; controls not needed.
+- `weather.com`: both browsers `readiness_document_pending`; direct
+  unavailable and owned-Geph `usable`, therefore still `terminal_error`.
+- `capacitorjs.com`: Safari `usable`, Chrome
+  `browser_observation_failed`; direct and owned-Geph both `usable`, therefore
+  still `terminal_error`.
 
-The matrix therefore failed, the soak, readiness attestation, and publisher did
-not run, and `.23` remains an ad-hoc-signed, unnotarized, unpublished preview.
-A prior local browser-only probe opened isolated Chrome windows but did not
-install or run Slipstream, activate the candidate daemon or private PF route,
-or prove the owned-Geph path. It is not product, routing, or release evidence
-and must not be used to replace this protected report.
+The matrix failed, so the soak, readiness attestation, and publisher did not
+run. `.23` remains an ad-hoc-signed, unnotarized, unpublished preview. A prior
+local browser-only probe remains non-evidence: it did not install or run
+Slipstream or activate its candidate daemon, private PF route, or owned-Geph
+path.
 
-The protected report also exposed a harness lifecycle contradiction rather
-than authority to weaken a site result. The live Chrome path executed the
-browser directly with `subprocess.Popen` plus a manual UID/GID transition, even
-though earlier protected qualification had already proved that valid sandboxed
-Chrome networking on the macOS runner requires the exact console Aqua bootstrap:
-an owner-private temporary job in `gui/<uid>` invoking `/usr/bin/open` through
-LaunchServices. The active PR correction reuses that exact LaunchAgent/open,
-identity, bootout, process-absence, and bounded quiet-window lifecycle. It also
-starts each full host deadline at the actual navigation, continues polling a
-challenge that may resolve within that same deadline, and reports only the
-shared bounded readiness-blocker enums. It does not change routing, controls,
-the four hosts, the Safari-plus-Chrome requirement, or the rule that every
-matrix entry must pass before the soak. No protected result is claimed for the
-active correction yet; next obtain its reviewed PR and exact-main CI, then run
-one owned-Geph qualification and one bound readiness attempt after the next
-broker UTC-day reset before considering the publisher. Do not dispatch a
-further account-backed run on 2026-08-22 UTC.
+The bounded report supports two narrowly scoped harness corrections, not a
+policy relaxation. Safari's live-site session uses WebDriver
+`pageLoadStrategy: normal`, which can block its own strict document poll until
+the full host deadline on incomplete or challenge pages; change only the
+return condition to `none`, then retry only a causal WebDriver transport timeout
+inside the same deadline while retaining terminal handling for invalid replies
+and the same evidence checks.
+Chrome's poll currently requests raw `document.documentElement.outerHTML` over
+DevTools even though it needs only byte length and fixed denial/challenge
+markers; that path is vulnerable to the fixed 64 KiB DevTools response limit.
+Return a fixed, private structured envelope from page-side evaluation instead,
+retain the same readiness criteria, and retry only bounded
+`QualificationError`/`TimeoutError` observations inside the existing deadline.
+Neither correction changes routing, controls, the four hosts, Safari-plus-Chrome
+requirement, or the rule that every matrix entry must pass before the soak.
+Weather's current two-browser pending result has no authorized reclassification,
+deadline extension, or route expansion.
+
+The correction is being prepared on `codex/fix-safari-live-site-navigation`.
+After review, exact-main CI, and audit for its new SHA, do not spend another
+account-backed run on 2026-08-22 UTC: the user's one emergency chain is already
+complete. After the next UTC-day reset, run at most one owned-Geph qualification
+and one readiness bound to that exact candidate; only a full pass may dispatch
+the publisher.
 
 ### Historical checkpoints (superseded)
 
