@@ -1,22 +1,25 @@
-name: owned-geph-qualification
+name: owned-geph-diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic_only:
+        description: "Explicitly run the quota-consuming owned-Geph diagnostic; never release evidence."
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   actions: read
-  id-token: write
-  attestations: write
-  artifact-metadata: write
 
 concurrency:
-  group: owned-geph-qualification
+  group: account-backed-geph
   cancel-in-progress: false
 
 jobs:
-  account-backed-owned-geph:
-    if: github.ref == 'refs/heads/main'
+  account-backed-owned-geph-diagnostic:
+    if: github.ref == 'refs/heads/main' && inputs.diagnostic_only == true
     runs-on: macos-14
     timeout-minutes: 35
     environment: geph-qualification
@@ -159,7 +162,10 @@ jobs:
           set -euo pipefail
           test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
           sudo launchctl disable system/dev.slipstream.tproxy
-          ! sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1
+          if sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1; then
+            echo "Slipstream root daemon is still loaded" >&2
+            exit 1
+          fi
           test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
           test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
 
@@ -222,7 +228,10 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
-          ! sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1
+          if sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1; then
+            echo "Slipstream root daemon survived owned-Geph diagnostic" >&2
+            exit 1
+          fi
           test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
           test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
           test ! -e /var/run/slipstream-pf.token
@@ -231,33 +240,15 @@ jobs:
           test ! -e /var/run/slipstream-autogeph.json
           test ! -e /var/run/slipstream-semantic.sock
           test -z "$(/usr/sbin/lsof -nP -t -iTCP@127.0.0.1:9954 -sTCP:LISTEN || true)"
-          ! launchctl print "gui/$(id -u)/dev.slipstream.geph" >/dev/null 2>&1
+          if launchctl print "gui/$(id -u)/dev.slipstream.geph" >/dev/null 2>&1; then
+            echo "Slipstream owned-Geph LaunchAgent survived diagnostic" >&2
+            exit 1
+          fi
           test ! -e "$HOME/Library/LaunchAgents/dev.slipstream.geph.plist"
           test ! -e "$HOME/Library/Application Support/dev.slipstream.tray"
           test ! -e "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.slipstream.semantic.json"
-          ! security find-generic-password \
-            -s dev.slipstream.geph -a account-secret >/dev/null 2>&1
-
-      - name: Bind qualification proof to the exact candidate
-        run: |
-          set -euo pipefail
-          mkdir -p dist-qualified
-          python3 scripts/release_candidate.py create-proof \
-            --candidate-dir dist-candidate \
-            --output dist-qualified/release-qualification.json \
-            --qualification-run-id "$GITHUB_RUN_ID" \
-            --qualification-run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --expected-candidate-run-attempt "${{ steps.candidate-run.outputs.run_attempt }}" \
-            --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"
-
-      - name: Attest exact qualification proof
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
-        with:
-          subject-path: dist-qualified/release-qualification.json
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: Slipstream-owned-geph-qualified-${{ github.sha }}
-          path: dist-qualified/release-qualification.json
-          if-no-files-found: error
-          retention-days: 7
+          if security find-generic-password \
+            -s dev.slipstream.geph -a account-secret >/dev/null 2>&1; then
+            echo "Slipstream owned-Geph Keychain item survived diagnostic" >&2
+            exit 1
+          fi

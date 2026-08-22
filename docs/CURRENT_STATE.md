@@ -10,30 +10,38 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-22 (current checkpoint): exact product main remains
-`f16bb7c9a58065c749cb13b24c42c3d6d0389a05` from PR #361. Exact-main
-[CI `32575593760`](https://github.com/aiwaki/slipstream/actions/runs/32575593760),
-[dependency audit `32575593677`](https://github.com/aiwaki/slipstream/actions/runs/32575593677),
-candidate artifact `9476551838`
-(`sha256:acf78baa54ce97414d7239a37c76aca526ecf38fe7f3edef8cc3b9716b1417fa`),
-and bound
-[owned-Geph qualification `32582906139`](https://github.com/aiwaki/slipstream/actions/runs/32582906139)
-passed. Bound
-[release-readiness `32583053838`](https://github.com/aiwaki/slipstream/actions/runs/32583053838)
-completed the fixed four-host/two-browser driver but failed strict validation
-before the 30-minute soak; artifact `9478349480`
-(`sha256:b5d9a3da8f215962c0ea8d8e00f4329a4d2295ae6937f11e2d3e4dec9f508500`)
-records three `readiness_document_pending_semantic_ready` outcomes. `.23`
-remains unpublished. Detailed evidence and classifier rationale are in
-`docs/BROWSER_COMPANION.md`.
+Update 2026-08-22 (current checkpoint): PR #363 merged the fail-closed semantic
+readiness correction as exact product main
+`c8c4c425e0488479686d76265b5eec3db133d202`. Exact-main
+[CI `32589384708`](https://github.com/aiwaki/slipstream/actions/runs/32589384708)
+and
+[dependency audit `32589384714`](https://github.com/aiwaki/slipstream/actions/runs/32589384714)
+passed. Candidate artifact `9479994821` has digest
+`sha256:746b16a10f42d5e86472965b73c17afed21d3e33d5c43ba6ef26107136ec1312`.
+The sequential
+[owned-Geph run `32590027895`](https://github.com/aiwaki/slipstream/actions/runs/32590027895)
+passed, but bound
+[release-readiness `32590146466`](https://github.com/aiwaki/slipstream/actions/runs/32590146466)
+failed before SafariDriver or the four-host/two-browser matrix. Its bounded
+artifact `9480105795`
+(`sha256:14eda77a4f71de355e159fe7e8724596be3e9dac1ae8b528ea6773b444573b95`)
+contains only exit marker `125`: the second ephemeral runner requested a fresh
+account token and the broker returned `cannot get token: rate limited`. The
+soak, readiness proof, publisher, and `.23` release did not run.
 
-PR #363 is the active narrow fail-closed readiness-harness correction; it
-changes neither routing nor the fixed matrix. Do not retry unchanged
-`f16bb7c`. Merge the correction after exact-head review and checks, obtain a
-successful exact-main CI/audit/candidate, then run exactly one owned-Geph
-qualification for that SHA and one readiness bound to its candidate. Only a
-passed matrix, measured 30-minute soak, attestations, and exact-SHA gates may
-dispatch `.23`. PR #362 remains diagnostic-only and non-release.
+The active correction makes `release-readiness.yml` the sole release-critical
+account-backed workflow. One held owned-Geph process must pass the existing
+deterministic Chromium semantic gate and the unchanged Safari/Chrome live-site
+matrix before release and cleanup; the same workflow also requires transport
+mechanics and, after that cleanup, the measured 30-minute invisibility soak. It
+emits separate qualification/readiness proofs bound to one exact run attempt.
+The legacy owned-Geph workflow becomes explicit diagnostic-only work and cannot
+emit release evidence. Do not retry `c8c4c425` or persist a bearer token between
+runners. Merge this correction after exact-head review/checks, obtain a new
+exact-main CI/audit/candidate, then dispatch exactly one combined readiness
+run. Only its complete matrix, lifecycle cleanup, soak, attestations, and
+exact-SHA gates may dispatch `.23`. PR #362 remains diagnostic-only and
+non-release.
 
 ### Superseded checkpoint
 

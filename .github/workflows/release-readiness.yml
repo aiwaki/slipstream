@@ -15,14 +15,14 @@ permissions:
   artifact-metadata: write
 
 concurrency:
-  group: release-readiness
+  group: account-backed-geph
   cancel-in-progress: false
 
 jobs:
   exact-candidate-readiness:
     if: github.ref == 'refs/heads/main'
     runs-on: macos-14
-    timeout-minutes: 55
+    timeout-minutes: 75
     environment: geph-qualification
     env:
       SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
@@ -127,6 +127,26 @@ jobs:
             --expected-workflow-run-id "${{ steps.candidate.outputs.run_id }}" \
             --expected-workflow-run-attempt "${{ steps.candidate.outputs.run_attempt }}" \
             --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"
+          app="$RUNNER_TEMP/candidate-app/Slipstream.app"
+          test "$(
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+              "$app/Contents/Info.plist"
+          )" = slipstream
+          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
+          helper="$app/Contents/MacOS/slipstream-browser-probe"
+          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
+          for binary in "$helper" "$watchdog"; do
+            test -x "$binary"
+            /usr/bin/lipo "$binary" -verify_arch arm64
+            /usr/bin/codesign --verify --strict "$binary"
+            if /usr/bin/otool -L "$binary" | /usr/bin/grep -E \
+              'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
+              echo "non-GUI helper links a GUI framework: $binary" >&2
+              exit 1
+            fi
+          done
+          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
+          /usr/bin/codesign --verify --deep --strict "$app"
 
       - name: Qualify exact-candidate dual-stack PF and QUIC mechanics
         env:
@@ -154,6 +174,18 @@ jobs:
         with:
           chrome-version: 151.0.7922.77
           install-chromedriver: false
+
+      - name: Establish a daemon-free qualification boundary
+        run: |
+          set -euo pipefail
+          test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+          sudo launchctl disable system/dev.slipstream.tproxy
+          if sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1; then
+            echo "Slipstream root daemon is still loaded" >&2
+            exit 1
+          fi
+          test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
+          test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
 
       - name: Run account-backed Safari and Chrome live-site gate
         env:
@@ -205,6 +237,10 @@ jobs:
             sleep 0.25
           done
           test -f "$ready"
+          env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E "$(command -v python3)" \
+            scripts/chromium_semantic_packaged_smoke.py \
+            --app-bundle "$RUNNER_TEMP/candidate-app/Slipstream.app" \
+            --chrome-executable "${{ steps.chrome.outputs.chrome-path }}"
           sudo /usr/bin/safaridriver --enable
           driver_port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
           /usr/bin/safaridriver --diagnose --port "$driver_port" \
@@ -268,6 +304,36 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Verify the account-backed gate cleaned product-owned state
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+          if sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1; then
+            echo "Slipstream root daemon survived the account-backed gate" >&2
+            exit 1
+          fi
+          test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
+          test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
+          test ! -e /var/run/slipstream-pf.token
+          test ! -e /var/run/slipstream-pf-lo0-skip.json
+          test ! -e /var/run/slipstream.status
+          test ! -e /var/run/slipstream-autogeph.json
+          test ! -e /var/run/slipstream-semantic.sock
+          test -z "$(/usr/sbin/lsof -nP -t -iTCP@127.0.0.1:9954 -sTCP:LISTEN || true)"
+          if launchctl print "gui/$(id -u)/dev.slipstream.geph" >/dev/null 2>&1; then
+            echo "Slipstream owned-Geph LaunchAgent survived the account-backed gate" >&2
+            exit 1
+          fi
+          test ! -e "$HOME/Library/LaunchAgents/dev.slipstream.geph.plist"
+          test ! -e "$HOME/Library/Application Support/dev.slipstream.tray"
+          test ! -e "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.slipstream.semantic.json"
+          if security find-generic-password \
+            -s dev.slipstream.geph -a account-secret >/dev/null 2>&1; then
+            echo "Slipstream owned-Geph Keychain item survived the account-backed gate" >&2
+            exit 1
+          fi
+
       - name: Require passed live-site matrix before the long soak
         run: |
           set -euo pipefail
@@ -305,11 +371,37 @@ jobs:
           set -e
           printf '%s\n' "$soak_status" > dist-readiness/invisibility-soak.exit
 
-      - name: Bind measured readiness to exact candidate and workflow attempt
+      - name: Verify the soak left no product-owned system path
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+          if sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1; then
+            echo "Slipstream root daemon survived the invisibility soak" >&2
+            exit 1
+          fi
+          test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
+          test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
+          test ! -e /var/run/slipstream-pf.token
+          test ! -e /var/run/slipstream-pf-lo0-skip.json
+          test ! -e /var/run/slipstream.status
+          test ! -e /var/run/slipstream-autogeph.json
+          test ! -e /var/run/slipstream-semantic.sock
+
+      - name: Bind qualification and measured readiness to one workflow attempt
         run: |
           set -euo pipefail
           live_status="$(tr -d '[:space:]' < dist-readiness/live-sites.exit)"
           soak_status="$(tr -d '[:space:]' < dist-readiness/invisibility-soak.exit)"
+          mkdir -p dist-qualified
+          python3 scripts/release_candidate.py create-proof \
+            --candidate-dir dist-candidate \
+            --output dist-qualified/release-qualification.json \
+            --qualification-run-id "$GITHUB_RUN_ID" \
+            --qualification-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --qualification-workflow .github/workflows/release-readiness.yml \
+            --expected-candidate-run-attempt "${{ steps.candidate.outputs.run_attempt }}" \
+            --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"
           python3 scripts/release_readiness.py create \
             --candidate-dir dist-candidate \
             --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app" \
@@ -325,10 +417,22 @@ jobs:
             --output dist-readiness/release-readiness.json
           rm -f dist-readiness/*.exit
 
+      - name: Attest exact qualification proof
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist-qualified/release-qualification.json
+
       - name: Attest exact release-readiness evidence
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
           subject-path: dist-readiness/*
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Slipstream-owned-geph-qualified-${{ github.sha }}
+          path: dist-qualified/release-qualification.json
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

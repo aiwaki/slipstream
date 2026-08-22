@@ -2721,7 +2721,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
     def test_protected_workflow_composes_geph_and_semantic_gates_without_secret_leak(self) -> None:
         workflow = (
-            ROOT / ".github/workflows/owned-geph-qualification.yml"
+            ROOT / ".github/workflows/release-readiness.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertNotIn("pull_request:", workflow)
@@ -2741,7 +2741,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            '--chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"',
+            '--chrome-executable "${{ steps.chrome.outputs.chrome-path }}"',
             workflow,
         )
         self.assertNotIn("--ci-disable-chrome-sandbox", workflow)

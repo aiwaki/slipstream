@@ -254,6 +254,62 @@ class ReleaseCandidateTests(unittest.TestCase):
                     app_tree=root.with_name(f"{root.name}-Slipstream.app"),
                 )
 
+    def test_proof_binds_the_combined_readiness_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._candidate(root)
+            self._create(root)
+            first, second = self._metadata_patches()
+            with first, second:
+                proof = release_candidate.build_qualification_proof(
+                    candidate_dir=root,
+                    qualification_run_id=88,
+                    qualification_run_attempt=3,
+                    qualification_workflow=(
+                        release_candidate.READINESS_QUALIFICATION_WORKFLOW
+                    ),
+                    expected_candidate_run_attempt=2,
+                    app_tree=root.with_name(f"{root.name}-Slipstream.app"),
+                )
+            proof_path = root / release_candidate.PROOF_NAME
+            release_candidate._write_json(proof_path, proof)
+
+            first, second = self._metadata_patches()
+            with first, second:
+                result = release_candidate.validate_qualification_proof(
+                    candidate_dir=root,
+                    proof_path=proof_path,
+                    expected_qualification_run_id=88,
+                    expected_qualification_run_attempt=3,
+                    expected_qualification_workflow=(
+                        release_candidate.READINESS_QUALIFICATION_WORKFLOW
+                    ),
+                    expected_candidate_run_attempt=2,
+                )
+            self.assertEqual(result["qualification_run_id"], 88)
+            self.assertEqual(
+                proof["qualification"]["workflow"],
+                release_candidate.READINESS_QUALIFICATION_WORKFLOW,
+            )
+
+            first, second = self._metadata_patches()
+            with first, second, self.assertRaisesRegex(ValueError, "workflow"):
+                release_candidate.validate_qualification_proof(
+                    candidate_dir=root,
+                    proof_path=proof_path,
+                    expected_qualification_workflow=(
+                        release_candidate.QUALIFICATION_WORKFLOW
+                    ),
+                )
+
+            proof["qualification"]["workflow"] = []
+            release_candidate._write_json(proof_path, proof)
+            with self.assertRaisesRegex(ValueError, "workflow"):
+                release_candidate.validate_qualification_proof(
+                    candidate_dir=root,
+                    proof_path=proof_path,
+                )
+
     def test_proof_creation_rechecks_unpacked_app_after_qualification(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

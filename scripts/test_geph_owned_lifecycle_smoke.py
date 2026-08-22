@@ -923,6 +923,8 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             ROOT / ".github/workflows/owned-geph-qualification.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("inputs.diagnostic_only == true", workflow)
+        self.assertIn("never release evidence", workflow)
         self.assertNotIn("pull_request:", workflow)
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertIn("environment: geph-qualification", workflow)
@@ -932,12 +934,16 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         )
         self.assertIn("geph_owned_lifecycle_smoke.py", workflow)
 
-    def test_protected_workflow_publishes_only_after_cleanup_proof(self) -> None:
-        workflow = (
-            ROOT / ".github/workflows/owned-geph-qualification.yml"
-        ).read_text(encoding="utf-8")
-        cleanup = workflow.index("Verify the user-level gate left no system path")
-        package = workflow.index("Bind qualification proof to the exact candidate")
+    def test_combined_readiness_publishes_only_after_cleanup_proof(self) -> None:
+        workflow = (ROOT / ".github/workflows/release-readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        cleanup = workflow.index(
+            "Verify the account-backed gate cleaned product-owned state"
+        )
+        package = workflow.index(
+            "Bind qualification and measured readiness to one workflow attempt"
+        )
         upload = workflow.index(
             "name: Slipstream-owned-geph-qualified-${{ github.sha }}"
         )
@@ -947,7 +953,25 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         package_block = workflow[package:upload]
         self.assertIn("scripts/release_candidate.py create-proof", package_block)
         self.assertIn('--qualification-run-id "$GITHUB_RUN_ID"', package_block)
+        self.assertIn(
+            "--qualification-workflow .github/workflows/release-readiness.yml",
+            package_block,
+        )
         self.assertIn("if-no-files-found: error", workflow[upload:])
+
+    def test_combined_browser_gate_has_a_bounded_thirty_minute_lease(self) -> None:
+        self.assertEqual(smoke.COORDINATION_TIMEOUT, 1800.0)
+        workflow = (ROOT / ".github/workflows/release-readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        gate = workflow[
+            workflow.index("Run account-backed Safari and Chrome live-site gate") :
+            workflow.index("Preserve bounded live-site diagnostics for this attempt")
+        ]
+        self.assertEqual(gate.count("scripts/geph_owned_lifecycle_smoke.py"), 1)
+        release = gate.index('/usr/bin/install -m 600 /dev/null "$release"')
+        wait = gate.index('wait "$geph_pid"', release)
+        self.assertLess(release, wait)
 
 
 if __name__ == "__main__":
