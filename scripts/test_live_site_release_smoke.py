@@ -24,6 +24,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "title": "Aikido Security",
             "visible_app": True,
             "visible_body": True,
+            "visible_challenge_marker": False,
         }
         value.update(changes)
         return value
@@ -191,6 +192,13 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertIn(
             "boundedString(document.title, 512)", smoke.READINESS_EXPRESSION
         )
+        self.assertIn("const visibleText", smoke.READINESS_EXPRESSION)
+        self.assertIn("visible_challenge_marker", smoke.READINESS_EXPRESSION)
+        self.assertIn("visibleChallengeWidget", smoke.READINESS_EXPRESSION)
+        self.assertIn("challenges.cloudflare.com", smoke.READINESS_EXPRESSION)
+        self.assertIn("data-sitekey", smoke.READINESS_EXPRESSION)
+        self.assertIn("if (!visible(node)) return false;", smoke.READINESS_EXPRESSION)
+        self.assertIn("node.hasAttribute('data-sitekey')", smoke.READINESS_EXPRESSION)
 
     def test_chrome_navigation_error_becomes_bounded_terminal_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -561,6 +569,13 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             smoke._classify_chrome_evidence("xpersonatoy.com", evidence),
             ("challenge_or_auth", "challenge_or_auth"),
         )
+
+    def test_chrome_uses_the_same_visible_captcha_boolean_as_safari(self) -> None:
+        expression = smoke._chrome_evidence_expression("xpersonatoy.com")
+
+        self.assertIn("signals.visible_challenge_marker === true", expression)
+        self.assertIn("visibleChallengeWidget", expression)
+        self.assertNotIn('"captcha"].some((marker) => lowered.includes(marker))', expression)
 
     def test_chrome_compact_evidence_has_a_fixed_private_envelope(self) -> None:
         positive = self._chrome_evidence()["result"]["value"]
@@ -1094,7 +1109,10 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         document = "<html>private document marker" + "x" * 600
         cases = (
             ({"https": False}, "readiness_context_invalid"),
-            ({"ready_state": "loading"}, "readiness_document_pending"),
+            (
+                {"ready_state": "loading"},
+                "readiness_document_pending_semantic_ready",
+            ),
             ({"visible_body": False}, "readiness_visibility_missing"),
             ({"next_hop_protocol": ""}, "readiness_transport_missing"),
             ({"title": "private title marker"}, "readiness_title_mismatch"),
@@ -1115,31 +1133,76 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 self.assertIn(reason, smoke.TERMINAL_BROWSER_REASONS)
                 self.assertNotIn("private", reason)
 
-    def test_challenge_marker_remains_nonpassing_with_positive_shaped_signals(
+    def test_script_only_captcha_does_not_override_positive_readiness(
         self,
     ) -> None:
-        document = "<html>captcha cf-chl- dormant script" + "x" * 600
+        document = "<html><script>captcha dormant script</script>" + "x" * 600
         positive = self._signals(
             title="StarrToy",
             main_text_length=80,
-        )
-        unresolved = self._signals(
-            title="Just a moment",
-            main_text_length=0,
-            body_text_length=0,
         )
 
         self.assertEqual(
             smoke._classify_document_evidence(
                 "xpersonatoy.com", document, positive
             ),
-            ("challenge_or_auth", "challenge_or_auth"),
+            ("usable", ""),
         )
         self.assertEqual(
             smoke._classify_document_evidence(
-                "xpersonatoy.com", document, unresolved
+                "xpersonatoy.com", "<html>cf-chl-" + "x" * 600, positive
             ),
             ("challenge_or_auth", "challenge_or_auth"),
+        )
+
+    def test_visible_challenge_widget_signal_remains_nonpassing(self) -> None:
+        document = "<html>" + "x" * 600
+        signals = self._signals(
+            title="StarrToy",
+            main_text_length=80,
+            # The page-side expression produces this same fixed boolean for a
+            # visible captcha widget; it never crosses DOM or iframe content.
+            visible_challenge_marker=True,
+        )
+
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "xpersonatoy.com",
+                document,
+                signals,
+            ),
+            ("challenge_or_auth", "challenge_or_auth"),
+        )
+
+    def test_pending_document_reports_when_semantic_content_is_ready(self) -> None:
+        document = "<html>" + "x" * 600
+        pending_weather = self._signals(
+            title="Weather",
+            main_text_length=100,
+            ready_state="interactive",
+        )
+
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "weather.com", document, pending_weather
+            ),
+            ("terminal_error", "readiness_document_pending_semantic_ready"),
+        )
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "weather.com",
+                document,
+                {**pending_weather, "main_text_length": 0},
+            ),
+            ("terminal_error", "readiness_content_missing"),
+        )
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "weather.com",
+                document,
+                {**pending_weather, "visible_challenge_marker": "false"},
+            ),
+            ("terminal_error", "readiness_signals_invalid"),
         )
 
     def test_safari_keeps_polling_until_a_challenge_resolves(self) -> None:
@@ -1333,6 +1396,18 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             self.assertEqual(smoke._control_route("weather.com", "direct"), "usable")
 
         self.assertNotIn("text", run.call_args.kwargs)
+
+    def test_control_route_dormant_captcha_text_is_not_a_challenge(self) -> None:
+        response = mock.Mock(
+            returncode=0,
+            stdout=(
+                b"<script>captcha dormant third-party script</script>"
+                + (b"x" * 600)
+                + b"\n__SLIPSTREAM_STATUS__:200"
+            ),
+        )
+        with mock.patch.object(smoke.subprocess, "run", return_value=response):
+            self.assertEqual(smoke._control_route("xpersonatoy.com", "direct"), "usable")
 
     def test_successful_sites_cannot_hide_cleanup_failure(self) -> None:
         browser_result = {

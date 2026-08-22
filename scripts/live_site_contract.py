@@ -18,6 +18,7 @@ TERMINAL_BROWSER_REASONS = frozenset(
         "readiness_content_missing",
         "readiness_context_invalid",
         "readiness_document_pending",
+        "readiness_document_pending_semantic_ready",
         "readiness_signals_invalid",
         "readiness_title_mismatch",
         "readiness_transport_missing",

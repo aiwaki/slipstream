@@ -50,10 +50,18 @@ ALLOWED_PROTOCOLS = {"h2", "http/1.1", "h3"}
 CHALLENGE_MARKERS = (
     "checking your browser",
     "verify you are human",
-    "captcha",
     "just a moment",
     "cf-chl-",
 )
+# A generic captcha string is often shipped in a dormant third-party script.
+# It is challenge evidence only when the rendered page exposes it to the user;
+# the Safari and Chrome paths derive that one fixed boolean from visible text
+# or a visibility-gated challenge widget.
+WEAK_VISIBLE_CHALLENGE_MARKERS = ("captcha",)
+# A curl control sees source bytes, not rendered visibility.  Therefore it may
+# only use the unambiguous raw markers; generic `captcha` remains browser-only
+# evidence so dormant third-party scripts cannot make a healthy control route
+# look like a challenge.
 TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
 
 
@@ -79,8 +87,11 @@ def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
     app_text = int(signals.get("app_text_length") or 0)
     if signals.get("https") is not True or signals.get("secure_context") is not True:
         return "readiness_context_invalid"
-    if signals.get("ready_state") != "complete":
-        return "readiness_document_pending"
+    if not isinstance(signals.get("visible_challenge_marker"), bool):
+        raise ValueError("invalid visible challenge signal")
+    ready_state = signals.get("ready_state")
+    if ready_state not in {"loading", "interactive", "complete"}:
+        raise ValueError("invalid document ready state")
     if signals.get("visible_body") is not True:
         return "readiness_visibility_missing"
     if signals.get("next_hop_protocol") not in ALLOWED_PROTOCOLS:
@@ -88,8 +99,9 @@ def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
     if host == "xpersonatoy.com":
         if "starrtoy" not in title:
             return "readiness_title_mismatch"
-        return None if main_text >= 80 else "readiness_content_missing"
-    if host == "app.aikido.dev":
+        if main_text < 80:
+            return "readiness_content_missing"
+    elif host == "app.aikido.dev":
         if "aikido security" not in title:
             return "readiness_title_mismatch"
         if (
@@ -97,16 +109,24 @@ def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
             or signals.get("preloader_visible") is not False
         ):
             return "readiness_visibility_missing"
-        return None if app_text >= 20 else "readiness_content_missing"
-    if host == "weather.com":
+        if app_text < 20:
+            return "readiness_content_missing"
+    elif host == "weather.com":
         if "weather" not in title:
             return "readiness_title_mismatch"
-        return None if main_text >= 100 else "readiness_content_missing"
-    if host == "capacitorjs.com":
+        if main_text < 100:
+            return "readiness_content_missing"
+    elif host == "capacitorjs.com":
         if "capacitor" not in title:
             return "readiness_title_mismatch"
-        return None if main_text >= 100 else "readiness_content_missing"
-    return "readiness_content_missing"
+        if main_text < 100:
+            return "readiness_content_missing"
+    else:
+        return "readiness_content_missing"
+    # A document that has met every fixed visible semantic condition can still
+    # wait on an unrelated late resource. Keep it terminal, but preserve the
+    # bounded distinction so the protected report no longer hides the cause.
+    return None if ready_state == "complete" else "readiness_document_pending_semantic_ready"
 
 
 def _positive_readiness(host: str, signals: dict[str, object]) -> bool:
@@ -146,11 +166,18 @@ def _classify_document_evidence(
     host: str, document: str, signals: dict[str, object] | None = None
 ) -> tuple[str, str]:
     lowered = document.casefold()
+    visible_weak_challenge = (
+        isinstance(signals, dict)
+        and signals.get("visible_challenge_marker") is True
+    )
     return _classify_evidence(
         host,
         document_bytes=len(document.encode("utf-8")),
         denial_detected=any(marker in lowered for marker in SITES[host]["denials"]),
-        challenge_detected=any(marker in lowered for marker in CHALLENGE_MARKERS),
+        challenge_detected=(
+            any(marker in lowered for marker in CHALLENGE_MARKERS)
+            or visible_weak_challenge
+        ),
         signals=signals,
     )
 
@@ -224,6 +251,25 @@ READINESS_EXPRESSION = r"""
   };
   const boundedString = (value, maximum) => String(value || '').slice(0, maximum);
   const textLength = (node) => node ? (node.innerText || '').trim().length : 0;
+  const visibleText = document.body ? (document.body.innerText || '').toLowerCase() : '';
+  const visibleChallengeWidget = () => {
+    const widgetMarkers = ['captcha', 'turnstile', 'challenges.cloudflare.com'];
+    const widgets = document.querySelectorAll(
+      'iframe, [data-sitekey], [name="cf-turnstile-response"], [name="g-recaptcha-response"], [name="h-captcha-response"]'
+    );
+    return Array.from(widgets).some((node) => {
+      if (!visible(node)) return false;
+      if (node.hasAttribute('data-sitekey')) return true;
+      if (['cf-turnstile-response', 'g-recaptcha-response', 'h-captcha-response'].includes(node.getAttribute('name'))) return true;
+      const descriptor = [
+        boundedString(node.getAttribute('title'), 256),
+        boundedString(node.getAttribute('src'), 256),
+        boundedString(node.getAttribute('class'), 256),
+        boundedString(node.id, 256)
+      ].join(' ').toLowerCase();
+      return widgetMarkers.some((marker) => descriptor.includes(marker));
+    });
+  };
   const navigation = performance.getEntriesByType('navigation')[0];
   const app = document.querySelector('#app');
   const preloader = document.querySelector('#preloader__root');
@@ -238,10 +284,14 @@ READINESS_EXPRESSION = r"""
     secure_context: window.isSecureContext === true,
     title: boundedString(document.title, 512),
     visible_app: visible(app),
-    visible_body: visible(document.body)
+    visible_body: visible(document.body),
+    visible_challenge_marker: __WEAK_VISIBLE_CHALLENGE_MARKERS__.some((marker) => visibleText.includes(marker)) || visibleChallengeWidget()
   };
 })()
-"""
+""".replace(
+    "__WEAK_VISIBLE_CHALLENGE_MARKERS__",
+    json.dumps(WEAK_VISIBLE_CHALLENGE_MARKERS),
+)
 
 
 def _chrome_evidence_expression(host: str) -> str:
@@ -254,11 +304,12 @@ def _chrome_evidence_expression(host: str) -> str:
 (() => {{
   const documentSource = document.documentElement.outerHTML;
   const lowered = documentSource.toLowerCase();
+  const signals = ({READINESS_EXPRESSION});
   return {{
-    challenge_detected: {challenges}.some((marker) => lowered.includes(marker)),
+    challenge_detected: {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true,
     denial_detected: {denials}.some((marker) => lowered.includes(marker)),
     document_bytes: new TextEncoder().encode(documentSource).length,
-    signals: ({READINESS_EXPRESSION})
+    signals
   }};
 }})()
 """

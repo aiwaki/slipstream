@@ -10,61 +10,61 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-22 (new live-browser evidence and targeted correction): exact
-product main `80c2585335d265447cd26e9f28e6233a3dd3541b` (PR #358) passed
-[exact-main CI `32555469232`](https://github.com/aiwaki/slipstream/actions/runs/32555469232)
+Update 2026-08-22 (second protected chain, current checkpoint): PR #359 merged
+the narrow Safari/Chrome observation correction as exact product main
+`111000c17e0d6decf97eb1a636cf0b3bca2a1fc9`. Its
+[exact-main CI `32571354600`](https://github.com/aiwaki/slipstream/actions/runs/32571354600)
 and
-[dependency audit `32555469304`](https://github.com/aiwaki/slipstream/actions/runs/32555469304).
-With the user's one-time immediate override, the same SHA passed the complete
-account-backed
-[owned-Geph qualification `32569080184`](https://github.com/aiwaki/slipstream/actions/runs/32569080184).
-The bound
-[release-readiness `32569192382`](https://github.com/aiwaki/slipstream/actions/runs/32569192382)
-then stopped at the fixed live-site matrix before the 30-minute soak. Its
+[dependency audit `32571354592`](https://github.com/aiwaki/slipstream/actions/runs/32571354592)
+passed, producing release-candidate artifact `9475493072` with digest
+`sha256:4cecfa4249a693d2d7fa66865e2c6772c8d1461903aa1d24ec184c9f018877ee`.
+
+The user explicitly authorized one second same-day protected chain. The bound
+[owned-Geph qualification `32572608696`](https://github.com/aiwaki/slipstream/actions/runs/32572608696)
+passed, including exact-candidate proof, cleanup, and attestation. The one
+bound
+[release-readiness `32572723728`](https://github.com/aiwaki/slipstream/actions/runs/32572723728)
+then stopped at the strict live-site matrix before the 30-minute soak. Its
 bounded
-[live-site artifact `9474913881`](https://github.com/aiwaki/slipstream/actions/runs/32569192382/artifacts/9474913881)
-has digest `sha256:6b5b9be513df108e12295e68118d38bb7fc2c5ffe7fd8c972ccf9e8bfd4ff195`
+[live-site artifact `9475787712`](https://github.com/aiwaki/slipstream/actions/runs/32572723728/artifacts/9475787712)
+has digest `sha256:61633782e256499698c0a28daa138393bfbb4462b1348fce33442219b4fd76f5`
 and records:
 
-- `xpersonatoy.com`: Safari `navigation_rejected`, Chrome
-  `challenge_or_auth`; both controls unavailable, therefore `inconclusive`.
-- `app.aikido.dev`: both browsers `usable`; controls not needed.
-- `weather.com`: both browsers `readiness_document_pending`; direct
-  unavailable and owned-Geph `usable`, therefore still `terminal_error`.
-- `capacitorjs.com`: Safari `usable`, Chrome
-  `browser_observation_failed`; direct and owned-Geph both `usable`, therefore
-  still `terminal_error`.
+- `xpersonatoy.com`: Safari and Chrome both `challenge_or_auth` at their
+  20-second deadlines; controls unavailable, therefore `inconclusive`.
+- `app.aikido.dev`: Safari and Chrome both `usable`.
+- `weather.com`: Safari and Chrome both `readiness_document_pending` at their
+  25-second deadlines; controls unavailable, therefore `inconclusive`.
+- `capacitorjs.com`: Safari and Chrome both `usable`.
 
-The matrix failed, so the soak, readiness attestation, and publisher did not
-run. `.23` remains an ad-hoc-signed, unnotarized, unpublished preview. A prior
+The matrix is not a pass, so the soak, readiness attestation, and publisher
+were skipped; `.23` remains an ad-hoc-signed, unnotarized, unpublished preview.
+The two affected hosts require different evidence-led handling. In one read-only
+bounded direct XPersonatoy observation, the detector's generic `captcha` marker
+occurred only inside a dormant script on an otherwise StarrToy-shaped document;
+the harness had searched all raw source in both browsers, so that is a
+confirmed false-positive surface. The active correction
+retains strong challenge markers but counts generic `captcha` only from one
+page-side visible-text-or-widget boolean. It changes neither routing nor the fixed
+four-host/Safari-plus-Chrome matrix.
+
+Weather remains untriaged: both browsers had valid, non-short, non-denial,
+non-challenge evidence, but the existing first `readyState != complete` check
+masked every later semantic predicate. The correction keeps a pending document
+terminal and adds only a bounded `readiness_document_pending_semantic_ready`
+reason after the existing visible title/content/protocol checks have passed.
+It does not extend a deadline, make Weather pass, or change controls. A prior
 local browser-only probe remains non-evidence: it did not install or run
 Slipstream or activate its candidate daemon, private PF route, or owned-Geph
 path.
 
-The bounded report supports two narrowly scoped harness corrections, not a
-policy relaxation. Safari's live-site session uses WebDriver
-`pageLoadStrategy: normal`, which can block its own strict document poll until
-the full host deadline on incomplete or challenge pages; change only the
-return condition to `none`, then retry only a causal WebDriver transport timeout
-inside the same deadline while retaining terminal handling for invalid replies
-and the same evidence checks.
-Chrome's poll currently requests raw `document.documentElement.outerHTML` over
-DevTools even though it needs only byte length and fixed denial/challenge
-markers; that path is vulnerable to the fixed 64 KiB DevTools response limit.
-Return a fixed, private structured envelope from page-side evaluation instead,
-retain the same readiness criteria, and retry only bounded
-`QualificationError`/`TimeoutError` observations inside the existing deadline.
-Neither correction changes routing, controls, the four hosts, Safari-plus-Chrome
-requirement, or the rule that every matrix entry must pass before the soak.
-Weather's current two-browser pending result has no authorized reclassification,
-deadline extension, or route expansion.
-
-The correction is being prepared on `codex/fix-safari-live-site-navigation`.
-After review, exact-main CI, and audit for its new SHA, do not spend another
-account-backed run on 2026-08-22 UTC: the user's one emergency chain is already
-complete. After the next UTC-day reset, run at most one owned-Geph qualification
-and one readiness bound to that exact candidate; only a full pass may dispatch
-the publisher.
+No further account-backed or readiness run may be dispatched on 2026-08-22 UTC,
+and the unchanged `111000c` candidate must not be retried. First review and
+merge the narrow harness correction, then obtain a successful exact-main CI,
+audit, and immutable candidate for its new SHA. Only then may the next
+UTC-day's one owned-Geph qualification and one bound readiness run execute.
+Only a completely passed matrix, measured 30-minute soak, attestations, and
+exact-SHA gates may dispatch the publisher.
 
 ### Historical checkpoints (superseded)
 
