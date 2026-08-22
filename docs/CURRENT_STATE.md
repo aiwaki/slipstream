@@ -10,7 +10,57 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-22 (second protected chain, current checkpoint): PR #359 merged
+Update 2026-08-22 (current checkpoint): PR #361 merged the bounded live-site
+diagnostic correction as exact product main
+`f16bb7c9a58065c749cb13b24c42c3d6d0389a05`. Its
+[exact-main CI `32575593760`](https://github.com/aiwaki/slipstream/actions/runs/32575593760)
+and
+[dependency audit `32575593677`](https://github.com/aiwaki/slipstream/actions/runs/32575593677)
+passed. Release-candidate artifact `9476551838` is unexpired and has digest
+`sha256:acf78baa54ce97414d7239a37c76aca526ecf38fe7f3edef8cc3b9716b1417fa`.
+
+The exact-main
+[owned-Geph qualification `32582906139`](https://github.com/aiwaki/slipstream/actions/runs/32582906139)
+passed account-backed recovery, cleanup, exact-candidate binding, attestation,
+and artifact upload. Its proof artifact `9478290147` has digest
+`sha256:6f1ffdb46b6438fc146e2f4c83b253b21525734fbe869eccd2e2aec44fa2a4e5`.
+The bound
+[release-readiness `32583053838`](https://github.com/aiwaki/slipstream/actions/runs/32583053838)
+then completed the fixed four-host, two-browser driver but correctly stopped
+before the 30-minute soak because strict report validation did not pass. Its
+bounded artifact `9478349480` has digest
+`sha256:b5d9a3da8f215962c0ea8d8e00f4329a4d2295ae6937f11e2d3e4dec9f508500`
+and records:
+
+- `xpersonatoy.com`: Chrome `usable`; Safari met the fixed semantic checks but
+  ended `readiness_document_pending_semantic_ready` at 20 seconds.
+- `app.aikido.dev`: Safari and Chrome both `usable`.
+- `weather.com`: Safari and Chrome met the fixed semantic checks but ended
+  `readiness_document_pending_semantic_ready` at 25 seconds; the independent
+  owned-Geph control was `usable`.
+- `capacitorjs.com`: Safari and Chrome both `usable`.
+
+The bounded reason proves every fixed semantic condition passed, but the
+`f16bb7c` producer intentionally used that same reason for both `loading` and
+`interactive`; this artifact does not preserve which state occurred. The
+current narrow correction therefore does not broadly waive readiness:
+`interactive` is only a temporal candidate after exact-host, DOMContentLoaded,
+HTTPS, secure-context, transport, visibility, title/content, denial, and
+challenge checks; it becomes usable only after an uninterrupted 500 ms
+confirmation sequence. `loading`, timeout, denial, challenge, missing content,
+host/context mismatch, and invalid signals remain non-passing and reset the
+sequence. Only a fresh exact-candidate readiness run can prove whether this
+settles the observed sites. Do not retry unchanged `f16bb7c`. Merge this
+correction, obtain a new successful exact-main CI/audit/candidate, run exactly
+one owned-Geph qualification for that SHA, then one readiness bound to its
+candidate run.
+Only a completely passed matrix, measured 30-minute soak, attestations, and
+exact-SHA gates may dispatch the `.23` publisher. PR #362 remains a separate
+non-release local diagnostic and must not be treated as protected evidence.
+
+### Superseded checkpoint
+
+Update 2026-08-22 (second protected chain): PR #359 merged
 the narrow Safari/Chrome observation correction as exact product main
 `111000c17e0d6decf97eb1a636cf0b3bca2a1fc9`. Its
 [exact-main CI `32571354600`](https://github.com/aiwaki/slipstream/actions/runs/32571354600)

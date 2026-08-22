@@ -15,6 +15,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         value = {
             "app_text_length": 100,
             "body_text_length": 1000,
+            "dom_content_loaded": True,
+            "host_matches": True,
             "https": True,
             "main_text_length": 1000,
             "next_hop_protocol": "h2",
@@ -29,7 +31,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         value.update(changes)
         return value
 
-    def _chrome_evidence(
+    def _browser_evidence(
         self,
         *,
         document_bytes: int = 1_000,
@@ -38,15 +40,14 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         signals: dict[str, object] | None = None,
     ) -> dict[str, object]:
         return {
-            "result": {
-                "value": {
-                    "challenge_detected": challenge_detected,
-                    "denial_detected": denial_detected,
-                    "document_bytes": document_bytes,
-                    "signals": self._signals() if signals is None else signals,
-                }
-            }
+            "challenge_detected": challenge_detected,
+            "denial_detected": denial_detected,
+            "document_bytes": document_bytes,
+            "signals": self._signals() if signals is None else signals,
         }
+
+    def _chrome_evidence(self, **changes: object) -> dict[str, object]:
+        return {"result": {"value": self._browser_evidence(**changes)}}
 
     def _safari_observation_timeout(self) -> smoke.lifecycle.LifecycleError:
         error = smoke.lifecycle.LifecycleError("private timeout diagnostic")
@@ -199,6 +200,12 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertIn("data-sitekey", smoke.READINESS_EXPRESSION)
         self.assertIn("if (!visible(node)) return false;", smoke.READINESS_EXPRESSION)
         self.assertIn("node.hasAttribute('data-sitekey')", smoke.READINESS_EXPRESSION)
+        self.assertIn("domContentLoadedEventEnd > 0", smoke.READINESS_EXPRESSION)
+        host_expression = smoke._readiness_expression("weather.com")
+        self.assertIn('const expectedHost = "weather.com"', host_expression)
+        self.assertIn("location.hostname.toLowerCase()", host_expression)
+        with self.assertRaisesRegex(ValueError, "fixed matrix"):
+            smoke._readiness_expression("example.com")
 
     def test_chrome_navigation_error_becomes_bounded_terminal_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -460,6 +467,167 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         lifecycle.stop.assert_called_once()
         lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
 
+    def test_chrome_confirms_interactive_readiness_before_passing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            clock = 0.0
+            runtime_calls = 0
+            evidence = self._chrome_evidence(
+                signals=self._signals(ready_state="interactive")
+            )
+
+            def monotonic() -> float:
+                nonlocal clock
+                clock += 0.1
+                return clock
+
+            def command(
+                _debugger: str,
+                _port: int,
+                method: str,
+                _payload: dict[str, object],
+                **_kwargs: object,
+            ) -> dict:
+                nonlocal runtime_calls
+                if method == "Page.navigate":
+                    return {}
+                self.assertEqual(method, "Runtime.evaluate")
+                runtime_calls += 1
+                return evidence
+
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_devtools_command", side_effect=command
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.time, "monotonic", monotonic)
+                )
+                stack.enter_context(mock.patch.object(smoke.time, "sleep"))
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+        self.assertGreaterEqual(runtime_calls, 2)
+
+    def test_chrome_rejects_interactive_confirmation_at_or_after_deadline(
+        self,
+    ) -> None:
+        for final_observation in (0.5, 0.501):
+            with self.subTest(final_observation=final_observation):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = smoke.Path(temporary)
+                    clock = 0.0
+                    runtime_calls = 0
+                    evidence = self._chrome_evidence(
+                        signals=self._signals(ready_state="interactive")
+                    )
+
+                    def monotonic() -> float:
+                        return clock
+
+                    def sleep(_seconds: float) -> None:
+                        nonlocal clock
+                        clock = 0.49
+
+                    def command(
+                        _debugger: str,
+                        _port: int,
+                        method: str,
+                        _payload: dict[str, object],
+                        **_kwargs: object,
+                    ) -> dict:
+                        nonlocal clock, runtime_calls
+                        if method == "Page.navigate":
+                            return {}
+                        runtime_calls += 1
+                        if runtime_calls == 2:
+                            clock = final_observation
+                        return evidence
+
+                    with ExitStack() as stack:
+                        lifecycle = self._enter_chrome_lifecycle(stack, root)
+                        stack.enter_context(
+                            mock.patch.dict(
+                                smoke.SITES["app.aikido.dev"],
+                                {"deadline_ms": 500},
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(
+                                smoke.chromium,
+                                "_wait_for_devtools_port",
+                                return_value=9222,
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(
+                                smoke.chromium,
+                                "_devtools_json",
+                                return_value=[
+                                    {
+                                        "type": "page",
+                                        "url": "about:blank",
+                                        "webSocketDebuggerUrl": (
+                                            "ws://127.0.0.1/devtools/page/1"
+                                        ),
+                                    }
+                                ],
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(
+                                smoke.chromium,
+                                "_devtools_command",
+                                side_effect=command,
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(
+                                smoke.time,
+                                "monotonic",
+                                side_effect=monotonic,
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(smoke.time, "sleep", side_effect=sleep)
+                        )
+                        result = smoke._run_chrome(
+                            "app.aikido.dev", lifecycle.executable, 501, 20
+                        )
+
+                self.assertEqual(runtime_calls, 2)
+                self.assertEqual(
+                    (result["outcome"], result["reason"]),
+                    (
+                        "terminal_error",
+                        "readiness_document_pending_semantic_ready",
+                    ),
+                )
+
     def test_chrome_navigation_deadline_starts_after_browser_setup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
@@ -566,12 +734,12 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         )["result"]["value"]
 
         self.assertEqual(
-            smoke._classify_chrome_evidence("xpersonatoy.com", evidence),
+            smoke._classify_browser_evidence("xpersonatoy.com", evidence),
             ("challenge_or_auth", "challenge_or_auth"),
         )
 
     def test_chrome_uses_the_same_visible_captcha_boolean_as_safari(self) -> None:
-        expression = smoke._chrome_evidence_expression("xpersonatoy.com")
+        expression = smoke._browser_evidence_expression("xpersonatoy.com")
 
         self.assertIn("signals.visible_challenge_marker === true", expression)
         self.assertIn("visibleChallengeWidget", expression)
@@ -589,11 +757,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            smoke._classify_chrome_evidence("app.aikido.dev", positive),
+            smoke._classify_browser_evidence("app.aikido.dev", positive),
             ("usable", ""),
         )
         self.assertEqual(
-            smoke._classify_chrome_evidence(
+            smoke._classify_browser_evidence(
                 "weather.com",
                 self._chrome_evidence(
                     denial_detected=True,
@@ -603,7 +771,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             ("regional_access_denied", "regional_access_denied"),
         )
         self.assertEqual(
-            smoke._classify_chrome_evidence(
+            smoke._classify_browser_evidence(
                 "app.aikido.dev",
                 self._chrome_evidence(document_bytes=0)["result"]["value"],
             ),
@@ -624,11 +792,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         for evidence in malformed:
             with self.subTest(evidence=evidence):
                 self.assertEqual(
-                    smoke._classify_chrome_evidence("app.aikido.dev", evidence),
+                    smoke._classify_browser_evidence("app.aikido.dev", evidence),
                     ("terminal_error", "document_invalid"),
                 )
         self.assertEqual(
-            smoke._classify_chrome_evidence(
+            smoke._classify_browser_evidence(
                 "app.aikido.dev",
                 {**positive, "signals": None},
             ),
@@ -920,10 +1088,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             if method == "POST" and path == "/session":
                 session_payload = payload
                 return {"value": {"sessionId": "session-id"}}
-            if method == "GET" and path.endswith("/source"):
-                return {"value": "<html>" + "x" * 600}
             if method == "POST" and path.endswith("/execute/sync"):
-                return {"value": smoke.json.dumps(self._signals())}
+                return {"value": smoke.json.dumps(self._browser_evidence())}
             if (method, path) in {
                 ("POST", "/session/session-id/timeouts"),
                 ("POST", "/session/session-id/url"),
@@ -996,7 +1162,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         )
 
     def test_safari_later_webdriver_failure_is_not_a_decode_failure(self) -> None:
-        source_calls = 0
+        evidence_calls = 0
 
         def webdriver(
             _base_url: str,
@@ -1005,16 +1171,14 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             _payload: dict | None = None,
             **_kwargs: object,
         ) -> dict:
-            nonlocal source_calls
+            nonlocal evidence_calls
             if method == "POST" and path == "/session":
                 return {"value": {"sessionId": "session-id"}}
-            if method == "GET" and path.endswith("/source"):
-                source_calls += 1
-                if source_calls > 1:
-                    raise smoke.lifecycle.LifecycleError("private HTTP diagnostic")
-                return {"value": "<html>" + "x" * 600}
             if method == "POST" and path.endswith("/execute/sync"):
-                return {"value": smoke.json.dumps(self._signals())}
+                evidence_calls += 1
+                if evidence_calls > 1:
+                    raise smoke.lifecycle.LifecycleError("private HTTP diagnostic")
+                return {"value": smoke.json.dumps(self._browser_evidence())}
             return {}
 
         with (
@@ -1027,7 +1191,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
             mock.patch.object(
                 smoke,
-                "_classify_document_evidence",
+                "_classify_browser_evidence",
                 return_value=("terminal_error", "readiness_timeout"),
             ),
             mock.patch.object(smoke.time, "sleep"),
@@ -1039,7 +1203,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertEqual(result["reason"], "browser_observation_failed")
 
     def test_safari_retries_only_a_transient_observation_timeout(self) -> None:
-        source_calls = 0
+        evidence_calls = 0
 
         def webdriver(
             _base_url: str,
@@ -1048,16 +1212,14 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             _payload: dict | None = None,
             **_kwargs: object,
         ) -> dict:
-            nonlocal source_calls
+            nonlocal evidence_calls
             if method == "POST" and path == "/session":
                 return {"value": {"sessionId": "session-id"}}
-            if method == "GET" and path.endswith("/source"):
-                source_calls += 1
-                if source_calls == 1:
-                    raise self._safari_observation_timeout()
-                return {"value": "<html>" + "x" * 600}
             if method == "POST" and path.endswith("/execute/sync"):
-                return {"value": smoke.json.dumps(self._signals())}
+                evidence_calls += 1
+                if evidence_calls == 1:
+                    raise self._safari_observation_timeout()
+                return {"value": smoke.json.dumps(self._browser_evidence())}
             return {}
 
         with (
@@ -1075,7 +1237,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
-        self.assertEqual(source_calls, 2)
+        self.assertEqual(evidence_calls, 2)
         sleep.assert_called_once_with(mock.ANY)
         self.assertLessEqual(sleep.call_args.args[0], 0.25)
 
@@ -1099,24 +1261,61 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(set(fixtures), set(smoke.SITES))
         for host, signals in fixtures.items():
-            with self.subTest(host=host):
+            with self.subTest(host=host, ready_state="complete"):
                 self.assertEqual(
-                    smoke._classify_document_evidence(host, document, signals),
+                    smoke._classify_document_evidence(
+                        host,
+                        document,
+                        {**signals, "ready_state": "complete"},
+                    ),
                     ("usable", ""),
+                )
+            with self.subTest(host=host, ready_state="interactive"):
+                self.assertEqual(
+                    smoke._classify_document_evidence(
+                        host,
+                        document,
+                        {**signals, "ready_state": "interactive"},
+                    ),
+                    (
+                        "terminal_error",
+                        "readiness_document_pending_semantic_ready",
+                    ),
+                )
+            with self.subTest(host=host, ready_state="loading"):
+                self.assertEqual(
+                    smoke._classify_document_evidence(
+                        host,
+                        document,
+                        {**signals, "ready_state": "loading"},
+                    ),
+                    (
+                        "terminal_error",
+                        "readiness_document_pending",
+                    ),
                 )
 
     def test_readiness_blockers_are_fixed_privacy_bounded_reasons(self) -> None:
         document = "<html>private document marker" + "x" * 600
         cases = (
             ({"https": False}, "readiness_context_invalid"),
+            ({"host_matches": False}, "readiness_context_invalid"),
             (
                 {"ready_state": "loading"},
-                "readiness_document_pending_semantic_ready",
+                "readiness_document_pending",
+            ),
+            (
+                {"dom_content_loaded": False},
+                "readiness_document_pending",
             ),
             ({"visible_body": False}, "readiness_visibility_missing"),
             ({"next_hop_protocol": ""}, "readiness_transport_missing"),
             ({"title": "private title marker"}, "readiness_title_mismatch"),
             ({"app_text_length": 0}, "readiness_content_missing"),
+            ({"host_matches": None}, "readiness_signals_invalid"),
+            ({"host_matches": "true"}, "readiness_signals_invalid"),
+            ({"dom_content_loaded": None}, "readiness_signals_invalid"),
+            ({"dom_content_loaded": "true"}, "readiness_signals_invalid"),
         )
 
         for changes, expected_reason in cases:
@@ -1160,6 +1359,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         signals = self._signals(
             title="StarrToy",
             main_text_length=80,
+            ready_state="interactive",
             # The page-side expression produces this same fixed boolean for a
             # visible captcha widget; it never crosses DOM or iframe content.
             visible_challenge_marker=True,
@@ -1174,9 +1374,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             ("challenge_or_auth", "challenge_or_auth"),
         )
 
-    def test_pending_document_reports_when_semantic_content_is_ready(self) -> None:
+    def test_interactive_document_passes_only_when_semantic_content_is_ready(
+        self,
+    ) -> None:
         document = "<html>" + "x" * 600
-        pending_weather = self._signals(
+        interactive_weather = self._signals(
             title="Weather",
             main_text_length=100,
             ready_state="interactive",
@@ -1184,7 +1386,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(
             smoke._classify_document_evidence(
-                "weather.com", document, pending_weather
+                "weather.com", document, interactive_weather
             ),
             ("terminal_error", "readiness_document_pending_semantic_ready"),
         )
@@ -1192,7 +1394,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             smoke._classify_document_evidence(
                 "weather.com",
                 document,
-                {**pending_weather, "main_text_length": 0},
+                {**interactive_weather, "main_text_length": 0},
             ),
             ("terminal_error", "readiness_content_missing"),
         )
@@ -1200,25 +1402,182 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             smoke._classify_document_evidence(
                 "weather.com",
                 document,
-                {**pending_weather, "visible_challenge_marker": "false"},
+                {**interactive_weather, "visible_challenge_marker": "false"},
+            ),
+            ("terminal_error", "readiness_signals_invalid"),
+        )
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "weather.com",
+                document,
+                {**interactive_weather, "ready_state": "loaded"},
             ),
             ("terminal_error", "readiness_signals_invalid"),
         )
 
-    def test_safari_keeps_polling_until_a_challenge_resolves(self) -> None:
-        source_calls = 0
-        challenge = "<html>Checking your browser captcha" + "x" * 600
-        usable = "<html>StarrToy" + "x" * 600
-        signals = iter(
+    def test_interactive_settle_requires_a_stable_positive_sequence(self) -> None:
+        signals = self._signals(ready_state="interactive")
+        first = smoke._settle_observation(
+            "terminal_error",
+            "readiness_document_pending_semantic_ready",
+            signals,
+            observed_at=1.0,
+            interactive_usable_since=None,
+            confirmation_deadline=10.0,
+        )
+        self.assertEqual(
+            first,
             (
-                self._signals(
-                    title="Just a moment",
-                    main_text_length=0,
-                    body_text_length=0,
+                "terminal_error",
+                "readiness_document_pending_semantic_ready",
+                1.0,
+                False,
+            ),
+        )
+
+        challenge = smoke._settle_observation(
+            "challenge_or_auth",
+            "challenge_or_auth",
+            signals,
+            observed_at=1.25,
+            interactive_usable_since=first[2],
+            confirmation_deadline=10.0,
+        )
+        self.assertEqual(
+            challenge,
+            ("challenge_or_auth", "challenge_or_auth", None, False),
+        )
+
+        restarted = smoke._settle_observation(
+            "terminal_error",
+            "readiness_document_pending_semantic_ready",
+            signals,
+            observed_at=2.0,
+            interactive_usable_since=challenge[2],
+            confirmation_deadline=10.0,
+        )
+        before_settle = smoke._settle_observation(
+            "terminal_error",
+            "readiness_document_pending_semantic_ready",
+            signals,
+            observed_at=2.49,
+            interactive_usable_since=restarted[2],
+            confirmation_deadline=10.0,
+        )
+        settled = smoke._settle_observation(
+            "terminal_error",
+            "readiness_document_pending_semantic_ready",
+            signals,
+            observed_at=2.5,
+            interactive_usable_since=before_settle[2],
+            confirmation_deadline=10.0,
+        )
+        self.assertFalse(restarted[3])
+        self.assertFalse(before_settle[3])
+        self.assertEqual(settled, ("usable", "", 2.0, True))
+
+        loading = smoke._settle_observation(
+            "terminal_error",
+            "readiness_document_pending",
+            self._signals(ready_state="loading"),
+            observed_at=None,
+            interactive_usable_since=2.0,
+            confirmation_deadline=10.0,
+        )
+        self.assertEqual(
+            loading,
+            (
+                "terminal_error",
+                "readiness_document_pending",
+                None,
+                False,
+            ),
+        )
+
+    def test_interactive_host_and_dom_failures_restart_the_full_settle(self) -> None:
+        positive = self._signals(ready_state="interactive")
+        usable_since: float | None = None
+
+        def observe(signals: dict[str, object], observed_at: float):
+            nonlocal usable_since
+            outcome, reason = smoke._classify_browser_evidence(
+                "app.aikido.dev",
+                self._browser_evidence(signals=signals),
+            )
+            result = smoke._settle_observation(
+                outcome,
+                reason,
+                signals,
+                observed_at=(
+                    observed_at if signals.get("ready_state") == "interactive" else None
                 ),
-                self._signals(
-                    title="StarrToy",
-                    main_text_length=80,
+                interactive_usable_since=usable_since,
+                confirmation_deadline=10.0,
+            )
+            usable_since = result[2]
+            return result
+
+        self.assertEqual(observe(positive, 1.0)[2:], (1.0, False))
+        self.assertEqual(
+            observe({**positive, "host_matches": False}, 1.4),
+            ("terminal_error", "readiness_context_invalid", None, False),
+        )
+        self.assertEqual(observe(positive, 2.0)[2:], (2.0, False))
+        self.assertEqual(
+            observe({**positive, "dom_content_loaded": False}, 2.49),
+            ("terminal_error", "readiness_document_pending", None, False),
+        )
+        self.assertEqual(observe(positive, 3.0)[2:], (3.0, False))
+        self.assertEqual(observe(positive, 3.49)[3], False)
+        self.assertEqual(observe(positive, 3.5), ("usable", "", 3.0, True))
+
+    def test_interactive_confirmation_must_finish_strictly_before_deadline(
+        self,
+    ) -> None:
+        signals = self._signals(ready_state="interactive")
+        reason = "readiness_document_pending_semantic_ready"
+        for observed_at in (10.0, 10.001):
+            with self.subTest(observed_at=observed_at):
+                self.assertEqual(
+                    smoke._settle_observation(
+                        "terminal_error",
+                        reason,
+                        signals,
+                        observed_at=observed_at,
+                        interactive_usable_since=9.0,
+                        confirmation_deadline=10.0,
+                    ),
+                    ("terminal_error", reason, None, True),
+                )
+        self.assertEqual(
+            smoke._settle_observation(
+                "terminal_error",
+                reason,
+                signals,
+                observed_at=9.999,
+                interactive_usable_since=9.0,
+                confirmation_deadline=10.0,
+            ),
+            ("usable", "", 9.0, True),
+        )
+
+    def test_safari_keeps_polling_until_a_challenge_resolves(self) -> None:
+        evidence_calls = 0
+        evidence = iter(
+            (
+                self._browser_evidence(
+                    challenge_detected=True,
+                    signals=self._signals(
+                        title="Just a moment",
+                        main_text_length=0,
+                        body_text_length=0,
+                    ),
+                ),
+                self._browser_evidence(
+                    signals=self._signals(
+                        title="StarrToy",
+                        main_text_length=80,
+                    ),
                 ),
             )
         )
@@ -1230,14 +1589,12 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             _payload: dict | None = None,
             **_kwargs: object,
         ) -> dict:
-            nonlocal source_calls
+            nonlocal evidence_calls
             if method == "POST" and path == "/session":
                 return {"value": {"sessionId": "session-id"}}
-            if method == "GET" and path.endswith("/source"):
-                source_calls += 1
-                return {"value": challenge if source_calls == 1 else usable}
             if method == "POST" and path.endswith("/execute/sync"):
-                return {"value": smoke.json.dumps(next(signals))}
+                evidence_calls += 1
+                return {"value": smoke.json.dumps(next(evidence))}
             return {}
 
         with (
@@ -1256,12 +1613,136 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(result["outcome"], "usable")
         self.assertEqual(result["reason"], "")
-        self.assertEqual(source_calls, 2)
+        self.assertEqual(evidence_calls, 2)
         sleep.assert_called_once()
+
+    def test_safari_late_challenge_resets_interactive_settle(self) -> None:
+        evidence_calls = 0
+        clock = 0.0
+        signals = self._signals(
+            title="StarrToy",
+            main_text_length=80,
+            ready_state="interactive",
+        )
+
+        def monotonic() -> float:
+            nonlocal clock
+            clock += 0.1
+            return clock
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            nonlocal evidence_calls
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "POST" and path.endswith("/execute/sync"):
+                evidence_calls += 1
+                return {
+                    "value": smoke.json.dumps(
+                        self._browser_evidence(
+                            challenge_detected=evidence_calls == 2,
+                            signals=signals,
+                        )
+                    )
+                }
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.time, "monotonic", monotonic),
+            mock.patch.object(smoke.time, "sleep"),
+        ):
+            result = smoke._run_safari(
+                "xpersonatoy.com", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+        self.assertGreaterEqual(evidence_calls, 4)
+
+    def test_safari_rejects_interactive_confirmation_at_or_after_deadline(
+        self,
+    ) -> None:
+        for final_observation in (0.5, 0.501):
+            with self.subTest(final_observation=final_observation):
+                clock = 0.0
+                evidence_calls = 0
+                evidence = self._browser_evidence(
+                    signals=self._signals(ready_state="interactive")
+                )
+
+                def monotonic() -> float:
+                    return clock
+
+                def sleep(_seconds: float) -> None:
+                    nonlocal clock
+                    clock = 0.49
+
+                def webdriver(
+                    _base_url: str,
+                    method: str,
+                    path: str,
+                    _payload: dict | None = None,
+                    **_kwargs: object,
+                ) -> dict:
+                    nonlocal clock, evidence_calls
+                    if method == "POST" and path == "/session":
+                        return {"value": {"sessionId": "session-id"}}
+                    if method == "POST" and path.endswith("/execute/sync"):
+                        evidence_calls += 1
+                        if evidence_calls == 2:
+                            clock = final_observation
+                        return {"value": smoke.json.dumps(evidence)}
+                    return {}
+
+                with (
+                    mock.patch.dict(
+                        smoke.SITES["app.aikido.dev"], {"deadline_ms": 500}
+                    ),
+                    mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+                    mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+                    mock.patch.object(
+                        smoke.lifecycle, "_webdriver_request", webdriver
+                    ),
+                    mock.patch.object(
+                        smoke.lifecycle,
+                        "_wait_for_safari_process",
+                        return_value=4321,
+                    ),
+                    mock.patch.object(
+                        smoke.lifecycle, "_stop_owned_safari_process"
+                    ),
+                    mock.patch.object(
+                        smoke.time, "monotonic", side_effect=monotonic
+                    ),
+                    mock.patch.object(smoke.time, "sleep", side_effect=sleep),
+                ):
+                    result = smoke._run_safari(
+                        "app.aikido.dev", "http://127.0.0.1:12345", 501
+                    )
+
+                self.assertEqual(evidence_calls, 2)
+                self.assertEqual(
+                    (result["outcome"], result["reason"]),
+                    (
+                        "terminal_error",
+                        "readiness_document_pending_semantic_ready",
+                    ),
+                )
 
     def test_safari_navigation_deadline_starts_after_session_setup(self) -> None:
         events: list[tuple[str, object]] = []
-        clock_values = iter((1.0, 101.0, 101.1, 101.2, 101.3, 102.0))
+        clock_values = iter((1.0, 101.0, 101.1, 101.2, 102.0))
 
         def monotonic() -> float:
             value = next(clock_values)
@@ -1278,10 +1759,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             events.append((method, path))
             if method == "POST" and path == "/session":
                 return {"value": {"sessionId": "session-id"}}
-            if method == "GET" and path.endswith("/source"):
-                return {"value": "<html>" + "x" * 600}
             if method == "POST" and path.endswith("/execute/sync"):
-                return {"value": smoke.json.dumps(self._signals())}
+                return {"value": smoke.json.dumps(self._browser_evidence())}
             return {}
 
         with (
@@ -1333,19 +1812,19 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             ("usable", ""),
         )
 
-    def test_safari_readiness_signals_require_a_json_object_string(self) -> None:
-        signals = self._signals()
+    def test_safari_evidence_requires_a_json_object_string(self) -> None:
+        evidence = self._browser_evidence()
         self.assertEqual(
-            smoke._decode_safari_readiness_signals(smoke.json.dumps(signals)),
-            signals,
+            smoke._decode_safari_evidence(smoke.json.dumps(evidence)),
+            evidence,
         )
-        for invalid in (None, signals, "not-json", "[]"):
+        for invalid in (None, evidence, "not-json", "[]"):
             with self.subTest(invalid=invalid):
                 with self.assertRaisesRegex(
                     smoke.LiveSiteError,
-                    "^Safari returned invalid readiness signals$",
+                    "^Safari returned invalid compact evidence$",
                 ):
-                    smoke._decode_safari_readiness_signals(invalid)
+                    smoke._decode_safari_evidence(invalid)
 
     def test_short_or_tls_warning_documents_fail(self) -> None:
         self.assertEqual(
