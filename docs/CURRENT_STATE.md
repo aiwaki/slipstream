@@ -45,7 +45,9 @@ The bounded report supports two narrowly scoped harness corrections, not a
 policy relaxation. Safari's live-site session uses WebDriver
 `pageLoadStrategy: normal`, which can block its own strict document poll until
 the full host deadline on incomplete or challenge pages; change only the
-return condition to `none`, then retain the same deadline and evidence checks.
+return condition to `none`, then retry only a causal WebDriver transport timeout
+inside the same deadline while retaining terminal handling for invalid replies
+and the same evidence checks.
 Chrome's poll currently requests raw `document.documentElement.outerHTML` over
 DevTools even though it needs only byte length and fixed denial/challenge
 markers; that path is vulnerable to the fixed 64 KiB DevTools response limit.

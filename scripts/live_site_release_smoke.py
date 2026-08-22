@@ -502,6 +502,10 @@ def _decode_safari_readiness_signals(value: object) -> dict[str, object]:
     return signals
 
 
+def _is_safari_observation_timeout(error: lifecycle.LifecycleError) -> bool:
+    return isinstance(error.__cause__, TimeoutError)
+
+
 def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -572,27 +576,40 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             # Reset before each later WebDriver request so an HTTP/timeout
             # failure is not mislabeled as a prior serialization failure.
             failure_reason = "browser_observation_failed"
-            remaining = max(0.1, absolute_deadline - time.monotonic())
-            source = lifecycle._webdriver_request(
-                driver_url,
-                "GET",
-                f"/session/{encoded}/source",
-                timeout=min(2.0, remaining),
-            ).get("value")
-            if not isinstance(source, str):
-                failure_reason = "document_invalid"
-                raise LiveSiteError("SafariDriver returned a non-text document")
-            document = source
-            serialized_signals = lifecycle._webdriver_request(
-                driver_url,
-                "POST",
-                f"/session/{encoded}/execute/sync",
-                {
-                    "script": f"return JSON.stringify({READINESS_EXPRESSION});",
-                    "args": [],
-                },
-                timeout=min(2.0, remaining),
-            ).get("value")
+            try:
+                remaining = absolute_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                source = lifecycle._webdriver_request(
+                    driver_url,
+                    "GET",
+                    f"/session/{encoded}/source",
+                    timeout=min(2.0, remaining),
+                ).get("value")
+                if not isinstance(source, str):
+                    failure_reason = "document_invalid"
+                    raise LiveSiteError("SafariDriver returned a non-text document")
+                document = source
+                remaining = absolute_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                serialized_signals = lifecycle._webdriver_request(
+                    driver_url,
+                    "POST",
+                    f"/session/{encoded}/execute/sync",
+                    {
+                        "script": f"return JSON.stringify({READINESS_EXPRESSION});",
+                        "args": [],
+                    },
+                    timeout=min(2.0, remaining),
+                ).get("value")
+            except lifecycle.LifecycleError as exc:
+                if not _is_safari_observation_timeout(exc):
+                    raise
+                remaining = absolute_deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(0.25, remaining))
+                continue
             failure_reason = "readiness_signals_invalid"
             signals = _decode_safari_readiness_signals(serialized_signals)
             outcome, reason = _classify_document_evidence(host, document, signals)

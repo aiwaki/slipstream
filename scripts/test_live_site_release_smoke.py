@@ -47,6 +47,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             }
         }
 
+    def _safari_observation_timeout(self) -> smoke.lifecycle.LifecycleError:
+        error = smoke.lifecycle.LifecycleError("private timeout diagnostic")
+        error.__cause__ = TimeoutError("timed out")
+        return error
+
     def _fake_chrome_for_testing(self, root: smoke.Path) -> smoke.Path:
         contents = root / "Google Chrome for Testing.app" / "Contents"
         executable = contents / "MacOS" / "Google Chrome for Testing"
@@ -1018,6 +1023,47 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(result["reason"], "browser_observation_failed")
 
+    def test_safari_retries_only_a_transient_observation_timeout(self) -> None:
+        source_calls = 0
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            nonlocal source_calls
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "GET" and path.endswith("/source"):
+                source_calls += 1
+                if source_calls == 1:
+                    raise self._safari_observation_timeout()
+                return {"value": "<html>" + "x" * 600}
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": smoke.json.dumps(self._signals())}
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.time, "sleep") as sleep,
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+        self.assertEqual(source_calls, 2)
+        sleep.assert_called_once_with(mock.ANY)
+        self.assertLessEqual(sleep.call_args.args[0], 0.25)
+
     def test_all_fixed_sites_have_positive_semantic_fixtures(self) -> None:
         document = "<html>" + "x" * 600
         fixtures = {
@@ -1152,7 +1198,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
     def test_safari_navigation_deadline_starts_after_session_setup(self) -> None:
         events: list[tuple[str, object]] = []
-        clock_values = iter((1.0, 101.0, 101.1, 101.2, 102.0))
+        clock_values = iter((1.0, 101.0, 101.1, 101.2, 101.3, 102.0))
 
         def monotonic() -> float:
             value = next(clock_values)
