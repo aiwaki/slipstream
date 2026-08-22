@@ -28,6 +28,115 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         value.update(changes)
         return value
 
+    def _fake_chrome_for_testing(self, root: smoke.Path) -> smoke.Path:
+        contents = root / "Google Chrome for Testing.app" / "Contents"
+        executable = contents / "MacOS" / "Google Chrome for Testing"
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        (contents / "Info.plist").touch()
+        executable.touch()
+        executable.chmod(0o755)
+        return executable
+
+    def _enter_chrome_lifecycle(
+        self,
+        stack: ExitStack,
+        root: smoke.Path,
+        *,
+        bootstrap_error: BaseException | None = None,
+        cleanup_events: list[str] | None = None,
+    ) -> SimpleNamespace:
+        executable = self._fake_chrome_for_testing(root)
+        profile = root / "profile"
+        profile.mkdir(exist_ok=True)
+        launch = smoke.chromium.ChromeLaunch(
+            "gui/501/dev.slipstream.chromium-semantic.live.test",
+            4242,
+            4242,
+        )
+        browser = smoke.chromium.ChromeProcess(
+            4343,
+            4343,
+            f"{executable} --user-data-dir={profile}",
+        )
+        events = cleanup_events if cleanup_events is not None else []
+
+        stack.enter_context(
+            mock.patch.object(
+                smoke.lifecycle,
+                "_user_environment",
+                return_value=({"HOME": str(root), "USER": "runner"}, root),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                smoke.lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(smoke.tempfile, "mkdtemp", return_value=str(profile))
+        )
+        stack.enter_context(mock.patch.object(smoke.os, "chown"))
+        write_private = stack.enter_context(
+            mock.patch.object(smoke.chromium, "_write_owner_private_file")
+        )
+        bootstrap_options = (
+            {"side_effect": bootstrap_error}
+            if bootstrap_error is not None
+            else {"return_value": launch}
+        )
+        bootstrap = stack.enter_context(
+            mock.patch.object(
+                smoke.chromium,
+                "_bootstrap_chrome_launch_agent",
+                **bootstrap_options,
+            )
+        )
+        wait_for_browser = stack.enter_context(
+            mock.patch.object(
+                smoke.chromium,
+                "_wait_for_owned_chrome_process",
+                return_value=browser,
+            )
+        )
+        stop = stack.enter_context(
+            mock.patch.object(
+                smoke.chromium,
+                "_stop_chrome_launch_agent",
+                side_effect=lambda *_args, **_kwargs: events.append("stop"),
+            )
+        )
+        remove_profile = stack.enter_context(
+            mock.patch.object(
+                smoke.chromium,
+                "_remove_owned_profile",
+                side_effect=lambda *_args, **_kwargs: events.append("remove"),
+            )
+        )
+        wait_for_absence = stack.enter_context(
+            mock.patch.object(smoke.chromium, "_wait_for_launch_agent_absence")
+        )
+        stop_partial = stack.enter_context(
+            mock.patch.object(smoke.chromium, "_stop_owned_chrome_processes")
+        )
+        popen = stack.enter_context(mock.patch.object(smoke.subprocess, "Popen"))
+        return SimpleNamespace(
+            bootstrap=bootstrap,
+            browser=browser,
+            events=events,
+            executable=executable,
+            launch=launch,
+            popen=popen,
+            profile=profile,
+            remove_profile=remove_profile,
+            stop=stop,
+            stop_partial=stop_partial,
+            wait_for_absence=wait_for_absence,
+            wait_for_browser=wait_for_browser,
+            write_private=write_private,
+        )
+
     def test_fixed_sites_have_explicit_deadlines(self) -> None:
         self.assertEqual(
             tuple(smoke.SITES),
@@ -52,26 +161,20 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
     def test_chrome_navigation_error_becomes_bounded_terminal_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
-            executable = root / "chrome"
-            executable.touch()
-            process = mock.Mock(pid=1234)
-            with (
-                mock.patch.object(
-                    smoke.lifecycle,
-                    "_user_environment",
-                    return_value=({}, root),
-                ),
-                mock.patch.object(
-                    smoke.lifecycle,
-                    "_user_supplementary_groups",
-                    return_value=(),
-                ),
-                mock.patch.object(smoke.os, "chown"),
-                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
-                mock.patch.object(
+            cleanup_events: list[str] = []
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(
+                    stack,
+                    root,
+                    cleanup_events=cleanup_events,
+                )
+                stack.enter_context(
+                    mock.patch.object(
                     smoke.chromium, "_wait_for_devtools_port", return_value=9222
-                ),
-                mock.patch.object(
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
                     smoke.chromium,
                     "_devtools_json",
                     return_value=[
@@ -81,65 +184,100 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                             "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/1",
                         }
                     ],
-                ),
-                mock.patch.object(
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
                     smoke.chromium,
                     "_devtools_command",
                     return_value={"errorText": "net::ERR_EMPTY_RESPONSE"},
-                ),
-                mock.patch.object(
-                    smoke.lifecycle, "_stop_owned_chrome_process_group"
-                ) as stop,
-            ):
-                result = smoke._run_chrome("app.aikido.dev", executable, 501, 20)
+                    )
+                )
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
 
         self.assertEqual(result["outcome"], "terminal_error")
         self.assertEqual(result["reason"], "navigation_rejected")
         self.assertEqual(result["browser"], "chrome")
         self.assertEqual(result["route"], "slipstream_selected")
-        stop.assert_called_once()
+        lifecycle.popen.assert_not_called()
+        lifecycle.wait_for_browser.assert_called_once_with(
+            501,
+            lifecycle.executable.resolve(),
+            lifecycle.profile,
+            mock.ANY,
+        )
+        lifecycle.stop.assert_called_once_with(
+            lifecycle.launch,
+            uid=501,
+            gid=20,
+            supplementary_groups=(12, 61),
+            executable=lifecycle.executable.resolve(),
+            profile=lifecycle.profile,
+            ownership=mock.ANY,
+            post_bootout_settle_time=0.0,
+        )
+        lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
+        self.assertEqual(cleanup_events, ["stop", "remove"])
+        self.assertEqual(lifecycle.write_private.call_count, 5)
+        for call in lifecycle.write_private.call_args_list:
+            self.assertEqual(call.args[-2:], (501, 20))
+        payload = smoke.plistlib.loads(
+            lifecycle.write_private.call_args_list[-1].args[1]
+        )
+        self.assertEqual(payload["ProcessType"], "Interactive")
+        self.assertEqual(payload["LimitLoadToSessionType"], "Aqua")
+        command = payload["ProgramArguments"]
+        self.assertEqual(command[:4], ["/usr/bin/open", "-n", "-W", "-j"])
+        self.assertIn(str(lifecycle.executable.parents[2].resolve()), command)
+        self.assertIn("--args", command)
+        self.assertFalse(any(argument.startswith("--headless") for argument in command))
+        self.assertNotIn("--no-sandbox", command)
 
     def test_chrome_setup_failures_keep_exact_bounded_stages(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
-            executable = root / "chrome"
-            executable.touch()
-            process = mock.Mock(pid=1234)
 
-            def run(*patchers: object) -> dict[str, object]:
+            def run(
+                *patchers: object,
+                bootstrap_error: BaseException | None = None,
+            ) -> tuple[dict[str, object], SimpleNamespace]:
                 with ExitStack() as stack:
-                    stack.enter_context(
-                        mock.patch.object(
-                            smoke.lifecycle,
-                            "_user_environment",
-                            return_value=({}, root),
-                        )
+                    lifecycle = self._enter_chrome_lifecycle(
+                        stack,
+                        root,
+                        bootstrap_error=bootstrap_error,
                     )
-                    stack.enter_context(
-                        mock.patch.object(
-                            smoke.lifecycle,
-                            "_user_supplementary_groups",
-                            return_value=(),
-                        )
-                    )
-                    stack.enter_context(mock.patch.object(smoke.os, "chown"))
                     for patcher in patchers:
                         stack.enter_context(patcher)
-                    return smoke._run_chrome(
-                        "app.aikido.dev", executable, 501, 20
+                    result = smoke._run_chrome(
+                        "app.aikido.dev", lifecycle.executable, 501, 20
                     )
+                    lifecycle.popen.assert_not_called()
+                    return result, lifecycle
 
-            result = run(
-                mock.patch.object(
-                    smoke.subprocess,
-                    "Popen",
-                    side_effect=OSError("private process diagnostic"),
+            result, lifecycle = run(
+                bootstrap_error=smoke.chromium.QualificationError(
+                    "private launch diagnostic"
                 )
             )
             self.assertEqual(result["reason"], "browser_start_failed")
+            self.assertEqual(result["elapsed_ms"], 0)
+            label = lifecycle.bootstrap.call_args.args[1]
+            lifecycle.wait_for_absence.assert_called_once_with(f"gui/501/{label}")
+            lifecycle.stop_partial.assert_called_once_with(
+                501,
+                lifecycle.executable.resolve(),
+                lifecycle.profile,
+                mock.ANY,
+                timeout=10.0,
+                settle_time=5.0,
+            )
+            lifecycle.stop.assert_not_called()
+            lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
 
-            result = run(
-                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
+            result, lifecycle = run(
                 mock.patch.object(
                     smoke.chromium,
                     "_wait_for_devtools_port",
@@ -147,30 +285,55 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                         "private DevTools diagnostic"
                     ),
                 ),
-                mock.patch.object(
-                    smoke.lifecycle, "_stop_owned_chrome_process_group"
-                ),
             )
             self.assertEqual(result["reason"], "devtools_unavailable")
+            self.assertEqual(result["elapsed_ms"], 0)
+            lifecycle.stop.assert_called_once()
+            lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
 
-            result = run(
-                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
+            result, lifecycle = run(
                 mock.patch.object(
                     smoke.chromium, "_wait_for_devtools_port", return_value=9222
                 ),
                 mock.patch.object(smoke.chromium, "_devtools_json", return_value=[]),
-                mock.patch.object(
-                    smoke.lifecycle, "_stop_owned_chrome_process_group"
-                ),
             )
             self.assertEqual(result["reason"], "target_unavailable")
+            self.assertEqual(result["elapsed_ms"], 0)
+            lifecycle.stop.assert_called_once()
+            lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
+
+    def test_chrome_partial_bootstrap_cleanup_failure_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(
+                    stack,
+                    root,
+                    bootstrap_error=smoke.chromium.QualificationError(
+                        "private launch diagnostic"
+                    ),
+                )
+                lifecycle.wait_for_absence.side_effect = (
+                    smoke.chromium.QualificationError("private cleanup diagnostic")
+                )
+                with self.assertRaisesRegex(
+                    smoke.LiveSiteError,
+                    "^Chrome cleanup failed$",
+                ):
+                    smoke._run_chrome(
+                        "app.aikido.dev", lifecycle.executable, 501, 20
+                    )
+
+        lifecycle.popen.assert_not_called()
+        label = lifecycle.bootstrap.call_args.args[1]
+        lifecycle.wait_for_absence.assert_called_once_with(f"gui/501/{label}")
+        lifecycle.stop_partial.assert_called_once()
+        lifecycle.stop.assert_not_called()
+        lifecycle.remove_profile.assert_not_called()
 
     def test_chrome_retries_transient_execution_context_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
-            executable = root / "chrome"
-            executable.touch()
-            process = mock.Mock(pid=1234)
             document = "<html><title>Aikido Security</title>" + "x" * 600
             commands = mock.Mock(
                 side_effect=[
@@ -180,19 +343,15 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     {"result": {"value": document}},
                 ]
             )
-            with (
-                mock.patch.object(
-                    smoke.lifecycle, "_user_environment", return_value=({}, root)
-                ),
-                mock.patch.object(
-                    smoke.lifecycle, "_user_supplementary_groups", return_value=()
-                ),
-                mock.patch.object(smoke.os, "chown"),
-                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
-                mock.patch.object(
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
                     smoke.chromium, "_wait_for_devtools_port", return_value=9222
-                ),
-                mock.patch.object(
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
                     smoke.chromium,
                     "_devtools_json",
                     return_value=[
@@ -202,18 +361,73 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                             "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/1",
                         }
                     ],
-                ),
-                mock.patch.object(smoke.chromium, "_devtools_command", commands),
-                mock.patch.object(smoke.time, "sleep"),
-                mock.patch.object(
-                    smoke.lifecycle, "_stop_owned_chrome_process_group"
-                ),
-            ):
-                result = smoke._run_chrome("app.aikido.dev", executable, 501, 20)
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.chromium, "_devtools_command", commands)
+                )
+                stack.enter_context(mock.patch.object(smoke.time, "sleep"))
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
 
         self.assertEqual(result["outcome"], "usable")
         self.assertEqual(result["reason"], "")
         self.assertEqual(commands.call_count, 4)
+        lifecycle.popen.assert_not_called()
+        lifecycle.stop.assert_called_once()
+        lifecycle.remove_profile.assert_called_once_with(lifecycle.profile)
+
+    def test_chrome_navigation_deadline_starts_after_browser_setup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            document = "<html><title>Aikido Security</title>" + "x" * 600
+            commands = mock.Mock(
+                side_effect=[
+                    {},
+                    {"result": {"value": self._signals()}},
+                    {"result": {"value": document}},
+                ]
+            )
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.chromium, "_devtools_command", commands)
+                )
+                monotonic = stack.enter_context(
+                    mock.patch.object(
+                        smoke.time,
+                        "monotonic",
+                        side_effect=(1.0, 101.0, 101.1, 102.0),
+                    )
+                )
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual(result["outcome"], "usable")
+        self.assertEqual(result["elapsed_ms"], 1_000)
+        self.assertEqual(monotonic.call_count, 4)
 
     def test_safari_waits_for_the_ready_status_not_only_http_success(self) -> None:
         ready = mock.Mock(
@@ -260,6 +474,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 "app.aikido.dev", "http://127.0.0.1:12345", 501
             )
         self.assertEqual(result["reason"], "driver_unavailable")
+        self.assertEqual(result["elapsed_ms"], 0)
 
         with (
             mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
@@ -275,6 +490,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 "app.aikido.dev", "http://127.0.0.1:12345", 501
             )
         self.assertEqual(result["reason"], "browser_process_conflict")
+        self.assertEqual(result["elapsed_ms"], 0)
 
         with (
             mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
@@ -291,6 +507,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 "app.aikido.dev", "http://127.0.0.1:12345", 501
             )
         self.assertEqual(result["reason"], "session_create_failed")
+        self.assertEqual(result["elapsed_ms"], 0)
 
         webdriver = mock.Mock(
             side_effect=[
@@ -314,6 +531,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 "app.aikido.dev", "http://127.0.0.1:12345", 501
             )
         self.assertEqual(result["reason"], "browser_process_unavailable")
+        self.assertEqual(result["elapsed_ms"], 0)
 
         webdriver = mock.Mock(
             side_effect=[
@@ -335,6 +553,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 "app.aikido.dev", "http://127.0.0.1:12345", 501
             )
         self.assertEqual(result["reason"], "session_configuration_failed")
+        self.assertEqual(result["elapsed_ms"], 0)
 
     def test_safari_clean_session_navigates_without_originless_cookie_delete(
         self,
@@ -425,6 +644,183 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(result["reason"], "browser_observation_failed")
+
+    def test_all_fixed_sites_have_positive_semantic_fixtures(self) -> None:
+        document = "<html>" + "x" * 600
+        fixtures = {
+            "xpersonatoy.com": self._signals(
+                title="StarrToy",
+                main_text_length=80,
+            ),
+            "app.aikido.dev": self._signals(),
+            "weather.com": self._signals(
+                title="Weather",
+                main_text_length=100,
+            ),
+            "capacitorjs.com": self._signals(
+                title="Capacitor",
+                main_text_length=100,
+            ),
+        }
+
+        self.assertEqual(set(fixtures), set(smoke.SITES))
+        for host, signals in fixtures.items():
+            with self.subTest(host=host):
+                self.assertEqual(
+                    smoke._classify_document_evidence(host, document, signals),
+                    ("usable", ""),
+                )
+
+    def test_readiness_blockers_are_fixed_privacy_bounded_reasons(self) -> None:
+        document = "<html>private document marker" + "x" * 600
+        cases = (
+            ({"https": False}, "readiness_context_invalid"),
+            ({"ready_state": "loading"}, "readiness_document_pending"),
+            ({"visible_body": False}, "readiness_visibility_missing"),
+            ({"next_hop_protocol": ""}, "readiness_transport_missing"),
+            ({"title": "private title marker"}, "readiness_title_mismatch"),
+            ({"app_text_length": 0}, "readiness_content_missing"),
+        )
+
+        for changes, expected_reason in cases:
+            with self.subTest(expected_reason=expected_reason):
+                outcome, reason = smoke._classify_document_evidence(
+                    "app.aikido.dev",
+                    document,
+                    self._signals(**changes),
+                )
+                self.assertEqual(
+                    (outcome, reason),
+                    ("terminal_error", expected_reason),
+                )
+                self.assertIn(reason, smoke.TERMINAL_BROWSER_REASONS)
+                self.assertNotIn("private", reason)
+
+    def test_challenge_marker_remains_nonpassing_with_positive_shaped_signals(
+        self,
+    ) -> None:
+        document = "<html>captcha cf-chl- dormant script" + "x" * 600
+        positive = self._signals(
+            title="StarrToy",
+            main_text_length=80,
+        )
+        unresolved = self._signals(
+            title="Just a moment",
+            main_text_length=0,
+            body_text_length=0,
+        )
+
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "xpersonatoy.com", document, positive
+            ),
+            ("challenge_or_auth", "challenge_or_auth"),
+        )
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "xpersonatoy.com", document, unresolved
+            ),
+            ("challenge_or_auth", "challenge_or_auth"),
+        )
+
+    def test_safari_keeps_polling_until_a_challenge_resolves(self) -> None:
+        source_calls = 0
+        challenge = "<html>Checking your browser captcha" + "x" * 600
+        usable = "<html>StarrToy" + "x" * 600
+        signals = iter(
+            (
+                self._signals(
+                    title="Just a moment",
+                    main_text_length=0,
+                    body_text_length=0,
+                ),
+                self._signals(
+                    title="StarrToy",
+                    main_text_length=80,
+                ),
+            )
+        )
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            nonlocal source_calls
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "GET" and path.endswith("/source"):
+                source_calls += 1
+                return {"value": challenge if source_calls == 1 else usable}
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": smoke.json.dumps(next(signals))}
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.time, "sleep") as sleep,
+        ):
+            result = smoke._run_safari(
+                "xpersonatoy.com", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual(result["outcome"], "usable")
+        self.assertEqual(result["reason"], "")
+        self.assertEqual(source_calls, 2)
+        sleep.assert_called_once()
+
+    def test_safari_navigation_deadline_starts_after_session_setup(self) -> None:
+        events: list[tuple[str, object]] = []
+        clock_values = iter((1.0, 101.0, 101.1, 101.2, 102.0))
+
+        def monotonic() -> float:
+            value = next(clock_values)
+            events.append(("clock", value))
+            return value
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            events.append((method, path))
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "GET" and path.endswith("/source"):
+                return {"value": "<html>" + "x" * 600}
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": smoke.json.dumps(self._signals())}
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.time, "monotonic", side_effect=monotonic),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        navigation = ("POST", "/session/session-id/url")
+        navigation_index = events.index(navigation)
+        self.assertEqual(events[navigation_index - 1], ("clock", 101.0))
+        self.assertEqual(result["outcome"], "usable")
+        self.assertEqual(result["elapsed_ms"], 1_000)
 
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"

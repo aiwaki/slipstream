@@ -6,13 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
-import shutil
+import plistlib
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.parse
+from pathlib import Path
 
 import chromium_semantic_packaged_smoke as chromium
 import live_site_contract
@@ -73,33 +73,44 @@ def _require_protected_ci() -> None:
         raise LiveSiteError("live-site gate requires protected disposable macOS CI")
 
 
-def _positive_readiness(host: str, signals: dict[str, object]) -> bool:
+def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
     title = str(signals.get("title") or "").casefold()
-    body_text = int(signals.get("body_text_length") or 0)
     main_text = int(signals.get("main_text_length") or 0)
     app_text = int(signals.get("app_text_length") or 0)
-    common = (
-        signals.get("https") is True
-        and signals.get("secure_context") is True
-        and signals.get("ready_state") == "complete"
-        and signals.get("visible_body") is True
-        and signals.get("next_hop_protocol") in ALLOWED_PROTOCOLS
-    )
+    if signals.get("https") is not True or signals.get("secure_context") is not True:
+        return "readiness_context_invalid"
+    if signals.get("ready_state") != "complete":
+        return "readiness_document_pending"
+    if signals.get("visible_body") is not True:
+        return "readiness_visibility_missing"
+    if signals.get("next_hop_protocol") not in ALLOWED_PROTOCOLS:
+        return "readiness_transport_missing"
     if host == "xpersonatoy.com":
-        return common and "starrtoy" in title and main_text >= 80
+        if "starrtoy" not in title:
+            return "readiness_title_mismatch"
+        return None if main_text >= 80 else "readiness_content_missing"
     if host == "app.aikido.dev":
-        return (
-            common
-            and "aikido security" in title
-            and signals.get("visible_app") is True
-            and app_text >= 20
-            and signals.get("preloader_visible") is False
-        )
+        if "aikido security" not in title:
+            return "readiness_title_mismatch"
+        if (
+            signals.get("visible_app") is not True
+            or signals.get("preloader_visible") is not False
+        ):
+            return "readiness_visibility_missing"
+        return None if app_text >= 20 else "readiness_content_missing"
     if host == "weather.com":
-        return common and "weather" in title and main_text >= 100
+        if "weather" not in title:
+            return "readiness_title_mismatch"
+        return None if main_text >= 100 else "readiness_content_missing"
     if host == "capacitorjs.com":
-        return common and "capacitor" in title and main_text >= 100
-    return False
+        if "capacitor" not in title:
+            return "readiness_title_mismatch"
+        return None if main_text >= 100 else "readiness_content_missing"
+    return "readiness_content_missing"
+
+
+def _positive_readiness(host: str, signals: dict[str, object]) -> bool:
+    return _readiness_blocker(host, signals) is None
 
 
 def _classify_document_evidence(
@@ -119,12 +130,12 @@ def _classify_document_evidence(
     if signals is None:
         return "terminal_error", "readiness_signals_invalid"
     try:
-        ready = _positive_readiness(host, signals)
+        blocker = _readiness_blocker(host, signals)
     except (TypeError, ValueError):
         return "terminal_error", "readiness_signals_invalid"
-    if not ready:
-        return "terminal_error", "readiness_timeout"
-    return "usable", ""
+    if blocker is None:
+        return "usable", ""
+    return "terminal_error", blocker
 
 
 def _classify_document(
@@ -188,11 +199,22 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     environment, home = lifecycle._user_environment(uid)
     groups = lifecycle._user_supplementary_groups(uid, gid)
     profile = Path(tempfile.mkdtemp(prefix="slipstream-release-chrome-"))
-    output = tempfile.TemporaryFile()
-    process: subprocess.Popen | None = None
-    process_group: int | None = None
-    started = time.monotonic()
-    finished = started
+    chrome_stdout_path = profile / "chrome.stdout"
+    chrome_stderr_path = profile / "chrome.stderr"
+    launcher_stdout_path = profile / "launcher.stdout"
+    launcher_stderr_path = profile / "launcher.stderr"
+    plist_path = profile / "chrome-launch-agent.plist"
+    label = (
+        f"{chromium.CHROME_JOB_PREFIX}.live.{os.getpid()}."
+        f"{profile.name.rsplit('-', 1)[-1]}"
+    )
+    launch: chromium.ChromeLaunch | None = None
+    browser: chromium.ChromeProcess | None = None
+    ownership = chromium.ChromeOwnership(set())
+    bootstrap_started = False
+    attempt_started = time.monotonic()
+    observation_started: float | None = None
+    finished = attempt_started
     outcome = "terminal_error"
     reason = "browser_start_failed"
     failure_reason = reason
@@ -200,19 +222,52 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
-        process = subprocess.Popen(
-            _chrome_command(executable, profile),
-            cwd=home,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=output,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            user=uid,
-            group=gid,
-            extra_groups=groups,
+        application_bundle = chromium._launchservices_app_bundle(
+            executable,
+            profile,
+            uid,
+            gid,
         )
-        process_group = process.pid
+        executable = chromium._launchservices_executable(
+            executable,
+            application_bundle,
+        )
+        for path in (
+            chrome_stdout_path,
+            chrome_stderr_path,
+            launcher_stdout_path,
+            launcher_stderr_path,
+        ):
+            chromium._write_owner_private_file(path, b"", uid, gid)
+        browser_command = _chrome_command(executable, profile)
+        open_command = chromium._launchservices_open_command(
+            application_bundle,
+            browser_command,
+            chrome_stdout_path,
+            chrome_stderr_path,
+        )
+        payload = chromium._launchservices_launch_agent_payload(
+            label,
+            environment,
+            home,
+            open_command,
+            launcher_stdout_path,
+            launcher_stderr_path,
+        )
+        chromium._write_owner_private_file(
+            plist_path,
+            plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=True),
+            uid,
+            gid,
+        )
+        bootstrap_started = True
+        launch = chromium._bootstrap_chrome_launch_agent(uid, label, plist_path)
+        browser = chromium._wait_for_owned_chrome_process(
+            uid,
+            executable,
+            profile,
+            ownership,
+        )
         failure_reason = "devtools_unavailable"
         port = chromium._wait_for_devtools_port(profile, uid, timeout=10)
         failure_reason = "target_unavailable"
@@ -228,6 +283,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             raise LiveSiteError("Chrome did not expose one clean page")
         debugger = pages[0]["webSocketDebuggerUrl"]
         failure_reason = "navigation_rejected"
+        observation_started = time.monotonic()
         navigation = chromium._devtools_command(
             debugger,
             port,
@@ -238,7 +294,8 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         if navigation.get("errorText") not in (None, ""):
             raise LiveSiteError("Chrome rejected the HTTPS navigation")
         failure_reason = "browser_observation_failed"
-        deadline = started + SITES[host]["deadline_ms"] / 1000
+        reason = failure_reason
+        deadline = observation_started + SITES[host]["deadline_ms"] / 1000
         signals: dict[str, object] = {}
         document = ""
         while time.monotonic() < deadline:
@@ -281,8 +338,13 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             outcome, reason = _classify_document_evidence(host, document, signals)
             # A static app shell reaches readyState=complete before its JS has
             # rendered a useful interface. Keep polling until a fixed positive
-            # signal, denial/challenge, or the site deadline.
-            if outcome != "terminal_error":
+            # signal, a fixed denial, or the site deadline. A challenge remains
+            # non-passing but may resolve within the same bounded navigation.
+            if outcome in {
+                "usable",
+                "regional_access_denied",
+                "edge_access_denied",
+            }:
                 break
             time.sleep(0.25)
         finished = time.monotonic()
@@ -291,29 +353,59 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         finished = time.monotonic()
     finally:
         cleanup_failed = False
-        if process is not None and process_group is not None:
-            try:
-                lifecycle._stop_owned_chrome_process_group(
-                    process,
-                    process_group,
+        profile_cleanup_safe = not bootstrap_started
+        try:
+            if launch is not None:
+                chromium._stop_chrome_launch_agent(
+                    launch,
                     uid=uid,
                     gid=gid,
                     supplementary_groups=groups,
+                    executable=executable,
+                    profile=profile,
+                    ownership=ownership,
+                    post_bootout_settle_time=5.0 if browser is None else 0.0,
                 )
-            except BaseException:
-                cleanup_failed = True
-        try:
-            output.close()
+                profile_cleanup_safe = True
+            elif bootstrap_started:
+                partial_errors: list[BaseException] = []
+                try:
+                    chromium._wait_for_launch_agent_absence(f"gui/{uid}/{label}")
+                except BaseException as exc:
+                    partial_errors.append(exc)
+                try:
+                    chromium._stop_owned_chrome_processes(
+                        uid,
+                        executable,
+                        profile,
+                        ownership,
+                        timeout=10.0,
+                        settle_time=5.0,
+                    )
+                except BaseException as exc:
+                    partial_errors.append(exc)
+                if partial_errors:
+                    raise LiveSiteError(
+                        "partial Chrome bootstrap cleanup could not be verified"
+                    ) from partial_errors[0]
+                profile_cleanup_safe = True
         except BaseException:
             cleanup_failed = True
-        try:
-            shutil.rmtree(profile)
-        except BaseException:
+        if profile_cleanup_safe:
+            try:
+                chromium._remove_owned_profile(profile)
+            except BaseException:
+                cleanup_failed = True
+        else:
             cleanup_failed = True
         if cleanup_failed:
             raise LiveSiteError("Chrome cleanup failed") from None
     # Worker teardown is verified but excluded from the navigation deadline.
-    elapsed_ms = round((finished - started) * 1000)
+    elapsed_ms = (
+        round((finished - observation_started) * 1000)
+        if observation_started is not None
+        else 0
+    )
     if failure is not None:
         outcome = "terminal_error"
         reason = failure_reason
@@ -360,8 +452,9 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     outcome = "terminal_error"
     reason = "driver_unavailable"
     failure_reason = reason
-    started = time.monotonic()
-    finished = started
+    attempt_started = time.monotonic()
+    observation_started: float | None = None
+    finished = attempt_started
     failure: BaseException | None = None
     try:
         _wait_for_safaridriver_ready(driver_url)
@@ -390,7 +483,6 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         safari_pid = lifecycle._wait_for_safari_process(uid, host)
         encoded = urllib.parse.quote(session_id, safe="")
         deadline = int(SITES[host]["deadline_ms"])
-        absolute_deadline = started + deadline / 1000
         failure_reason = "session_configuration_failed"
         lifecycle._webdriver_request(
             driver_url,
@@ -402,6 +494,8 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         # cookies while Safari is still on about:blank has no origin and makes
         # SafariDriver reject or stall an otherwise valid clean session.
         failure_reason = "navigation_rejected"
+        observation_started = time.monotonic()
+        absolute_deadline = observation_started + deadline / 1000
         lifecycle._webdriver_request(
             driver_url,
             "POST",
@@ -410,6 +504,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             timeout=deadline / 1000 + 5,
         )
         failure_reason = "browser_observation_failed"
+        reason = failure_reason
         while time.monotonic() < absolute_deadline:
             # A successful decode may still leave the current document pending.
             # Reset before each later WebDriver request so an HTTP/timeout
@@ -439,7 +534,11 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             failure_reason = "readiness_signals_invalid"
             signals = _decode_safari_readiness_signals(serialized_signals)
             outcome, reason = _classify_document_evidence(host, document, signals)
-            if outcome != "terminal_error":
+            if outcome in {
+                "usable",
+                "regional_access_denied",
+                "edge_access_denied",
+            }:
                 break
             time.sleep(min(0.25, max(0.0, absolute_deadline - time.monotonic())))
         finished = time.monotonic()
@@ -464,7 +563,11 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         if cleanup:
             raise LiveSiteError("Safari cleanup failed") from (failure or cleanup[0])
     # Session teardown is verified but excluded from the navigation deadline.
-    elapsed_ms = round((finished - started) * 1000)
+    elapsed_ms = (
+        round((finished - observation_started) * 1000)
+        if observation_started is not None
+        else 0
+    )
     if failure is not None:
         outcome = "terminal_error"
         reason = failure_reason
