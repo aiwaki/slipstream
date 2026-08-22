@@ -1397,6 +1397,18 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertNotIn("text", run.call_args.kwargs)
 
+    def test_control_route_dormant_captcha_text_is_not_a_challenge(self) -> None:
+        response = mock.Mock(
+            returncode=0,
+            stdout=(
+                b"<script>captcha dormant third-party script</script>"
+                + (b"x" * 600)
+                + b"\n__SLIPSTREAM_STATUS__:200"
+            ),
+        )
+        with mock.patch.object(smoke.subprocess, "run", return_value=response):
+            self.assertEqual(smoke._control_route("xpersonatoy.com", "direct"), "usable")
+
     def test_successful_sites_cannot_hide_cleanup_failure(self) -> None:
         browser_result = {
             "browser": "safari",

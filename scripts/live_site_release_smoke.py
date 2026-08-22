@@ -58,7 +58,10 @@ CHALLENGE_MARKERS = (
 # the Safari and Chrome paths derive that one fixed boolean from visible text
 # or a visibility-gated challenge widget.
 WEAK_VISIBLE_CHALLENGE_MARKERS = ("captcha",)
-CONTROL_CHALLENGE_MARKERS = CHALLENGE_MARKERS + WEAK_VISIBLE_CHALLENGE_MARKERS
+# A curl control sees source bytes, not rendered visibility.  Therefore it may
+# only use the unambiguous raw markers; generic `captcha` remains browser-only
+# evidence so dormant third-party scripts cannot make a healthy control route
+# look like a challenge.
 TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
 
 
@@ -744,7 +747,7 @@ def _control_route(host: str, route: str) -> str:
     all_denials = tuple(marker for site in SITES.values() for marker in site["denials"])
     if any(marker in lowered for marker in all_denials):
         return "denial"
-    if any(marker in lowered for marker in CONTROL_CHALLENGE_MARKERS) or int(code) in {
+    if any(marker in lowered for marker in CHALLENGE_MARKERS) or int(code) in {
         401,
         407,
         429,
