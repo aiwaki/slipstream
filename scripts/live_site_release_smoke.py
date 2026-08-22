@@ -134,10 +134,10 @@ def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
         return None
     # `interactive` means the DOM has been parsed. DOMContentLoaded additionally
     # proves deferred/module work reached its fixed milestone. Preserve this as
-    # an explicit temporal candidate; the browser loops require a short stable
-    # sequence before promoting it to `usable`, so a first positive snapshot
-    # cannot hide a late challenge or redirect. `loading` remains non-passing
-    # and does not start that candidate sequence.
+    # an explicit temporal candidate; the browser loops require a second atomic
+    # positive snapshot with a conservative lower-bound separation before
+    # promoting it to `usable`. `loading` remains non-passing and does not start
+    # that candidate sequence.
     if ready_state == "interactive" and signals.get("dom_content_loaded") is True:
         return "readiness_document_pending_semantic_ready"
     return "readiness_document_pending"
@@ -152,11 +152,24 @@ def _settle_observation(
     reason: str,
     signals: dict[str, object] | None,
     *,
-    observed_at: float | None,
-    interactive_usable_since: float | None,
+    observation_started_at: float,
+    observation_completed_at: float,
+    interactive_confirmation_since: float | None,
     confirmation_deadline: float,
 ) -> tuple[str, str, float | None, bool]:
+    if (
+        isinstance(observation_started_at, bool)
+        or not isinstance(observation_started_at, (int, float))
+        or isinstance(observation_completed_at, bool)
+        or not isinstance(observation_completed_at, (int, float))
+        or observation_started_at > observation_completed_at
+    ):
+        return "terminal_error", "browser_observation_failed", None, True
     if outcome in {"regional_access_denied", "edge_access_denied"}:
+        return outcome, reason, None, True
+    if observation_completed_at >= confirmation_deadline:
+        if outcome == "usable":
+            return "terminal_error", "readiness_timeout", None, True
         return outcome, reason, None, True
     if outcome == "usable":
         return outcome, reason, None, True
@@ -165,19 +178,23 @@ def _settle_observation(
         or reason != "readiness_document_pending_semantic_ready"
         or not isinstance(signals, dict)
         or signals.get("ready_state") != "interactive"
-        or observed_at is None
     ):
         return outcome, reason, None, False
-    if observed_at >= confirmation_deadline:
-        return outcome, reason, None, True
-    started_at = (
-        observed_at
-        if interactive_usable_since is None
-        else interactive_usable_since
-    )
-    if observed_at - started_at >= INTERACTIVE_SETTLE_SECONDS:
-        return "usable", "", started_at, True
-    return outcome, reason, started_at, False
+    if interactive_confirmation_since is None:
+        # The first candidate begins no earlier than response receipt, after
+        # its page-side snapshot has definitely happened. Later confirmations
+        # use the next request start, before that snapshot can happen. This
+        # conservative bracket prevents CDP/WebDriver response latency from
+        # contributing to the required settle interval.
+        return outcome, reason, observation_completed_at, False
+    if observation_started_at < interactive_confirmation_since:
+        return outcome, reason, None, False
+    if (
+        observation_started_at - interactive_confirmation_since
+        >= INTERACTIVE_SETTLE_SECONDS
+    ):
+        return "usable", "", interactive_confirmation_since, True
+    return outcome, reason, interactive_confirmation_since, False
 
 
 def _classify_evidence(
@@ -401,7 +418,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     finished = attempt_started
     outcome = "terminal_error"
     reason = "browser_start_failed"
-    interactive_usable_since: float | None = None
+    interactive_confirmation_since: float | None = None
     failure_reason = reason
     failure: BaseException | None = None
     try:
@@ -482,7 +499,8 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         reason = failure_reason
         deadline = observation_started + SITES[host]["deadline_ms"] / 1000
         while time.monotonic() < deadline:
-            remaining = deadline - time.monotonic()
+            observation_started_at = time.monotonic()
+            remaining = deadline - observation_started_at
             if remaining <= 0:
                 break
             try:
@@ -499,11 +517,12 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
                 evidence = (
                     evaluated.get("value") if isinstance(evaluated, dict) else None
                 )
+                observation_completed_at = time.monotonic()
             except (chromium.QualificationError, TimeoutError):
                 # Navigation can replace the execution context and a bounded
                 # DevTools request can time out. Neither authorizes a pass;
                 # keep polling only inside the unchanged host deadline.
-                interactive_usable_since = None
+                interactive_confirmation_since = None
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
                     time.sleep(min(0.25, remaining))
@@ -514,19 +533,14 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             # signal, a fixed denial, or the site deadline. A challenge remains
             # non-passing but may resolve within the same bounded navigation.
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
-            observed_at = (
-                time.monotonic()
-                if isinstance(signals, dict)
-                and signals.get("ready_state") == "interactive"
-                else None
-            )
-            outcome, reason, interactive_usable_since, should_stop = (
+            outcome, reason, interactive_confirmation_since, should_stop = (
                 _settle_observation(
                     outcome,
                     reason,
                     signals,
-                    observed_at=observed_at,
-                    interactive_usable_since=interactive_usable_since,
+                    observation_started_at=observation_started_at,
+                    observation_completed_at=observation_completed_at,
+                    interactive_confirmation_since=interactive_confirmation_since,
                     confirmation_deadline=deadline,
                 )
             )
@@ -699,14 +713,15 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         )
         failure_reason = "browser_observation_failed"
         reason = failure_reason
-        interactive_usable_since: float | None = None
+        interactive_confirmation_since: float | None = None
         while time.monotonic() < absolute_deadline:
             # A successful decode may still leave the current document pending.
             # Reset before each later WebDriver request so an HTTP/timeout
             # failure is not mislabeled as a prior serialization failure.
             failure_reason = "browser_observation_failed"
             try:
-                remaining = absolute_deadline - time.monotonic()
+                observation_started_at = time.monotonic()
+                remaining = absolute_deadline - observation_started_at
                 if remaining <= 0:
                     break
                 serialized_evidence = lifecycle._webdriver_request(
@@ -723,10 +738,11 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
                     },
                     timeout=min(2.0, remaining),
                 ).get("value")
+                observation_completed_at = time.monotonic()
             except lifecycle.LifecycleError as exc:
                 if not _is_safari_observation_timeout(exc):
                     raise
-                interactive_usable_since = None
+                interactive_confirmation_since = None
                 remaining = absolute_deadline - time.monotonic()
                 if remaining > 0:
                     time.sleep(min(0.25, remaining))
@@ -735,19 +751,14 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             evidence = _decode_safari_evidence(serialized_evidence)
             outcome, reason = _classify_browser_evidence(host, evidence)
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
-            observed_at = (
-                time.monotonic()
-                if isinstance(signals, dict)
-                and signals.get("ready_state") == "interactive"
-                else None
-            )
-            outcome, reason, interactive_usable_since, should_stop = (
+            outcome, reason, interactive_confirmation_since, should_stop = (
                 _settle_observation(
                     outcome,
                     reason,
                     signals,
-                    observed_at=observed_at,
-                    interactive_usable_since=interactive_usable_since,
+                    observation_started_at=observation_started_at,
+                    observation_completed_at=observation_completed_at,
+                    interactive_confirmation_since=interactive_confirmation_since,
                     confirmation_deadline=absolute_deadline,
                 )
             )

@@ -46,8 +46,13 @@ The bounded reason proves every fixed semantic condition passed, but the
 current narrow correction therefore does not broadly waive readiness:
 `interactive` is only a temporal candidate after exact-host, DOMContentLoaded,
 HTTPS, secure-context, transport, visibility, title/content, denial, and
-challenge checks; it becomes usable only after an uninterrupted 500 ms
-confirmation sequence. `loading`, timeout, denial, challenge, missing content,
+challenge checks; it becomes usable only after a second atomic positive
+observation whose conservative lower-bound separation is at least 500 ms.
+PR #363 carries this correction and brackets each observation at request start
+and response receipt, so transport latency cannot satisfy the interval; any
+otherwise positive response completed at or after the host deadline also
+remains non-passing.
+`loading`, timeout, denial, challenge, missing content,
 host/context mismatch, and invalid signals remain non-passing and reset the
 sequence. Only a fresh exact-candidate readiness run can prove whether this
 settles the observed sites. Do not retry unchanged `f16bb7c`. Merge this
