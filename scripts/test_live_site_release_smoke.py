@@ -9,8 +9,22 @@ from unittest import mock
 import live_site_release_smoke as smoke
 import release_readiness as readiness
 
+_DEFAULT_DOCUMENT_ACTIVATION_ID = object()
+
 
 class LiveSiteReleaseSmokeTests(unittest.TestCase):
+    DOCUMENT_ACTIVATION_ID = (1, 2, 3, 4)
+
+    def _confirmation(
+        self,
+        since: float,
+        document_activation_id: tuple[int, int, int, int] | None = None,
+    ) -> smoke.InteractiveConfirmation:
+        return (
+            since,
+            document_activation_id or self.DOCUMENT_ACTIVATION_ID,
+        )
+
     def _signals(self, **changes: object) -> dict[str, object]:
         value = {
             "app_text_length": 100,
@@ -37,11 +51,17 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         document_bytes: int = 1_000,
         denial_detected: bool = False,
         challenge_detected: bool = False,
+        document_activation_id: object = _DEFAULT_DOCUMENT_ACTIVATION_ID,
         signals: dict[str, object] | None = None,
     ) -> dict[str, object]:
         return {
             "challenge_detected": challenge_detected,
             "denial_detected": denial_detected,
+            "document_activation_id": (
+                list(self.DOCUMENT_ACTIVATION_ID)
+                if document_activation_id is _DEFAULT_DOCUMENT_ACTIVATION_ID
+                else document_activation_id
+            ),
             "document_bytes": document_bytes,
             "signals": self._signals() if signals is None else signals,
         }
@@ -617,6 +637,88 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertEqual(runtime_calls, 3)
         self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
 
+    def test_chrome_document_replacement_restarts_interactive_settle(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            clock = 0.0
+            runtime_calls = 0
+            first_id = [1, 2, 3, 4]
+            replacement_id = [5, 6, 7, 8]
+            signals = self._signals(ready_state="interactive")
+
+            def monotonic() -> float:
+                return clock
+
+            def sleep(_seconds: float) -> None:
+                nonlocal clock
+                clock = 0.7 if runtime_calls == 1 else 1.3
+
+            def command(
+                _debugger: str,
+                _port: int,
+                method: str,
+                _payload: dict[str, object],
+                **_kwargs: object,
+            ) -> dict:
+                nonlocal clock, runtime_calls
+                if method == "Page.navigate":
+                    return {}
+                runtime_calls += 1
+                clock = {1: 0.1, 2: 0.8, 3: 1.31}[runtime_calls]
+                return self._chrome_evidence(
+                    document_activation_id=(
+                        first_id if runtime_calls == 1 else replacement_id
+                    ),
+                    signals=signals,
+                )
+
+            with ExitStack() as stack:
+                lifecycle = self._enter_chrome_lifecycle(stack, root)
+                stack.enter_context(
+                    mock.patch.dict(
+                        smoke.SITES["app.aikido.dev"], {"deadline_ms": 10_000}
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium,
+                        "_devtools_json",
+                        return_value=[
+                            {
+                                "type": "page",
+                                "url": "about:blank",
+                                "webSocketDebuggerUrl": (
+                                    "ws://127.0.0.1/devtools/page/1"
+                                ),
+                            }
+                        ],
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke.chromium, "_devtools_command", side_effect=command
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.time, "monotonic", monotonic)
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.time, "sleep", side_effect=sleep)
+                )
+                result = smoke._run_chrome(
+                    "app.aikido.dev", lifecycle.executable, 501, 20
+                )
+
+        self.assertEqual(runtime_calls, 3)
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+
     def test_chrome_rejects_interactive_confirmation_at_or_after_deadline(
         self,
     ) -> None:
@@ -903,6 +1005,12 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertIn("signals.visible_challenge_marker === true", expression)
         self.assertIn("visibleChallengeWidget", expression)
         self.assertNotIn('"captcha"].some((marker) => lowered.includes(marker))', expression)
+        self.assertIn("document_activation_id", expression)
+        self.assertIn("crypto.getRandomValues", expression)
+        self.assertIn("activationState.root !== root", expression)
+        self.assertIn("addEventListener('pagehide'", expression)
+        self.assertNotIn("performance.timeOrigin", expression)
+        self.assertNotIn("location.href", expression)
 
     def test_shared_compact_evidence_missing_root_is_retryable(self) -> None:
         expression = smoke._browser_evidence_expression("app.aikido.dev")
@@ -914,7 +1022,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertLess(root_read, root_guard)
         self.assertNotIn("document.documentElement.outerHTML", expression)
 
-        evidence = self._browser_evidence(document_bytes=0, signals=None)
+        evidence = self._browser_evidence(
+            document_bytes=0,
+            document_activation_id=None,
+            signals=None,
+        )
         outcome, reason = smoke._classify_browser_evidence(
             "app.aikido.dev", evidence
         )
@@ -925,7 +1037,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 evidence["signals"],
                 observation_started_at=1.0,
                 observation_completed_at=1.1,
-                interactive_confirmation_since=0.5,
+                document_activation_id=None,
+                interactive_confirmation=(0.5, (1, 2, 3, 4)),
                 confirmation_deadline=2.0,
             ),
             ("terminal_error", "document_too_short", None, False),
@@ -938,6 +1051,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             {
                 "challenge_detected",
                 "denial_detected",
+                "document_activation_id",
                 "document_bytes",
                 "signals",
             },
@@ -974,6 +1088,12 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             {**positive, "document_bytes": -1},
             {**positive, "denial_detected": "false"},
             {**positive, "challenge_detected": 0},
+            {**positive, "document_activation_id": None},
+            {**positive, "document_activation_id": True},
+            {**positive, "document_activation_id": [1, 2, 3]},
+            {**positive, "document_activation_id": [1, 2, 3, -1]},
+            {**positive, "document_activation_id": [1, 2, 3, 1 << 32]},
+            {**positive, "document_activation_id": [1, 2, 3, "4"]},
         )
         for evidence in malformed:
             with self.subTest(evidence=evidence):
@@ -1609,7 +1729,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             signals,
             observation_started_at=0.9,
             observation_completed_at=1.0,
-            interactive_confirmation_since=None,
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=None,
             confirmation_deadline=10.0,
         )
         self.assertEqual(
@@ -1617,7 +1738,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             (
                 "terminal_error",
                 "readiness_document_pending_semantic_ready",
-                1.0,
+                self._confirmation(1.0),
                 False,
             ),
         )
@@ -1628,7 +1749,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             signals,
             observation_started_at=1.2,
             observation_completed_at=1.25,
-            interactive_confirmation_since=first[2],
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=first[2],
             confirmation_deadline=10.0,
         )
         self.assertEqual(
@@ -1642,7 +1764,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             signals,
             observation_started_at=1.9,
             observation_completed_at=2.0,
-            interactive_confirmation_since=challenge[2],
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=challenge[2],
             confirmation_deadline=10.0,
         )
         before_settle = smoke._settle_observation(
@@ -1651,7 +1774,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             signals,
             observation_started_at=2.49,
             observation_completed_at=2.49,
-            interactive_confirmation_since=restarted[2],
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=restarted[2],
             confirmation_deadline=10.0,
         )
         settled = smoke._settle_observation(
@@ -1660,12 +1784,13 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             signals,
             observation_started_at=2.5,
             observation_completed_at=2.5,
-            interactive_confirmation_since=before_settle[2],
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=before_settle[2],
             confirmation_deadline=10.0,
         )
         self.assertFalse(restarted[3])
         self.assertFalse(before_settle[3])
-        self.assertEqual(settled, ("usable", "", 2.0, True))
+        self.assertEqual(settled, ("usable", "", self._confirmation(2.0), True))
 
         loading = smoke._settle_observation(
             "terminal_error",
@@ -1673,7 +1798,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             self._signals(ready_state="loading"),
             observation_started_at=2.6,
             observation_completed_at=2.6,
-            interactive_confirmation_since=2.0,
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=self._confirmation(2.0),
             confirmation_deadline=10.0,
         )
         self.assertEqual(
@@ -1688,10 +1814,10 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
     def test_interactive_host_and_dom_failures_restart_the_full_settle(self) -> None:
         positive = self._signals(ready_state="interactive")
-        usable_since: float | None = None
+        confirmation: smoke.InteractiveConfirmation | None = None
 
         def observe(signals: dict[str, object], observed_at: float):
-            nonlocal usable_since
+            nonlocal confirmation
             outcome, reason = smoke._classify_browser_evidence(
                 "app.aikido.dev",
                 self._browser_evidence(signals=signals),
@@ -1702,25 +1828,102 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 signals,
                 observation_started_at=observed_at,
                 observation_completed_at=observed_at,
-                interactive_confirmation_since=usable_since,
+                document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                interactive_confirmation=confirmation,
                 confirmation_deadline=10.0,
             )
-            usable_since = result[2]
+            confirmation = result[2]
             return result
 
-        self.assertEqual(observe(positive, 1.0)[2:], (1.0, False))
+        self.assertEqual(
+            observe(positive, 1.0)[2:],
+            (self._confirmation(1.0), False),
+        )
         self.assertEqual(
             observe({**positive, "host_matches": False}, 1.4),
             ("terminal_error", "readiness_context_invalid", None, False),
         )
-        self.assertEqual(observe(positive, 2.0)[2:], (2.0, False))
+        self.assertEqual(
+            observe(positive, 2.0)[2:],
+            (self._confirmation(2.0), False),
+        )
         self.assertEqual(
             observe({**positive, "dom_content_loaded": False}, 2.49),
             ("terminal_error", "readiness_document_pending", None, False),
         )
-        self.assertEqual(observe(positive, 3.0)[2:], (3.0, False))
+        self.assertEqual(
+            observe(positive, 3.0)[2:],
+            (self._confirmation(3.0), False),
+        )
         self.assertEqual(observe(positive, 3.49)[3], False)
-        self.assertEqual(observe(positive, 3.5), ("usable", "", 3.0, True))
+        self.assertEqual(
+            observe(positive, 3.5),
+            ("usable", "", self._confirmation(3.0), True),
+        )
+
+    def test_document_replacement_restarts_the_full_settle(self) -> None:
+        signals = self._signals(ready_state="interactive")
+        reason = "readiness_document_pending_semantic_ready"
+        first_id = (1, 2, 3, 4)
+        replacement_id = (5, 6, 7, 8)
+        first = smoke._settle_observation(
+            "terminal_error",
+            reason,
+            signals,
+            observation_started_at=0.9,
+            observation_completed_at=1.0,
+            document_activation_id=first_id,
+            interactive_confirmation=None,
+            confirmation_deadline=10.0,
+        )
+        replacement = smoke._settle_observation(
+            "terminal_error",
+            reason,
+            signals,
+            observation_started_at=1.6,
+            observation_completed_at=1.7,
+            document_activation_id=replacement_id,
+            interactive_confirmation=first[2],
+            confirmation_deadline=10.0,
+        )
+        self.assertEqual(
+            replacement,
+            (
+                "terminal_error",
+                reason,
+                self._confirmation(1.7, replacement_id),
+                False,
+            ),
+        )
+        before_settle = smoke._settle_observation(
+            "terminal_error",
+            reason,
+            signals,
+            observation_started_at=2.199,
+            observation_completed_at=2.199,
+            document_activation_id=replacement_id,
+            interactive_confirmation=replacement[2],
+            confirmation_deadline=10.0,
+        )
+        self.assertFalse(before_settle[3])
+        self.assertEqual(
+            smoke._settle_observation(
+                "terminal_error",
+                reason,
+                signals,
+                observation_started_at=2.2,
+                observation_completed_at=2.2,
+                document_activation_id=replacement_id,
+                interactive_confirmation=before_settle[2],
+                confirmation_deadline=10.0,
+            ),
+            (
+                "usable",
+                "",
+                self._confirmation(1.7, replacement_id),
+                True,
+            ),
+        )
 
     def test_interactive_confirmation_must_finish_strictly_before_deadline(
         self,
@@ -1736,7 +1939,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                         signals,
                         observation_started_at=9.9,
                         observation_completed_at=completed_at,
-                        interactive_confirmation_since=9.0,
+                        document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                        interactive_confirmation=self._confirmation(9.0),
                         confirmation_deadline=10.0,
                     ),
                     ("terminal_error", reason, None, True),
@@ -1748,7 +1952,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 signals,
                 observation_started_at=9.9,
                 observation_completed_at=10.0,
-                interactive_confirmation_since=None,
+                document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                interactive_confirmation=None,
                 confirmation_deadline=10.0,
             ),
             ("terminal_error", reason, None, True),
@@ -1760,10 +1965,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 signals,
                 observation_started_at=9.999,
                 observation_completed_at=9.999,
-                interactive_confirmation_since=9.0,
+                document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                interactive_confirmation=self._confirmation(9.0),
                 confirmation_deadline=10.0,
             ),
-            ("usable", "", 9.0, True),
+            ("usable", "", self._confirmation(9.0), True),
         )
 
     def test_transport_latency_cannot_age_an_interactive_candidate(self) -> None:
@@ -1775,20 +1981,25 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             signals,
             observation_started_at=0.0,
             observation_completed_at=2.0,
-            interactive_confirmation_since=None,
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=None,
             confirmation_deadline=10.0,
         )
-        self.assertEqual(first[2:], (2.0, False))
+        self.assertEqual(first[2:], (self._confirmation(2.0), False))
         delayed_second = smoke._settle_observation(
             "terminal_error",
             reason,
             signals,
             observation_started_at=2.25,
             observation_completed_at=4.25,
-            interactive_confirmation_since=first[2],
+            document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+            interactive_confirmation=first[2],
             confirmation_deadline=10.0,
         )
-        self.assertEqual(delayed_second[2:], (2.0, False))
+        self.assertEqual(
+            delayed_second[2:],
+            (self._confirmation(2.0), False),
+        )
         self.assertEqual(
             smoke._settle_observation(
                 "terminal_error",
@@ -1796,10 +2007,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 signals,
                 observation_started_at=4.5,
                 observation_completed_at=6.5,
-                interactive_confirmation_since=delayed_second[2],
+                document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                interactive_confirmation=delayed_second[2],
                 confirmation_deadline=10.0,
             ),
-            ("usable", "", 2.0, True),
+            ("usable", "", self._confirmation(2.0), True),
         )
 
         for started_at, expected_stop in ((2.499, False), (2.5, True)):
@@ -1810,7 +2022,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     signals,
                     observation_started_at=started_at,
                     observation_completed_at=2.6,
-                    interactive_confirmation_since=2.0,
+                    document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                    interactive_confirmation=self._confirmation(2.0),
                     confirmation_deadline=10.0,
                 )
                 self.assertEqual(result[3], expected_stop)
@@ -1821,7 +2034,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 signals,
                 observation_started_at=5.0,
                 observation_completed_at=4.9,
-                interactive_confirmation_since=2.0,
+                document_activation_id=self.DOCUMENT_ACTIVATION_ID,
+                interactive_confirmation=self._confirmation(2.0),
                 confirmation_deadline=10.0,
             ),
             ("terminal_error", "browser_observation_failed", None, True),
@@ -2027,6 +2241,70 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     clock = 4.6
                     evidence = complete
                 return {"value": smoke.json.dumps(evidence)}
+            return {}
+
+        with (
+            mock.patch.dict(
+                smoke.SITES["app.aikido.dev"], {"deadline_ms": 10_000}
+            ),
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.time, "monotonic", monotonic),
+            mock.patch.object(smoke.time, "sleep", side_effect=sleep),
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual(evidence_calls, 3)
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+
+    def test_safari_document_replacement_restarts_interactive_settle(
+        self,
+    ) -> None:
+        clock = 0.0
+        evidence_calls = 0
+        first_id = [1, 2, 3, 4]
+        replacement_id = [5, 6, 7, 8]
+        signals = self._signals(ready_state="interactive")
+
+        def monotonic() -> float:
+            return clock
+
+        def sleep(_seconds: float) -> None:
+            nonlocal clock
+            clock = 0.7 if evidence_calls == 1 else 1.3
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            nonlocal clock, evidence_calls
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "POST" and path.endswith("/execute/sync"):
+                evidence_calls += 1
+                clock = {1: 0.1, 2: 0.8, 3: 1.31}[evidence_calls]
+                return {
+                    "value": smoke.json.dumps(
+                        self._browser_evidence(
+                            document_activation_id=(
+                                first_id
+                                if evidence_calls == 1
+                                else replacement_id
+                            ),
+                            signals=signals,
+                        )
+                    )
+                }
             return {}
 
         with (

@@ -387,12 +387,18 @@ HTTPS, secure-context, transport, visibility, title/content, denial, and
 challenge checks. A second atomic positive observation must have a conservative
 lower-bound separation of at least 500 milliseconds. Bracketing each browser
 request at start and response receipt prevents response latency from satisfying
-the interval; any response completed at or after the host deadline remains
+the interval. The same atomic envelope carries one harness-generated, fixed-size
+document-activation token that changes with the browser global or root element
+and after `pagehide`; a reload, same-URL replacement, root replacement, or
+BFCache restoration therefore begins a new confirmation interval. The token is
+validated and compared only inside the browser driver and is never written to a
+readiness report. Any response completed at or after the host deadline remains
 non-passing. Timeout, denial, challenge, missing content, host/context mismatch,
-invalid signals, and an early missing document root also remain fail-closed and
-reset or cannot start confirmation. This changes neither routing, deadlines,
-controls, hosts, nor browser families. Only a fresh exact-candidate readiness
-run can establish whether the correction settles the observed sites.
+invalid signals or activation identity, and an early missing document root also
+remain fail-closed and reset or cannot start confirmation. This changes neither
+routing, deadlines, controls, hosts, nor browser families. Only a fresh
+exact-candidate readiness run can establish whether the correction settles the
+observed sites.
 
 ## Verification
 

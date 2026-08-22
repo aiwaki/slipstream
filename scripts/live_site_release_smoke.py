@@ -48,6 +48,8 @@ SITES = {
 MIN_DOCUMENT_BYTES = 512
 ALLOWED_PROTOCOLS = {"h2", "http/1.1", "h3"}
 INTERACTIVE_SETTLE_SECONDS = 0.5
+DOCUMENT_ACTIVATION_WORDS = 4
+UINT32_MAX = (1 << 32) - 1
 CHALLENGE_MARKERS = (
     "checking your browser",
     "verify you are human",
@@ -64,6 +66,9 @@ WEAK_VISIBLE_CHALLENGE_MARKERS = ("captcha",)
 # evidence so dormant third-party scripts cannot make a healthy control route
 # look like a challenge.
 TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
+
+DocumentActivationId = tuple[int, int, int, int]
+InteractiveConfirmation = tuple[float, DocumentActivationId]
 
 
 class LiveSiteError(RuntimeError):
@@ -154,9 +159,10 @@ def _settle_observation(
     *,
     observation_started_at: float,
     observation_completed_at: float,
-    interactive_confirmation_since: float | None,
+    document_activation_id: DocumentActivationId | None,
+    interactive_confirmation: InteractiveConfirmation | None,
     confirmation_deadline: float,
-) -> tuple[str, str, float | None, bool]:
+) -> tuple[str, str, InteractiveConfirmation | None, bool]:
     if (
         isinstance(observation_started_at, bool)
         or not isinstance(observation_started_at, (int, float))
@@ -180,21 +186,47 @@ def _settle_observation(
         or signals.get("ready_state") != "interactive"
     ):
         return outcome, reason, None, False
-    if interactive_confirmation_since is None:
+    if document_activation_id is None:
+        return "terminal_error", "browser_observation_failed", None, True
+    if (
+        interactive_confirmation is None
+        or interactive_confirmation[1] != document_activation_id
+    ):
         # The first candidate begins no earlier than response receipt, after
         # its page-side snapshot has definitely happened. Later confirmations
         # use the next request start, before that snapshot can happen. This
         # conservative bracket prevents CDP/WebDriver response latency from
-        # contributing to the required settle interval.
-        return outcome, reason, observation_completed_at, False
+        # contributing to the required settle interval. A replacement document
+        # is always a new first candidate, even when it has the same host and
+        # semantic signals as the prior activation.
+        return (
+            outcome,
+            reason,
+            (observation_completed_at, document_activation_id),
+            False,
+        )
+    interactive_confirmation_since = interactive_confirmation[0]
     if observation_started_at < interactive_confirmation_since:
         return outcome, reason, None, False
     if (
         observation_started_at - interactive_confirmation_since
         >= INTERACTIVE_SETTLE_SECONDS
     ):
-        return "usable", "", interactive_confirmation_since, True
-    return outcome, reason, interactive_confirmation_since, False
+        return "usable", "", interactive_confirmation, True
+    return outcome, reason, interactive_confirmation, False
+
+
+def _parse_document_activation_id(value: object) -> DocumentActivationId | None:
+    if (
+        not isinstance(value, list)
+        or len(value) != DOCUMENT_ACTIVATION_WORDS
+        or any(
+            type(word) is not int or not 0 <= word <= UINT32_MAX
+            for word in value
+        )
+    ):
+        return None
+    return (value[0], value[1], value[2], value[3])
 
 
 def _classify_evidence(
@@ -250,6 +282,7 @@ def _classify_browser_evidence(host: str, evidence: object) -> tuple[str, str]:
     expected = {
         "challenge_detected",
         "denial_detected",
+        "document_activation_id",
         "document_bytes",
         "signals",
     }
@@ -258,6 +291,7 @@ def _classify_browser_evidence(host: str, evidence: object) -> tuple[str, str]:
     document_bytes = evidence.get("document_bytes")
     denial_detected = evidence.get("denial_detected")
     challenge_detected = evidence.get("challenge_detected")
+    raw_document_activation_id = evidence.get("document_activation_id")
     signals = evidence.get("signals")
     if (
         isinstance(document_bytes, bool)
@@ -265,6 +299,17 @@ def _classify_browser_evidence(host: str, evidence: object) -> tuple[str, str]:
         or document_bytes < 0
         or not isinstance(denial_detected, bool)
         or not isinstance(challenge_detected, bool)
+    ):
+        return "terminal_error", "document_invalid"
+    document_activation_id = _parse_document_activation_id(
+        raw_document_activation_id
+    )
+    if (
+        raw_document_activation_id is not None
+        and document_activation_id is None
+    ) or (
+        document_bytes >= MIN_DOCUMENT_BYTES
+        and document_activation_id is None
     ):
         return "terminal_error", "document_invalid"
     return _classify_evidence(
@@ -379,16 +424,45 @@ def _browser_evidence_expression(host: str) -> str:
     challenges = json.dumps(CHALLENGE_MARKERS)
     # Both CDP and WebDriver use this one compact, atomic observation. Inspect
     # the document inside the page and return only fixed booleans, a byte count,
-    # and the readiness object; raw page content never crosses either transport.
+    # one opaque fixed-size activation token, and the readiness object; raw page
+    # content never crosses either transport.
     return f"""
 (() => {{
   const root = document.documentElement;
+  const activationStateKey = Symbol.for(
+    'com.slipstream.release-readiness.document-activation-v1'
+  );
+  let activationState = globalThis[activationStateKey];
+  if (!activationState) {{
+    activationState = {{active: false, root: null, token: null}};
+    Object.defineProperty(globalThis, activationStateKey, {{value: activationState}});
+    globalThis.addEventListener('pagehide', () => {{
+      activationState.active = false;
+    }});
+  }}
+  const tokenIsValid = Array.isArray(activationState.token)
+    && activationState.token.length === {DOCUMENT_ACTIVATION_WORDS}
+    && activationState.token.every(
+      (word) => Number.isInteger(word) && word >= 0 && word <= {UINT32_MAX}
+    );
+  if (root && (
+    !activationState.active
+    || activationState.root !== root
+    || !tokenIsValid
+  )) {{
+    activationState.root = root;
+    activationState.token = Object.freeze(Array.from(
+      crypto.getRandomValues(new Uint32Array({DOCUMENT_ACTIVATION_WORDS}))
+    ));
+    activationState.active = true;
+  }}
   const documentSource = root ? root.outerHTML : '';
   const lowered = documentSource.toLowerCase();
   const signals = ({_readiness_expression(host)});
   return {{
     challenge_detected: {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true,
     denial_detected: {denials}.some((marker) => lowered.includes(marker)),
+    document_activation_id: root ? activationState.token : null,
     document_bytes: new TextEncoder().encode(documentSource).length,
     signals
   }};
@@ -419,7 +493,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     finished = attempt_started
     outcome = "terminal_error"
     reason = "browser_start_failed"
-    interactive_confirmation_since: float | None = None
+    interactive_confirmation: InteractiveConfirmation | None = None
     failure_reason = reason
     failure: BaseException | None = None
     try:
@@ -523,7 +597,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
                 # Navigation can replace the execution context and a bounded
                 # DevTools request can time out. Neither authorizes a pass;
                 # keep polling only inside the unchanged host deadline.
-                interactive_confirmation_since = None
+                interactive_confirmation = None
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
                     time.sleep(min(0.25, remaining))
@@ -534,14 +608,22 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             # signal, a fixed denial, or the site deadline. A challenge remains
             # non-passing but may resolve within the same bounded navigation.
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
-            outcome, reason, interactive_confirmation_since, should_stop = (
+            document_activation_id = (
+                _parse_document_activation_id(
+                    evidence.get("document_activation_id")
+                )
+                if isinstance(evidence, dict)
+                else None
+            )
+            outcome, reason, interactive_confirmation, should_stop = (
                 _settle_observation(
                     outcome,
                     reason,
                     signals,
                     observation_started_at=observation_started_at,
                     observation_completed_at=observation_completed_at,
-                    interactive_confirmation_since=interactive_confirmation_since,
+                    document_activation_id=document_activation_id,
+                    interactive_confirmation=interactive_confirmation,
                     confirmation_deadline=deadline,
                 )
             )
@@ -714,7 +796,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         )
         failure_reason = "browser_observation_failed"
         reason = failure_reason
-        interactive_confirmation_since: float | None = None
+        interactive_confirmation: InteractiveConfirmation | None = None
         while time.monotonic() < absolute_deadline:
             # A successful decode may still leave the current document pending.
             # Reset before each later WebDriver request so an HTTP/timeout
@@ -743,7 +825,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             except lifecycle.LifecycleError as exc:
                 if not _is_safari_observation_timeout(exc):
                     raise
-                interactive_confirmation_since = None
+                interactive_confirmation = None
                 remaining = absolute_deadline - time.monotonic()
                 if remaining > 0:
                     time.sleep(min(0.25, remaining))
@@ -752,14 +834,22 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             evidence = _decode_safari_evidence(serialized_evidence)
             outcome, reason = _classify_browser_evidence(host, evidence)
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
-            outcome, reason, interactive_confirmation_since, should_stop = (
+            document_activation_id = (
+                _parse_document_activation_id(
+                    evidence.get("document_activation_id")
+                )
+                if isinstance(evidence, dict)
+                else None
+            )
+            outcome, reason, interactive_confirmation, should_stop = (
                 _settle_observation(
                     outcome,
                     reason,
                     signals,
                     observation_started_at=observation_started_at,
                     observation_completed_at=observation_completed_at,
-                    interactive_confirmation_since=interactive_confirmation_since,
+                    document_activation_id=document_activation_id,
+                    interactive_confirmation=interactive_confirmation,
                     confirmation_deadline=absolute_deadline,
                 )
             )
