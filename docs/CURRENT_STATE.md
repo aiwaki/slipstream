@@ -10,7 +10,34 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-22 (second protected chain, current checkpoint): PR #359 merged
+Update 2026-08-22 (current checkpoint): exact product main remains
+`f16bb7c9a58065c749cb13b24c42c3d6d0389a05` from PR #361. Exact-main
+[CI `32575593760`](https://github.com/aiwaki/slipstream/actions/runs/32575593760),
+[dependency audit `32575593677`](https://github.com/aiwaki/slipstream/actions/runs/32575593677),
+candidate artifact `9476551838`
+(`sha256:acf78baa54ce97414d7239a37c76aca526ecf38fe7f3edef8cc3b9716b1417fa`),
+and bound
+[owned-Geph qualification `32582906139`](https://github.com/aiwaki/slipstream/actions/runs/32582906139)
+passed. Bound
+[release-readiness `32583053838`](https://github.com/aiwaki/slipstream/actions/runs/32583053838)
+completed the fixed four-host/two-browser driver but failed strict validation
+before the 30-minute soak; artifact `9478349480`
+(`sha256:b5d9a3da8f215962c0ea8d8e00f4329a4d2295ae6937f11e2d3e4dec9f508500`)
+records three `readiness_document_pending_semantic_ready` outcomes. `.23`
+remains unpublished. Detailed evidence and classifier rationale are in
+`docs/BROWSER_COMPANION.md`.
+
+PR #363 is the active narrow fail-closed readiness-harness correction; it
+changes neither routing nor the fixed matrix. Do not retry unchanged
+`f16bb7c`. Merge the correction after exact-head review and checks, obtain a
+successful exact-main CI/audit/candidate, then run exactly one owned-Geph
+qualification for that SHA and one readiness bound to its candidate. Only a
+passed matrix, measured 30-minute soak, attestations, and exact-SHA gates may
+dispatch `.23`. PR #362 remains diagnostic-only and non-release.
+
+### Superseded checkpoint
+
+Update 2026-08-22 (second protected chain): PR #359 merged
 the narrow Safari/Chrome observation correction as exact product main
 `111000c17e0d6decf97eb1a636cf0b3bca2a1fc9`. Its
 [exact-main CI `32571354600`](https://github.com/aiwaki/slipstream/actions/runs/32571354600)

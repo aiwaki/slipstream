@@ -22,8 +22,8 @@ TERMINAL_BROWSER_REASONS = frozenset(
         "readiness_signals_invalid",
         "readiness_title_mismatch",
         "readiness_transport_missing",
-        # Retained for previously preserved schema-v2 reports. The current
-        # producer emits one fixed privacy-bounded blocker instead.
+        # Emitted when an otherwise usable atomic browser observation finishes
+        # at or after its strict host deadline; also retained for older reports.
         "readiness_timeout",
         "readiness_visibility_missing",
         "session_configuration_failed",
