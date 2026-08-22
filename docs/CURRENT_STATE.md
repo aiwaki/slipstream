@@ -10,7 +10,64 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-21 (browser retry blocked by Geph broker quota): PR #355 merged
+Update 2026-08-22 (release live-browser lifecycle correction active): exact
+product main `a2a2b89f6fe834e624a87f43bd82a20514ee9a34` passed
+[exact-main CI `32485833048`](https://github.com/aiwaki/slipstream/actions/runs/32485833048)
+and
+[dependency audit `32485833077`](https://github.com/aiwaki/slipstream/actions/runs/32485833077).
+The same SHA then passed the complete account-backed
+[owned-Geph qualification `32553370295`](https://github.com/aiwaki/slipstream/actions/runs/32553370295).
+[Release-readiness `32553506502`](https://github.com/aiwaki/slipstream/actions/runs/32553506502)
+consumed that exact candidate but stopped before the 30-minute soak. Its bounded
+[live-site artifact `9470800711`](https://github.com/aiwaki/slipstream/actions/runs/32553506502/artifacts/9470800711)
+records the complete fixed matrix:
+
+- `xpersonatoy.com`: Safari returned `challenge_or_auth`; Chrome reached its
+  navigation deadline with `readiness_timeout`; both route controls were
+  unavailable, so the site result was `inconclusive`.
+- `app.aikido.dev`: Safari and Chrome were both `usable`; controls were not
+  needed.
+- `weather.com`: Safari reached `readiness_timeout`; Chrome returned
+  `browser_observation_failed`; direct control was unavailable and the
+  owned-Geph control was `usable`, so the site result remained
+  `terminal_error`.
+- `capacitorjs.com`: Safari was `usable`; Chrome returned
+  `browser_start_failed`; both direct and owned-Geph controls were `usable`, so
+  the site result remained `terminal_error`.
+
+The matrix therefore failed, the soak, readiness attestation, and publisher did
+not run, and `.23` remains an ad-hoc-signed, unnotarized, unpublished preview.
+A prior local browser-only probe opened isolated Chrome windows but did not
+install or run Slipstream, activate the candidate daemon or private PF route,
+or prove the owned-Geph path. It is not product, routing, or release evidence
+and must not be used to replace this protected report.
+
+The protected report also exposed a harness lifecycle contradiction rather
+than authority to weaken a site result. The live Chrome path executed the
+browser directly with `subprocess.Popen` plus a manual UID/GID transition, even
+though earlier protected qualification had already proved that valid sandboxed
+Chrome networking on the macOS runner requires the exact console Aqua bootstrap:
+an owner-private temporary job in `gui/<uid>` invoking `/usr/bin/open` through
+LaunchServices. The active PR correction reuses that exact LaunchAgent/open,
+identity, bootout, process-absence, and bounded quiet-window lifecycle. It also
+starts each full host deadline at the actual navigation, continues polling a
+challenge that may resolve within that same deadline, and reports only the
+shared bounded readiness-blocker enums. It does not change routing, controls,
+the four hosts, the Safari-plus-Chrome requirement, or the rule that every
+matrix entry must pass before the soak. No protected result is claimed for the
+active correction yet; next obtain its reviewed PR and exact-main CI, then run
+one owned-Geph qualification and one bound readiness attempt after the next
+broker UTC-day reset before considering the publisher. Do not dispatch a
+further account-backed run on 2026-08-22 UTC.
+
+### Historical checkpoints (superseded)
+
+The entries below preserve evidence history only. Any `next`, `active`, or
+retry wording in them is superseded by the 2026-08-22 checkpoint above and
+must not be used to select a candidate or spend an account-backed run.
+
+Historical update 2026-08-21 (browser retry blocked by Geph broker quota): PR
+#355 merged
 its product candidate as `ced62298ceb65c948e53dafa79ec6d32acf76299`; exact-main CI
 `32481509165`, dependency audit `32481509168`, and the sequential owned-Geph
 qualification `32482765687` passed. The Safari harness now returns its existing
@@ -25,23 +82,19 @@ account authenticated far enough to obtain user and subkey state, then the
 broker rejected `get_connect_token` as rate limited and explicitly required a
 retry after the broker day resets. No live-site JSON existed, the bounded
 artifact upload correctly failed rather than inventing evidence, the soak and
-publisher did not run, and `.23` remains unpublished. Do not repeat this
-account-backed run before the broker day resets. Next: after that reset, run
-one exact-SHA owned-Geph qualification followed by release-readiness bound to
-candidate `32481509165`; inspect the full four-host/two-browser report if it
-fails, and dispatch the ad-hoc, unnotarized publisher only if every protected
-gate and the full readiness soak pass.
+publisher did not run, and `.23` remained unpublished. Its proposed retry of
+candidate `32481509165` is obsolete; the authoritative candidate and next
+action are recorded only in the current checkpoint above.
 
 Checkpoint PR #356 then merged as docs-only main
 `9df852508b5e59d7b60ce5b2a9a7ce489df04c99`; its scoped CI `32483427423`
 and dependency audit `32483427427` passed but correctly produced no release
 candidate. The user authorized an immediate protected retry despite the broker
-message. The active product-scoped follow-up initializes a fixed nonzero
+message. The completed product-scoped follow-up initialized a fixed nonzero
 `live-sites.exit` marker before account-backed Geph starts, so a pre-browser
 failure preserves bounded evidence without a second artifact-upload failure.
-After this narrow workflow fix produces a fresh exact-main candidate, run one
-owned-Geph qualification and one readiness attempt immediately; the publisher
-remains conditional on the complete matrix and soak.
+That historical follow-up is now represented by the newer exact candidate and
+protected evidence in the current checkpoint above.
 
 Update 2026-08-21 (Safari sessions now reach document observation): PR #354
 merged as `5b87bb174eb8a68bb4ab038dce0fea095fafd464`; exact-main CI

@@ -334,6 +334,39 @@ fresh browser profile, native host manifest, owned Geph LaunchAgent, Keychain
 item, and user runtime. This protected workflow is completion evidence only
 after it passes on the exact merged main commit.
 
+### Live-site release-readiness lifecycle
+
+The separate protected release-readiness matrix does not load the historical
+companion extension, but its real GUI Chrome for Testing process is subject to
+the same macOS session boundary above. It must start from one owner-private
+temporary LaunchAgent in the exact `gui/<console-uid>` Aqua domain and invoke
+`/usr/bin/open` through LaunchServices. Direct execution from the root harness
+with a manual UID/GID drop is not an equivalent browser lifecycle and cannot
+qualify Chrome networking, DevTools observation, or a live-site outcome.
+
+[Release-readiness run `32553506502`](https://github.com/aiwaki/slipstream/actions/runs/32553506502)
+exposed that the live-site harness had drifted across this boundary: Aikido was
+usable in both browsers, but Chrome timed out on XPersonatoy, failed observation
+on Weather, and failed startup on Capacitor while using the direct launch.
+Artifact
+[`9470800711`](https://github.com/aiwaki/slipstream/actions/runs/32553506502/artifacts/9470800711)
+is valid failure evidence for that harness attempt, not proof that a local
+browser-only probe exercised Slipstream and not authority to weaken the fixed
+four-host/two-browser matrix.
+
+The active correction shares the proven LaunchAgent/open bootstrap and its
+exact ownership, cleanup, process-absence, and bounded quiet-window checks. A
+host's navigation clock begins only when Chrome or Safari receives the actual
+navigation command; setup time cannot consume the promised observation window.
+The existing `elapsed_ms` field measures only that navigation interval and is
+zero when a bounded setup stage fails before any navigation begins.
+A challenge remains non-passing but is polled until it resolves, a fixed denial
+appears, or the same deadline expires. Unresolved readiness is reduced to the
+shared privacy-bounded blocker enum rather than raw page, URL, exception, or
+process data. These are qualification-harness corrections only: routing,
+controls, hosts, both browser families, and the requirement for a completely
+passing matrix remain unchanged.
+
 ## Verification
 
 ```bash

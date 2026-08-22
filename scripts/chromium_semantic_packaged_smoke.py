@@ -36,6 +36,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1080,6 +1081,22 @@ def _chrome_open_command(
         fixture_host,
         headless=headless,
     )
+    return _launchservices_open_command(
+        application_bundle or _chrome_app_bundle(executable),
+        chrome,
+        stdout_path,
+        stderr_path,
+    )
+
+
+def _launchservices_open_command(
+    application_bundle: Path,
+    browser_command: Sequence[str],
+    stdout_path: Path,
+    stderr_path: Path,
+) -> tuple[str, ...]:
+    if len(browser_command) < 2:
+        raise QualificationError("Chrome command has no browser arguments")
     return (
         "/usr/bin/open",
         "-n",
@@ -1090,10 +1107,34 @@ def _chrome_open_command(
         "--stderr",
         str(stderr_path),
         "-a",
-        str(application_bundle or _chrome_app_bundle(executable)),
+        str(application_bundle),
         "--args",
-        *chrome[1:],
+        *browser_command[1:],
     )
+
+
+def _launchservices_launch_agent_payload(
+    label: str,
+    environment: dict[str, str],
+    home: Path,
+    program_arguments: Sequence[str],
+    launcher_stdout_path: Path,
+    launcher_stderr_path: Path,
+) -> dict[str, object]:
+    if not program_arguments or program_arguments[0] != "/usr/bin/open":
+        raise QualificationError("Chrome launcher must use LaunchServices")
+    return {
+        "Label": label,
+        "ProgramArguments": list(program_arguments),
+        "RunAtLoad": True,
+        "ProcessType": "Interactive",
+        "LimitLoadToSessionType": "Aqua",
+        "AbandonProcessGroup": False,
+        "WorkingDirectory": str(home),
+        "EnvironmentVariables": dict(environment),
+        "StandardOutPath": str(launcher_stdout_path),
+        "StandardErrorPath": str(launcher_stderr_path),
+    }
 
 
 def _chrome_launch_agent_payload(
@@ -1113,32 +1154,25 @@ def _chrome_launch_agent_payload(
     *,
     headless: bool = False,
 ) -> dict[str, object]:
-    program_arguments = list(
-        _chrome_open_command(
-            executable,
-            profile,
-            extension,
-            fixture_port,
-            chrome_stdout_path,
-            chrome_stderr_path,
-            application_bundle,
-            fixture_host,
-            headless=headless,
-        )
+    program_arguments = _chrome_open_command(
+        executable,
+        profile,
+        extension,
+        fixture_port,
+        chrome_stdout_path,
+        chrome_stderr_path,
+        application_bundle,
+        fixture_host,
+        headless=headless,
     )
-    payload: dict[str, object] = {
-        "Label": label,
-        "ProgramArguments": program_arguments,
-        "RunAtLoad": True,
-        "ProcessType": "Interactive",
-        "LimitLoadToSessionType": "Aqua",
-        "AbandonProcessGroup": False,
-        "WorkingDirectory": str(home),
-        "EnvironmentVariables": dict(environment),
-        "StandardOutPath": str(launcher_stdout_path),
-        "StandardErrorPath": str(launcher_stderr_path),
-    }
-    return payload
+    return _launchservices_launch_agent_payload(
+        label,
+        environment,
+        home,
+        program_arguments,
+        launcher_stdout_path,
+        launcher_stderr_path,
+    )
 
 
 def _write_owner_private_file(
