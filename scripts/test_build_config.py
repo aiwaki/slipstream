@@ -419,6 +419,41 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("Build the frozen daemon", readiness)
         self.assertNotIn("Build the packaged app", readiness)
 
+    def test_targeted_browser_diagnostic_is_separate_from_release_authority(self) -> None:
+        diagnostic = (
+            ROOT / ".github/workflows/live-site-diagnostic.yml"
+        ).read_text(encoding="utf-8")
+        readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        qualification = (
+            ROOT / ".github/workflows/owned-geph-qualification.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("workflow_dispatch:", diagnostic)
+        self.assertIn("local-browser-diagnostic:", diagnostic)
+        self.assertIn("scripts/live_site_browser_diagnostic.py", diagnostic)
+        self.assertIn("retention-days: 1", diagnostic)
+        self.assertIn("persist-credentials: false", diagnostic)
+        observation = diagnostic[
+            diagnostic.index(
+                "Observe one unverified local browser path"
+            ) : diagnostic.index("Upload bounded diagnostic report")
+        ]
+        self.assertIn("DIAGNOSTIC_HOST: ${{ inputs.host }}", observation)
+        self.assertIn('--host "$DIAGNOSTIC_HOST"', observation)
+        self.assertNotIn('--host "${{ inputs.host }}"', observation)
+        self.assertNotIn("SLIPSTREAM_GEPH_ACCOUNT_SECRET", diagnostic)
+        self.assertNotIn("SLIPSTREAM_DISPOSABLE_CI", diagnostic)
+        self.assertNotIn("SLIPSTREAM_RELEASE_READINESS", diagnostic)
+        self.assertNotIn("sudo", diagnostic)
+        self.assertNotIn("id-token: write", diagnostic)
+        self.assertNotIn("attestations: write", diagnostic)
+        self.assertNotIn("actions/attest@", diagnostic)
+        self.assertNotIn("release-candidate-", diagnostic)
+        self.assertNotIn("--skip", readiness)
+        self.assertNotIn("--skip", qualification)
+
     def test_candidate_signing_and_attestation_have_least_privilege(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         publisher = (ROOT / ".github/workflows/build-app.yml").read_text(

@@ -1,0 +1,68 @@
+name: live-site-diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: "One fixed release host to observe in an unverified local browser path."
+        required: true
+        type: choice
+        options:
+          - xpersonatoy.com
+          - app.aikido.dev
+          - weather.com
+          - capacitorjs.com
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-site-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  local-browser-diagnostic:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        id: chrome
+        with:
+          chrome-version: 151.0.7922.77
+          install-chromedriver: false
+
+      - name: Install locked diagnostic dependencies
+        run: |
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --only-binary=:all: \
+            --require-hashes \
+            -r spike/requirements.txt
+
+      - name: Observe one unverified local browser path (diagnostic only)
+        env:
+          DIAGNOSTIC_HOST: ${{ inputs.host }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-diagnostic
+          python3 scripts/live_site_browser_diagnostic.py \
+            --host "$DIAGNOSTIC_HOST" \
+            --chrome-executable "${{ steps.chrome.outputs.chrome-path }}" \
+            --output dist-diagnostic/report.json
+
+      - name: Upload bounded diagnostic report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-site-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist-diagnostic/report.json
+          if-no-files-found: error
+          retention-days: 1
