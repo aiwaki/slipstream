@@ -382,7 +382,8 @@ def _browser_evidence_expression(host: str) -> str:
     # and the readiness object; raw page content never crosses either transport.
     return f"""
 (() => {{
-  const documentSource = document.documentElement.outerHTML;
+  const root = document.documentElement;
+  const documentSource = root ? root.outerHTML : '';
   const lowered = documentSource.toLowerCase();
   const signals = ({_readiness_expression(host)});
   return {{

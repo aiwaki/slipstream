@@ -354,7 +354,7 @@ is valid failure evidence for that harness attempt, not proof that a local
 browser-only probe exercised Slipstream and not authority to weaken the fixed
 four-host/two-browser matrix.
 
-The active correction shares the proven LaunchAgent/open bootstrap and its
+The PR #361 correction shares the proven LaunchAgent/open bootstrap and its
 exact ownership, cleanup, process-absence, and bounded quiet-window checks. A
 host's navigation clock begins only when Chrome or Safari receives the actual
 navigation command; setup time cannot consume the promised observation window.
@@ -366,6 +366,33 @@ shared privacy-bounded blocker enum rather than raw page, URL, exception, or
 process data. These are qualification-harness corrections only: routing,
 controls, hosts, both browser families, and the requirement for a completely
 passing matrix remain unchanged.
+
+[Release-readiness run `32583053838`](https://github.com/aiwaki/slipstream/actions/runs/32583053838)
+later completed the fixed four-host/two-browser driver for exact main
+`f16bb7c9a58065c749cb13b24c42c3d6d0389a05`, after exact-main CI
+`32575593760`, dependency audit `32575593677`, and owned-Geph qualification
+`32582906139` had passed. XPersonatoy was Chrome `usable`, while Safari ended
+`readiness_document_pending_semantic_ready`; Aikido and Capacitor were usable
+in both browsers; Weather ended with the same pending-semantic reason in both
+browsers while its owned-Geph control was usable. The fixed matrix therefore
+failed strict validation and the 30-minute soak did not start. Bounded artifact
+`9478349480` has digest
+`sha256:b5d9a3da8f215962c0ea8d8e00f4329a4d2295ae6937f11e2d3e4dec9f508500`.
+
+That producer mapped both `loading` and `interactive` to the same reason, so
+the artifact cannot identify the underlying document state and cannot
+authorize release. PR #363 keeps `loading` non-passing and treats
+`interactive` only as a temporal candidate after exact-host, DOMContentLoaded,
+HTTPS, secure-context, transport, visibility, title/content, denial, and
+challenge checks. A second atomic positive observation must have a conservative
+lower-bound separation of at least 500 milliseconds. Bracketing each browser
+request at start and response receipt prevents response latency from satisfying
+the interval; any response completed at or after the host deadline remains
+non-passing. Timeout, denial, challenge, missing content, host/context mismatch,
+invalid signals, and an early missing document root also remain fail-closed and
+reset or cannot start confirmation. This changes neither routing, deadlines,
+controls, hosts, nor browser families. Only a fresh exact-candidate readiness
+run can establish whether the correction settles the observed sites.
 
 ## Verification
 

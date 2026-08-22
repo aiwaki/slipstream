@@ -904,6 +904,33 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertIn("visibleChallengeWidget", expression)
         self.assertNotIn('"captcha"].some((marker) => lowered.includes(marker))', expression)
 
+    def test_shared_compact_evidence_missing_root_is_retryable(self) -> None:
+        expression = smoke._browser_evidence_expression("app.aikido.dev")
+
+        root_read = expression.index("const root = document.documentElement;")
+        root_guard = expression.index(
+            "const documentSource = root ? root.outerHTML : '';"
+        )
+        self.assertLess(root_read, root_guard)
+        self.assertNotIn("document.documentElement.outerHTML", expression)
+
+        evidence = self._browser_evidence(document_bytes=0, signals=None)
+        outcome, reason = smoke._classify_browser_evidence(
+            "app.aikido.dev", evidence
+        )
+        self.assertEqual(
+            smoke._settle_observation(
+                outcome,
+                reason,
+                evidence["signals"],
+                observation_started_at=1.0,
+                observation_completed_at=1.1,
+                interactive_confirmation_since=0.5,
+                confirmation_deadline=2.0,
+            ),
+            ("terminal_error", "document_too_short", None, False),
+        )
+
     def test_chrome_compact_evidence_has_a_fixed_private_envelope(self) -> None:
         positive = self._chrome_evidence()["result"]["value"]
         self.assertEqual(
@@ -1852,6 +1879,58 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(result["outcome"], "usable")
         self.assertEqual(result["reason"], "")
+        self.assertEqual(evidence_calls, 2)
+        sleep.assert_called_once()
+
+    def test_safari_retries_rootless_compact_evidence(self) -> None:
+        evidence_calls = 0
+        rootless = self._browser_evidence(
+            document_bytes=0,
+            signals=self._signals(
+                body_text_length=0,
+                dom_content_loaded=False,
+                main_text_length=0,
+                ready_state="loading",
+                title="",
+                visible_body=False,
+            ),
+        )
+        self.assertEqual(
+            smoke._classify_browser_evidence("app.aikido.dev", rootless),
+            ("terminal_error", "document_too_short"),
+        )
+        evidence = iter((rootless, self._browser_evidence()))
+
+        def webdriver(
+            _base_url: str,
+            method: str,
+            path: str,
+            _payload: dict | None = None,
+            **_kwargs: object,
+        ) -> dict:
+            nonlocal evidence_calls
+            if method == "POST" and path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if method == "POST" and path.endswith("/execute/sync"):
+                evidence_calls += 1
+                return {"value": smoke.json.dumps(next(evidence))}
+            return {}
+
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", webdriver),
+            mock.patch.object(
+                smoke.lifecycle, "_wait_for_safari_process", return_value=4321
+            ),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.time, "sleep") as sleep,
+        ):
+            result = smoke._run_safari(
+                "app.aikido.dev", "http://127.0.0.1:12345", 501
+            )
+
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
         self.assertEqual(evidence_calls, 2)
         sleep.assert_called_once()
 
