@@ -2232,6 +2232,21 @@ mod tests {
         let recovered = read_journal(&path).unwrap();
         assert_eq!(recovered.initiator_pid, std::process::id());
         assert_eq!(recovered.phase, TransactionPhase::Prepared);
+    }
+
+    #[test]
+    fn prepared_recovery_unloads_loaded_watchdog_before_rebootstrap() {
+        let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let (path, mut value) = journal(root.path());
+        value.old_executable_sha256 = executable(&value.target, b"old");
+        value.new_executable_sha256 = executable(&value.stage, b"new");
+        fs::write(&value.helper, b"watchdog").unwrap();
+        value.watchdog_sha256 = sha256_file(&value.helper).unwrap();
+        fs::create_dir_all(value.launch_agent.parent().unwrap()).unwrap();
+        write_journal(&path, &value).unwrap();
+        let current_exe = bundle_executable(&value.target);
+        let state_dir = path.parent().unwrap();
+        let launch_agents = value.launch_agent.parent().unwrap();
 
         let loaded = Cell::new(true);
         let unloads = Cell::new(0usize);
@@ -2247,6 +2262,7 @@ mod tests {
                 Ok(())
             },
             |_, _| {
+                assert!(!loaded.get());
                 restarts.set(restarts.get() + 1);
                 Ok(())
             },

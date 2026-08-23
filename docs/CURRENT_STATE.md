@@ -10,6 +10,40 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-23 (deterministic exact-main requalification boundary):
+[PR #365](https://github.com/aiwaki/slipstream/pull/365) merged the packaged-soak
+cleanup correction as exact main
+`8751ec7997a040ac6ba8720a906e91c2ea35d1af`. Its exact-head
+[CI `32623538562`](https://github.com/aiwaki/slipstream/actions/runs/32623538562)
+and
+[dependency audit `32623538559`](https://github.com/aiwaki/slipstream/actions/runs/32623538559)
+passed, including packaged lifecycle and browser qualification. Exact-main
+[dependency audit `32624011543`](https://github.com/aiwaki/slipstream/actions/runs/32624011543)
+also passed. Exact-main
+[CI `32624011525`](https://github.com/aiwaki/slipstream/actions/runs/32624011525)
+failed only in the unchanged Rust unit test
+`prepared_journal_is_rebootstrapped_and_retained_across_bootstrap_failure`:
+the third back-to-back recovery returned the documented deferred-success result
+for a busy nonblocking transaction lock, so the test's `unloads == 1`
+assumption failed. The identical Git tree passed that test in the PR run, and
+100 isolated local repetitions passed; this is flaky evidence, not a product
+recovery or cleanup failure. Production recovery remains unchanged. The active
+correction separates the loaded-watchdog unload/rebootstrap assertion onto a
+fresh journal and lock fixture, while the original fixture remains solely the
+bootstrap-failure/retained-journal/retry proof. CI `32624011525` cannot
+authorize a candidate or release despite every unrelated successful job. Its
+uploaded `release-candidate-8751ec7997a040ac6ba8720a906e91c2ea35d1af`
+artifact `9489272959` is therefore invalid evidence and must not be bound to a
+readiness or publisher run.
+
+Do not rerun that unchanged CI as proof and do not dispatch another
+account-backed readiness run on 2026-08-23 UTC. First merge the deterministic
+test correction after exact-head checks, then require a new successful
+exact-main CI/audit/candidate. The next protected action remains exactly one
+combined readiness run after the next broker UTC-day reset.
+
+### Previous checkpoint
+
 Update 2026-08-23 (post-soak cleanup boundary): PR #364 merged the
 single-session protected pipeline as exact product main
 `adc285408417963b4a74e952234efe1c19e9266e`. Exact-main
