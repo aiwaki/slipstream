@@ -13,9 +13,10 @@ import sys
 import tempfile
 import time
 
+import invisibility_soak_contract
 import pending_navigation_browser_probe_smoke as visibility
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = invisibility_soak_contract.SCHEMA_VERSION
 RELEASE_DURATION_SECONDS = 1800
 SAMPLE_INTERVAL_SECONDS = 0.5
 MAX_SAMPLE_GAP_SECONDS = 2.0
@@ -25,10 +26,46 @@ FORBIDDEN_LAUNCH_AGENTS = (
     "dev.slipstream.semantic-browser.plist",
     "dev.slipstream.browser-worker.plist",
 )
+CLEANUP_PROBE_INTERVAL_SECONDS = 0.2
+CLEANUP_PROBE_TIMEOUT_SECONDS = 3.0
+CLEANUP_STABLE_SAMPLES = 3
+INSTALLED_DAEMON = Path("/usr/local/slipstream/slipstreamd")
+SYSTEM_CLEANUP_PATHS = invisibility_soak_contract.SYSTEM_CLEANUP_PATHS
+SYSTEM_CLEANUP_LABELS = invisibility_soak_contract.SYSTEM_CLEANUP_LABELS
+CLEANUP_REPORT_SYMBOLS = invisibility_soak_contract.CLEANUP_REPORT_SYMBOLS
 
 
 class SoakError(RuntimeError):
     pass
+
+
+class CleanupError(SoakError):
+    """Carry only allowlisted cleanup diagnostics across the report boundary."""
+
+    def __init__(self, kind: str, resources: tuple[str, ...] = ()) -> None:
+        if kind == "uninstall_command":
+            if resources:
+                raise ValueError("uninstall cleanup errors cannot name resources")
+            self.report_symbols = (kind,)
+            message = "product cleanup failed: uninstall_command"
+        elif kind in {"probe", "residue"}:
+            if not resources or any(
+                resource not in SYSTEM_CLEANUP_LABELS for resource in resources
+            ):
+                raise ValueError("cleanup error resources must be allowlisted")
+            resources = tuple(sorted(set(resources)))
+            self.report_symbols = tuple(
+                f"{kind}:{resource}" for resource in resources
+            )
+            prefix = (
+                "cleanup probe failed"
+                if kind == "probe"
+                else "product cleanup residue"
+            )
+            message = prefix + ": " + ",".join(resources)
+        else:
+            raise ValueError("unknown cleanup error kind")
+        super().__init__(message)
 
 
 def _require_protected_ci() -> None:
@@ -125,6 +162,119 @@ def _run_checked(command: tuple[str, ...], timeout: float = 120.0) -> None:
         raise SoakError(f"command failed during soak: {command[0]}")
 
 
+def _run_cleanup_probe(
+    command: tuple[str, ...], label: str
+) -> subprocess.CompletedProcess[str]:
+    """Run one exact cleanup probe and collapse execution errors to its label."""
+    if label not in SYSTEM_CLEANUP_LABELS:
+        raise ValueError("cleanup probe label must be allowlisted")
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CleanupError("probe", (label,)) from exc
+
+
+def _system_cleanup_residues() -> tuple[str, ...]:
+    """Return only bounded symbolic names for exact product-owned residue."""
+    residues = [
+        label for label, path in SYSTEM_CLEANUP_PATHS if os.path.lexists(path)
+    ]
+    launchd = _run_cleanup_probe(
+        (
+            "/usr/bin/sudo",
+            "/bin/launchctl",
+            "print",
+            "system/dev.slipstream.tproxy",
+        ),
+        "launchd_job",
+    )
+    if launchd.returncode == 0:
+        residues.append("launchd_job")
+    elif launchd.returncode != 113 or "Could not find service" not in (
+        launchd.stdout + launchd.stderr
+    ):
+        raise CleanupError("probe", ("launchd_job",))
+    for label, mode in (("pf_nat_anchor", "-sn"), ("pf_filter_anchor", "-sr")):
+        result = _run_cleanup_probe(
+            (
+                "/usr/bin/sudo",
+                "/sbin/pfctl",
+                "-a",
+                "com.apple/slipstream",
+                mode,
+            ),
+            label,
+        )
+        if result.returncode != 0:
+            raise CleanupError("probe", (label,))
+        if result.stdout.strip():
+            residues.append(label)
+    listener = _run_cleanup_probe(
+        (
+            "/usr/bin/sudo",
+            "/usr/sbin/lsof",
+            "-nP",
+            "-t",
+            "-iTCP:1080",
+            "-sTCP:LISTEN",
+        ),
+        "daemon_listener",
+    )
+    if listener.returncode == 0 and listener.stdout.strip():
+        residues.append("daemon_listener")
+    elif not (
+        listener.returncode == 1
+        and not listener.stdout.strip()
+        and not listener.stderr.strip()
+    ):
+        raise CleanupError("probe", ("daemon_listener",))
+    return tuple(sorted(residues))
+
+
+def _wait_for_system_cleanup_absence(
+    *,
+    timeout: float = CLEANUP_PROBE_TIMEOUT_SECONDS,
+    stable_samples: int = CLEANUP_STABLE_SAMPLES,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+) -> tuple[str, ...]:
+    """Require several consecutive absent samples to catch late reappearance."""
+    if timeout <= 0 or stable_samples <= 0:
+        raise ValueError("cleanup wait bounds must be positive")
+    deadline = monotonic() + timeout
+    consecutive_absent = 0
+    last_residues: tuple[str, ...] = ("cleanup_state_unstable",)
+    while True:
+        residues = _system_cleanup_residues()
+        if residues:
+            last_residues = residues
+            consecutive_absent = 0
+        else:
+            consecutive_absent += 1
+            if consecutive_absent >= stable_samples:
+                return ()
+        if monotonic() >= deadline:
+            return last_residues
+        sleep(CLEANUP_PROBE_INTERVAL_SECONDS)
+
+
+def _cleanup_installed_candidate() -> None:
+    """Clean once through the root-owned installed daemon, then prove absence."""
+    try:
+        _run_checked(("/usr/bin/sudo", str(INSTALLED_DAEMON), "--uninstall"))
+    except BaseException as exc:
+        raise CleanupError("uninstall_command") from exc
+    residues = _wait_for_system_cleanup_absence()
+    if residues:
+        raise CleanupError("residue", residues)
+
+
 def _terminate_owned(process: subprocess.Popen[bytes], executable: Path) -> None:
     if process.poll() is not None:
         return
@@ -205,7 +355,7 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     first_status: dict | None = None
     last_status: dict | None = None
     failure: BaseException | None = None
-    cleanup_errors: list[str] = []
+    cleanup_failures: list[str] = []
     try:
         _run_checked(("/usr/bin/sudo", str(daemon), "--install"))
         first_status = _wait_status()
@@ -333,14 +483,14 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
         if tray is not None:
             try:
                 _terminate_owned(tray, tray_executable)
-            except BaseException as exc:
-                cleanup_errors.append(str(exc))
+            except BaseException:
+                cleanup_failures.append("tray_process")
         try:
-            installed = Path("/usr/local/slipstream/slipstreamd")
-            if installed.exists():
-                _run_checked(("/usr/bin/sudo", str(installed), "--uninstall"))
-        except BaseException as exc:
-            cleanup_errors.append(str(exc))
+            _cleanup_installed_candidate()
+        except CleanupError as exc:
+            cleanup_failures.extend(exc.report_symbols)
+        except BaseException:
+            cleanup_failures.append("product_cleanup_unexpected")
         for process, label in ((listener, "events"), (unified_log, "unified")):
             if process is None:
                 continue
@@ -399,7 +549,7 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     }
     passed = (
         failure is None
-        and not cleanup_errors
+        and not cleanup_failures
         and measured_seconds >= duration_seconds
         and samples > 0
         and max_sample_gap <= MAX_SAMPLE_GAP_SECONDS
@@ -418,6 +568,7 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
         "max_sample_gap_seconds": round(max_sample_gap, 3),
         "visibility_samples": samples,
         "counters": counters,
+        "cleanup_failures": sorted(set(cleanup_failures)),
         "daemon_pid_stable": pid_stable,
         "heartbeat_advanced": heartbeat_advanced,
     }

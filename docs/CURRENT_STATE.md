@@ -10,6 +10,61 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-23 (post-soak cleanup boundary): PR #364 merged the
+single-session protected pipeline as exact product main
+`adc285408417963b4a74e952234efe1c19e9266e`. Exact-main
+[CI `32592704060`](https://github.com/aiwaki/slipstream/actions/runs/32592704060)
+and
+[dependency audit `32592704131`](https://github.com/aiwaki/slipstream/actions/runs/32592704131)
+passed. Candidate artifact `9480865076` is unexpired, has size `448116879`,
+and has digest
+`sha256:47673697447ec6aaa8efb30896967e0cdb84c4ce014b12e2d10266d7e93c2fc2`.
+
+The one authorized combined
+[release-readiness run `32619377051`](https://github.com/aiwaki/slipstream/actions/runs/32619377051),
+attempt `1`, passed exact-candidate verification, dual-stack PF and QUIC
+mechanics, one held account-backed Geph lifecycle, the complete fixed
+Safari/Chrome live-site matrix, its first exact cleanup, and the measured
+30-minute visibility sampling interval. The soak wrapper deliberately captures
+the harness exit for later proof binding, so its green workflow-step conclusion
+does not mean the soak report passed. The run then failed immediately in
+`Verify the soak left no product-owned system path`. The shell step used silent
+`test` assertions, so the retained log alone does not identify which
+postcondition failed. Source analysis establishes the cleanup bug: installation hardens
+`/usr/local/slipstream` as `root:root 0700`, while the soak runs as the non-root
+console user and guarded uninstall with
+`Path("/usr/local/slipstream/slipstreamd").exists()`. On pinned Python `3.13`,
+that inaccessible child probe raises `PermissionError`; the harness records a
+cleanup error but never invokes uninstall. The independent system check then
+rejected the residue. Its first plist assertion is the most likely failing
+predicate, but the old silent log cannot prove that attribution. Proof creation
+and both attestations were skipped; only non-authoritative live-site diagnostic
+artifact `9487946634` was uploaded. No soak report survived. The publisher and
+`.23` release did not run.
+
+The active correction does not reclassify that failure or weaken cleanup. The
+soak currently invokes uninstall only when the non-root process can traverse
+the mutable installed daemon path and then trusts that command's exit status;
+it does not independently require stable absence before reporting `passed`.
+Cleanup will instead always run one idempotent uninstall through the root-owned
+installed daemon without a non-root path probe and require three consecutive
+clean samples covering launchd, both loopback listener families, private PF anchors, installed
+runtime/attestation, tokens, status/state, and browser sockets/runtime. Failures
+expose only bounded symbolic residue names. A separate seven-day soak diagnostic
+artifact preserves the report and exit marker but has no release authority.
+The outer workflow check remains independent and gains explicit symbolic
+diagnostics.
+
+Do not rerun account-backed readiness unchanged on 2026-08-23 UTC. First merge
+the correction after exact-head review and required checks, then obtain a new
+exact-main CI/audit/candidate. On the next broker UTC-day, dispatch exactly one
+combined readiness for that new candidate. Only a complete same-attempt
+qualification proof, readiness proof, both attestations, and exact cleanup may
+dispatch the `.23` publisher. The preview remains ad-hoc signed and
+unnotarized because no Apple Developer ID is available.
+
+### Superseded checkpoint
+
 Update 2026-08-22 (current checkpoint): PR #363 merged the fail-closed semantic
 readiness correction as exact product main
 `c8c4c425e0488479686d76265b5eec3db133d202`. Exact-main
@@ -43,7 +98,7 @@ run. Only its complete matrix, lifecycle cleanup, soak, attestations, and
 exact-SHA gates may dispatch `.23`. PR #362 remains diagnostic-only and
 non-release.
 
-### Superseded checkpoint
+### Older superseded checkpoint
 
 Update 2026-08-22 (second protected chain): PR #359 merged
 the narrow Safari/Chrome observation correction as exact product main

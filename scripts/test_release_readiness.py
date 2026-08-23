@@ -53,7 +53,7 @@ def soak_report(*, seconds: float = 1800.1, counter: str | None = None) -> dict:
         counters[counter] = 1
     passed = seconds >= 1800 and counter is None
     return {
-        "schema_version": 1,
+        "schema_version": release_readiness.SOAK_SCHEMA_VERSION,
         "harness": "packaged_macos_invisibility_soak",
         "harness_exit_status": 0 if passed else 1,
         "result": "passed" if passed else "failed",
@@ -63,6 +63,7 @@ def soak_report(*, seconds: float = 1800.1, counter: str | None = None) -> dict:
         "max_sample_gap_seconds": 0.5,
         "visibility_samples": 3600,
         "counters": counters,
+        "cleanup_failures": [],
         "daemon_pid_stable": True,
         "heartbeat_advanced": True,
     }
@@ -112,6 +113,29 @@ class ReleaseReadinessTests(unittest.TestCase):
         visible.update({"harness_exit_status": 0, "result": "passed"})
         with self.assertRaisesRegex(ValueError, "measured evidence"):
             release_readiness.validate_soak_report(visible, 0)
+
+    def test_soak_cleanup_diagnostics_are_bounded_and_block_success(self) -> None:
+        report = soak_report()
+        report["cleanup_failures"] = ["residue:daemon_status"]
+        with self.assertRaisesRegex(ValueError, "measured evidence"):
+            release_readiness.validate_soak_report(report, 0)
+
+        report.update({"harness_exit_status": 1, "result": "failed"})
+        self.assertEqual(
+            release_readiness.validate_soak_report(report, 1),
+            "failed",
+        )
+
+        report["cleanup_failures"] = ["private path or exception"]
+        with self.assertRaisesRegex(ValueError, "cleanup diagnostics"):
+            release_readiness.validate_soak_report(report, 1)
+
+        report["cleanup_failures"] = [
+            "residue:daemon_status",
+            "residue:daemon_status",
+        ]
+        with self.assertRaisesRegex(ValueError, "cleanup diagnostics"):
+            release_readiness.validate_soak_report(report, 1)
 
     def test_proof_binds_candidate_attempt_evidence_and_readiness_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

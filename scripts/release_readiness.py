@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
+import invisibility_soak_contract
 import live_site_contract
 import make_release_sbom
 import release_candidate
@@ -33,6 +34,8 @@ TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
 MIN_SOAK_SECONDS = 1800
 SOAK_SAMPLE_INTERVAL_SECONDS = 0.5
 MAX_SOAK_SAMPLE_GAP_SECONDS = 2.0
+SOAK_SCHEMA_VERSION = invisibility_soak_contract.SCHEMA_VERSION
+CLEANUP_REPORT_SYMBOLS = invisibility_soak_contract.CLEANUP_REPORT_SYMBOLS
 ZERO_COUNTERS = (
     "coregraphics_window_samples",
     "dock_visible_samples",
@@ -204,12 +207,13 @@ def validate_soak_report(report: dict, exit_status: int) -> str:
         "max_sample_gap_seconds",
         "visibility_samples",
         "counters",
+        "cleanup_failures",
         "daemon_pid_stable",
         "heartbeat_advanced",
     }
     if set(report) != expected_keys:
         raise ValueError("invisibility report fields are invalid")
-    if report.get("schema_version") != SCHEMA_VERSION:
+    if report.get("schema_version") != SOAK_SCHEMA_VERSION:
         raise ValueError("invisibility report schema is invalid")
     if report.get("harness") != "packaged_macos_invisibility_soak":
         raise ValueError("invisibility harness identity is invalid")
@@ -224,8 +228,16 @@ def validate_soak_report(report: dict, exit_status: int) -> str:
     max_sample_gap = report.get("max_sample_gap_seconds")
     samples = report.get("visibility_samples")
     counters = report.get("counters")
+    cleanup_failures = report.get("cleanup_failures")
     if not isinstance(counters, dict) or set(counters) != set(ZERO_COUNTERS):
         raise ValueError("invisibility counters are incomplete")
+    if (
+        not isinstance(cleanup_failures, list)
+        or any(type(symbol) is not str for symbol in cleanup_failures)
+        or cleanup_failures != sorted(set(cleanup_failures))
+        or not set(cleanup_failures).issubset(CLEANUP_REPORT_SYMBOLS)
+    ):
+        raise ValueError("invisibility cleanup diagnostics are invalid")
     zero = all(
         type(counters[name]) is int and counters[name] == 0 for name in ZERO_COUNTERS
     )
@@ -247,6 +259,7 @@ def validate_soak_report(report: dict, exit_status: int) -> str:
     evidence_passed = (
         duration_ok
         and zero
+        and not cleanup_failures
         and report.get("daemon_pid_stable") is True
         and report.get("heartbeat_advanced") is True
     )
