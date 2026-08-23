@@ -386,6 +386,10 @@ class BuildConfigTests(unittest.TestCase):
             "Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}",
             readiness,
         )
+        self.assertIn(
+            "Slipstream-invisibility-soak-diagnostics-${{ github.sha }}-${{ github.run_attempt }}",
+            readiness,
+        )
         live_gate = readiness[
             readiness.index("Run account-backed Safari and Chrome live-site gate") :
             readiness.index("Preserve bounded live-site diagnostics for this attempt")
@@ -444,6 +448,14 @@ class BuildConfigTests(unittest.TestCase):
         )
         self.assertLess(
             readiness.index("Run measured 30-minute background invisibility soak"),
+            readiness.index(
+                "Preserve bounded invisibility-soak diagnostics for this attempt"
+            ),
+        )
+        self.assertLess(
+            readiness.index(
+                "Preserve bounded invisibility-soak diagnostics for this attempt"
+            ),
             readiness.index("Verify the soak left no product-owned system path"),
         )
         self.assertLess(
@@ -457,6 +469,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("Slipstream-transport-matrix-${{ github.sha }}", readiness)
         self.assertNotIn("scripts/release_transport_matrix.py create", ci)
         self.assertIn("Attest exact release-readiness evidence", readiness)
+        self.assertIn("Slipstream cleanup residue: $2", readiness)
+        self.assertIn("browser_probe_runtime", readiness)
         self.assertIn("--expected-workflow-run-attempt", readiness)
         self.assertNotIn("Build the frozen daemon", readiness)
         self.assertNotIn("Build the packaged app", readiness)

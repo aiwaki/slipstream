@@ -371,22 +371,84 @@ jobs:
           set -e
           printf '%s\n' "$soak_status" > dist-readiness/invisibility-soak.exit
 
+      - name: Preserve bounded invisibility-soak diagnostics for this attempt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Slipstream-invisibility-soak-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            dist-readiness/invisibility-soak.json
+            dist-readiness/invisibility-soak.exit
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Verify the soak left no product-owned system path
         if: always()
         run: |
           set -euo pipefail
-          test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
-          if sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1; then
+          assert_absent_path() {
+            if test -e "$1" || test -L "$1"; then
+              echo "Slipstream cleanup residue: $2" >&2
+              exit 1
+            fi
+          }
+          assert_empty_anchor() {
+            if anchor_output="$(sudo pfctl -a com.apple/slipstream "$1" 2>/dev/null)"; then
+              :
+            else
+              echo "Slipstream cleanup probe failed: $2" >&2
+              exit 1
+            fi
+            if test -n "$anchor_output"; then
+              echo "Slipstream cleanup residue: $2" >&2
+              exit 1
+            fi
+          }
+          assert_absent_path /Library/LaunchDaemons/dev.slipstream.tproxy.plist launchd_plist
+          launchctl_output=""
+          if launchctl_output="$(sudo launchctl print system/dev.slipstream.tproxy 2>&1)"; then
             echo "Slipstream root daemon survived the invisibility soak" >&2
             exit 1
+          else
+            launchctl_status=$?
           fi
-          test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
-          test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
-          test ! -e /var/run/slipstream-pf.token
-          test ! -e /var/run/slipstream-pf-lo0-skip.json
-          test ! -e /var/run/slipstream.status
-          test ! -e /var/run/slipstream-autogeph.json
-          test ! -e /var/run/slipstream-semantic.sock
+          if test "$launchctl_status" -ne 113 || \
+              [[ "$launchctl_output" != *"Could not find service"* ]]; then
+            echo "Slipstream cleanup probe failed: launchd_job" >&2
+            exit 1
+          fi
+          assert_empty_anchor -sn pf_nat_anchor
+          assert_empty_anchor -sr pf_filter_anchor
+          assert_absent_path /usr/local/slipstream install_runtime
+          assert_absent_path "/Library/Application Support/dev.slipstream.tray" install_attestation
+          assert_absent_path /var/run/slipstream-pf.token pf_enable_token
+          assert_absent_path /var/run/slipstream-pf-lo0-skip.json pf_loopback_lease
+          assert_absent_path /var/run/slipstream.status daemon_status
+          assert_absent_path /var/run/slipstream.status.tmp daemon_status_tmp
+          assert_absent_path /var/run/slipstream-autogeph.json auto_geph_state
+          assert_absent_path /var/run/slipstream-strat.json strategy_state
+          assert_absent_path /var/run/slipstream-tgws.link tgws_link
+          assert_absent_path /var/run/slipstream-semantic.sock semantic_socket
+          assert_absent_path /var/run/slipstream-browser-probe.sock browser_probe_socket
+          assert_absent_path /var/run/slipstream-browser-probe-workers browser_probe_runtime
+          listener_output=""
+          listener_stderr="$RUNNER_TEMP/slipstream-cleanup-lsof.stderr"
+          : > "$listener_stderr"
+          if listener_output="$(sudo /usr/sbin/lsof -nP -t -iTCP:1080 -sTCP:LISTEN 2>"$listener_stderr")"; then
+            listener_status=0
+          else
+            listener_status=$?
+          fi
+          if test "$listener_status" -eq 0 && test -n "$listener_output"; then
+            echo "Slipstream cleanup residue: daemon_listener" >&2
+            exit 1
+          fi
+          if ! { test "$listener_status" -eq 1 && \
+              test -z "$listener_output" && test ! -s "$listener_stderr"; }; then
+            echo "Slipstream cleanup probe failed: daemon_listener" >&2
+            exit 1
+          fi
+          rm -f "$listener_stderr"
 
       - name: Bind qualification and measured readiness to one workflow attempt
         run: |
