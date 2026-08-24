@@ -486,6 +486,111 @@ class BuildConfigTests(unittest.TestCase):
                 r"(?m)^\s+!\s+security\s+find-generic-password\b",
             )
 
+    def test_account_backed_workflows_share_a_three_dispatch_daily_budget(
+        self,
+    ) -> None:
+        workflows = {
+            "release-readiness.yml": (
+                ROOT / ".github/workflows/release-readiness.yml"
+            ).read_text(encoding="utf-8"),
+            "owned-geph-qualification.yml": (
+                ROOT / ".github/workflows/owned-geph-qualification.yml"
+            ).read_text(encoding="utf-8"),
+        }
+        protected_jobs = {
+            "release-readiness.yml": "  exact-candidate-readiness:",
+            "owned-geph-qualification.yml": (
+                "  account-backed-owned-geph-diagnostic:"
+            ),
+        }
+
+        for workflow_name, workflow in workflows.items():
+            budget_start = workflow.index("  account-backed-run-budget:")
+            protected_start = workflow.index(protected_jobs[workflow_name])
+            budget_job = workflow[budget_start:protected_start]
+            protected_header_end = workflow.index("    runs-on:", protected_start)
+            protected_header = workflow[protected_start:protected_header_end]
+            protected_job = workflow[protected_start:]
+
+            self.assertLess(budget_start, protected_start)
+            self.assertIn("runs-on: ubuntu-latest", budget_job)
+            self.assertIn("actions: read", budget_job)
+            self.assertIn("contents: read", budget_job)
+            self.assertNotIn("environment:", budget_job)
+            self.assertNotIn("secrets.", budget_job)
+            self.assertNotIn("continue-on-error", budget_job)
+            self.assertNotIn("always()", budget_job)
+            self.assertIn(
+                "Reserve one of three daily account-backed dispatches",
+                budget_job,
+            )
+            self.assertIn(
+                "actions/workflows/release-readiness.yml/runs", budget_job
+            )
+            self.assertIn(
+                "actions/workflows/owned-geph-qualification.yml/runs",
+                budget_job,
+            )
+            self.assertIn("-f branch=main", budget_job)
+            self.assertIn("-f event=workflow_dispatch", budget_job)
+            self.assertIn('utc_day="$(date -u +%F)"', budget_job)
+            self.assertIn('-f "created=$created_range"', budget_job)
+            self.assertIn("-F per_page=100", budget_job)
+            self.assertIn(
+                "python3 scripts/account_backed_run_budget.py verify", budget_job
+            )
+            self.assertIn('--current-run-id "$GITHUB_RUN_ID"', budget_job)
+            self.assertIn(
+                '--current-run-attempt "$GITHUB_RUN_ATTEMPT"', budget_job
+            )
+            self.assertIn("needs: account-backed-run-budget", protected_job)
+            self.assertIn("environment: geph-qualification", protected_job)
+            self.assertIn("github.run_attempt == '1'", budget_job)
+            self.assertIn("github.run_attempt == '1'", protected_header)
+            self.assertNotIn("always()", protected_header)
+            self.assertIn(
+                "needs.account-backed-run-budget.result == 'success'",
+                protected_header,
+            )
+            self.assertIn("group: account-backed-geph", workflow)
+            self.assertIn("queue: max", workflow)
+            self.assertIn(
+                "Never rerun a protected\n  # run that predates this budget job",
+                workflow,
+            )
+
+        self.assertEqual(
+            workflows["release-readiness.yml"].count(
+                "scripts/account_backed_run_budget.py verify"
+            ),
+            1,
+        )
+        self.assertEqual(
+            workflows["owned-geph-qualification.yml"].count(
+                "scripts/account_backed_run_budget.py verify"
+            ),
+            1,
+        )
+        owned_budget = workflows["owned-geph-qualification.yml"][
+            workflows["owned-geph-qualification.yml"].index(
+                "  account-backed-run-budget:"
+            ) : workflows["owned-geph-qualification.yml"].index(
+                "  account-backed-owned-geph-diagnostic:"
+            )
+        ]
+        self.assertNotIn("inputs.diagnostic_only", owned_budget)
+
+        secret_workflows = {
+            path.name
+            for path in (ROOT / ".github/workflows").glob("*.yml")
+            if "secrets.SLIPSTREAM_GEPH_ACCOUNT_SECRET"
+            in path.read_text(encoding="utf-8")
+        }
+        self.assertEqual(
+            secret_workflows,
+            {"owned-geph-qualification.yml", "release-readiness.yml"},
+        )
+
     def test_candidate_signing_and_attestation_have_least_privilege(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         publisher = (ROOT / ".github/workflows/build-app.yml").read_text(

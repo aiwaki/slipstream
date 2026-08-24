@@ -74,6 +74,20 @@ automatic-update success and forced-rollback canary. Remove the bounded
 `.23`-specific publisher-repair escape hatch in an ordinary follow-up change;
 it is historical recovery machinery, not a general release path.
 
+Post-release account-backed workflow policy now allows at most three fresh
+`main` dispatches per UTC day across `release-readiness` and the diagnostic-only
+owned-Geph workflow combined. A separate no-environment preflight uses only the
+read-scoped ephemeral GitHub token, not the protected account/broker secret. It
+counts every outcome, rejects workflow reruns and incomplete API evidence, and
+stops a fourth dispatch before candidate download or broker access. This changes
+only the attempt budget: it does not run or shorten a soak, reuse failed release
+evidence, or weaken any routing, browser, matrix, cleanup, proof, attestation, or
+exact-SHA gate. On 2026-08-24 UTC, runs `32709760820` and `32719127944` are the
+two historical dispatches; no post-release account-backed run was added. GitHub
+reruns replay their historical workflow source, so neither pre-guard run may be
+rerun; repository code can close that historical platform escape only after an
+account-secret rotation into a new protected environment.
+
 ### Previous checkpoint
 
 Update 2026-08-23 (deterministic exact-main requalification boundary):
