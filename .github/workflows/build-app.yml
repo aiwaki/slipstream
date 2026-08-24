@@ -31,7 +31,7 @@ on:
         description: "Optional successful protected release-readiness run ID for this exact SHA."
         required: false
       release_source_commit:
-        description: "Publisher-repair only: exact .23 qualified source behind the known first repair and current second repair."
+        description: "Publisher-repair only: exact .23 qualified source behind the pinned two-repair prefix and a bounded three- or four-commit repair chain."
         required: false
   push:
     tags: ["v*"]
@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 3
+          fetch-depth: 5
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -123,7 +123,8 @@ jobs:
             release_name="Slipstream $v"
             if [ -n "$RELEASE_SOURCE_INPUT" ]; then
               expected_repair_source=6ba71ef75d821ee74cedcee5d8a9c83495da7c76
-              expected_repair_intermediate=1e0d03130405020a761504c1e65827f76020de47
+              expected_first_repair=1e0d03130405020a761504c1e65827f76020de47
+              expected_second_repair=06885e10d22a435175034023d6cc9b51d3666b34
               [ "$GITHUB_RUN_ATTEMPT" = 1 ] || {
                 echo "publisher repair cannot use a workflow rerun"
                 exit 1
@@ -151,11 +152,14 @@ jobs:
                 echo "publisher repair must run from live main"
                 exit 1
               }
-              [ "$(git rev-parse "$GITHUB_SHA^")" = "$expected_repair_intermediate" ] &&
-                [ "$(git rev-parse "$expected_repair_intermediate^")" = "$expected_repair_source" ] || {
-                  echo "publisher repair history does not match the exact two-hop .23 topology"
-                  exit 1
-                }
+              if [ "$(git rev-parse "$expected_first_repair^")" = "$expected_repair_source" ] &&
+                [ "$(git rev-parse "$expected_second_repair^")" = "$expected_first_repair" ] &&
+                git merge-base --is-ancestor "$expected_second_repair" "$GITHUB_SHA"; then
+                :
+              else
+                echo "publisher repair history does not contain the known two-repair .23 prefix"
+                exit 1
+              fi
               repair_cursor="$GITHUB_SHA"
               repair_commit_count=0
               while [ "$repair_cursor" != "$RELEASE_SOURCE_INPUT" ]; do
@@ -166,10 +170,10 @@ jobs:
                   [ -z "$extra_parents" ] || {
                     echo "publisher repair history must be linear"
                     exit 1
-                  }
+                }
                 repair_commit_count=$((repair_commit_count + 1))
-                [ "$repair_commit_count" -le 2 ] || {
-                  echo "publisher repair permits at most two workflow-only commits"
+                [ "$repair_commit_count" -le 4 ] || {
+                  echo "publisher repair permits at most four workflow-only commits"
                   exit 1
                 }
 
@@ -223,28 +227,28 @@ jobs:
                   repair_metadata="$(gh api \
                     "repos/${{ github.repository }}/actions/runs/$repair_run")"
                   python3 -c '
-                  import json
-                  import sys
-                  run = json.load(sys.stdin)
-                  expected_sha, repository, workflow = sys.argv[1:]
-                  expected = {
-                      "head_sha": expected_sha,
-                      "head_branch": "main",
-                      "event": "push",
-                      "conclusion": "success",
-                      "path": f".github/workflows/{workflow}",
-                  }
-                  for key, value in expected.items():
-                      if run.get(key) != value:
-                          raise SystemExit(
-                              f"repair run has invalid {key}: {run.get(key)!r}"
-                          )
-                  if (run.get("head_repository") or {}).get("full_name") != repository:
-                      raise SystemExit("repair run belongs to a different repository")
-                  attempt = run.get("run_attempt")
-                  if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
-                      raise SystemExit("repair run attempt is invalid")
-                  ' "$repair_cursor" "${{ github.repository }}" "$repair_workflow" \
+          import json
+          import sys
+          run = json.load(sys.stdin)
+          expected_sha, repository, workflow = sys.argv[1:]
+          expected = {
+              "head_sha": expected_sha,
+              "head_branch": "main",
+              "event": "push",
+              "conclusion": "success",
+              "path": f".github/workflows/{workflow}",
+          }
+          for key, value in expected.items():
+              if run.get(key) != value:
+                  raise SystemExit(
+                      f"repair run has invalid {key}: {run.get(key)!r}"
+                  )
+          if (run.get("head_repository") or {}).get("full_name") != repository:
+              raise SystemExit("repair run belongs to a different repository")
+          attempt = run.get("run_attempt")
+          if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+              raise SystemExit("repair run attempt is invalid")
+          ' "$repair_cursor" "${{ github.repository }}" "$repair_workflow" \
                     <<< "$repair_metadata"
                   repair_attempt="$(python3 -c \
                     'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
@@ -252,41 +256,44 @@ jobs:
                   repair_jobs="$(gh api \
                     "repos/${{ github.repository }}/actions/runs/$repair_run/jobs?filter=latest&per_page=100")"
                   python3 -c '
-                  import json
-                  import sys
-                  payload = json.load(sys.stdin)
-                  attempt = int(sys.argv[1])
-                  workflow = sys.argv[2]
-                  jobs = payload.get("jobs")
-                  if not isinstance(jobs, list) or payload.get("total_count") != len(jobs):
-                      raise SystemExit("repair run job list is incomplete")
-                  required = {
-                      "ci.yml": ("checks", "packaged-app-lifecycle"),
-                      "dependency-audit.yml": ("Required dependency audit",),
-                  }[workflow]
-                  for name in required:
-                      matches = [job for job in jobs if job.get("name") == name]
-                      if len(matches) != 1:
-                          raise SystemExit(
-                              f"repair run must contain exactly one {name!r} job"
-                          )
-                      job = matches[0]
-                      if job.get("run_attempt") != attempt:
-                          raise SystemExit(
-                              f"repair job {name!r} belongs to another run attempt"
-                          )
-                      if job.get("status") != "completed" or job.get("conclusion") != "success":
-                          raise SystemExit(
-                              f"repair job {name!r} did not complete successfully"
-                          )
-                  ' "$repair_attempt" "$repair_workflow" <<< "$repair_jobs"
+          import json
+          import sys
+          payload = json.load(sys.stdin)
+          attempt = int(sys.argv[1])
+          workflow = sys.argv[2]
+          jobs = payload.get("jobs")
+          if not isinstance(jobs, list) or payload.get("total_count") != len(jobs):
+              raise SystemExit("repair run job list is incomplete")
+          required = {
+              "ci.yml": ("checks", "packaged-app-lifecycle"),
+              "dependency-audit.yml": ("Required dependency audit",),
+          }[workflow]
+          for name in required:
+              matches = [job for job in jobs if job.get("name") == name]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"repair run must contain exactly one {name!r} job"
+                  )
+              job = matches[0]
+              if job.get("run_attempt") != attempt:
+                  raise SystemExit(
+                      f"repair job {name!r} belongs to another run attempt"
+                  )
+              if job.get("status") != "completed" or job.get("conclusion") != "success":
+                  raise SystemExit(
+                      f"repair job {name!r} did not complete successfully"
+                  )
+          ' "$repair_attempt" "$repair_workflow" <<< "$repair_jobs"
                 done
                 repair_cursor="$repair_parent"
               done
-              [ "$repair_commit_count" = 2 ] || {
-                echo "publisher repair requires exactly two validated repair commits"
-                exit 1
-              }
+              case "$repair_commit_count" in
+                3|4) ;;
+                *)
+                  echo "publisher repair requires three or four validated repair commits"
+                  exit 1
+                  ;;
+              esac
               source_commit="$RELEASE_SOURCE_INPUT"
             fi
           fi
