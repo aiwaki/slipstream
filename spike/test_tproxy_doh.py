@@ -6419,9 +6419,9 @@ def test_quic_v1_v2_observation_and_exact_host_fallback_cover_ipv4_ipv6(
         now=100.1,
     ) is None
 
-    # A local-bypass host and an unreviewed host never inherit this decision,
-    # even when their packet uses the same IP family and QUIC version.
-    for host in ("updates.discord.com", "unknown.example"):
+    # Explicit local-only policy never inherits this decision, even when its
+    # packet uses the same IP family and QUIC version.
+    for host in ("updates.discord.com", "www.youtube.com"):
         assert tproxy._quic_initial_tcp_fallback_response(
             OrderedDict(),
             OrderedDict(),
@@ -6429,6 +6429,17 @@ def test_quic_v1_v2_observation_and_exact_host_fallback_cover_ipv4_ipv6(
             initial_for(host),
             now=101.0,
         ) is None
+
+    # A fresh exact unknown first contact moves to TCP for bounded semantic
+    # classification. This is not Geph authority and remains flow bounded.
+    unknown = initial_for("unknown.example")
+    assert tproxy._quic_initial_tcp_fallback_response(
+        OrderedDict(),
+        OrderedDict(),
+        flow,
+        unknown,
+        now=101.0,
+    ) is not None
     assert family in {"inet", "inet6"}
 
 
@@ -6588,7 +6599,7 @@ def test_quic_initial_sni_caps_retained_fragment_object_count(monkeypatch):
     assert not flows
 
 
-def test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped(
+def test_quic_tcp_fallback_is_exactly_active_owned_route_or_unknown_first_contact(
     monkeypatch,
 ):
     monkeypatch.setattr(tproxy, "_pf_applied", True)
@@ -6598,17 +6609,47 @@ def test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped(
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
-    assert tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
-    assert tproxy._quic_geo_exit_tcp_fallback("chatgpt.com")
-    assert not tproxy._quic_geo_exit_tcp_fallback("updates.discord.com")
-    assert not tproxy._quic_geo_exit_tcp_fallback("www.youtube.com")
-    assert not tproxy._quic_geo_exit_tcp_fallback("unknown.example")
+    assert tproxy._quic_route_tcp_fallback("www.xpersonatoy.com")
+    assert tproxy._quic_route_tcp_fallback("chatgpt.com")
+    assert not tproxy._quic_route_tcp_fallback("updates.discord.com")
+    assert not tproxy._quic_route_tcp_fallback("www.youtube.com")
+    assert tproxy._quic_route_tcp_fallback("unknown.example", now=100.0)
+
+    with tproxy._route_preflight_lock:
+        monkeypatch.setitem(
+            tproxy._route_preflight_cache,
+            "unknown.example",
+            (200.0, tproxy.SEMANTIC_OUTCOME_USABLE),
+        )
+    assert not tproxy._quic_route_tcp_fallback(
+        "unknown.example",
+        now=100.0,
+    )
+    assert tproxy._quic_route_tcp_fallback("unknown.example", now=201.0)
+
+    with tproxy._route_preflight_lock:
+        monkeypatch.setitem(
+            tproxy._route_preflight_cache,
+            "unknown.example",
+            (300.0, tproxy.SEMANTIC_OUTCOME_CHALLENGE_OR_AUTH),
+        )
+    assert not tproxy._quic_route_tcp_fallback(
+        "unknown.example",
+        now=250.0,
+    )
+
+    monkeypatch.setitem(
+        tproxy._auto_geph,
+        "unknown.example",
+        time.time() + 60.0,
+    )
+    assert tproxy._quic_route_tcp_fallback("unknown.example", now=250.0)
 
     monkeypatch.setattr(tproxy, "_pf_applied", False)
-    assert not tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
+    assert not tproxy._quic_route_tcp_fallback("www.xpersonatoy.com")
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
-    assert not tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
+    assert not tproxy._quic_route_tcp_fallback("www.xpersonatoy.com")
 
 
 def test_quic_version_negotiation_fallback_swaps_connection_ids():

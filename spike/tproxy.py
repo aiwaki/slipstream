@@ -7911,16 +7911,48 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
     return None
 
 
-def _quic_geo_exit_tcp_fallback(host):
-    return bool(
-        host
+def _quic_route_tcp_fallback(host, *, now=None):
+    """Move only route-relevant QUIC first contact onto the TCP evidence path.
+
+    A fresh unknown exact hostname has no trustworthy semantic route decision
+    yet. Its one exact QUIC flow falls back to TCP so the existing bounded
+    direct preflight can classify it before any Geph route is possible. A fresh
+    usable/challenge result restores QUIC for that hostname. Learned exact
+    hosts keep falling back because the owned Geph route is TCP-only.
+    """
+    h = normalize_host(host)
+    if not (
+        h
         and _pf_applied
         and transparent_routing_ready()
         and GEPH_ENABLED
         and _geph_up
         and _geph_owned
         and _geph_port == GEPH_OWNED_PORT
-        and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+    ):
+        return False
+    route_class = route_policy(h)["route_class"]
+    if route_class == ROUTE_GEO_EXIT:
+        return True
+    if route_class != ROUTE_UNKNOWN or not _auto_geph_base_host_allowed(h):
+        return False
+    if _auto_geph_learned_exact_host(h):
+        return True
+
+    now = time.monotonic() if now is None else float(now)
+    with _route_preflight_lock:
+        _prune_initial_route_preflights_locked(now)
+        cached = _route_preflight_cache.get(h)
+        if cached is not None:
+            _route_preflight_cache.move_to_end(h)
+    return not bool(
+        cached
+        and cached[0] > now
+        and cached[1]
+        in {
+            SEMANTIC_OUTCOME_USABLE,
+            SEMANTIC_OUTCOME_CHALLENGE_OR_AUTH,
+        }
     )
 
 
@@ -8055,11 +8087,24 @@ def transport_mechanics_selftest():
                 now=100.1,
             ) is not None:
                 raise RuntimeError("packaged QUIC fallback was not flow bounded")
+            unknown_initial = _transport_selftest_quic_initial(
+                version,
+                "unknown.example",
+            )
+            if not _quic_initial_tcp_fallback_response(
+                OrderedDict(),
+                OrderedDict(),
+                flow,
+                unknown_initial,
+                now=101.0,
+            ):
+                raise RuntimeError(
+                    "packaged QUIC unknown first contact skipped TCP classification"
+                )
             for excluded in (
                 "updates.discord.com",
                 "www.youtube.com",
                 "r1---sn.example.googlevideo.com",
-                "unknown.example",
             ):
                 if _quic_initial_tcp_fallback_response(
                     OrderedDict(),
@@ -11249,9 +11294,9 @@ def _quic_initial_tcp_fallback_response(
     *,
     now=None,
 ):
-    """Return a VN response only for one exact reviewed QUIC Initial flow."""
+    """Return one exact-flow VN response only when TCP classification is due."""
     host = _observe_quic_initial_sni(initial_flows, flow_key, payload)
-    if not _quic_geo_exit_tcp_fallback(host):
+    if not _quic_route_tcp_fallback(host, now=now):
         return None
     now = time.monotonic() if now is None else now
     cutoff = now - QUIC_TCP_FALLBACK_FLOW_IDLE
@@ -11363,7 +11408,7 @@ def network_monitor(
             for _ in range(QUIC_TCP_FALLBACK_REPEAT):
                 _l3send(packet)
             print(
-                ">> geo-exit QUIC flow moved to TCP fallback",
+                ">> route-qualified QUIC flow moved to TCP fallback",
                 file=sys.stderr,
                 flush=True,
             )

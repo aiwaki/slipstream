@@ -1190,6 +1190,26 @@ frontmost application, and recent physical input must all still agree. Browser
 automation is useful for reproducing socket/signature attribution, but it must
 remain `not_frontmost` or `recent_input_failed` and is not product evidence.
 
+If that admission succeeds and `learned` increases but the same visible page
+still uses its direct denial or incomplete asset, check the QUIC boundary before
+changing semantic rules. A learned unknown exact host is a TCP-only Geph route;
+letting a browser reuse HTTP/3 bypasses it. Conversely, a QUIC-first unknown
+root never reaches the TCP semantic preflight at all. The allowed correction is
+one exact-SNI QUIC Version Negotiation flow while classification is due:
+
+- reviewed geo-exit and learned exact hosts continue on TCP;
+- a fresh unknown exact host uses TCP once for the existing bounded direct
+  classification; no Geph route is authorized by Version Negotiation;
+- fresh `usable` or `challenge_or_auth` cache restores QUIC for that exact host;
+- slow/inconclusive direct evidence remains unlearned and direct;
+- explicit direct/local routes, Discord, YouTube, Googlevideo, ECH/no-SNI,
+  unsupported QUIC, shared destination IPs, and every other UDP flow remain
+  untouched.
+
+Do not replace this with a CDN/IP rule or a global UDP/443 block. When validating
+a newly installed correction, restart the browser first so an already-open QUIC
+connection cannot bypass a new Initial-flow policy.
+
 A `200` root document is not a pass when the page stays blank or spinning and a
 required JavaScript, CSS, or image reports `ERR_CONNECTION_CLOSED`,
 `ERR_CONTENT_LENGTH_MISMATCH`, or an incomplete transfer. Diagnose this without

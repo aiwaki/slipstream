@@ -28,6 +28,21 @@ socket owner, foreground state, and recent physical input while selecting only
 the compatible verifier form. `--ignore-resources` is restricted to exact
 system Safari/WebKit roots and is never used for Chrome or an arbitrary path.
 
+The fresh physical Chrome/Safari attempt then passed that admission boundary
+but still did not restore either page. Public state advanced from idle to
+`last_state=learned`, `learned=1`, `pending=0` at
+`2026-08-24T17:33:27Z`. The canonical one-entry private cache size plus the
+usable Aikido root/critical-asset control identifies the learned exact child as
+`cdn.aikido.dev`; no parent or suffix rule was added. Nevertheless the visible
+Chrome child remained incomplete, Capacitor still showed the direct Cloudflare
+edge denial, and Safari held both URLs over Start Page. Bounded controls after
+the attempt reproduced direct Capacitor denial and incomplete Aikido asset
+delivery, while the same Capacitor root and Aikido asset each returned a full
+65,536-byte range through the owned Geph listener. The remaining cause is QUIC:
+the existing v1/v2 observer moved only static `geo_exit` policy to TCP, so an
+automatically learned exact child could still bypass its TCP-only Geph route,
+and a QUIC-first unknown parent could bypass semantic preflight entirely.
+
 Production routing still contains no Aikido or Capacitor hostname rule and no
 broad `403` rule. Slow progressive reads are inconclusive and uncacheable; only
 explicit EOF/reset with valid incomplete framing can continue to the existing
@@ -36,19 +51,29 @@ absolute eight-second job remain unchanged; one signed foreground attempt may
 use an adaptive retry capped at five seconds while preserving two seconds plus
 25 ms for proof and scheduling.
 
-The exact branch passes `1044` full `spike` tests, `545` script tests, focused
-provenance checks, and `git diff --check`. A canonical Python 3.13 daemon was
-built into a local ad-hoc, unnotarized app; the source, bundled, and installed
-daemon SHA-256 is
-`7f316ac1fe3a0dca498f19a7947ecd2b3ba832358c459696c9da2155e2bc235a`.
-The controlled local installation is active with launchd daemon PID `81055`.
-This is diagnostic product evidence, not a release candidate or Gatekeeper
-claim. The next verified action is one fresh physical-input navigation to
-Capacitor and Aikido in normal Chrome and Safari, followed immediately by the
-privacy-bounded status/result check; synthetic browser control is deliberately
-rejected by recent-input provenance. Do not merge until that behavior and the
-new exact-head PR checks pass. This targeted diagnosis did not start another
-30-minute soak and does not weaken or replace any later release gate.
+The correction now sends Version Negotiation for only one exact QUIC Initial
+flow when a static geo-exit, a learned exact host, or a fresh exact unknown
+first contact needs the TCP evidence path. It does not authorize Geph: the TCP
+path retains the complete direct/owned proof and foreground provenance. A
+fresh usable or challenge/auth direct result is cached and restores QUIC for
+that exact host; an inconclusive slow link remains direct and unlearned.
+Explicit direct/local policy, Discord, YouTube, Googlevideo, ECH/no-SNI,
+unsupported QUIC, inactive PF, and unowned/unready Geph remain untouched. There
+is no destination-IP/CDN rule and no global UDP/443 block.
+
+The exact source passes `1044` full `spike` tests, the full script test suite,
+focused QUIC v1/v2 and IPv4/IPv6 first-contact/learned/exclusion checks,
+packaged transport self-test, compilation, and `git diff --check`. The currently
+installed diagnostic build remains the preceding provenance-only daemon PID
+`81055`, SHA-256
+`7f316ac1fe3a0dca498f19a7947ecd2b3ba832358c459696c9da2155e2bc235a`;
+it is not evidence for the QUIC correction. The next verified action is to
+build and install the exact corrected local head, restart the two browsers so
+no pre-existing QUIC connection survives, and run one fresh physical-input
+Capacitor/Aikido attempt in normal Chrome and Safari. Do not merge until that
+behavior and the new exact-head PR checks pass. This targeted diagnosis did not
+start another 30-minute soak and does not weaken or replace any later release
+gate. The local app remains ad-hoc and unnotarized.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
