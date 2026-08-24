@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 import inspect
 import shlex
@@ -11,6 +12,16 @@ from unittest import mock
 import packaged_invisibility_soak as soak
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _unified_log_filter_banner() -> str:
+    return (
+        'Filtering the log data using "composedMessage CONTAINS[c] '
+        '"PostShowProcess" AND (composedMessage CONTAINS[c] '
+        '"slipstream" OR composedMessage CONTAINS[c] '
+        '"chrome-headless" OR composedMessage CONTAINS[c] '
+        '"chromium")"'
+    )
 
 
 class FakeClock:
@@ -25,6 +36,153 @@ class FakeClock:
 
 
 class PackagedInvisibilitySoakTests(unittest.TestCase):
+    def test_unified_log_filter_banner_handshake_precedes_measurement(self) -> None:
+        pipe = SimpleNamespace(fileno=lambda: 42)
+        process = SimpleNamespace(stdout=pipe, poll=lambda: None)
+        chunk = (_unified_log_filter_banner() + "\n").encode()
+        with (
+            mock.patch.object(
+                soak.select,
+                "select",
+                return_value=([pipe], [], []),
+            ),
+            mock.patch.object(soak.os, "read", return_value=chunk),
+        ):
+            banner = soak._wait_for_unified_log_filter_banner(process)
+
+        self.assertEqual(banner, chunk)
+
+    def test_unified_log_handshake_preserves_prefetched_event(self) -> None:
+        pipe = SimpleNamespace(fileno=lambda: 42)
+        process = SimpleNamespace(stdout=pipe, poll=lambda: None)
+        event = json.dumps({"eventMessage": "Slipstream PostShowProcess"})
+        chunk = (_unified_log_filter_banner() + "\n" + event + "\n").encode()
+        with (
+            mock.patch.object(
+                soak.select,
+                "select",
+                return_value=([pipe], [], []),
+            ),
+            mock.patch.object(soak.os, "read", return_value=chunk),
+        ):
+            captured = soak._wait_for_unified_log_filter_banner(process)
+
+        self.assertEqual(captured, chunk)
+        self.assertEqual(soak._count_unified_log_post_show_events(captured), 1)
+
+    def test_unified_log_filter_banner_handshake_times_out_closed(self) -> None:
+        pipe = SimpleNamespace(fileno=lambda: 42)
+        process = SimpleNamespace(stdout=pipe, poll=lambda: None)
+        with (
+            mock.patch.object(
+                soak.select,
+                "select",
+                return_value=([], [], []),
+            ),
+            self.assertRaisesRegex(
+                soak.SoakError,
+                "unified-log filter banner timed out",
+            ),
+        ):
+            soak._wait_for_unified_log_filter_banner(process)
+
+    def test_unified_log_filter_banner_handshake_rejects_early_exit(self) -> None:
+        process = SimpleNamespace(
+            stdout=SimpleNamespace(fileno=lambda: 42),
+            poll=lambda: 1,
+        )
+
+        with self.assertRaisesRegex(
+            soak.SoakError,
+            "unified-log sampler exited before its filter banner",
+        ):
+            soak._wait_for_unified_log_filter_banner(process)
+
+    def test_unified_log_sampler_is_polled_inside_measured_window(self) -> None:
+        source = inspect.getsource(soak.run_soak)
+        sample = source.index("def sample()")
+        sampler_poll = source.index("unified_log.poll()", sample)
+        measured = source.index("_sample_window(", sample)
+
+        self.assertLess(sampler_poll, measured)
+
+    def test_all_samplers_are_polled_at_measured_window_boundary(self) -> None:
+        source = inspect.getsource(soak.run_soak)
+        measured = source.index(
+            "measured_seconds, samples, max_sample_gap = _sample_window("
+        )
+        cleanup = source.index("except BaseException as exc:", measured)
+        boundary = source[measured:cleanup]
+
+        self.assertIn("tray.poll()", boundary)
+        self.assertIn("listener.poll()", boundary)
+        self.assertIn("unified_log.poll()", boundary)
+
+    def test_unified_log_filter_banner_is_not_a_visibility_event(self) -> None:
+        self.assertEqual(
+            soak._count_unified_log_post_show_events(_unified_log_filter_banner()),
+            0,
+        )
+
+    def test_unified_log_structured_post_show_event_still_fails(self) -> None:
+        event = json.dumps(
+            {
+                "eventMessage": (
+                    "Notification: kLSNotifyShowRequest Slipstream "
+                    "PostShowProcess"
+                )
+            }
+        )
+
+        output = _unified_log_filter_banner() + "\n" + event
+
+        self.assertEqual(soak._count_unified_log_post_show_events(output), 1)
+
+    def test_unified_log_counts_every_structured_post_show_event(self) -> None:
+        event = json.dumps(
+            {"eventMessage": "Slipstream PostShowProcess"}
+        )
+        output = "\n".join((_unified_log_filter_banner(), event, event))
+
+        self.assertEqual(soak._count_unified_log_post_show_events(output), 2)
+
+    def test_unified_log_missing_filter_banner_is_fail_closed(self) -> None:
+        event = json.dumps(
+            {"eventMessage": "Slipstream PostShowProcess"}
+        )
+
+        with self.assertRaisesRegex(
+            soak.SoakError,
+            "unified-log filter banner is missing",
+        ):
+            soak._count_unified_log_post_show_events(event)
+
+    def test_unified_log_duplicate_filter_banner_is_fail_closed(self) -> None:
+        banner = _unified_log_filter_banner()
+
+        with self.assertRaisesRegex(
+            soak.SoakError,
+            "unified-log filter banner is invalid",
+        ):
+            soak._count_unified_log_post_show_events(banner + "\n" + banner)
+
+    def test_unified_log_unexpected_output_is_fail_closed(self) -> None:
+        with self.assertRaisesRegex(
+            soak.SoakError,
+            "unified-log sampler emitted malformed NDJSON",
+        ):
+            soak._count_unified_log_post_show_events("unexpected output")
+
+    def test_unified_log_unrelated_structured_event_is_fail_closed(self) -> None:
+        event = json.dumps({"eventMessage": "unrelated diagnostic"})
+        output = _unified_log_filter_banner() + "\n" + event
+
+        with self.assertRaisesRegex(
+            soak.SoakError,
+            "unified-log predicate emitted an unrelated event",
+        ):
+            soak._count_unified_log_post_show_events(output)
+
     def test_system_cleanup_residue_uses_only_symbolic_names(self) -> None:
         def fake_lexists(path: str) -> bool:
             return path == "/var/run/slipstream.status"

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -33,6 +34,10 @@ INSTALLED_DAEMON = Path("/usr/local/slipstream/slipstreamd")
 SYSTEM_CLEANUP_PATHS = invisibility_soak_contract.SYSTEM_CLEANUP_PATHS
 SYSTEM_CLEANUP_LABELS = invisibility_soak_contract.SYSTEM_CLEANUP_LABELS
 CLEANUP_REPORT_SYMBOLS = invisibility_soak_contract.CLEANUP_REPORT_SYMBOLS
+UNIFIED_LOG_FILTER_BANNER_PREFIX = "Filtering the log data using "
+UNIFIED_LOG_EVENT_MARKERS = ("slipstream", "chrome-headless", "chromium")
+UNIFIED_LOG_START_TIMEOUT_SECONDS = 5.0
+UNIFIED_LOG_HANDSHAKE_MAX_BYTES = 64 * 1024
 
 
 class SoakError(RuntimeError):
@@ -320,6 +325,95 @@ def _sample_window(
     return measured, samples, max_sample_gap
 
 
+def _validate_unified_log_filter_banner(line: str) -> None:
+    folded = line.casefold()
+    required_terms = ("postshowprocess", *UNIFIED_LOG_EVENT_MARKERS)
+    if not line.startswith(UNIFIED_LOG_FILTER_BANNER_PREFIX) or not all(
+        term in folded for term in required_terms
+    ):
+        raise SoakError("unified-log filter banner is invalid")
+
+
+def _wait_for_unified_log_filter_banner(
+    process: subprocess.Popen[bytes],
+    *,
+    timeout_seconds: float = UNIFIED_LOG_START_TIMEOUT_SECONDS,
+) -> bytes:
+    if process.stdout is None:
+        raise SoakError("unified-log sampler has no output pipe")
+    if process.poll() is not None:
+        raise SoakError("unified-log sampler exited before its filter banner")
+    deadline = time.monotonic() + timeout_seconds
+    captured = bytearray()
+    while b"\n" not in captured:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SoakError("unified-log filter banner timed out")
+        readable, _, _ = select.select((process.stdout,), (), (), remaining)
+        if not readable:
+            raise SoakError("unified-log filter banner timed out")
+        chunk = os.read(process.stdout.fileno(), UNIFIED_LOG_HANDSHAKE_MAX_BYTES)
+        if not chunk:
+            raise SoakError("unified-log sampler exited before its filter banner")
+        captured.extend(chunk)
+        if len(captured) > UNIFIED_LOG_HANDSHAKE_MAX_BYTES:
+            raise SoakError("unified-log filter banner exceeded its byte limit")
+    banner, _, _prefetched = bytes(captured).partition(b"\n")
+    try:
+        banner_text = banner.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SoakError("unified-log filter banner is not UTF-8") from exc
+    _validate_unified_log_filter_banner(banner_text.strip())
+    return bytes(captured)
+
+
+def _count_unified_log_post_show_events(output: str | bytes) -> int:
+    """Count only structured PostShowProcess events from ``log stream``.
+
+    ``log stream --predicate`` writes a plain-text filter banner to stdout.
+    That banner repeats the complete predicate, including PostShowProcess and
+    every product marker, so substring matching mistakes the sampler's own
+    banner for a visibility event. NDJSON keeps real events independently
+    parseable; any other output remains a fail-closed sampler error.
+    """
+
+    if isinstance(output, bytes):
+        try:
+            output = output.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise SoakError("unified-log sampler output is not UTF-8") from exc
+    count = 0
+    banner_seen = False
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith(UNIFIED_LOG_FILTER_BANNER_PREFIX):
+            if banner_seen:
+                raise SoakError("unified-log filter banner is invalid")
+            _validate_unified_log_filter_banner(line)
+            banner_seen = True
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise SoakError("unified-log sampler emitted malformed NDJSON") from exc
+        if not isinstance(event, dict):
+            raise SoakError("unified-log sampler event must be an object")
+        message = event.get("eventMessage")
+        if not isinstance(message, str):
+            raise SoakError("unified-log sampler event has no message")
+        message_folded = message.casefold()
+        if "postshowprocess" not in message_folded or not any(
+            marker in message_folded for marker in UNIFIED_LOG_EVENT_MARKERS
+        ):
+            raise SoakError("unified-log predicate emitted an unrelated event")
+        count += 1
+    if not banner_seen:
+        raise SoakError("unified-log filter banner is missing")
+    return count
+
+
 def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     _require_protected_ci()
     if duration_seconds <= 0:
@@ -339,9 +433,10 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     tray_log = tempfile.TemporaryFile()
     tray: subprocess.Popen[bytes] | None = None
     listener: subprocess.Popen[str] | None = None
-    unified_log: subprocess.Popen[str] | None = None
+    unified_log: subprocess.Popen[bytes] | None = None
     event_output = ""
-    unified_output = ""
+    unified_prefix = b""
+    unified_output = b""
     measured_seconds = 0.0
     samples = 0
     max_sample_gap = 0.0
@@ -415,7 +510,7 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
                 "/usr/bin/log",
                 "stream",
                 "--style",
-                "json",
+                "ndjson",
                 "--level",
                 "debug",
                 "--predicate",
@@ -426,8 +521,8 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
             ),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
         )
+        unified_prefix = _wait_for_unified_log_filter_banner(unified_log)
         if unified_log.poll() is not None:
             raise SoakError("unified-log sampler exited before measured soak")
         expected_pid = first_status.get("pid")
@@ -449,6 +544,10 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
             nonlocal last_heartbeat_change
             if tray.poll() is not None:
                 raise SoakError("tray process exited during idle soak")
+            if listener is None or listener.poll() is not None:
+                raise SoakError("visibility sampler exited during idle soak")
+            if unified_log is None or unified_log.poll() is not None:
+                raise SoakError("unified-log sampler exited during idle soak")
             windows = visibility._slipstream_window_ids()
             listing = visibility._launch_services_listing()
             _registered, dock_visible = visibility._slipstream_launch_services_state(
@@ -477,6 +576,12 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
         measured_seconds, samples, max_sample_gap = _sample_window(
             duration_seconds, sample
         )
+        if tray.poll() is not None:
+            raise SoakError("tray process exited at measured soak boundary")
+        if listener is None or listener.poll() is not None:
+            raise SoakError("visibility sampler exited at measured soak boundary")
+        if unified_log is None or unified_log.poll() is not None:
+            raise SoakError("unified-log sampler exited at measured soak boundary")
     except BaseException as exc:
         failure = exc
     finally:
@@ -503,7 +608,7 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
             if label == "events":
                 event_output = output
             else:
-                unified_output = output
+                unified_output = unified_prefix + output
         tray_log.close()
 
     event_text = event_output.casefold()
@@ -513,15 +618,13 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     )
     profile_residue = len(_profiles() - baseline_profiles)
     launch_agent_residue = len(_launch_agents() - baseline_agents)
-    unified_log_post_show_process = sum(
-        1
-        for line in unified_output.splitlines()
-        if "postshowprocess" in line.casefold()
-        and any(
-            marker in line.casefold()
-            for marker in ("slipstream", "chrome-headless", "chromium")
+    try:
+        unified_log_post_show_process = _count_unified_log_post_show_events(
+            unified_output
         )
-    )
+    except SoakError as exc:
+        failure = failure or exc
+        unified_log_post_show_process = 1
     pid_stable = bool(
         first_status
         and last_status
