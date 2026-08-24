@@ -10,11 +10,13 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-24 (post-release browser-visible recovery correction under
+Update 2026-08-25 (post-release browser-visible recovery correction under
 review): live `origin/main` remains
 `2780de4b3f5d77ab3852e46381b997c618bd5080`. [PR #373](https://github.com/aiwaki/slipstream/pull/373)
 contains the generic strict-edge and critical-cross-origin recovery correction
-plus browser-provenance correction `b848006682922f76adb40482d590b849e2449db1`.
+through exact transport head `124499bb1d44d6343f3ba7cd6246a502302a075c`,
+plus the current-macOS foreground parser correction
+`6e3c31e4e0d7d95439b470c431a20763de111307`.
 The first physical Capacitor/Aikido attempt left public auto-geo-exit status at
 `learned=0`, `pending=0`, `last_state=idle`: the foreground browser connection
 was rejected before semantic classification or any route proof. Exact loopback
@@ -76,19 +78,45 @@ Explicit direct/local policy, Discord, YouTube, Googlevideo, ECH/no-SNI,
 unsupported QUIC, inactive PF, and unowned/unready Geph remain untouched. There
 is no destination-IP/CDN rule and no global UDP/443 block.
 
-The exact working source passes `1717` full Python tests plus `181` subtests,
-focused QUIC v1/v2 and IPv4/IPv6 first-contact/learned/exclusion checks, the new
-exact-flow packet-construction checks, compilation, and `git diff --check`. The
-currently installed diagnostic app executable has SHA-256
-`8f1eb22ab44f8a58e2fe3def4ec23e98377125925a031b5d9cf1feb8a837a8d1`
-and runs daemon PID `3134`; it predates the exact-socket correction and is not
-success evidence. The next verified action is to commit, build, and install the
-exact corrected local head, restart the two browsers so no pre-existing QUIC
-connection survives, and run one fresh physical-input Capacitor/Aikido attempt
-in normal Chrome and Safari. Do not merge until that behavior and the new
-exact-head PR checks pass. This targeted diagnosis did not start another
-30-minute soak and does not weaken or replace any later release gate. The local
-app remains ad-hoc and unnotarized.
+Exact transport head `124499bb1d44d6343f3ba7cd6246a502302a075c` was then
+built and installed. Its exact-head [CI `32763184998`](https://github.com/aiwaki/slipstream/actions/runs/32763184998)
+and [dependency audit `32763185003`](https://github.com/aiwaki/slipstream/actions/runs/32763185003)
+both passed. Automated Chrome reached the Aikido login after a delayed load,
+but that is diagnostic rather than physical-browser proof. A fresh physical
+Chrome Capacitor reload opened a new TCP connection and still rendered the
+complete direct Cloudflare denial with the workstation's ordinary public IP.
+The same root was complete and usable through the owned-Geph listener.
+
+The blocker was an independent macOS observation compatibility bug. On the live
+signed Chrome NetworkService socket, ownership, exact process ancestry, and
+signatures passed, but `_read_frontmost` returned `not_frontmost` even while
+Chrome was actually frontmost. Current `lsappinfo` emits indented
+`bundleID="..."` and `pid = N` fields with PID metadata, whereas production
+accepted only the older quoted `"CFBundleIdentifier"`/`"pid"` pair. The
+correction accepts one complete known dialect, rejects mixed, duplicate,
+partial, unindented-current, and malformed fields, and preserves exact
+bundle/PID, path, signature/team/designated requirement, ancestry, socket
+stability, repeated foreground observation, and the five-second physical-input
+gate. A live read-only A/B check reached `input_not_recent` after the fix when
+no recent physical input was present, proving that the real current-format
+socket crossed the repaired parser without treating automation as product
+evidence.
+
+The current source passes `1059` full `spike` tests, `671` script tests plus
+`181` subtests, the focused strict-edge/provenance checks, compilation, and
+`git diff --check`. The installed diagnostic app still contains transport head
+`124499bb1d44d6343f3ba7cd6246a502302a075c` rather than the parser correction:
+its executable SHA-256 is
+`f99833891d502d2f628f93f5b0c25d8a7f83889bf92d08cbfe2caac3787d3985`,
+its bundled daemon SHA-256 is
+`fa29c8b8b1b3c530af1705e5b51045f0a484647841b86d096b62d655da94522c`,
+and the running app/daemon PIDs are `41036`/`41257`. The next verified action is
+to push the correction, require exact-head PR checks, build and install that
+exact source, restart both browser transports, and run one fresh physical-input
+Capacitor/Aikido attempt in normal Chrome and Safari. Do not merge until that
+behavior and exact-head checks pass. This targeted diagnosis did not start
+another 30-minute soak and does not weaken or replace any later release gate.
+The local app remains ad-hoc and unnotarized.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)

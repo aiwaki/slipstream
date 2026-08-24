@@ -1190,6 +1190,16 @@ frontmost application, and recent physical input must all still agree. Browser
 automation is useful for reproducing socket/signature attribution, but it must
 remain `not_frontmost` or `recent_input_failed` and is not product evidence.
 
+If a real foreground socket still reports `not_frontmost`, inspect the bounded
+`lsappinfo info -only bundleID -only pid` result before changing any route.
+Older macOS output may contain the complete quoted
+`"CFBundleIdentifier"`/`"pid"` pair; current output contains the complete
+indented `bundleID`/`pid = N` pair and bounded PID metadata. Production accepts
+one complete dialect only. Mixed, duplicate, partial, unindented-current, or
+non-numeric fields fail closed. Parsing either layout does not replace the
+subsequent exact bundle/PID, signed ancestry, socket stability, repeated
+frontmost snapshot, or recent-input checks.
+
 If that admission succeeds and `learned` increases but the same visible page
 still uses its direct denial or incomplete asset, check the QUIC boundary before
 changing semantic rules. A learned unknown exact host is a TCP-only Geph route;

@@ -1406,6 +1406,30 @@ and eight payload bytes needed to identify the connected socket. This is an
 exact-flow transport failure signal, not hostname/IP route authority; it adds
 no PF rule and never widens the existing route/provenance/proof gates.
 
+The first Chrome check against exact installed QUIC-correction source
+`124499bb1d44d6343f3ba7cd6246a502302a075c` exposed the next independent
+boundary. Aikido reached its login page after a delayed load, but a fresh
+physical Capacitor reload still rendered the complete direct Cloudflare denial
+and disclosed the workstation's ordinary public IP. The browser opened a new
+TCP connection, the bounded direct body still classified as
+`edge_access_denied`, and the same root remained usable through the owned-Geph
+listener. Calling the production provenance assessor on that live signed Chrome
+NetworkService socket while Chrome was actually frontmost returned
+`not_frontmost`.
+
+The cause was the system observation parser, not routing policy or semantic
+classification. Older `lsappinfo` output used quoted
+`"CFBundleIdentifier"`/`"pid"` keys; current macOS emits indented
+`bundleID="..."` and `pid = N` followed by process metadata. The old parser
+therefore stopped before any owned-Geph proof. The correction accepts only one
+complete known dialect, rejects mixed/duplicate/partial fields, and leaves the
+exact bundle/PID, canonical path, signature/team/designated requirement,
+ancestry, socket-owner stability, foreground stability, and five-second
+physical-input gate unchanged. A live read-only A/B check then advanced through
+the corrected current-format parser to `input_not_recent` when no fresh
+physical input was present, proving the parser fix without treating automation
+as product evidence. No hostname or HTTP-status exception was added.
+
 ## Transfer Backlog
 
 Safe candidates:
