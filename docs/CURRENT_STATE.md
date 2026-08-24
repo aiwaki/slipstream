@@ -10,6 +10,50 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-24 (structured unified-log readiness boundary): exact product
+main is `0755a5cb1c9b87b6fb3b8598968ca1ed39daae07` after PR #366. Exact-main
+[CI `32626514165`](https://github.com/aiwaki/slipstream/actions/runs/32626514165)
+and
+[dependency audit `32626514160`](https://github.com/aiwaki/slipstream/actions/runs/32626514160)
+passed. Immutable candidate artifact `9489930478` is unexpired, has size
+`448108843`, and has digest
+`sha256:4f4301a2460960fd67f1c2993393ce356d7f1f8127a69b7226813b70526d7009`.
+
+The one authorized combined
+[release-readiness run `32709760820`](https://github.com/aiwaki/slipstream/actions/runs/32709760820),
+attempt `1`, passed exact-candidate verification, dual-stack PF/NATLOOK and
+QUIC mechanics, one held account-backed Geph lifecycle, the complete fixed
+Safari/Chrome live-site matrix, both cleanup boundaries, and the full measured
+soak: `1800.144` seconds, `3600` samples, maximum gap `0.659` seconds, stable
+daemon PID, advancing heartbeat, and no cleanup failure. Every independent
+window, Dock, frontmost, browser-process, LaunchServices, LaunchAgent, profile,
+and residue counter was zero. The final gate correctly failed because
+`unified_log_post_show_process` was `1`; its proof-named artifacts describe a
+failed readiness result and cannot authorize publication.
+
+Bounded local reproduction established that this one count is the sampler's
+own plain-text `/usr/bin/log stream` filter banner, not a structured macOS log
+event. The banner repeats the predicate text, including `PostShowProcess` and
+all three product markers, so the old substring counter deterministically
+counted it. The active correction switches the stream to NDJSON, completes one
+validated bounded banner handshake before measurement, parses only structured
+`eventMessage` records, counts every real matching event, continuously checks
+sampler liveness, and fails closed for a missing/duplicate banner, malformed
+NDJSON, or unrelated structured output. It does not ignore a first event or
+add a visibility grace period. Deterministic fixtures cover the exact real
+banner, one and multiple real events, sampler timeout/exit, and malformed or
+unrelated output.
+
+Do not rerun readiness or dispatch owned-Geph again on 2026-08-24 UTC. Merge
+the parser correction after exact-head review and required checks, then require
+a new successful exact-main CI/audit/candidate. On the first eligible UTC day,
+dispatch exactly one combined readiness bound to that new candidate. Only a
+complete successful same-attempt qualification/readiness proof and both
+attestations may dispatch the `.23` publisher. The preview remains unpublished,
+ad-hoc signed, and unnotarized because no Apple Developer ID is available.
+
+### Previous checkpoint
+
 Update 2026-08-23 (deterministic exact-main requalification boundary):
 [PR #365](https://github.com/aiwaki/slipstream/pull/365) merged the packaged-soak
 cleanup correction as exact main
@@ -42,7 +86,7 @@ test correction after exact-head checks, then require a new successful
 exact-main CI/audit/candidate. The next protected action remains exactly one
 combined readiness run after the next broker UTC-day reset.
 
-### Previous checkpoint
+### Earlier checkpoint
 
 Update 2026-08-23 (post-soak cleanup boundary): PR #364 merged the
 single-session protected pipeline as exact product main
