@@ -1169,6 +1169,27 @@ local bypass and direct routes out of Geph.
 
 ### The root loads but a critical resource closes early
 
+If a physical Safari/Chrome failure leaves the public auto-geo-exit counters at
+`learned=0`, `pending=0`, and `last_state=idle`, first prove that foreground
+browser provenance admitted the socket; do not add a parent or CDN hostname
+rule. A closed loopback TLS listener can identify the exact socket-owning PID
+without visiting the affected site. The expected current verifier boundary is:
+
+- official Chrome root/helpers: `codesign --verify --strict=symlinks`; Finder
+  metadata on the root bundle must not be converted into an unrelated resource
+  failure by bare `--strict`;
+- exact Safari/WebKit executables under canonical `/System/Applications`,
+  `/System/Library`, or sealed Cryptex roots only:
+  `codesign --verify --ignore-resources --strict=symlinks`, followed by the
+  exact Apple designated-requirement check.
+
+Never apply `--ignore-resources` to Chrome, a user path, or an arbitrary binary.
+Passing the verifier is not sufficient: exact canonical path, identifier,
+designated requirement/team, UID/start time, process ancestry, socket owner,
+frontmost application, and recent physical input must all still agree. Browser
+automation is useful for reproducing socket/signature attribution, but it must
+remain `not_frontmost` or `recent_input_failed` and is not product evidence.
+
 A `200` root document is not a pass when the page stays blank or spinning and a
 required JavaScript, CSS, or image reports `ERR_CONNECTION_CLOSED`,
 `ERR_CONTENT_LENGTH_MISMATCH`, or an incomplete transfer. Diagnose this without

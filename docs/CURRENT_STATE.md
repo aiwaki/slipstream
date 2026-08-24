@@ -13,24 +13,41 @@ file.
 Update 2026-08-24 (post-release browser-visible recovery correction under
 review): live `origin/main` remains
 `2780de4b3f5d77ab3852e46381b997c618bd5080`. [PR #373](https://github.com/aiwaki/slipstream/pull/373)
-contains implementation commit `49aa6fc8a07370d50acfa28b924c2057cfe82700` and the
-generic correction for a strict edge-denial document and an incomplete critical
-cross-origin bootstrap object. Production routing contains no Aikido or
-Capacitor hostname rule and no broad `403` rule. Slow progressive reads are
-inconclusive and uncacheable; only explicit EOF/reset with valid incomplete
-framing can continue to the existing complete same-object owned-Geph proof.
-The ordinary 400-ms/500-ms path and absolute eight-second job remain unchanged;
-one signed foreground attempt may use an adaptive retry capped at five seconds
-while preserving two seconds plus 25 ms for proof and scheduling.
+contains the generic strict-edge and critical-cross-origin recovery correction
+plus browser-provenance correction `b848006682922f76adb40482d590b849e2449db1`.
+The first physical Capacitor/Aikido attempt left public auto-geo-exit status at
+`learned=0`, `pending=0`, `last_state=idle`: the foreground browser connection
+was rejected before semantic classification or any route proof. Exact loopback
+socket attribution reproduced both causes. Current Google Chrome's exact signed
+root bundle fails only `codesign --verify --strict` because Finder metadata is
+present, while `--strict=symlinks` passes; current Cryptex WebKit Networking
+fails resource-envelope verification as obsolete but passes
+`--ignore-resources --strict=symlinks`. Production now preserves exact canonical
+paths, identifiers, Apple/Google designated requirements, team, process tree,
+socket owner, foreground state, and recent physical input while selecting only
+the compatible verifier form. `--ignore-resources` is restricted to exact
+system Safari/WebKit roots and is never used for Chrome or an arbitrary path.
 
-The exact branch passed `1043` full `spike` tests, `545` script tests, `53`
-focused route/bootstrap regressions, `git diff --check`, and independent
-slow-link/coalescing review. A local ad-hoc `.app` was built without
-notarization; its strict deep code-sign verification passes and its bundled
-daemon executable matches the rebuilt artifact. The next verified action is to
-require all exact-head PR checks, then install only that local exact-implementation build
-for a fresh normal-Chrome foreground check of Capacitor parent learning and
-Aikido exact-child learning. This targeted diagnosis did not start another
+Production routing still contains no Aikido or Capacitor hostname rule and no
+broad `403` rule. Slow progressive reads are inconclusive and uncacheable; only
+explicit EOF/reset with valid incomplete framing can continue to the existing
+complete same-object owned-Geph proof. The ordinary 400-ms/500-ms path and
+absolute eight-second job remain unchanged; one signed foreground attempt may
+use an adaptive retry capped at five seconds while preserving two seconds plus
+25 ms for proof and scheduling.
+
+The exact branch passes `1044` full `spike` tests, `545` script tests, focused
+provenance checks, and `git diff --check`. A canonical Python 3.13 daemon was
+built into a local ad-hoc, unnotarized app; the source, bundled, and installed
+daemon SHA-256 is
+`7f316ac1fe3a0dca498f19a7947ecd2b3ba832358c459696c9da2155e2bc235a`.
+The controlled local installation is active with launchd daemon PID `81055`.
+This is diagnostic product evidence, not a release candidate or Gatekeeper
+claim. The next verified action is one fresh physical-input navigation to
+Capacitor and Aikido in normal Chrome and Safari, followed immediately by the
+privacy-bounded status/result check; synthetic browser control is deliberately
+rejected by recent-input provenance. Do not merge until that behavior and the
+new exact-head PR checks pass. This targeted diagnosis did not start another
 30-minute soak and does not weaken or replace any later release gate.
 
 Update 2026-08-24 (verified preview `.23` release):
