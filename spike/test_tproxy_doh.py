@@ -9247,6 +9247,80 @@ def test_semantic_edge_denial_is_strict_generic_and_challenge_precedes_it():
     assert not tproxy._semantic_geph_response_usable(edge)
 
 
+def test_plain_preflight_deadline_is_retryable_inconclusive(monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        timeout,
+    )
+
+    observation = tproxy._semantic_plain_preflight_probe_detail(
+        "8.8.8.8",
+        "deadline.example",
+        0.01,
+    )
+
+    assert observation.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    assert observation.retryable_inconclusive
+
+
+def test_plain_preflight_framed_partial_idle_is_retryable_inconclusive(
+    monkeypatch,
+):
+    body = b"x" * (16 * 1024)
+    response = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+        b"Content-Length: 65536\r\n\r\n"
+        + body
+    )
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.responses = deque((response, tproxy.socket.timeout()))
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _request):
+            return None
+
+        def recv(self, _size):
+            result = self.responses.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def close(self):
+            return None
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda *_args, **_kwargs: tls_socket
+        ),
+    )
+
+    observation = tproxy._semantic_plain_preflight_probe_detail(
+        "8.8.8.8",
+        "slow-root.example",
+        0.4,
+    )
+
+    assert observation.outcome == tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING
+    assert observation.safe_incomplete
+    assert observation.retryable_inconclusive
+
+
 def _enable_owned_geph_preflight(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
@@ -9397,6 +9471,175 @@ def test_route_preflight_selects_owned_geph_only_after_strict_denial(
         claim,
         "blocked-edge.example",
     )
+
+
+def test_strict_edge_denial_uses_payload_proof_without_browser_worker(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "strict-edge.example"
+    provenance = []
+    geph_calls = []
+    direct_timeouts = []
+    monkeypatch.setattr(tproxy, "_route_preflight_headless_available", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda peer, _assessor: provenance.append(peer) or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_run_headless_owned_geph_preflight",
+        lambda *_args, **_kwargs: pytest.fail(
+            "strict edge denial should not depend on a browser worker"
+        ),
+    )
+
+    def direct(_ip, actual_host, timeout):
+        assert actual_host == host
+        direct_timeouts.append(timeout)
+        if len(direct_timeouts) == 1:
+            return tproxy._SemanticPlainPreflightObservation(
+                tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=True,
+            )
+        return tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            direct_probe=direct,
+            geph_probe=lambda actual_host, timeout: (
+                geph_calls.append((actual_host, timeout))
+                or tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+            ),
+        )
+    )
+
+    assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim)
+    assert provenance == [("127.0.0.1", 49152)]
+    assert len(direct_timeouts) == 2
+    assert direct_timeouts[0] <= tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
+    assert direct_timeouts[1] <= (
+        tproxy.ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT
+    )
+    assert geph_calls and geph_calls[0][0] == host
+    assert tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_repeated_inconclusive_foreground_retry_is_not_cached(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "still-inconclusive.example"
+    direct_timeouts = []
+
+    def direct(_ip, _host, timeout):
+        direct_timeouts.append(timeout)
+        return tproxy._SemanticPlainPreflightObservation(
+            tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING,
+            safe_incomplete=True,
+            retryable_inconclusive=True,
+        )
+
+    monkeypatch.setattr(
+        tproxy,
+        "_run_headless_owned_geph_preflight",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a repeated idle timeout cannot authorize headless proof"
+        ),
+    )
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            direct_probe=direct,
+            geph_probe=lambda *_args: pytest.fail(
+                "inconclusive direct evidence cannot authorize Geph"
+            ),
+        )
+    )
+
+    assert claim is None
+    assert len(direct_timeouts) == 2
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_adaptive_foreground_retry_can_finish_after_simulated_three_seconds(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "slow-but-healthy.example"
+    clock = [100.0]
+    timeouts = []
+
+    monkeypatch.setattr(
+        tproxy,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: clock[0],
+            time=lambda: 1_000.0,
+        ),
+    )
+
+    async def bounded_probe(_probe, _ip, actual_host, timeout):
+        assert actual_host == host
+        timeouts.append(timeout)
+        if len(timeouts) == 1:
+            return tproxy._SemanticPlainPreflightObservation(
+                tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING,
+                safe_incomplete=True,
+                retryable_inconclusive=True,
+            )
+        assert timeout > 3.5
+        clock[0] += 3.5
+        return tproxy._SemanticPlainPreflightObservation(
+            tproxy.SEMANTIC_OUTCOME_USABLE
+        )
+
+    monkeypatch.setattr(
+        tproxy,
+        "_run_bounded_direct_route_preflight",
+        bounded_probe,
+    )
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            direct_probe=lambda *_args: pytest.fail(
+                "the deterministic bounded-probe seam was bypassed"
+            ),
+            geph_probe=lambda *_args: pytest.fail(
+                "a slow healthy direct route cannot authorize Geph"
+            ),
+        )
+    )
+
+    assert claim is None
+    assert timeouts[0] == tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
+    assert 3.5 < timeouts[1] <= (
+        tproxy.ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT
+    )
+    assert clock[0] == 103.5
+    assert tproxy._route_preflight_cache[host][1] == (
+        tproxy.SEMANTIC_OUTCOME_USABLE
+    )
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=lambda *_args: pytest.fail(
+                "the completed adaptive retry was not cached"
+            ),
+        )
+    ) is None
+    assert len(timeouts) == 2
 
 
 def test_route_preflight_does_not_learn_from_one_synthetic_direct_timeout(
@@ -9656,18 +9899,105 @@ def _bootstrap_root_observation(asset_host):
     )
 
 
-def _bootstrap_evidence(outcome, *, total=1_210_087, body_bytes=16_937):
-    return tproxy.bootstrap_asset_preflight.RangeProbeEvidence(
+def _bootstrap_evidence(
+    outcome,
+    *,
+    total=1_210_087,
+    body_bytes=16_937,
+    termination=None,
+):
+    evidence = tproxy.bootstrap_asset_preflight.RangeProbeEvidence(
         outcome,
         total_length=total,
         range_end=tproxy.bootstrap_asset_preflight.DEFAULT_RANGE_END,
         validator_digest="same-public-object",
         received_body_bytes=body_bytes,
     )
+    if termination is None:
+        termination = (
+            tproxy._BOOTSTRAP_RANGE_TERMINATION_COMPLETE
+            if outcome
+            is tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE
+            else tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF
+            if outcome
+            is tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
+            else tproxy._BOOTSTRAP_RANGE_TERMINATION_UNKNOWN
+        )
+    return tproxy._BootstrapRangeProbeObservation(evidence, termination)
 
 
-def test_healthy_bootstrap_provenance_shares_first_contact_budget():
-    host = "budgeted-bootstrap.example"
+@pytest.mark.parametrize(
+    ("termination_event", "expected_termination"),
+    (
+        (
+            tproxy.socket.timeout(),
+            tproxy._BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT,
+        ),
+        (b"", tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF),
+        (ConnectionResetError(), tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF),
+    ),
+)
+def test_bootstrap_range_preserves_idle_vs_closed_transport_termination(
+    monkeypatch,
+    termination_event,
+    expected_termination,
+):
+    body = b"x" * (16 * 1024)
+    response = (
+        b"HTTP/1.1 206 Partial Content\r\n"
+        b"Content-Type: application/javascript\r\n"
+        b"Content-Length: 65536\r\n"
+        b"Content-Range: bytes 0-65535/1210087\r\n"
+        b'ETag: "same-public-object"\r\n\r\n'
+        + body
+    )
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.responses = deque((response, termination_event))
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _request):
+            return None
+
+        def recv(self, _size):
+            result = self.responses.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def close(self):
+            return None
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda *_args, **_kwargs: tls_socket
+        ),
+    )
+    deadline = time.monotonic() + 1.0
+
+    observation = tproxy._bootstrap_range_response_on_tls_socket(
+        tls_socket,
+        "critical-cdn.example",
+        b"GET /entry.js HTTP/1.1\r\n\r\n",
+        deadline,
+        deadline,
+    )
+
+    assert observation.termination == expected_termination
+    assert observation.evidence.outcome is (
+        tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
+    )
+    assert observation.evidence.received_body_bytes == 16 * 1024
+
+
+def test_same_origin_bootstrap_provenance_shares_first_contact_budget():
+    host = "budgeted-root.example"
     entered = threading.Event()
     release = threading.Event()
     asset_probes = []
@@ -9714,7 +10044,262 @@ def test_healthy_bootstrap_provenance_shares_first_contact_budget():
     assert host not in tproxy._route_preflight_cache
 
 
-def test_route_preflight_learns_exact_bootstrap_host_after_incomplete_direct(
+def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "delayed-parent.example"
+    asset_host = "delayed-critical-cdn.example"
+    events = []
+    root_timeouts = []
+
+    def delayed_root(_ip, _host, timeout):
+        root_timeouts.append(timeout)
+        if len(root_timeouts) == 1:
+            return tproxy._SemanticPlainPreflightObservation(
+                tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=True,
+            )
+        time.sleep(0.45)
+        return _bootstrap_root_observation(asset_host)
+
+    def delayed_provenance(peer, _assessor):
+        events.append(("provenance", peer))
+        time.sleep(0.2)
+        return True
+
+    def direct_asset(ip, host, request, direct_deadline, final_deadline):
+        events.append(("direct", ip, host, direct_deadline, final_deadline))
+        assert direct_deadline <= final_deadline
+        assert direct_deadline - time.monotonic() > 0.75
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            body_bytes=16 * 1024,
+        )
+
+    def geph_asset(host, request, deadline):
+        events.append(("geph", host, deadline))
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+            body_bytes=65_536,
+        )
+
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        delayed_provenance,
+    )
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            direct_probe=delayed_root,
+            bootstrap_direct_probe=direct_asset,
+            bootstrap_geph_probe=geph_asset,
+            bootstrap_resolver=lambda host: (
+                ["1.1.1.1"] if host == asset_host else []
+            ),
+        )
+    )
+
+    assert claim is None
+    assert [event[0] for event in events] == ["provenance", "direct", "geph"]
+    assert len(root_timeouts) == 2
+    assert root_timeouts[0] <= tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
+    assert root_timeouts[1] <= (
+        tproxy.ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT
+    )
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert tproxy._auto_geph_learned_exact_host(asset_host)
+    assert tproxy._route_preflight_cache[asset_host][1] == "owned_geph"
+
+
+def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "slow-app-shell.example"
+    asset_host = "slow-critical-cdn.example"
+    direct_requests = []
+
+    def direct_asset(ip, host, request, _direct_deadline, _final_deadline):
+        direct_requests.append((ip, host, request))
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            body_bytes=16 * 1024,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT,
+        )
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            direct_probe=lambda *_args: _bootstrap_root_observation(asset_host),
+            bootstrap_direct_probe=direct_asset,
+            bootstrap_geph_probe=lambda *_args: pytest.fail(
+                "an idle direct asset cannot authorize a Geph comparison"
+            ),
+            bootstrap_resolver=lambda _host: ["1.1.1.1"],
+        )
+    )
+
+    assert claim is None
+    assert direct_requests[0][:2] == ("1.1.1.1", asset_host)
+    assert parent_host not in tproxy._route_preflight_cache
+    assert asset_host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert not tproxy._auto_geph_learned_exact_host(asset_host)
+
+
+def test_coalesced_two_parent_bootstrap_child_idle_stays_uncacheable(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    asset_host = "shared-slow-critical-cdn.example"
+    entered = threading.Event()
+    release = threading.Event()
+    waiter_joined = threading.Event()
+    direct_calls = []
+
+    class SignallingFuture(Future):
+        def add_done_callback(self, fn):
+            waiter_joined.set()
+            return super().add_done_callback(fn)
+
+    monkeypatch.setattr(tproxy, "Future", SignallingFuture)
+
+    def direct_asset(ip, host, request, _direct_deadline, _final_deadline):
+        direct_calls.append((ip, host, request))
+        entered.set()
+        assert release.wait(1.0)
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            body_bytes=16 * 1024,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT,
+        )
+
+    def asset():
+        return tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+            exact_host=asset_host,
+            host_header=asset_host,
+            request_target="/entry.js",
+        )
+
+    async def scenario():
+        now = time.monotonic()
+        owner = asyncio.create_task(
+            tproxy._run_bootstrap_asset_preflight(
+                asset(),
+                "first-parent.example",
+                "8.8.8.8",
+                now + 1.0,
+                now + 2.0,
+                direct_probe=direct_asset,
+                geph_probe=lambda *_args: pytest.fail(
+                    "an idle direct asset cannot authorize Geph"
+                ),
+                resolver=lambda _host: ["1.1.1.1"],
+            )
+        )
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        waiter = asyncio.create_task(
+            tproxy._run_bootstrap_asset_preflight(
+                asset(),
+                "second-parent.example",
+                "8.8.8.8",
+                now + 1.0,
+                now + 2.0,
+                direct_probe=lambda *_args: pytest.fail(
+                    "the coalesced child waiter became an owner"
+                ),
+                geph_probe=lambda *_args: pytest.fail(
+                    "an idle direct asset cannot authorize Geph"
+                ),
+                resolver=lambda _host: ["1.1.1.1"],
+            )
+        )
+        assert await asyncio.to_thread(waiter_joined.wait, 1.0)
+        release.set()
+        return await asyncio.gather(owner, waiter)
+
+    results = asyncio.run(scenario())
+
+    assert len(direct_calls) == 1
+    assert results == [
+        (False, tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE),
+        (False, tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE),
+    ]
+    assert asset_host not in tproxy._route_preflight_cache
+    assert asset_host not in tproxy._route_preflight_inflight
+    assert not tproxy._auto_geph_learned_exact_host(asset_host)
+
+
+def test_bootstrap_child_waiter_treats_bare_false_without_cache_as_inconclusive():
+    asset_host = "root-owned-slow-child.example"
+    shared_root_future = Future()
+    tproxy._route_preflight_inflight[asset_host] = shared_root_future
+    asset = tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+        exact_host=asset_host,
+        host_header=asset_host,
+        request_target="/entry.js",
+    )
+
+    async def scenario():
+        now = time.monotonic()
+        task = asyncio.create_task(
+            tproxy._run_bootstrap_asset_preflight(
+                asset,
+                "parent.example",
+                "8.8.8.8",
+                now + 1.0,
+                now + 2.0,
+                direct_probe=lambda *_args: pytest.fail(
+                    "the child waiter became an owner"
+                ),
+            )
+        )
+        await asyncio.sleep(0)
+        shared_root_future.set_result(False)
+        return await task
+
+    assert asyncio.run(scenario()) == (
+        False,
+        tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE,
+    )
+    assert asset_host not in tproxy._route_preflight_cache
+
+
+def test_bootstrap_child_wait_timeout_stays_uncacheable():
+    asset_host = "timed-out-shared-child.example"
+    shared_future = Future()
+    tproxy._route_preflight_inflight[asset_host] = shared_future
+    asset = tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+        exact_host=asset_host,
+        host_header=asset_host,
+        request_target="/entry.js",
+    )
+    now = time.monotonic()
+
+    result = asyncio.run(
+        tproxy._run_bootstrap_asset_preflight(
+            asset,
+            "parent.example",
+            "8.8.8.8",
+            now + 0.02,
+            now + 0.02,
+            direct_probe=lambda *_args: pytest.fail(
+                "the child waiter became an owner"
+            ),
+        )
+    )
+
+    assert result == (
+        False,
+        tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE,
+    )
+    assert asset_host not in tproxy._route_preflight_cache
+
+
+def test_route_preflight_learns_exact_bootstrap_host_after_eof_incomplete(
     monkeypatch,
 ):
     _enable_owned_geph_preflight(monkeypatch)
@@ -9725,7 +10310,8 @@ def test_route_preflight_learns_exact_bootstrap_host_after_incomplete_direct(
     def direct_asset(ip, host, request, _healthy_deadline, _final_deadline):
         direct_requests.append((ip, host, request))
         return _bootstrap_evidence(
-            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF,
         )
 
     def geph_asset(host, request, _deadline):

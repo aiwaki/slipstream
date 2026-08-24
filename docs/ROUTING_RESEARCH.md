@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-08-22
+Updated: 2026-08-24
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-24 | Aikido/Capacitor browser-visible controls | Direct/owned-Geph asymmetry reproduced; generic slow-link correction under test | `capacitorjs.com` returned a complete direct `403` classified as strict edge denial while the owned-Geph comparison was complete and usable. `app.aikido.dev` exposed a separate timing defect: its root could outlive the 400-ms semantic probe and publish a retry-cache result before a foreground browser attempt, while the current `cdn.aikido.dev` critical JavaScript object closed direct after exactly 16 KiB and completed the same bounded range through owned Geph. The adaptive foreground retry is capped at 5.0 seconds and uses only the unchanged eight-second job remainder after reserving 2.0 seconds plus 25 ms scheduling grace for proof; the 400-ms direct and 500-ms healthy first-contact paths remain unchanged. Any idle timeout remains inconclusive/no-cache/no-Geph, as does reaching the local read-size cap (`truncated=True`). Only stable explicit EOF or reset (normalized as EOF) with valid incomplete framing can become actionable under the existing same-object proof. This supports generic foreground retry and exact child-host learning, not Aikido/Capacitor policy entries or a general `403` rule. | Keep the correction generic, require bounded critical-resource completion in the live gate, and qualify the exact changed candidate normally. These bounded local controls diagnosed the defect without starting or reusing a new 30-minute release soak. |
 | 2026-08-22 | Sequential protected workflows duplicate account authentication | Root cause proven; single-session release gate in preparation | Exact main `c8c4c425e0488479686d76265b5eec3db133d202` passed CI `32589384708`, audit `32589384714`, and standalone owned-Geph run `32590027895`. Readiness `32590146466` then created a second ephemeral Keychain/config/process on a different hosted runner. Its first `get_connect_token` and one bounded retry both returned the already-classified daily rate limit before SafariDriver or any matrix browser started; artifact `9480105795` contains only exit marker `125`. Passing a Geph cache/token between runners would persist reusable authentication material and is rejected. The safe composition keeps one Geph lifecycle process inside `release-readiness.yml`, runs the existing deterministic Chromium semantic gate and fixed Safari/Chrome matrix before releasing it, proves cleanup, then runs the independent invisibility soak. Separate qualification and readiness proofs share one exact protected workflow attempt. | Merge only after local/PR verification, obtain a fresh exact-main candidate, and dispatch one combined readiness run. Do not run the explicit standalone diagnostic on a UTC day reserved for release qualification. |
 | 2026-08-22 | Obscura as a proposed CAPTCHA/rate-limit fallback | Not applicable to the broker failure; optional diagnostic only | The reviewed upstream repository describes Obscura as a Rust/V8 headless browser with CDP, rendering, stealth, and optional HTTP/SOCKS proxy input. It does not provide a geo-exit network path or an account-backed Slipstream-owned proxy. It therefore cannot repair `get_connect_token` rate limiting or replace Safari/Chrome/product-route evidence. It may later provide one additional browser comparison for CAPTCHA triage, but a different rendering result cannot authorize routing or publication. | Keep Obscura out of the `.23` release-critical path. If evaluated later, pin source/binary provenance and treat its result as non-gating targeted diagnostics only. |
 | 2026-08-22 | Live-site release-readiness false positive and masked Weather state | Narrow harness correction in preparation; routing/product code unchanged | Protected readiness `32572723728` proved the earlier Safari/Chrome lifecycle correction: Aikido and Capacitor were usable in both browsers, while XPersonatoy and Weather reached their exact host deadlines in both browsers. In one bounded direct XPersonatoy observation, the generic `captcha` marker that made the detector non-passing occurred only in a dormant script on an otherwise StarrToy-shaped document. The harness had searched raw Safari source and raw Chrome DOM alike, so generic marker presence alone was not a visible challenge. Retain strong raw challenge markers; derive one fixed `captcha` boolean only from visible page text or a visibility-gated CAPTCHA widget, without retaining DOM or text. Weather's `readyState != complete` was the first blocker and concealed whether the fixed title, visible body, protocol, and content conditions were ready. Preserve all conditions and report a new terminal `readiness_document_pending_semantic_ready` only when those conditions pass but the document remains pending. No route, deadline, control, host, or browser rule changes. | Validate the focused harness tests and PR checks, merge only after review, build a new exact-main candidate, then perform one protected owned-Geph qualification and one readiness for that changed candidate. Do not retry unchanged `111000c`. |
@@ -1338,6 +1339,56 @@ reported as restoring/updating and heartbeat publication remains independent.
 preflight request/outcome boundary used by both Python and Rust. It carries
 bounded route candidates and fixed outcomes, never page text, path, cookies,
 Ray ID, or arbitrary browser failure strings.
+
+## 2026-08-24 Aikido and Capacitor controls
+
+The two live sites reproduced different generic failure classes through the
+installed transparent route:
+
+- `capacitorjs.com` returned a complete direct HTTP `403` whose bounded markers
+  classified as strict `edge_access_denied`. The same root comparison through
+  the exact owned-Geph SOCKS listener returned a complete usable response. This
+  is the existing strict semantic-denial case; an ordinary status-only `403`,
+  `429`, login, CAPTCHA, or generic security page remains non-authorizing.
+- The `app.aikido.dev` root took longer than the 400-ms direct semantic budget.
+  Treating that inconclusive timeout as cacheable could suppress the following
+  real foreground attempt even though no route decision had been proved.
+- Aikido redeployed during the investigation: the earlier
+  `/assets/vendor-DRSRiXAi.js` was replaced by root bundle
+  `/assets/index-lUwU0pAj.js` and vendor `/assets/vendor-B_TeJkvL.js`. A bounded
+  request for the current `cdn.aikido.dev` vendor object closed on the
+  transparent direct path after exactly 16,384 of 65,536 requested bytes. The
+  identical URL and range completed all 65,536 bytes through the verified owned
+  Geph. Real foreground Chrome showed the corresponding critical JavaScript/CSS
+  `ERR_CONNECTION_CLOSED` and an unfinished app, so root completion alone was
+  not browser usability.
+
+The earlier no-persistence live model learned the Capacitor parent in 3.892
+seconds and Aikido's exact `cdn.aikido.dev` child in 5.316 seconds, but a
+slow-link control showed that a fixed retry slice was not a safe general
+boundary. The correction therefore computes one adaptive foreground retry with
+`_route_preflight_foreground_retry_timeout`: at most
+`ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT` (5.0 seconds), drawn from the
+unchanged eight-second absolute job after reserving
+`ROUTE_PREFLIGHT_FOREGROUND_PROOF_RESERVE` (2.0 seconds) plus
+`ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE` (25 ms). The ordinary 400-ms
+direct and 500-ms healthy first-contact paths stay unchanged.
+
+A root idle timeout, or a partial critical range ending in
+`_BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT`, maps to
+`_ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE`: it publishes neither parent nor
+child cache state and cannot start or authorize Geph. A length-framed partial
+response does not change that result. Reaching the local read-size cap with
+`truncated=True` is also `UNKNOWN`. Only stable explicit EOF or reset (normalized
+as EOF) with valid incomplete framing may continue through the existing
+incomplete-direct plus complete same-object owned-Geph proof. The observed
+16-KiB Aikido control was an explicit transfer close, not an idle timeout or
+local size-cap truncation. The correction adds no route entry for
+`app.aikido.dev`, `cdn.aikido.dev`, or `capacitorjs.com`, and it does not broaden
+HTTP-status classification. Live-site qualification now requires bounded
+critical-resource completion in addition to the root document. These local
+controls were diagnostic only; no new 30-minute invisibility soak was started
+or treated as proof.
 
 ## Transfer Backlog
 

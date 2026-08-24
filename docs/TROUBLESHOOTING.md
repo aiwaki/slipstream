@@ -1167,6 +1167,38 @@ unavailable or unowned backend, an explicit policy, or a different failure
 shape cannot authorize this overlay. This avoids per-site rules while keeping
 local bypass and direct routes out of Geph.
 
+### The root loads but a critical resource closes early
+
+A `200` root document is not a pass when the page stays blank or spinning and a
+required JavaScript, CSS, or image reports `ERR_CONNECTION_CLOSED`,
+`ERR_CONTENT_LENGTH_MISMATCH`, or an incomplete transfer. Diagnose this without
+adding a site rule:
+
+1. Start from a fresh daemon/preflight cache and do not prime the host through
+   PF with curl, Playwright, or a background browser before the real foreground
+   attempt. The foreground root retry is adaptive and capped at 5.0 seconds. It
+   uses only the remainder of the unchanged eight-second job after reserving
+   2.0 seconds plus 25 ms scheduling grace for proof; it does not widen the
+   ordinary 400-ms direct or 500-ms healthy first-contact path.
+2. In normal signed Safari or Chrome, use recent physical input and require the
+   original navigation to recover without a second manual reload. A headless or
+   CDP navigation rejected by foreground provenance is not product evidence.
+3. Inspect only a bounded critical resource discovered from the usable root.
+   Compare the same URL and bounded range direct and through the verified owned
+   Geph. An idle timeout remains inconclusive even after a length-framed partial
+   root response or partial critical range: publish no cache and do not start or
+   authorize Geph. Reaching the local read-size cap (`truncated=True`) is also
+   `UNKNOWN`. Only stable explicit EOF or reset (normalized as EOF) with valid
+   incomplete framing can make the direct result actionable, and learning that
+   exact child hostname still requires a complete same-object Geph result.
+4. Keep status-only `403`/`429`, login, CAPTCHA, and generic security pages
+   inert unless the strict bounded semantic classifier identifies its reviewed
+   denial shape and the independent Geph response is complete and usable.
+
+The live gate must check bounded critical-resource completion, not only the root
+status or DOM. This workflow never authorizes a parent-host exception, a CDN
+suffix rule, or a general `403` fallback.
+
 If that complete exact-host proof coincides with a brief owned-Geph recovery,
 the replay-safe request waits for at most five seconds and actively probes the
 exact owned listener instead of relying on the periodic monitor. Listener

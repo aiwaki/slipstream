@@ -301,7 +301,7 @@ def test_declared_body_shortfall_requires_eof_or_idle_timeout():
 def test_direct_and_geph_evidence_must_bind_the_same_js_object():
     direct = _inspect(
         _range_response(
-            b"x" * 2_048,
+            b"x" * (16 * 1_024),
             declared_length=65_536,
             content_range="bytes 0-65535/1210087",
         ),
@@ -321,6 +321,7 @@ def test_direct_and_geph_evidence_must_bind_the_same_js_object():
 
     assert isinstance(direct, RangeProbeEvidence)
     assert direct.outcome is RangeProbeOutcome.INCOMPLETE
+    assert direct.received_body_bytes == 16 * 1_024
     assert complete.outcome is RangeProbeOutcome.COMPLETE
     assert direct.proves_same_object_as(complete)
     assert not direct.proves_same_object_as(other)

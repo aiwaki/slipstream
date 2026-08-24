@@ -14,7 +14,7 @@ import release_candidate
 import release_transport_matrix
 
 SCHEMA_VERSION = 1
-LIVE_SITE_SCHEMA_VERSION = 2
+LIVE_SITE_SCHEMA_VERSION = 3
 PROOF_NAME = "release-readiness.json"
 WORKFLOW = ".github/workflows/release-readiness.yml"
 REQUIRED_HOSTS = (
@@ -30,7 +30,16 @@ HOST_DEADLINES_MS = {
     "capacitorjs.com": 25_000,
 }
 REQUIRED_BROWSERS = ("chrome", "safari")
-TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
+REQUIRED_RESOURCE_HOSTS = {"app.aikido.dev": "cdn.aikido.dev"}
+REQUIRED_RESOURCE_BYTE_BUCKETS = {
+    "zero",
+    "lt_16k",
+    "16k_to_64k",
+    "gte_64k",
+}
+TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS | {
+    "required_resource_incomplete"
+}
 MIN_SOAK_SECONDS = 1800
 SOAK_SAMPLE_INTERVAL_SECONDS = 0.5
 MAX_SOAK_SAMPLE_GAP_SECONDS = 2.0
@@ -109,6 +118,7 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                 "elapsed_ms",
                 "outcome",
                 "reason",
+                "required_resource",
                 "route",
             }:
                 raise ValueError("browser live-site result is invalid")
@@ -127,6 +137,25 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                 raise ValueError("browser live-site deadline evidence is invalid")
             if browser.get("route") != "slipstream_selected":
                 raise ValueError("browser live-site route is invalid")
+            required_resource = browser.get("required_resource")
+            required_resource_host = REQUIRED_RESOURCE_HOSTS.get(host)
+            if required_resource_host is None:
+                if required_resource is not None:
+                    raise ValueError("browser required-resource evidence is invalid")
+            else:
+                if not isinstance(required_resource, dict) or set(
+                    required_resource
+                ) != {"host", "complete", "byte_bucket"}:
+                    raise ValueError("browser required-resource evidence is invalid")
+                complete = required_resource.get("complete")
+                byte_bucket = required_resource.get("byte_bucket")
+                if (
+                    required_resource.get("host") != required_resource_host
+                    or not isinstance(complete, bool)
+                    or byte_bucket not in REQUIRED_RESOURCE_BYTE_BUCKETS
+                    or (complete and byte_bucket == "zero")
+                ):
+                    raise ValueError("browser required-resource evidence is invalid")
             outcome = browser.get("outcome")
             reason = browser.get("reason")
             if outcome not in {
@@ -148,6 +177,16 @@ def validate_live_report(report: dict, exit_status: int) -> str:
                     raise ValueError("browser terminal reason is invalid")
             elif reason != expected_reason:
                 raise ValueError("browser live-site reason is invalid")
+            if required_resource_host is not None:
+                resource_complete = required_resource.get("complete") is True
+                if outcome == "usable" and not resource_complete:
+                    raise ValueError(
+                        "usable Aikido result lacks complete CDN resource evidence"
+                    )
+                if reason == "required_resource_incomplete" and resource_complete:
+                    raise ValueError(
+                        "Aikido required-resource reason contradicts its evidence"
+                    )
         if sorted(browser_names) != list(REQUIRED_BROWSERS):
             raise ValueError("live-site browsers are not the fixed Safari/Chrome pair")
         controls = site.get("controls")
