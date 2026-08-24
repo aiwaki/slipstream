@@ -10,47 +10,64 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-24 (structured unified-log readiness boundary): exact product
-main is `0755a5cb1c9b87b6fb3b8598968ca1ed39daae07` after PR #366. Exact-main
-[CI `32626514165`](https://github.com/aiwaki/slipstream/actions/runs/32626514165)
+Update 2026-08-24 (publisher release-filter boundary): exact product main
+entering the correction is
+`6ba71ef75d821ee74cedcee5d8a9c83495da7c76` after
+[PR #367](https://github.com/aiwaki/slipstream/pull/367). Exact-main
+[CI `32717752642`](https://github.com/aiwaki/slipstream/actions/runs/32717752642)
 and
-[dependency audit `32626514160`](https://github.com/aiwaki/slipstream/actions/runs/32626514160)
-passed. Immutable candidate artifact `9489930478` is unexpired, has size
-`448108843`, and has digest
-`sha256:4f4301a2460960fd67f1c2993393ce356d7f1f8127a69b7226813b70526d7009`.
+[dependency audit `32717752636`](https://github.com/aiwaki/slipstream/actions/runs/32717752636)
+passed. Immutable candidate artifact `9516822515` is unexpired, has size
+`448117495`, and has outer service digest
+`sha256:bc1ac772fb83f66689bd2e629b5d71c3b049a61a3500ae6f7edf62532af00ccf`.
+Independent validation matched those bytes and verified its manifest, exact
+source archive/tree/run/attempt, updater signature, DMG, arm64 binaries, seven
+provenance subjects, three SPDX subjects, and app-tree SHA-256
+`d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea`.
 
-The one authorized combined
-[release-readiness run `32709760820`](https://github.com/aiwaki/slipstream/actions/runs/32709760820),
+The user-authorized combined
+[release-readiness run `32719127944`](https://github.com/aiwaki/slipstream/actions/runs/32719127944),
 attempt `1`, passed exact-candidate verification, dual-stack PF/NATLOOK and
-QUIC mechanics, one held account-backed Geph lifecycle, the complete fixed
-Safari/Chrome live-site matrix, both cleanup boundaries, and the full measured
-soak: `1800.144` seconds, `3600` samples, maximum gap `0.659` seconds, stable
-daemon PID, advancing heartbeat, and no cleanup failure. Every independent
-window, Dock, frontmost, browser-process, LaunchServices, LaunchAgent, profile,
-and residue counter was zero. The final gate correctly failed because
-`unified_log_post_show_process` was `1`; its proof-named artifacts describe a
-failed readiness result and cannot authorize publication.
+QUIC mechanics, one held account-backed Geph lifecycle, all four hosts in both
+Safari and Chrome, both cleanup boundaries, proof binding, and both
+attestations. Its measured soak passed for `1800.12` seconds with `3600`
+samples, maximum gap `0.66` seconds, stable daemon PID, advancing heartbeat,
+no cleanup failure, and every visibility/residue counter zero, including
+`unified_log_post_show_process`. Release-ready artifact `9518108620` has digest
+`sha256:e65d302d4711cecd09878c22bb06c65ea3ecc55bec47d4eeb372b43ea8ed2787`;
+qualification artifact `9518107947` has digest
+`sha256:c4fca9a7c571c6c46428588b4cb6ac79ab5530f02b376bb2fd059c674ddb4732`.
 
-Bounded local reproduction established that this one count is the sampler's
-own plain-text `/usr/bin/log stream` filter banner, not a structured macOS log
-event. The banner repeats the predicate text, including `PostShowProcess` and
-all three product markers, so the old substring counter deterministically
-counted it. The active correction switches the stream to NDJSON, completes one
-validated bounded banner handshake before measurement, parses only structured
-`eventMessage` records, counts every real matching event, continuously checks
-sampler liveness, and fails closed for a missing/duplicate banner, malformed
-NDJSON, or unrelated structured output. It does not ignore a first event or
-add a visibility grace period. Deterministic fixtures cover the exact real
-banner, one and multiple real events, sampler timeout/exit, and malformed or
-unrelated output.
+The exact-input
+[publisher run `32722287401`](https://github.com/aiwaki/slipstream/actions/runs/32722287401)
+failed before candidate/proof resolution and before any tag or release mutation.
+The `Resolve previous app release tag` step interpolated a regex containing
+`\.` into a `gh api --jq` string, where jq rejected `\.` as an invalid string
+escape. Tag and release `v0.1.9-preview.23` remain absent. The active correction
+pipes the unmodified API response into system `jq`, passes the current tag,
+pattern, and prerelease flag with typed `--arg`/`--argjson`, and regression-tests
+the actual extracted filter against preview `.23`, `.22`, draft, and stable
+fixtures plus the live `.22` predecessor.
 
-Do not rerun readiness or dispatch owned-Geph again on 2026-08-24 UTC. Merge
-the parser correction after exact-head review and required checks, then require
-a new successful exact-main CI/audit/candidate. On the first eligible UTC day,
-dispatch exactly one combined readiness bound to that new candidate. Only a
-complete successful same-attempt qualification/readiness proof and both
-attestations may dispatch the `.23` publisher. The preview remains unpublished,
-ad-hoc signed, and unnotarized because no Apple Developer ID is available.
+Do not rerun publisher `32722287401` unchanged, and do not repeat the unrelated
+30-minute soak. Merge the deterministic filter correction after exact-head
+review and required checks. Its narrowly bounded publisher-repair mode may
+reuse source `6ba71ef75d821ee74cedcee5d8a9c83495da7c76` only when that commit is the
+direct parent of live main, the one-commit diff contains only
+`.github/workflows/build-app.yml`, its contract test, and this checkpoint, and
+the repaired main itself has successful exact-SHA CI and dependency audit.
+Candidate, audit, qualification, readiness, their existing attestations,
+manifest source fields, release metadata payloads, and the tag remain bound to
+the older qualified source commit; the tag must target that commit. The new
+tag-specific metadata attestation covers five subjects and is necessarily
+issued by the repaired publisher commit, so publication must verify both links:
+its provenance must name that exact publisher SHA; the manifest and proof
+source fields must name the older qualified source; and `latest.json` must
+remain transitively bound through its tag, updater signature, and the
+source-bound artifact manifest. Dispatch the publisher with all four explicit
+successful evidence run IDs and the explicit repair source, without another
+account-backed run. The preview remains unpublished, ad-hoc signed, and
+unnotarized because no Apple Developer ID is available.
 
 ### Previous checkpoint
 
