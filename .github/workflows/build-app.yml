@@ -31,7 +31,7 @@ on:
         description: "Optional successful protected release-readiness run ID for this exact SHA."
         required: false
       release_source_commit:
-        description: "Publisher-repair only: exact qualified parent commit when current main changes only build-app.yml, its contract test, and CURRENT_STATE."
+        description: "Publisher-repair only: exact .23 qualified source behind the known first repair and current second repair."
         required: false
   push:
     tags: ["v*"]
@@ -61,11 +61,13 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13.14"
+          cache: pip
+          cache-dependency-path: spike/requirements-runtime.txt
 
       - name: Resolve version and tag
         id: ver
@@ -120,6 +122,8 @@ jobs:
             make_latest=false
             release_name="Slipstream $v"
             if [ -n "$RELEASE_SOURCE_INPUT" ]; then
+              expected_repair_source=6ba71ef75d821ee74cedcee5d8a9c83495da7c76
+              expected_repair_intermediate=1e0d03130405020a761504c1e65827f76020de47
               [ "$GITHUB_RUN_ATTEMPT" = 1 ] || {
                 echo "publisher repair cannot use a workflow rerun"
                 exit 1
@@ -128,9 +132,16 @@ jobs:
                 echo "publisher repair source must be a full lowercase commit SHA"
                 exit 1
               }
-              parent_commit="$(git rev-parse "$GITHUB_SHA^")"
-              [ "$RELEASE_SOURCE_INPUT" = "$parent_commit" ] || {
-                echo "publisher repair source must be the direct parent of current main"
+              [ "$RELEASE_SOURCE_INPUT" = "$expected_repair_source" ] || {
+                echo "publisher repair source does not match the qualified .23 source"
+                exit 1
+              }
+              git cat-file -e "$RELEASE_SOURCE_INPUT^{commit}" || {
+                echo "publisher repair source is not available in the bounded checkout"
+                exit 1
+              }
+              git merge-base --is-ancestor "$RELEASE_SOURCE_INPUT" "$GITHUB_SHA" || {
+                echo "publisher repair source must be an ancestor of current main"
                 exit 1
               }
               live_main="$(gh api \
@@ -140,34 +151,142 @@ jobs:
                 echo "publisher repair must run from live main"
                 exit 1
               }
-              repair_files="$(git diff --no-renames --name-only "$RELEASE_SOURCE_INPUT" "$GITHUB_SHA")"
-              [ -n "$repair_files" ] || {
-                echo "publisher repair diff is empty"
-                exit 1
-              }
-              while IFS= read -r repair_file; do
-                case "$repair_file" in
-                  .github/workflows/build-app.yml|docs/CURRENT_STATE.md|scripts/test_build_config.py) ;;
-                  *)
-                    echo "publisher repair changes a non-allowlisted file: $repair_file"
-                    exit 1
-                    ;;
-                esac
-              done <<< "$repair_files"
-              grep -Fxq .github/workflows/build-app.yml <<< "$repair_files" || {
-                echo "publisher repair must change build-app.yml"
-                exit 1
-              }
-              for repair_workflow in ci.yml dependency-audit.yml; do
-                repair_run="$(gh api --paginate \
-                  "repos/${{ github.repository }}/actions/workflows/$repair_workflow/runs?branch=main&event=push&status=completed&per_page=100" \
-                  --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
-                  | sed -n '1p')"
-                [ -n "$repair_run" ] || {
-                  echo "publisher repair main lacks successful $repair_workflow"
+              [ "$(git rev-parse "$GITHUB_SHA^")" = "$expected_repair_intermediate" ] &&
+                [ "$(git rev-parse "$expected_repair_intermediate^")" = "$expected_repair_source" ] || {
+                  echo "publisher repair history does not match the exact two-hop .23 topology"
                   exit 1
                 }
+              repair_cursor="$GITHUB_SHA"
+              repair_commit_count=0
+              while [ "$repair_cursor" != "$RELEASE_SOURCE_INPUT" ]; do
+                read -r repair_commit repair_parent extra_parents \
+                  <<< "$(git rev-list --parents -n 1 "$repair_cursor")"
+                [ "$repair_commit" = "$repair_cursor" ] &&
+                  [ -n "$repair_parent" ] &&
+                  [ -z "$extra_parents" ] || {
+                    echo "publisher repair history must be linear"
+                    exit 1
+                  }
+                repair_commit_count=$((repair_commit_count + 1))
+                [ "$repair_commit_count" -le 2 ] || {
+                  echo "publisher repair permits at most two workflow-only commits"
+                  exit 1
+                }
+
+                repair_files_path="$(mktemp "$RUNNER_TEMP/publisher-repair-files.XXXXXX")"
+                git diff --no-renames --name-only -z \
+                  "$repair_parent" "$repair_cursor" > "$repair_files_path"
+                [ -s "$repair_files_path" ] || {
+                  echo "publisher repair commit $repair_cursor has an empty diff"
+                  exit 1
+                }
+                repair_file_count=0
+                repair_has_workflow=false
+                repair_has_contract=false
+                repair_has_checkpoint=false
+                while IFS= read -r -d '' repair_file; do
+                  repair_file_count=$((repair_file_count + 1))
+                  case "$repair_file" in
+                    .github/workflows/build-app.yml) repair_has_workflow=true ;;
+                    scripts/test_build_config.py) repair_has_contract=true ;;
+                    docs/CURRENT_STATE.md) repair_has_checkpoint=true ;;
+                    *)
+                      echo "publisher repair commit $repair_cursor changes a non-allowlisted file: $repair_file"
+                      exit 1
+                      ;;
+                  esac
+                  for repair_tree in "$repair_parent" "$repair_cursor"; do
+                    read -r repair_mode repair_type _ \
+                      <<< "$(git ls-tree "$repair_tree" -- "$repair_file")"
+                    [ "$repair_mode" = 100644 ] && [ "$repair_type" = blob ] || {
+                      echo "publisher repair path $repair_file must remain a regular non-executable blob"
+                      exit 1
+                    }
+                  done
+                done < "$repair_files_path"
+                [ "$repair_file_count" = 3 ] &&
+                  [ "$repair_has_workflow" = true ] &&
+                  [ "$repair_has_contract" = true ] &&
+                  [ "$repair_has_checkpoint" = true ] || {
+                  echo "publisher repair commit $repair_cursor must change exactly the workflow, contract test, and checkpoint"
+                  exit 1
+                }
+                for repair_workflow in ci.yml dependency-audit.yml; do
+                  repair_run="$(gh api --paginate \
+                    "repos/${{ github.repository }}/actions/workflows/$repair_workflow/runs?branch=main&event=push&status=completed&per_page=100" \
+                    --jq ".workflow_runs[] | select(.head_sha == \"$repair_cursor\") | select(.conclusion == \"success\") | .id" \
+                    | sed -n '1p')"
+                  [ -n "$repair_run" ] || {
+                    echo "publisher repair commit $repair_cursor lacks successful $repair_workflow"
+                    exit 1
+                  }
+                  repair_metadata="$(gh api \
+                    "repos/${{ github.repository }}/actions/runs/$repair_run")"
+                  python3 -c '
+                  import json
+                  import sys
+                  run = json.load(sys.stdin)
+                  expected_sha, repository, workflow = sys.argv[1:]
+                  expected = {
+                      "head_sha": expected_sha,
+                      "head_branch": "main",
+                      "event": "push",
+                      "conclusion": "success",
+                      "path": f".github/workflows/{workflow}",
+                  }
+                  for key, value in expected.items():
+                      if run.get(key) != value:
+                          raise SystemExit(
+                              f"repair run has invalid {key}: {run.get(key)!r}"
+                          )
+                  if (run.get("head_repository") or {}).get("full_name") != repository:
+                      raise SystemExit("repair run belongs to a different repository")
+                  attempt = run.get("run_attempt")
+                  if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+                      raise SystemExit("repair run attempt is invalid")
+                  ' "$repair_cursor" "${{ github.repository }}" "$repair_workflow" \
+                    <<< "$repair_metadata"
+                  repair_attempt="$(python3 -c \
+                    'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
+                    <<< "$repair_metadata")"
+                  repair_jobs="$(gh api \
+                    "repos/${{ github.repository }}/actions/runs/$repair_run/jobs?filter=latest&per_page=100")"
+                  python3 -c '
+                  import json
+                  import sys
+                  payload = json.load(sys.stdin)
+                  attempt = int(sys.argv[1])
+                  workflow = sys.argv[2]
+                  jobs = payload.get("jobs")
+                  if not isinstance(jobs, list) or payload.get("total_count") != len(jobs):
+                      raise SystemExit("repair run job list is incomplete")
+                  required = {
+                      "ci.yml": ("checks", "packaged-app-lifecycle"),
+                      "dependency-audit.yml": ("Required dependency audit",),
+                  }[workflow]
+                  for name in required:
+                      matches = [job for job in jobs if job.get("name") == name]
+                      if len(matches) != 1:
+                          raise SystemExit(
+                              f"repair run must contain exactly one {name!r} job"
+                          )
+                      job = matches[0]
+                      if job.get("run_attempt") != attempt:
+                          raise SystemExit(
+                              f"repair job {name!r} belongs to another run attempt"
+                          )
+                      if job.get("status") != "completed" or job.get("conclusion") != "success":
+                          raise SystemExit(
+                              f"repair job {name!r} did not complete successfully"
+                          )
+                  ' "$repair_attempt" "$repair_workflow" <<< "$repair_jobs"
+                done
+                repair_cursor="$repair_parent"
               done
+              [ "$repair_commit_count" = 2 ] || {
+                echo "publisher repair requires exactly two validated repair commits"
+                exit 1
+              }
               source_commit="$RELEASE_SOURCE_INPUT"
             fi
           fi
@@ -435,6 +554,17 @@ jobs:
           echo "qualification_run_attempt=$qualification_attempt" >> "$GITHUB_OUTPUT"
           echo "readiness_run_id=$readiness_run" >> "$GITHUB_OUTPUT"
           echo "readiness_run_attempt=$readiness_attempt" >> "$GITHUB_OUTPUT"
+
+      - name: Install and preflight locked release verification dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --only-binary=:all: \
+            --require-hashes \
+            -r spike/requirements-runtime.txt
+          python3 -m pip check
+          PYTHONPATH=scripts python3 -c 'import verify_release_artifacts'
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

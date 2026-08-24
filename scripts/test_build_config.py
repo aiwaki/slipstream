@@ -1167,9 +1167,32 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_python_locks_pin_and_hash_every_distribution(self) -> None:
         expected_packages = {
-            "runtime": {"certifi", "cryptography", "scapy"},
-            "test": {"certifi", "cryptography", "pytest", "scapy"},
-            "build": {"certifi", "cryptography", "pyinstaller", "scapy"},
+            "runtime": {
+                "certifi",
+                "cryptography",
+                "h2",
+                "hpack",
+                "hyperframe",
+                "scapy",
+            },
+            "test": {
+                "certifi",
+                "cryptography",
+                "h2",
+                "hpack",
+                "hyperframe",
+                "pytest",
+                "scapy",
+            },
+            "build": {
+                "certifi",
+                "cryptography",
+                "h2",
+                "hpack",
+                "hyperframe",
+                "pyinstaller",
+                "scapy",
+            },
         }
         requirement_pattern = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s]+)")
         hash_pattern = re.compile(r"--hash=sha256:([0-9a-f]{64})")
@@ -1373,7 +1396,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(filtered.returncode, 0, filtered.stderr)
         self.assertEqual(filtered.stdout.splitlines(), ["v0.1.9-preview.22"])
 
-    def test_publisher_repair_reuses_only_a_direct_qualified_parent(self) -> None:
+    def test_publisher_repair_reuses_only_a_bounded_qualified_ancestor(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
             encoding="utf-8"
         )
@@ -1386,19 +1409,52 @@ class BuildConfigTests(unittest.TestCase):
         publication = workflow[publication_start:]
 
         self.assertIn("release_source_commit:", workflow)
-        self.assertIn("fetch-depth: 2", workflow)
+        self.assertIn("fetch-depth: 3", workflow)
         self.assertIn('[ "$GITHUB_RUN_ATTEMPT" = 1 ]', resolution)
-        self.assertIn('parent_commit="$(git rev-parse "$GITHUB_SHA^")"', resolution)
         self.assertIn(
-            '[ "$RELEASE_SOURCE_INPUT" = "$parent_commit" ]', resolution
+            'git merge-base --is-ancestor "$RELEASE_SOURCE_INPUT" "$GITHUB_SHA"',
+            resolution,
         )
         self.assertIn("publisher repair must run from live main", resolution)
-        self.assertIn("git diff --no-renames --name-only", resolution)
-        self.assertIn(".github/workflows/build-app.yml|", resolution)
-        self.assertIn("docs/CURRENT_STATE.md|", resolution)
-        self.assertIn("scripts/test_build_config.py)", resolution)
+        self.assertIn(
+            "expected_repair_source=6ba71ef75d821ee74cedcee5d8a9c83495da7c76",
+            resolution,
+        )
+        self.assertIn(
+            "expected_repair_intermediate=1e0d03130405020a761504c1e65827f76020de47",
+            resolution,
+        )
+        self.assertIn("exact two-hop .23 topology", resolution)
+        self.assertIn('repair_cursor="$GITHUB_SHA"', resolution)
+        self.assertIn("git rev-list --parents -n 1", resolution)
+        self.assertIn("publisher repair history must be linear", resolution)
+        self.assertIn('[ "$repair_commit_count" -le 2 ]', resolution)
+        self.assertIn(
+            "publisher repair permits at most two workflow-only commits", resolution
+        )
+        self.assertIn("git diff --no-renames --name-only -z", resolution)
+        self.assertIn("read -r -d '' repair_file", resolution)
+        self.assertIn("repair_file_count", resolution)
+        self.assertIn("git ls-tree", resolution)
+        self.assertIn('[ "$repair_mode" = 100644 ]', resolution)
+        self.assertIn('[ "$repair_type" = blob ]', resolution)
+        self.assertIn("repair_has_workflow=true", resolution)
+        self.assertIn("repair_has_contract=true", resolution)
+        self.assertIn("repair_has_checkpoint=true", resolution)
+        self.assertIn("must change exactly the workflow", resolution)
         self.assertIn(
             "for repair_workflow in ci.yml dependency-audit.yml", resolution
+        )
+        self.assertIn('select(.head_sha == \\"$repair_cursor\\")', resolution)
+        self.assertIn('"head_branch": "main"', resolution)
+        self.assertIn('"event": "push"', resolution)
+        self.assertIn('"path": f".github/workflows/{workflow}"', resolution)
+        self.assertIn("repair run belongs to a different repository", resolution)
+        self.assertIn('"checks", "packaged-app-lifecycle"', resolution)
+        self.assertIn('"Required dependency audit"', resolution)
+        self.assertIn("repair run job list is incomplete", resolution)
+        self.assertIn(
+            '[ "$repair_commit_count" = 2 ]', resolution
         )
         self.assertIn(
             "publisher repair requires all four exact evidence run IDs", publication
@@ -1428,6 +1484,34 @@ class BuildConfigTests(unittest.TestCase):
         )
         self.assertNotIn("$GITHUB_SHA", product_publication)
         self.assertIn('--source-digest "$GITHUB_SHA"', publisher_attestation)
+
+    def test_publisher_installs_and_preflights_locked_runtime_dependencies(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        install_start = workflow.index(
+            "- name: Install and preflight locked release verification dependencies"
+        )
+        download_start = workflow.index(
+            "- uses: actions/download-artifact@", install_start
+        )
+        verify_start = workflow.index(
+            "- name: Verify exact immutable candidate and qualification proof"
+        )
+        install = workflow[install_start:download_start]
+
+        self.assertIn("cache: pip", workflow)
+        self.assertIn("cache-dependency-path: spike/requirements-runtime.txt", workflow)
+        self.assertIn("--only-binary=:all:", install)
+        self.assertIn("--require-hashes", install)
+        self.assertIn("-r spike/requirements-runtime.txt", install)
+        self.assertIn("python3 -m pip check", install)
+        self.assertIn(
+            "PYTHONPATH=scripts python3 -c 'import verify_release_artifacts'",
+            install,
+        )
+        self.assertLess(install_start, download_start)
+        self.assertLess(download_start, verify_start)
 
     def test_publisher_repair_allowlist_exposes_rename_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1475,6 +1559,142 @@ class BuildConfigTests(unittest.TestCase):
                 },
             )
             self.assertFalse(changed <= allowlist)
+
+    def test_publisher_repair_history_is_exact_linear_and_per_edge_allowlisted(
+        self,
+    ) -> None:
+        allowlist = {
+            ".github/workflows/build-app.yml",
+            "docs/CURRENT_STATE.md",
+            "scripts/test_build_config.py",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            def git(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ("git", "-C", str(repo), *args),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=5,
+                )
+
+            def commit_repair(text: str, message: str) -> str:
+                for path, suffix in (
+                    (workflow, "workflow"),
+                    (contract, "contract"),
+                    (checkpoint, "checkpoint"),
+                ):
+                    path.write_text(f"{text} {suffix}\n", encoding="utf-8")
+                git("add", *sorted(allowlist))
+                git("commit", "-qm", message)
+                return git("rev-parse", "HEAD").stdout.strip()
+
+            def valid_repair_chain(
+                source: str,
+                intermediate: str,
+                head: str,
+            ) -> bool:
+                head_lineage = git("rev-list", "--parents", "-n", "1", head)
+                intermediate_lineage = git(
+                    "rev-list", "--parents", "-n", "1", intermediate
+                )
+                if head_lineage.stdout.split() != [head, intermediate]:
+                    return False
+                if intermediate_lineage.stdout.split() != [intermediate, source]:
+                    return False
+                cursor = head
+                count = 0
+                while cursor != source:
+                    lineage = git("rev-list", "--parents", "-n", "1", cursor)
+                    commits = lineage.stdout.split()
+                    if len(commits) != 2 or commits[0] != cursor:
+                        return False
+                    parent = commits[1]
+                    count += 1
+                    if count > 2:
+                        return False
+                    changed = set(
+                        git(
+                            "diff",
+                            "--no-renames",
+                            "--name-only",
+                            parent,
+                            cursor,
+                        )
+                        .stdout.strip()
+                        .splitlines()
+                    )
+                    if changed != allowlist:
+                        return False
+                    for path in changed:
+                        for tree in (parent, cursor):
+                            entry = git("ls-tree", tree, "--", path).stdout.split()
+                            if len(entry) < 3 or entry[:2] != ["100644", "blob"]:
+                                return False
+                    cursor = parent
+                return count == 2
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Slipstream Tests")
+            git("config", "user.email", "tests@slipstream.invalid")
+            workflow = repo / ".github/workflows/build-app.yml"
+            contract = repo / "scripts/test_build_config.py"
+            checkpoint = repo / "docs/CURRENT_STATE.md"
+            product = repo / "app-tauri/src/product.rs"
+            for path in (workflow, contract, checkpoint, product):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            product.write_text("qualified product\n", encoding="utf-8")
+            source = commit_repair("qualified", "Qualified source")
+            git("add", "app-tauri/src/product.rs")
+            git("commit", "--amend", "-qm", "Qualified source")
+            source = git("rev-parse", "HEAD").stdout.strip()
+            first = commit_repair("repair one", "First publisher repair")
+            second = commit_repair("repair two", "Second publisher repair")
+            self.assertTrue(valid_repair_chain(source, first, second))
+            self.assertFalse(valid_repair_chain(source, source, first))
+            self.assertFalse(valid_repair_chain(source, first, source))
+
+            git("checkout", "-qb", "third", second)
+            third = commit_repair("repair three", "Third publisher repair")
+            self.assertFalse(valid_repair_chain(source, first, third))
+
+            git("checkout", "-qb", "reverted-product", source)
+            product.write_text("modified product\n", encoding="utf-8")
+            bad_first = commit_repair("bad repair one", "Modify product")
+            git("add", "app-tauri/src/product.rs")
+            git("commit", "--amend", "-qm", "Modify product")
+            bad_first = git("rev-parse", "HEAD").stdout.strip()
+            product.write_text("qualified product\n", encoding="utf-8")
+            bad_second = commit_repair("bad repair two", "Revert product")
+            git("add", "app-tauri/src/product.rs")
+            git("commit", "--amend", "-qm", "Revert product")
+            bad_second = git("rev-parse", "HEAD").stdout.strip()
+            self.assertFalse(valid_repair_chain(source, bad_first, bad_second))
+
+            git("checkout", "-qb", "type-change", source)
+            checkpoint.unlink()
+            checkpoint.symlink_to("../scripts/test_build_config.py")
+            type_first = commit_repair("type repair one", "Change path type")
+            git("add", "docs/CURRENT_STATE.md")
+            git("commit", "--amend", "-qm", "Change path type")
+            type_first = git("rev-parse", "HEAD").stdout.strip()
+            checkpoint.unlink()
+            type_second = commit_repair("type repair two", "Restore path type")
+            self.assertFalse(valid_repair_chain(source, type_first, type_second))
+
+            git("checkout", "-qb", "side", source)
+            git("commit", "--allow-empty", "-qm", "Side repair")
+            side = git("rev-parse", "HEAD").stdout.strip()
+            git("checkout", "-q", "main")
+            git("merge", "--no-ff", "-qm", "Merge repair", "side")
+            merge = git("rev-parse", "HEAD").stdout.strip()
+            self.assertFalse(valid_repair_chain(source, side, merge))
+
+            git("checkout", "-qb", "unrelated")
+            unrelated_source = commit_repair("unrelated", "Unrelated source")
+            self.assertFalse(valid_repair_chain(unrelated_source, first, second))
 
     def test_stable_channel_stays_closed_until_notarization_exists(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
