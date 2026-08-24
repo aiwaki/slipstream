@@ -201,6 +201,22 @@ def test_accepts_signed_foreground_safari_network_process_after_recent_input() -
     assert result.reason is AdmissionReason.ACCEPTED
     assert all(call[0][0].startswith("/") for call in runner.calls)
     assert all(call[2] == AdmissionPolicy().max_command_output_bytes for call in runner.calls)
+    verify_calls = [call[0] for call in runner.calls if "--verify" in call[0]]
+    assert (
+        CODESIGN_PATH,
+        "--verify",
+        "--ignore-resources",
+        "--strict=symlinks",
+        "--verbose=2",
+        WEBKIT_PATH,
+    ) in verify_calls
+    assert (
+        CODESIGN_PATH,
+        "--verify",
+        "--strict=symlinks",
+        "--verbose=2",
+        SAFARI_PATH,
+    ) in verify_calls
 
 
 def test_accepts_safari_paths_resolved_into_signed_system_cryptexes() -> None:
@@ -218,6 +234,8 @@ def test_accepts_safari_paths_resolved_into_signed_system_cryptexes() -> None:
 
     assert result.accepted is True
     assert result.browser_family is BrowserFamily.SAFARI
+    verify_calls = [call[0] for call in runner.calls if "--verify" in call[0]]
+    assert all("--ignore-resources" in call for call in verify_calls)
 
 
 def test_accepts_only_official_google_chrome_helper_and_signed_root() -> None:
@@ -238,6 +256,10 @@ def test_accepts_only_official_google_chrome_helper_and_signed_root() -> None:
     assert result.accepted is True
     assert result.browser_family is BrowserFamily.CHROME
     assert result.pid == 301
+    verify_calls = [call[0] for call in runner.calls if "--verify" in call[0]]
+    assert verify_calls
+    assert all("--strict=symlinks" in call for call in verify_calls)
+    assert all("--ignore-resources" not in call for call in verify_calls)
 
 
 def test_rejects_background_browser_even_when_socket_and_signatures_match() -> None:
@@ -346,6 +368,26 @@ def test_opt_in_shared_webkit_rejects_unsigned_frontmost_safari() -> None:
     result = assess(runner, policy=policy)
 
     assert result.reason is AdmissionReason.SIGNATURE_FAILED
+
+
+def test_rejects_system_webkit_when_executable_verification_fails() -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        processes={
+            201: (1, 501, WEBKIT_PATH),
+            200: (1, 501, SAFARI_PATH),
+        },
+        verify_failures={WEBKIT_PATH},
+    )
+    policy = AdmissionPolicy(allow_shared_signed_webkit_with_frontmost_safari=True)
+
+    result = assess(runner, policy=policy)
+
+    assert result.reason is AdmissionReason.SIGNATURE_FAILED
+    verify_call = next(call[0] for call in runner.calls if "--verify" in call[0])
+    assert "--ignore-resources" in verify_call
+    assert "--strict=symlinks" in verify_call
 
 
 def test_opt_in_shared_webkit_rejects_non_safari_frontmost_application() -> None:
