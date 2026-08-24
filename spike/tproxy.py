@@ -8031,6 +8031,8 @@ def _transport_selftest_quic_initial(version, host):
 
 def transport_mechanics_selftest():
     """Exercise the packaged QUIC parser/fallback without network mutation."""
+    from scapy.all import ICMP, ICMPv6DestUnreach, IP, IPv6, Raw, UDP
+
     global _pf_applied, GEPH_ENABLED, _geph_up, _geph_owned, _geph_port
     global transparent_routing_ready
     previous = (
@@ -8071,14 +8073,26 @@ def transport_mechanics_selftest():
                 raise RuntimeError("packaged QUIC exact hostname observation failed")
             initial_flows = OrderedDict()
             fallback_flows = OrderedDict()
-            if not _quic_initial_tcp_fallback_response(
+            response = _quic_initial_tcp_fallback_response(
                 initial_flows,
                 fallback_flows,
                 flow,
                 initial,
                 now=100.0,
-            ):
+            )
+            if not response:
                 raise RuntimeError("packaged QUIC exact-host fallback failed")
+            ipv6 = flow[0] == 6
+            network_layer = IPv6 if ipv6 else IP
+            packets = _quic_tcp_fallback_packets(
+                network_layer(src=flow[1], dst=flow[3]),
+                UDP(sport=flow[2], dport=flow[4]) / Raw(initial),
+                response,
+                ipv6=ipv6,
+                layers=(IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach),
+            )
+            if len(packets) != 2 or not all(bytes(packet) for packet in packets):
+                raise RuntimeError("packaged QUIC TCP fallback signals failed")
             if _quic_initial_tcp_fallback_response(
                 initial_flows,
                 fallback_flows,
@@ -11315,6 +11329,44 @@ def _quic_initial_tcp_fallback_response(
     return response
 
 
+def _quic_tcp_fallback_packets(ip, udp, response, *, ipv6, layers):
+    """Build bounded reverse-path signals for one observed QUIC flow.
+
+    Version Negotiation is sufficient only until the client has processed a
+    packet from the real server.  The matching ICMP port-unreachable also
+    fails the exact connected UDP socket when that server packet wins the
+    race, allowing the browser to retry the same navigation over TCP.  The
+    embedded tuple is reconstructed from the observed packet and is never
+    widened to a host, address range, or UDP/443 rule.
+    """
+    IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach = layers
+    network_layer = IPv6 if ipv6 else IP
+    reverse_network = network_layer(src=ip.dst, dst=ip.src)
+    version_negotiation = (
+        reverse_network.copy()
+        / UDP(sport=udp.dport, dport=udp.sport)
+        / Raw(response)
+    )
+    quoted_original = (
+        network_layer(src=ip.src, dst=ip.dst)
+        / UDP(sport=udp.sport, dport=udp.dport)
+        / Raw(bytes(udp.payload)[:8])
+    )
+    if ipv6:
+        unreachable = (
+            reverse_network
+            / ICMPv6DestUnreach(code=4)
+            / quoted_original
+        )
+    else:
+        unreachable = (
+            reverse_network
+            / ICMP(type=3, code=3)
+            / quoted_original
+        )
+    return version_negotiation, unreachable
+
+
 def reduce_geph_probe_state(previous_up, strikes, probe_ok, port, conflict=False):
     """Apply hysteresis without inventing readiness on a cold start."""
     if probe_ok and port is not None:
@@ -11353,10 +11405,22 @@ def network_monitor(
         else wake_marker_reader
     )
     last_wake_marker = wake_marker_reader()
-    AsyncSniffer = send = IP = IPv6 = UDP = TCP = Raw = get_if_addr = None
+    AsyncSniffer = send = IP = IPv6 = UDP = TCP = Raw = None
+    ICMP = ICMPv6DestUnreach = get_if_addr = None
     try:
-        from scapy.all import (AsyncSniffer, send, IP, IPv6, UDP, TCP, Raw,
-                               get_if_addr, conf)
+        from scapy.all import (
+            AsyncSniffer,
+            ICMP,
+            ICMPv6DestUnreach,
+            IP,
+            IPv6,
+            Raw,
+            TCP,
+            UDP,
+            conf,
+            get_if_addr,
+            send,
+        )
         conf.verb = 0
     except Exception as e:
         print(f">> packet observer disabled (scapy: {e})", file=sys.stderr)
@@ -11381,11 +11445,9 @@ def network_monitor(
             return
         if p.haslayer(IP):
             ip = p[IP]
-            ip_packet = lambda src, dst: IP(src=src, dst=dst)
             ipv6 = False
         elif IPv6 is not None and p.haslayer(IPv6):
             ip = p[IPv6]
-            ip_packet = lambda src, dst: IPv6(src=src, dst=dst)
             ipv6 = True
         else:
             return
@@ -11400,15 +11462,18 @@ def network_monitor(
             )
             if response is None:
                 return
-            packet = (
-                ip_packet(ip.dst, ip.src)
-                / UDP(sport=443, dport=udp.sport)
-                / Raw(response)
+            packets = _quic_tcp_fallback_packets(
+                ip,
+                udp,
+                response,
+                ipv6=ipv6,
+                layers=(IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach),
             )
             for _ in range(QUIC_TCP_FALLBACK_REPEAT):
-                _l3send(packet)
+                for packet in packets:
+                    _l3send(packet)
             print(
-                ">> route-qualified QUIC flow moved to TCP fallback",
+                ">> route-qualified QUIC flow refused for TCP fallback",
                 file=sys.stderr,
                 flush=True,
             )

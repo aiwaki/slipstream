@@ -51,9 +51,24 @@ absolute eight-second job remain unchanged; one signed foreground attempt may
 use an adaptive retry capped at five seconds while preserving two seconds plus
 25 ms for proof and scheduling.
 
-The correction now sends Version Negotiation for only one exact QUIC Initial
-flow when a static geo-exit, a learned exact host, or a fresh exact unknown
-first contact needs the TCP evidence path. It does not authorize Geph: the TCP
+The first exact installed QUIC correction still failed visibly in both
+browsers. Public auto-geo-exit state advanced from one to two learned exact
+hosts, but Chrome retained Aikido's loader and Capacitor's direct Cloudflare
+denial; Safari retained Start Page for Aikido and rendered the direct Capacitor
+denial. During a fresh Safari Aikido navigation, the signed WebKit Networking
+process held the root on TCP while the critical CDN connection remained on
+UDP/443. The daemon's valid Version Negotiation therefore lost a packet race:
+RFC 9000 requires the client to ignore VN after it has processed a real server
+packet. The evidence rules out another hostname, classifier, or provenance
+exception.
+
+The correction now sends bounded Version Negotiation plus one matching
+ICMPv4/ICMPv6 port-unreachable response for only one exact QUIC Initial flow
+when a static geo-exit, a learned exact host, or a fresh exact unknown first
+contact needs the TCP evidence path. The ICMP quote contains only that observed
+address/port tuple and eight QUIC payload bytes, allowing the kernel to fail
+the exact connected UDP socket even when the real server wins the VN race. It
+adds no persistent PF rule and does not authorize Geph: the TCP
 path retains the complete direct/owned proof and foreground provenance. A
 fresh usable or challenge/auth direct result is cached and restores QUIC for
 that exact host; an inconclusive slow link remains direct and unlearned.
@@ -61,19 +76,19 @@ Explicit direct/local policy, Discord, YouTube, Googlevideo, ECH/no-SNI,
 unsupported QUIC, inactive PF, and unowned/unready Geph remain untouched. There
 is no destination-IP/CDN rule and no global UDP/443 block.
 
-The exact source passes `1044` full `spike` tests, the full script test suite,
-focused QUIC v1/v2 and IPv4/IPv6 first-contact/learned/exclusion checks,
-packaged transport self-test, compilation, and `git diff --check`. The currently
-installed diagnostic build remains the preceding provenance-only daemon PID
-`81055`, SHA-256
-`7f316ac1fe3a0dca498f19a7947ecd2b3ba832358c459696c9da2155e2bc235a`;
-it is not evidence for the QUIC correction. The next verified action is to
-build and install the exact corrected local head, restart the two browsers so
-no pre-existing QUIC connection survives, and run one fresh physical-input
-Capacitor/Aikido attempt in normal Chrome and Safari. Do not merge until that
-behavior and the new exact-head PR checks pass. This targeted diagnosis did not
-start another 30-minute soak and does not weaken or replace any later release
-gate. The local app remains ad-hoc and unnotarized.
+The exact working source passes `1717` full Python tests plus `181` subtests,
+focused QUIC v1/v2 and IPv4/IPv6 first-contact/learned/exclusion checks, the new
+exact-flow packet-construction checks, compilation, and `git diff --check`. The
+currently installed diagnostic app executable has SHA-256
+`8f1eb22ab44f8a58e2fe3def4ec23e98377125925a031b5d9cf1feb8a837a8d1`
+and runs daemon PID `3134`; it predates the exact-socket correction and is not
+success evidence. The next verified action is to commit, build, and install the
+exact corrected local head, restart the two browsers so no pre-existing QUIC
+connection survives, and run one fresh physical-input Capacitor/Aikido attempt
+in normal Chrome and Safari. Do not merge until that behavior and the new
+exact-head PR checks pass. This targeted diagnosis did not start another
+30-minute soak and does not weaken or replace any later release gate. The local
+app remains ad-hoc and unnotarized.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)

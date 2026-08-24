@@ -1194,17 +1194,25 @@ If that admission succeeds and `learned` increases but the same visible page
 still uses its direct denial or incomplete asset, check the QUIC boundary before
 changing semantic rules. A learned unknown exact host is a TCP-only Geph route;
 letting a browser reuse HTTP/3 bypasses it. Conversely, a QUIC-first unknown
-root never reaches the TCP semantic preflight at all. The allowed correction is
-one exact-SNI QUIC Version Negotiation flow while classification is due:
+root never reaches the TCP semantic preflight at all. Version Negotiation alone
+is not sufficient when a real server packet wins the race: RFC 9000 requires a
+client to ignore a later VN after it has successfully processed any packet. The
+allowed correction is one exact-SNI flow with bounded Version Negotiation plus
+a matching ICMPv4/ICMPv6 port-unreachable while classification is due:
 
 - reviewed geo-exit and learned exact hosts continue on TCP;
 - a fresh unknown exact host uses TCP once for the existing bounded direct
-  classification; no Geph route is authorized by Version Negotiation;
+  classification; neither transport signal authorizes a Geph route;
 - fresh `usable` or `challenge_or_auth` cache restores QUIC for that exact host;
 - slow/inconclusive direct evidence remains unlearned and direct;
 - explicit direct/local routes, Discord, YouTube, Googlevideo, ECH/no-SNI,
   unsupported QUIC, shared destination IPs, and every other UDP flow remain
   untouched.
+
+The ICMP message quotes only the observed client/server addresses, UDP ports,
+and first eight QUIC payload bytes so the kernel can bind the error to that
+connected UDP socket. It creates no persistent PF rule and cannot affect a
+second flow, a hostname suffix, or UDP/443 generally.
 
 Do not replace this with a CDN/IP rule or a global UDP/443 block. When validating
 a newly installed correction, restart the browser first so an already-open QUIC

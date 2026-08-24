@@ -6670,6 +6670,54 @@ def test_quic_version_negotiation_fallback_swaps_connection_ids():
     )
 
 
+@pytest.mark.parametrize(
+    ("ipv6", "client", "server"),
+    (
+        (False, "192.0.2.10", "198.51.100.10"),
+        (True, "2001:db8::10", "2001:db8::20"),
+    ),
+)
+def test_quic_tcp_fallback_packets_refuse_only_the_observed_udp_flow(
+    ipv6,
+    client,
+    server,
+):
+    from scapy.all import ICMP, ICMPv6DestUnreach, IP, IPv6, Raw, UDP
+
+    network_layer = IPv6 if ipv6 else IP
+    original_payload = b"abcdefghignored"
+    ip = network_layer(src=client, dst=server)
+    udp = UDP(sport=51000, dport=443) / Raw(original_payload)
+    response = b"version-negotiation"
+
+    version_negotiation, unreachable = tproxy._quic_tcp_fallback_packets(
+        ip,
+        udp,
+        response,
+        ipv6=ipv6,
+        layers=(IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach),
+    )
+
+    assert version_negotiation.src == server
+    assert version_negotiation.dst == client
+    assert version_negotiation[UDP].sport == 443
+    assert version_negotiation[UDP].dport == 51000
+    assert bytes(version_negotiation[Raw]) == response
+
+    error_layer = ICMPv6DestUnreach if ipv6 else ICMP
+    assert unreachable.src == server
+    assert unreachable.dst == client
+    assert unreachable[error_layer].code == (4 if ipv6 else 3)
+    if not ipv6:
+        assert unreachable[ICMP].type == 3
+    quoted_ip = unreachable[error_layer].payload[network_layer]
+    assert quoted_ip.src == client
+    assert quoted_ip.dst == server
+    assert quoted_ip[UDP].sport == 51000
+    assert quoted_ip[UDP].dport == 443
+    assert bytes(quoted_ip[Raw]) == original_payload[:8]
+
+
 def test_ipv6_quic_v2_fallback_is_exact_host_and_flow_scoped(monkeypatch):
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "transparent_routing_ready", lambda: True)
