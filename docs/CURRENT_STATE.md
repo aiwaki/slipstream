@@ -10,8 +10,8 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-24 (publisher release-filter boundary): exact product main
-entering the correction is
+Update 2026-08-24 (publisher dependency-preflight boundary): exact qualified
+product source remains
 `6ba71ef75d821ee74cedcee5d8a9c83495da7c76` after
 [PR #367](https://github.com/aiwaki/slipstream/pull/367). Exact-main
 [CI `32717752642`](https://github.com/aiwaki/slipstream/actions/runs/32717752642)
@@ -24,6 +24,16 @@ Independent validation matched those bytes and verified its manifest, exact
 source archive/tree/run/attempt, updater signature, DMG, arm64 binaries, seven
 provenance subjects, three SPDX subjects, and app-tree SHA-256
 `d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea`.
+
+[PR #368](https://github.com/aiwaki/slipstream/pull/368) merged the first
+publisher-only correction as live main
+`1e0d03130405020a761504c1e65827f76020de47`. Its exact-main
+[CI `32726104977`](https://github.com/aiwaki/slipstream/actions/runs/32726104977)
+and
+[dependency audit `32726104931`](https://github.com/aiwaki/slipstream/actions/runs/32726104931)
+passed. The commit has the qualified product source as its sole parent and
+changes only `.github/workflows/build-app.yml`, its contract test, and this
+checkpoint; no product file changed.
 
 The user-authorized combined
 [release-readiness run `32719127944`](https://github.com/aiwaki/slipstream/actions/runs/32719127944),
@@ -38,24 +48,34 @@ no cleanup failure, and every visibility/residue counter zero, including
 qualification artifact `9518107947` has digest
 `sha256:c4fca9a7c571c6c46428588b4cb6ac79ab5530f02b376bb2fd059c674ddb4732`.
 
-The exact-input
+The first exact-input
 [publisher run `32722287401`](https://github.com/aiwaki/slipstream/actions/runs/32722287401)
 failed before candidate/proof resolution and before any tag or release mutation.
 The `Resolve previous app release tag` step interpolated a regex containing
 `\.` into a `gh api --jq` string, where jq rejected `\.` as an invalid string
-escape. Tag and release `v0.1.9-preview.23` remain absent. The active correction
-pipes the unmodified API response into system `jq`, passes the current tag,
-pattern, and prerelease flag with typed `--arg`/`--argjson`, and regression-tests
-the actual extracted filter against preview `.23`, `.22`, draft, and stable
-fixtures plus the live `.22` predecessor.
+escape. PR #368 corrected this by passing typed arguments to system `jq`; the
+actual `.23`/`.22`/draft/stable filter regression passed. The subsequent
+[publisher run `32727225970`](https://github.com/aiwaki/slipstream/actions/runs/32727225970)
+passed the repair guard, filter, exact run resolution, candidate downloads, and
+complete candidate/qualification/readiness verification. It then failed before
+attestation or any release/tag mutation because `verify_release_artifacts.py`
+transitively imports `h2`, while the publisher had not installed the locked
+runtime dependencies. Tag and release `v0.1.9-preview.23` remain absent, and
+preview `.22` was not archived.
 
-Do not rerun publisher `32722287401` unchanged, and do not repeat the unrelated
-30-minute soak. Merge the deterministic filter correction after exact-head
-review and required checks. Its narrowly bounded publisher-repair mode may
-reuse source `6ba71ef75d821ee74cedcee5d8a9c83495da7c76` only when that commit is the
-direct parent of live main, the one-commit diff contains only
-`.github/workflows/build-app.yml`, its contract test, and this checkpoint, and
-the repaired main itself has successful exact-SHA CI and dependency audit.
+Do not rerun either failed publisher unchanged, and do not repeat the unrelated
+30-minute soak. The active correction installs `spike/requirements-runtime.txt`
+with hashes, runs `pip check`, and imports the verifier before downloading the
+large candidate. Repair mode is pinned to the exact two-hop topology from the
+qualified source through first repair `1e0d03130405020a761504c1e65827f76020de47`
+to the next live main. It examines both commits independently with NUL-delimited
+paths and rename detection disabled, requires each diff to contain exactly
+regular-blob versions of `build-app.yml`, its contract test, and this
+checkpoint, and rejects merges, path type/mode changes, additions/deletions,
+and any product path. For both repair SHAs it independently validates exact
+repository/workflow/branch/event/attempt metadata, successful exact-main CI and
+dependency audit, complete job lists, and their required wrapper jobs.
+
 Candidate, audit, qualification, readiness, their existing attestations,
 manifest source fields, release metadata payloads, and the tag remain bound to
 the older qualified source commit; the tag must target that commit. The new
@@ -66,7 +86,8 @@ source fields must name the older qualified source; and `latest.json` must
 remain transitively bound through its tag, updater signature, and the
 source-bound artifact manifest. Dispatch the publisher with all four explicit
 successful evidence run IDs and the explicit repair source, without another
-account-backed run. The preview remains unpublished, ad-hoc signed, and
+account-backed run, only after the second repair has its own exact-head and
+exact-main checks. The preview remains unpublished, ad-hoc signed, and
 unnotarized because no Apple Developer ID is available.
 
 ### Previous checkpoint
