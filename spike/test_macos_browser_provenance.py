@@ -69,6 +69,7 @@ class FixtureRunner:
     )
     front_bundle: str = "com.apple.Safari"
     front_pid: int = 200
+    front_info_output: str | None = None
     idle_nanoseconds: int = 250_000_000
     advance_per_call: float = 0.0
     lsof_outputs: list[str] = field(default_factory=list)
@@ -117,7 +118,12 @@ class FixtureRunner:
         if command[:2] == (LSAPPINFO_PATH, "info"):
             return CommandResult(
                 0,
-                f'"CFBundleIdentifier"="{self.front_bundle}"\n"pid"={self.front_pid}\n',
+                (
+                    self.front_info_output
+                    if self.front_info_output is not None
+                    else f'"CFBundleIdentifier"="{self.front_bundle}"\n'
+                    f'"pid"={self.front_pid}\n'
+                ),
             )
         if command[0] == IOREG_PATH:
             return CommandResult(0, f'    "HIDIdleTime" = {self.idle_nanoseconds}\n')
@@ -260,6 +266,110 @@ def test_accepts_only_official_google_chrome_helper_and_signed_root() -> None:
     assert verify_calls
     assert all("--strict=symlinks" in call for call in verify_calls)
     assert all("--ignore-resources" not in call for call in verify_calls)
+
+
+def test_accepts_current_lsappinfo_format_for_signed_foreground_chrome() -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        processes={
+            301: (300, 501, CHROME_HELPER_PATH),
+            300: (1, 501, CHROME_PATH),
+        },
+        owner_pid=301,
+        front_bundle="com.google.Chrome",
+        front_pid=300,
+        front_info_output=(
+            "[ NULL ]  ASN:0x0-0xabc: (in front)\n"
+            '    bundleID="com.google.Chrome"\n'
+            "    bundle path=[ NULL ]\n"
+            "    executable path=[ NULL ]\n"
+            "    pid = 300 !cgsConnection !signalled type=[ NULL ] "
+            "flavor=[ NULL ] Version=[ NULL ] Arch=!!none\n"
+        ),
+    )
+
+    result = assess(runner)
+
+    assert result.accepted is True
+    assert result.browser_family is BrowserFamily.CHROME
+    assert result.pid == 301
+
+
+def test_accepts_current_lsappinfo_format_for_signed_foreground_safari() -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        front_info_output=(
+            "[ NULL ]  ASN:0x0-0xabc: (in front)\n"
+            '    bundleID="com.apple.Safari"\n'
+            "    bundle path=[ NULL ]\n"
+            "    executable path=[ NULL ]\n"
+            "    pid = 200 !cgsConnection !signalled type=[ NULL ]\n"
+        ),
+    )
+
+    result = assess(runner)
+
+    assert result.accepted is True
+    assert result.browser_family is BrowserFamily.SAFARI
+    assert result.pid == 201
+
+
+@pytest.mark.parametrize(
+    "front_info_output",
+    [
+        (
+            '    bundleID="com.google.Chrome"\n'
+            '    bundleID="com.apple.Safari"\n'
+            "    pid = 300 !cgsConnection\n"
+        ),
+        (
+            '    bundleID="com.google.Chrome"\n'
+            "    pid = 300 !cgsConnection\n"
+            "    pid = 301 !cgsConnection\n"
+        ),
+        (
+            '"CFBundleIdentifier"="com.google.Chrome"\n'
+            '"pid"=300\n'
+            '    bundleID="com.google.Chrome"\n'
+            "    pid = 300 !cgsConnection\n"
+        ),
+        (
+            '"CFBundleIdentifier"="com.google.Chrome"\n'
+            "    pid = 300 !cgsConnection\n"
+        ),
+        (
+            '    bundleID="com.google.Chrome"\n'
+            '"pid"=300\n'
+        ),
+        "[ NULL ]  ASN:0x0-0xabc: (in front)\n",
+        '    bundleID="com.google.Chrome"\n    pid = invalid\n',
+        '    bundleID="com.google.Chrome"\n    pid = 0\n',
+        '    bundleID="com.google.Chrome"\n    pid = 1\n',
+        '    bundleID="com.google.Chrome"\n    pid = -1\n',
+        'bundleID="com.google.Chrome"\npid = 300\n',
+    ],
+)
+def test_current_lsappinfo_format_rejects_ambiguous_or_relaxed_fields(
+    front_info_output: str,
+) -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        processes={
+            301: (300, 501, CHROME_HELPER_PATH),
+            300: (1, 501, CHROME_PATH),
+        },
+        owner_pid=301,
+        front_bundle="com.google.Chrome",
+        front_pid=300,
+        front_info_output=front_info_output,
+    )
+
+    result = assess(runner)
+
+    assert result.reason is AdmissionReason.NOT_FRONTMOST
 
 
 def test_rejects_background_browser_even_when_socket_and_signatures_match() -> None:

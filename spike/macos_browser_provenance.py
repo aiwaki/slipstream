@@ -713,16 +713,45 @@ def _read_frontmost(observer: _BudgetedObserver) -> _FrontmostApplication:
     output = observer.run(
         (LSAPPINFO_PATH, "info", "-only", "bundleID", "-only", "pid", asn)
     )
-    bundle_ids = re.findall(
+    # Older lsappinfo emits quoted CoreFoundation keys, while current
+    # macOS emits the requested field names with indentation and appends
+    # process flags after the PID. Accept only those two known field layouts
+    # from the already-bounded output and retain the fail-closed uniqueness
+    # requirement.
+    legacy_bundle_ids = re.findall(
         r'^"CFBundleIdentifier"="([^"\r\n]+)"$', output, flags=re.MULTILINE
     )
-    pids = re.findall(r'^"pid"=(\d+)$', output, flags=re.MULTILINE)
-    if len(bundle_ids) != 1 or len(pids) != 1:
+    legacy_pids = re.findall(r'^"pid"=(\d+)$', output, flags=re.MULTILINE)
+    current_bundle_ids = re.findall(
+        r'^[ \t]+bundleID="([^"\r\n]+)"[ \t]*$', output, flags=re.MULTILINE
+    )
+    current_pids = re.findall(
+        r'^[ \t]+pid[ \t]*=[ \t]*(\d+)(?:[ \t]+[^\r\n]*)?$',
+        output,
+        flags=re.MULTILINE,
+    )
+    if (
+        len(legacy_bundle_ids) == 1
+        and len(legacy_pids) == 1
+        and not current_bundle_ids
+        and not current_pids
+    ):
+        bundle_id = legacy_bundle_ids[0]
+        pid_text = legacy_pids[0]
+    elif (
+        len(current_bundle_ids) == 1
+        and len(current_pids) == 1
+        and not legacy_bundle_ids
+        and not legacy_pids
+    ):
+        bundle_id = current_bundle_ids[0]
+        pid_text = current_pids[0]
+    else:
         raise _ObservationFailure(AdmissionReason.NOT_FRONTMOST)
-    pid = int(pids[0], 10)
+    pid = int(pid_text, 10)
     if pid <= 1:
         raise _ObservationFailure(AdmissionReason.NOT_FRONTMOST)
-    return _FrontmostApplication(asn, bundle_ids[0], pid)
+    return _FrontmostApplication(asn, bundle_id, pid)
 
 
 def _parse_front_asn(output: str) -> str:
