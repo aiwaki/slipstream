@@ -30,6 +30,9 @@ on:
       readiness_run_id:
         description: "Optional successful protected release-readiness run ID for this exact SHA."
         required: false
+      release_source_commit:
+        description: "Publisher-repair only: exact qualified parent commit when current main changes only build-app.yml, its contract test, and CURRENT_STATE."
+        required: false
   push:
     tags: ["v*"]
 
@@ -57,6 +60,8 @@ jobs:
           exit 1
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -66,10 +71,16 @@ jobs:
         id: ver
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_INPUT: ${{ github.event.inputs.release_source_commit }}
         run: |
           set -euo pipefail
           repo_v="$(tr -d '[:space:]' < VERSION)"
+          source_commit="$GITHUB_SHA"
           if [ "$GITHUB_EVENT_NAME" = push ]; then
+            [ -z "$RELEASE_SOURCE_INPUT" ] || {
+              echo "publisher repair is unavailable for tag-triggered stable releases"
+              exit 1
+            }
             v="${GITHUB_REF_NAME#v}"
             tag="$GITHUB_REF_NAME"
             [ "$v" = "$repo_v" ] || {
@@ -108,6 +119,57 @@ jobs:
             prerelease=true
             make_latest=false
             release_name="Slipstream $v"
+            if [ -n "$RELEASE_SOURCE_INPUT" ]; then
+              [ "$GITHUB_RUN_ATTEMPT" = 1 ] || {
+                echo "publisher repair cannot use a workflow rerun"
+                exit 1
+              }
+              [[ "$RELEASE_SOURCE_INPUT" =~ ^[0-9a-f]{40}$ ]] || {
+                echo "publisher repair source must be a full lowercase commit SHA"
+                exit 1
+              }
+              parent_commit="$(git rev-parse "$GITHUB_SHA^")"
+              [ "$RELEASE_SOURCE_INPUT" = "$parent_commit" ] || {
+                echo "publisher repair source must be the direct parent of current main"
+                exit 1
+              }
+              live_main="$(gh api \
+                "repos/${{ github.repository }}/git/ref/heads/main" \
+                --jq .object.sha)"
+              [ "$live_main" = "$GITHUB_SHA" ] || {
+                echo "publisher repair must run from live main"
+                exit 1
+              }
+              repair_files="$(git diff --no-renames --name-only "$RELEASE_SOURCE_INPUT" "$GITHUB_SHA")"
+              [ -n "$repair_files" ] || {
+                echo "publisher repair diff is empty"
+                exit 1
+              }
+              while IFS= read -r repair_file; do
+                case "$repair_file" in
+                  .github/workflows/build-app.yml|docs/CURRENT_STATE.md|scripts/test_build_config.py) ;;
+                  *)
+                    echo "publisher repair changes a non-allowlisted file: $repair_file"
+                    exit 1
+                    ;;
+                esac
+              done <<< "$repair_files"
+              grep -Fxq .github/workflows/build-app.yml <<< "$repair_files" || {
+                echo "publisher repair must change build-app.yml"
+                exit 1
+              }
+              for repair_workflow in ci.yml dependency-audit.yml; do
+                repair_run="$(gh api --paginate \
+                  "repos/${{ github.repository }}/actions/workflows/$repair_workflow/runs?branch=main&event=push&status=completed&per_page=100" \
+                  --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+                  | sed -n '1p')"
+                [ -n "$repair_run" ] || {
+                  echo "publisher repair main lacks successful $repair_workflow"
+                  exit 1
+                }
+              done
+              source_commit="$RELEASE_SOURCE_INPUT"
+            fi
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -115,7 +177,8 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
-          echo "source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$(git show -s --format=%ct "$source_commit")" >> "$GITHUB_OUTPUT"
           existing_tag_count="$(gh api \
             "repos/${{ github.repository }}/git/matching-refs/tags/$tag" \
             --jq "[.[] | select(.ref == \"refs/tags/$tag\")] | length")"
@@ -158,7 +221,7 @@ jobs:
                   )
           if not isinstance(release.get("published_at"), str) or not release["published_at"]:
               raise SystemExit("existing release is not published")
-          ' "$resume_release_id" "$tag" "$release_name" "$GITHUB_SHA" "$prerelease" \
+          ' "$resume_release_id" "$tag" "$release_name" "$source_commit" "$prerelease" \
               <<< "$existing_release"
             echo "::notice::resuming exact published release finalization for $tag"
           else
@@ -181,8 +244,18 @@ jobs:
             prerelease=false
             tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+$'
           fi
-          filter=".[] | select(.draft | not) | select(.tag_name != \"$current_tag\") | select(.tag_name | test(\"$tag_pattern\")) | select(.prerelease == $prerelease) | .tag_name"
-          previous_tag="$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" --jq "$filter" | sed -n '1p')"
+          # jq expands these names from the typed arguments below.
+          # shellcheck disable=SC2016
+          filter='.[] | select(.draft | not) | select(.tag_name != $current_tag) | select(.tag_name | test($tag_pattern)) | select(.prerelease == $prerelease) | .tag_name'
+          previous_tag="$(
+            gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" |
+              jq -r \
+                --arg current_tag "$current_tag" \
+                --arg tag_pattern "$tag_pattern" \
+                --argjson prerelease "$prerelease" \
+                "$filter" |
+              sed -n '1p'
+          )"
           echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
       - name: Resolve exact candidate and qualification runs
@@ -193,43 +266,54 @@ jobs:
           DEPENDENCY_AUDIT_INPUT: ${{ github.event.inputs.dependency_audit_run_id }}
           QUALIFICATION_INPUT: ${{ github.event.inputs.qualification_run_id }}
           READINESS_INPUT: ${{ github.event.inputs.readiness_run_id }}
+          RELEASE_SOURCE_INPUT: ${{ github.event.inputs.release_source_commit }}
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
           candidate_run="$CANDIDATE_INPUT"
           dependency_audit_run="$DEPENDENCY_AUDIT_INPUT"
           qualification_run="$QUALIFICATION_INPUT"
           readiness_run="$READINESS_INPUT"
+          if [ -n "$RELEASE_SOURCE_INPUT" ]; then
+            [ -n "$candidate_run" ] &&
+              [ -n "$dependency_audit_run" ] &&
+              [ -n "$qualification_run" ] &&
+              [ -n "$readiness_run" ] || {
+                echo "publisher repair requires all four exact evidence run IDs"
+                exit 1
+              }
+          fi
           if [ -z "$candidate_run" ]; then
             candidate_run="$(gh api --paginate \
               "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" \
-              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$SOURCE_COMMIT\") | select(.conclusion == \"success\") | .id" \
               | sed -n '1p')"
           fi
           if [ -z "$dependency_audit_run" ]; then
             dependency_audit_run="$(gh api --paginate \
               "repos/${{ github.repository }}/actions/workflows/dependency-audit.yml/runs?branch=main&event=push&status=completed&per_page=100" \
-              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$SOURCE_COMMIT\") | select(.conclusion == \"success\") | .id" \
               | sed -n '1p')"
           fi
           if [ -z "$readiness_run" ]; then
             readiness_run="$(gh api --paginate \
               "repos/${{ github.repository }}/actions/workflows/release-readiness.yml/runs?branch=main&event=workflow_dispatch&status=completed&per_page=100" \
-              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$SOURCE_COMMIT\") | select(.conclusion == \"success\") | .id" \
               | sed -n '1p')"
           fi
           if [ -z "$qualification_run" ]; then
             qualification_run="$readiness_run"
           fi
           [ -n "$candidate_run" ] || {
-            echo "missing successful ci.yml run for $GITHUB_SHA"
+            echo "missing successful ci.yml run for $SOURCE_COMMIT"
             exit 1
           }
           [ -n "$dependency_audit_run" ] || {
-            echo "missing successful dependency-audit.yml run for $GITHUB_SHA"
+            echo "missing successful dependency-audit.yml run for $SOURCE_COMMIT"
             exit 1
           }
           [ -n "$readiness_run" ] || {
-            echo "missing successful release-readiness.yml run for $GITHUB_SHA"
+            echo "missing successful release-readiness.yml run for $SOURCE_COMMIT"
             exit 1
           }
           [ "$qualification_run" = "$readiness_run" ] || {
@@ -261,7 +345,7 @@ jobs:
               raise SystemExit("run belongs to a different repository")
           if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
               raise SystemExit("run attempt is invalid")
-          ' "$GITHUB_SHA" "${{ github.repository }}" push ci.yml \
+          ' "$SOURCE_COMMIT" "${{ github.repository }}" push ci.yml \
             <<< "$candidate_metadata"
           python3 -c '
           import json
@@ -282,7 +366,7 @@ jobs:
               raise SystemExit("run belongs to a different repository")
           if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
               raise SystemExit("run attempt is invalid")
-          ' "$GITHUB_SHA" "${{ github.repository }}" push \
+          ' "$SOURCE_COMMIT" "${{ github.repository }}" push \
             dependency-audit.yml <<< "$dependency_audit_metadata"
           dependency_audit_attempt="$(python3 -c \
             'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
@@ -334,7 +418,7 @@ jobs:
               raise SystemExit("run belongs to a different repository")
           if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
               raise SystemExit("run attempt is invalid")
-          ' "$GITHUB_SHA" "${{ github.repository }}" workflow_dispatch \
+          ' "$SOURCE_COMMIT" "${{ github.repository }}" workflow_dispatch \
             release-readiness.yml <<< "$readiness_metadata"
           candidate_attempt="$(python3 -c \
             'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
@@ -354,21 +438,21 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-candidate-${{ github.sha }}
+          name: release-candidate-${{ steps.ver.outputs.source_commit }}
           path: dist-candidate
           run-id: ${{ steps.runs.outputs.release_candidate_run_id }}
           github-token: ${{ github.token }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: Slipstream-release-ready-${{ github.sha }}
+          name: Slipstream-release-ready-${{ steps.ver.outputs.source_commit }}
           path: dist-readiness
           run-id: ${{ steps.runs.outputs.readiness_run_id }}
           github-token: ${{ github.token }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: Slipstream-owned-geph-qualified-${{ github.sha }}
+          name: Slipstream-owned-geph-qualified-${{ steps.ver.outputs.source_commit }}
           path: dist-qualified
           run-id: ${{ steps.runs.outputs.qualification_run_id }}
           github-token: ${{ github.token }}
@@ -376,17 +460,18 @@ jobs:
       - name: Verify exact immutable candidate and qualification proof
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
-          source_tree="$(git rev-parse "$GITHUB_SHA^{tree}")"
-          source_archive_sha256="$(git archive --format=tar "$GITHUB_SHA" | shasum -a 256 | awk '{print $1}')"
+          source_tree="$(git rev-parse "$SOURCE_COMMIT^{tree}")"
+          source_archive_sha256="$(git archive --format=tar "$SOURCE_COMMIT" | shasum -a 256 | awk '{print $1}')"
           mkdir -p "$RUNNER_TEMP/candidate-app"
           ditto -x -k dist-candidate/Slipstream-macos-arm64.zip "$RUNNER_TEMP/candidate-app"
           python3 scripts/release_candidate.py verify \
             --candidate-dir dist-candidate \
             --repository "${{ github.repository }}" \
             --version "${{ steps.ver.outputs.version }}" \
-            --source-commit "$GITHUB_SHA" \
+            --source-commit "$SOURCE_COMMIT" \
             --source-tree "$source_tree" \
             --source-archive-sha256 "$source_archive_sha256" \
             --source-date-epoch "${{ steps.ver.outputs.source_date_epoch }}" \
@@ -418,21 +503,21 @@ jobs:
             gh attestation verify "$artifact" \
               --repo "${{ github.repository }}" \
               --signer-workflow "$signer_workflow" \
-              --source-digest "$GITHUB_SHA" \
+              --source-digest "$SOURCE_COMMIT" \
               --source-ref refs/heads/main \
               --deny-self-hosted-runners >/dev/null
           done
           gh attestation verify dist-qualified/release-qualification.json \
             --repo "${{ github.repository }}" \
             --signer-workflow "${{ github.repository }}/.github/workflows/release-readiness.yml" \
-            --source-digest "$GITHUB_SHA" \
+            --source-digest "$SOURCE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners >/dev/null
           for artifact in dist-readiness/*; do
             gh attestation verify "$artifact" \
               --repo "${{ github.repository }}" \
               --signer-workflow "${{ github.repository }}/.github/workflows/release-readiness.yml" \
-              --source-digest "$GITHUB_SHA" \
+              --source-digest "$SOURCE_COMMIT" \
               --source-ref refs/heads/main \
               --deny-self-hosted-runners >/dev/null
           done
@@ -440,13 +525,15 @@ jobs:
             gh attestation verify "$artifact" \
               --repo "${{ github.repository }}" \
               --signer-workflow "$signer_workflow" \
-              --source-digest "$GITHUB_SHA" \
+              --source-digest "$SOURCE_COMMIT" \
               --source-ref refs/heads/main \
               --predicate-type https://spdx.dev/Document/v2.3 \
               --deny-self-hosted-runners >/dev/null
           done
 
       - name: Create tag-specific release metadata without rebuilding
+        env:
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
           cp -R dist-candidate dist-release
@@ -465,7 +552,7 @@ jobs:
             --version "${{ steps.ver.outputs.version }}" \
             --tag "${{ steps.ver.outputs.tag }}" \
             --channel "${{ steps.ver.outputs.channel }}" \
-            --source-commit "$GITHUB_SHA" \
+            --source-commit "$SOURCE_COMMIT" \
             --source-date-epoch "${{ steps.ver.outputs.source_date_epoch }}" \
             --target "$SLIPSTREAM_TAURI_TARGET"
           python3 scripts/verify_release_artifacts.py \
@@ -474,7 +561,7 @@ jobs:
             --tag "${{ steps.ver.outputs.tag }}" \
             --version "${{ steps.ver.outputs.version }}" \
             --channel "${{ steps.ver.outputs.channel }}" \
-            --source-commit "$GITHUB_SHA" \
+            --source-commit "$SOURCE_COMMIT" \
             --target "$SLIPSTREAM_TAURI_TARGET"
 
       - name: Attest tag-specific release metadata
@@ -486,6 +573,26 @@ jobs:
             dist-release/release-qualification.json
             dist-release/release-readiness.json
             dist-release/transport-mechanics.json
+
+      - name: Verify tag-specific publisher attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          signer_workflow="${{ github.repository }}/.github/workflows/build-app.yml"
+          for artifact in \
+            dist-release/latest.json \
+            dist-release/artifact-manifest.json \
+            dist-release/release-qualification.json \
+            dist-release/release-readiness.json \
+            dist-release/transport-mechanics.json; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners >/dev/null
+          done
 
       - name: Write release notes
         run: |
@@ -515,7 +622,7 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ steps.ver.outputs.source_commit }}
           name: ${{ steps.ver.outputs.release_name }}
           draft: true
           prerelease: ${{ steps.ver.outputs.prerelease }}
@@ -562,6 +669,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ steps.release.outputs.id }}
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
           umask 077
@@ -594,7 +702,7 @@ jobs:
               --tag "${{ steps.ver.outputs.tag }}" \
               --channel "${{ steps.ver.outputs.channel }}" \
               --release-name "${{ steps.ver.outputs.release_name }}" \
-              --source-commit "$GITHUB_SHA" \
+              --source-commit "$SOURCE_COMMIT" \
               --target "$SLIPSTREAM_TAURI_TARGET" \
               --release-id "$RELEASE_ID" \
               --state draft
@@ -641,6 +749,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ steps.release.outputs.id }}
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
           umask 077
@@ -670,7 +779,7 @@ jobs:
               --tag "${{ steps.ver.outputs.tag }}" \
               --channel "${{ steps.ver.outputs.channel }}" \
               --release-name "${{ steps.ver.outputs.release_name }}" \
-              --source-commit "$GITHUB_SHA" \
+              --source-commit "$SOURCE_COMMIT" \
               --target "$SLIPSTREAM_TAURI_TARGET" \
               --release-id "$RELEASE_ID" \
               --state published

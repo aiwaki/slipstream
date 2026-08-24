@@ -257,7 +257,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("scripts/make_release_manifest.py", workflow)
         self.assertIn("dist-release/Slipstream.spdx.json", workflow)
         self.assertIn("dist-release/artifact-manifest.json", workflow)
-        self.assertIn('--source-commit "$GITHUB_SHA"', workflow)
+        self.assertIn('--source-commit "$SOURCE_COMMIT"', workflow)
         self.assertIn('--target "$SLIPSTREAM_TAURI_TARGET"', workflow)
         self.assertNotIn("npm run build", workflow)
         self.assertNotIn(".buildvenv/bin/pyinstaller", workflow.lower())
@@ -283,7 +283,7 @@ class BuildConfigTests(unittest.TestCase):
             "branch=main&event=push&status=completed&per_page=100",
             resolution,
         )
-        self.assertIn('select(.head_sha == \\"$GITHUB_SHA\\")', resolution)
+        self.assertIn('select(.head_sha == \\"$SOURCE_COMMIT\\")', resolution)
         self.assertIn('select(.conclusion == \\"success\\")', resolution)
         self.assertIn(
             '"repos/${{ github.repository }}/actions/runs/$dependency_audit_run"',
@@ -869,7 +869,9 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("draft: true", draft)
         self.assertIn("overwrite_files: false", draft)
         self.assertIn("fail_on_unmatched_files: true", draft)
-        self.assertIn("target_commitish: ${{ github.sha }}", draft)
+        self.assertIn(
+            "target_commitish: ${{ steps.ver.outputs.source_commit }}", draft
+        )
 
         id_contract = workflow[release_id:draft_verify]
         self.assertIn("steps.release-draft.outputs.id", id_contract)
@@ -953,7 +955,9 @@ class BuildConfigTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("target_commitish: ${{ github.sha }}", workflow)
+        self.assertIn(
+            "target_commitish: ${{ steps.ver.outputs.source_commit }}", workflow
+        )
         self.assertIn("select(.draft | not)", workflow)
         self.assertIn('[ "$GITHUB_REF" = refs/heads/main ]', workflow)
 
@@ -973,7 +977,7 @@ class BuildConfigTests(unittest.TestCase):
         )
         self.assertIn("Attest tag-specific release metadata", workflow)
         self.assertIn("gh attestation verify", workflow)
-        self.assertIn('--source-digest "$GITHUB_SHA"', workflow)
+        self.assertIn('--source-digest "$SOURCE_COMMIT"', workflow)
         self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
         self.assertIn("--deny-self-hosted-runners", workflow)
         self.assertLess(
@@ -1295,17 +1299,182 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("body_path: dist-release/release-notes.md", app)
         self.assertIn("generate_release_notes: true", app)
         self.assertIn("Resolve previous app release tag", app)
-        self.assertIn('test(\\"$tag_pattern\\")', app)
+        self.assertIn("test($tag_pattern)", app)
         self.assertIn("-preview\\.[0-9]+$", app)
         self.assertIn("previous_tag: ${{ steps.previous.outputs.tag }}", app)
         self.assertIn(".prerelease == $prerelease", app)
         self.assertIn("gh api --paginate", app)
+        self.assertIn('--arg current_tag "$current_tag"', app)
+        self.assertIn('--arg tag_pattern "$tag_pattern"', app)
+        self.assertIn('--argjson prerelease "$prerelease"', app)
+        self.assertNotIn('--jq "$filter"', app)
         self.assertNotIn('cp "$B/dmg/"*.dmg "$OUT/" 2>/dev/null || true', app)
 
         self.assertIn('branches: ["main"]', geph)
         self.assertIn("prerelease: true", geph)
         self.assertIn("make_latest: false", geph)
         self.assertIn("This is not an app release", geph)
+
+    def test_previous_release_filter_is_valid_jq_and_excludes_current_tag(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        step_start = workflow.index("- name: Resolve previous app release tag")
+        step_end = workflow.index(
+            "- name: Resolve exact candidate and qualification runs"
+        )
+        step = workflow[step_start:step_end]
+        match = re.search(r"(?m)^\s*filter='([^']+)'$", step)
+        self.assertIsNotNone(match)
+        jq_filter = match.group(1)
+        releases = [
+            {
+                "tag_name": "v0.1.9-preview.23",
+                "draft": False,
+                "prerelease": True,
+            },
+            {
+                "tag_name": "v0.1.9-preview.22",
+                "draft": False,
+                "prerelease": True,
+            },
+            {
+                "tag_name": "v0.1.9-preview.21",
+                "draft": True,
+                "prerelease": True,
+            },
+            {
+                "tag_name": "v0.1.8",
+                "draft": False,
+                "prerelease": False,
+            },
+        ]
+        filtered = subprocess.run(
+            (
+                "jq",
+                "-r",
+                "--arg",
+                "current_tag",
+                "v0.1.9-preview.23",
+                "--arg",
+                "tag_pattern",
+                r"^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$",
+                "--argjson",
+                "prerelease",
+                "true",
+                jq_filter,
+            ),
+            input=json.dumps(releases),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(filtered.returncode, 0, filtered.stderr)
+        self.assertEqual(filtered.stdout.splitlines(), ["v0.1.9-preview.22"])
+
+    def test_publisher_repair_reuses_only_a_direct_qualified_parent(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        resolution_start = workflow.index("- name: Resolve version and tag")
+        resolution_end = workflow.index("- name: Resolve previous app release tag")
+        resolution = workflow[resolution_start:resolution_end]
+        publication_start = workflow.index(
+            "- name: Resolve exact candidate and qualification runs"
+        )
+        publication = workflow[publication_start:]
+
+        self.assertIn("release_source_commit:", workflow)
+        self.assertIn("fetch-depth: 2", workflow)
+        self.assertIn('[ "$GITHUB_RUN_ATTEMPT" = 1 ]', resolution)
+        self.assertIn('parent_commit="$(git rev-parse "$GITHUB_SHA^")"', resolution)
+        self.assertIn(
+            '[ "$RELEASE_SOURCE_INPUT" = "$parent_commit" ]', resolution
+        )
+        self.assertIn("publisher repair must run from live main", resolution)
+        self.assertIn("git diff --no-renames --name-only", resolution)
+        self.assertIn(".github/workflows/build-app.yml|", resolution)
+        self.assertIn("docs/CURRENT_STATE.md|", resolution)
+        self.assertIn("scripts/test_build_config.py)", resolution)
+        self.assertIn(
+            "for repair_workflow in ci.yml dependency-audit.yml", resolution
+        )
+        self.assertIn(
+            "publisher repair requires all four exact evidence run IDs", publication
+        )
+        self.assertIn('echo "source_commit=$source_commit"', resolution)
+        self.assertIn(
+            "release-candidate-${{ steps.ver.outputs.source_commit }}", publication
+        )
+        self.assertIn('--source-commit "$SOURCE_COMMIT"', publication)
+        self.assertIn('--source-digest "$SOURCE_COMMIT"', publication)
+        self.assertIn(
+            "target_commitish: ${{ steps.ver.outputs.source_commit }}", publication
+        )
+        self.assertNotIn("${{ github.sha }}", publication)
+        publisher_attestation_start = publication.index(
+            "- name: Verify tag-specific publisher attestations"
+        )
+        publisher_attestation_end = publication.index(
+            "- name: Write release notes", publisher_attestation_start
+        )
+        publisher_attestation = publication[
+            publisher_attestation_start:publisher_attestation_end
+        ]
+        product_publication = (
+            publication[:publisher_attestation_start]
+            + publication[publisher_attestation_end:]
+        )
+        self.assertNotIn("$GITHUB_SHA", product_publication)
+        self.assertIn('--source-digest "$GITHUB_SHA"', publisher_attestation)
+
+    def test_publisher_repair_allowlist_exposes_rename_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            def git(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ("git", "-C", str(repo), *args),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=5,
+                )
+
+            git("init", "-q")
+            git("config", "user.name", "Slipstream Tests")
+            git("config", "user.email", "tests@slipstream.invalid")
+            product_path = repo / "app-tauri/src/product.rs"
+            product_path.parent.mkdir(parents=True)
+            product_path.write_text("product source\n", encoding="utf-8")
+            git("add", "app-tauri/src/product.rs")
+            git("commit", "-qm", "Add product source")
+            (repo / ".github/workflows").mkdir(parents=True)
+            git(
+                "mv",
+                "app-tauri/src/product.rs",
+                ".github/workflows/build-app.yml",
+            )
+
+            changed = set(
+                git("diff", "--no-renames", "--name-only", "HEAD")
+                .stdout.strip()
+                .splitlines()
+            )
+            allowlist = {
+                ".github/workflows/build-app.yml",
+                "docs/CURRENT_STATE.md",
+                "scripts/test_build_config.py",
+            }
+            self.assertEqual(
+                changed,
+                {
+                    "app-tauri/src/product.rs",
+                    ".github/workflows/build-app.yml",
+                },
+            )
+            self.assertFalse(changed <= allowlist)
 
     def test_stable_channel_stays_closed_until_notarization_exists(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
