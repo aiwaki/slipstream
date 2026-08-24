@@ -37,6 +37,7 @@ CLEANUP_REPORT_SYMBOLS = invisibility_soak_contract.CLEANUP_REPORT_SYMBOLS
 UNIFIED_LOG_FILTER_BANNER_PREFIX = "Filtering the log data using "
 UNIFIED_LOG_EVENT_MARKERS = ("slipstream", "chrome-headless", "chromium")
 UNIFIED_LOG_START_TIMEOUT_SECONDS = 5.0
+UNIFIED_LOG_HANDSHAKE_MAX_BYTES = 64 * 1024
 
 
 class SoakError(RuntimeError):
@@ -334,25 +335,39 @@ def _validate_unified_log_filter_banner(line: str) -> None:
 
 
 def _wait_for_unified_log_filter_banner(
-    process: subprocess.Popen[str],
+    process: subprocess.Popen[bytes],
     *,
     timeout_seconds: float = UNIFIED_LOG_START_TIMEOUT_SECONDS,
-) -> str:
+) -> bytes:
     if process.stdout is None:
         raise SoakError("unified-log sampler has no output pipe")
     if process.poll() is not None:
         raise SoakError("unified-log sampler exited before its filter banner")
-    readable, _, _ = select.select((process.stdout,), (), (), timeout_seconds)
-    if not readable:
-        raise SoakError("unified-log filter banner timed out")
-    banner = process.stdout.readline()
-    if not banner:
-        raise SoakError("unified-log sampler exited before its filter banner")
-    _validate_unified_log_filter_banner(banner.strip())
-    return banner
+    deadline = time.monotonic() + timeout_seconds
+    captured = bytearray()
+    while b"\n" not in captured:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SoakError("unified-log filter banner timed out")
+        readable, _, _ = select.select((process.stdout,), (), (), remaining)
+        if not readable:
+            raise SoakError("unified-log filter banner timed out")
+        chunk = os.read(process.stdout.fileno(), UNIFIED_LOG_HANDSHAKE_MAX_BYTES)
+        if not chunk:
+            raise SoakError("unified-log sampler exited before its filter banner")
+        captured.extend(chunk)
+        if len(captured) > UNIFIED_LOG_HANDSHAKE_MAX_BYTES:
+            raise SoakError("unified-log filter banner exceeded its byte limit")
+    banner, _, _prefetched = bytes(captured).partition(b"\n")
+    try:
+        banner_text = banner.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SoakError("unified-log filter banner is not UTF-8") from exc
+    _validate_unified_log_filter_banner(banner_text.strip())
+    return bytes(captured)
 
 
-def _count_unified_log_post_show_events(output: str) -> int:
+def _count_unified_log_post_show_events(output: str | bytes) -> int:
     """Count only structured PostShowProcess events from ``log stream``.
 
     ``log stream --predicate`` writes a plain-text filter banner to stdout.
@@ -362,6 +377,11 @@ def _count_unified_log_post_show_events(output: str) -> int:
     parseable; any other output remains a fail-closed sampler error.
     """
 
+    if isinstance(output, bytes):
+        try:
+            output = output.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise SoakError("unified-log sampler output is not UTF-8") from exc
     count = 0
     banner_seen = False
     for raw_line in output.splitlines():
@@ -413,10 +433,10 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     tray_log = tempfile.TemporaryFile()
     tray: subprocess.Popen[bytes] | None = None
     listener: subprocess.Popen[str] | None = None
-    unified_log: subprocess.Popen[str] | None = None
+    unified_log: subprocess.Popen[bytes] | None = None
     event_output = ""
-    unified_prefix = ""
-    unified_output = ""
+    unified_prefix = b""
+    unified_output = b""
     measured_seconds = 0.0
     samples = 0
     max_sample_gap = 0.0
@@ -501,7 +521,6 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
             ),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
         )
         unified_prefix = _wait_for_unified_log_filter_banner(unified_log)
         if unified_log.poll() is not None:

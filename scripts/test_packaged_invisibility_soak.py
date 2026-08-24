@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 import inspect
-import io
 import shlex
 import tempfile
 from pathlib import Path
@@ -38,19 +37,41 @@ class FakeClock:
 
 class PackagedInvisibilitySoakTests(unittest.TestCase):
     def test_unified_log_filter_banner_handshake_precedes_measurement(self) -> None:
-        pipe = io.StringIO(_unified_log_filter_banner() + "\n")
+        pipe = SimpleNamespace(fileno=lambda: 42)
         process = SimpleNamespace(stdout=pipe, poll=lambda: None)
-        with mock.patch.object(
-            soak.select,
-            "select",
-            return_value=([pipe], [], []),
+        chunk = (_unified_log_filter_banner() + "\n").encode()
+        with (
+            mock.patch.object(
+                soak.select,
+                "select",
+                return_value=([pipe], [], []),
+            ),
+            mock.patch.object(soak.os, "read", return_value=chunk),
         ):
             banner = soak._wait_for_unified_log_filter_banner(process)
 
-        self.assertEqual(banner, _unified_log_filter_banner() + "\n")
+        self.assertEqual(banner, chunk)
+
+    def test_unified_log_handshake_preserves_prefetched_event(self) -> None:
+        pipe = SimpleNamespace(fileno=lambda: 42)
+        process = SimpleNamespace(stdout=pipe, poll=lambda: None)
+        event = json.dumps({"eventMessage": "Slipstream PostShowProcess"})
+        chunk = (_unified_log_filter_banner() + "\n" + event + "\n").encode()
+        with (
+            mock.patch.object(
+                soak.select,
+                "select",
+                return_value=([pipe], [], []),
+            ),
+            mock.patch.object(soak.os, "read", return_value=chunk),
+        ):
+            captured = soak._wait_for_unified_log_filter_banner(process)
+
+        self.assertEqual(captured, chunk)
+        self.assertEqual(soak._count_unified_log_post_show_events(captured), 1)
 
     def test_unified_log_filter_banner_handshake_times_out_closed(self) -> None:
-        pipe = io.StringIO("")
+        pipe = SimpleNamespace(fileno=lambda: 42)
         process = SimpleNamespace(stdout=pipe, poll=lambda: None)
         with (
             mock.patch.object(
@@ -66,7 +87,10 @@ class PackagedInvisibilitySoakTests(unittest.TestCase):
             soak._wait_for_unified_log_filter_banner(process)
 
     def test_unified_log_filter_banner_handshake_rejects_early_exit(self) -> None:
-        process = SimpleNamespace(stdout=io.StringIO(""), poll=lambda: 1)
+        process = SimpleNamespace(
+            stdout=SimpleNamespace(fileno=lambda: 42),
+            poll=lambda: 1,
+        )
 
         with self.assertRaisesRegex(
             soak.SoakError,
