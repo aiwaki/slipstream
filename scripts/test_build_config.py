@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -1396,6 +1397,45 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(filtered.returncode, 0, filtered.stderr)
         self.assertEqual(filtered.stdout.splitlines(), ["v0.1.9-preview.22"])
 
+    def test_release_workflow_multiline_python_payloads_compile_after_yaml_dedent(
+        self,
+    ) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        step_start = workflow.index("      - name: Resolve version and tag\n")
+        step_end = workflow.index("\n      - ", step_start + 1)
+        step = workflow[step_start:step_end]
+        run_marker = "        run: |\n"
+        self.assertEqual(step.count(run_marker), 1)
+        run_lines = step.split(run_marker, 1)[1].splitlines()
+        content_indent = min(
+            len(line) - len(line.lstrip()) for line in run_lines if line.strip()
+        )
+        self.assertEqual(content_indent, 10)
+        for line in run_lines:
+            if line.strip():
+                self.assertTrue(line.startswith(" " * content_indent))
+        effective_script = "\n".join(
+            line[content_indent:] if line.strip() else "" for line in run_lines
+        )
+
+        tokens = shlex.split(effective_script, comments=True, posix=True)
+        payloads = [
+            tokens[index + 2]
+            for index, token in enumerate(tokens[:-2])
+            if token == "python3"
+            and tokens[index + 1] == "-c"
+            and "\n" in tokens[index + 2]
+        ]
+        self.assertEqual(len(payloads), 3)
+        for payload in payloads:
+            compile(
+                payload,
+                "build-app.yml Resolve version and tag python3 -c",
+                "exec",
+            )
+
     def test_publisher_repair_reuses_only_a_bounded_qualified_ancestor(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
             encoding="utf-8"
@@ -1409,7 +1449,7 @@ class BuildConfigTests(unittest.TestCase):
         publication = workflow[publication_start:]
 
         self.assertIn("release_source_commit:", workflow)
-        self.assertIn("fetch-depth: 3", workflow)
+        self.assertIn("fetch-depth: 5", workflow)
         self.assertIn('[ "$GITHUB_RUN_ATTEMPT" = 1 ]', resolution)
         self.assertIn(
             'git merge-base --is-ancestor "$RELEASE_SOURCE_INPUT" "$GITHUB_SHA"',
@@ -1421,16 +1461,26 @@ class BuildConfigTests(unittest.TestCase):
             resolution,
         )
         self.assertIn(
-            "expected_repair_intermediate=1e0d03130405020a761504c1e65827f76020de47",
+            "expected_first_repair=1e0d03130405020a761504c1e65827f76020de47",
             resolution,
         )
-        self.assertIn("exact two-hop .23 topology", resolution)
+        self.assertIn(
+            "expected_second_repair=06885e10d22a435175034023d6cc9b51d3666b34",
+            resolution,
+        )
+        self.assertIn(
+            'git merge-base --is-ancestor "$expected_second_repair" "$GITHUB_SHA"',
+            resolution,
+        )
+        self.assertIn('git rev-parse "$expected_first_repair^"', resolution)
+        self.assertIn('git rev-parse "$expected_second_repair^"', resolution)
+        self.assertIn("known two-repair .23 prefix", resolution)
         self.assertIn('repair_cursor="$GITHUB_SHA"', resolution)
         self.assertIn("git rev-list --parents -n 1", resolution)
         self.assertIn("publisher repair history must be linear", resolution)
-        self.assertIn('[ "$repair_commit_count" -le 2 ]', resolution)
+        self.assertIn('[ "$repair_commit_count" -le 4 ]', resolution)
         self.assertIn(
-            "publisher repair permits at most two workflow-only commits", resolution
+            "publisher repair permits at most four workflow-only commits", resolution
         )
         self.assertIn("git diff --no-renames --name-only -z", resolution)
         self.assertIn("read -r -d '' repair_file", resolution)
@@ -1453,9 +1503,9 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('"checks", "packaged-app-lifecycle"', resolution)
         self.assertIn('"Required dependency audit"', resolution)
         self.assertIn("repair run job list is incomplete", resolution)
-        self.assertIn(
-            '[ "$repair_commit_count" = 2 ]', resolution
-        )
+        self.assertIn('case "$repair_commit_count" in', resolution)
+        self.assertIn("3|4) ;;", resolution)
+        self.assertIn("three or four validated repair commits", resolution)
         self.assertIn(
             "publisher repair requires all four exact evidence run IDs", publication
         )
@@ -1593,16 +1643,34 @@ class BuildConfigTests(unittest.TestCase):
 
             def valid_repair_chain(
                 source: str,
-                intermediate: str,
+                first_repair: str,
+                second_repair: str,
                 head: str,
             ) -> bool:
-                head_lineage = git("rev-list", "--parents", "-n", "1", head)
-                intermediate_lineage = git(
-                    "rev-list", "--parents", "-n", "1", intermediate
+                first_lineage = git(
+                    "rev-list", "--parents", "-n", "1", first_repair
                 )
-                if head_lineage.stdout.split() != [head, intermediate]:
+                second_lineage = git(
+                    "rev-list", "--parents", "-n", "1", second_repair
+                )
+                if first_lineage.stdout.split() != [first_repair, source]:
                     return False
-                if intermediate_lineage.stdout.split() != [intermediate, source]:
+                if second_lineage.stdout.split() != [second_repair, first_repair]:
+                    return False
+                if subprocess.run(
+                    (
+                        "git",
+                        "-C",
+                        str(repo),
+                        "merge-base",
+                        "--is-ancestor",
+                        second_repair,
+                        head,
+                    ),
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                ).returncode != 0:
                     return False
                 cursor = head
                 count = 0
@@ -1613,7 +1681,7 @@ class BuildConfigTests(unittest.TestCase):
                         return False
                     parent = commits[1]
                     count += 1
-                    if count > 2:
+                    if count > 4:
                         return False
                     changed = set(
                         git(
@@ -1634,7 +1702,7 @@ class BuildConfigTests(unittest.TestCase):
                             if len(entry) < 3 or entry[:2] != ["100644", "blob"]:
                                 return False
                     cursor = parent
-                return count == 2
+                return 3 <= count <= 4
 
             git("init", "-q", "-b", "main")
             git("config", "user.name", "Slipstream Tests")
@@ -1652,49 +1720,64 @@ class BuildConfigTests(unittest.TestCase):
             source = git("rev-parse", "HEAD").stdout.strip()
             first = commit_repair("repair one", "First publisher repair")
             second = commit_repair("repair two", "Second publisher repair")
-            self.assertTrue(valid_repair_chain(source, first, second))
-            self.assertFalse(valid_repair_chain(source, source, first))
-            self.assertFalse(valid_repair_chain(source, first, source))
-
-            git("checkout", "-qb", "third", second)
             third = commit_repair("repair three", "Third publisher repair")
-            self.assertFalse(valid_repair_chain(source, first, third))
+            fourth = commit_repair("repair four", "Fourth publisher repair")
+            fifth = commit_repair("repair five", "Fifth publisher repair")
+            self.assertTrue(valid_repair_chain(source, first, second, third))
+            self.assertTrue(valid_repair_chain(source, first, second, fourth))
+            self.assertFalse(valid_repair_chain(source, first, second, second))
+            self.assertFalse(valid_repair_chain(source, first, second, fifth))
+            self.assertFalse(valid_repair_chain(source, source, second, third))
+            self.assertFalse(valid_repair_chain(source, first, third, third))
 
-            git("checkout", "-qb", "reverted-product", source)
+            git("checkout", "-qb", "bypass-second", first)
+            commit_repair("parallel repair two", "Parallel second repair")
+            bypass_third = commit_repair(
+                "parallel repair three", "Parallel third repair"
+            )
+            self.assertFalse(
+                valid_repair_chain(source, first, second, bypass_third)
+            )
+
+            git("checkout", "-qb", "reverted-product", second)
             product.write_text("modified product\n", encoding="utf-8")
-            bad_first = commit_repair("bad repair one", "Modify product")
+            commit_repair("bad repair three", "Modify product")
             git("add", "app-tauri/src/product.rs")
             git("commit", "--amend", "-qm", "Modify product")
-            bad_first = git("rev-parse", "HEAD").stdout.strip()
             product.write_text("qualified product\n", encoding="utf-8")
-            bad_second = commit_repair("bad repair two", "Revert product")
+            commit_repair("bad repair four", "Revert product")
             git("add", "app-tauri/src/product.rs")
             git("commit", "--amend", "-qm", "Revert product")
-            bad_second = git("rev-parse", "HEAD").stdout.strip()
-            self.assertFalse(valid_repair_chain(source, bad_first, bad_second))
+            bad_fourth = git("rev-parse", "HEAD").stdout.strip()
+            self.assertFalse(
+                valid_repair_chain(source, first, second, bad_fourth)
+            )
 
-            git("checkout", "-qb", "type-change", source)
+            git("checkout", "-qb", "type-change", second)
             checkpoint.unlink()
             checkpoint.symlink_to("../scripts/test_build_config.py")
-            type_first = commit_repair("type repair one", "Change path type")
+            commit_repair("type repair three", "Change path type")
             git("add", "docs/CURRENT_STATE.md")
             git("commit", "--amend", "-qm", "Change path type")
-            type_first = git("rev-parse", "HEAD").stdout.strip()
             checkpoint.unlink()
-            type_second = commit_repair("type repair two", "Restore path type")
-            self.assertFalse(valid_repair_chain(source, type_first, type_second))
+            type_fourth = commit_repair("type repair four", "Restore path type")
+            self.assertFalse(
+                valid_repair_chain(source, first, second, type_fourth)
+            )
 
-            git("checkout", "-qb", "side", source)
+            git("checkout", "-qb", "side", second)
             git("commit", "--allow-empty", "-qm", "Side repair")
-            side = git("rev-parse", "HEAD").stdout.strip()
-            git("checkout", "-q", "main")
-            git("merge", "--no-ff", "-qm", "Merge repair", "side")
+            git("checkout", "-qb", "merge-repair", second)
+            commit_repair("merge base repair", "Merge base repair")
+            git("merge", "--no-ff", "-s", "ours", "-qm", "Merge repair", "side")
             merge = git("rev-parse", "HEAD").stdout.strip()
-            self.assertFalse(valid_repair_chain(source, side, merge))
+            self.assertFalse(valid_repair_chain(source, first, second, merge))
 
             git("checkout", "-qb", "unrelated")
             unrelated_source = commit_repair("unrelated", "Unrelated source")
-            self.assertFalse(valid_repair_chain(unrelated_source, first, second))
+            self.assertFalse(
+                valid_repair_chain(unrelated_source, first, second, third)
+            )
 
     def test_stable_channel_stays_closed_until_notarization_exists(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(

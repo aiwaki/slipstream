@@ -10,7 +10,7 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-24 (publisher dependency-preflight boundary): exact qualified
+Update 2026-08-24 (publisher inline-Python boundary): exact qualified
 product source remains
 `6ba71ef75d821ee74cedcee5d8a9c83495da7c76` after
 [PR #367](https://github.com/aiwaki/slipstream/pull/367). Exact-main
@@ -34,6 +34,17 @@ and
 passed. The commit has the qualified product source as its sole parent and
 changes only `.github/workflows/build-app.yml`, its contract test, and this
 checkpoint; no product file changed.
+
+[PR #369](https://github.com/aiwaki/slipstream/pull/369) merged the second
+publisher-only correction as live main
+`06885e10d22a435175034023d6cc9b51d3666b34`. Its exact-main
+[CI `32731046988`](https://github.com/aiwaki/slipstream/actions/runs/32731046988)
+and
+[dependency audit `32731046880`](https://github.com/aiwaki/slipstream/actions/runs/32731046880)
+passed. It is the sole child of the first repair, changes the same exact three
+publisher/checkpoint files, and installs and imports the hash-locked runtime
+verification dependencies before any candidate download. No product file or
+qualified evidence changed.
 
 The user-authorized combined
 [release-readiness run `32719127944`](https://github.com/aiwaki/slipstream/actions/runs/32719127944),
@@ -60,21 +71,33 @@ passed the repair guard, filter, exact run resolution, candidate downloads, and
 complete candidate/qualification/readiness verification. It then failed before
 attestation or any release/tag mutation because `verify_release_artifacts.py`
 transitively imports `h2`, while the publisher had not installed the locked
-runtime dependencies. Tag and release `v0.1.9-preview.23` remain absent, and
-preview `.22` was not archived.
+runtime dependencies. PR #369 fixed that preflight boundary. The next exact
+[publisher run `32732505330`](https://github.com/aiwaki/slipstream/actions/runs/32732505330)
+failed earlier in `Resolve version and tag`: the two nested multiline
+`python3 -c` validators retained eight shell-indentation spaces after YAML
+block dedenting, so Python rejected the first `import json` with
+`IndentationError`. Dependency installation, downloads, attestations, draft,
+tag, publication, and archival were all skipped. Tag and release
+`v0.1.9-preview.23` remain absent, and preview `.22` was not archived.
 
-Do not rerun either failed publisher unchanged, and do not repeat the unrelated
-30-minute soak. The active correction installs `spike/requirements-runtime.txt`
-with hashes, runs `pip check`, and imports the verifier before downloading the
-large candidate. Repair mode is pinned to the exact two-hop topology from the
-qualified source through first repair `1e0d03130405020a761504c1e65827f76020de47`
-to the next live main. It examines both commits independently with NUL-delimited
-paths and rename detection disabled, requires each diff to contain exactly
-regular-blob versions of `build-app.yml`, its contract test, and this
-checkpoint, and rejects merges, path type/mode changes, additions/deletions,
-and any product path. For both repair SHAs it independently validates exact
-repository/workflow/branch/event/attempt metadata, successful exact-main CI and
-dependency audit, complete job lists, and their required wrapper jobs.
+Do not rerun any failed publisher unchanged, and do not repeat the unrelated
+30-minute soak. The active correction moves both Python payloads to effective
+shell column zero and reconstructs the effective YAML `run` script in the
+contract test; every raw multiline `python3 -c` payload is lexed and compiled
+without a masking `dedent()`. Repair mode pins the known prefix
+`6ba71ef75d821ee74cedcee5d8a9c83495da7c76` ->
+`1e0d03130405020a761504c1e65827f76020de47` ->
+`06885e10d22a435175034023d6cc9b51d3666b34`, requires the second repair to be
+an ancestor of live main, and accepts exactly three or four linear repair
+commits from the qualified source. The fourth slot is a hard-capped contingency
+only; it is not permission to retry an unchanged failure. Every edge remains
+independently checked with NUL-delimited paths and rename detection disabled,
+must contain exactly regular-blob versions of `build-app.yml`, its contract
+test, and this checkpoint, and rejects merges, path type/mode changes,
+additions/deletions, and any product path. Every repair SHA must independently
+have exact repository/workflow/branch/event/attempt metadata, successful
+exact-main CI and dependency audit, complete job lists, and required wrapper
+jobs.
 
 Candidate, audit, qualification, readiness, their existing attestations,
 manifest source fields, release metadata payloads, and the tag remain bound to
@@ -86,8 +109,8 @@ source fields must name the older qualified source; and `latest.json` must
 remain transitively bound through its tag, updater signature, and the
 source-bound artifact manifest. Dispatch the publisher with all four explicit
 successful evidence run IDs and the explicit repair source, without another
-account-backed run, only after the second repair has its own exact-head and
-exact-main checks. The preview remains unpublished, ad-hoc signed, and
+account-backed run or soak, only after this third repair has its own exact-head
+and exact-main checks. The preview remains unpublished, ad-hoc signed, and
 unnotarized because no Apple Developer ID is available.
 
 ### Previous checkpoint
