@@ -216,6 +216,20 @@ Geph artifact.
   measured invisibility soak. Separate qualification and readiness proofs bind
   both result sets to the same candidate manifest and protected run attempt;
   the workflow does not rebuild the app.
+- A Linux preflight with only the read-scoped ephemeral GitHub token and no
+  protected account/broker secret limits `release-readiness` and the standalone
+  diagnostic-only owned-Geph workflow to three fresh `main` dispatches combined
+  per UTC day. It counts every outcome, rejects workflow reruns, and fails closed
+  on incomplete API evidence; a fourth dispatch stops before the protected
+  environment, candidate download, broker authentication, or the measured soak.
+  This budget does not justify retrying unchanged failures or omitting any
+  release gate. The shared `queue: max` concurrency group serializes retained
+  dispatches without silently replacing an older pending slot. GitHub reruns
+  use the source of the original run, so historical
+  runs created before this guard must never be rerun; repository code cannot
+  retrofit their old workflow definition without a protected-environment secret
+  rotation. A dispatch still queued when the UTC broker day changes fails the
+  new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
   from `main`; for this P0 release the accepted tag is exactly
   `v0.1.9-preview.23`. A draft, tag-only collision or mismatched published

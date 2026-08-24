@@ -17,10 +17,56 @@ permissions:
 concurrency:
   group: account-backed-geph
   cancel-in-progress: false
+  queue: max
 
 jobs:
+  # GitHub reruns replay historical workflow source. Never rerun a protected
+  # run that predates this budget job; dispatch the reviewed current main instead.
+  account-backed-run-budget:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Reserve one of three daily account-backed dispatches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          utc_day="$(date -u +%F)"
+          created_range="${utc_day}T00:00:00Z..${utc_day}T23:59:59Z"
+          readiness_runs="$RUNNER_TEMP/release-readiness-runs.json"
+          diagnostic_runs="$RUNNER_TEMP/owned-geph-diagnostic-runs.json"
+          gh api --method GET \
+            "repos/${{ github.repository }}/actions/workflows/release-readiness.yml/runs" \
+            -f branch=main \
+            -f event=workflow_dispatch \
+            -f "created=$created_range" \
+            -F per_page=100 > "$readiness_runs"
+          gh api --method GET \
+            "repos/${{ github.repository }}/actions/workflows/owned-geph-qualification.yml/runs" \
+            -f branch=main \
+            -f event=workflow_dispatch \
+            -f "created=$created_range" \
+            -F per_page=100 > "$diagnostic_runs"
+          python3 scripts/account_backed_run_budget.py verify \
+            --repository "${{ github.repository }}" \
+            --utc-date "$utc_day" \
+            --current-run-id "$GITHUB_RUN_ID" \
+            --current-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --release-readiness-runs "$readiness_runs" \
+            --owned-geph-runs "$diagnostic_runs"
+
   exact-candidate-readiness:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == '1' &&
+      needs.account-backed-run-budget.result == 'success'
+    needs: account-backed-run-budget
     runs-on: macos-14
     timeout-minutes: 75
     environment: geph-qualification
