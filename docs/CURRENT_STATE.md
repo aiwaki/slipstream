@@ -10,6 +10,29 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-24 (post-release browser-visible recovery correction under
+review): live `origin/main` remains
+`2780de4b3f5d77ab3852e46381b997c618bd5080`. [PR #373](https://github.com/aiwaki/slipstream/pull/373)
+contains implementation commit `49aa6fc8a07370d50acfa28b924c2057cfe82700` and the
+generic correction for a strict edge-denial document and an incomplete critical
+cross-origin bootstrap object. Production routing contains no Aikido or
+Capacitor hostname rule and no broad `403` rule. Slow progressive reads are
+inconclusive and uncacheable; only explicit EOF/reset with valid incomplete
+framing can continue to the existing complete same-object owned-Geph proof.
+The ordinary 400-ms/500-ms path and absolute eight-second job remain unchanged;
+one signed foreground attempt may use an adaptive retry capped at five seconds
+while preserving two seconds plus 25 ms for proof and scheduling.
+
+The exact branch passed `1043` full `spike` tests, `545` script tests, `53`
+focused route/bootstrap regressions, `git diff --check`, and independent
+slow-link/coalescing review. A local ad-hoc `.app` was built without
+notarization; its strict deep code-sign verification passes and its bundled
+daemon executable matches the rebuilt artifact. The next verified action is to
+require all exact-head PR checks, then install only that local exact-implementation build
+for a fresh normal-Chrome foreground check of Capacitor parent learning and
+Aikido exact-child learning. This targeted diagnosis did not start another
+30-minute soak and does not weaken or replace any later release gate.
+
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
 is published as prerelease ID `375747998`. The lightweight tag and release
