@@ -10,108 +10,69 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-24 (publisher inline-Python boundary): exact qualified
-product source remains
-`6ba71ef75d821ee74cedcee5d8a9c83495da7c76` after
-[PR #367](https://github.com/aiwaki/slipstream/pull/367). Exact-main
-[CI `32717752642`](https://github.com/aiwaki/slipstream/actions/runs/32717752642)
+Update 2026-08-24 (verified preview `.23` release):
+[Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
+is published as prerelease ID `375747998`. The lightweight tag and release
+target both point to the exact qualified product source
+`6ba71ef75d821ee74cedcee5d8a9c83495da7c76`; the release is not a rebuild of
+the later publisher-repair commits.
+
+Exact product [CI `32717752642`](https://github.com/aiwaki/slipstream/actions/runs/32717752642)
 and
 [dependency audit `32717752636`](https://github.com/aiwaki/slipstream/actions/runs/32717752636)
-passed. Immutable candidate artifact `9516822515` is unexpired, has size
-`448117495`, and has outer service digest
+passed at that source. Immutable candidate artifact `9516822515` has service
+digest
 `sha256:bc1ac772fb83f66689bd2e629b5d71c3b049a61a3500ae6f7edf62532af00ccf`.
-Independent validation matched those bytes and verified its manifest, exact
-source archive/tree/run/attempt, updater signature, DMG, arm64 binaries, seven
-provenance subjects, three SPDX subjects, and app-tree SHA-256
-`d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea`.
-
-[PR #368](https://github.com/aiwaki/slipstream/pull/368) merged the first
-publisher-only correction as live main
-`1e0d03130405020a761504c1e65827f76020de47`. Its exact-main
-[CI `32726104977`](https://github.com/aiwaki/slipstream/actions/runs/32726104977)
-and
-[dependency audit `32726104931`](https://github.com/aiwaki/slipstream/actions/runs/32726104931)
-passed. The commit has the qualified product source as its sole parent and
-changes only `.github/workflows/build-app.yml`, its contract test, and this
-checkpoint; no product file changed.
-
-[PR #369](https://github.com/aiwaki/slipstream/pull/369) merged the second
-publisher-only correction as live main
-`06885e10d22a435175034023d6cc9b51d3666b34`. Its exact-main
-[CI `32731046988`](https://github.com/aiwaki/slipstream/actions/runs/32731046988)
-and
-[dependency audit `32731046880`](https://github.com/aiwaki/slipstream/actions/runs/32731046880)
-passed. It is the sole child of the first repair, changes the same exact three
-publisher/checkpoint files, and installs and imports the hash-locked runtime
-verification dependencies before any candidate download. No product file or
-qualified evidence changed.
-
-The user-authorized combined
+The single successful combined
 [release-readiness run `32719127944`](https://github.com/aiwaki/slipstream/actions/runs/32719127944),
 attempt `1`, passed exact-candidate verification, dual-stack PF/NATLOOK and
-QUIC mechanics, one held account-backed Geph lifecycle, all four hosts in both
-Safari and Chrome, both cleanup boundaries, proof binding, and both
-attestations. Its measured soak passed for `1800.12` seconds with `3600`
-samples, maximum gap `0.66` seconds, stable daemon PID, advancing heartbeat,
-no cleanup failure, and every visibility/residue counter zero, including
-`unified_log_post_show_process`. Release-ready artifact `9518108620` has digest
-`sha256:e65d302d4711cecd09878c22bb06c65ea3ecc55bec47d4eeb372b43ea8ed2787`;
-qualification artifact `9518107947` has digest
-`sha256:c4fca9a7c571c6c46428588b4cb6ac79ab5530f02b376bb2fd059c674ddb4732`.
+QUIC mechanics, one held account-backed Geph lifecycle, the four-host matrix
+in both Safari and Chrome, exact cleanup, both proofs and attestations, and the
+measured `1800.12`-second soak with `3600` samples and every visibility/residue
+counter zero. No second soak was run for the publisher corrections.
 
-The first exact-input
-[publisher run `32722287401`](https://github.com/aiwaki/slipstream/actions/runs/32722287401)
-failed before candidate/proof resolution and before any tag or release mutation.
-The `Resolve previous app release tag` step interpolated a regex containing
-`\.` into a `gh api --jq` string, where jq rejected `\.` as an invalid string
-escape. PR #368 corrected this by passing typed arguments to system `jq`; the
-actual `.23`/`.22`/draft/stable filter regression passed. The subsequent
-[publisher run `32727225970`](https://github.com/aiwaki/slipstream/actions/runs/32727225970)
-passed the repair guard, filter, exact run resolution, candidate downloads, and
-complete candidate/qualification/readiness verification. It then failed before
-attestation or any release/tag mutation because `verify_release_artifacts.py`
-transitively imports `h2`, while the publisher had not installed the locked
-runtime dependencies. PR #369 fixed that preflight boundary. The next exact
-[publisher run `32732505330`](https://github.com/aiwaki/slipstream/actions/runs/32732505330)
-failed earlier in `Resolve version and tag`: the two nested multiline
-`python3 -c` validators retained eight shell-indentation spaces after YAML
-block dedenting, so Python rejected the first `import json` with
-`IndentationError`. Dependency installation, downloads, attestations, draft,
-tag, publication, and archival were all skipped. Tag and release
-`v0.1.9-preview.23` remain absent, and preview `.22` was not archived.
+[PR #370](https://github.com/aiwaki/slipstream/pull/370) merged the third and
+final publisher-only correction as
+`35a9b0a687114ee64d680d4254bb29bad7dd6b98`, whose sole parent is second repair
+`06885e10d22a435175034023d6cc9b51d3666b34`. Its exact-main
+[CI `32735418896`](https://github.com/aiwaki/slipstream/actions/runs/32735418896)
+and
+[dependency audit `32735418912`](https://github.com/aiwaki/slipstream/actions/runs/32735418912)
+passed. All three repair edges changed only `build-app.yml`, its contract test,
+and this checkpoint; every edge had independent exact-main CI/audit evidence.
+The successful
+[publisher run `32736780280`](https://github.com/aiwaki/slipstream/actions/runs/32736780280),
+attempt `1`, validated that chain, installed hash-locked verifier dependencies,
+verified the original candidate/readiness evidence, created and verified the
+tag-specific metadata attestations, published and remotely rechecked the exact
+draft, and archived `.22` as `Slipstream 0.1.9 (preview 22, архивная)`.
 
-Do not rerun any failed publisher unchanged, and do not repeat the unrelated
-30-minute soak. The active correction moves both Python payloads to effective
-shell column zero and reconstructs the effective YAML `run` script in the
-contract test; every raw multiline `python3 -c` payload is lexed and compiled
-without a masking `dedent()`. Repair mode pins the known prefix
-`6ba71ef75d821ee74cedcee5d8a9c83495da7c76` ->
-`1e0d03130405020a761504c1e65827f76020de47` ->
-`06885e10d22a435175034023d6cc9b51d3666b34`, requires the second repair to be
-an ancestor of live main, and accepts exactly three or four linear repair
-commits from the qualified source. The fourth slot is a hard-capped contingency
-only; it is not permission to retry an unchanged failure. Every edge remains
-independently checked with NUL-delimited paths and rename detection disabled,
-must contain exactly regular-blob versions of `build-app.yml`, its contract
-test, and this checkpoint, and rejects merges, path type/mode changes,
-additions/deletions, and any product path. Every repair SHA must independently
-have exact repository/workflow/branch/event/attempt metadata, successful
-exact-main CI and dependency audit, complete job lists, and required wrapper
-jobs.
+Independent post-publication verification downloaded all 12 remote assets and
+matched every GitHub size and SHA-256. `verify_release_artifacts.py` confirmed
+the updater signature, candidate/release manifests, SBOM/audit, exact source,
+tag, target, and version; `verify_published_release.py` confirmed release ID,
+prerelease state, exact tag target, and the complete asset inventory. ZIP and
+tar.gz integrity checks passed, the DMG checksum is valid, and the extracted
+bundle has identifier `dev.slipstream.tray`, version `0.1.9-preview.23`,
+`LSUIElement=true`, an `arm64` main executable, and a valid on-disk code seal.
+Seven candidate provenance subjects, three readiness subjects, five publisher
+metadata subjects, and the three candidate SPDX subjects independently verify
+against their exact signer workflows and source SHAs. The published candidate
+manifest retains app-tree SHA-256
+`d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea`.
 
-Candidate, audit, qualification, readiness, their existing attestations,
-manifest source fields, release metadata payloads, and the tag remain bound to
-the older qualified source commit; the tag must target that commit. The new
-tag-specific metadata attestation covers five subjects and is necessarily
-issued by the repaired publisher commit, so publication must verify both links:
-its provenance must name that exact publisher SHA; the manifest and proof
-source fields must name the older qualified source; and `latest.json` must
-remain transitively bound through its tag, updater signature, and the
-source-bound artifact manifest. Dispatch the publisher with all four explicit
-successful evidence run IDs and the explicit repair source, without another
-account-backed run or soak, only after this third repair has its own exact-head
-and exact-main checks. The preview remains unpublished, ad-hoc signed, and
-unnotarized because no Apple Developer ID is available.
+The macOS bundle is deliberately ad-hoc and unnotarized: `codesign` reports
+`Signature=adhoc` and no Team Identifier. This workstation has Gatekeeper
+assessment disabled, so its local `spctl` acceptance is not compatibility
+evidence. Do not claim Developer ID signing, notarization, stapling, or normal
+Gatekeeper compatibility. Stable publication remains closed until those Apple
+requirements exist.
+
+Preview `.23` needs no further publisher or release-readiness run. Before
+`.24`, preserve the existing requirement for a real public `.23 -> .24`
+automatic-update success and forced-rollback canary. Remove the bounded
+`.23`-specific publisher-repair escape hatch in an ordinary follow-up change;
+it is historical recovery machinery, not a general release path.
 
 ### Previous checkpoint
 
