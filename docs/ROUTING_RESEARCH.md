@@ -1,9 +1,42 @@
 # Routing Research Notes
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-08-26 first-request late-handoff regression
+
+A clean installed-candidate control started with `learned=0` and reproduced the
+Capacitor direct denial. Production correctly classified the route and learned
+the exact host, but the initiating curl still ended in `SSL_ERROR_SYSCALL`
+after roughly eleven seconds. That is not recovery: it proves the semantic
+classifier and exact-host learning path while independently proving that the
+original replay-safe request missed its usable handoff.
+
+Exact history comparison isolated the regression. Commit `672c613` connected
+the hard-transport marker to the older sequential recovery ladder, and the
+later bounded direct retry in `af3e515` legitimately consumed more of the same
+client window. The preflight claim retained an absolute deadline, but the
+Geph handoff consumed only a boolean authorization and then started fresh
+readiness and first-payload waits. Separately, `timeout` was accepted by the
+zero-payload helper as if it were an explicit close. That could combine slow
+network ambiguity with stale observations and authorize a route incorrectly.
+
+The working correction keeps one eight-second deadline from accepted client
+connection through downstream drain, reserves four seconds for the verified
+owned-Geph payload/handoff, and races app-owned Xbox DNS with exactly two
+distinct local strategies only after an independent hard system failure. A
+local payload wins. Geph is authorized only when every current-attempt stage is
+explicitly `closed`; timeout, pending, failed, cancellation, and incomplete
+results publish nothing. Learning/status work begins only after the original
+client receives and drains at least 64 Geph bytes before its deadline.
+Deterministic verification passes the complete local suite: `1763` tests and
+`181` subtests, with only the existing Scapy finite-field-DH deprecation
+warning. Codebase-memory reindexing returned `Transport closed`, so this review
+used the documented narrow `rtk` source fallback. Physical clean-first-request
+Chrome and Safari evidence remains open; no account-backed workflow or soak
+was started.
 
 ## 2026-08-25 Strict-denial network decision: physical validation
 
@@ -82,6 +115,7 @@ outcome, never from visual incompleteness, a status code, or elapsed time alone.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-26 | Exact route learned after the initiating request had already failed | Shared-deadline/current-attempt correction locally green; physical proof open | A clean Capacitor curl ended in `SSL_ERROR_SYSCALL` at roughly eleven seconds even though public state learned the exact host. The hard marker entered a legacy sequential ladder, its claim deadline was reduced to boolean authorization before Geph, and timeout could count as closed evidence. Production now uses one eight-second client deadline, reserves four seconds for Geph delivery, races Xbox DNS plus exactly two distinct local strategies, admits Geph only when all current-attempt stages explicitly close, and schedules confirmation only after the original client drain succeeds before deadline. | Commit and build the exact tree, install it without touching the user's dirty primary checkout, reset only controlled product state, and require the first clean curl plus fresh Chrome and Safari connections to converge. No account-backed run or soak is relevant. |
 | 2026-08-25 | Strict denial was hidden behind the provenance gate after the fast probe | Root cause corrected; full local suite green | Exact comparison with successful head `513484a` showed that the strict-denial classifier, owned-Geph payload proof, and exact-host commit path still existed. Live direct probes instead exposed the timing boundary: the 400-ms root slice could end inconclusive before the complete strict denial arrived, while the same-host owned-Geph proof completed normally. Production then asked for browser provenance before its adaptive retry, so a network-only strict denial could be rejected as `not_frontmost` or `input_not_recent` before the retry revealed it. The correction gives exactly one bounded same-IP direct network retry first. A final usable result stays direct, a second inconclusive result returns no-cache/no-provenance/no-Geph, a final strict denial reaches only the existing complete exact-host proof, and final safe-incomplete or critical-resource evidence still requires signed foreground/recent-input provenance. Actionable branches default to no cache until proof commits. Existing h2/TCP/QUIC sessions cannot be migrated after learning and are excluded from clean first-request evidence. | Build and install the exact corrected commit, reset process-local learned state, and require first-request convergence on genuinely fresh Chrome and Safari connections before pushing PR #373. No hostname rule, account-backed run, or soak is relevant. |
 | 2026-08-25 | Hard first-contact and strict minimal edge denial converged only after repeated browser retries | Generic same-request corrections under local verification | A few retained TLS bytes made the exact system stream truthy even when the independent direct probe then produced a hard TLS/socket failure. The handler committed that stream instead of entering the existing guarded local ladder. Production now carries a distinct hard-transport bit from the direct probe and reuses the same replay-safe first flight for app-owned DNS/local recovery; idle timeout, slow progress, complete ordinary `403`, and unusable results on both direct and owned routes remain non-authorizing. A separate bounded exception follows one apex/`www` HTTPS root redirect only to obtain a complete usable final owned-Geph payload under the same deadline and still learns only the original host. Weather then proved its critical `dsx` resource used a complete minimal strict-denial fingerprint not covered by the prose classifier and that one owned target connection could fail while a second succeeded inside the existing proof budget. The new classifier is exact status/body/header bound and the proof has exactly one remaining-budget retry under its unchanged deadline. | Finish full local verification, rebuild/install the exact branch head, and require fresh physical Chrome and Safari convergence plus exact-head CI/audit before merging PR #373. No new soak or account-backed run is relevant. |
 | 2026-08-24 | Learned exact-host route bypassed over QUIC | Two physical failures reproduced; exact-flow socket-failure correction locally green | The first fresh attempt advanced public auto-geo-exit state from idle to one learned exact host, yet Chrome kept Aikido's critical bootstrap incomplete and showed Capacitor's direct Cloudflare denial; Safari held both URL loads over Start Page. Canonical private-cache size/timestamp plus the usable Aikido root and critical-asset path identify the learned entry as the exact `cdn.aikido.dev` child. Bounded post-attempt controls still got the direct Capacitor denial and incomplete Aikido asset, while explicit owned Geph returned complete 65,536-byte ranges for both. Source review found `_quic_geo_exit_tcp_fallback` consulted only static `route_policy(...)=geo_exit`: a learned unknown exact host therefore bypassed its TCP-only route over HTTP/3, and a QUIC-first unknown root never reached TCP semantic preflight. Exact-SNI Version Negotiation fixed that source defect but the next physical attempt still failed in both browsers; public state reached two learned hosts, while a live Safari socket showed the Aikido root on TCP and its critical CDN on UDP. RFC 9000 explains the race: a client must discard VN after processing a real server packet. The revised correction pairs bounded VN with a matching IPv4/IPv6 port-unreachable quoting only the observed UDP tuple, so the exact socket fails and the browser retries TCP even when the server wins the VN race. A fresh usable/challenge result restores exact-host QUIC; only the existing proof can learn Geph. Explicit policy/exclusions, ECH/no-SNI, other UDP, persistent PF, and shared CDN IPs remain untouched. | Build/install the exact local head, restart browsers to discard old QUIC connections, and require one fresh physical Chrome/Safari success before merge. No additional release soak is relevant to this targeted defect. |

@@ -538,6 +538,8 @@ _runtime_route_circuits = route_circuit_registry.RouteCircuitRegistry(
 ADDRESS_RACE_TIMEOUT_MS = 9_000
 ADDRESS_RACE_STAGGER_MS = 250
 ADDRESS_RACE_MAX_CONCURRENT = 2
+UNKNOWN_RECOVERY_TOTAL_TIMEOUT = 8.0
+UNKNOWN_RECOVERY_GEPH_RESERVE = GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT = 4.0
 
 
 CANARY_INTERVAL = 10 * 60.0
@@ -552,7 +554,6 @@ LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
 LOCAL_BYPASS_RESWEEP_COOLDOWN = 60.0
 LOCAL_BYPASS_RESWEEP_STALE_AFTER = 120.0
 GEO_PAYLOAD_CANARY_TIMEOUT = 6.0
-GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT = 4.0
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
@@ -2228,6 +2229,7 @@ SYSTEM_PROBE_PAYLOAD = "payload"
 SYSTEM_PROBE_CLOSED = "closed"
 SYSTEM_PROBE_TIMEOUT = "timeout"
 SYSTEM_PROBE_PENDING = "pending"
+SYSTEM_PROBE_UNCLEAR = "unclear"
 ROUTE_PROBE_PAYLOAD = "payload"
 ROUTE_PROBE_CLOSED = "closed"
 ROUTE_PROBE_TIMEOUT = "timeout"
@@ -2341,6 +2343,31 @@ class _RoutePreflightOwnedGephClaim:
     capability: str
     host: str
     deadline_monotonic: float
+
+
+@dataclass(frozen=True, slots=True)
+class _RoutePreflightLocalRecoveryClaim:
+    marker: object
+    host: str
+    deadline_monotonic: float
+
+
+@dataclass(frozen=True, slots=True)
+class _HardLocalRecoveryStageResult:
+    stage: str
+    raced: object
+    attempted: int
+    outcomes: dict
+    strategy_name: object = None
+    via_xbox_dns: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _HardLocalRecoveryResult:
+    raced: object = None
+    strategy_name: object = None
+    via_xbox_dns: bool = False
+    proof_complete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -6147,6 +6174,22 @@ def _owned_geph_preflight_claim(host, capability, deadline_monotonic):
     )
 
 
+def _local_recovery_preflight_claim(host, deadline_monotonic):
+    """Bind hard transport recovery to the originating client deadline."""
+    h = normalize_host(host)
+    if (
+        not h
+        or deadline_monotonic <= time.monotonic()
+        or not _auto_geph_base_host_allowed(h)
+    ):
+        return None
+    return _RoutePreflightLocalRecoveryClaim(
+        marker=_ROUTE_PREFLIGHT_LOCAL_RECOVERY,
+        host=h,
+        deadline_monotonic=deadline_monotonic,
+    )
+
+
 def _consume_owned_geph_preflight_claim(claim, host):
     """Atomically validate and spend a private relay handoff capability."""
     now = time.monotonic()
@@ -6958,6 +7001,7 @@ async def _run_initial_route_preflight(
     bootstrap_geph_probe=None,
     bootstrap_resolver=None,
     now=None,
+    deadline_monotonic=None,
 ):
     """Hold one first ClientHello while exact-host route evidence is gathered.
 
@@ -6972,6 +7016,25 @@ async def _run_initial_route_preflight(
     """
     h = normalize_host(host)
     preflight_started = time.monotonic()
+    handoff_deadline = preflight_started + (
+        route_preflight.MAX_DEADLINE_MS / 1000.0
+    )
+    if deadline_monotonic is not None:
+        try:
+            handoff_deadline = min(
+                handoff_deadline,
+                float(deadline_monotonic),
+            )
+        except (TypeError, ValueError):
+            return None
+    # A handler-supplied deadline reserves enough time to deliver the already
+    # proven route to this exact client. Direct calls retain the historical
+    # full preflight budget used by deterministic qualification tests.
+    deadline = handoff_deadline
+    if deadline_monotonic is not None:
+        deadline -= UNKNOWN_RECOVERY_GEPH_RESERVE
+    if deadline <= preflight_started:
+        return None
     now = time.monotonic() if now is None else now
     try:
         address = ipaddress.ip_address(ip)
@@ -6981,7 +7044,7 @@ async def _run_initial_route_preflight(
         return _owned_geph_preflight_claim(
             h,
             secrets.token_hex(16),
-            now + 1.0,
+            handoff_deadline,
         )
     if (
         not address.is_global
@@ -6990,8 +7053,6 @@ async def _run_initial_route_preflight(
         return None
 
     job = _new_direct_route_preflight_job(h)
-    deadline = time.monotonic() + route_preflight.MAX_DEADLINE_MS / 1000.0
-
     owner = False
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
@@ -7002,7 +7063,7 @@ async def _run_initial_route_preflight(
                 return _owned_geph_preflight_claim(
                     h,
                     job.capability,
-                    deadline,
+                    handoff_deadline,
                 )
             return None
         future = _route_preflight_inflight.get(h)
@@ -7018,17 +7079,23 @@ async def _run_initial_route_preflight(
             owner = True
     if not owner:
         try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
             selected_by_owner = await asyncio.wait_for(
                 asyncio.shield(asyncio.wrap_future(future)),
-                timeout=route_preflight.MAX_DEADLINE_MS / 1000.0,
+                timeout=remaining,
             )
             if selected_by_owner is _ROUTE_PREFLIGHT_LOCAL_RECOVERY:
-                return _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+                return _local_recovery_preflight_claim(
+                    h,
+                    handoff_deadline,
+                )
             if selected_by_owner and _auto_geph_learned_exact_host(h):
                 return _owned_geph_preflight_claim(
                     h,
                     job.capability,
-                    deadline,
+                    handoff_deadline,
                 )
             return None
         except (asyncio.TimeoutError, RuntimeError):
@@ -7169,7 +7236,10 @@ async def _run_initial_route_preflight(
             # select or remember a foreign exit.  A slow direct probe remains
             # retryable-inconclusive and never enters this branch.
             publish_cache = False
-            selected_claim = _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+            selected_claim = _local_recovery_preflight_claim(
+                h,
+                handoff_deadline,
+            )
             return selected_claim
         if outcome in SEMANTIC_DENIAL_OUTCOMES or (
             outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
@@ -7225,7 +7295,7 @@ async def _run_initial_route_preflight(
                     selected_claim = _owned_geph_preflight_claim(
                         h,
                         job.capability,
-                        deadline,
+                        handoff_deadline,
                     )
         elif outcome == SEMANTIC_OUTCOME_USABLE and eligible_asset is not None:
             asset_host = normalize_host(eligible_asset.exact_host)
@@ -7254,7 +7324,7 @@ async def _run_initial_route_preflight(
                 selected_claim = _owned_geph_preflight_claim(
                     h,
                     job.capability,
-                    deadline,
+                    handoff_deadline,
                 )
             elif (
                 asset_outcome
@@ -7302,7 +7372,10 @@ async def _run_initial_route_preflight(
             if not future.done():
                 future.set_result(
                     _ROUTE_PREFLIGHT_LOCAL_RECOVERY
-                    if selected_claim is _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+                    if isinstance(
+                        selected_claim,
+                        _RoutePreflightLocalRecoveryClaim,
+                    )
                     else bool(selected_claim)
                 )
     return selected_claim
@@ -12002,6 +12075,7 @@ async def doh_resolve_async(host):
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     _doh_inflight[host] = fut
+    ips = []
     try:
         ips = await loop.run_in_executor(_POOL, doh_resolve, host)
     except Exception:
@@ -12024,6 +12098,7 @@ async def xbox_dns_resolve_async(host):
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     _xbox_dns_inflight[host] = fut
+    ips = []
     try:
         ips = await loop.run_in_executor(_POOL, xbox_dns_resolve, host)
     except Exception:
@@ -14857,11 +14932,13 @@ def _publish_route_probe_outcome(outcome):
 
 
 def _probe_attempts_confirm_zero_payload(outcomes, attempted):
-    replay_safe = {ROUTE_PROBE_CLOSED, ROUTE_PROBE_TIMEOUT}
     return (
         attempted > 0
         and len(outcomes) == attempted
-        and all(outcome in replay_safe for outcome in outcomes.values())
+        and all(
+            outcome == ROUTE_PROBE_CLOSED
+            for outcome in outcomes.values()
+        )
     )
 
 
@@ -14874,6 +14951,7 @@ async def _race_probe_addresses(
     policy,
     backend,
     attempt_outcomes=None,
+    timeout_ms=None,
 ):
     """Race complete first-payload probes within one preselected route."""
     candidates = tuple(addresses)
@@ -14908,7 +14986,11 @@ async def _race_probe_addresses(
         service_group=policy.get("service_group") or SERVICE_GENERIC,
         route_class=policy.get("route_class") or ROUTE_UNKNOWN,
         backend_id=backend,
-        timeout_ms=ADDRESS_RACE_TIMEOUT_MS,
+        timeout_ms=(
+            ADDRESS_RACE_TIMEOUT_MS
+            if timeout_ms is None
+            else max(1, int(timeout_ms))
+        ),
         stagger_ms=ADDRESS_RACE_STAGGER_MS,
         max_concurrent=ADDRESS_RACE_MAX_CONCURRENT,
     )
@@ -14932,6 +15014,7 @@ async def _try_xbox_dns_local_connect(
     body,
     *,
     attempt_summary=None,
+    timeout_ms=None,
 ):
     """Try the app-owned Xbox DNS answer locally, never through Geph."""
     if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
@@ -14947,11 +15030,275 @@ async def _try_xbox_dns_local_connect(
         policy=route_policy(host),
         backend=BACKEND_LOCAL_ENGINE,
         attempt_outcomes=outcomes,
+        timeout_ms=timeout_ms,
     )
     if attempt_summary is not None:
         attempt_summary["attempted"] = attempted
         attempt_summary["outcomes"] = outcomes
     return raced
+
+
+async def _hard_local_strategy_stage(
+    host,
+    dst_ip,
+    port,
+    head,
+    body,
+    strategy,
+    resolver_task,
+    evidence_deadline,
+):
+    """Run one hard-recovery strategy without publishing partial evidence."""
+    outcomes = {}
+    try:
+        real_ips = await asyncio.shield(resolver_task)
+        remaining = evidence_deadline - time.monotonic()
+        if remaining <= 0:
+            return _HardLocalRecoveryStageResult(
+                f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strategy['name']}",
+                None,
+                0,
+                outcomes,
+                strategy_name=strategy["name"],
+            )
+        candidates = real_ips[:ip_attempt_limit(host)]
+        raced, attempted = await _race_probe_addresses(
+            host,
+            port,
+            candidates,
+            lambda ip: dial_strategy(ip, port, head, body, host, strategy),
+            policy=route_policy(host),
+            backend=BACKEND_LOCAL_ENGINE,
+            attempt_outcomes=outcomes,
+            timeout_ms=remaining * 1000.0,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        raced, attempted = None, 0
+    return _HardLocalRecoveryStageResult(
+        f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strategy['name']}",
+        raced,
+        attempted,
+        outcomes,
+        strategy_name=strategy["name"],
+    )
+
+
+async def _hard_local_xbox_stage(
+    host,
+    port,
+    head,
+    body,
+    evidence_deadline,
+):
+    """Run app-owned DNS in the hard-recovery gate without side effects."""
+    summary = {}
+    remaining = evidence_deadline - time.monotonic()
+    if remaining <= 0:
+        return _HardLocalRecoveryStageResult(
+            AUTO_GEPH_STAGE_XBOX_DNS,
+            None,
+            0,
+            {},
+            strategy_name="plain",
+            via_xbox_dns=True,
+        )
+    try:
+        raced = await _try_xbox_dns_local_connect(
+            host,
+            port,
+            head,
+            body,
+            attempt_summary=summary,
+            timeout_ms=remaining * 1000.0,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        raced = None
+    return _HardLocalRecoveryStageResult(
+        AUTO_GEPH_STAGE_XBOX_DNS,
+        raced,
+        int(summary.get("attempted") or 0),
+        summary.get("outcomes") or {},
+        strategy_name="plain",
+        via_xbox_dns=True,
+    )
+
+
+async def _try_hard_local_recovery(
+    host,
+    dst_ip,
+    port,
+    head,
+    body,
+    *,
+    deadline_monotonic,
+    repeat_stage=None,
+):
+    """Race exact current-attempt local proof under one client deadline.
+
+    This path is admitted only after an independent hard transport failure.
+    Xbox DNS and exactly two distinct local strategies may run concurrently.
+    A local payload wins immediately. Owned Geph is authorized only when all
+    three stages explicitly close after sending the replay-safe ClientHello;
+    timeout, cancellation, dial failure, or an incomplete result is unclear.
+    """
+    evidence_deadline = (
+        float(deadline_monotonic) - UNKNOWN_RECOVERY_GEPH_RESERVE
+    )
+    if evidence_deadline <= time.monotonic():
+        return _HardLocalRecoveryResult()
+
+    strategies = []
+    seen_names = set()
+    for strategy in _strategy_order_for_attempt(host, repeat_stage):
+        name = strategy.get("name")
+        if name in GENERAL_STRATS and name not in seen_names:
+            seen_names.add(name)
+            strategies.append(strategy)
+        if len(strategies) == AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES:
+            break
+    if len(strategies) != AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES:
+        return _HardLocalRecoveryResult()
+
+    resolver_task = asyncio.create_task(resolve_connection_ips(host, dst_ip))
+    tasks = {
+        asyncio.create_task(
+            _hard_local_xbox_stage(
+                host,
+                port,
+                head,
+                body,
+                evidence_deadline,
+            )
+        )
+    }
+    tasks.update(
+        asyncio.create_task(
+            _hard_local_strategy_stage(
+                host,
+                dst_ip,
+                port,
+                head,
+                body,
+                strategy,
+                resolver_task,
+                evidence_deadline,
+            )
+        )
+        for strategy in strategies
+    )
+    stage_results = []
+    winner = None
+    pending = set(tasks)
+    try:
+        while pending:
+            remaining = evidence_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                break
+            ready_winners = []
+            for task in done:
+                try:
+                    stage_result = task.result()
+                except Exception:
+                    stage_result = None
+                if stage_result is None:
+                    continue
+                stage_results.append(stage_result)
+                if stage_result.raced is not None:
+                    ready_winners.append(stage_result)
+            if ready_winners:
+                # FIRST_COMPLETED may return multiple payload-bearing stages
+                # from the same loop tick. Prefer app-owned DNS on a tie and
+                # synchronously close every losing stream before returning the
+                # sole live route to the caller.
+                ready_winners.sort(
+                    key=lambda item: (not item.via_xbox_dns, item.stage)
+                )
+                winner = ready_winners[0]
+                for losing_stage in ready_winners[1:]:
+                    try:
+                        losing_stage.raced[1][1].close()
+                    except (AttributeError, IndexError, TypeError):
+                        pass
+                break
+    finally:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if resolver_task.done():
+            await asyncio.gather(resolver_task, return_exceptions=True)
+        else:
+            # Strategy waiters shield this shared owner. A local winner must
+            # not cancel it: another coalesced connection may still depend on
+            # the result, and the pool operation itself cannot be cancelled.
+            def consume_resolver_result(task):
+                if task.cancelled():
+                    return
+                try:
+                    task.result()
+                except Exception:
+                    pass
+
+            resolver_task.add_done_callback(consume_resolver_result)
+
+    if winner is not None:
+        return _HardLocalRecoveryResult(
+            raced=winner.raced,
+            strategy_name=winner.strategy_name,
+            via_xbox_dns=winner.via_xbox_dns,
+        )
+    if len(stage_results) != 1 + AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES:
+        return _HardLocalRecoveryResult()
+    if not all(
+        _probe_attempts_confirm_zero_payload(
+            stage.outcomes,
+            stage.attempted,
+        )
+        for stage in stage_results
+    ):
+        return _HardLocalRecoveryResult()
+
+    # Publish the four current-attempt stages only after the gate is complete;
+    # stale observations can never fill a timeout from this request.
+    observed_at = time.monotonic()
+    note_zero_payload_route_failure(
+        host,
+        AUTO_GEPH_STAGE_SYSTEM,
+        now=observed_at,
+    )
+    _mark_xbox_dns_candidate(host)
+    candidate_ready = False
+    for stage in sorted(
+        stage_results,
+        key=lambda item: (not item.via_xbox_dns, item.stage),
+    ):
+        candidate_ready = bool(
+            note_zero_payload_route_failure(
+                host,
+                stage.stage,
+                now=observed_at,
+            )
+            or candidate_ready
+        )
+        if stage.via_xbox_dns:
+            _mark_xbox_dns_exhausted(host)
+        else:
+            _record_strategy_result(host, stage.strategy_name, False)
+    return _HardLocalRecoveryResult(
+        proof_complete=bool(
+            candidate_ready and _auto_geph_learning_candidate_proven(host)
+        )
+    )
 
 
 async def _try_exact_system_probe(
@@ -14968,7 +15315,9 @@ async def _try_exact_system_probe(
     """
     direct = await dial_plain(dst_ip, port, first_flight)
     if direct is None:
-        return SYSTEM_PROBE_CLOSED, None
+        # dial_plain intentionally collapses connect timeout and connect error;
+        # neither proves that a transmitted ClientHello was hard-closed.
+        return SYSTEM_PROBE_UNCLEAR, None
     up_r, up_w = direct
     try:
         server_first = await asyncio.wait_for(
@@ -15055,6 +15404,7 @@ async def _try_unknown_owned_geph_route(
     writer,
     *,
     successor_claim=None,
+    deadline_monotonic=None,
 ):
     """Use owned Geph only after the complete zero-payload local proof.
 
@@ -15063,6 +15413,25 @@ async def _try_unknown_owned_geph_route(
     against owned-Geph restart until the relay finishes.
     """
     h = normalize_host(host)
+    if isinstance(successor_claim, _RoutePreflightOwnedGephClaim):
+        deadline_monotonic = min(
+            successor_claim.deadline_monotonic,
+            (
+                successor_claim.deadline_monotonic
+                if deadline_monotonic is None
+                else float(deadline_monotonic)
+            ),
+        )
+    elif deadline_monotonic is not None:
+        try:
+            deadline_monotonic = float(deadline_monotonic)
+        except (TypeError, ValueError):
+            return False
+    if (
+        deadline_monotonic is not None
+        and deadline_monotonic <= time.monotonic()
+    ):
+        return False
     preflight_authorized = _consume_owned_geph_preflight_claim(
         successor_claim,
         h,
@@ -15089,28 +15458,52 @@ async def _try_unknown_owned_geph_route(
     # Its own bounded payload confirmation is allowed during the global backend
     # hold, just like the independent background confirmation. Static and
     # learned geo-exit traffic still obeys geo_exit_backend_ready().
-    if not await _wait_for_owned_geph_candidate(
+    candidate_wait = _wait_for_owned_geph_candidate(
         h,
         one_shot_authorized=request_authorized,
-    ):
+    )
+    try:
+        candidate_ready = (
+            await candidate_wait
+            if deadline_monotonic is None
+            else await asyncio.wait_for(
+                candidate_wait,
+                timeout=max(
+                    0.001,
+                    deadline_monotonic - time.monotonic(),
+                ),
+            )
+        )
+    except asyncio.TimeoutError:
+        return False
+    if not candidate_ready:
         return False
     if not _geph_session_started():
         return False
     up_w = None
     confirm_after_session = False
     try:
-        geph = await dial_via_geph(h, port, first_flight)
-        if geph is None:
+        remaining = (
+            GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT
+            if deadline_monotonic is None
+            else deadline_monotonic - time.monotonic()
+        )
+        if remaining <= 0:
+            return False
+        geph_payload, _geph_error = await _dial_via_geph_first_payload(
+            h,
+            port,
+            first_flight,
+            timeout=min(GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT, remaining),
+        )
+        if geph_payload is None:
             _set_auto_geph_status("rejected", h, "owned Geph connect unavailable")
             return False
-        up_r, up_w = geph
-        try:
-            server_first = await asyncio.wait_for(
-                up_r.read(65536),
-                timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
-            )
-        except (asyncio.TimeoutError, ConnectionError, OSError):
-            server_first = b""
+        up_r, up_w, server_first = geph_payload
+        payload_ready_before_deadline = bool(
+            deadline_monotonic is None
+            or time.monotonic() < deadline_monotonic
+        )
         if len(server_first) < AUTO_GEPH_CONFIRM_MIN_BYTES:
             _set_auto_geph_status(
                 "rejected",
@@ -15119,6 +15512,8 @@ async def _try_unknown_owned_geph_route(
                 len(server_first),
             )
             return False
+        if not payload_ready_before_deadline:
+            return False
         if candidate_authorized and not _auto_geph_learning_candidate_proven(h):
             candidate_authorized = False
             one_shot_authorized = True
@@ -15126,6 +15521,21 @@ async def _try_unknown_owned_geph_route(
             candidate_authorized
             and not _auto_geph_learned_exact_host(h)
         )
+        try:
+            writer.write(server_first)
+            if deadline_monotonic is None:
+                await writer.drain()
+            else:
+                remaining = deadline_monotonic - time.monotonic()
+                if remaining <= 0:
+                    return False
+                await asyncio.wait_for(writer.drain(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return False
+        except (ConnectionError, OSError):
+            if payload_ready_before_deadline and not successor_authorized:
+                _retain_auto_geph_successor_after_late_handoff(h)
+            return True
         if confirm_after_session:
             _schedule_auto_geph_confirmation_before_relay(h)
         elif preflight_authorized:
@@ -15154,13 +15564,6 @@ async def _try_unknown_owned_geph_route(
                 "failures; route learning remains paused during network noise",
                 file=sys.stderr,
             )
-        try:
-            writer.write(server_first)
-            await writer.drain()
-        except (ConnectionError, OSError):
-            if not successor_authorized:
-                _retain_auto_geph_successor_after_late_handoff(h)
-            return True
         activity = _RelayActivity(
             last_downstream_at=time.monotonic(),
             downstream_bytes=len(server_first),
@@ -15254,6 +15657,10 @@ async def handle(reader, writer):
 
 
 async def _handle_impl(reader, writer):
+    connection_started_at_monotonic = time.monotonic()
+    unknown_recovery_deadline = (
+        connection_started_at_monotonic + UNKNOWN_RECOVERY_TOTAL_TIMEOUT
+    )
     connection_started_at_unix_ms = int(time.time() * 1000)
     sock = writer.get_extra_info("socket")
     peer_endpoint = writer.get_extra_info("peername")
@@ -15594,6 +16001,7 @@ async def _handle_impl(reader, writer):
             reader,
             writer,
             successor_claim=successor_claim,
+            deadline_monotonic=unknown_recovery_deadline,
         ):
             return
     server_first_repeat_claim = (
@@ -15640,6 +16048,7 @@ async def _handle_impl(reader, writer):
     chosen_name = None
     via_system_exact = False
     via_xbox_dns = False
+    allow_unknown_geph_this_request = True
     if (
         is_tls
         and host
@@ -15666,12 +16075,56 @@ async def _handle_impl(reader, writer):
                 host,
                 dst_ip,
                 peer_endpoint=peer_endpoint,
+                deadline_monotonic=unknown_recovery_deadline,
             )
-            if preflight_claim is _ROUTE_PREFLIGHT_LOCAL_RECOVERY:
+            if (
+                isinstance(
+                    preflight_claim,
+                    _RoutePreflightLocalRecoveryClaim,
+                )
+                and preflight_claim.marker is _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+                and preflight_claim.host == normalize_host(host)
+            ):
                 await _close_stream_writer(exact[1])
-                note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_SYSTEM)
-                _mark_xbox_dns_candidate(host)
-                unknown_stage = UNKNOWN_RECOVERY_XBOX_DNS
+                hard_recovery = await _try_hard_local_recovery(
+                    host,
+                    dst_ip,
+                    dst_port,
+                    head,
+                    body,
+                    deadline_monotonic=(
+                        preflight_claim.deadline_monotonic
+                    ),
+                    repeat_stage=server_first_repeat_stage,
+                )
+                if hard_recovery.raced is not None:
+                    chosen, result = hard_recovery.raced
+                    chosen_name = hard_recovery.strategy_name
+                    via_xbox_dns = hard_recovery.via_xbox_dns
+                    _record_strategy_result(host, chosen_name, True)
+                    if not via_xbox_dns:
+                        remember_strategy(host, chosen_name)
+                    unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
+                elif hard_recovery.proof_complete:
+                    if await _try_unknown_owned_geph_route(
+                        host,
+                        dst_port,
+                        head + body,
+                        reader,
+                        writer,
+                        deadline_monotonic=(
+                            preflight_claim.deadline_monotonic
+                        ),
+                    ):
+                        return
+                    writer.close()
+                    return
+                else:
+                    # Deadline, timeout, cancellation, or dial ambiguity is not
+                    # route evidence. Do not enter the legacy sequential ladder
+                    # or let stale observations authorize a foreign exit.
+                    writer.close()
+                    return
             elif preflight_claim is not None:
                 await _close_stream_writer(exact[1])
                 if await _try_unknown_owned_geph_route(
@@ -15681,6 +16134,7 @@ async def _handle_impl(reader, writer):
                     reader,
                     writer,
                     successor_claim=preflight_claim,
+                    deadline_monotonic=unknown_recovery_deadline,
                 ):
                     return
                 # The semantic proof was valid but the selected circuit became
@@ -15694,8 +16148,18 @@ async def _handle_impl(reader, writer):
                 chosen_name = "plain"
                 via_system_exact = True
         else:
-            assert system_probe in (SYSTEM_PROBE_CLOSED, SYSTEM_PROBE_TIMEOUT)
-            note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_SYSTEM)
+            assert system_probe in (
+                SYSTEM_PROBE_CLOSED,
+                SYSTEM_PROBE_TIMEOUT,
+                SYSTEM_PROBE_UNCLEAR,
+            )
+            if system_probe == SYSTEM_PROBE_CLOSED:
+                note_zero_payload_route_failure(
+                    host,
+                    AUTO_GEPH_STAGE_SYSTEM,
+                )
+            else:
+                allow_unknown_geph_this_request = False
             _mark_xbox_dns_candidate(host)
             unknown_stage = UNKNOWN_RECOVERY_XBOX_DNS
 
@@ -15723,12 +16187,15 @@ async def _handle_impl(reader, writer):
             via_xbox_dns = True
             _record_strategy_result(host, chosen_name, True)
         else:
-            if _probe_attempts_confirm_zero_payload(
+            xbox_closed = _probe_attempts_confirm_zero_payload(
                 xbox_summary.get("outcomes") or {},
                 int(xbox_summary.get("attempted") or 0),
-            ):
+            )
+            if xbox_closed:
                 note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_XBOX_DNS)
-            _mark_xbox_dns_exhausted(host)
+                _mark_xbox_dns_exhausted(host)
+            else:
+                allow_unknown_geph_this_request = False
             unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
 
     # App-owned DNS is a separate route attempt and remains available while
@@ -15743,12 +16210,14 @@ async def _handle_impl(reader, writer):
             is_tls
             and host
             and route_class == ROUTE_UNKNOWN
+            and allow_unknown_geph_this_request
             and await _try_unknown_owned_geph_route(
                 host,
                 dst_port,
                 head + body,
                 reader,
                 writer,
+                deadline_monotonic=unknown_recovery_deadline,
             )
         ):
             return
@@ -15826,14 +16295,15 @@ async def _handle_impl(reader, writer):
                 strat_ok = True
                 _record_strategy_result(host, strat["name"], True)
             if not strat_ok:
-                _record_strategy_result(host, strat["name"], False)
-                if (
+                strategy_closed = bool(
                     route_class == ROUTE_UNKNOWN
                     and _probe_attempts_confirm_zero_payload(
                         strategy_outcomes,
                         attempted,
                     )
-                ):
+                )
+                if strategy_closed:
+                    _record_strategy_result(host, strat["name"], False)
                     local_proof_complete = note_zero_payload_route_failure(
                         host,
                         f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strat['name']}",
@@ -15844,6 +16314,8 @@ async def _handle_impl(reader, writer):
                         # replay-safe proof. Do not make the client wait for
                         # every remaining strategy before trying owned Geph.
                         break
+                elif route_class == ROUTE_UNKNOWN:
+                    allow_unknown_geph_this_request = False
             if result or attempts >= max_attempts:
                 break
         if result:
@@ -15851,7 +16323,7 @@ async def _handle_impl(reader, writer):
                 _dead.pop(host, None)
                 if _strat_cache.get(host) != chosen_name:
                     remember_strategy(host, chosen_name)
-        elif host:
+        elif host and allow_unknown_geph_this_request:
             _dead[host] = now + DEAD_TTL        # arm the negative cache
             if len(_dead) > 4096:
                 _dead.clear()
@@ -15872,12 +16344,14 @@ async def _handle_impl(reader, writer):
             is_tls
             and host
             and route_class == ROUTE_UNKNOWN
+            and allow_unknown_geph_this_request
             and await _try_unknown_owned_geph_route(
                 host,
                 dst_port,
                 head + body,
                 reader,
                 writer,
+                deadline_monotonic=unknown_recovery_deadline,
             )
         ):
             return

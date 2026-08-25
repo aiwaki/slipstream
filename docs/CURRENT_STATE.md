@@ -10,6 +10,34 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-26 (first-request handoff correction locally green): the user's
+dirty primary checkout remains untouched; work continues only in the isolated
+PR #373 worktree on `codex/aikido-cdn-recovery`. A clean installed-candidate
+Capacitor control started with `learned=0`, correctly classified and learned
+the exact host, but its initiating curl still ended in `SSL_ERROR_SYSCALL`
+after roughly eleven seconds. This is a late-handoff failure, not successful
+recovery. History and source review found that the hard-transport marker added
+by `672c613` entered the old sequential local ladder, while the preflight
+deadline was discarded before fresh Geph readiness/payload waits; the later
+bounded direct retry in `af3e515` exposed the overrun more consistently.
+Timeout was also incorrectly accepted as zero-payload evidence.
+
+The current uncommitted correction carries one absolute eight-second deadline
+from client accept through downstream drain, reserves four seconds for the
+verified owned-Geph payload, and races app-owned Xbox DNS plus exactly two
+distinct local strategies after the independent system hard failure. Only
+three explicit current-attempt `closed` stages authorize Geph; timeout,
+pending, failed, cancellation, or incomplete results publish no evidence,
+cache, learning, or successor. A local payload wins immediately. Confirmation
+is scheduled only after at least 64 Geph bytes have drained to the original
+client before deadline. The full local suite passes `1763` tests plus `181`
+subtests; only the existing Scapy finite-field-DH deprecation warning remains,
+and `git diff --check` is clean. Codebase-memory reindexing returned
+`Transport closed`, so the review used the documented narrow `rtk` fallback.
+The next verified action is final review, exact commit/build/install, then a
+clean first curl and fresh Chrome/Safari physical validation. No account-backed
+workflow or 30-minute soak was started, and no physical success is claimed yet.
+
 Update 2026-08-25 (post-release browser-visible recovery correction under
 review): live `origin/main` remains
 `2780de4b3f5d77ab3852e46381b997c618bd5080`. [PR #373](https://github.com/aiwaki/slipstream/pull/373)

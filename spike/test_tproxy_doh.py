@@ -9785,7 +9785,9 @@ def test_route_preflight_hard_terminal_enters_local_recovery_without_geph(
         )
     )
 
-    assert result is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert isinstance(result, tproxy._RoutePreflightLocalRecoveryClaim)
+    assert result.marker is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert result.host == host
     assert host not in tproxy._route_preflight_cache
     assert not tproxy._auto_geph_learned_exact_host(host)
 
@@ -9826,8 +9828,11 @@ def test_route_preflight_coalesces_hard_terminal_local_recovery(monkeypatch):
 
     owner_result, waiter_result = asyncio.run(scenario())
 
-    assert owner_result is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
-    assert waiter_result is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert isinstance(owner_result, tproxy._RoutePreflightLocalRecoveryClaim)
+    assert isinstance(waiter_result, tproxy._RoutePreflightLocalRecoveryClaim)
+    assert owner_result.marker is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert waiter_result.marker is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert owner_result.host == waiter_result.host == host
     assert host not in tproxy._route_preflight_cache
 
 
@@ -9955,6 +9960,54 @@ def test_repeated_inconclusive_network_retry_is_not_cached(monkeypatch):
 
     assert claim is None
     assert len(direct_timeouts) == 2
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_network_retry_hard_failure_enters_local_recovery_without_provenance(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "retry-then-hard-close.example"
+    direct_calls = []
+
+    def direct(_ip, actual_host, timeout):
+        assert actual_host == host
+        direct_calls.append(timeout)
+        if len(direct_calls) == 1:
+            return tproxy._SemanticPlainPreflightObservation(
+                tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=True,
+            )
+        return tproxy._SemanticPlainPreflightObservation(
+            tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=False,
+            hard_transport_failure=True,
+        )
+
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a hard network failure must not depend on browser focus"
+        ),
+    )
+
+    result = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=direct,
+            geph_probe=lambda *_args: pytest.fail(
+                "local hard-recovery proof must precede Geph"
+            ),
+        )
+    )
+
+    assert len(direct_calls) == 2
+    assert isinstance(result, tproxy._RoutePreflightLocalRecoveryClaim)
+    assert result.marker is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert result.host == host
     assert host not in tproxy._route_preflight_cache
     assert not tproxy._auto_geph_learned_exact_host(host)
 

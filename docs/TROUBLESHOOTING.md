@@ -1176,6 +1176,34 @@ For a repeated exact-host local stall, Slipstream may make one local retry via a
 Slipstream-issued Xbox DNS query, then continue through distinct local
 strategies. It never changes the system resolver.
 
+### The route learns but the initiating request still fails
+
+An increase in `learned` does not prove same-request recovery. If the first
+clean curl or browser connection ends in `SSL_ERROR_SYSCALL`, EOF, or a reset
+while the exact-host counter increases, treat it as a late handoff: the
+classifier and alternate-route proof worked, but the original ClientHello did
+not receive usable Geph payload before its client deadline.
+
+Check the complete current-attempt evidence rather than retrying until the
+learned route hides the defect:
+
+1. The absolute recovery deadline begins when the client connection is
+   accepted and remains the same through preflight, app-owned DNS, local
+   strategies, Geph readiness, first payload, and downstream drain.
+2. After a hard system transport failure, app-owned Xbox DNS and exactly two
+   distinct local strategies run in parallel. A local payload wins; Geph is
+   admissible only if every stage explicitly reports `closed` for this request.
+3. `timeout`, `pending`, `failed`, cancellation, connect ambiguity, or a
+   missing stage is `unclear`. It must not create observations, a dead cache,
+   learning, or a successor request.
+4. Route confirmation is not scheduled until at least 64 owned-Geph server
+   bytes are written and drained to the initiating client before its deadline.
+
+Do not call a later retry a first-request pass, and do not compensate with a
+hostname rule, a broader `403` rule, foreground state, or a longer sequence of
+timeouts. Validate from clean product state and require the first fresh request
+to converge.
+
 If a browser visibly remains on `about:blank` but copying the address produces
 the requested site, the target navigation is pending and has not committed its
 first document. This is not evidence that the browser opened the wrong URL.
