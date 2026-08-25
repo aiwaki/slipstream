@@ -10,6 +10,173 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-25 (post-release browser-visible recovery correction under
+review): live `origin/main` remains
+`2780de4b3f5d77ab3852e46381b997c618bd5080`. [PR #373](https://github.com/aiwaki/slipstream/pull/373)
+contains the generic strict-edge and critical-cross-origin recovery correction
+through exact transport head `124499bb1d44d6343f3ba7cd6246a502302a075c`,
+plus the current-macOS foreground parser correction
+`6e3c31e4e0d7d95439b470c431a20763de111307`.
+The first physical Capacitor/Aikido attempt left public auto-geo-exit status at
+`learned=0`, `pending=0`, `last_state=idle`: the foreground browser connection
+was rejected before semantic classification or any route proof. Exact loopback
+socket attribution reproduced both causes. Current Google Chrome's exact signed
+root bundle fails only `codesign --verify --strict` because Finder metadata is
+present, while `--strict=symlinks` passes; current Cryptex WebKit Networking
+fails resource-envelope verification as obsolete but passes
+`--ignore-resources --strict=symlinks`. Production now preserves exact canonical
+paths, identifiers, Apple/Google designated requirements, team, process tree,
+socket owner, foreground state, and recent physical input while selecting only
+the compatible verifier form. `--ignore-resources` is restricted to exact
+system Safari/WebKit roots and is never used for Chrome or an arbitrary path.
+
+The fresh physical Chrome/Safari attempt then passed that admission boundary
+but still did not restore either page. Public state advanced from idle to
+`last_state=learned`, `learned=1`, `pending=0` at
+`2026-08-24T17:33:27Z`. The canonical one-entry private cache size plus the
+usable Aikido root/critical-asset control identifies the learned exact child as
+`cdn.aikido.dev`; no parent or suffix rule was added. Nevertheless the visible
+Chrome child remained incomplete, Capacitor still showed the direct Cloudflare
+edge denial, and Safari held both URLs over Start Page. Bounded controls after
+the attempt reproduced direct Capacitor denial and incomplete Aikido asset
+delivery, while the same Capacitor root and Aikido asset each returned a full
+65,536-byte range through the owned Geph listener. The remaining cause is QUIC:
+the existing v1/v2 observer moved only static `geo_exit` policy to TCP, so an
+automatically learned exact child could still bypass its TCP-only Geph route,
+and a QUIC-first unknown parent could bypass semantic preflight entirely.
+
+Production routing still contains no Aikido or Capacitor hostname rule and no
+broad `403` rule. Slow progressive reads are inconclusive and uncacheable; only
+explicit EOF/reset with valid incomplete framing can continue to the existing
+complete same-object owned-Geph proof. The ordinary 400-ms/500-ms path and
+absolute eight-second job remain unchanged; one signed foreground attempt may
+use an adaptive retry capped at five seconds while preserving two seconds plus
+25 ms for proof and scheduling.
+
+The first exact installed QUIC correction still failed visibly in both
+browsers. Public auto-geo-exit state advanced from one to two learned exact
+hosts, but Chrome retained Aikido's loader and Capacitor's direct Cloudflare
+denial; Safari retained Start Page for Aikido and rendered the direct Capacitor
+denial. During a fresh Safari Aikido navigation, the signed WebKit Networking
+process held the root on TCP while the critical CDN connection remained on
+UDP/443. The daemon's valid Version Negotiation therefore lost a packet race:
+RFC 9000 requires the client to ignore VN after it has processed a real server
+packet. The evidence rules out another hostname, classifier, or provenance
+exception.
+
+The correction now sends bounded Version Negotiation plus one matching
+ICMPv4/ICMPv6 port-unreachable response for only one exact QUIC Initial flow
+when a static geo-exit, a learned exact host, or a fresh exact unknown first
+contact needs the TCP evidence path. The ICMP quote contains only that observed
+address/port tuple and eight QUIC payload bytes, allowing the kernel to fail
+the exact connected UDP socket even when the real server wins the VN race. It
+adds no persistent PF rule and does not authorize Geph: the TCP
+path retains the complete direct/owned proof and foreground provenance. A
+fresh usable or challenge/auth direct result is cached and restores QUIC for
+that exact host; an inconclusive slow link remains direct and unlearned.
+Explicit direct/local policy, Discord, YouTube, Googlevideo, ECH/no-SNI,
+unsupported QUIC, inactive PF, and unowned/unready Geph remain untouched. There
+is no destination-IP/CDN rule and no global UDP/443 block.
+
+Exact transport head `124499bb1d44d6343f3ba7cd6246a502302a075c` was then
+built and installed. Its exact-head [CI `32763184998`](https://github.com/aiwaki/slipstream/actions/runs/32763184998)
+and [dependency audit `32763185003`](https://github.com/aiwaki/slipstream/actions/runs/32763185003)
+both passed. Automated Chrome reached the Aikido login after a delayed load,
+but that is diagnostic rather than physical-browser proof. A fresh physical
+Chrome Capacitor reload opened a new TCP connection and still rendered the
+complete direct Cloudflare denial with the workstation's ordinary public IP.
+The same root was complete and usable through the owned-Geph listener.
+
+The blocker was an independent macOS observation compatibility bug. On the live
+signed Chrome NetworkService socket, ownership, exact process ancestry, and
+signatures passed, but `_read_frontmost` returned `not_frontmost` even while
+Chrome was actually frontmost. Current `lsappinfo` emits indented
+`bundleID="..."` and `pid = N` fields with PID metadata, whereas production
+accepted only the older quoted `"CFBundleIdentifier"`/`"pid"` pair. The
+correction accepts one complete known dialect, rejects mixed, duplicate,
+partial, unindented-current, and malformed fields, and preserves exact
+bundle/PID, path, signature/team/designated requirement, ancestry, socket
+stability, repeated foreground observation, and the five-second physical-input
+gate. A live read-only A/B check reached `input_not_recent` after the fix when
+no recent physical input was present, proving that the real current-format
+socket crossed the repaired parser without treating automation as product
+evidence.
+
+Parser head `138d2b07baae7c9804618f73e3376c48ad0ef711` then passed
+[exact-head CI `32766607891`](https://github.com/aiwaki/slipstream/actions/runs/32766607891)
+and
+[dependency audit `32766607935`](https://github.com/aiwaki/slipstream/actions/runs/32766607935),
+was built, installed, and matched the running daemon. A fresh physical attempt
+still left public auto-geo-exit state idle. The resulting bounded diagnostic
+snapshot isolated two liveness defects rather than a missing hostname rule.
+On a current live Chrome NetworkService socket, the first production provenance
+assessment returned `signature_failed` after `0.279` seconds because its cold
+`codesign` subprocess exceeded the generic `0.25`-second command limit. The
+exact same Google-signed executable passed strict verification, and a warm
+repeat crossed signature verification to the independent foreground check.
+Separately, the owned Geph listener was unavailable for about two seconds after
+wake; the old edge-denial branch could turn that transient inability to prove
+the alternate route into a two-minute retry cache.
+
+The branch now gives only the already-actionable browser-recovery path a
+`1.5`-second total provenance budget and `0.5` seconds per command, still under
+the unchanged absolute eight-second route job. The ordinary direct probe
+remains `0.4` seconds and a slow usable connection remains inconclusive rather
+than Geph evidence. An actionable denial observed while owned Geph is still
+recovering no longer publishes the retry cache; only a later independently
+admitted physical navigation may try again, and it still needs the complete
+owned-Geph proof before learning. Focused regressions, the complete
+`test_tproxy_doh.py` routing suite (`587` tests), and the combined full local
+suite (`1733` tests plus `181` subtests) pass, as do compilation and
+`git diff --check`. Product head
+`fdb6c4a8d3b0148e6ed5f448ceea380ec68263a7` then passed exact-head
+[dependency audit `32861205555`](https://github.com/aiwaki/slipstream/actions/runs/32861205555).
+Its [CI `32861205567`](https://github.com/aiwaki/slipstream/actions/runs/32861205567)
+passed the product, Windows, Chromium, packaged-build, and packaged-browser
+jobs, but failed only the heavy packaged lifecycle before navigation: its one
+three-second idle sample measured `1.020` seconds of daemon CPU against the
+unchanged `1.000`-second ceiling while finite startup PF rollback/retry work was
+still settling. The same unchanged harness measured `0.559` and `0.390`
+seconds on the two preceding green exact heads, and the `fdb6c4a` browser
+recovery path is not entered before a browser job.
+
+The narrow qualification-only correction retains the one-second-per-three-
+seconds ceiling. Only a first excessive sample permits exactly one consecutive
+three-second sample; worker processes and profiles must remain absent after
+each, and two excessive samples still fail. Evidence now records every CPU
+sample, the sample count, and the total observation duration. Focused harness
+verification passes `76` tests plus `20` subtests.
+
+Repeated physical Capacitor checks then confirmed the remaining policy defect:
+the strict direct Cloudflare denial and complete same-host owned-Geph HTTP 200
+proof were sufficient network evidence, but first-host learning still depended
+on Chrome being `frontmost`. The working tree now removes foreground/recent-
+input admission only for a complete strict regional/edge denial followed by a
+complete usable exact-host owned-Geph payload proof. Ambiguous retry,
+incomplete-navigation, and critical-child paths retain signed foreground
+browser provenance. A failed strict-denial proof is no longer cached. Ordinary
+403/429, CAPTCHA/login, idle timeout, slow usable direct, and the Discord/
+YouTube/googlevideo exclusions are unchanged; no hostname rule was added.
+Focused routing regressions, the complete `test_tproxy_doh.py` suite (`589`
+tests), and the combined full local suite (`1738` tests plus `181` subtests)
+pass. The exact working tree was frozen with Python 3.13, rebuilt, and installed;
+the root daemon attestation and embedded daemon both bind SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`,
+and the replacement launchd PID is `68160`. Chrome was closed through its UI
+and its surviving `--no-startup-window` root plus NetworkService were then
+terminated before a genuinely fresh launch. In that clean real Chrome,
+Capacitor loaded the normal product page instead of the Cloudflare denial and
+public auto-geo-exit state advanced from one to two learned exact hosts; Aikido
+then completed to its login page. A separate private Safari window likewise
+loaded the normal Capacitor page and the complete Aikido login page, after which
+only that temporary window was closed and the user's ordinary four-tab window
+remained intact. There is still no Capacitor/Aikido hostname rule, broad `403`
+rule, or foreground requirement for the strict-denial decision. The next
+verified action is to commit and push this exact correction and require fresh
+exact-head CI/audit before merge. This targeted diagnosis did not start another
+30-minute soak and does not weaken or replace any later release gate. The local
+app remains ad-hoc and unnotarized.
+
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
 is published as prerelease ID `375747998`. The lightweight tag and release

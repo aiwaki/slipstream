@@ -1167,6 +1167,97 @@ unavailable or unowned backend, an explicit policy, or a different failure
 shape cannot authorize this overlay. This avoids per-site rules while keeping
 local bypass and direct routes out of Geph.
 
+### The root loads but a critical resource closes early
+
+If a physical Safari/Chrome failure leaves the public auto-geo-exit counters at
+`learned=0`, `pending=0`, and `last_state=idle`, first prove that foreground
+browser provenance admitted the socket; do not add a parent or CDN hostname
+rule. A closed loopback TLS listener can identify the exact socket-owning PID
+without visiting the affected site. The expected current verifier boundary is:
+
+- official Chrome root/helpers: `codesign --verify --strict=symlinks`; Finder
+  metadata on the root bundle must not be converted into an unrelated resource
+  failure by bare `--strict`;
+- exact Safari/WebKit executables under canonical `/System/Applications`,
+  `/System/Library`, or sealed Cryptex roots only:
+  `codesign --verify --ignore-resources --strict=symlinks`, followed by the
+  exact Apple designated-requirement check.
+
+Never apply `--ignore-resources` to Chrome, a user path, or an arbitrary binary.
+Passing the verifier is not sufficient: exact canonical path, identifier,
+designated requirement/team, UID/start time, process ancestry, socket owner,
+frontmost application, and recent physical input must all still agree. Browser
+automation is useful for reproducing socket/signature attribution, but it must
+remain `not_frontmost` or `recent_input_failed` and is not product evidence.
+
+If a real foreground socket still reports `not_frontmost`, inspect the bounded
+`lsappinfo info -only bundleID -only pid` result before changing any route.
+Older macOS output may contain the complete quoted
+`"CFBundleIdentifier"`/`"pid"` pair; current output contains the complete
+indented `bundleID`/`pid = N` pair and bounded PID metadata. Production accepts
+one complete dialect only. Mixed, duplicate, partial, unindented-current, or
+non-numeric fields fail closed. Parsing either layout does not replace the
+subsequent exact bundle/PID, signed ancestry, socket stability, repeated
+frontmost snapshot, or recent-input checks.
+
+If that admission succeeds and `learned` increases but the same visible page
+still uses its direct denial or incomplete asset, check the QUIC boundary before
+changing semantic rules. A learned unknown exact host is a TCP-only Geph route;
+letting a browser reuse HTTP/3 bypasses it. Conversely, a QUIC-first unknown
+root never reaches the TCP semantic preflight at all. Version Negotiation alone
+is not sufficient when a real server packet wins the race: RFC 9000 requires a
+client to ignore a later VN after it has successfully processed any packet. The
+allowed correction is one exact-SNI flow with bounded Version Negotiation plus
+a matching ICMPv4/ICMPv6 port-unreachable while classification is due:
+
+- reviewed geo-exit and learned exact hosts continue on TCP;
+- a fresh unknown exact host uses TCP once for the existing bounded direct
+  classification; neither transport signal authorizes a Geph route;
+- fresh `usable` or `challenge_or_auth` cache restores QUIC for that exact host;
+- slow/inconclusive direct evidence remains unlearned and direct;
+- explicit direct/local routes, Discord, YouTube, Googlevideo, ECH/no-SNI,
+  unsupported QUIC, shared destination IPs, and every other UDP flow remain
+  untouched.
+
+The ICMP message quotes only the observed client/server addresses, UDP ports,
+and first eight QUIC payload bytes so the kernel can bind the error to that
+connected UDP socket. It creates no persistent PF rule and cannot affect a
+second flow, a hostname suffix, or UDP/443 generally.
+
+Do not replace this with a CDN/IP rule or a global UDP/443 block. When validating
+a newly installed correction, restart the browser first so an already-open QUIC
+connection cannot bypass a new Initial-flow policy.
+
+A `200` root document is not a pass when the page stays blank or spinning and a
+required JavaScript, CSS, or image reports `ERR_CONNECTION_CLOSED`,
+`ERR_CONTENT_LENGTH_MISMATCH`, or an incomplete transfer. Diagnose this without
+adding a site rule:
+
+1. Start from a fresh daemon/preflight cache and do not prime the host through
+   PF with curl, Playwright, or a background browser before the real foreground
+   attempt. The foreground root retry is adaptive and capped at 5.0 seconds. It
+   uses only the remainder of the unchanged eight-second job after reserving
+   2.0 seconds plus 25 ms scheduling grace for proof; it does not widen the
+   ordinary 400-ms direct or 500-ms healthy first-contact path.
+2. In normal signed Safari or Chrome, use recent physical input and require the
+   original navigation to recover without a second manual reload. A headless or
+   CDP navigation rejected by foreground provenance is not product evidence.
+3. Inspect only a bounded critical resource discovered from the usable root.
+   Compare the same URL and bounded range direct and through the verified owned
+   Geph. An idle timeout remains inconclusive even after a length-framed partial
+   root response or partial critical range: publish no cache and do not start or
+   authorize Geph. Reaching the local read-size cap (`truncated=True`) is also
+   `UNKNOWN`. Only stable explicit EOF or reset (normalized as EOF) with valid
+   incomplete framing can make the direct result actionable, and learning that
+   exact child hostname still requires a complete same-object Geph result.
+4. Keep status-only `403`/`429`, login, CAPTCHA, and generic security pages
+   inert unless the strict bounded semantic classifier identifies its reviewed
+   denial shape and the independent Geph response is complete and usable.
+
+The live gate must check bounded critical-resource completion, not only the root
+status or DOM. This workflow never authorizes a parent-host exception, a CDN
+suffix rule, or a general `403` fallback.
+
 If that complete exact-host proof coincides with a brief owned-Geph recovery,
 the replay-safe request waits for at most five seconds and actively probes the
 exact owned listener instead of relying on the periodic monitor. Listener

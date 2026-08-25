@@ -69,6 +69,7 @@ class FixtureRunner:
     )
     front_bundle: str = "com.apple.Safari"
     front_pid: int = 200
+    front_info_output: str | None = None
     idle_nanoseconds: int = 250_000_000
     advance_per_call: float = 0.0
     lsof_outputs: list[str] = field(default_factory=list)
@@ -117,7 +118,12 @@ class FixtureRunner:
         if command[:2] == (LSAPPINFO_PATH, "info"):
             return CommandResult(
                 0,
-                f'"CFBundleIdentifier"="{self.front_bundle}"\n"pid"={self.front_pid}\n',
+                (
+                    self.front_info_output
+                    if self.front_info_output is not None
+                    else f'"CFBundleIdentifier"="{self.front_bundle}"\n'
+                    f'"pid"={self.front_pid}\n'
+                ),
             )
         if command[0] == IOREG_PATH:
             return CommandResult(0, f'    "HIDIdleTime" = {self.idle_nanoseconds}\n')
@@ -201,6 +207,22 @@ def test_accepts_signed_foreground_safari_network_process_after_recent_input() -
     assert result.reason is AdmissionReason.ACCEPTED
     assert all(call[0][0].startswith("/") for call in runner.calls)
     assert all(call[2] == AdmissionPolicy().max_command_output_bytes for call in runner.calls)
+    verify_calls = [call[0] for call in runner.calls if "--verify" in call[0]]
+    assert (
+        CODESIGN_PATH,
+        "--verify",
+        "--ignore-resources",
+        "--strict=symlinks",
+        "--verbose=2",
+        WEBKIT_PATH,
+    ) in verify_calls
+    assert (
+        CODESIGN_PATH,
+        "--verify",
+        "--strict=symlinks",
+        "--verbose=2",
+        SAFARI_PATH,
+    ) in verify_calls
 
 
 def test_accepts_safari_paths_resolved_into_signed_system_cryptexes() -> None:
@@ -218,6 +240,8 @@ def test_accepts_safari_paths_resolved_into_signed_system_cryptexes() -> None:
 
     assert result.accepted is True
     assert result.browser_family is BrowserFamily.SAFARI
+    verify_calls = [call[0] for call in runner.calls if "--verify" in call[0]]
+    assert all("--ignore-resources" in call for call in verify_calls)
 
 
 def test_accepts_only_official_google_chrome_helper_and_signed_root() -> None:
@@ -238,6 +262,114 @@ def test_accepts_only_official_google_chrome_helper_and_signed_root() -> None:
     assert result.accepted is True
     assert result.browser_family is BrowserFamily.CHROME
     assert result.pid == 301
+    verify_calls = [call[0] for call in runner.calls if "--verify" in call[0]]
+    assert verify_calls
+    assert all("--strict=symlinks" in call for call in verify_calls)
+    assert all("--ignore-resources" not in call for call in verify_calls)
+
+
+def test_accepts_current_lsappinfo_format_for_signed_foreground_chrome() -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        processes={
+            301: (300, 501, CHROME_HELPER_PATH),
+            300: (1, 501, CHROME_PATH),
+        },
+        owner_pid=301,
+        front_bundle="com.google.Chrome",
+        front_pid=300,
+        front_info_output=(
+            "[ NULL ]  ASN:0x0-0xabc: (in front)\n"
+            '    bundleID="com.google.Chrome"\n'
+            "    bundle path=[ NULL ]\n"
+            "    executable path=[ NULL ]\n"
+            "    pid = 300 !cgsConnection !signalled type=[ NULL ] "
+            "flavor=[ NULL ] Version=[ NULL ] Arch=!!none\n"
+        ),
+    )
+
+    result = assess(runner)
+
+    assert result.accepted is True
+    assert result.browser_family is BrowserFamily.CHROME
+    assert result.pid == 301
+
+
+def test_accepts_current_lsappinfo_format_for_signed_foreground_safari() -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        front_info_output=(
+            "[ NULL ]  ASN:0x0-0xabc: (in front)\n"
+            '    bundleID="com.apple.Safari"\n'
+            "    bundle path=[ NULL ]\n"
+            "    executable path=[ NULL ]\n"
+            "    pid = 200 !cgsConnection !signalled type=[ NULL ]\n"
+        ),
+    )
+
+    result = assess(runner)
+
+    assert result.accepted is True
+    assert result.browser_family is BrowserFamily.SAFARI
+    assert result.pid == 201
+
+
+@pytest.mark.parametrize(
+    "front_info_output",
+    [
+        (
+            '    bundleID="com.google.Chrome"\n'
+            '    bundleID="com.apple.Safari"\n'
+            "    pid = 300 !cgsConnection\n"
+        ),
+        (
+            '    bundleID="com.google.Chrome"\n'
+            "    pid = 300 !cgsConnection\n"
+            "    pid = 301 !cgsConnection\n"
+        ),
+        (
+            '"CFBundleIdentifier"="com.google.Chrome"\n'
+            '"pid"=300\n'
+            '    bundleID="com.google.Chrome"\n'
+            "    pid = 300 !cgsConnection\n"
+        ),
+        (
+            '"CFBundleIdentifier"="com.google.Chrome"\n'
+            "    pid = 300 !cgsConnection\n"
+        ),
+        (
+            '    bundleID="com.google.Chrome"\n'
+            '"pid"=300\n'
+        ),
+        "[ NULL ]  ASN:0x0-0xabc: (in front)\n",
+        '    bundleID="com.google.Chrome"\n    pid = invalid\n',
+        '    bundleID="com.google.Chrome"\n    pid = 0\n',
+        '    bundleID="com.google.Chrome"\n    pid = 1\n',
+        '    bundleID="com.google.Chrome"\n    pid = -1\n',
+        'bundleID="com.google.Chrome"\npid = 300\n',
+    ],
+)
+def test_current_lsappinfo_format_rejects_ambiguous_or_relaxed_fields(
+    front_info_output: str,
+) -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        processes={
+            301: (300, 501, CHROME_HELPER_PATH),
+            300: (1, 501, CHROME_PATH),
+        },
+        owner_pid=301,
+        front_bundle="com.google.Chrome",
+        front_pid=300,
+        front_info_output=front_info_output,
+    )
+
+    result = assess(runner)
+
+    assert result.reason is AdmissionReason.NOT_FRONTMOST
 
 
 def test_rejects_background_browser_even_when_socket_and_signatures_match() -> None:
@@ -346,6 +478,26 @@ def test_opt_in_shared_webkit_rejects_unsigned_frontmost_safari() -> None:
     result = assess(runner, policy=policy)
 
     assert result.reason is AdmissionReason.SIGNATURE_FAILED
+
+
+def test_rejects_system_webkit_when_executable_verification_fails() -> None:
+    clock = FakeClock()
+    runner = FixtureRunner(
+        clock,
+        processes={
+            201: (1, 501, WEBKIT_PATH),
+            200: (1, 501, SAFARI_PATH),
+        },
+        verify_failures={WEBKIT_PATH},
+    )
+    policy = AdmissionPolicy(allow_shared_signed_webkit_with_frontmost_safari=True)
+
+    result = assess(runner, policy=policy)
+
+    assert result.reason is AdmissionReason.SIGNATURE_FAILED
+    verify_call = next(call[0] for call in runner.calls if "--verify" in call[0])
+    assert "--ignore-resources" in verify_call
+    assert "--strict=symlinks" in verify_call
 
 
 def test_opt_in_shared_webkit_rejects_non_safari_frontmost_application() -> None:

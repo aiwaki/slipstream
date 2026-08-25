@@ -1,14 +1,36 @@
 # Routing Research Notes
 
-Updated: 2026-08-22
+Updated: 2026-08-25
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-08-25 Strict-denial network decision: physical validation
+
+The exact no-foreground correction was frozen, installed, and bound by the
+root attestation and embedded-daemon SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`.
+Chrome's old UI was closed and its surviving background root and NetworkService
+were explicitly allowed to exit before relaunch, so the result did not reuse
+the direct Cloudflare connection seen by the prior build. The first clean
+Capacitor navigation loaded the normal site and advanced public exact-host
+learning from one entry to two; the same Chrome then completed Aikido to its
+login page. A separate private Safari window independently loaded the normal
+Capacitor page and the complete Aikido login page; closing the temporary window
+left the user's ordinary Safari tabs intact. This confirms the intended product
+path without a hostname exception: a complete strict direct denial plus a
+complete same-host owned-Geph payload proof may learn the exact network route,
+and the resulting runtime overlay is available to every eligible connection.
+Foreground signed-browser evidence remains limited to ambiguous incomplete or
+retry paths.
 
 ## Findings Index
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-24 | Learned exact-host route bypassed over QUIC | Two physical failures reproduced; exact-flow socket-failure correction locally green | The first fresh attempt advanced public auto-geo-exit state from idle to one learned exact host, yet Chrome kept Aikido's critical bootstrap incomplete and showed Capacitor's direct Cloudflare denial; Safari held both URL loads over Start Page. Canonical private-cache size/timestamp plus the usable Aikido root and critical-asset path identify the learned entry as the exact `cdn.aikido.dev` child. Bounded post-attempt controls still got the direct Capacitor denial and incomplete Aikido asset, while explicit owned Geph returned complete 65,536-byte ranges for both. Source review found `_quic_geo_exit_tcp_fallback` consulted only static `route_policy(...)=geo_exit`: a learned unknown exact host therefore bypassed its TCP-only route over HTTP/3, and a QUIC-first unknown root never reached TCP semantic preflight. Exact-SNI Version Negotiation fixed that source defect but the next physical attempt still failed in both browsers; public state reached two learned hosts, while a live Safari socket showed the Aikido root on TCP and its critical CDN on UDP. RFC 9000 explains the race: a client must discard VN after processing a real server packet. The revised correction pairs bounded VN with a matching IPv4/IPv6 port-unreachable quoting only the observed UDP tuple, so the exact socket fails and the browser retries TCP even when the server wins the VN race. A fresh usable/challenge result restores exact-host QUIC; only the existing proof can learn Geph. Explicit policy/exclusions, ECH/no-SNI, other UDP, persistent PF, and shared CDN IPs remain untouched. | Build/install the exact local head, restart browsers to discard old QUIC connections, and require one fresh physical Chrome/Safari success before merge. No additional release soak is relevant to this targeted defect. |
+| 2026-08-24 | Current macOS Chrome/Safari provenance rejected before automatic recovery | Root cause reproduced; compatible exact-browser verification implemented locally | Public status after the physical Aikido/Capacitor failure remained `learned=0`, `pending=0`, `last_state=idle`, proving that neither a manual CDN rule nor semantic-classifier tuning could repair the first failure. A loopback TLS socket bound the Chrome connection to its exact official helper and root. The helper passed strict verification, while the root failed bare `--strict` only for Finder metadata and passed `--strict=symlinks`; its exact Google identifier, team, and designated requirement remained valid. Safari used the exact signed `com.apple.WebKit.Networking` executable in the current sealed Cryptex. Its legacy resource envelope failed ordinary/strict verification but passed `--ignore-resources --strict=symlinks` and the exact Apple designated requirement. The correction selects that compatibility form only for Safari family executables under exact canonical system/SSV/Cryptex roots; Chrome retains resource validation. All other process, socket, foreground, and recent-input gates are unchanged. | Run one fresh physical Chrome/Safari attempt against the installed exact local correction, inspect only privacy-bounded route state and visible completion, and keep PR #373 unmerged until both behavior and exact-head checks pass. |
+| 2026-08-24 | Aikido/Capacitor browser-visible controls | Direct/owned-Geph asymmetry reproduced; generic slow-link correction under test | `capacitorjs.com` returned a complete direct `403` classified as strict edge denial while the owned-Geph comparison was complete and usable. `app.aikido.dev` exposed a separate timing defect: its root could outlive the 400-ms semantic probe and publish a retry-cache result before a foreground browser attempt, while the current `cdn.aikido.dev` critical JavaScript object closed direct after exactly 16 KiB and completed the same bounded range through owned Geph. The adaptive foreground retry is capped at 5.0 seconds and uses only the unchanged eight-second job remainder after reserving 2.0 seconds plus 25 ms scheduling grace for proof; the 400-ms direct and 500-ms healthy first-contact paths remain unchanged. Any idle timeout remains inconclusive/no-cache/no-Geph, as does reaching the local read-size cap (`truncated=True`). Only stable explicit EOF or reset (normalized as EOF) with valid incomplete framing can become actionable under the existing same-object proof. This supports generic foreground retry and exact child-host learning, not Aikido/Capacitor policy entries or a general `403` rule. | Keep the correction generic, require bounded critical-resource completion in the live gate, and qualify the exact changed candidate normally. These bounded local controls diagnosed the defect without starting or reusing a new 30-minute release soak. |
 | 2026-08-22 | Sequential protected workflows duplicate account authentication | Root cause proven; single-session release gate in preparation | Exact main `c8c4c425e0488479686d76265b5eec3db133d202` passed CI `32589384708`, audit `32589384714`, and standalone owned-Geph run `32590027895`. Readiness `32590146466` then created a second ephemeral Keychain/config/process on a different hosted runner. Its first `get_connect_token` and one bounded retry both returned the already-classified daily rate limit before SafariDriver or any matrix browser started; artifact `9480105795` contains only exit marker `125`. Passing a Geph cache/token between runners would persist reusable authentication material and is rejected. The safe composition keeps one Geph lifecycle process inside `release-readiness.yml`, runs the existing deterministic Chromium semantic gate and fixed Safari/Chrome matrix before releasing it, proves cleanup, then runs the independent invisibility soak. Separate qualification and readiness proofs share one exact protected workflow attempt. | Merge only after local/PR verification, obtain a fresh exact-main candidate, and dispatch one combined readiness run. Do not run the explicit standalone diagnostic on a UTC day reserved for release qualification. |
 | 2026-08-22 | Obscura as a proposed CAPTCHA/rate-limit fallback | Not applicable to the broker failure; optional diagnostic only | The reviewed upstream repository describes Obscura as a Rust/V8 headless browser with CDP, rendering, stealth, and optional HTTP/SOCKS proxy input. It does not provide a geo-exit network path or an account-backed Slipstream-owned proxy. It therefore cannot repair `get_connect_token` rate limiting or replace Safari/Chrome/product-route evidence. It may later provide one additional browser comparison for CAPTCHA triage, but a different rendering result cannot authorize routing or publication. | Keep Obscura out of the `.23` release-critical path. If evaluated later, pin source/binary provenance and treat its result as non-gating targeted diagnostics only. |
 | 2026-08-22 | Live-site release-readiness false positive and masked Weather state | Narrow harness correction in preparation; routing/product code unchanged | Protected readiness `32572723728` proved the earlier Safari/Chrome lifecycle correction: Aikido and Capacitor were usable in both browsers, while XPersonatoy and Weather reached their exact host deadlines in both browsers. In one bounded direct XPersonatoy observation, the generic `captcha` marker that made the detector non-passing occurred only in a dormant script on an otherwise StarrToy-shaped document. The harness had searched raw Safari source and raw Chrome DOM alike, so generic marker presence alone was not a visible challenge. Retain strong raw challenge markers; derive one fixed `captcha` boolean only from visible page text or a visibility-gated CAPTCHA widget, without retaining DOM or text. Weather's `readyState != complete` was the first blocker and concealed whether the fixed title, visible body, protocol, and content conditions were ready. Preserve all conditions and report a new terminal `readiness_document_pending_semantic_ready` only when those conditions pass but the document remains pending. No route, deadline, control, host, or browser rule changes. | Validate the focused harness tests and PR checks, merge only after review, build a new exact-main candidate, then perform one protected owned-Geph qualification and one readiness for that changed candidate. Do not retry unchanged `111000c`. |
@@ -518,10 +540,14 @@ document pending for another eight seconds and submits the existing bounded
 capability. Only then may the daemon advance and close the original relay;
 Chrome itself must repeat the unchanged original URL and fetch exactly one CSS,
 JavaScript, image, and ready resource. No extension or reload command exists in
-the scenario. Before the first request, a three-second installed idle sample
-requires the production broker to be owned by the console user with mode
-`0600`, the worker runtime to be empty, worker processes and profiles to be
-absent, and daemon CPU growth to remain at most one second.
+the scenario. Before the first request, an installed idle sample requires the
+production broker to be owned by the console user with mode `0600`, the worker
+runtime to be empty, worker processes and profiles to be absent, and daemon CPU
+growth to remain at most one second over three seconds. Only if that first
+sample exceeds the ceiling does the harness take exactly one consecutive
+three-second sample. It rechecks that worker processes and profiles remain
+absent after each sample and fails when both samples exceed the unchanged
+ceiling; evidence records every sample and the total observation duration.
 
 PR #330 merged as exact live main
 `9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main packaged job
@@ -1338,6 +1364,126 @@ reported as restoring/updating and heartbeat publication remains independent.
 preflight request/outcome boundary used by both Python and Rust. It carries
 bounded route candidates and fixed outcomes, never page text, path, cookies,
 Ray ID, or arbitrary browser failure strings.
+
+## 2026-08-24 Aikido and Capacitor controls
+
+The two live sites reproduced different generic failure classes through the
+installed transparent route:
+
+- `capacitorjs.com` returned a complete direct HTTP `403` whose bounded markers
+  classified as strict `edge_access_denied`. The same root comparison through
+  the exact owned-Geph SOCKS listener returned a complete usable response. This
+  is the existing strict semantic-denial case; an ordinary status-only `403`,
+  `429`, login, CAPTCHA, or generic security page remains non-authorizing.
+- The `app.aikido.dev` root took longer than the 400-ms direct semantic budget.
+  Treating that inconclusive timeout as cacheable could suppress the following
+  real foreground attempt even though no route decision had been proved.
+- Aikido redeployed during the investigation: the earlier
+  `/assets/vendor-DRSRiXAi.js` was replaced by root bundle
+  `/assets/index-lUwU0pAj.js` and vendor `/assets/vendor-B_TeJkvL.js`. A bounded
+  request for the current `cdn.aikido.dev` vendor object closed on the
+  transparent direct path after exactly 16,384 of 65,536 requested bytes. The
+  identical URL and range completed all 65,536 bytes through the verified owned
+  Geph. Real foreground Chrome showed the corresponding critical JavaScript/CSS
+  `ERR_CONNECTION_CLOSED` and an unfinished app, so root completion alone was
+  not browser usability.
+
+The earlier no-persistence live model learned the Capacitor parent in 3.892
+seconds and Aikido's exact `cdn.aikido.dev` child in 5.316 seconds, but a
+slow-link control showed that a fixed retry slice was not a safe general
+boundary. The correction therefore computes one adaptive foreground retry with
+`_route_preflight_foreground_retry_timeout`: at most
+`ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT` (5.0 seconds), drawn from the
+unchanged eight-second absolute job after reserving
+`ROUTE_PREFLIGHT_FOREGROUND_PROOF_RESERVE` (2.0 seconds) plus
+`ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE` (25 ms). The ordinary 400-ms
+direct and 500-ms healthy first-contact paths stay unchanged.
+
+A root idle timeout, or a partial critical range ending in
+`_BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT`, maps to
+`_ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE`: it publishes neither parent nor
+child cache state and cannot start or authorize Geph. A length-framed partial
+response does not change that result. Reaching the local read-size cap with
+`truncated=True` is also `UNKNOWN`. Only stable explicit EOF or reset (normalized
+as EOF) with valid incomplete framing may continue through the existing
+incomplete-direct plus complete same-object owned-Geph proof. The observed
+16-KiB Aikido control was an explicit transfer close, not an idle timeout or
+local size-cap truncation. The correction adds no route entry for
+`app.aikido.dev`, `cdn.aikido.dev`, or `capacitorjs.com`, and it does not broaden
+HTTP-status classification. Live-site qualification now requires bounded
+critical-resource completion in addition to the root document. These local
+controls were diagnostic only; no new 30-minute invisibility soak was started
+or treated as proof.
+
+The following exact installed attempt isolated the remaining transport race.
+Both Chrome pages remained unusable, and Safari still showed a direct
+Capacitor denial while Aikido never replaced Start Page. Public state advanced
+from one to two learned exact hosts, proving classification was no longer the
+blocker. A live Safari WebKit Networking process then held the Aikido root over
+TCP while a critical CDN address remained on UDP/443. The daemon had emitted
+valid Version Negotiation for the exact flow, but RFC 9000 section 6.2 requires
+the client to discard that response after any real server packet was processed.
+The bounded successor therefore adds a matching ICMPv4 type 3/code 3 or
+ICMPv6 type 1/code 4 response. It embeds only the original address/port tuple
+and eight payload bytes needed to identify the connected socket. This is an
+exact-flow transport failure signal, not hostname/IP route authority; it adds
+no PF rule and never widens the existing route/provenance/proof gates.
+
+The first Chrome check against exact installed QUIC-correction source
+`124499bb1d44d6343f3ba7cd6246a502302a075c` exposed the next independent
+boundary. Aikido reached its login page after a delayed load, but a fresh
+physical Capacitor reload still rendered the complete direct Cloudflare denial
+and disclosed the workstation's ordinary public IP. The browser opened a new
+TCP connection, the bounded direct body still classified as
+`edge_access_denied`, and the same root remained usable through the owned-Geph
+listener. Calling the production provenance assessor on that live signed Chrome
+NetworkService socket while Chrome was actually frontmost returned
+`not_frontmost`.
+
+The cause was the system observation parser, not routing policy or semantic
+classification. Older `lsappinfo` output used quoted
+`"CFBundleIdentifier"`/`"pid"` keys; current macOS emits indented
+`bundleID="..."` and `pid = N` followed by process metadata. The old parser
+therefore stopped before any owned-Geph proof. The correction accepts only one
+complete known dialect, rejects mixed/duplicate/partial fields, and leaves the
+exact bundle/PID, canonical path, signature/team/designated requirement,
+ancestry, socket-owner stability, foreground stability, and five-second
+physical-input gate unchanged. A live read-only A/B check then advanced through
+the corrected current-format parser to `input_not_recent` when no fresh
+physical input was present, proving the parser fix without treating automation
+as product evidence. No hostname or HTTP-status exception was added.
+
+The next physical attempt exposed a separate cold-start timing edge. On the
+current live Chrome NetworkService socket, the first exact production assessor
+returned `signature_failed` in 0.279 seconds; the official helper's signature,
+Google team, designated requirement, path, and ancestry were valid, and the
+immediate warm assessment crossed signature verification to the foreground
+check. The failure was therefore the 0.25-second subprocess cap, not bad Chrome
+or a routing classification. The exceptional provenance budget is now 1.5
+seconds total with a 0.5-second per-command cap, still inside the existing
+eight-second exact-host job; direct healthy/inconclusive timing is unchanged.
+The same snapshot recorded owned Geph briefly unready after wake. A complete
+actionable denial in that interval no longer creates the two-minute retry
+cache: a subsequent new physical navigation may retry after readiness, but no
+route is learned without the same complete owned-Geph payload proof. This adds
+neither an Aikido/Capacitor rule nor a broad status-code rule.
+
+The following physical checks exposed a policy mistake rather than another
+browser-parser dialect. Capacitor continued to render its complete direct
+Cloudflare denial while the exact root returned HTTP 200 through the owned
+Geph SOCKS listener. Post-navigation observation could report `not_frontmost`
+as soon as the user returned to Codex, and the product still made that mutable
+window state a prerequisite for learning. Network recovery must not depend on
+which app happens to own focus. A complete strict regional/edge denial now
+skips browser provenance and uses only the independently complete direct
+classification plus complete usable same-host owned-Geph payload proof. The
+foreground/recent-input gate remains on inconclusive retries, incomplete
+navigation, and critical-child comparison, where the network evidence alone is
+ambiguous. A failed strict-denial proof remains uncached so a transient Geph or
+deadline failure cannot suppress the next independent first connection. The
+learned route is still exact-host, bounded, and shared by every eligible
+connection; ordinary 403/429, CAPTCHA/login, timeout, slow usable direct,
+Discord, YouTube, and googlevideo behavior is unchanged.
 
 ## Transfer Backlog
 

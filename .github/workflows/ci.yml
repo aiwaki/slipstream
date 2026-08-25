@@ -234,7 +234,7 @@ jobs:
           python3 -m pytest -q \
             spike/test_tproxy_doh.py::test_quic_v1_v2_observation_and_exact_host_fallback_cover_ipv4_ipv6 \
             spike/test_tproxy_doh.py::test_packaged_transport_mechanics_selftest_covers_fixed_matrix_without_network \
-            spike/test_tproxy_doh.py::test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped \
+            spike/test_tproxy_doh.py::test_quic_tcp_fallback_is_exactly_active_owned_route_or_unknown_first_contact \
             spike/test_tproxy_doh.py::test_quic_initial_sni_reassembles_publicly_decryptable_crypto_frames \
             spike/test_tproxy_doh.py::test_quic_v2_initial_sni_uses_rfc9369_keys_and_packet_type \
             spike/test_tproxy_doh.py::test_ipv6_quic_v2_fallback_is_exact_host_and_flow_scoped

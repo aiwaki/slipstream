@@ -584,6 +584,34 @@ def _is_webkit_network_path(path: str) -> bool:
     return _matches_any(path, _WEBKIT_NETWORK_PATHS)
 
 
+def _signature_verification_argv(
+    path: str,
+    family: BrowserFamily,
+) -> tuple[str, ...]:
+    """Verify executable identity without rejecting benign macOS sideband data."""
+    argv = [CODESIGN_PATH, "--verify"]
+    if family is BrowserFamily.SAFARI and path.startswith(
+        (
+            "/System/Applications/",
+            "/System/Library/",
+            "/System/Volumes/Preboot/Cryptexes/",
+        )
+    ):
+        # Current Apple WebKit binaries live on the sealed system/cryptex
+        # volume, but codesign reports their legacy resource envelope as
+        # obsolete.  Ignore resources only for those exact canonical system
+        # paths; the executable signature and Apple designated requirement
+        # remain mandatory below.
+        argv.append("--ignore-resources")
+    # Plain --strict also rejects harmless FinderInfo/resource-fork sideband
+    # data.  Chrome updates can leave that metadata on an otherwise fully
+    # resource-valid official bundle.  Keep normal resource validation and
+    # add the symlink restriction without enabling the unrelated sideband
+    # check.
+    argv.extend(("--strict=symlinks", "--verbose=2", path))
+    return tuple(argv)
+
+
 def _verify_signature(
     observer: _BudgetedObserver,
     path: str,
@@ -592,7 +620,7 @@ def _verify_signature(
     root: bool,
 ) -> bool:
     try:
-        observer.run((CODESIGN_PATH, "--verify", "--strict", "--verbose=2", path))
+        observer.run(_signature_verification_argv(path, family))
         output = observer.run(
             (CODESIGN_PATH, "--display", "--verbose=4", "--requirements", "-", path)
         )
@@ -685,16 +713,45 @@ def _read_frontmost(observer: _BudgetedObserver) -> _FrontmostApplication:
     output = observer.run(
         (LSAPPINFO_PATH, "info", "-only", "bundleID", "-only", "pid", asn)
     )
-    bundle_ids = re.findall(
+    # Older lsappinfo emits quoted CoreFoundation keys, while current
+    # macOS emits the requested field names with indentation and appends
+    # process flags after the PID. Accept only those two known field layouts
+    # from the already-bounded output and retain the fail-closed uniqueness
+    # requirement.
+    legacy_bundle_ids = re.findall(
         r'^"CFBundleIdentifier"="([^"\r\n]+)"$', output, flags=re.MULTILINE
     )
-    pids = re.findall(r'^"pid"=(\d+)$', output, flags=re.MULTILINE)
-    if len(bundle_ids) != 1 or len(pids) != 1:
+    legacy_pids = re.findall(r'^"pid"=(\d+)$', output, flags=re.MULTILINE)
+    current_bundle_ids = re.findall(
+        r'^[ \t]+bundleID="([^"\r\n]+)"[ \t]*$', output, flags=re.MULTILINE
+    )
+    current_pids = re.findall(
+        r'^[ \t]+pid[ \t]*=[ \t]*(\d+)(?:[ \t]+[^\r\n]*)?$',
+        output,
+        flags=re.MULTILINE,
+    )
+    if (
+        len(legacy_bundle_ids) == 1
+        and len(legacy_pids) == 1
+        and not current_bundle_ids
+        and not current_pids
+    ):
+        bundle_id = legacy_bundle_ids[0]
+        pid_text = legacy_pids[0]
+    elif (
+        len(current_bundle_ids) == 1
+        and len(current_pids) == 1
+        and not legacy_bundle_ids
+        and not legacy_pids
+    ):
+        bundle_id = current_bundle_ids[0]
+        pid_text = current_pids[0]
+    else:
         raise _ObservationFailure(AdmissionReason.NOT_FRONTMOST)
-    pid = int(pids[0], 10)
+    pid = int(pid_text, 10)
     if pid <= 1:
         raise _ObservationFailure(AdmissionReason.NOT_FRONTMOST)
-    return _FrontmostApplication(asn, bundle_ids[0], pid)
+    return _FrontmostApplication(asn, bundle_id, pid)
 
 
 def _parse_front_asn(output: str) -> str:

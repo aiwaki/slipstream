@@ -19,7 +19,7 @@ import live_site_contract
 import pf_anchor_smoke as pf
 import pf_installed_lifecycle_smoke as lifecycle
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SITES = {
     "xpersonatoy.com": {
         "deadline_ms": 20_000,
@@ -47,6 +47,15 @@ SITES = {
 }
 MIN_DOCUMENT_BYTES = 512
 ALLOWED_PROTOCOLS = {"h2", "http/1.1", "h3"}
+REQUIRED_RESOURCE_HOSTS = {"app.aikido.dev": "cdn.aikido.dev"}
+REQUIRED_RESOURCE_BYTE_BUCKETS = (
+    "zero",
+    "lt_16k",
+    "16k_to_64k",
+    "gte_64k",
+)
+REQUIRED_RESOURCE_MAX_ATTEMPTS = 3
+REQUIRED_RESOURCE_RETRY_DELAY_MS = 1_000
 INTERACTIVE_SETTLE_SECONDS = 0.5
 DOCUMENT_ACTIVATION_WORDS = 4
 UINT32_MAX = (1 << 32) - 1
@@ -65,7 +74,9 @@ WEAK_VISIBLE_CHALLENGE_MARKERS = ("captcha",)
 # only use the unambiguous raw markers; generic `captcha` remains browser-only
 # evidence so dormant third-party scripts cannot make a healthy control route
 # look like a challenge.
-TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS
+TERMINAL_BROWSER_REASONS = live_site_contract.TERMINAL_BROWSER_REASONS | {
+    "required_resource_incomplete"
+}
 
 DocumentActivationId = tuple[int, int, int, int]
 InteractiveConfirmation = tuple[float, DocumentActivationId]
@@ -123,6 +134,13 @@ def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
             return "readiness_visibility_missing"
         if app_text < 20:
             return "readiness_content_missing"
+        required_resource = _bounded_required_resource(host, signals)
+        if (
+            not isinstance(required_resource, dict)
+            or required_resource["complete"] is not True
+            or required_resource["byte_bucket"] == "zero"
+        ):
+            return "required_resource_incomplete"
     elif host == "weather.com":
         if "weather" not in title:
             return "readiness_title_mismatch"
@@ -150,6 +168,42 @@ def _readiness_blocker(host: str, signals: dict[str, object]) -> str | None:
 
 def _positive_readiness(host: str, signals: dict[str, object]) -> bool:
     return _readiness_blocker(host, signals) is None
+
+
+def _bounded_required_resource(
+    host: str, signals: dict[str, object] | None
+) -> dict[str, object] | None:
+    required_host = REQUIRED_RESOURCE_HOSTS.get(host)
+    if required_host is None:
+        return None
+    fallback: dict[str, object] = {
+        "host": required_host,
+        "complete": False,
+        "byte_bucket": "zero",
+    }
+    if not isinstance(signals, dict):
+        return fallback
+    value = signals.get("required_resource")
+    if not isinstance(value, dict) or set(value) != {
+        "host",
+        "complete",
+        "byte_bucket",
+    }:
+        return fallback
+    complete = value.get("complete")
+    byte_bucket = value.get("byte_bucket")
+    if (
+        value.get("host") != required_host
+        or not isinstance(complete, bool)
+        or byte_bucket not in REQUIRED_RESOURCE_BYTE_BUCKETS
+        or (complete and byte_bucket == "zero")
+    ):
+        return fallback
+    return {
+        "host": required_host,
+        "complete": complete,
+        "byte_bucket": byte_bucket,
+    }
 
 
 def _settle_observation(
@@ -422,10 +476,12 @@ def _readiness_expression(host: str) -> str:
 def _browser_evidence_expression(host: str) -> str:
     denials = json.dumps(SITES[host]["denials"])
     challenges = json.dumps(CHALLENGE_MARKERS)
-    # Both CDP and WebDriver use this one compact, atomic observation. Inspect
-    # the document inside the page and return only fixed booleans, a byte count,
-    # one opaque fixed-size activation token, and the readiness object; raw page
-    # content never crosses either transport.
+    required_resource_host = json.dumps(REQUIRED_RESOURCE_HOSTS.get(host))
+    # Both CDP and WebDriver use the same compact snapshots. Inspect the
+    # document inside the page and return only fixed booleans, the document byte
+    # count, one opaque fixed-size activation token, and bounded readiness
+    # fields; raw page content and resource identifiers never cross either
+    # transport.
     return f"""
 (() => {{
   const root = document.documentElement;
@@ -434,7 +490,12 @@ def _browser_evidence_expression(host: str) -> str:
   );
   let activationState = globalThis[activationStateKey];
   if (!activationState) {{
-    activationState = {{active: false, root: null, token: null}};
+    activationState = {{
+      active: false,
+      requiredResource: null,
+      root: null,
+      token: null
+    }};
     Object.defineProperty(globalThis, activationStateKey, {{value: activationState}});
     globalThis.addEventListener('pagehide', () => {{
       activationState.active = false;
@@ -454,11 +515,133 @@ def _browser_evidence_expression(host: str) -> str:
     activationState.token = Object.freeze(Array.from(
       crypto.getRandomValues(new Uint32Array({DOCUMENT_ACTIVATION_WORDS}))
     ));
+    activationState.requiredResource = null;
     activationState.active = true;
   }}
+  const requiredResourceHost = {required_resource_host};
+  const resourceByteBucket = (byteCount) => {{
+    if (!Number.isSafeInteger(byteCount) || byteCount <= 0) return 'zero';
+    if (byteCount < 16 * 1024) return 'lt_16k';
+    if (byteCount < 64 * 1024) return '16k_to_64k';
+    return 'gte_64k';
+  }};
+  const boundedRequiredResource = () => {{
+    if (!requiredResourceHost) return null;
+    const state = activationState.requiredResource;
+    const byteCount = state && Number.isSafeInteger(state.byteCount)
+      ? state.byteCount
+      : 0;
+    return {{
+      host: requiredResourceHost,
+      complete: Boolean(state && state.complete === true && byteCount > 0),
+      byte_bucket: resourceByteBucket(byteCount)
+    }};
+  }};
+  const discoverRequiredResource = () => {{
+    if (!requiredResourceHost) return null;
+    const candidates = document.querySelectorAll(
+      'script[src], link[rel~="modulepreload"][href], link[rel~="preload"][as="script"][href]'
+    );
+    for (const node of candidates) {{
+      try {{
+        const candidate = new URL(
+          node.tagName === 'SCRIPT' ? node.src : node.href,
+          document.baseURI
+        );
+        if (
+          candidate.protocol === 'https:'
+          && candidate.hostname.toLowerCase() === requiredResourceHost
+          && (candidate.port === '' || candidate.port === '443')
+          && candidate.username === ''
+          && candidate.password === ''
+        ) {{
+          return candidate;
+        }}
+      }} catch (_error) {{
+        // A malformed page-controlled candidate is simply not qualifying.
+      }}
+    }}
+    return null;
+  }};
+  const startRequiredResourceProbe = () => {{
+    if (!requiredResourceHost || !root) return;
+    let state = activationState.requiredResource;
+    if (!state) {{
+      state = {{
+        attempts: 0,
+        byteCount: 0,
+        complete: false,
+        retryAfter: 0,
+        running: false
+      }};
+      activationState.requiredResource = state;
+    }}
+    const now = performance.now();
+    if (
+      state.complete
+      || state.running
+      || state.attempts >= {REQUIRED_RESOURCE_MAX_ATTEMPTS}
+      || now < state.retryAfter
+    ) return;
+    const candidate = discoverRequiredResource();
+    if (!candidate) return;
+    state.attempts += 1;
+    state.byteCount = 0;
+    state.complete = false;
+    state.running = true;
+    void (async () => {{
+      try {{
+        const response = await fetch(candidate.href, {{
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+          referrerPolicy: 'no-referrer'
+        }});
+        const finalResource = new URL(response.url);
+        if (
+          !response.ok
+          || finalResource.protocol !== 'https:'
+          || finalResource.hostname.toLowerCase() !== requiredResourceHost
+          || (finalResource.port !== '' && finalResource.port !== '443')
+          || finalResource.username !== ''
+          || finalResource.password !== ''
+          || !response.body
+          || typeof response.body.getReader !== 'function'
+        ) throw new Error('required resource response rejected');
+        const reader = response.body.getReader();
+        try {{
+          for (;;) {{
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            const chunkLength = chunk.value && chunk.value.byteLength;
+            if (!Number.isSafeInteger(chunkLength) || chunkLength < 0) {{
+              throw new Error('required resource chunk rejected');
+            }}
+            state.byteCount = Math.min(
+              Number.MAX_SAFE_INTEGER,
+              state.byteCount + chunkLength
+            );
+          }}
+        }} finally {{
+          reader.releaseLock();
+        }}
+        if (state.byteCount <= 0) {{
+          throw new Error('required resource was empty');
+        }}
+        state.complete = true;
+      }} catch (_error) {{
+        state.complete = false;
+        state.retryAfter = performance.now() + {REQUIRED_RESOURCE_RETRY_DELAY_MS};
+      }} finally {{
+        state.running = false;
+      }}
+    }})();
+  }};
+  startRequiredResourceProbe();
   const documentSource = root ? root.outerHTML : '';
   const lowered = documentSource.toLowerCase();
   const signals = ({_readiness_expression(host)});
+  signals.required_resource = boundedRequiredResource();
   return {{
     challenge_detected: {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true,
     denial_detected: {denials}.some((marker) => lowered.includes(marker)),
@@ -496,6 +679,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     interactive_confirmation: InteractiveConfirmation | None = None
     failure_reason = reason
     failure: BaseException | None = None
+    latest_signals: dict[str, object] | None = None
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
@@ -608,6 +792,8 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             # signal, a fixed denial, or the site deadline. A challenge remains
             # non-passing but may resolve within the same bounded navigation.
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
+            if isinstance(signals, dict):
+                latest_signals = signals
             document_activation_id = (
                 _parse_document_activation_id(
                     evidence.get("document_activation_id")
@@ -698,6 +884,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         "elapsed_ms": elapsed_ms,
         "outcome": outcome,
         "reason": reason,
+        "required_resource": _bounded_required_resource(host, latest_signals),
         "route": "slipstream_selected",
     }
 
@@ -742,6 +929,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     observation_started: float | None = None
     finished = attempt_started
     failure: BaseException | None = None
+    latest_signals: dict[str, object] | None = None
     try:
         _wait_for_safaridriver_ready(driver_url)
         failure_reason = "browser_process_conflict"
@@ -834,6 +1022,8 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
             evidence = _decode_safari_evidence(serialized_evidence)
             outcome, reason = _classify_browser_evidence(host, evidence)
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
+            if isinstance(signals, dict):
+                latest_signals = signals
             document_activation_id = (
                 _parse_document_activation_id(
                     evidence.get("document_activation_id")
@@ -892,6 +1082,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
         "elapsed_ms": elapsed_ms,
         "outcome": outcome,
         "reason": reason,
+        "required_resource": _bounded_required_resource(host, latest_signals),
         "route": "slipstream_selected",
     }
 

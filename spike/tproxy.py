@@ -2172,9 +2172,9 @@ SEMANTIC_PLAIN_PROBE_WINDOW = 60.0
 SEMANTIC_PLAIN_PROBE_WINDOW_MAX = 8
 # The held browser connection already proved that the exact system endpoint can
 # speak TLS.  The independent semantic root probe must therefore stay inside
-# the healthy-first-contact latency budget; the full eight-second contract is
-# reserved for confirming an alternative owned-Geph route after a strong
-# denial signal.
+# the healthy-first-contact latency budget.  The full eight-second contract is
+# available only after signed foreground-browser provenance for one
+# inconclusive root retry, critical-child comparison, or owned-Geph proof.
 ROUTE_PREFLIGHT_DIRECT_TIMEOUT = 0.4
 ROUTE_PREFLIGHT_CACHE_TTL = 10 * 60.0
 ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
@@ -2183,6 +2183,28 @@ ROUTE_PREFLIGHT_CONCURRENT_MAX = 2
 ROUTE_PREFLIGHT_WINDOW = 60.0
 ROUTE_PREFLIGHT_WINDOW_MAX = 8
 ROUTE_PREFLIGHT_HEALTHY_BUDGET = 0.5
+# Browser provenance runs only after an actionable semantic observation.  A
+# cold codesign launch can legitimately exceed the generic 250 ms command
+# default even though the same signed browser verifies immediately once warm.
+# Keep this exceptional path inside the unchanged eight-second route job while
+# leaving enough per-command space for the first signature verification.
+ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET = 1.5
+ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT = 0.5
+ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE = 0.05
+# A deadline-expired root probe is inconclusive, not a stable terminal result.
+# Only a signed foreground browser may spend this one additional direct retry.
+# The retry may use at most five seconds of the unchanged eight-second job and
+# must leave two seconds for a same-attempt owned-Geph proof.  The scheduling
+# grace is also subtracted before the retry starts, so it cannot consume that
+# proof reserve while its worker is being joined.
+ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT = 5.0
+ROUTE_PREFLIGHT_FOREGROUND_PROOF_RESERVE = 2.0
+ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE = 0.025
+# A complete parent document may name a critical cross-origin script only
+# after the ordinary root probe has consumed most of the healthy budget.  Once
+# signed foreground-browser provenance is accepted, give that exact child one
+# fresh, bounded direct range attempt inside the unchanged eight-second job.
+ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT = 1.0
 ROUTE_PREFLIGHT_HEADLESS_FAILURE_WINDOW = 5 * 60.0
 ROUTE_PREFLIGHT_HEADLESS_FAILURE_LIMIT = 3
 ROUTE_PREFLIGHT_HEADLESS_BREAKER_COOLDOWN = 5 * 60.0
@@ -2298,6 +2320,7 @@ _auto_geph_successor_requests = {}  # host -> one request-only Geph retry expiry
 _AUTO_GEPH_SUCCESSOR_CLAIM = object()
 _ROUTE_PREFLIGHT_OWNED_GEPH_CLAIM = object()
 _ROUTE_PREFLIGHT_OWNED_GEPH_PROOF = object()
+_ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -2332,6 +2355,20 @@ class _SemanticPlainPreflightObservation:
     outcome: str
     bootstrap_assets: tuple = ()
     safe_incomplete: bool = False
+    retryable_inconclusive: bool = False
+
+
+_BOOTSTRAP_RANGE_TERMINATION_COMPLETE = "complete"
+_BOOTSTRAP_RANGE_TERMINATION_EOF = "eof"
+_BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT = "idle_timeout"
+_BOOTSTRAP_RANGE_TERMINATION_TRUNCATED = "truncated"
+_BOOTSTRAP_RANGE_TERMINATION_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class _BootstrapRangeProbeObservation:
+    evidence: object
+    termination: str
 
 
 @dataclass(slots=True)
@@ -4139,14 +4176,16 @@ def _semantic_plain_preflight_probe_detail(
             truncated=truncated,
         )
         if not response_complete:
+            safe_incomplete = http_response_incomplete(
+                data,
+                stream_closed=stream_closed,
+                idle_timed_out=idle_timed_out,
+                truncated=truncated,
+            )
             return _SemanticPlainPreflightObservation(
                 SEMANTIC_OUTCOME_NAVIGATION_PENDING,
-                safe_incomplete=http_response_incomplete(
-                    data,
-                    stream_closed=stream_closed,
-                    idle_timed_out=idle_timed_out,
-                    truncated=truncated,
-                ),
+                safe_incomplete=safe_incomplete,
+                retryable_inconclusive=bool(idle_timed_out),
             )
         outcome = _semantic_plain_response_outcome(
             data,
@@ -4163,6 +4202,11 @@ def _semantic_plain_preflight_probe_detail(
                 deadline=deadline,
             )
         return _SemanticPlainPreflightObservation(outcome, assets)
+    except TimeoutError:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+        )
     except Exception:
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR
@@ -4247,6 +4291,17 @@ def _bootstrap_range_response_on_tls_socket(
             truncated=truncated,
             deadline=classification_deadline,
         )
+        termination = (
+            _BOOTSTRAP_RANGE_TERMINATION_COMPLETE
+            if complete
+            else _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
+            if idle_timed_out
+            else _BOOTSTRAP_RANGE_TERMINATION_EOF
+            if stream_closed
+            else _BOOTSTRAP_RANGE_TERMINATION_TRUNCATED
+            if truncated
+            else _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN
+        )
         if (
             evidence.outcome
             is bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE
@@ -4257,13 +4312,16 @@ def _bootstrap_range_response_on_tls_socket(
             )
             != SEMANTIC_OUTCOME_USABLE
         ):
-            return bootstrap_asset_preflight.RangeProbeEvidence(
-                bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN
+            evidence = bootstrap_asset_preflight.RangeProbeEvidence(
+                bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN,
             )
-        return evidence
+        return _BootstrapRangeProbeObservation(evidence, termination)
     except Exception:
-        return bootstrap_asset_preflight.RangeProbeEvidence(
-            bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN
+        return _BootstrapRangeProbeObservation(
+            bootstrap_asset_preflight.RangeProbeEvidence(
+                bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN,
+            ),
+            _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
         )
     finally:
         try:
@@ -4283,8 +4341,11 @@ def _bootstrap_asset_plain_range_probe(
     try:
         remaining = io_deadline - time.monotonic()
         if remaining <= 0:
-            return bootstrap_asset_preflight.RangeProbeEvidence(
-                bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED
+            return _BootstrapRangeProbeObservation(
+                bootstrap_asset_preflight.RangeProbeEvidence(
+                    bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED,
+                ),
+                _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
             )
         sock = socket.create_connection(
             (ip, 443),
@@ -4303,21 +4364,30 @@ def _bootstrap_asset_plain_range_probe(
                 sock.close()
             except Exception:
                 pass
-        return bootstrap_asset_preflight.RangeProbeEvidence(
-            bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN
+        return _BootstrapRangeProbeObservation(
+            bootstrap_asset_preflight.RangeProbeEvidence(
+                bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN,
+            ),
+            _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
         )
 
 
 def _bootstrap_asset_geph_range_probe(host, request, deadline):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        return bootstrap_asset_preflight.RangeProbeEvidence(
-            bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED
+        return _BootstrapRangeProbeObservation(
+            bootstrap_asset_preflight.RangeProbeEvidence(
+                bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED,
+            ),
+            _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
         )
     sock = _socks5_connect_blocking(host, 443, max(remaining, 0.001))
     if sock is None:
-        return bootstrap_asset_preflight.RangeProbeEvidence(
-            bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN
+        return _BootstrapRangeProbeObservation(
+            bootstrap_asset_preflight.RangeProbeEvidence(
+                bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN,
+            ),
+            _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
         )
     return _bootstrap_range_response_on_tls_socket(
         sock,
@@ -6041,8 +6111,12 @@ def _browser_navigation_provenance_accepted(
             peer_endpoint[0],
             peer_endpoint[1],
             policy=macos_browser_provenance.AdmissionPolicy(
-                total_budget_seconds=1.0,
-                command_timeout_seconds=0.25,
+                total_budget_seconds=(
+                    ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+                ),
+                command_timeout_seconds=(
+                    ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT
+                ),
                 recent_input_seconds=5.0,
                 allow_shared_signed_webkit_with_frontmost_safari=True,
             ),
@@ -6314,6 +6388,36 @@ def _commit_preflight_owned_geph_proof(proof, owner_epoch):
     return True
 
 
+def _decode_bootstrap_range_probe_observation(observation):
+    """Return bounded evidence plus its local transport termination."""
+    termination = _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN
+    if isinstance(observation, _BootstrapRangeProbeObservation):
+        termination = observation.termination
+        observation = observation.evidence
+    if not isinstance(
+        observation,
+        bootstrap_asset_preflight.RangeProbeEvidence,
+    ):
+        return None, _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN
+    if termination not in {
+        _BOOTSTRAP_RANGE_TERMINATION_COMPLETE,
+        _BOOTSTRAP_RANGE_TERMINATION_EOF,
+        _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT,
+        _BOOTSTRAP_RANGE_TERMINATION_TRUNCATED,
+        _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
+    }:
+        termination = _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN
+    if (
+        termination == _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN
+        and observation.outcome
+        is bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE
+    ):
+        # Test-injected complete evidence is independently self-framed.  An
+        # injected incomplete result still needs an explicit termination.
+        termination = _BOOTSTRAP_RANGE_TERMINATION_COMPLETE
+    return observation, termination
+
+
 def _bootstrap_asset_preflight_blocking(
     asset,
     parent_host,
@@ -6373,19 +6477,20 @@ def _bootstrap_asset_preflight_blocking(
             if direct_probe is None
             else direct_probe
         )
-        direct_evidence = direct_probe(
+        direct_observation = direct_probe(
             selected_ip,
             h,
             request,
             healthy_deadline,
             final_deadline,
         )
+        (
+            direct_evidence,
+            direct_termination,
+        ) = _decode_bootstrap_range_probe_observation(direct_observation)
         if time.monotonic() >= final_deadline:
             return None, cache_outcome
-        if not isinstance(
-            direct_evidence,
-            bootstrap_asset_preflight.RangeProbeEvidence,
-        ):
+        if direct_evidence is None:
             return None, cache_outcome
         if (
             direct_evidence.outcome
@@ -6397,6 +6502,16 @@ def _bootstrap_asset_preflight_blocking(
             direct_evidence.outcome
             is not bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
         ):
+            return None, cache_outcome
+        if (
+            direct_termination
+            == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
+        ):
+            # Slow delivery is not a stable direct failure.  Do not use it to
+            # authorize an alternative route and do not suppress a later
+            # foreground attempt with either the child or parent cache.
+            return None, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+        if direct_termination != _BOOTSTRAP_RANGE_TERMINATION_EOF:
             return None, cache_outcome
         if _validated_route_preflight_outcome(
             job,
@@ -6419,12 +6534,12 @@ def _bootstrap_asset_preflight_blocking(
             if geph_probe is None
             else geph_probe
         )
-        geph_evidence = geph_probe(h, request, final_deadline)
+        geph_observation = geph_probe(h, request, final_deadline)
+        geph_evidence, _geph_termination = (
+            _decode_bootstrap_range_probe_observation(geph_observation)
+        )
         if (
-            not isinstance(
-                geph_evidence,
-                bootstrap_asset_preflight.RangeProbeEvidence,
-            )
+            geph_evidence is None
             or not direct_evidence.proves_same_object_as(geph_evidence)
             or time.monotonic() >= final_deadline
             or int(time.time() * 1000) > job.deadline_unix_ms
@@ -6527,14 +6642,17 @@ async def _run_bootstrap_asset_preflight(
         if not owner:
             asset.forget()
             try:
-                selected = bool(
-                    await asyncio.wait_for(
-                        asyncio.shield(asyncio.wrap_future(future)),
-                        timeout=max(0.001, final_deadline - time.monotonic()),
-                    )
+                shared_result = await asyncio.wait_for(
+                    asyncio.shield(asyncio.wrap_future(future)),
+                    timeout=max(0.001, final_deadline - time.monotonic()),
                 )
+                if shared_result is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
+                    return False, shared_result
+                selected = bool(shared_result)
                 with _route_preflight_lock:
                     completed = _route_preflight_cache.get(h)
+                if not selected and completed is None:
+                    return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
                 return (
                     selected,
                     "owned_geph"
@@ -6544,7 +6662,7 @@ async def _run_bootstrap_asset_preflight(
                     else SEMANTIC_OUTCOME_TERMINAL_ERROR,
                 )
             except (asyncio.TimeoutError, RuntimeError):
-                return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+                return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
 
     selected = False
     cache_outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
@@ -6568,6 +6686,9 @@ async def _run_bootstrap_asset_preflight(
             ),
             timeout=remaining + 0.05,
         )
+        if cache_outcome is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
+            publish_cache = False
+            return False, cache_outcome
         selected = _commit_preflight_owned_geph_proof(proof, owner_epoch)
         if not selected and cache_outcome == "owned_geph":
             cache_outcome = SEMANTIC_OUTCOME_NAVIGATION_PENDING
@@ -6602,7 +6723,95 @@ async def _run_bootstrap_asset_preflight(
                 _prune_initial_route_preflights_locked(completed_at)
                 _route_preflight_inflight.pop(h, None)
                 if future is not None and not future.done():
-                    future.set_result(bool(selected))
+                    future.set_result(
+                        _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+                        if (
+                            not publish_cache
+                            and cache_outcome
+                            is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+                        )
+                        else bool(selected)
+                    )
+
+
+async def _run_bounded_direct_route_preflight(
+    direct_probe,
+    address,
+    host,
+    timeout,
+):
+    """Run one pure direct probe and preserve deadline expiry as local state."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(direct_probe, address, host, timeout),
+            timeout=(
+                timeout + ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+            ),
+        )
+    except asyncio.TimeoutError:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+        )
+
+
+def _route_preflight_foreground_retry_timeout(deadline_monotonic):
+    """Spend one adaptive retry slice while preserving proof capacity."""
+    retry_capacity = (
+        deadline_monotonic
+        - time.monotonic()
+        - ROUTE_PREFLIGHT_FOREGROUND_PROOF_RESERVE
+        - ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+    )
+    return min(
+        ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT,
+        max(0.0, retry_capacity),
+    )
+
+
+def _decode_direct_route_preflight_observation(job, observation):
+    assets = ()
+    safe_incomplete = False
+    retryable_inconclusive = False
+    if isinstance(observation, _SemanticPlainPreflightObservation):
+        assets = observation.bootstrap_assets
+        safe_incomplete = bool(observation.safe_incomplete)
+        retryable_inconclusive = bool(observation.retryable_inconclusive)
+        observation = observation.outcome
+    outcome = _validated_direct_route_preflight_outcome(job, observation)
+    if outcome is None:
+        outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
+        retryable_inconclusive = False
+    return outcome, assets, safe_incomplete, retryable_inconclusive
+
+
+def _select_route_preflight_bootstrap_asset(assets, parent_host):
+    """Select one allowed asset, preferring an exact cross-origin child."""
+    parent = normalize_host(parent_host)
+    selected = None
+    selected_is_cross_origin = False
+    for candidate in assets:
+        candidate_host = normalize_host(candidate.exact_host)
+        candidate_is_cross_origin = bool(
+            candidate_host and candidate_host != parent
+        )
+        if (
+            _auto_geph_base_host_allowed(candidate_host)
+            and (
+                selected is None
+                or (
+                    candidate_is_cross_origin
+                    and not selected_is_cross_origin
+                )
+            )
+        ):
+            if selected is not None:
+                selected.forget()
+            selected = candidate
+            selected_is_cross_origin = candidate_is_cross_origin
+        else:
+            candidate.forget()
+    return selected, selected_is_cross_origin
 
 
 async def _run_initial_route_preflight(
@@ -6620,11 +6829,12 @@ async def _run_initial_route_preflight(
 ):
     """Hold one first ClientHello while exact-host route evidence is gathered.
 
-    A healthy direct root stays browser-free.  Any semantic denial, framed
-    incomplete response, critical bootstrap comparison, or local headless
-    fallback additionally requires a foreground, recently-used signed
-    Safari/Chrome socket.  The exact-host work remains coalesced and bounded;
-    no page-private bytes enter routing state, status, or logs.
+    A healthy direct root stays browser-free.  A strict, complete semantic
+    denial may learn only after the same exact host has a complete usable
+    response through the owned Geph exit.  Ambiguous incomplete, retry, and
+    critical-bootstrap paths additionally require a foreground, recently-used
+    signed Safari/Chrome socket.  The exact-host work remains coalesced and
+    bounded; no page-private bytes enter routing state, status, or logs.
     """
     h = normalize_host(host)
     preflight_started = time.monotonic()
@@ -6698,40 +6908,54 @@ async def _run_initial_route_preflight(
         else direct_probe
     )
     bootstrap_assets = ()
+    eligible_asset = None
+    eligible_asset_is_cross_origin = False
     direct_safe_incomplete = False
     try:
         direct_timeout = min(
             ROUTE_PREFLIGHT_DIRECT_TIMEOUT,
             max(0.001, deadline - time.monotonic()),
         )
-        observation = await asyncio.wait_for(
-            asyncio.to_thread(direct_probe, str(address), h, direct_timeout),
-            timeout=direct_timeout + 0.025,
+        observation = await _run_bounded_direct_route_preflight(
+            direct_probe,
+            str(address),
+            h,
+            direct_timeout,
         )
-        if isinstance(observation, _SemanticPlainPreflightObservation):
-            bootstrap_assets = observation.bootstrap_assets
-            direct_safe_incomplete = bool(observation.safe_incomplete)
-            observation = observation.outcome
-        outcome = _validated_direct_route_preflight_outcome(job, observation)
-        if outcome is None:
-            outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
+        (
+            outcome,
+            bootstrap_assets,
+            direct_safe_incomplete,
+            direct_retryable_inconclusive,
+        ) = _decode_direct_route_preflight_observation(job, observation)
         cache_outcome = outcome
-        actionable_browser_observation = bool(
-            outcome in SEMANTIC_DENIAL_OUTCOMES
+        if outcome == SEMANTIC_OUTCOME_USABLE:
+            (
+                eligible_asset,
+                eligible_asset_is_cross_origin,
+            ) = _select_route_preflight_bootstrap_asset(bootstrap_assets, h)
+        requires_browser_provenance = bool(
+            direct_retryable_inconclusive
             or (
                 outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
                 and direct_safe_incomplete
             )
-            or (outcome == SEMANTIC_OUTCOME_USABLE and bootstrap_assets)
+            or eligible_asset is not None
         )
-        if actionable_browser_observation:
-            # A usable root with a critical bootstrap object is still on the
-            # healthy first-contact path.  Process provenance must share that
-            # path's 500 ms budget; otherwise its own one-second subprocess
-            # budget can delay an otherwise healthy navigation well beyond
-            # the advertised bound before the asset probe even starts.
+        if requires_browser_provenance:
+            # Same-origin bootstrap inspection remains on the ordinary 500 ms
+            # healthy path.  A deadline-expired root probe or a critical
+            # cross-origin child is different: the parent must stay held until
+            # signed foreground provenance and one bounded retry/comparison
+            # finish, or the browser will fetch the unresolved route direct.
+            # These exceptional paths still share the job's absolute
+            # eight-second deadline.
             provenance_deadline = deadline
-            if outcome == SEMANTIC_OUTCOME_USABLE and bootstrap_assets:
+            if (
+                outcome == SEMANTIC_OUTCOME_USABLE
+                and eligible_asset is not None
+                and not eligible_asset_is_cross_origin
+            ):
                 provenance_deadline = min(
                     provenance_deadline,
                     preflight_started + ROUTE_PREFLIGHT_HEALTHY_BUDGET,
@@ -6746,7 +6970,11 @@ async def _run_initial_route_preflight(
                             peer_endpoint,
                             provenance_assessor,
                         ),
-                        timeout=min(1.05, max(0.001, remaining)),
+                        timeout=min(
+                            ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+                            + ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE,
+                            max(0.001, remaining),
+                        ),
                     )
                 )
             except (asyncio.TimeoutError, RuntimeError):
@@ -6754,36 +6982,90 @@ async def _run_initial_route_preflight(
             if not provenance_ok:
                 publish_cache = False
                 return None
+        if direct_retryable_inconclusive:
+            # The fast probe did not produce a stable semantic result.  It must
+            # neither poison the retry cache nor authorize Geph.  After signed
+            # foreground provenance, retry the same system endpoint exactly
+            # once with a larger but still bounded slice of the original job.
+            for asset in bootstrap_assets:
+                asset.forget()
+            bootstrap_assets = ()
+            eligible_asset = None
+            eligible_asset_is_cross_origin = False
+            retry_timeout = _route_preflight_foreground_retry_timeout(
+                deadline
+            )
+            if retry_timeout <= 0:
+                publish_cache = False
+                return None
+            observation = await _run_bounded_direct_route_preflight(
+                direct_probe,
+                str(address),
+                h,
+                retry_timeout,
+            )
+            if time.monotonic() >= deadline:
+                publish_cache = False
+                return None
+            (
+                outcome,
+                bootstrap_assets,
+                direct_safe_incomplete,
+                direct_retryable_inconclusive,
+            ) = _decode_direct_route_preflight_observation(job, observation)
+            if direct_retryable_inconclusive:
+                publish_cache = False
+                return None
+            cache_outcome = outcome
+            if outcome == SEMANTIC_OUTCOME_USABLE:
+                (
+                    eligible_asset,
+                    eligible_asset_is_cross_origin,
+                ) = _select_route_preflight_bootstrap_asset(
+                    bootstrap_assets,
+                    h,
+                )
         if outcome in SEMANTIC_DENIAL_OUTCOMES or (
             outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
             and direct_safe_incomplete
         ):
             if not _owned_geph_ready_for_semantic_confirmation():
+                # A direct semantic denial is actionable, but a Geph listener
+                # that is still recovering cannot prove the alternate route.
+                # Do not turn that transient state into the two-minute denial
+                # retry cache: the next independently admitted physical
+                # navigation may try again after the owned backend is ready.
+                publish_cache = False
                 return None
             remaining = deadline - time.monotonic()
             if remaining > 0:
-                proof = await _run_headless_owned_geph_preflight(
-                    job,
-                    peer_endpoint,
-                    deadline,
-                    provenance_assessor=provenance_assessor,
-                    provenance_already_accepted=True,
-                )
-                if proof is None and outcome in SEMANTIC_DENIAL_OUTCOMES:
-                    remaining = deadline - time.monotonic()
-                    if remaining > 0:
-                        proof = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                _prove_preflight_owned_geph_route,
-                                h,
-                                outcome,
-                                remaining,
-                                geph_probe,
-                                job,
-                                deadline,
-                            ),
-                            timeout=remaining + 0.1,
-                        )
+                proof = None
+                if outcome in SEMANTIC_DENIAL_OUTCOMES:
+                    # A complete strict denial is already independent direct
+                    # semantic evidence.  Require the smaller exact-host
+                    # owned-Geph payload proof, but do not make network-level
+                    # recovery depend on which application happens to be
+                    # frontmost.  Ordinary 403s never reach this branch.
+                    proof = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _prove_preflight_owned_geph_route,
+                            h,
+                            outcome,
+                            remaining,
+                            geph_probe,
+                            job,
+                            deadline,
+                        ),
+                        timeout=remaining + 0.1,
+                    )
+                else:
+                    proof = await _run_headless_owned_geph_preflight(
+                        job,
+                        peer_endpoint,
+                        deadline,
+                        provenance_assessor=provenance_assessor,
+                        provenance_already_accepted=True,
+                    )
                 selected = _commit_preflight_owned_geph_proof(proof, future)
                 if selected:
                     cache_outcome = "owned_geph"
@@ -6792,6 +7074,12 @@ async def _run_initial_route_preflight(
                         job.capability,
                         deadline,
                     )
+                elif outcome in SEMANTIC_DENIAL_OUTCOMES:
+                    # A failed alternate-route proof is not a decision that
+                    # the denied direct response is healthy.  Leave the exact
+                    # host retryable so a later independent first connection
+                    # can recover after a transient proof/backend failure.
+                    publish_cache = False
                 elif (
                     outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
                     and direct_safe_incomplete
@@ -6800,46 +7088,47 @@ async def _run_initial_route_preflight(
                     # browser worker, and its retryable incomplete result must
                     # not suppress a later foreground classification.
                     publish_cache = False
-        elif outcome == SEMANTIC_OUTCOME_USABLE and bootstrap_assets:
-            eligible_asset = None
-            for candidate in bootstrap_assets:
-                if (
-                    eligible_asset is None
-                    and _auto_geph_base_host_allowed(candidate.exact_host)
-                ):
-                    eligible_asset = candidate
-                else:
-                    candidate.forget()
-            if eligible_asset is not None:
-                asset_host = normalize_host(eligible_asset.exact_host)
-                asset_selected, asset_outcome = await _run_bootstrap_asset_preflight(
-                    eligible_asset,
+        elif outcome == SEMANTIC_OUTCOME_USABLE and eligible_asset is not None:
+            asset_host = normalize_host(eligible_asset.exact_host)
+            direct_asset_deadline = min(
+                deadline,
+                (
+                    time.monotonic()
+                    + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
+                    if eligible_asset_is_cross_origin
+                    else preflight_started + ROUTE_PREFLIGHT_HEALTHY_BUDGET
+                ),
+            )
+            asset_selected, asset_outcome = await _run_bootstrap_asset_preflight(
+                eligible_asset,
+                h,
+                str(address),
+                direct_asset_deadline,
+                deadline,
+                direct_probe=bootstrap_direct_probe,
+                geph_probe=bootstrap_geph_probe,
+                resolver=bootstrap_resolver,
+            )
+            if asset_selected and asset_host == h:
+                selected = True
+                cache_outcome = "owned_geph"
+                selected_claim = _owned_geph_preflight_claim(
                     h,
-                    str(address),
-                    min(
-                        preflight_started + ROUTE_PREFLIGHT_HEALTHY_BUDGET,
-                        deadline,
-                    ),
+                    job.capability,
                     deadline,
-                    direct_probe=bootstrap_direct_probe,
-                    geph_probe=bootstrap_geph_probe,
-                    resolver=bootstrap_resolver,
                 )
-                if asset_selected and asset_host == h:
-                    selected = True
-                    cache_outcome = "owned_geph"
-                    selected_claim = _owned_geph_preflight_claim(
-                        h,
-                        job.capability,
-                        deadline,
-                    )
-                elif not asset_selected and asset_outcome != (
-                    SEMANTIC_OUTCOME_USABLE
-                ):
-                    # The root itself was usable, but a critical bootstrap
-                    # object was not independently cleared.  Do not hide that
-                    # unresolved child behind a ten-minute healthy-root cache.
-                    cache_outcome = asset_outcome
+            elif (
+                asset_outcome
+                is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+            ):
+                publish_cache = False
+            elif not asset_selected and asset_outcome != (
+                SEMANTIC_OUTCOME_USABLE
+            ):
+                # The root itself was usable, but a critical bootstrap object
+                # was not independently cleared.  Do not hide that unresolved
+                # child behind a ten-minute healthy-root cache.
+                cache_outcome = asset_outcome
     except asyncio.CancelledError:
         publish_cache = False
         raise
@@ -7648,16 +7937,48 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
     return None
 
 
-def _quic_geo_exit_tcp_fallback(host):
-    return bool(
-        host
+def _quic_route_tcp_fallback(host, *, now=None):
+    """Move only route-relevant QUIC first contact onto the TCP evidence path.
+
+    A fresh unknown exact hostname has no trustworthy semantic route decision
+    yet. Its one exact QUIC flow falls back to TCP so the existing bounded
+    direct preflight can classify it before any Geph route is possible. A fresh
+    usable/challenge result restores QUIC for that hostname. Learned exact
+    hosts keep falling back because the owned Geph route is TCP-only.
+    """
+    h = normalize_host(host)
+    if not (
+        h
         and _pf_applied
         and transparent_routing_ready()
         and GEPH_ENABLED
         and _geph_up
         and _geph_owned
         and _geph_port == GEPH_OWNED_PORT
-        and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+    ):
+        return False
+    route_class = route_policy(h)["route_class"]
+    if route_class == ROUTE_GEO_EXIT:
+        return True
+    if route_class != ROUTE_UNKNOWN or not _auto_geph_base_host_allowed(h):
+        return False
+    if _auto_geph_learned_exact_host(h):
+        return True
+
+    now = time.monotonic() if now is None else float(now)
+    with _route_preflight_lock:
+        _prune_initial_route_preflights_locked(now)
+        cached = _route_preflight_cache.get(h)
+        if cached is not None:
+            _route_preflight_cache.move_to_end(h)
+    return not bool(
+        cached
+        and cached[0] > now
+        and cached[1]
+        in {
+            SEMANTIC_OUTCOME_USABLE,
+            SEMANTIC_OUTCOME_CHALLENGE_OR_AUTH,
+        }
     )
 
 
@@ -7736,6 +8057,8 @@ def _transport_selftest_quic_initial(version, host):
 
 def transport_mechanics_selftest():
     """Exercise the packaged QUIC parser/fallback without network mutation."""
+    from scapy.all import ICMP, ICMPv6DestUnreach, IP, IPv6, Raw, UDP
+
     global _pf_applied, GEPH_ENABLED, _geph_up, _geph_owned, _geph_port
     global transparent_routing_ready
     previous = (
@@ -7776,14 +8099,26 @@ def transport_mechanics_selftest():
                 raise RuntimeError("packaged QUIC exact hostname observation failed")
             initial_flows = OrderedDict()
             fallback_flows = OrderedDict()
-            if not _quic_initial_tcp_fallback_response(
+            response = _quic_initial_tcp_fallback_response(
                 initial_flows,
                 fallback_flows,
                 flow,
                 initial,
                 now=100.0,
-            ):
+            )
+            if not response:
                 raise RuntimeError("packaged QUIC exact-host fallback failed")
+            ipv6 = flow[0] == 6
+            network_layer = IPv6 if ipv6 else IP
+            packets = _quic_tcp_fallback_packets(
+                network_layer(src=flow[1], dst=flow[3]),
+                UDP(sport=flow[2], dport=flow[4]) / Raw(initial),
+                response,
+                ipv6=ipv6,
+                layers=(IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach),
+            )
+            if len(packets) != 2 or not all(bytes(packet) for packet in packets):
+                raise RuntimeError("packaged QUIC TCP fallback signals failed")
             if _quic_initial_tcp_fallback_response(
                 initial_flows,
                 fallback_flows,
@@ -7792,11 +8127,24 @@ def transport_mechanics_selftest():
                 now=100.1,
             ) is not None:
                 raise RuntimeError("packaged QUIC fallback was not flow bounded")
+            unknown_initial = _transport_selftest_quic_initial(
+                version,
+                "unknown.example",
+            )
+            if not _quic_initial_tcp_fallback_response(
+                OrderedDict(),
+                OrderedDict(),
+                flow,
+                unknown_initial,
+                now=101.0,
+            ):
+                raise RuntimeError(
+                    "packaged QUIC unknown first contact skipped TCP classification"
+                )
             for excluded in (
                 "updates.discord.com",
                 "www.youtube.com",
                 "r1---sn.example.googlevideo.com",
-                "unknown.example",
             ):
                 if _quic_initial_tcp_fallback_response(
                     OrderedDict(),
@@ -10986,9 +11334,9 @@ def _quic_initial_tcp_fallback_response(
     *,
     now=None,
 ):
-    """Return a VN response only for one exact reviewed QUIC Initial flow."""
+    """Return one exact-flow VN response only when TCP classification is due."""
     host = _observe_quic_initial_sni(initial_flows, flow_key, payload)
-    if not _quic_geo_exit_tcp_fallback(host):
+    if not _quic_route_tcp_fallback(host, now=now):
         return None
     now = time.monotonic() if now is None else now
     cutoff = now - QUIC_TCP_FALLBACK_FLOW_IDLE
@@ -11005,6 +11353,44 @@ def _quic_initial_tcp_fallback_response(
         return None
     fallback_flows[flow_key] = now
     return response
+
+
+def _quic_tcp_fallback_packets(ip, udp, response, *, ipv6, layers):
+    """Build bounded reverse-path signals for one observed QUIC flow.
+
+    Version Negotiation is sufficient only until the client has processed a
+    packet from the real server.  The matching ICMP port-unreachable also
+    fails the exact connected UDP socket when that server packet wins the
+    race, allowing the browser to retry the same navigation over TCP.  The
+    embedded tuple is reconstructed from the observed packet and is never
+    widened to a host, address range, or UDP/443 rule.
+    """
+    IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach = layers
+    network_layer = IPv6 if ipv6 else IP
+    reverse_network = network_layer(src=ip.dst, dst=ip.src)
+    version_negotiation = (
+        reverse_network.copy()
+        / UDP(sport=udp.dport, dport=udp.sport)
+        / Raw(response)
+    )
+    quoted_original = (
+        network_layer(src=ip.src, dst=ip.dst)
+        / UDP(sport=udp.sport, dport=udp.dport)
+        / Raw(bytes(udp.payload)[:8])
+    )
+    if ipv6:
+        unreachable = (
+            reverse_network
+            / ICMPv6DestUnreach(code=4)
+            / quoted_original
+        )
+    else:
+        unreachable = (
+            reverse_network
+            / ICMP(type=3, code=3)
+            / quoted_original
+        )
+    return version_negotiation, unreachable
 
 
 def reduce_geph_probe_state(previous_up, strikes, probe_ok, port, conflict=False):
@@ -11045,10 +11431,22 @@ def network_monitor(
         else wake_marker_reader
     )
     last_wake_marker = wake_marker_reader()
-    AsyncSniffer = send = IP = IPv6 = UDP = TCP = Raw = get_if_addr = None
+    AsyncSniffer = send = IP = IPv6 = UDP = TCP = Raw = None
+    ICMP = ICMPv6DestUnreach = get_if_addr = None
     try:
-        from scapy.all import (AsyncSniffer, send, IP, IPv6, UDP, TCP, Raw,
-                               get_if_addr, conf)
+        from scapy.all import (
+            AsyncSniffer,
+            ICMP,
+            ICMPv6DestUnreach,
+            IP,
+            IPv6,
+            Raw,
+            TCP,
+            UDP,
+            conf,
+            get_if_addr,
+            send,
+        )
         conf.verb = 0
     except Exception as e:
         print(f">> packet observer disabled (scapy: {e})", file=sys.stderr)
@@ -11073,11 +11471,9 @@ def network_monitor(
             return
         if p.haslayer(IP):
             ip = p[IP]
-            ip_packet = lambda src, dst: IP(src=src, dst=dst)
             ipv6 = False
         elif IPv6 is not None and p.haslayer(IPv6):
             ip = p[IPv6]
-            ip_packet = lambda src, dst: IPv6(src=src, dst=dst)
             ipv6 = True
         else:
             return
@@ -11092,15 +11488,18 @@ def network_monitor(
             )
             if response is None:
                 return
-            packet = (
-                ip_packet(ip.dst, ip.src)
-                / UDP(sport=443, dport=udp.sport)
-                / Raw(response)
+            packets = _quic_tcp_fallback_packets(
+                ip,
+                udp,
+                response,
+                ipv6=ipv6,
+                layers=(IP, IPv6, UDP, Raw, ICMP, ICMPv6DestUnreach),
             )
             for _ in range(QUIC_TCP_FALLBACK_REPEAT):
-                _l3send(packet)
+                for packet in packets:
+                    _l3send(packet)
             print(
-                ">> geo-exit QUIC flow moved to TCP fallback",
+                ">> route-qualified QUIC flow refused for TCP fallback",
                 file=sys.stderr,
                 flush=True,
             )
