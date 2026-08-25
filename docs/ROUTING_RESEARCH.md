@@ -1430,6 +1430,21 @@ the corrected current-format parser to `input_not_recent` when no fresh
 physical input was present, proving the parser fix without treating automation
 as product evidence. No hostname or HTTP-status exception was added.
 
+The next physical attempt exposed a separate cold-start timing edge. On the
+current live Chrome NetworkService socket, the first exact production assessor
+returned `signature_failed` in 0.279 seconds; the official helper's signature,
+Google team, designated requirement, path, and ancestry were valid, and the
+immediate warm assessment crossed signature verification to the foreground
+check. The failure was therefore the 0.25-second subprocess cap, not bad Chrome
+or a routing classification. The exceptional provenance budget is now 1.5
+seconds total with a 0.5-second per-command cap, still inside the existing
+eight-second exact-host job; direct healthy/inconclusive timing is unchanged.
+The same snapshot recorded owned Geph briefly unready after wake. A complete
+actionable denial in that interval no longer creates the two-minute retry
+cache: a subsequent new physical navigation may retry after readiness, but no
+route is learned without the same complete owned-Geph payload proof. This adds
+neither an Aikido/Capacitor rule nor a broad status-code rule.
+
 ## Transfer Backlog
 
 Safe candidates:

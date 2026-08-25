@@ -9434,6 +9434,79 @@ def _enable_owned_geph_preflight(monkeypatch):
     )
 
 
+def test_route_preflight_browser_provenance_allows_cold_signature_start():
+    observed = []
+
+    def assessor(local_address, local_port, *, policy):
+        observed.append((local_address, local_port, policy))
+        return tproxy.macos_browser_provenance.BrowserNavigationProvenance(
+            accepted=True,
+            browser_family=(
+                tproxy.macos_browser_provenance.BrowserFamily.CHROME
+            ),
+            pid=4242,
+            reason=tproxy.macos_browser_provenance.AdmissionReason.ACCEPTED,
+        )
+
+    assert tproxy._browser_navigation_provenance_accepted(
+        ("127.0.0.1", 49152),
+        assessor,
+    )
+    assert len(observed) == 1
+    assert observed[0][:2] == ("127.0.0.1", 49152)
+    policy = observed[0][2]
+    assert policy.total_budget_seconds == (
+        tproxy.ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+    )
+    assert policy.command_timeout_seconds == (
+        tproxy.ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT
+    )
+    assert policy.command_timeout_seconds > 0.25
+    assert (
+        policy.total_budget_seconds
+        + tproxy.ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE
+        < tproxy.route_preflight.MAX_DEADLINE_MS / 1000.0
+    )
+
+
+def test_actionable_preflight_waits_for_full_cold_provenance_budget(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    real_wait_for = asyncio.wait_for
+    observed_timeouts = []
+
+    async def recording_wait_for(awaitable, timeout):
+        observed_timeouts.append(timeout)
+        return await real_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr(tproxy.asyncio, "wait_for", recording_wait_for)
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            "cold-provenance.example",
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            direct_probe=lambda *_args: (
+                tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+            ),
+            geph_probe=lambda *_args, **_kwargs: (
+                tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+            ),
+        )
+    )
+
+    assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim)
+    expected_timeout = (
+        tproxy.ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+        + tproxy.ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE
+    )
+    assert any(
+        timeout == pytest.approx(expected_timeout)
+        for timeout in observed_timeouts
+    )
+
+
 def test_headless_route_result_is_claim_bound_and_not_route_authority(
     monkeypatch,
 ):
@@ -9896,6 +9969,52 @@ def test_route_preflight_healthy_direct_does_not_require_geph_ready(monkeypatch)
         )
     ) is None
     assert calls and calls[0][2] <= tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
+
+
+def test_transient_geph_unready_does_not_cache_actionable_denial(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "geph-recovering.example"
+    ready = {"value": False}
+    geph_calls = []
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_geph_ready_for_semantic_confirmation",
+        lambda: ready["value"],
+    )
+
+    def direct(_ip, actual_host, _timeout):
+        assert actual_host == host
+        return tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+
+    assert asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=direct,
+            geph_probe=lambda *_args: pytest.fail(
+                "unready Geph must not be probed"
+            ),
+        )
+    ) is None
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+    ready["value"] = True
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=direct,
+            geph_probe=lambda actual_host, timeout: (
+                geph_calls.append((actual_host, timeout))
+                or tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+            ),
+        )
+    )
+
+    assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim)
+    assert geph_calls and geph_calls[0][0] == host
+    assert tproxy._auto_geph_learned_exact_host(host)
 
 
 def test_background_connection_cannot_learn_or_cache_browser_action(monkeypatch):

@@ -2183,6 +2183,14 @@ ROUTE_PREFLIGHT_CONCURRENT_MAX = 2
 ROUTE_PREFLIGHT_WINDOW = 60.0
 ROUTE_PREFLIGHT_WINDOW_MAX = 8
 ROUTE_PREFLIGHT_HEALTHY_BUDGET = 0.5
+# Browser provenance runs only after an actionable semantic observation.  A
+# cold codesign launch can legitimately exceed the generic 250 ms command
+# default even though the same signed browser verifies immediately once warm.
+# Keep this exceptional path inside the unchanged eight-second route job while
+# leaving enough per-command space for the first signature verification.
+ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET = 1.5
+ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT = 0.5
+ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE = 0.05
 # A deadline-expired root probe is inconclusive, not a stable terminal result.
 # Only a signed foreground browser may spend this one additional direct retry.
 # The retry may use at most five seconds of the unchanged eight-second job and
@@ -6103,8 +6111,12 @@ def _browser_navigation_provenance_accepted(
             peer_endpoint[0],
             peer_endpoint[1],
             policy=macos_browser_provenance.AdmissionPolicy(
-                total_budget_seconds=1.0,
-                command_timeout_seconds=0.25,
+                total_budget_seconds=(
+                    ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+                ),
+                command_timeout_seconds=(
+                    ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT
+                ),
                 recent_input_seconds=5.0,
                 allow_shared_signed_webkit_with_frontmost_safari=True,
             ),
@@ -6958,7 +6970,11 @@ async def _run_initial_route_preflight(
                             peer_endpoint,
                             provenance_assessor,
                         ),
-                        timeout=min(1.05, max(0.001, remaining)),
+                        timeout=min(
+                            ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+                            + ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE,
+                            max(0.001, remaining),
+                        ),
                     )
                 )
             except (asyncio.TimeoutError, RuntimeError):
@@ -7014,6 +7030,12 @@ async def _run_initial_route_preflight(
             and direct_safe_incomplete
         ):
             if not _owned_geph_ready_for_semantic_confirmation():
+                # A direct semantic denial is actionable, but a Geph listener
+                # that is still recovering cannot prove the alternate route.
+                # Do not turn that transient state into the two-minute denial
+                # retry cache: the next independently admitted physical
+                # navigation may try again after the owned backend is ready.
+                publish_cache = False
                 return None
             remaining = deadline - time.monotonic()
             if remaining > 0:

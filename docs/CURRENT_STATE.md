@@ -102,21 +102,39 @@ no recent physical input was present, proving that the real current-format
 socket crossed the repaired parser without treating automation as product
 evidence.
 
-The current source passes `1059` full `spike` tests, `671` script tests plus
-`181` subtests, the focused strict-edge/provenance checks, compilation, and
-`git diff --check`. The installed diagnostic app still contains transport head
-`124499bb1d44d6343f3ba7cd6246a502302a075c` rather than the parser correction:
-its executable SHA-256 is
-`f99833891d502d2f628f93f5b0c25d8a7f83889bf92d08cbfe2caac3787d3985`,
-its bundled daemon SHA-256 is
-`fa29c8b8b1b3c530af1705e5b51045f0a484647841b86d096b62d655da94522c`,
-and the running app/daemon PIDs are `41036`/`41257`. The next verified action is
-to push the correction, require exact-head PR checks, build and install that
-exact source, restart both browser transports, and run one fresh physical-input
-Capacitor/Aikido attempt in normal Chrome and Safari. Do not merge until that
-behavior and exact-head checks pass. This targeted diagnosis did not start
-another 30-minute soak and does not weaken or replace any later release gate.
-The local app remains ad-hoc and unnotarized.
+Parser head `138d2b07baae7c9804618f73e3376c48ad0ef711` then passed
+[exact-head CI `32766607891`](https://github.com/aiwaki/slipstream/actions/runs/32766607891)
+and
+[dependency audit `32766607935`](https://github.com/aiwaki/slipstream/actions/runs/32766607935),
+was built, installed, and matched the running daemon. A fresh physical attempt
+still left public auto-geo-exit state idle. The resulting bounded diagnostic
+snapshot isolated two liveness defects rather than a missing hostname rule.
+On a current live Chrome NetworkService socket, the first production provenance
+assessment returned `signature_failed` after `0.279` seconds because its cold
+`codesign` subprocess exceeded the generic `0.25`-second command limit. The
+exact same Google-signed executable passed strict verification, and a warm
+repeat crossed signature verification to the independent foreground check.
+Separately, the owned Geph listener was unavailable for about two seconds after
+wake; the old edge-denial branch could turn that transient inability to prove
+the alternate route into a two-minute retry cache.
+
+The branch now gives only the already-actionable browser-recovery path a
+`1.5`-second total provenance budget and `0.5` seconds per command, still under
+the unchanged absolute eight-second route job. The ordinary direct probe
+remains `0.4` seconds and a slow usable connection remains inconclusive rather
+than Geph evidence. An actionable denial observed while owned Geph is still
+recovering no longer publishes the retry cache; only a later independently
+admitted physical navigation may try again, and it still needs the complete
+owned-Geph proof before learning. Focused regressions, the complete
+`test_tproxy_doh.py` routing suite (`587` tests), and the combined full local
+suite (`1733` tests plus `181` subtests) pass, as do compilation and
+`git diff --check`. The next verified action is to push a new exact PR head,
+require its CI/audit, install that exact source, restart both browser
+transports, and run fresh physical-input Capacitor/Aikido checks in normal
+Chrome and Safari. Do not merge until both visible outcomes and exact-head
+checks pass. This targeted diagnosis did not start another 30-minute soak and
+does not weaken or replace any later release gate. The local app remains
+ad-hoc and unnotarized.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
