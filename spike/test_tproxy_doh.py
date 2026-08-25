@@ -9874,6 +9874,13 @@ def test_slow_strict_edge_denial_uses_payload_proof_without_browser_provenance(
             host,
             "8.8.8.8",
             peer_endpoint=("127.0.0.1", 49152),
+            deadline_monotonic=(
+                time.monotonic()
+                + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+            ),
+            local_recovery_deadline_monotonic=(
+                time.monotonic() + tproxy.UNKNOWN_RECOVERY_TOTAL_TIMEOUT
+            ),
             direct_probe=direct,
             geph_probe=lambda actual_host, timeout: (
                 geph_calls.append((actual_host, timeout))
@@ -10062,6 +10069,13 @@ def test_adaptive_network_retry_can_finish_after_simulated_three_seconds(
             host,
             "8.8.8.8",
             peer_endpoint=("127.0.0.1", 49152),
+            deadline_monotonic=(
+                clock[0]
+                + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+            ),
+            local_recovery_deadline_monotonic=(
+                clock[0] + tproxy.UNKNOWN_RECOVERY_TOTAL_TIMEOUT
+            ),
             direct_probe=lambda *_args: pytest.fail(
                 "the deterministic bounded-probe seam was bypassed"
             ),
@@ -11165,7 +11179,7 @@ def test_held_first_navigation_switches_before_direct_server_bytes(
             return None
 
     exact_writer = ExactWriter()
-    claim = object()
+    claim = None
     handoffs = []
 
     async def exact_probe(*_args, **_kwargs):
@@ -11175,7 +11189,14 @@ def test_held_first_navigation_switches_before_direct_server_bytes(
             b"direct-denial-tls-record",
         )
 
-    async def preflight(*_args, **_kwargs):
+    async def preflight(*_args, **kwargs):
+        nonlocal claim
+        claim = tproxy._RoutePreflightOwnedGephClaim(
+            marker=tproxy._ROUTE_PREFLIGHT_OWNED_GEPH_CLAIM,
+            capability="a" * 32,
+            host="first-nav.example",
+            deadline_monotonic=kwargs["deadline_monotonic"],
+        )
         return claim
 
     async def owned_geph(*args, **kwargs):

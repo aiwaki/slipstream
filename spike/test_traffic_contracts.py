@@ -349,7 +349,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
             calls.append(("direct", ip, port, first_flight))
             return streaming_upstream_response(contract.response)
 
-        async def fake_system_probe(ip, port, first_flight):
+        async def fake_system_probe(ip, port, first_flight, **_kwargs):
             assert first_flight == expected_first_flight
             calls.append(("direct", ip, port, first_flight))
             return (
@@ -506,7 +506,7 @@ def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
     writer = CaptureWriter()
     calls = []
 
-    async def failed_direct(ip, port, first_flight):
+    async def failed_direct(ip, port, first_flight, **_kwargs):
         calls.append((ip, port, first_flight))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 
@@ -573,6 +573,30 @@ def test_exact_system_probe_timeout_is_replay_safe(monkeypatch):
     assert upstream_writer.closed is True
 
 
+def test_exact_system_probe_can_preserve_a_slow_established_stream(monkeypatch):
+    upstream_reader = ScriptedReader(block_when_empty=True)
+    upstream_writer = CaptureWriter()
+
+    async def exact_direct(_ip, _port, _first_flight, **_kwargs):
+        return upstream_reader, upstream_writer
+
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+
+    state, exact = asyncio.run(
+        tproxy._try_exact_system_probe(
+            "203.0.113.32",
+            443,
+            b"client hello",
+            deadline_monotonic=time.monotonic() + 0.01,
+            preserve_timeout_stream=True,
+        )
+    )
+
+    assert state == tproxy.SYSTEM_PROBE_TIMEOUT
+    assert exact == (upstream_reader, upstream_writer, b"")
+    assert upstream_writer.closed is False
+
+
 def test_exact_system_probe_eof_is_replay_safe(monkeypatch):
     upstream_reader = ScriptedReader()
     upstream_writer = CaptureWriter()
@@ -622,6 +646,187 @@ def test_exact_system_probe_cancellation_closes_the_owned_stream(monkeypatch):
     asyncio.run(scenario())
 
     assert upstream_writer.closed is True
+
+
+def test_unknown_initial_route_probes_start_concurrently():
+    exact_started = asyncio.Event()
+    preflight_started = asyncio.Event()
+    exact_writer = CaptureWriter()
+    exact_payload = b"slow direct payload"
+
+    async def exact_probe(_ip, _port, _first_flight, **_kwargs):
+        exact_started.set()
+        await preflight_started.wait()
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            (ScriptedReader(), exact_writer, exact_payload),
+        )
+
+    async def route_preflight(_host, _ip, **_kwargs):
+        preflight_started.set()
+        await exact_started.wait()
+        return None
+
+    async def scenario():
+        now = time.monotonic()
+        return await asyncio.wait_for(
+            tproxy._run_unknown_initial_route_race(
+                "slow-direct.example",
+                "203.0.113.40",
+                443,
+                b"client hello",
+                hard_recovery_deadline_monotonic=now + 1.0,
+                semantic_handoff_deadline_monotonic=now + 2.0,
+                exact_probe=exact_probe,
+                route_preflight=route_preflight,
+            ),
+            timeout=0.5,
+        )
+
+    state, exact, claim = asyncio.run(scenario())
+
+    assert state == tproxy.SYSTEM_PROBE_PAYLOAD
+    assert exact[2] == exact_payload
+    assert claim is None
+    assert not exact_writer.closed
+
+
+def test_unknown_initial_semantic_claim_discards_held_direct_stream():
+    exact_returned = asyncio.Event()
+    exact_writer = CaptureWriter()
+    claim = object()
+
+    async def exact_probe(_ip, _port, _first_flight, **_kwargs):
+        exact_returned.set()
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            (ScriptedReader(), exact_writer, b"blocked direct payload"),
+        )
+
+    async def route_preflight(_host, _ip, **_kwargs):
+        await exact_returned.wait()
+        return claim
+
+    async def scenario():
+        now = time.monotonic()
+        return await tproxy._run_unknown_initial_route_race(
+            "strict-denial.example",
+            "203.0.113.41",
+            443,
+            b"client hello",
+            hard_recovery_deadline_monotonic=now + 1.0,
+            semantic_handoff_deadline_monotonic=now + 2.0,
+            exact_probe=exact_probe,
+            route_preflight=route_preflight,
+        )
+
+    state, exact, selected = asyncio.run(scenario())
+
+    assert state == tproxy.SYSTEM_PROBE_PAYLOAD
+    assert exact is None
+    assert selected is claim
+    assert exact_writer.closed
+
+
+def test_unknown_initial_timeout_stays_unclear_without_route_claim():
+    preflight_finished = asyncio.Event()
+
+    async def exact_probe(_ip, _port, _first_flight, **_kwargs):
+        await preflight_finished.wait()
+        return tproxy.SYSTEM_PROBE_TIMEOUT, None
+
+    async def route_preflight(_host, _ip, **_kwargs):
+        preflight_finished.set()
+        return None
+
+    async def scenario():
+        now = time.monotonic()
+        return await tproxy._run_unknown_initial_route_race(
+            "timeout-is-unclear.example",
+            "203.0.113.42",
+            443,
+            b"client hello",
+            hard_recovery_deadline_monotonic=now + 1.0,
+            semantic_handoff_deadline_monotonic=now + 2.0,
+            exact_probe=exact_probe,
+            route_preflight=route_preflight,
+        )
+
+    state, exact, claim = asyncio.run(scenario())
+
+    assert state == tproxy.SYSTEM_PROBE_TIMEOUT
+    assert exact is None
+    assert claim is None
+
+
+def test_unknown_initial_preflight_exception_closes_completed_exact_stream():
+    exact_returned = asyncio.Event()
+    exact_writer = CaptureWriter()
+
+    async def exact_probe(_ip, _port, _first_flight, **_kwargs):
+        exact_returned.set()
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            (ScriptedReader(), exact_writer, b"held payload"),
+        )
+
+    async def route_preflight(_host, _ip, **_kwargs):
+        await exact_returned.wait()
+        raise RuntimeError("preflight failed")
+
+    async def scenario():
+        now = time.monotonic()
+        with pytest.raises(RuntimeError, match="preflight failed"):
+            await tproxy._run_unknown_initial_route_race(
+                "preflight-exception.example",
+                "203.0.113.43",
+                443,
+                b"client hello",
+                hard_recovery_deadline_monotonic=now + 1.0,
+                semantic_handoff_deadline_monotonic=now + 2.0,
+                exact_probe=exact_probe,
+                route_preflight=route_preflight,
+            )
+
+    asyncio.run(scenario())
+
+    assert exact_writer.closed
+
+
+def test_unknown_initial_exact_exception_cancels_semantic_sibling():
+    preflight_started = asyncio.Event()
+    preflight_cancelled = False
+
+    async def exact_probe(_ip, _port, _first_flight, **_kwargs):
+        await preflight_started.wait()
+        raise RuntimeError("exact failed")
+
+    async def route_preflight(_host, _ip, **_kwargs):
+        nonlocal preflight_cancelled
+        preflight_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            preflight_cancelled = True
+            raise
+
+    async def scenario():
+        now = time.monotonic()
+        with pytest.raises(RuntimeError, match="exact failed"):
+            await tproxy._run_unknown_initial_route_race(
+                "exact-exception.example",
+                "203.0.113.44",
+                443,
+                b"client hello",
+                hard_recovery_deadline_monotonic=now + 1.0,
+                semantic_handoff_deadline_monotonic=now + 2.0,
+                exact_probe=exact_probe,
+                route_preflight=route_preflight,
+            )
+
+    asyncio.run(scenario())
+
+    assert preflight_cancelled
 
 
 def test_probe_evidence_distinguishes_timeout_from_cancellation():
@@ -739,7 +944,7 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
         tproxy.STRAT_BY_NAME["split16+fake"],
     )
 
-    async def failed_system(ip, port, first_flight):
+    async def failed_system(ip, port, first_flight, **_kwargs):
         calls.append(("system", ip, port, first_flight))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 
@@ -838,7 +1043,7 @@ def test_unknown_exact_proof_uses_one_shot_geph_during_network_noise(
     # network-wide guard noisy. It must be downgraded, not learned later.
     tproxy._auto_geph_candidates[host] = now + 60.0
 
-    async def failed_system(ip, port, first_flight):
+    async def failed_system(ip, port, first_flight, **_kwargs):
         calls.append(("system", ip, port, first_flight))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 
@@ -1739,7 +1944,7 @@ def test_unknown_bounded_route_timeouts_never_authorize_owned_geph(monkeypatch):
         for name in tproxy.GENERAL_STRATS
     )
 
-    async def failed_system(_ip, _port, _first_flight):
+    async def failed_system(_ip, _port, _first_flight, **_kwargs):
         return tproxy.SYSTEM_PROBE_TIMEOUT, None
 
     async def timed_out_xbox(
@@ -1806,7 +2011,7 @@ def test_unknown_first_server_payload_forbids_route_replay(monkeypatch):
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
 
-    async def healthy_system(_ip, _port, _first_flight):
+    async def healthy_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PAYLOAD,
             probed_upstream_response(response),
@@ -1847,7 +2052,7 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
     writer = CaptureWriter()
     observations = []
 
-    async def short_system(_ip, _port, _first_flight):
+    async def short_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PAYLOAD,
             probed_upstream_response(response),
@@ -1928,7 +2133,7 @@ def test_system_plain_route_runs_held_preflight_before_committing(monkeypatch):
     writer = CaptureWriter()
     preflights = []
 
-    async def short_system(_ip, _port, _first_flight):
+    async def short_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PAYLOAD,
             probed_upstream_response(response),
@@ -1956,6 +2161,127 @@ def test_system_plain_route_runs_held_preflight_before_committing(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
+def test_slow_established_direct_timeout_stays_direct_without_geph(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "slow-established-direct.example"
+    response = b"eventual direct TLS payload"
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    exact_writer = CaptureWriter()
+
+    async def slow_system(_ip, _port, _first_flight, **_kwargs):
+        return (
+            tproxy.SYSTEM_PROBE_TIMEOUT,
+            (ScriptedReader(stream=(response,)), exact_writer, b""),
+        )
+
+    async def inconclusive_preflight(*_args, **_kwargs):
+        return None
+
+    async def forbidden_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", slow_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_run_initial_route_preflight",
+        inconclusive_preflight,
+    )
+    monkeypatch.setattr(tproxy, "_try_unknown_owned_geph_route", forbidden_geph)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_strict_preflight_switches_the_same_first_request_to_owned_geph(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "same-request-semantic-switch.example"
+    direct_response = b"direct regional denial"
+    recovered_response = b"owned Geph usable payload"
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    exact_writer = CaptureWriter()
+    exact_started = asyncio.Event()
+    preflight_started = asyncio.Event()
+    handoffs = []
+
+    async def held_system(_ip, _port, _first_flight, **_kwargs):
+        exact_started.set()
+        await preflight_started.wait()
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            (
+                ScriptedReader(),
+                exact_writer,
+                direct_response,
+            ),
+        )
+
+    async def strict_preflight(actual_host, ip, **kwargs):
+        preflight_started.set()
+        await exact_started.wait()
+        assert actual_host == host
+        assert ip == "1.1.1.1"
+        deadline_delta = (
+            kwargs["deadline_monotonic"]
+            - kwargs["local_recovery_deadline_monotonic"]
+        )
+        assert deadline_delta == pytest.approx(
+            tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+            - tproxy.UNKNOWN_RECOVERY_TOTAL_TIMEOUT,
+            abs=0.1,
+        )
+        return tproxy._RoutePreflightOwnedGephClaim(
+            marker=tproxy._ROUTE_PREFLIGHT_OWNED_GEPH_CLAIM,
+            capability="a" * 32,
+            host=host,
+            deadline_monotonic=kwargs["deadline_monotonic"],
+        )
+
+    async def owned_handoff(
+        actual_host,
+        port,
+        first_flight,
+        _reader,
+        client_writer,
+        *,
+        successor_claim=None,
+        deadline_monotonic=None,
+    ):
+        handoffs.append(
+            (
+                actual_host,
+                port,
+                first_flight,
+                successor_claim,
+                deadline_monotonic,
+            )
+        )
+        client_writer.write(recovered_response)
+        await client_writer.drain()
+        return True
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", held_system)
+    monkeypatch.setattr(tproxy, "_run_initial_route_preflight", strict_preflight)
+    monkeypatch.setattr(tproxy, "_try_unknown_owned_geph_route", owned_handoff)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert exact_writer.closed
+    assert bytes(writer.payload) == recovered_response
+    assert direct_response not in bytes(writer.payload)
+    assert len(handoffs) == 1
+    assert handoffs[0][0:3] == (host, 443, expected_first_flight)
+    assert isinstance(handoffs[0][3], tproxy._RoutePreflightOwnedGephClaim)
+    assert handoffs[0][4] == handoffs[0][3].deadline_monotonic
+
+
 def test_hard_preflight_failure_continues_local_recovery_same_request(
     monkeypatch,
 ):
@@ -1968,7 +2294,7 @@ def test_hard_preflight_failure_continues_local_recovery_same_request(
     exact_writer = CaptureWriter()
     calls = []
 
-    async def short_system(_ip, _port, _first_flight):
+    async def short_system(_ip, _port, _first_flight, **_kwargs):
         first_size = min(16, len(direct_response))
         return (
             tproxy.SYSTEM_PROBE_PAYLOAD,
@@ -1983,7 +2309,7 @@ def test_hard_preflight_failure_continues_local_recovery_same_request(
         calls.append(("preflight", actual_host, ip))
         return tproxy._local_recovery_preflight_claim(
             actual_host,
-            kwargs["deadline_monotonic"],
+            kwargs["local_recovery_deadline_monotonic"],
         )
 
     async def healthy_xbox(actual_host, port, head, body, **_kwargs):
@@ -2367,7 +2693,7 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
 
-    async def pending_system(_ip, _port, _first_flight):
+    async def pending_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PENDING,
             (ScriptedReader(stream=(response,)), CaptureWriter(), b""),
@@ -2433,7 +2759,7 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
     monkeypatch.setattr(tproxy, "_pending_navigation_probe_available", True)
     tproxy._shutdown_started.clear()
 
-    async def pending_system(_ip, _port, _first_flight):
+    async def pending_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PENDING,
             (ScriptedReader(), CaptureWriter(), response),
@@ -2539,7 +2865,7 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
     confirmations = []
     clean_eof_advances = []
 
-    async def pending_system(_ip, _port, _first_flight):
+    async def pending_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PENDING,
             (ScriptedReader(), CaptureWriter(), response),
@@ -2606,7 +2932,7 @@ def test_unknown_partial_tls_watchdog_preserves_candidate_without_bypassing_ladd
     response = b"\x17\x03\x03\x00\x08" + b"R" * 8
     confirmations = []
 
-    async def pending_system(_ip, _port, _first_flight):
+    async def pending_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PENDING,
             (ScriptedReader(), CaptureWriter(), response),
@@ -3822,7 +4148,7 @@ def test_incomplete_unknown_local_evidence_does_not_promote_to_geph(monkeypatch)
         calls.append(("dns", actual_host))
         return ["198.51.100.42"]
 
-    async def failed_direct(_ip, _port, _first_flight):
+    async def failed_direct(_ip, _port, _first_flight, **_kwargs):
         calls.append(("direct", host))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 

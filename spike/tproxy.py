@@ -540,6 +540,10 @@ ADDRESS_RACE_STAGGER_MS = 250
 ADDRESS_RACE_MAX_CONCURRENT = 2
 UNKNOWN_RECOVERY_TOTAL_TIMEOUT = 8.0
 UNKNOWN_RECOVERY_GEPH_RESERVE = GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT = 4.0
+UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT = (
+    (route_preflight.MAX_DEADLINE_MS / 1000.0)
+    + UNKNOWN_RECOVERY_GEPH_RESERVE
+)
 
 
 CANARY_INTERVAL = 10 * 60.0
@@ -7002,6 +7006,7 @@ async def _run_initial_route_preflight(
     bootstrap_resolver=None,
     now=None,
     deadline_monotonic=None,
+    local_recovery_deadline_monotonic=None,
 ):
     """Hold one first ClientHello while exact-host route evidence is gathered.
 
@@ -7016,25 +7021,36 @@ async def _run_initial_route_preflight(
     """
     h = normalize_host(host)
     preflight_started = time.monotonic()
-    handoff_deadline = preflight_started + (
+    proof_deadline = preflight_started + (
         route_preflight.MAX_DEADLINE_MS / 1000.0
     )
+    handoff_deadline = proof_deadline
     if deadline_monotonic is not None:
         try:
-            handoff_deadline = min(
-                handoff_deadline,
-                float(deadline_monotonic),
+            handoff_deadline = float(deadline_monotonic)
+        except (TypeError, ValueError):
+            return None
+    # Semantic evidence keeps its historical full eight-second budget.  A
+    # handler-supplied deadline is the later first-request handoff boundary;
+    # reserve the final Geph payload slice exactly once rather than subtracting
+    # it from an already eight-second total.
+    deadline = proof_deadline
+    if deadline_monotonic is not None:
+        deadline = min(
+            deadline,
+            handoff_deadline - UNKNOWN_RECOVERY_GEPH_RESERVE,
+        )
+    if deadline <= preflight_started:
+        return None
+    local_recovery_deadline = handoff_deadline
+    if local_recovery_deadline_monotonic is not None:
+        try:
+            local_recovery_deadline = min(
+                local_recovery_deadline,
+                float(local_recovery_deadline_monotonic),
             )
         except (TypeError, ValueError):
             return None
-    # A handler-supplied deadline reserves enough time to deliver the already
-    # proven route to this exact client. Direct calls retain the historical
-    # full preflight budget used by deterministic qualification tests.
-    deadline = handoff_deadline
-    if deadline_monotonic is not None:
-        deadline -= UNKNOWN_RECOVERY_GEPH_RESERVE
-    if deadline <= preflight_started:
-        return None
     now = time.monotonic() if now is None else now
     try:
         address = ipaddress.ip_address(ip)
@@ -7089,7 +7105,7 @@ async def _run_initial_route_preflight(
             if selected_by_owner is _ROUTE_PREFLIGHT_LOCAL_RECOVERY:
                 return _local_recovery_preflight_claim(
                     h,
-                    handoff_deadline,
+                    local_recovery_deadline,
                 )
             if selected_by_owner and _auto_geph_learned_exact_host(h):
                 return _owned_geph_preflight_claim(
@@ -7238,7 +7254,7 @@ async def _run_initial_route_preflight(
             publish_cache = False
             selected_claim = _local_recovery_preflight_claim(
                 h,
-                handoff_deadline,
+                local_recovery_deadline,
             )
             return selected_claim
         if outcome in SEMANTIC_DENIAL_OUTCOMES or (
@@ -14780,7 +14796,7 @@ def _disposable_pending_navigation_fixture_endpoint(
     return "127.0.0.1", fixture_port
 
 
-async def dial_plain(ip, port, first_flight):
+async def dial_plain(ip, port, first_flight, *, deadline_monotonic=None):
     """Open an exact direct stream with no DNS rewrite, desync, or tunnel.
 
     The buffered first flight is sent verbatim. This is used for transparent
@@ -14790,6 +14806,17 @@ async def dial_plain(ip, port, first_flight):
     w = None
     connected = False
     try:
+        if deadline_monotonic is not None:
+            try:
+                deadline_monotonic = float(deadline_monotonic)
+            except (TypeError, ValueError):
+                return None
+            remaining = deadline_monotonic - time.monotonic()
+            if remaining <= 0:
+                return None
+            connect_timeout = min(6.0, remaining)
+        else:
+            connect_timeout = 6.0
         endpoint = (
             _disposable_pending_navigation_fixture_endpoint(
                 _PENDING_NAVIGATION_FIXTURE_HOST.get(),
@@ -14802,10 +14829,16 @@ async def dial_plain(ip, port, first_flight):
         connect_ip, connect_port = endpoint or (ip, port)
         r, w = await asyncio.wait_for(
             asyncio.open_connection(connect_ip, connect_port),
-            timeout=6,
+            timeout=connect_timeout,
         )
         w.write(first_flight)
-        await w.drain()
+        if deadline_monotonic is None:
+            await w.drain()
+        else:
+            remaining = deadline_monotonic - time.monotonic()
+            if remaining <= 0:
+                return None
+            await asyncio.wait_for(w.drain(), timeout=remaining)
         connected = True
         return r, w
     except asyncio.CancelledError:
@@ -15306,6 +15339,9 @@ async def _try_exact_system_probe(
     port,
     first_flight,
     probe_timeout=3.0,
+    *,
+    deadline_monotonic=None,
+    preserve_timeout_stream=False,
 ):
     """Probe the PF-selected destination before committing a client stream.
 
@@ -15313,21 +15349,40 @@ async def _try_exact_system_probe(
     replay-safe. Close a bounded silent attempt so the same request can continue
     through app-owned DNS, local strategies, and finally proven owned Geph.
     """
-    direct = await dial_plain(dst_ip, port, first_flight)
+    if deadline_monotonic is None:
+        direct = await dial_plain(dst_ip, port, first_flight)
+    else:
+        direct = await dial_plain(
+            dst_ip,
+            port,
+            first_flight,
+            deadline_monotonic=deadline_monotonic,
+        )
     if direct is None:
         # dial_plain intentionally collapses connect timeout and connect error;
         # neither proves that a transmitted ClientHello was hard-closed.
         return SYSTEM_PROBE_UNCLEAR, None
     up_r, up_w = direct
     try:
+        if deadline_monotonic is None:
+            read_timeout = probe_timeout
+        else:
+            read_timeout = float(deadline_monotonic) - time.monotonic()
+            if read_timeout <= 0:
+                if preserve_timeout_stream:
+                    return SYSTEM_PROBE_TIMEOUT, (up_r, up_w, b"")
+                await _close_stream_writer(up_w)
+                return SYSTEM_PROBE_TIMEOUT, None
         server_first = await asyncio.wait_for(
             up_r.read(65536),
-            timeout=probe_timeout,
+            timeout=read_timeout,
         )
     except asyncio.CancelledError:
         await _close_stream_writer(up_w)
         raise
     except asyncio.TimeoutError:
+        if preserve_timeout_stream:
+            return SYSTEM_PROBE_TIMEOUT, (up_r, up_w, b"")
         await _close_stream_writer(up_w)
         return SYSTEM_PROBE_TIMEOUT, None
     except (ConnectionError, OSError):
@@ -15337,6 +15392,125 @@ async def _try_exact_system_probe(
         return SYSTEM_PROBE_PAYLOAD, (up_r, up_w, server_first)
     await _close_stream_writer(up_w)
     return SYSTEM_PROBE_CLOSED, None
+
+
+async def _discard_initial_exact_probe_task(task):
+    """Cancel one held exact probe and close any concurrently won stream."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        _state, exact = await task
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        return
+    if exact is not None:
+        try:
+            await _close_stream_writer(exact[1])
+        except Exception:
+            pass
+
+
+async def _cancel_initial_route_preflight_task(task):
+    """Cancel and collect a semantic task without publishing late evidence."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        return
+
+
+async def _run_unknown_initial_route_race(
+    host,
+    dst_ip,
+    dst_port,
+    first_flight,
+    *,
+    peer_endpoint=None,
+    hard_recovery_deadline_monotonic,
+    semantic_handoff_deadline_monotonic,
+    exact_probe=None,
+    route_preflight=None,
+):
+    """Run held exact-system and independent semantic probes concurrently.
+
+    The exact stream remains replay-safe until this function returns.  A
+    complete actionable semantic claim wins immediately and closes that
+    stream.  A healthy, slow, or inconclusive semantic result never converts a
+    timeout into route evidence: it waits for and returns the held exact
+    result.  A hard exact close cancels the semantic branch so the existing
+    bounded local proof can begin without serial delay.
+    """
+    exact_probe = _try_exact_system_probe if exact_probe is None else exact_probe
+    route_preflight = (
+        _run_initial_route_preflight
+        if route_preflight is None
+        else route_preflight
+    )
+    exact_task = asyncio.create_task(
+        exact_probe(
+            dst_ip,
+            dst_port,
+            first_flight,
+            deadline_monotonic=semantic_handoff_deadline_monotonic,
+            preserve_timeout_stream=True,
+        )
+    )
+    preflight_task = asyncio.create_task(
+        route_preflight(
+            host,
+            dst_ip,
+            peer_endpoint=peer_endpoint,
+            deadline_monotonic=semantic_handoff_deadline_monotonic,
+            local_recovery_deadline_monotonic=(
+                hard_recovery_deadline_monotonic
+            ),
+        )
+    )
+    try:
+        done, _pending = await asyncio.wait(
+            (exact_task, preflight_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if preflight_task in done:
+            claim = await preflight_task
+            if claim is not None:
+                if exact_task.done():
+                    system_probe, exact = await exact_task
+                    if exact is not None:
+                        await _close_stream_writer(exact[1])
+                    return system_probe, None, claim
+                await _discard_initial_exact_probe_task(exact_task)
+                return SYSTEM_PROBE_UNCLEAR, None, claim
+            system_probe, exact = await exact_task
+            return system_probe, exact, None
+
+        system_probe, exact = await exact_task
+        if system_probe == SYSTEM_PROBE_CLOSED:
+            await _cancel_initial_route_preflight_task(preflight_task)
+            return system_probe, None, None
+
+        claim = await preflight_task
+        if claim is not None:
+            if exact is not None:
+                await _close_stream_writer(exact[1])
+            return system_probe, None, claim
+        return system_probe, exact, None
+    except asyncio.CancelledError:
+        await _discard_initial_exact_probe_task(exact_task)
+        await _cancel_initial_route_preflight_task(preflight_task)
+        raise
+    except Exception:
+        await _discard_initial_exact_probe_task(exact_task)
+        await _cancel_initial_route_preflight_task(preflight_task)
+        raise
 
 
 async def _try_exact_system_passthrough(
@@ -15694,6 +15868,12 @@ async def _handle_impl(reader, writer):
     except (asyncio.IncompleteReadError, asyncio.TimeoutError, OSError):
         writer.close()
         return
+    # The ordinary hard-transport ladder remains bounded from connection
+    # acceptance. Semantic inspection starts only once a complete replay-safe
+    # first flight exists, and receives its own evidence plus handoff budget.
+    unknown_semantic_handoff_deadline = (
+        time.monotonic() + UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+    )
 
     # Telegram MTProto to its DC IPs: no SNI, nothing like TLS — our desync
     # corrupts the handshake. Pass DIRECT (untouched) so we never make Telegram
@@ -16057,96 +16237,95 @@ async def _handle_impl(reader, writer):
     ):
         fixture_host_token = _PENDING_NAVIGATION_FIXTURE_HOST.set(host)
         try:
-            system_probe, exact = await _try_exact_system_probe(
+            (
+                system_probe,
+                exact,
+                preflight_claim,
+            ) = await _run_unknown_initial_route_race(
+                host,
                 dst_ip,
                 dst_port,
                 head + body,
+                peer_endpoint=peer_endpoint,
+                hard_recovery_deadline_monotonic=(
+                    unknown_recovery_deadline
+                ),
+                semantic_handoff_deadline_monotonic=(
+                    unknown_semantic_handoff_deadline
+                ),
             )
         finally:
             _PENDING_NAVIGATION_FIXTURE_HOST.reset(fixture_host_token)
-        if exact:
-            # The browser still has zero server bytes.  Hold this exact stream
-            # while one bounded service-root preflight compares the system
-            # edge with a pinned owned-Geph edge.  A healthy or inconclusive
-            # system result commits immediately; only a strict denial plus a
-            # complete non-denial owned-Geph response may replace this first
-            # navigation.
-            preflight_claim = await _run_initial_route_preflight(
+        if (
+            isinstance(
+                preflight_claim,
+                _RoutePreflightLocalRecoveryClaim,
+            )
+            and preflight_claim.marker is _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+            and preflight_claim.host == normalize_host(host)
+        ):
+            hard_recovery = await _try_hard_local_recovery(
                 host,
                 dst_ip,
-                peer_endpoint=peer_endpoint,
-                deadline_monotonic=unknown_recovery_deadline,
+                dst_port,
+                head,
+                body,
+                deadline_monotonic=(
+                    preflight_claim.deadline_monotonic
+                ),
+                repeat_stage=server_first_repeat_stage,
             )
-            if (
-                isinstance(
-                    preflight_claim,
-                    _RoutePreflightLocalRecoveryClaim,
-                )
-                and preflight_claim.marker is _ROUTE_PREFLIGHT_LOCAL_RECOVERY
-                and preflight_claim.host == normalize_host(host)
-            ):
-                await _close_stream_writer(exact[1])
-                hard_recovery = await _try_hard_local_recovery(
-                    host,
-                    dst_ip,
-                    dst_port,
-                    head,
-                    body,
-                    deadline_monotonic=(
-                        preflight_claim.deadline_monotonic
-                    ),
-                    repeat_stage=server_first_repeat_stage,
-                )
-                if hard_recovery.raced is not None:
-                    chosen, result = hard_recovery.raced
-                    chosen_name = hard_recovery.strategy_name
-                    via_xbox_dns = hard_recovery.via_xbox_dns
-                    _record_strategy_result(host, chosen_name, True)
-                    if not via_xbox_dns:
-                        remember_strategy(host, chosen_name)
-                    unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
-                elif hard_recovery.proof_complete:
-                    if await _try_unknown_owned_geph_route(
-                        host,
-                        dst_port,
-                        head + body,
-                        reader,
-                        writer,
-                        deadline_monotonic=(
-                            preflight_claim.deadline_monotonic
-                        ),
-                    ):
-                        return
-                    writer.close()
-                    return
-                else:
-                    # Deadline, timeout, cancellation, or dial ambiguity is not
-                    # route evidence. Do not enter the legacy sequential ladder
-                    # or let stale observations authorize a foreign exit.
-                    writer.close()
-                    return
-            elif preflight_claim is not None:
-                await _close_stream_writer(exact[1])
+            if hard_recovery.raced is not None:
+                chosen, result = hard_recovery.raced
+                chosen_name = hard_recovery.strategy_name
+                via_xbox_dns = hard_recovery.via_xbox_dns
+                _record_strategy_result(host, chosen_name, True)
+                if not via_xbox_dns:
+                    remember_strategy(host, chosen_name)
+                unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
+            elif hard_recovery.proof_complete:
                 if await _try_unknown_owned_geph_route(
                     host,
                     dst_port,
                     head + body,
                     reader,
                     writer,
-                    successor_claim=preflight_claim,
-                    deadline_monotonic=unknown_recovery_deadline,
+                    deadline_monotonic=(
+                        preflight_claim.deadline_monotonic
+                    ),
                 ):
                     return
-                # The semantic proof was valid but the selected circuit became
-                # unusable before handoff.  Replaying direct would expose the
-                # already-proven denial, so fail closed and let the browser's
-                # normal retry use the learned exact-host route.
                 writer.close()
                 return
             else:
-                result = exact
-                chosen_name = "plain"
-                via_system_exact = True
+                # Deadline, timeout, cancellation, or dial ambiguity is not
+                # route evidence. Do not enter the legacy sequential ladder or
+                # let stale observations authorize a foreign exit.
+                writer.close()
+                return
+        elif preflight_claim is not None:
+            if await _try_unknown_owned_geph_route(
+                host,
+                dst_port,
+                head + body,
+                reader,
+                writer,
+                successor_claim=preflight_claim,
+                deadline_monotonic=(
+                    preflight_claim.deadline_monotonic
+                ),
+            ):
+                return
+            # The semantic proof was valid but the selected circuit became
+            # unusable before handoff.  Replaying direct would expose the
+            # already-proven denial, so fail closed and let the browser's
+            # normal retry use the learned exact-host route.
+            writer.close()
+            return
+        elif exact:
+            result = exact
+            chosen_name = "plain"
+            via_system_exact = True
         else:
             assert system_probe in (
                 SYSTEM_PROBE_CLOSED,
