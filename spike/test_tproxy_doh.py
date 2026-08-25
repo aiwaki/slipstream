@@ -9322,6 +9322,37 @@ def test_semantic_edge_denial_is_strict_generic_and_challenge_precedes_it():
     assert tproxy._semantic_plain_response_outcome(vendor_only) == (
         tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
     )
+    strict_minimal = (
+        b"HTTP/1.1 403 Forbidden\r\n"
+        b"Content-Type: text/html\r\n"
+        b"Content-Length: 21\r\n"
+        b"Content-Security-Policy: default-src 'none'\r\n"
+        b"X-Content-Type-Options: nosniff\r\n\r\n"
+        b"Bad Request - Blocked"
+    )
+    assert tproxy._semantic_plain_response_outcome(strict_minimal) == (
+        tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+    )
+    for unsafe_variant in (
+        strict_minimal.replace(
+            b"Content-Security-Policy: default-src 'none'\r\n",
+            b"",
+        ),
+        strict_minimal.replace(
+            b"X-Content-Type-Options: nosniff\r\n",
+            b"",
+        ),
+        strict_minimal.replace(
+            b"Bad Request - Blocked",
+            b"Bad Request - Blocked?",
+        ).replace(b"Content-Length: 21", b"Content-Length: 22"),
+    ):
+        assert tproxy._semantic_plain_response_outcome(unsafe_variant) == (
+            tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+        )
+    assert tproxy._semantic_plain_response_outcome(
+        strict_minimal.replace(b"403 Forbidden", b"200 OK")
+    ) == tproxy.SEMANTIC_OUTCOME_USABLE
     assert tproxy._semantic_plain_response_outcome(
         b"HTTP/1.1 429 Too Many Requests\r\n\r\n" + edge_body
     ) == tproxy.SEMANTIC_OUTCOME_CHALLENGE_OR_AUTH
@@ -9668,10 +9699,18 @@ def test_route_preflight_selects_owned_geph_only_after_strict_denial(
     _enable_owned_geph_preflight(monkeypatch)
     direct_calls = []
     geph_calls = []
+    strict_minimal_response = (
+        b"HTTP/1.1 403 Forbidden\r\n"
+        b"Content-Type: text/html\r\n"
+        b"Content-Length: 21\r\n"
+        b"Content-Security-Policy: default-src 'none'\r\n"
+        b"X-Content-Type-Options: nosniff\r\n\r\n"
+        b"Bad Request - Blocked"
+    )
 
     def direct(ip, host, timeout):
         direct_calls.append((ip, host, timeout))
-        return tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+        return tproxy._semantic_plain_response_outcome(strict_minimal_response)
 
     def geph(host, timeout):
         geph_calls.append((host, timeout))
@@ -12355,6 +12394,35 @@ def test_incomplete_response_probe_shares_deadline_across_socks_tls_and_http(
     assert tls_socket.closed
 
 
+def test_semantic_geph_probe_retries_one_early_transport_failure(
+    monkeypatch,
+):
+    response = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+        b"Content-Length: 128\r\n\r\n" + b"x" * 128
+    )
+    deadlines = []
+
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 100.0)
+
+    def probe(_host, deadline):
+        deadlines.append(deadline)
+        if len(deadlines) == 1:
+            return None
+        return response, False, False
+
+    monkeypatch.setattr(tproxy, "_semantic_geph_root_response", probe)
+
+    assert (
+        tproxy._semantic_geph_payload_probe(
+            "retry.example",
+            timeout=6.0,
+        )
+        == 128
+    )
+    assert deadlines == [103.0, 106.0]
+
+
 def test_semantic_geph_probe_shares_deadline_across_socks_tls_and_http(
     monkeypatch,
 ):
@@ -12388,7 +12456,7 @@ def test_semantic_geph_probe_shares_deadline_across_socks_tls_and_http(
             return self.tls_socket
 
     tls_socket = FakeSocket()
-    clock = iter([0.0, 0.0, 1.0, 2.0, 7.0])
+    clock = iter([0.0, 0.0, 1.0, 2.0, 7.0, 7.0])
     monkeypatch.setattr(tproxy.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(
         tproxy,

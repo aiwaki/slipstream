@@ -169,6 +169,17 @@ between one apex and its single `www.` form, under the same deadline, and must
 receive a complete usable final response. Any other redirect or a second
 redirect fails closed. This creates no rule for either hostname.
 
+A rendered shell with permanent forecast/content placeholders is also not a
+successful navigation. Check the exact critical resource rather than the root
+alone. One reviewed minimal edge shape is actionable only when the complete
+response is exactly `403`, body `Bad Request - Blocked`, HTML content type, CSP
+`default-src 'none'`, and `nosniff`; changing or omitting any field reduces it
+to an ordinary inert error. A complete usable result for that same exact host
+through owned Geph is still mandatory. The proof may make one retry connection
+only from the unused part of its original six-second deadline, so a transient
+first connect does not require repeated page reloads and does not turn a slow
+direct connection into route evidence.
+
 ### Historical `.22`: a clean Chrome profile stays at `about:blank`
 
 This section explains an archival preview failure; it is not a current setup

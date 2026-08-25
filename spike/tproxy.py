@@ -2250,6 +2250,8 @@ AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX = 2
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
 SEMANTIC_GEPH_PROBE_RANGE_END = 262143
+SEMANTIC_GEPH_INITIAL_ATTEMPT_MAX = 3.0
+SEMANTIC_GEPH_RETRY_MIN_BUDGET = 1.0
 INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = SEMANTIC_GEPH_PROBE_MAX_BYTES
 INCOMPLETE_RESPONSE_GEPH_PROBE_TIMEOUT = 20.0
 SEMANTIC_REGIONAL_DENIAL_MARKERS = (
@@ -2280,6 +2282,7 @@ SEMANTIC_EDGE_SECURITY_MARKERS = (
     b"web application firewall",
     b"attention required",
 )
+SEMANTIC_STRICT_MINIMAL_EDGE_DENIAL_BODY = b"bad request - blocked"
 SEMANTIC_CHALLENGE_OR_AUTH_MARKERS = (
     b"captcha",
     b"checking your browser",
@@ -4036,12 +4039,19 @@ def _semantic_http_response_outcome(
         status = int(first_line[1])
     except ValueError:
         return SEMANTIC_OUTCOME_TERMINAL_ERROR
+    header_values = {}
     for header in headers.split(b"\r\n")[1:]:
         name, separator, value = header.partition(b":")
+        normalized_name = name.strip().lower()
+        normalized_value = value.strip().lower()
+        if separator:
+            header_values.setdefault(normalized_name, []).append(
+                normalized_value
+            )
         if (
             separator
-            and name.strip().lower() == b"content-encoding"
-            and value.strip().lower() not in {b"", b"identity"}
+            and normalized_name == b"content-encoding"
+            and normalized_value not in {b"", b"identity"}
         ):
             return SEMANTIC_OUTCOME_TERMINAL_ERROR
     body = http_response_body(
@@ -4061,10 +4071,26 @@ def _semantic_http_response_outcome(
         marker in lowered for marker in SEMANTIC_REGIONAL_DENIAL_MARKERS
     ):
         return SEMANTIC_OUTCOME_REGIONAL_DENIAL
+    strict_minimal_edge_denial = bool(
+        status == 403
+        and lowered.strip() == SEMANTIC_STRICT_MINIMAL_EDGE_DENIAL_BODY
+        and header_values.get(b"content-type") == [b"text/html"]
+        and header_values.get(b"content-security-policy")
+        == [b"default-src 'none'"]
+        and header_values.get(b"x-content-type-options") == [b"nosniff"]
+    )
     if (
-        len(body) <= SEMANTIC_EDGE_DENIAL_MAX_BODY_BYTES
-        and any(marker in lowered for marker in SEMANTIC_EDGE_DENIAL_MARKERS)
-        and any(marker in lowered for marker in SEMANTIC_EDGE_SECURITY_MARKERS)
+        strict_minimal_edge_denial
+        or (
+            len(body) <= SEMANTIC_EDGE_DENIAL_MAX_BODY_BYTES
+            and any(
+                marker in lowered for marker in SEMANTIC_EDGE_DENIAL_MARKERS
+            )
+            and any(
+                marker in lowered
+                for marker in SEMANTIC_EDGE_SECURITY_MARKERS
+            )
+        )
     ):
         return SEMANTIC_OUTCOME_EDGE_DENIAL
     if (
@@ -4531,7 +4557,16 @@ def _semantic_geph_root_response(host, deadline):
 
 def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     deadline = time.monotonic() + max(float(timeout), 0.001)
-    response = _semantic_geph_root_response(host, deadline)
+    first_deadline = min(
+        deadline,
+        time.monotonic() + SEMANTIC_GEPH_INITIAL_ATTEMPT_MAX,
+    )
+    response = _semantic_geph_root_response(host, first_deadline)
+    if (
+        response is None
+        and deadline - time.monotonic() >= SEMANTIC_GEPH_RETRY_MIN_BUDGET
+    ):
+        response = _semantic_geph_root_response(host, deadline)
     if response is None:
         return 0
     data, stream_closed, truncated = response

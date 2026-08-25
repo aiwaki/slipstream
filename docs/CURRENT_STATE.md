@@ -200,6 +200,36 @@ fresh exact-head CI/audit. This targeted diagnosis did not start another
 30-minute soak and does not weaken or replace any later release gate. The local
 app remains ad-hoc and unnotarized.
 
+That transport/redirect correction was committed locally as
+`672c6132a03d029f048bbf36b5e755760e71c968`, built and installed, and its exact
+daemon bytes were verified before the broader physical check. Chrome RuTracker
+then reached the fully styled page, but only after a delay that remains too long
+for acceptable product behavior; Safari still did not converge. Chrome Weather
+loaded its layout and news while leaving forecast placeholders unresolved, and
+Safari continued to show the regional denial. An isolated diagnostic browser
+trace (not product evidence) located the critical Weather request at
+`dsx.weather.com`: the exact object returned direct HTTP `403` with the complete
+minimal `Bad Request - Blocked`/HTML/CSP/nosniff fingerprint, while the verified
+owned listener returned HTTP `200` and complete JSON. The first owned target
+connection could time out and the next one succeed within the original proof
+budget.
+
+The current uncommitted correction therefore adds no hostname rule: it
+classifies only that exact strict status/body/header response and still requires
+the complete same-host owned-Geph proof. The proof keeps its six-second absolute
+deadline, caps the first target connection at three seconds, and permits exactly
+one retry connection only from the remaining budget. Focused classifier,
+route-selection, deadline, malformed-fingerprint, and retry regressions are
+green; the complete `test_tproxy_doh.py` suite passes `604` tests, the adjacent
+traffic contracts pass `68`, and the complete local project run passes `1754`
+tests plus `181` subtests. Its sole warning is the existing
+Scapy/cryptography finite-field-DH deprecation. Diff and compilation checks are
+also clean. The next verified action is one exact commit, rebuild/install, and
+fresh physical Chrome/Safari validation. PR
+#373 remains unpushed at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`;
+no account-backed workflow or new 30-minute soak is relevant to this correction.
+The local app remains ad-hoc and unnotarized.
+
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
 is published as prerelease ID `375747998`. The lightweight tag and release
