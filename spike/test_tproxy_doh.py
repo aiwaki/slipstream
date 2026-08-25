@@ -4915,6 +4915,223 @@ def test_reviewed_geo_exit_first_payload_timeout_never_falls_back_direct(
     assert writer.closed
 
 
+def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
+    monkeypatch,
+):
+    host = "payments.example.com"
+    wall_now = 1_000.0
+
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def get_extra_info(self, _name):
+            return object()
+
+    attempts = []
+    committed = []
+    sessions = []
+
+    async def geph_ready(*args):
+        attempts.append(args)
+        return (object(), object(), b"server-first"), None
+
+    async def commit(*args):
+        committed.append(args)
+
+    async def direct_must_not_run(*_args):
+        raise AssertionError("runtime-learned host leaked to direct")
+
+    monkeypatch.setattr(tproxy.time, "time", lambda: wall_now)
+    monkeypatch.setattr(tproxy, "_auto_geph", {host: wall_now + 3600})
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: host)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "_dial_via_geph_first_payload", geph_ready)
+    monkeypatch.setattr(tproxy, "_commit_owned_geph_first_payload", commit)
+    monkeypatch.setattr(tproxy, "_try_system_geo_connect", direct_must_not_run)
+    monkeypatch.setattr(
+        tproxy,
+        "geo_exit_backend_ready",
+        lambda now=None: (_ for _ in ()).throw(
+            AssertionError("runtime-learned host obeyed global cooldown")
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_session_started",
+        lambda: sessions.append("start") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_session_finished",
+        lambda: sessions.append("finish"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_allows",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", wall_now + 120)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "runtime miss")
+
+    asyncio.run(tproxy._handle_impl(Reader(), Writer()))
+
+    assert attempts == [(host, 443, b"\x16\x03\x01\x00\x01x")]
+    assert len(committed) == 1
+    assert sessions == ["start", "finish"]
+
+
+def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
+    monkeypatch,
+):
+    host = "payments.example.com"
+
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def __init__(self):
+            self.closed = False
+
+        def get_extra_info(self, _name):
+            return object()
+
+        def close(self):
+            self.closed = True
+
+    async def direct_must_not_run(*_args):
+        raise AssertionError("runtime-learned host leaked to direct")
+
+    monkeypatch.setattr(tproxy, "_auto_geph", {host: tproxy.time.time() + 3600})
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: host)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "_try_system_geo_connect", direct_must_not_run)
+    monkeypatch.setattr(tproxy, "geo_exit_backend_ready", lambda now=None: False)
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_allows",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_record_result",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda *_args: None)
+    monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", lambda *_args: None)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    writer = Writer()
+
+    asyncio.run(tproxy._handle_impl(Reader(), writer))
+
+    assert writer.closed is True
+
+
+def test_runtime_learned_exact_host_respects_explicit_geph_opt_out(monkeypatch):
+    host = "payments.example.com"
+
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def get_extra_info(self, _name):
+            return object()
+
+    direct_calls = []
+
+    async def direct(*args):
+        direct_calls.append(args)
+        return True
+
+    async def geph_must_not_run(*_args):
+        raise AssertionError("explicit Geph opt-out attempted owned backend")
+
+    monkeypatch.setattr(tproxy, "_auto_geph", {host: tproxy.time.time() + 3600})
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: host)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "_try_system_geo_connect", direct)
+    monkeypatch.setattr(tproxy, "_dial_via_geph_first_payload", geph_must_not_run)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    asyncio.run(tproxy._handle_impl(Reader(), Writer()))
+
+    assert len(direct_calls) == 1
+
+
+def test_runtime_learned_backend_misses_preserve_exact_route(monkeypatch):
+    host = "payments.example.com"
+    expiry = tproxy.time.time() + 3600
+    contexts = []
+
+    monkeypatch.setattr(tproxy, "_auto_geph", {host: expiry})
+    monkeypatch.setattr(tproxy, "_auto_geph_runtime_failures", {})
+    monkeypatch.setattr(tproxy, "_geph_fail_log", {})
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_backend_hold_until",
+        tproxy.time.time() + 120,
+    )
+    monkeypatch.setattr(tproxy, "route_health_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        tproxy,
+        "note_geph_restart_failure",
+        lambda *_args, **_kwargs: {
+            "recommended": False,
+            "rate_limited": False,
+            "recommendation_reason": "",
+        },
+    )
+
+    def capture_recovery(_outcome, context):
+        contexts.append(context)
+        return (tproxy.RecoveryAction(tproxy.RECOVERY_NONE),)
+
+    monkeypatch.setattr(tproxy, "reduce_connection_outcome", capture_recovery)
+
+    for _attempt in range(10):
+        tproxy.log_geph_route_failure(host, "SOCKS connect failed")
+
+    assert len(tproxy._auto_geph_runtime_failures[host]) == (
+        tproxy.AUTO_GEPH_RUNTIME_MISS_STORM
+    )
+    assert all(not context.strategy_invalidation_recommended for context in contexts)
+    assert tproxy._auto_geph[host] == expiry
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert tproxy.runtime_route_policy(host)["runtime_learned"] is True
+
+
 def test_reviewed_geo_exit_replays_once_after_payload_proven_owned_recovery(
     monkeypatch,
 ):
@@ -6650,6 +6867,53 @@ def test_quic_tcp_fallback_is_exactly_active_owned_route_or_unknown_first_contac
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
     assert not tproxy._quic_route_tcp_fallback("www.xpersonatoy.com")
+
+
+@pytest.mark.parametrize(
+    ("geph_up", "geph_owned", "geph_port"),
+    (
+        (False, True, tproxy.GEPH_OWNED_PORT),
+        (True, False, tproxy.GEPH_OWNED_PORT),
+        (True, True, tproxy.GEPH_EXTERNAL_PORT),
+    ),
+)
+def test_quic_learned_exact_host_stays_on_tcp_during_owned_backend_transition(
+    monkeypatch,
+    geph_up,
+    geph_owned,
+    geph_port,
+):
+    host = "learned.example"
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "transparent_routing_ready", lambda: True)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", geph_up)
+    monkeypatch.setattr(tproxy, "_geph_owned", geph_owned)
+    monkeypatch.setattr(tproxy, "_geph_port", geph_port)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph",
+        {host: tproxy.time.time() + 3600},
+    )
+
+    assert tproxy._quic_route_tcp_fallback(host)
+    assert not tproxy._quic_route_tcp_fallback("unknown.example")
+    assert not tproxy._quic_route_tcp_fallback("updates.discord.com")
+    assert not tproxy._quic_route_tcp_fallback("www.youtube.com")
+
+
+def test_quic_learned_exact_host_respects_explicit_geph_opt_out(monkeypatch):
+    host = "learned.example"
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "transparent_routing_ready", lambda: True)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph",
+        {host: tproxy.time.time() + 3600},
+    )
+
+    assert not tproxy._quic_route_tcp_fallback(host)
 
 
 def test_quic_version_negotiation_fallback_swaps_connection_ids():

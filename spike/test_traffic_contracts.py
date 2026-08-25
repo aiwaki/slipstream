@@ -3639,7 +3639,7 @@ def test_proven_exact_unknown_host_uses_owned_geph_without_local_replay(monkeypa
         (False, tproxy.GEPH_EXTERNAL_PORT),
     ),
 )
-def test_learned_unknown_host_without_ready_owned_geph_uses_exact_system_route(
+def test_learned_unknown_host_without_ready_owned_geph_fails_closed(
     monkeypatch,
     geph_owned,
     geph_port,
@@ -3686,9 +3686,9 @@ def test_learned_unknown_host_without_ready_owned_geph_uses_exact_system_route(
 
     asyncio.run(run_handler(client, writer))
 
-    assert bytes(writer.payload) == response
-    assert len(calls) == 1
-    assert calls[0][:3] == ("system", *destination)
+    assert bytes(writer.payload) == b""
+    assert writer.closed is True
+    assert calls == []
 
 
 @pytest.mark.parametrize(

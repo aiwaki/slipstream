@@ -3099,7 +3099,13 @@ def log_geph_route_failure(host, reason, now=None):
         degrade_after=1 if reason == "tunnel down" else GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     )
     restart_evidence = note_geph_restart_failure(host, reason, now=wall_now)
-    reset_learned_route = note_auto_geph_runtime_failure(host, reason, now=wall_now)
+    learned_exact_host = _auto_geph_learned_exact_host(host, wall_now)
+    if learned_exact_host:
+        # A failed owned-Geph attempt says nothing about whether the already
+        # denied direct path became usable.  Preserve that exact-host proof
+        # across backend cooldown/restart; its bounded TTL (or fresh direct
+        # success evidence) is the only safe way to reconsider direct routing.
+        record_auto_geph_runtime_failure(host, reason, now=wall_now)
     failure_phase = (
         FAILURE_PHASE_BACKEND
         if reason == "tunnel down"
@@ -3121,7 +3127,7 @@ def log_geph_route_failure(host, reason, now=None):
             backend_owned=bool(_geph_owned),
             restart_recommended=restart_evidence["recommended"],
             restart_rate_limited=restart_evidence["rate_limited"],
-            strategy_invalidation_recommended=reset_learned_route,
+            strategy_invalidation_recommended=False,
             external_state=not _geph_owned,
         ),
     )
@@ -5483,28 +5489,29 @@ def _forget_auto_geph_host(host, reason):
     return True
 
 
-def note_auto_geph_runtime_failure(host, reason, now=None):
+def record_auto_geph_runtime_failure(host, reason, now=None):
+    """Retain bounded backend diagnostics without invalidating direct proof."""
     if not _is_auto_geph_runtime_miss(reason):
-        return False
+        return 0
     h = normalize_host(host)
     if not _auto_geph_learned_exact_host(h, now):
-        return False
+        return 0
     wall_now = time.time() if now is None else now
     with _auto_geph_lock:
         if not _auto_geph_learned_exact_host(h, wall_now):
-            return False
+            return 0
         q = _auto_geph_runtime_failures.setdefault(h, [])
         q.append(wall_now)
         cutoff = wall_now - AUTO_GEPH_RUNTIME_MISS_WINDOW
         while q and q[0] < cutoff:
             q.pop(0)
+        if len(q) > AUTO_GEPH_RUNTIME_MISS_STORM:
+            del q[:-AUTO_GEPH_RUNTIME_MISS_STORM]
         if len(_auto_geph_runtime_failures) > 4096:
             for old_host, values in list(_auto_geph_runtime_failures.items()):
                 if not values or values[-1] < cutoff:
                     _auto_geph_runtime_failures.pop(old_host, None)
-        if len(q) < AUTO_GEPH_RUNTIME_MISS_STORM:
-            return False
-    return True
+        return len(q)
 
 
 def _prune_local_partial_stalls(now):
@@ -8183,7 +8190,17 @@ def _quic_route_tcp_fallback(host, *, now=None):
         h
         and _pf_applied
         and transparent_routing_ready()
-        and GEPH_ENABLED
+    ):
+        return False
+    # Persisted exact-host learning is evidence that QUIC/direct is the wrong
+    # route.  Keep that flow on the TCP evidence path even while the owned
+    # backend is cooling, draining, or restarting; TCP will either commit an
+    # owned first payload or fail closed.  Backend readiness below remains a
+    # prerequisite only for static geo-exit and unknown first-contact flows.
+    if GEPH_ENABLED and _auto_geph_learned_exact_host(h):
+        return True
+    if not (
+        GEPH_ENABLED
         and _geph_up
         and _geph_owned
         and _geph_port == GEPH_OWNED_PORT
@@ -8194,9 +8211,6 @@ def _quic_route_tcp_fallback(host, *, now=None):
         return True
     if route_class != ROUTE_UNKNOWN or not _auto_geph_base_host_allowed(h):
         return False
-    if _auto_geph_learned_exact_host(h):
-        return True
-
     now = time.monotonic() if now is None else float(now)
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
@@ -15964,9 +15978,19 @@ async def _handle_impl(reader, writer):
         )
         geph_now = time.time()
         geph_cooling = geph_now < _geph_backend_hold_until
+        # A runtime-learned exact host has already produced a complete direct
+        # denial and a usable payload through this owned Geph listener.  The
+        # global geo-exit cooldown is therefore not permission to expose a
+        # later connection to the proven-wrong direct route.  Try the verified
+        # owned listener under the normal first-payload guard; if it is not
+        # currently usable, fail this replay-safe request closed below.
         geph_ready = bool(
             geph_runtime_eligible
-            and geo_exit_backend_ready(now=geph_now)
+            and (
+                _owned_geph_ready_for_semantic_confirmation()
+                if learned_owned_only
+                else geo_exit_backend_ready(now=geph_now)
+            )
         )
         geph_failure = "tunnel down"
         geph_suspend = "geo-exit tunnel down"
@@ -16134,6 +16158,14 @@ async def _handle_impl(reader, writer):
             # Safari's misleading HTTPS/downgrade warning.  Fail this request
             # cleanly; the browser may reconnect after bounded recovery, but it
             # never receives a partial or semantically wrong direct response.
+            writer.close()
+            return
+        if learned_owned_only and GEPH_ENABLED:
+            # Persistent runtime learning is exact-host evidence that direct
+            # is semantically unusable.  A cooling, draining, or unavailable
+            # owned backend must never turn that evidence into a direct leak.
+            # Closing before any upstream byte lets the browser reconnect once
+            # the bounded owned-backend recovery has completed.
             writer.close()
             return
         if await _try_system_geo_connect(
