@@ -151,9 +151,10 @@ or the same denial on both routes remain non-actionable.
 
 Do not classify this from elapsed time alone. The initial 400-ms direct probe is
 only the ordinary fast slice; an idle/deadline timeout is
-`retryable_inconclusive`, may use one bounded signed-foreground retry, and never
-authorizes Geph by itself. This protects a slow connection that is still making
-useful progress.
+`retryable_inconclusive`, may use exactly one bounded same-IP direct network
+retry before any browser provenance check, and never authorizes Geph by itself.
+If that retry is also inconclusive, recovery returns without cache, provenance,
+or Geph. This protects a slow connection that is still making useful progress.
 
 The immediate path is narrower: while the original TLS first flight is still
 held and the browser has received zero server bytes, a socket/TLS exception or
@@ -1268,10 +1269,11 @@ adding a site rule:
 
 1. Start from a fresh daemon/preflight cache and do not prime the host through
    PF with curl, Playwright, or a background browser before the real foreground
-   attempt. The foreground root retry is adaptive and capped at 5.0 seconds. It
-   uses only the remainder of the unchanged eight-second job after reserving
-   2.0 seconds plus 25 ms scheduling grace for proof; it does not widen the
-   ordinary 400-ms direct or 500-ms healthy first-contact path.
+   attempt. The same-IP direct network retry is adaptive and capped at 5.0
+   seconds. It uses only the remainder of the unchanged eight-second job after
+   reserving 1.5 seconds for cold signed-browser provenance, 50 ms of provenance
+   wait grace, 2.0 seconds for proof, and 25 ms scheduling grace; it does not
+   widen the ordinary 400-ms direct or 500-ms healthy first-contact path.
 2. In normal signed Safari or Chrome, use recent physical input and require the
    original navigation to recover without a second manual reload. A headless or
    CDP navigation rejected by foreground provenance is not product evidence.
@@ -1290,6 +1292,13 @@ adding a site rule:
 The live gate must check bounded critical-resource completion, not only the root
 status or DOM. This workflow never authorizes a parent-host exception, a CDN
 suffix rule, or a general `403` fallback.
+
+Learning affects new connections only; it cannot migrate an already-open
+direct HTTP/2, TCP, or QUIC session. A validation that reuses an old browser
+connection can therefore keep showing the old denial after the route is learned.
+Use a genuinely fresh connection for diagnosis and require the first request
+from a clean product state to converge, so this fact cannot hide a first-request
+product defect.
 
 If that complete exact-host proof coincides with a brief owned-Geph recovery,
 the replay-safe request waits for at most five seconds and actively probes the

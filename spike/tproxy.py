@@ -2172,9 +2172,11 @@ SEMANTIC_PLAIN_PROBE_WINDOW = 60.0
 SEMANTIC_PLAIN_PROBE_WINDOW_MAX = 8
 # The held browser connection already proved that the exact system endpoint can
 # speak TLS.  The independent semantic root probe must therefore stay inside
-# the healthy-first-contact latency budget.  The full eight-second contract is
-# available only after signed foreground-browser provenance for one
-# inconclusive root retry, critical-child comparison, or owned-Geph proof.
+# the healthy-first-contact latency budget.  One inconclusive fast probe may
+# spend a bounded direct network retry inside the full eight-second contract;
+# the timeout itself never authorizes a route.  Signed foreground-browser
+# provenance remains mandatory only for an ambiguous final document or a
+# critical-child comparison.
 ROUTE_PREFLIGHT_DIRECT_TIMEOUT = 0.4
 ROUTE_PREFLIGHT_CACHE_TTL = 10 * 60.0
 ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
@@ -2192,13 +2194,13 @@ ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET = 1.5
 ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT = 0.5
 ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE = 0.05
 # A deadline-expired root probe is inconclusive, not a stable terminal result.
-# Only a signed foreground browser may spend this one additional direct retry.
-# The retry may use at most five seconds of the unchanged eight-second job and
-# must leave two seconds for a same-attempt owned-Geph proof.  The scheduling
-# grace is also subtracted before the retry starts, so it cannot consume that
-# proof reserve while its worker is being joined.
-ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT = 5.0
-ROUTE_PREFLIGHT_FOREGROUND_PROOF_RESERVE = 2.0
+# Spend exactly one additional direct network retry without consulting browser
+# focus.  It may use at most five seconds of the unchanged eight-second job and
+# must leave the full browser-provenance budget plus two seconds for a
+# same-attempt proof.  The scheduling grace is also subtracted before the retry
+# starts, so a joined worker cannot consume either reserve.
+ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT = 5.0
+ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE = 2.0
 ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE = 0.025
 # A complete parent document may name a critical cross-origin script only
 # after the ordinary root probe has consumed most of the healthy budget.  Once
@@ -6874,16 +6876,18 @@ async def _run_bounded_direct_route_preflight(
         )
 
 
-def _route_preflight_foreground_retry_timeout(deadline_monotonic):
+def _route_preflight_network_retry_timeout(deadline_monotonic):
     """Spend one adaptive retry slice while preserving proof capacity."""
     retry_capacity = (
         deadline_monotonic
         - time.monotonic()
-        - ROUTE_PREFLIGHT_FOREGROUND_PROOF_RESERVE
+        - ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+        - ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE
+        - ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE
         - ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
     )
     return min(
-        ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT,
+        ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT,
         max(0.0, retry_capacity),
     )
 
@@ -6959,8 +6963,10 @@ async def _run_initial_route_preflight(
 
     A healthy direct root stays browser-free.  A strict, complete semantic
     denial may learn only after the same exact host has a complete usable
-    response through the owned Geph exit.  Ambiguous incomplete, retry, and
-    critical-bootstrap paths additionally require a foreground, recently-used
+    response through the owned Geph exit.  One inconclusive fast direct probe
+    gets one bounded direct network retry before any browser check; neither
+    timeout is route evidence.  A final ambiguous incomplete document or a
+    critical-bootstrap path additionally requires a foreground, recently-used
     signed Safari/Chrome socket.  The exact-host work remains coalesced and
     bounded; no page-private bytes enter routing state, status, or logs.
     """
@@ -7060,14 +7066,50 @@ async def _run_initial_route_preflight(
             direct_hard_transport_failure,
         ) = _decode_direct_route_preflight_observation(job, observation)
         cache_outcome = outcome
+        if direct_retryable_inconclusive:
+            # The fast probe did not produce a stable semantic result.  It must
+            # neither poison the retry cache nor authorize Geph.  Retry the
+            # same system endpoint exactly once with a larger but still
+            # bounded slice of the original job.  This is pure network
+            # evidence and must not depend on browser focus or recent input.
+            for asset in bootstrap_assets:
+                asset.forget()
+            bootstrap_assets = ()
+            eligible_asset = None
+            eligible_asset_is_cross_origin = False
+            retry_timeout = _route_preflight_network_retry_timeout(
+                deadline
+            )
+            if retry_timeout <= 0:
+                publish_cache = False
+                return None
+            observation = await _run_bounded_direct_route_preflight(
+                direct_probe,
+                str(address),
+                h,
+                retry_timeout,
+            )
+            if time.monotonic() >= deadline:
+                publish_cache = False
+                return None
+            (
+                outcome,
+                bootstrap_assets,
+                direct_safe_incomplete,
+                direct_retryable_inconclusive,
+                direct_hard_transport_failure,
+            ) = _decode_direct_route_preflight_observation(job, observation)
+            if direct_retryable_inconclusive:
+                publish_cache = False
+                return None
+            cache_outcome = outcome
         if outcome == SEMANTIC_OUTCOME_USABLE:
             (
                 eligible_asset,
                 eligible_asset_is_cross_origin,
             ) = _select_route_preflight_bootstrap_asset(bootstrap_assets, h)
         requires_browser_provenance = bool(
-            direct_retryable_inconclusive
-            or (
+            (
                 outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
                 and direct_safe_incomplete
             )
@@ -7075,12 +7117,12 @@ async def _run_initial_route_preflight(
         )
         if requires_browser_provenance:
             # Same-origin bootstrap inspection remains on the ordinary 500 ms
-            # healthy path.  A deadline-expired root probe or a critical
+            # healthy path.  A final ambiguous document or a critical
             # cross-origin child is different: the parent must stay held until
-            # signed foreground provenance and one bounded retry/comparison
-            # finish, or the browser will fetch the unresolved route direct.
-            # These exceptional paths still share the job's absolute
-            # eight-second deadline.
+            # signed foreground provenance and the bounded comparison finish,
+            # or the browser will fetch the unresolved route direct.  A
+            # complete strict denial above or after the network retry never
+            # enters this browser-dependent path.
             provenance_deadline = deadline
             if (
                 outcome == SEMANTIC_OUTCOME_USABLE
@@ -7113,50 +7155,6 @@ async def _run_initial_route_preflight(
             if not provenance_ok:
                 publish_cache = False
                 return None
-        if direct_retryable_inconclusive:
-            # The fast probe did not produce a stable semantic result.  It must
-            # neither poison the retry cache nor authorize Geph.  After signed
-            # foreground provenance, retry the same system endpoint exactly
-            # once with a larger but still bounded slice of the original job.
-            for asset in bootstrap_assets:
-                asset.forget()
-            bootstrap_assets = ()
-            eligible_asset = None
-            eligible_asset_is_cross_origin = False
-            retry_timeout = _route_preflight_foreground_retry_timeout(
-                deadline
-            )
-            if retry_timeout <= 0:
-                publish_cache = False
-                return None
-            observation = await _run_bounded_direct_route_preflight(
-                direct_probe,
-                str(address),
-                h,
-                retry_timeout,
-            )
-            if time.monotonic() >= deadline:
-                publish_cache = False
-                return None
-            (
-                outcome,
-                bootstrap_assets,
-                direct_safe_incomplete,
-                direct_retryable_inconclusive,
-                direct_hard_transport_failure,
-            ) = _decode_direct_route_preflight_observation(job, observation)
-            if direct_retryable_inconclusive:
-                publish_cache = False
-                return None
-            cache_outcome = outcome
-            if outcome == SEMANTIC_OUTCOME_USABLE:
-                (
-                    eligible_asset,
-                    eligible_asset_is_cross_origin,
-                ) = _select_route_preflight_bootstrap_asset(
-                    bootstrap_assets,
-                    h,
-                )
         if (
             direct_hard_transport_failure
             and not direct_retryable_inconclusive
@@ -7177,6 +7175,12 @@ async def _run_initial_route_preflight(
             outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
             and direct_safe_incomplete
         ):
+            # A direct denial or ambiguous incomplete document is never a
+            # healthy negative cache entry.  Keep it retryable unless this
+            # same attempt commits a bound owned-Geph proof; exceptions,
+            # deadline exhaustion, and backend recovery must all fail open
+            # without suppressing the next independent connection.
+            publish_cache = False
             if not _owned_geph_ready_for_semantic_confirmation():
                 # A direct semantic denial is actionable, but a Geph listener
                 # that is still recovering cannot prove the alternate route.
@@ -7216,26 +7220,13 @@ async def _run_initial_route_preflight(
                     )
                 selected = _commit_preflight_owned_geph_proof(proof, future)
                 if selected:
+                    publish_cache = True
                     cache_outcome = "owned_geph"
                     selected_claim = _owned_geph_preflight_claim(
                         h,
                         job.capability,
                         deadline,
                     )
-                elif outcome in SEMANTIC_DENIAL_OUTCOMES:
-                    # A failed alternate-route proof is not a decision that
-                    # the denied direct response is healthy.  Leave the exact
-                    # host retryable so a later independent first connection
-                    # can recover after a transient proof/backend failure.
-                    publish_cache = False
-                elif (
-                    outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
-                    and direct_safe_incomplete
-                ):
-                    # A background or unverifiable socket must not launch the
-                    # browser worker, and its retryable incomplete result must
-                    # not suppress a later foreground classification.
-                    publish_cache = False
         elif outcome == SEMANTIC_OUTCOME_USABLE and eligible_asset is not None:
             asset_host = normalize_host(eligible_asset.exact_host)
             direct_asset_deadline = min(

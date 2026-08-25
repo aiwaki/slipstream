@@ -9558,7 +9558,7 @@ def test_route_preflight_browser_provenance_allows_cold_signature_start():
     )
 
 
-def test_actionable_preflight_waits_for_full_cold_provenance_budget(
+def test_ambiguous_network_retry_waits_for_full_cold_provenance_budget(
     monkeypatch,
 ):
     _enable_owned_geph_preflight(monkeypatch)
@@ -9580,7 +9580,23 @@ def test_actionable_preflight_waits_for_full_cold_provenance_budget(
                 tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
                 retryable_inconclusive=True,
             )
-        return tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+        return tproxy._SemanticPlainPreflightObservation(
+            tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING,
+            safe_incomplete=True,
+        )
+
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_run_headless_owned_geph_preflight",
+        lambda *_args, **_kwargs: pytest.fail(
+            "an ambiguous retry without provenance cannot start proof"
+        ),
+    )
 
     claim = asyncio.run(
         tproxy._run_initial_route_preflight(
@@ -9588,13 +9604,14 @@ def test_actionable_preflight_waits_for_full_cold_provenance_budget(
             "8.8.8.8",
             peer_endpoint=("127.0.0.1", 49152),
             direct_probe=direct,
-            geph_probe=lambda *_args, **_kwargs: (
-                tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+            geph_probe=lambda *_args, **_kwargs: pytest.fail(
+                "an ambiguous retry cannot use the strict-denial proof"
             ),
         )
     )
 
-    assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim)
+    assert claim is None
+    assert len(direct_calls) == 2
     expected_timeout = (
         tproxy.ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
         + tproxy.ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE
@@ -9602,6 +9619,10 @@ def test_actionable_preflight_waits_for_full_cold_provenance_budget(
     assert any(
         timeout == pytest.approx(expected_timeout)
         for timeout in observed_timeouts
+    )
+    assert "cold-provenance.example" not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(
+        "cold-provenance.example"
     )
 
 
@@ -9810,19 +9831,20 @@ def test_route_preflight_coalesces_hard_terminal_local_recovery(monkeypatch):
     assert host not in tproxy._route_preflight_cache
 
 
-def test_strict_edge_denial_uses_payload_proof_without_browser_worker(
+def test_slow_strict_edge_denial_uses_payload_proof_without_browser_provenance(
     monkeypatch,
 ):
     _enable_owned_geph_preflight(monkeypatch)
     host = "strict-edge.example"
-    provenance = []
     geph_calls = []
     direct_timeouts = []
     monkeypatch.setattr(tproxy, "_route_preflight_headless_available", True)
     monkeypatch.setattr(
         tproxy,
         "_browser_navigation_provenance_accepted",
-        lambda peer, _assessor: provenance.append(peer) or True,
+        lambda *_args, **_kwargs: pytest.fail(
+            "complete network denial must not depend on browser focus"
+        ),
     )
     monkeypatch.setattr(
         tproxy,
@@ -9856,17 +9878,42 @@ def test_strict_edge_denial_uses_payload_proof_without_browser_worker(
     )
 
     assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim)
-    assert provenance == [("127.0.0.1", 49152)]
     assert len(direct_timeouts) == 2
     assert direct_timeouts[0] <= tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
     assert direct_timeouts[1] <= (
-        tproxy.ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT
+        tproxy.ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT
     )
     assert geph_calls and geph_calls[0][0] == host
     assert tproxy._auto_geph_learned_exact_host(host)
 
 
-def test_repeated_inconclusive_foreground_retry_is_not_cached(monkeypatch):
+def test_strict_denial_proof_exception_is_not_cached(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "strict-proof-timeout.example"
+
+    def fail_proof(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(
+        tproxy,
+        "_prove_preflight_owned_geph_route",
+        fail_proof,
+    )
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=lambda *_args: tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL,
+        )
+    )
+
+    assert claim is None
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_repeated_inconclusive_network_retry_is_not_cached(monkeypatch):
     _enable_owned_geph_preflight(monkeypatch)
     host = "still-inconclusive.example"
     direct_timeouts = []
@@ -9879,6 +9926,13 @@ def test_repeated_inconclusive_foreground_retry_is_not_cached(monkeypatch):
             retryable_inconclusive=True,
         )
 
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: pytest.fail(
+            "an idle timeout is network uncertainty, not browser evidence"
+        ),
+    )
     monkeypatch.setattr(
         tproxy,
         "_run_headless_owned_geph_preflight",
@@ -9905,7 +9959,7 @@ def test_repeated_inconclusive_foreground_retry_is_not_cached(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
-def test_adaptive_foreground_retry_can_finish_after_simulated_three_seconds(
+def test_adaptive_network_retry_can_finish_after_simulated_three_seconds(
     monkeypatch,
 ):
     _enable_owned_geph_preflight(monkeypatch)
@@ -9942,6 +9996,13 @@ def test_adaptive_foreground_retry_can_finish_after_simulated_three_seconds(
         "_run_bounded_direct_route_preflight",
         bounded_probe,
     )
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a slow usable direct response must not require browser focus"
+        ),
+    )
 
     claim = asyncio.run(
         tproxy._run_initial_route_preflight(
@@ -9959,9 +10020,15 @@ def test_adaptive_foreground_retry_can_finish_after_simulated_three_seconds(
 
     assert claim is None
     assert timeouts[0] == tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
-    assert 3.5 < timeouts[1] <= (
-        tproxy.ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT
+    expected_retry_capacity = (
+        tproxy.route_preflight.MAX_DEADLINE_MS / 1000.0
+        - tproxy.ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
+        - tproxy.ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE
+        - tproxy.ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE
+        - tproxy.ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
     )
+    assert 3.5 < timeouts[1]
+    assert timeouts[1] == pytest.approx(expected_retry_capacity)
     assert clock[0] == 103.5
     assert tproxy._route_preflight_cache[host][1] == (
         tproxy.SEMANTIC_OUTCOME_USABLE
@@ -10492,6 +10559,7 @@ def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance
 
     def delayed_root(_ip, _host, timeout):
         root_timeouts.append(timeout)
+        events.append(("root", len(root_timeouts)))
         if len(root_timeouts) == 1:
             return tproxy._SemanticPlainPreflightObservation(
                 tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
@@ -10541,11 +10609,17 @@ def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance
     )
 
     assert claim is None
-    assert [event[0] for event in events] == ["provenance", "direct", "geph"]
+    assert [event[0] for event in events] == [
+        "root",
+        "root",
+        "provenance",
+        "direct",
+        "geph",
+    ]
     assert len(root_timeouts) == 2
     assert root_timeouts[0] <= tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
     assert root_timeouts[1] <= (
-        tproxy.ROUTE_PREFLIGHT_FOREGROUND_RETRY_MAX_TIMEOUT
+        tproxy.ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT
     )
     assert not tproxy._auto_geph_learned_exact_host(parent_host)
     assert tproxy._auto_geph_learned_exact_host(asset_host)

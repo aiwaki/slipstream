@@ -49,9 +49,10 @@ Production routing still contains no Aikido or Capacitor hostname rule and no
 broad `403` rule. Slow progressive reads are inconclusive and uncacheable; only
 explicit EOF/reset with valid incomplete framing can continue to the existing
 complete same-object owned-Geph proof. The ordinary 400-ms/500-ms path and
-absolute eight-second job remain unchanged; one signed foreground attempt may
-use an adaptive retry capped at five seconds while preserving two seconds plus
-25 ms for proof and scheduling.
+absolute eight-second job remain unchanged; one bounded same-IP direct retry may
+run before browser provenance while preserving 1.5 seconds for cold provenance,
+50 ms of wait grace, two seconds for proof, and 25 ms for scheduling. Repeated
+timeout remains inconclusive and cannot authorize Geph.
 
 The first exact installed QUIC correction still failed visibly in both
 browsers. Public auto-geo-exit state advanced from one to two learned exact
@@ -229,6 +230,40 @@ fresh physical Chrome/Safari validation. PR
 #373 remains unpushed at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`;
 no account-backed workflow or new 30-minute soak is relevant to this correction.
 The local app remains ad-hoc and unnotarized.
+
+Exact comparison with the earlier physically successful `513484a` candidate
+then isolated why Capacitor could regress again without removal of that strict-
+denial policy. The classifier, same-host owned-Geph payload proof, and exact-
+host learning path are unchanged and still work: a live complete direct
+Capacitor denial classified as `edge_access_denied`, and the same host returned
+a complete usable payload through owned Geph in roughly 1.7-2.4 seconds. The
+first production direct slice, however, is intentionally only 400 ms and could
+finish as retryable-inconclusive before that denial completed. Production asked
+for signed foreground/recent-input provenance at that point, before running its
+adaptive direct retry, so a purely network-authoritative strict denial could be
+discarded as `not_frontmost` or `input_not_recent`. Repeated diagnostics
+eventually learned the host only because later timing crossed that gate. A
+browser that already held a direct HTTP/2, TCP, or QUIC connection could then
+continue showing the old denial even after learning because existing sessions
+cannot be migrated.
+
+The working tree now performs exactly one bounded same-IP direct network retry
+before provenance. A final usable direct result stays direct; a second
+inconclusive result returns without cache, provenance, or Geph; a final complete
+strict denial uses only the existing complete exact-host owned-Geph proof; and
+only a final safe-incomplete or critical-resource result enters signed browser
+provenance. Actionable denial/incomplete branches default to no cache, and only
+a successfully committed proof restores it, so proof timeout or exception
+cannot create a two-minute denial cache. The retry remains inside the unchanged
+eight-second job and preserves 1.5 seconds for cold provenance, 50 ms of wait
+grace, two seconds for proof, and 25 ms for scheduling. Focused latency, denial,
+proof-exception, cache, and critical-resource regressions pass. The full local
+project run passes `1755` tests plus `181` subtests; the only warning remains the
+existing Scapy/cryptography finite-field-DH deprecation, and `git diff --check`
+passes. The next verified action is to commit, build, and install these exact
+bytes, reset process-local learned state, and require the first request to
+converge on genuinely fresh Chrome and Safari connections. No hostname rule,
+account-backed workflow, or new soak is relevant.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
