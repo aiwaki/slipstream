@@ -1866,6 +1866,76 @@ def test_system_plain_route_runs_held_preflight_before_committing(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
+def test_hard_preflight_failure_continues_local_recovery_same_request(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "hard-preflight-close.example"
+    direct_response = b"discarded direct TLS bytes"
+    recovered_response = b"Xbox DNS local recovery payload"
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    exact_writer = CaptureWriter()
+    calls = []
+
+    async def short_system(_ip, _port, _first_flight):
+        first_size = min(16, len(direct_response))
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            (
+                ScriptedReader(stream=(direct_response[first_size:],)),
+                exact_writer,
+                direct_response[:first_size],
+            ),
+        )
+
+    async def hard_preflight(actual_host, ip, **_kwargs):
+        calls.append(("preflight", actual_host, ip))
+        return tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+
+    async def healthy_xbox(actual_host, port, head, body, **_kwargs):
+        calls.append(("xbox", actual_host, port, head + body))
+        return "198.51.100.31", probed_upstream_response(recovered_response)
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.31", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
+    monkeypatch.setattr(tproxy, "_run_initial_route_preflight", hard_preflight)
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_allows",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("local DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert calls == [
+        ("preflight", host, "203.0.113.31"),
+        ("xbox", host, 443, expected_first_flight),
+    ]
+    assert exact_writer.closed
+    assert bytes(writer.payload) == recovered_response
+    assert direct_response not in bytes(writer.payload)
+
+
 def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "slow-system-route.example"
@@ -1945,6 +2015,9 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
             (ScriptedReader(), CaptureWriter(), response),
         )
 
+    async def healthy_direct_preflight(*_args, **_kwargs):
+        return None
+
     async def handshake_idle(
         _reader,
         _up_w,
@@ -2004,6 +2077,11 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_run_initial_route_preflight",
+        healthy_direct_preflight,
+    )
     monkeypatch.setattr(tproxy, "relay_local_stream", handshake_idle)
     monkeypatch.setattr(
         tproxy,
@@ -2043,6 +2121,9 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
             (ScriptedReader(), CaptureWriter(), response),
         )
 
+    async def healthy_direct_preflight(*_args, **_kwargs):
+        return None
+
     async def client_first_abort(
         _reader,
         _up_w,
@@ -2063,6 +2144,11 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_run_initial_route_preflight",
+        healthy_direct_preflight,
+    )
     monkeypatch.setattr(tproxy, "relay_local_stream", client_first_abort)
     monkeypatch.setattr(tproxy, "_clean_eof_stream_stalled", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
@@ -2102,6 +2188,9 @@ def test_unknown_partial_tls_watchdog_preserves_candidate_without_bypassing_ladd
             (ScriptedReader(), CaptureWriter(), response),
         )
 
+    async def healthy_direct_preflight(*_args, **_kwargs):
+        return None
+
     async def partial_record_stall(
         _reader,
         _up_w,
@@ -2122,6 +2211,11 @@ def test_unknown_partial_tls_watchdog_preserves_candidate_without_bypassing_ladd
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_run_initial_route_preflight",
+        healthy_direct_preflight,
+    )
     monkeypatch.setattr(tproxy, "relay_local_stream", partial_record_stall)
     monkeypatch.setattr(
         tproxy,

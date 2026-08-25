@@ -147,6 +147,28 @@ connection must independently return a complete non-denial response for the
 same exact host. Ordinary login pages, CAPTCHA, HTTP 403/429, truncated bodies,
 or the same denial on both routes remain non-actionable.
 
+### A blocked or unstyled page recovers only after many retries
+
+Do not classify this from elapsed time alone. The initial 400-ms direct probe is
+only the ordinary fast slice; an idle/deadline timeout is
+`retryable_inconclusive`, may use one bounded signed-foreground retry, and never
+authorizes Geph by itself. This protects a slow connection that is still making
+useful progress.
+
+The immediate path is narrower: while the original TLS first flight is still
+held and the browser has received zero server bytes, a socket/TLS exception or
+EOF without admissible HTTP framing closes the suspect exact stream and enters
+the existing app-owned DNS/local strategy ladder in the same request. A
+complete ordinary `403` is not such a failure. The ladder still needs its normal
+independent local-failure and complete exact-host owned-Geph proof before it can
+learn a foreign exit.
+
+If the owned route returns only a bodyless redirect, it is not payload evidence
+by itself. Production may follow exactly one absolute HTTPS root redirect only
+between one apex and its single `www.` form, under the same deadline, and must
+receive a complete usable final response. Any other redirect or a second
+redirect fails closed. This creates no rule for either hostname.
+
 ### Historical `.22`: a clean Chrome profile stays at `about:blank`
 
 This section explains an archival preview failure; it is not a current setup

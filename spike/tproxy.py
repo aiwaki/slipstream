@@ -2321,6 +2321,7 @@ _AUTO_GEPH_SUCCESSOR_CLAIM = object()
 _ROUTE_PREFLIGHT_OWNED_GEPH_CLAIM = object()
 _ROUTE_PREFLIGHT_OWNED_GEPH_PROOF = object()
 _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE = object()
+_ROUTE_PREFLIGHT_LOCAL_RECOVERY = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -2356,6 +2357,7 @@ class _SemanticPlainPreflightObservation:
     bootstrap_assets: tuple = ()
     safe_incomplete: bool = False
     retryable_inconclusive: bool = False
+    hard_transport_failure: bool = False
 
 
 _BOOTSTRAP_RANGE_TERMINATION_COMPLETE = "complete"
@@ -4186,6 +4188,9 @@ def _semantic_plain_preflight_probe_detail(
                 SEMANTIC_OUTCOME_NAVIGATION_PENDING,
                 safe_incomplete=safe_incomplete,
                 retryable_inconclusive=bool(idle_timed_out),
+                hard_transport_failure=bool(
+                    stream_closed and not safe_incomplete
+                ),
             )
         outcome = _semantic_plain_response_outcome(
             data,
@@ -4209,7 +4214,8 @@ def _semantic_plain_preflight_probe_detail(
         )
     except Exception:
         return _SemanticPlainPreflightObservation(
-            SEMANTIC_OUTCOME_TERMINAL_ERROR
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            hard_transport_failure=True,
         )
     finally:
         try:
@@ -4409,15 +4415,69 @@ def _semantic_plain_denial_probe(
     )
 
 
-def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
-    deadline = time.monotonic() + max(float(timeout), 0.001)
+def _semantic_geph_canonical_root_redirect_target(host, data):
+    """Accept only one HTTPS root redirect between an apex and its ``www``.
+
+    The redirect is transport proof for the original exact host only.  It does
+    not create policy for the target hostname, and every other cross-host,
+    path, query, port, userinfo, or ambiguous redirect remains unusable.
+    """
+    if not isinstance(data, bytes):
+        return None
+    try:
+        header_block, _body = data.split(b"\r\n\r\n", 1)
+    except ValueError:
+        return None
+    lines = header_block.split(b"\r\n")
+    status_parts = lines[0].split()
+    if len(status_parts) < 2 or status_parts[1] not in {b"301", b"308"}:
+        return None
+    locations = []
+    for line in lines[1:]:
+        name, separator, value = line.partition(b":")
+        if separator and name.strip().lower() == b"location":
+            locations.append(value.strip())
+    if len(locations) != 1:
+        return None
+    try:
+        location = locations[0].decode("ascii")
+        parsed = urlparse(location)
+        target_port = parsed.port
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or target_port not in (None, 443)
+        or parsed.path != "/"
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    original = normalize_host(host)
+    target = normalize_host(parsed.hostname or "")
+    if not original or not target:
+        return None
+    if original.startswith("www."):
+        apex = original[4:]
+        if apex and not apex.startswith("www.") and target == apex:
+            return target
+    elif target == f"www.{original}":
+        return target
+    return None
+
+
+def _semantic_geph_root_response(host, deadline):
     sock = _socks5_connect_blocking(
         host,
         443,
         max(deadline - time.monotonic(), 0.001),
     )
     if sock is None:
-        return 0
+        return None
     tls_sock = None
     try:
         ctx = _local_payload_ssl_context()
@@ -4457,21 +4517,45 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
             stream_closed=stream_closed,
             truncated=truncated,
         )
-        if response_complete and _semantic_geph_response_usable(data):
-            body_length = http_response_body_length(
-                data,
-                stream_closed=stream_closed,
-                truncated=truncated,
-            )
-            return body_length or 0
-        return 0
+        if not response_complete:
+            return None
+        return data, stream_closed, truncated
     except Exception:
-        return 0
+        return None
     finally:
         try:
             (tls_sock or sock).close()
         except Exception:
             pass
+
+
+def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
+    deadline = time.monotonic() + max(float(timeout), 0.001)
+    response = _semantic_geph_root_response(host, deadline)
+    if response is None:
+        return 0
+    data, stream_closed, truncated = response
+    if _semantic_geph_response_usable(data):
+        return http_response_body_length(
+            data,
+            stream_closed=stream_closed,
+            truncated=truncated,
+        ) or 0
+
+    redirect_host = _semantic_geph_canonical_root_redirect_target(host, data)
+    if redirect_host is None:
+        return 0
+    redirected = _semantic_geph_root_response(redirect_host, deadline)
+    if redirected is None:
+        return 0
+    redirected_data, redirected_closed, redirected_truncated = redirected
+    if not _semantic_geph_response_usable(redirected_data):
+        return 0
+    return http_response_body_length(
+        redirected_data,
+        stream_closed=redirected_closed,
+        truncated=redirected_truncated,
+    ) or 0
 
 
 def _incomplete_response_probe_request(host, *, bounded_range):
@@ -6773,16 +6857,25 @@ def _decode_direct_route_preflight_observation(job, observation):
     assets = ()
     safe_incomplete = False
     retryable_inconclusive = False
+    hard_transport_failure = False
     if isinstance(observation, _SemanticPlainPreflightObservation):
         assets = observation.bootstrap_assets
         safe_incomplete = bool(observation.safe_incomplete)
         retryable_inconclusive = bool(observation.retryable_inconclusive)
+        hard_transport_failure = bool(observation.hard_transport_failure)
         observation = observation.outcome
     outcome = _validated_direct_route_preflight_outcome(job, observation)
     if outcome is None:
         outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
         retryable_inconclusive = False
-    return outcome, assets, safe_incomplete, retryable_inconclusive
+        hard_transport_failure = False
+    return (
+        outcome,
+        assets,
+        safe_incomplete,
+        retryable_inconclusive,
+        hard_transport_failure,
+    )
 
 
 def _select_route_preflight_bootstrap_asset(assets, parent_host):
@@ -6888,6 +6981,8 @@ async def _run_initial_route_preflight(
                 asyncio.shield(asyncio.wrap_future(future)),
                 timeout=route_preflight.MAX_DEADLINE_MS / 1000.0,
             )
+            if selected_by_owner is _ROUTE_PREFLIGHT_LOCAL_RECOVERY:
+                return _ROUTE_PREFLIGHT_LOCAL_RECOVERY
             if selected_by_owner and _auto_geph_learned_exact_host(h):
                 return _owned_geph_preflight_claim(
                     h,
@@ -6927,6 +7022,7 @@ async def _run_initial_route_preflight(
             bootstrap_assets,
             direct_safe_incomplete,
             direct_retryable_inconclusive,
+            direct_hard_transport_failure,
         ) = _decode_direct_route_preflight_observation(job, observation)
         cache_outcome = outcome
         if outcome == SEMANTIC_OUTCOME_USABLE:
@@ -7012,6 +7108,7 @@ async def _run_initial_route_preflight(
                 bootstrap_assets,
                 direct_safe_incomplete,
                 direct_retryable_inconclusive,
+                direct_hard_transport_failure,
             ) = _decode_direct_route_preflight_observation(job, observation)
             if direct_retryable_inconclusive:
                 publish_cache = False
@@ -7025,6 +7122,22 @@ async def _run_initial_route_preflight(
                     bootstrap_assets,
                     h,
                 )
+        if (
+            direct_hard_transport_failure
+            and not direct_retryable_inconclusive
+        ):
+            # The held client still has zero server bytes, while an independent
+            # modern-TLS probe produced a hard close/protocol failure rather
+            # than an idle timeout.  Do not commit the already-suspect exact
+            # system stream and then wait for several user retries.  Hand the
+            # same replay-safe ClientHello to the existing app-owned DNS and
+            # multi-strategy ladder; that ladder retains every local-evidence,
+            # network-noise, owned-Geph, and exact-host guard before it may
+            # select or remember a foreign exit.  A slow direct probe remains
+            # retryable-inconclusive and never enters this branch.
+            publish_cache = False
+            selected_claim = _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+            return selected_claim
         if outcome in SEMANTIC_DENIAL_OUTCOMES or (
             outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
             and direct_safe_incomplete
@@ -7161,7 +7274,11 @@ async def _run_initial_route_preflight(
             _prune_initial_route_preflights_locked(completed_at)
             _route_preflight_inflight.pop(h, None)
             if not future.done():
-                future.set_result(bool(selected_claim))
+                future.set_result(
+                    _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+                    if selected_claim is _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+                    else bool(selected_claim)
+                )
     return selected_claim
 
 
@@ -15524,7 +15641,12 @@ async def _handle_impl(reader, writer):
                 dst_ip,
                 peer_endpoint=peer_endpoint,
             )
-            if preflight_claim is not None:
+            if preflight_claim is _ROUTE_PREFLIGHT_LOCAL_RECOVERY:
+                await _close_stream_writer(exact[1])
+                note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_SYSTEM)
+                _mark_xbox_dns_candidate(host)
+                unknown_stage = UNKNOWN_RECOVERY_XBOX_DNS
+            elif preflight_claim is not None:
                 await _close_stream_writer(exact[1])
                 if await _try_unknown_owned_geph_route(
                     host,
@@ -15541,9 +15663,10 @@ async def _handle_impl(reader, writer):
                 # normal retry use the learned exact-host route.
                 writer.close()
                 return
-            result = exact
-            chosen_name = "plain"
-            via_system_exact = True
+            else:
+                result = exact
+                chosen_name = "plain"
+                via_system_exact = True
         else:
             assert system_probe in (SYSTEM_PROBE_CLOSED, SYSTEM_PROBE_TIMEOUT)
             note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_SYSTEM)

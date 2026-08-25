@@ -9354,6 +9354,64 @@ def test_plain_preflight_deadline_is_retryable_inconclusive(monkeypatch):
 
     assert observation.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
     assert observation.retryable_inconclusive
+    assert not observation.hard_transport_failure
+
+
+def test_plain_preflight_socket_reset_is_hard_transport_failure(monkeypatch):
+    def reset(*_args, **_kwargs):
+        raise ConnectionResetError("peer reset during TLS setup")
+
+    monkeypatch.setattr(tproxy.socket, "create_connection", reset)
+
+    observation = tproxy._semantic_plain_preflight_probe_detail(
+        "8.8.8.8",
+        "hard-reset.example",
+        0.4,
+    )
+
+    assert observation.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    assert not observation.retryable_inconclusive
+    assert observation.hard_transport_failure
+
+
+def test_plain_preflight_empty_eof_is_hard_transport_failure(monkeypatch):
+    class FakeTlsSocket:
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            return b""
+
+        def close(self):
+            return None
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda _sock, server_hostname: tls_socket
+        ),
+    )
+
+    observation = tproxy._semantic_plain_preflight_probe_detail(
+        "8.8.8.8",
+        "empty-eof.example",
+        0.4,
+    )
+
+    assert observation.outcome == tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING
+    assert not observation.safe_incomplete
+    assert not observation.retryable_inconclusive
+    assert observation.hard_transport_failure
 
 
 def test_plain_preflight_framed_partial_idle_is_retryable_inconclusive(
@@ -9642,6 +9700,75 @@ def test_route_preflight_selects_owned_geph_only_after_strict_denial(
         claim,
         "blocked-edge.example",
     )
+
+
+def test_route_preflight_hard_terminal_enters_local_recovery_without_geph(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "hard-tls-close.example"
+
+    result = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=lambda *_args: (
+                tproxy._SemanticPlainPreflightObservation(
+                    tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                    retryable_inconclusive=False,
+                    hard_transport_failure=True,
+                )
+            ),
+            geph_probe=lambda *_args: pytest.fail(
+                "a hard direct close must enter the guarded local ladder first"
+            ),
+        )
+    )
+
+    assert result is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_route_preflight_coalesces_hard_terminal_local_recovery(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "coalesced-hard-tls-close.example"
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def bounded_probe(_probe, _ip, actual_host, _timeout):
+            assert actual_host == host
+            entered.set()
+            await release.wait()
+            return tproxy._SemanticPlainPreflightObservation(
+                tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=False,
+                hard_transport_failure=True,
+            )
+
+        monkeypatch.setattr(
+            tproxy,
+            "_run_bounded_direct_route_preflight",
+            bounded_probe,
+        )
+        owner = asyncio.create_task(
+            tproxy._run_initial_route_preflight(host, "8.8.8.8")
+        )
+        await entered.wait()
+        waiter = asyncio.create_task(
+            tproxy._run_initial_route_preflight(host, "8.8.8.8")
+        )
+        await asyncio.sleep(0)
+        release.set()
+        return await asyncio.gather(owner, waiter)
+
+    owner_result, waiter_result = asyncio.run(scenario())
+
+    assert owner_result is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert waiter_result is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert host not in tproxy._route_preflight_cache
 
 
 def test_strict_edge_denial_uses_payload_proof_without_browser_worker(
@@ -12349,6 +12476,182 @@ def test_semantic_geph_probe_requires_complete_http_response(
     assert (result > 0) is expected_positive
     assert b"Range: bytes=0-262143\r\n" in tls_socket.request
     assert tls_socket.closed
+
+
+def test_semantic_geph_probe_follows_one_canonical_www_root_redirect(
+    monkeypatch,
+):
+    class FakeTlsSocket:
+        def __init__(self, response):
+            self.chunks = deque([response, b""])
+            self.closed = False
+            self.request = b""
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, payload):
+            self.request += payload
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    redirect_socket = FakeTlsSocket(
+        b"HTTP/1.1 301 Moved Permanently\r\n"
+        b"Location: https://example.com/\r\n"
+        b"Content-Length: 0\r\n\r\n"
+    )
+    final_socket = FakeTlsSocket(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+        b"Content-Length: 128\r\n\r\n" + b"x" * 128
+    )
+    sockets = deque([redirect_socket, final_socket])
+    connections = []
+
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: (
+            connections.append((host, port, timeout)) or sockets.popleft()
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda sock, server_hostname: sock
+        ),
+    )
+
+    result = tproxy._semantic_geph_payload_probe("www.example.com")
+
+    assert result == 128
+    assert [call[:2] for call in connections] == [
+        ("www.example.com", 443),
+        ("example.com", 443),
+    ]
+    assert b"Host: www.example.com\r\n" in redirect_socket.request
+    assert b"Host: example.com\r\n" in final_socket.request
+    assert redirect_socket.closed
+    assert final_socket.closed
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "http://example.com/",
+        "https://elsewhere.example/",
+        "https://example.com/path",
+        "https://example.com/?source=redirect",
+        "https://user@example.com/",
+        "https://example.com:444/",
+        "https://www.www.example.com/",
+        "/",
+    ],
+)
+def test_semantic_geph_probe_rejects_noncanonical_redirects(
+    monkeypatch,
+    location,
+):
+    class FakeTlsSocket:
+        def __init__(self):
+            self.closed = False
+            self.request = b""
+            self.chunks = deque(
+                [
+                    (
+                        b"HTTP/1.1 301 Moved Permanently\r\nLocation: "
+                        + location.encode("ascii")
+                        + b"\r\nContent-Length: 0\r\n\r\n"
+                    ),
+                    b"",
+                ]
+            )
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, payload):
+            self.request += payload
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    tls_socket = FakeTlsSocket()
+    connections = []
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: (
+            connections.append((host, port, timeout)) or tls_socket
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda sock, server_hostname: sock
+        ),
+    )
+
+    assert tproxy._semantic_geph_payload_probe("www.example.com") == 0
+    assert len(connections) == 1
+    assert tls_socket.closed
+
+
+def test_semantic_geph_probe_rejects_redirect_chain(monkeypatch):
+    class FakeTlsSocket:
+        def __init__(self, location):
+            self.closed = False
+            self.chunks = deque(
+                [
+                    b"HTTP/1.1 301 Moved Permanently\r\nLocation: "
+                    + location.encode("ascii")
+                    + b"\r\nContent-Length: 0\r\n\r\n",
+                    b"",
+                ]
+            )
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    first = FakeTlsSocket("https://example.com/")
+    second = FakeTlsSocket("https://www.example.com/")
+    sockets = deque([first, second])
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda _host, _port, _timeout: sockets.popleft(),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda sock, server_hostname: sock
+        ),
+    )
+
+    assert tproxy._semantic_geph_payload_probe("www.example.com") == 0
+    assert first.closed
+    assert second.closed
 
 
 def test_semantic_geph_probe_accepts_complete_large_response(monkeypatch):

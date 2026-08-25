@@ -171,9 +171,32 @@ then completed to its login page. A separate private Safari window likewise
 loaded the normal Capacitor page and the complete Aikido login page, after which
 only that temporary window was closed and the user's ordinary four-tab window
 remained intact. There is still no Capacitor/Aikido hostname rule, broad `403`
-rule, or foreground requirement for the strict-denial decision. The next
-verified action is to commit and push this exact correction and require fresh
-exact-head CI/audit before merge. This targeted diagnosis did not start another
+rule, or foreground requirement for the strict-denial decision. That correction
+was committed as exact PR head `513484ac43ae0348df06e61fca5af9d3105eb225`;
+exact-head CI `32867878889` and dependency audit `32867879962` passed.
+
+A broader physical sweep then exposed slow convergence without invalidating the
+Capacitor/Aikido proof. RuTracker eventually completed in Chrome only after a
+long sequence of retries while Safari showed hard TLS/connect failures. The
+handler could retain a few initial system TLS bytes, run an independent direct
+probe that ended in a hard TLS/socket failure, and still commit the suspect
+exact stream instead of using the existing app-owned DNS/local ladder. The
+working tree now carries a separate hard-transport observation bit and hands
+only socket/TLS exception or EOF without admissible HTTP framing into that
+ladder in the same request. Idle/deadline timeout, slow working progress, and a
+complete ordinary `403` remain non-authorizing. Weather independently showed a
+bodyless owned-Geph redirect from the `www` root to its apex followed by a usable
+apex payload; the proof may now follow exactly one such apex/`www` HTTPS root
+redirect under the same absolute deadline and still learns only the original
+exact host. LinkedIn slow-progress controls and Yelp's direct-good/owned-denied
+asymmetry remain negative guards against routing from time or visual
+incompleteness alone. Focused tests plus the complete routing suites pass:
+`603` `test_tproxy_doh.py` tests and `68` traffic-contract tests. The complete
+local project run also passes with `1753` tests and `181` subtests; its sole
+warning is the existing Scapy/cryptography finite-field-DH deprecation. The
+next verified action is final diff review, then commit, rebuild/install that
+exact commit, and fresh physical Chrome/Safari validation before requesting
+fresh exact-head CI/audit. This targeted diagnosis did not start another
 30-minute soak and does not weaken or replace any later release gate. The local
 app remains ad-hoc and unnotarized.
 
