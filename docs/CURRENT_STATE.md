@@ -128,13 +128,54 @@ admitted physical navigation may try again, and it still needs the complete
 owned-Geph proof before learning. Focused regressions, the complete
 `test_tproxy_doh.py` routing suite (`587` tests), and the combined full local
 suite (`1733` tests plus `181` subtests) pass, as do compilation and
-`git diff --check`. The next verified action is to push a new exact PR head,
-require its CI/audit, install that exact source, restart both browser
-transports, and run fresh physical-input Capacitor/Aikido checks in normal
-Chrome and Safari. Do not merge until both visible outcomes and exact-head
-checks pass. This targeted diagnosis did not start another 30-minute soak and
-does not weaken or replace any later release gate. The local app remains
-ad-hoc and unnotarized.
+`git diff --check`. Product head
+`fdb6c4a8d3b0148e6ed5f448ceea380ec68263a7` then passed exact-head
+[dependency audit `32861205555`](https://github.com/aiwaki/slipstream/actions/runs/32861205555).
+Its [CI `32861205567`](https://github.com/aiwaki/slipstream/actions/runs/32861205567)
+passed the product, Windows, Chromium, packaged-build, and packaged-browser
+jobs, but failed only the heavy packaged lifecycle before navigation: its one
+three-second idle sample measured `1.020` seconds of daemon CPU against the
+unchanged `1.000`-second ceiling while finite startup PF rollback/retry work was
+still settling. The same unchanged harness measured `0.559` and `0.390`
+seconds on the two preceding green exact heads, and the `fdb6c4a` browser
+recovery path is not entered before a browser job.
+
+The narrow qualification-only correction retains the one-second-per-three-
+seconds ceiling. Only a first excessive sample permits exactly one consecutive
+three-second sample; worker processes and profiles must remain absent after
+each, and two excessive samples still fail. Evidence now records every CPU
+sample, the sample count, and the total observation duration. Focused harness
+verification passes `76` tests plus `20` subtests.
+
+Repeated physical Capacitor checks then confirmed the remaining policy defect:
+the strict direct Cloudflare denial and complete same-host owned-Geph HTTP 200
+proof were sufficient network evidence, but first-host learning still depended
+on Chrome being `frontmost`. The working tree now removes foreground/recent-
+input admission only for a complete strict regional/edge denial followed by a
+complete usable exact-host owned-Geph payload proof. Ambiguous retry,
+incomplete-navigation, and critical-child paths retain signed foreground
+browser provenance. A failed strict-denial proof is no longer cached. Ordinary
+403/429, CAPTCHA/login, idle timeout, slow usable direct, and the Discord/
+YouTube/googlevideo exclusions are unchanged; no hostname rule was added.
+Focused routing regressions, the complete `test_tproxy_doh.py` suite (`589`
+tests), and the combined full local suite (`1738` tests plus `181` subtests)
+pass. The exact working tree was frozen with Python 3.13, rebuilt, and installed;
+the root daemon attestation and embedded daemon both bind SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`,
+and the replacement launchd PID is `68160`. Chrome was closed through its UI
+and its surviving `--no-startup-window` root plus NetworkService were then
+terminated before a genuinely fresh launch. In that clean real Chrome,
+Capacitor loaded the normal product page instead of the Cloudflare denial and
+public auto-geo-exit state advanced from one to two learned exact hosts; Aikido
+then completed to its login page. A separate private Safari window likewise
+loaded the normal Capacitor page and the complete Aikido login page, after which
+only that temporary window was closed and the user's ordinary four-tab window
+remained intact. There is still no Capacitor/Aikido hostname rule, broad `403`
+rule, or foreground requirement for the strict-denial decision. The next
+verified action is to commit and push this exact correction and require fresh
+exact-head CI/audit before merge. This targeted diagnosis did not start another
+30-minute soak and does not weaken or replace any later release gate. The local
+app remains ad-hoc and unnotarized.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)

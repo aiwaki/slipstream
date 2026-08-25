@@ -9482,14 +9482,23 @@ def test_actionable_preflight_waits_for_full_cold_provenance_budget(
 
     monkeypatch.setattr(tproxy.asyncio, "wait_for", recording_wait_for)
 
+    direct_calls = []
+
+    def direct(*_args):
+        direct_calls.append(True)
+        if len(direct_calls) == 1:
+            return tproxy._SemanticPlainPreflightObservation(
+                tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=True,
+            )
+        return tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+
     claim = asyncio.run(
         tproxy._run_initial_route_preflight(
             "cold-provenance.example",
             "8.8.8.8",
             peer_endpoint=("127.0.0.1", 49152),
-            direct_probe=lambda *_args: (
-                tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
-            ),
+            direct_probe=direct,
             geph_probe=lambda *_args, **_kwargs: (
                 tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
             ),
@@ -9827,7 +9836,9 @@ def test_route_preflight_does_not_learn_from_one_synthetic_direct_timeout(
                     safe_incomplete=False,
                 )
             ),
-            geph_probe=lambda *args: geph_calls.append(args) or (
+            geph_probe=lambda *args, **kwargs: (
+                geph_calls.append((args, kwargs))
+            ) or (
                 tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
             ),
         )
@@ -10017,7 +10028,7 @@ def test_transient_geph_unready_does_not_cache_actionable_denial(monkeypatch):
     assert tproxy._auto_geph_learned_exact_host(host)
 
 
-def test_background_connection_cannot_learn_or_cache_browser_action(monkeypatch):
+def test_strict_denial_can_learn_without_frontmost_browser(monkeypatch):
     _enable_owned_geph_preflight(monkeypatch)
     host = "background-denial.example"
     monkeypatch.setattr(
@@ -10033,9 +10044,42 @@ def test_background_connection_cannot_learn_or_cache_browser_action(monkeypatch)
             "8.8.8.8",
             peer_endpoint=("127.0.0.1", 49152),
             direct_probe=lambda *_args: (
-                tproxy.SEMANTIC_OUTCOME_REGIONAL_DENIAL
+                tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
             ),
-            geph_probe=lambda *args: geph_calls.append(args) or (
+            geph_probe=lambda *args, **kwargs: (
+                geph_calls.append((args, kwargs))
+            ) or (
+                tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+            ),
+        )
+    )
+
+    assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim)
+    assert geph_calls
+    assert tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_ordinary_403_shape_cannot_learn_without_frontmost_browser(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "ordinary-forbidden.example"
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: False,
+    )
+    geph_calls = []
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            direct_probe=lambda *_args: (
+                tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+            ),
+            geph_probe=lambda *args, **kwargs: (
+                geph_calls.append((args, kwargs))
+            ) or (
                 tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
             ),
         )
@@ -10043,6 +10087,25 @@ def test_background_connection_cannot_learn_or_cache_browser_action(monkeypatch)
 
     assert claim is None
     assert not geph_calls
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_failed_strict_denial_proof_is_not_cached(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "transient-denial-proof.example"
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=lambda *_args: (
+                tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+            ),
+            geph_probe=lambda *_args, **_kwargs: 0,
+        )
+    )
+
+    assert claim is None
     assert host not in tproxy._route_preflight_cache
     assert not tproxy._auto_geph_learned_exact_host(host)
 

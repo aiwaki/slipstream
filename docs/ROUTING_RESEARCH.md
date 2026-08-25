@@ -1,9 +1,28 @@
 # Routing Research Notes
 
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-08-25 Strict-denial network decision: physical validation
+
+The exact no-foreground correction was frozen, installed, and bound by the
+root attestation and embedded-daemon SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`.
+Chrome's old UI was closed and its surviving background root and NetworkService
+were explicitly allowed to exit before relaunch, so the result did not reuse
+the direct Cloudflare connection seen by the prior build. The first clean
+Capacitor navigation loaded the normal site and advanced public exact-host
+learning from one entry to two; the same Chrome then completed Aikido to its
+login page. A separate private Safari window independently loaded the normal
+Capacitor page and the complete Aikido login page; closing the temporary window
+left the user's ordinary Safari tabs intact. This confirms the intended product
+path without a hostname exception: a complete strict direct denial plus a
+complete same-host owned-Geph payload proof may learn the exact network route,
+and the resulting runtime overlay is available to every eligible connection.
+Foreground signed-browser evidence remains limited to ambiguous incomplete or
+retry paths.
 
 ## Findings Index
 
@@ -521,10 +540,14 @@ document pending for another eight seconds and submits the existing bounded
 capability. Only then may the daemon advance and close the original relay;
 Chrome itself must repeat the unchanged original URL and fetch exactly one CSS,
 JavaScript, image, and ready resource. No extension or reload command exists in
-the scenario. Before the first request, a three-second installed idle sample
-requires the production broker to be owned by the console user with mode
-`0600`, the worker runtime to be empty, worker processes and profiles to be
-absent, and daemon CPU growth to remain at most one second.
+the scenario. Before the first request, an installed idle sample requires the
+production broker to be owned by the console user with mode `0600`, the worker
+runtime to be empty, worker processes and profiles to be absent, and daemon CPU
+growth to remain at most one second over three seconds. Only if that first
+sample exceeds the ceiling does the harness take exactly one consecutive
+three-second sample. It rechecks that worker processes and profiles remain
+absent after each sample and fails when both samples exceed the unchanged
+ceiling; evidence records every sample and the total observation duration.
 
 PR #330 merged as exact live main
 `9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main packaged job
@@ -1444,6 +1467,23 @@ actionable denial in that interval no longer creates the two-minute retry
 cache: a subsequent new physical navigation may retry after readiness, but no
 route is learned without the same complete owned-Geph payload proof. This adds
 neither an Aikido/Capacitor rule nor a broad status-code rule.
+
+The following physical checks exposed a policy mistake rather than another
+browser-parser dialect. Capacitor continued to render its complete direct
+Cloudflare denial while the exact root returned HTTP 200 through the owned
+Geph SOCKS listener. Post-navigation observation could report `not_frontmost`
+as soon as the user returned to Codex, and the product still made that mutable
+window state a prerequisite for learning. Network recovery must not depend on
+which app happens to own focus. A complete strict regional/edge denial now
+skips browser provenance and uses only the independently complete direct
+classification plus complete usable same-host owned-Geph payload proof. The
+foreground/recent-input gate remains on inconclusive retries, incomplete
+navigation, and critical-child comparison, where the network evidence alone is
+ambiguous. A failed strict-denial proof remains uncached so a transient Geph or
+deadline failure cannot suppress the next independent first connection. The
+learned route is still exact-host, bounded, and shared by every eligible
+connection; ordinary 403/429, CAPTCHA/login, timeout, slow usable direct,
+Discord, YouTube, and googlevideo behavior is unchanged.
 
 ## Transfer Backlog
 

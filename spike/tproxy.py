@@ -6829,11 +6829,12 @@ async def _run_initial_route_preflight(
 ):
     """Hold one first ClientHello while exact-host route evidence is gathered.
 
-    A healthy direct root stays browser-free.  Any semantic denial, framed
-    incomplete response, critical bootstrap comparison, or local headless
-    fallback additionally requires a foreground, recently-used signed
-    Safari/Chrome socket.  The exact-host work remains coalesced and bounded;
-    no page-private bytes enter routing state, status, or logs.
+    A healthy direct root stays browser-free.  A strict, complete semantic
+    denial may learn only after the same exact host has a complete usable
+    response through the owned Geph exit.  Ambiguous incomplete, retry, and
+    critical-bootstrap paths additionally require a foreground, recently-used
+    signed Safari/Chrome socket.  The exact-host work remains coalesced and
+    bounded; no page-private bytes enter routing state, status, or logs.
     """
     h = normalize_host(host)
     preflight_started = time.monotonic()
@@ -6933,16 +6934,15 @@ async def _run_initial_route_preflight(
                 eligible_asset,
                 eligible_asset_is_cross_origin,
             ) = _select_route_preflight_bootstrap_asset(bootstrap_assets, h)
-        actionable_browser_observation = bool(
+        requires_browser_provenance = bool(
             direct_retryable_inconclusive
-            or outcome in SEMANTIC_DENIAL_OUTCOMES
             or (
                 outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
                 and direct_safe_incomplete
             )
             or eligible_asset is not None
         )
-        if actionable_browser_observation:
+        if requires_browser_provenance:
             # Same-origin bootstrap inspection remains on the ordinary 500 ms
             # healthy path.  A deadline-expired root probe or a critical
             # cross-origin child is different: the parent must stay held until
@@ -7040,7 +7040,25 @@ async def _run_initial_route_preflight(
             remaining = deadline - time.monotonic()
             if remaining > 0:
                 proof = None
-                if outcome != SEMANTIC_OUTCOME_EDGE_DENIAL:
+                if outcome in SEMANTIC_DENIAL_OUTCOMES:
+                    # A complete strict denial is already independent direct
+                    # semantic evidence.  Require the smaller exact-host
+                    # owned-Geph payload proof, but do not make network-level
+                    # recovery depend on which application happens to be
+                    # frontmost.  Ordinary 403s never reach this branch.
+                    proof = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _prove_preflight_owned_geph_route,
+                            h,
+                            outcome,
+                            remaining,
+                            geph_probe,
+                            job,
+                            deadline,
+                        ),
+                        timeout=remaining + 0.1,
+                    )
+                else:
                     proof = await _run_headless_owned_geph_preflight(
                         job,
                         peer_endpoint,
@@ -7048,26 +7066,6 @@ async def _run_initial_route_preflight(
                         provenance_assessor=provenance_assessor,
                         provenance_already_accepted=True,
                     )
-                # Strict edge-denial wording is already independently
-                # classified from a complete direct response.  Prefer the
-                # smaller payload proof so this recovery does not depend on a
-                # browser worker.  Other strict denials retain it as fallback.
-                # Ordinary 403s never reach this branch.
-                if proof is None and outcome in SEMANTIC_DENIAL_OUTCOMES:
-                    remaining = deadline - time.monotonic()
-                    if remaining > 0:
-                        proof = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                _prove_preflight_owned_geph_route,
-                                h,
-                                outcome,
-                                remaining,
-                                geph_probe,
-                                job,
-                                deadline,
-                            ),
-                            timeout=remaining + 0.1,
-                        )
                 selected = _commit_preflight_owned_geph_proof(proof, future)
                 if selected:
                     cache_outcome = "owned_geph"
@@ -7076,6 +7074,12 @@ async def _run_initial_route_preflight(
                         job.capability,
                         deadline,
                     )
+                elif outcome in SEMANTIC_DENIAL_OUTCOMES:
+                    # A failed alternate-route proof is not a decision that
+                    # the denied direct response is healthy.  Leave the exact
+                    # host retryable so a later independent first connection
+                    # can recover after a transient proof/backend failure.
+                    publish_cache = False
                 elif (
                     outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
                     and direct_safe_incomplete
