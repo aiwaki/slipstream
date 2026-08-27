@@ -86,15 +86,11 @@ crate is linked into the Windows production host.
 
 ## Build
 
-Build the self-contained Python daemon first:
-
-```bash
-cd spike
-./build_daemon.sh
-cd ..
-rm -rf app-tauri/src-tauri/slipstreamd
-cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
-```
+The app scripts rebuild the self-contained Python daemon with Python 3.13,
+stage it into Tauri through a temporary directory, and verify that the staged
+executable has the same SHA-256 as the fresh PyInstaller output. A tray rebuild
+therefore cannot silently reuse an older frozen daemon. If `python3.13` is not
+on `PATH`, set `SLIPSTREAM_PYTHON_313` to its exact executable path.
 
 A complete local app build also needs the Geph sidecar at:
 

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -106,7 +107,122 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("tauri.local.conf.json", scripts["build:local"])
         self.assertIn("tauri build", scripts["build:release"])
         self.assertIn(f"--target {TAURI_RELEASE_TARGET}", scripts["build:release"])
+        self.assertEqual(
+            scripts["build:daemon"],
+            "../scripts/build_and_stage_daemon.sh",
+        )
+        for name in ("build:local", "build:release"):
+            self.assertIn("npm run build:daemon", scripts[name])
+            self.assertLess(
+                scripts[name].index("npm run build:daemon"),
+                scripts[name].index("tauri build"),
+            )
         self.assertEqual(scripts["build"], "npm run build:release")
+
+    def test_app_build_rebuilds_and_hash_checks_the_frozen_daemon(self) -> None:
+        builder = ROOT / "scripts/build_and_stage_daemon.sh"
+        self.assertTrue(os.access(builder, os.X_OK))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            scripts_dir = repo / "scripts"
+            spike_dir = repo / "spike"
+            resources_dir = repo / "app-tauri/src-tauri"
+            scripts_dir.mkdir()
+            spike_dir.mkdir()
+            resources_dir.mkdir(parents=True)
+
+            staged_builder = scripts_dir / builder.name
+            staged_builder.write_bytes(builder.read_bytes())
+            staged_builder.chmod(0o755)
+            fake_python = repo / "python3.13"
+            write_executable(fake_python, 'printf "3.13\\n"\n')
+            write_executable(
+                spike_dir / "build_daemon.sh",
+                """root="$(cd "$(dirname "$0")/.." && pwd -P)"
+mkdir -p "$root/spike/dist/slipstreamd"
+printf 'fresh-daemon\\n' > "$root/spike/dist/slipstreamd/slipstreamd"
+chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
+printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
+""",
+            )
+
+            target = resources_dir / "slipstreamd"
+            base_env = os.environ.copy()
+            base_env.pop("SLIPSTREAM_BUILD_STAGE_TESTING", None)
+            base_env.pop("SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT", None)
+            base_env["SLIPSTREAM_PYTHON_313"] = str(fake_python)
+
+            def seed_preceding_daemon() -> None:
+                shutil.rmtree(target, ignore_errors=True)
+                target.mkdir()
+                executable = target / "slipstreamd"
+                executable.write_text("preceding-daemon\n", encoding="utf-8")
+                executable.chmod(0o755)
+                (target / "resource.dat").write_text(
+                    "preceding-resource\n", encoding="utf-8"
+                )
+
+            seed_preceding_daemon()
+            completed = subprocess.run(
+                [str(staged_builder)],
+                cwd=repo / "app-tauri",
+                env=base_env,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(
+                (target / "slipstreamd").read_text(encoding="utf-8"),
+                "fresh-daemon\n",
+            )
+            self.assertEqual(
+                (target / "resource.dat").read_text(encoding="utf-8"),
+                "fresh-resource\n",
+            )
+            self.assertEqual(list(resources_dir.glob(".slipstreamd-stage.*")), [])
+
+            expected_status = {"after_backup": 97, "after_swap": 1}
+            for failpoint in expected_status:
+                with self.subTest(failpoint=failpoint):
+                    seed_preceding_daemon()
+                    env = base_env.copy()
+                    env["SLIPSTREAM_BUILD_STAGE_TESTING"] = "1"
+                    env["SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT"] = failpoint
+                    failed = subprocess.run(
+                        [str(staged_builder)],
+                        cwd=repo / "app-tauri",
+                        env=env,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    self.assertEqual(
+                        failed.returncode, expected_status[failpoint], failed.stderr
+                    )
+                    self.assertIn(
+                        f"Forced build-stage test failure: {failpoint}",
+                        failed.stderr,
+                    )
+                    if failpoint == "after_swap":
+                        self.assertIn(
+                            "Staged daemon does not match the freshly built daemon.",
+                            failed.stderr,
+                        )
+                    self.assertEqual(
+                        (target / "slipstreamd").read_text(encoding="utf-8"),
+                        "preceding-daemon\n",
+                    )
+                    self.assertEqual(
+                        (target / "resource.dat").read_text(encoding="utf-8"),
+                        "preceding-resource\n",
+                    )
+                    self.assertEqual(
+                        list(resources_dir.glob(".slipstreamd-stage.*")), []
+                    )
 
     def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
         config = json.loads((ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text())

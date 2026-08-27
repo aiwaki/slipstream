@@ -13,10 +13,10 @@ file.
 Update 2026-08-28 (critical-child deadline root cause reproduced and corrected
 locally): the user's dirty primary checkout remains untouched. Work continues
 only in the isolated PR #373 worktree on `codex/aikido-cdn-recovery`; its exact
-committed base is `eccfccf9bd650027368b245df6a2b84758c504e2`. Live PR #373
+recovery head is `d9b79f02e7cb5c1c1ef44be3edab1d5be2fc474e`. Live PR #373
 remains open at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`
 with its old exact-head CI and dependency audit green. The later local commits
-and the current uncommitted timing correction have not yet been pushed.
+and the current uncommitted packaging safeguard have not yet been pushed.
 
 The installed exact-`eccfccf` build removed the incorrect foreground/recent-
 input prerequisite from network-authoritative critical-child comparison, but a
@@ -53,7 +53,7 @@ Ten focused deterministic regressions pass, including simulated `6.8`-second
 EOF followed by a `1.5`-second Geph proof, simulated slow idle and slow complete
 direct outcomes, distinct one-shot authorities, same-object mismatch, and the
 existing provenance boundary. The adjacent routing/provenance/bootstrap set is
-green (`685 passed`), the complete local project is green (`1782 passed`, `181`
+green (`685 passed`), the complete local project is green (`1783 passed`, `181`
 subtests, and only the existing Scapy finite-field-DH deprecation warning),
 documentation checks pass (`8 passed`), and `git diff --check` is clean. The
 exact current blocking production function also returned
@@ -64,6 +64,19 @@ ordinary Chrome and one Safari validation of complete Aikido and Capacitor
 resources. No account-backed workflow, publisher, or 30-minute soak is
 relevant to this correction, and no new physical browser success is claimed
 yet.
+
+The first local Tauri rebuild exposed a separate repeated packaging hazard:
+`npm run build:local` rebuilt the tray but silently reused the preceding frozen
+daemon (`sha256:6b43cc0d...`), so installing that apparently fresh app would
+not have installed the routing correction. The canonical local and release npm
+scripts now rebuild and transactionally stage the Python 3.13 daemon before
+Tauri and compare the staged executable's SHA-256 with the fresh PyInstaller
+output. Build-configuration and documentation tests pin that order and
+verification (`60 passed`). The green full-suite baseline is reused because
+the later diff changes only build orchestration and documentation; the
+repository now explicitly requires change-scoped verification instead of
+rerunning unchanged broad gates. The current fresh daemon is
+`sha256:9ba7583c...`; the discarded intermediate bundle was not installed.
 
 Update 2026-08-26 (first-request handoff correction locally green): the user's
 dirty primary checkout remains untouched; work continues only in the isolated

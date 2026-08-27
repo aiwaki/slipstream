@@ -5,11 +5,12 @@
   "description": "Slipstream menu-bar tray (Tauri v2)",
   "scripts": {
     "sync-version": "python3 ../scripts/sync_version.py",
+    "build:daemon": "../scripts/build_and_stage_daemon.sh",
     "tauri": "tauri",
     "dev": "npm run sync-version && tauri dev",
     "build": "npm run build:release",
-    "build:local": "npm run sync-version && tauri build --config src-tauri/tauri.local.conf.json",
-    "build:release": "npm run sync-version && tauri build --target aarch64-apple-darwin"
+    "build:local": "npm run sync-version && npm run build:daemon && tauri build --config src-tauri/tauri.local.conf.json",
+    "build:release": "npm run sync-version && npm run build:daemon && tauri build --target aarch64-apple-darwin"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
