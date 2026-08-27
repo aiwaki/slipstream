@@ -75,15 +75,28 @@ direct outcomes, distinct one-shot authorities, same-object mismatch, and the
 existing provenance boundary. The adjacent routing/provenance/bootstrap set is
 green (`685 passed`), the complete local project is green (`1783 passed`, `181`
 subtests, and only the existing Scapy finite-field-DH deprecation warning),
-documentation checks pass (`8 passed`), and `git diff --check` is clean. The
+documentation checks pass (`9 passed`), and `git diff --check` is clean. The
 exact current blocking production function also returned
 `_RoutePreflightOwnedGephProof` for the live Aikido object in `9.251` seconds
-with all `65,536` Geph bytes, without committing a route. The next verified
-action is an exact commit and automated rebuild/install, then one genuinely
-fresh ordinary Chrome and one Safari validation of complete Aikido and Capacitor
-resources. No account-backed workflow, publisher, or 30-minute soak is
-relevant to this correction, and no new physical browser success is claimed
-yet.
+with all `65,536` Geph bytes, without committing a route.
+
+The correction is committed as product commit
+`dfe300e017103dc3db7de25dea795cd49cc02567`. The canonical local build and
+bundle verifier passed from that exact commit: fresh, staged, and bundled
+daemon copies all have SHA-256
+`23f5ce6342d396d7e6789cf1e2e97f5ed45efb6029c23b43b6e4766ad7b6c707`;
+the app bundle is structurally valid and ad-hoc signed, with bundle tree
+SHA-256 `87df7511ef8481110d091fe63904ffae7943036bcc6460e7f078e8726b5b33b9`.
+It is intentionally unnotarized. The old failed temporary Chrome session was
+closed cleanly. Installation is the only remaining local transaction:
+`sudo -n true` reports that administrator authorization is required, and the
+root-owned `0700` install directory cannot be updated without it. Do not test
+the candidate against the still-installed old daemon or treat such a run as
+product evidence. After one authorized install, run the canonical installed
+verifier, then one genuinely fresh ordinary Chrome and one real Safari
+validation of complete Aikido and Capacitor resources. No account-backed
+workflow, publisher, full suite, or 30-minute soak is relevant to this local
+causal correction, and no new physical browser success is claimed yet.
 
 The first local Tauri rebuild exposed a separate repeated packaging hazard:
 `npm run build:local` rebuilt the tray but silently reused the preceding frozen
