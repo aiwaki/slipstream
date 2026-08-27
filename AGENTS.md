@@ -64,6 +64,12 @@
 - Record both the reused baseline and the exact focused verification so a
   resumed agent does not spend time or account-backed attempts proving
   unchanged behavior again.
+- After a Tauri app build, use `scripts/verify_macos_app_bundle.py` (normally
+  through the npm build scripts) as the single fresh/staged/bundled boundary.
+  Before workstation installation or physical browser validation, require that
+  canonical verifier; after installation use `npm run verify:local-install` to
+  bind the attestation to fresh StatusV2 and the live launchd service. Do not
+  repeatedly reconstruct this proof with ad-hoc hash commands.
 
 ## Routing Invariants
 

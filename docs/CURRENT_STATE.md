@@ -15,8 +15,10 @@ locally): the user's dirty primary checkout remains untouched. Work continues
 only in the isolated PR #373 worktree on `codex/aikido-cdn-recovery`; its exact
 recovery head is `d9b79f02e7cb5c1c1ef44be3edab1d5be2fc474e`. Live PR #373
 remains open at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`
-with its old exact-head CI and dependency audit green. The later local commits
-and the current uncommitted packaging safeguard have not yet been pushed.
+with its old exact-head CI and dependency audit green. The current automation
+work is based on packaging safeguard
+`dc54fbc0ccccb802be4e6272640c90d8d4bd1849`; the later local commits,
+including the canonical verifier, have not yet been pushed.
 
 The installed exact-`eccfccf` build removed the incorrect foreground/recent-
 input prerequisite from network-authoritative critical-child comparison, but a
@@ -77,6 +79,31 @@ the later diff changes only build orchestration and documentation; the
 repository now explicitly requires change-scoped verification instead of
 rerunning unchanged broad gates. The current fresh daemon is
 `sha256:9ba7583c...`; the discarded intermediate bundle was not installed.
+
+The former manual post-build hash reconstruction is now one canonical,
+read-only verifier wired into both local/release npm builds and every packaged
+macOS CI boundary. It checks fresh/staged executable equality, full source and
+materialized PyInstaller trees, the final app tree and critical binaries,
+architecture/helper/routing/signature invariants, and—when requested—the exact
+installed app, strict schema-3 attestation/witness/plist contract, fresh
+StatusV2 heartbeat, and live launchd program/arguments/PID. The implementation
+snapshots symlinks before materialization, rejects JSON booleans/floats where
+Rust requires integers or booleans, and orders signature/build-chain checks
+before any bundled executable runs. It also requires the exact production
+LaunchDaemon key set, a complete and unambiguous live launchctl snapshot, a
+stable production StatusV2 phase, and operational PF flags for an active
+daemon. Both bundle version fields must match `VERSION`, and the independently
+verified build-chain hash must equal the daemon hash read from the authenticated
+app. The focused verifier/build/docs set is green (`83 tests`);
+`npm run verify:local-install` passes against the real
+installed `dc54fbc` bundle and binds PID `12185` across attestation, StatusV2,
+and launchd. Fresh/staged/bundled daemon SHA-256 remains
+`9ba7583cc9d00baca88693021441100f01881dcf9510f49d3c987497f39bd596`.
+Direct root-only daemon hashing, listener ownership, and kernel PF inspection
+remain explicitly `not_run`; no full suite, protected run, browser matrix, or
+soak was repeated because this diff is confined to verification automation and
+documentation. Physical Chrome/Safari routing validation remains the next
+product gate.
 
 Update 2026-08-26 (first-request handoff correction locally green): the user's
 dirty primary checkout remains untouched; work continues only in the isolated

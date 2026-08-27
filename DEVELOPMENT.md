@@ -87,10 +87,13 @@ crate is linked into the Windows production host.
 ## Build
 
 The app scripts rebuild the self-contained Python daemon with Python 3.13,
-stage it into Tauri through a temporary directory, and verify that the staged
-executable has the same SHA-256 as the fresh PyInstaller output. A tray rebuild
-therefore cannot silently reuse an older frozen daemon. If `python3.13` is not
-on `PATH`, set `SLIPSTREAM_PYTHON_313` to its exact executable path.
+stage it into Tauri through a temporary directory, build the final app, and run
+the canonical macOS bundle verifier. That verifier checks the complete
+fresh/staged/materialized bundle chain, critical binary hashes and
+architectures, app identity, helper isolation, routing invariants, and the
+ad-hoc signature's integrity. A tray rebuild therefore cannot silently reuse
+an older frozen daemon. If `python3.13` is not on `PATH`, set
+`SLIPSTREAM_PYTHON_313` to its exact executable path.
 
 A complete local app build also needs the Geph sidecar at:
 
@@ -105,6 +108,22 @@ cd app-tauri
 npm ci
 npm run build:local
 ```
+
+After installing that exact build, compare the built and installed app trees
+and validate the schema-3 install attestation, witness, exact LaunchDaemon
+plist, fresh StatusV2 heartbeat, and live `launchctl` PID/program/arguments
+without opening the root-only daemon:
+
+```bash
+npm run verify:local-install
+```
+
+The command binds the attested PID to both StatusV2 and the running launchd
+service. Checks that require root access to hash `/usr/local/slipstream`, prove
+listener ownership, or inspect kernel PF state remain `not_run`; it does not
+silently treat them as passed. The current macOS build is ad-hoc signed and
+unnotarized, so this verification does not claim notarization or Gatekeeper
+compatibility.
 
 Release builds use `npm run build:release` and require the updater signing
 environment. The bundled Geph client is built by

@@ -135,18 +135,20 @@ packaged OS-observed notification gate with no activation. A real released
 future `.24` gate. Until the applicable packaged gate passes, treat the feature
 as implemented but not end-to-end released.
 
-For a packaged candidate, verify the runtime without starting it:
+For a locally built and installed candidate, run the canonical verifier without
+starting or opening the root-only daemon:
 
 ```bash
-test -x /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell
-test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' \
-  /Applications/Slipstream.app/Contents/Info.plist)" = true
-test -x /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
-/usr/bin/codesign --verify --strict \
-  /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
-python3 -m json.tool \
-  /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/manifest.json
+cd app-tauri
+npm run verify:local-install
 ```
+
+It verifies the exact fresh/staged/bundled/installed app chain, app identity,
+architectures, helper isolation, ad-hoc signature integrity, schema-3 install
+attestation, hard-link witness, exact LaunchDaemon contract, fresh StatusV2
+heartbeat, and live launchd PID/program/arguments. Direct hashing of the
+root-only installed daemon, listener ownership, and kernel PF checks require
+privilege and remain explicitly `not_run` in this read-only command.
 
 ### The menu flips to Off and then recovers by itself
 
@@ -1375,12 +1377,15 @@ never fall through to Geph.
 
 ## Installed Daemon
 
-After rebuilding the daemon, keep all copies in sync:
+After rebuilding and installing the daemon, verify every copy and its install
+evidence with the same canonical command used by the build and CI:
 
 ```bash
-shasum -a 256 \
-  spike/dist/slipstreamd/slipstreamd \
-  app-tauri/src-tauri/slipstreamd/slipstreamd \
-  /Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd \
-  /usr/local/slipstream/slipstreamd
+cd app-tauri
+npm run verify:local-install
 ```
+
+Do not substitute a manual list of `shasum` commands: it misses non-daemon app
+drift and cannot safely traverse the root-only installed runtime. The verifier
+uses the production attestation plus hard-link witness for that boundary, then
+binds its PID to the fresh StatusV2 publisher and live launchd service.

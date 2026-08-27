@@ -111,12 +111,34 @@ class BuildConfigTests(unittest.TestCase):
             scripts["build:daemon"],
             "../scripts/build_and_stage_daemon.sh",
         )
-        for name in ("build:local", "build:release"):
+        verifier = "python3 ../scripts/verify_macos_app_bundle.py"
+        for name, verifier_name in (
+            ("build:local", "verify:bundle:local"),
+            ("build:release", "verify:bundle:release"),
+        ):
             self.assertIn("npm run build:daemon", scripts[name])
+            self.assertIn(f"npm run {verifier_name}", scripts[name])
             self.assertLess(
                 scripts[name].index("npm run build:daemon"),
                 scripts[name].index("tauri build"),
             )
+            self.assertLess(
+                scripts[name].index("tauri build"),
+                scripts[name].index(f"npm run {verifier_name}"),
+            )
+            self.assertTrue(scripts[verifier_name].startswith(verifier))
+            self.assertIn(
+                "--fresh-daemon ../spike/dist/slipstreamd/slipstreamd",
+                scripts[verifier_name],
+            )
+            self.assertIn(
+                "--staged-daemon src-tauri/slipstreamd/slipstreamd",
+                scripts[verifier_name],
+            )
+        self.assertEqual(
+            scripts["verify:local-install"],
+            "npm run verify:bundle:local -- --installed-app /Applications/Slipstream.app",
+        )
         self.assertEqual(scripts["build"], "npm run build:release")
 
     def test_app_build_rebuilds_and_hash_checks_the_frozen_daemon(self) -> None:
@@ -240,6 +262,12 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         owned_geph = (
             ROOT / ".github/workflows/owned-geph-qualification.yml"
         ).read_text(encoding="utf-8")
+        readiness = (
+            ROOT / ".github/workflows/release-readiness.yml"
+        ).read_text(encoding="utf-8")
+        verifier = (ROOT / "scripts/verify_macos_app_bundle.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertEqual(config["mainBinaryName"], "slipstream")
         self.assertNotIn(
@@ -252,28 +280,19 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         self.assertIn('#[path = "../browser_probe.rs"]', helper_main)
         self.assertNotIn("use slipstream_lib", watchdog_main)
         self.assertIn('#[path = "../updater_transaction.rs"]', watchdog_main)
-        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', workflow)
-        self.assertIn('/usr/bin/otool -L "$helper"', workflow)
-        self.assertIn(
-            'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
-            workflow,
-        )
-        self.assertIn('/usr/bin/codesign --verify --strict "$watchdog"', workflow)
-        self.assertIn('/usr/bin/otool -L "$watchdog"', workflow)
-        self.assertIn("Print :CFBundleExecutable", workflow)
-        self.assertIn(
-            'helper="$app/Contents/MacOS/slipstream-browser-probe"',
-            owned_geph,
-        )
-        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', owned_geph)
-        self.assertIn('/usr/bin/otool -L "$helper"', owned_geph)
-        self.assertIn(
-            'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
-            owned_geph,
-        )
-        self.assertIn('/usr/bin/codesign --verify --strict "$watchdog"', owned_geph)
-        self.assertIn('/usr/bin/otool -L "$watchdog"', owned_geph)
-        self.assertIn("Print :CFBundleExecutable", owned_geph)
+        self.assertIn('"slipstream-browser-probe"', verifier)
+        self.assertIn('"slipstream-update-watchdog"', verifier)
+        self.assertIn('/usr/bin/codesign', verifier)
+        self.assertIn('/usr/bin/otool', verifier)
+        self.assertIn("GUI_FRAMEWORKS", verifier)
+        self.assertIn("def verify_status_v2(", verifier)
+        self.assertIn("def parse_launchctl_print(", verifier)
+        self.assertIn('[str(INSTALLED_DAEMON), "--port", str(LISTENER_PORT)]', verifier)
+        for packaged_workflow in (workflow, owned_geph, readiness):
+            self.assertIn(
+                "python3 scripts/verify_macos_app_bundle.py",
+                packaged_workflow,
+            )
         self.assertIn(
             "cargo test --locked --bin slipstream-browser-probe",
             workflow,
@@ -475,12 +494,20 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         self.assertIn('test -f "$bundle/macos/Slipstream.app.tar.gz"', ci)
         self.assertIn("needs: [changes, packaged-app-build]", ci)
         self.assertIn("Assemble immutable main release candidate", ci)
+        self.assertIn("python3 scripts/verify_macos_app_bundle.py", ci)
+        self.assertIn("--fresh-daemon spike/dist/slipstreamd/slipstreamd", ci)
+        self.assertIn(
+            "--staged-daemon app-tauri/src-tauri/slipstreamd/slipstreamd",
+            ci,
+        )
         self.assertGreaterEqual(
             ci.count("name: release-candidate-${{ github.sha }}"), 3
         )
 
         self.assertIn("release-candidate-${{ github.sha }}", qualification)
         self.assertIn("scripts/release_candidate.py verify", qualification)
+        self.assertIn("python3 scripts/verify_macos_app_bundle.py", qualification)
+        self.assertNotIn("--fresh-daemon", qualification)
         self.assertIn("name: owned-geph-diagnostic", qualification)
         self.assertIn("inputs.diagnostic_only == true", qualification)
         self.assertIn("group: account-backed-geph", qualification)
@@ -493,6 +520,9 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         self.assertNotIn("Build the packaged app", qualification)
 
         self.assertIn("release-candidate-${{ github.sha }}", readiness)
+        self.assertIn("scripts/release_candidate.py verify", readiness)
+        self.assertIn("python3 scripts/verify_macos_app_bundle.py", readiness)
+        self.assertNotIn("--fresh-daemon", readiness)
         self.assertIn("scripts/live_site_release_smoke.py", readiness)
         self.assertIn("scripts/packaged_invisibility_soak.py", readiness)
         self.assertIn("--duration-seconds 1800", readiness)

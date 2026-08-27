@@ -711,45 +711,10 @@ jobs:
         run: |
           set -euo pipefail
           app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
-          test -d "$app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
-            = slipstream
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
-            = "$(tr -d '[:space:]' < VERSION)"
-          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
-          /usr/bin/lipo "$app/Contents/Resources/slipstreamd/slipstreamd" \
-            -verify_arch arm64
-          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
-          helper="$app/Contents/MacOS/slipstream-browser-probe"
-          test -x "$helper"
-          /usr/bin/lipo "$helper" -verify_arch arm64
-          /usr/bin/codesign --verify --strict "$helper"
-          if /usr/bin/otool -L "$helper" | /usr/bin/grep -E \
-            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-            echo "browser-probe helper links a GUI framework" >&2
-            exit 1
-          fi
-          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
-          test -x "$watchdog"
-          /usr/bin/lipo "$watchdog" -verify_arch arm64
-          /usr/bin/codesign --verify --strict "$watchdog"
-          if /usr/bin/otool -L "$watchdog" | /usr/bin/grep -E \
-            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-            echo "update watchdog links a GUI framework" >&2
-            exit 1
-          fi
-          test -x "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell"
-          test -f "$app/Contents/Resources/chromium-headless-shell/LICENSE.headless_shell"
-          test -f "$app/Contents/Resources/chromium-headless-shell/manifest.json"
-          /usr/bin/lipo \
-            "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell" \
-            -verify_arch arm64
-          /usr/bin/codesign --verify --deep --strict "$app"
-          daemon="$app/Contents/Resources/slipstreamd/slipstreamd"
-          test "$("$daemon" --classify-host rr1---sn-test.googlevideo.com)" = \
-            '{"host": "rr1---sn-test.googlevideo.com", "route_class": "direct_first", "service_group": "youtube_video", "strategy_set": "direct_first"}'
-          test "$("$daemon" --classify-host www.youtube.com)" = \
-            '{"host": "www.youtube.com", "route_class": "local_bypass", "service_group": "youtube_video", "strategy_set": "fake_only"}'
+          python3 scripts/verify_macos_app_bundle.py \
+            --app-bundle "$app" \
+            --fresh-daemon spike/dist/slipstreamd/slipstreamd \
+            --staged-daemon app-tauri/src-tauri/slipstreamd/slipstreamd
 
       - name: Freeze the updater archive and its exact-run signing identity
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

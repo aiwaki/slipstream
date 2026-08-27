@@ -9,8 +9,11 @@
     "tauri": "tauri",
     "dev": "npm run sync-version && tauri dev",
     "build": "npm run build:release",
-    "build:local": "npm run sync-version && npm run build:daemon && tauri build --config src-tauri/tauri.local.conf.json",
-    "build:release": "npm run sync-version && npm run build:daemon && tauri build --target aarch64-apple-darwin"
+    "verify:bundle:local": "python3 ../scripts/verify_macos_app_bundle.py --app-bundle src-tauri/target/release/bundle/macos/Slipstream.app --fresh-daemon ../spike/dist/slipstreamd/slipstreamd --staged-daemon src-tauri/slipstreamd/slipstreamd",
+    "verify:bundle:release": "python3 ../scripts/verify_macos_app_bundle.py --app-bundle src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Slipstream.app --fresh-daemon ../spike/dist/slipstreamd/slipstreamd --staged-daemon src-tauri/slipstreamd/slipstreamd",
+    "verify:local-install": "npm run verify:bundle:local -- --installed-app /Applications/Slipstream.app",
+    "build:local": "npm run sync-version && npm run build:daemon && tauri build --config src-tauri/tauri.local.conf.json && npm run verify:bundle:local",
+    "build:release": "npm run sync-version && npm run build:daemon && tauri build --target aarch64-apple-darwin && npm run verify:bundle:release"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
