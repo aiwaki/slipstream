@@ -10938,24 +10938,206 @@ def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_without_ui_prove
     assert tproxy._route_preflight_cache[asset_host][1] == "owned_geph"
 
 
+def test_cross_origin_bootstrap_delayed_eof_gets_separate_geph_authority(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "late-eof-parent.example"
+    asset_host = "late-eof-critical-cdn.example"
+    minted_jobs = []
+    direct_deadlines = []
+    geph_deadlines = []
+    original_mint = tproxy._new_direct_route_preflight_job
+    clock = [100.0]
+    wall = [1_000.0]
+
+    monkeypatch.setattr(
+        tproxy,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: clock[0],
+            time=lambda: wall[0],
+        ),
+    )
+
+    def mint(host, now_unix_ms=None):
+        job = original_mint(host, now_unix_ms)
+        minted_jobs.append((host, job))
+        return job
+
+    def direct_asset(ip, host, request, direct_deadline, final_deadline):
+        direct_deadlines.append((
+            ip,
+            host,
+            request,
+            direct_deadline,
+            final_deadline,
+        ))
+        clock[0] += 6.8
+        wall[0] += 6.8
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            body_bytes=16 * 1024,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF,
+        )
+
+    def geph_asset(host, request, deadline):
+        geph_deadlines.append((host, request, deadline))
+        clock[0] += 1.5
+        wall[0] += 1.5
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+            body_bytes=65_536,
+        )
+
+    monkeypatch.setattr(tproxy, "_new_direct_route_preflight_job", mint)
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: pytest.fail(
+            "critical-child network proof consulted UI provenance"
+        ),
+    )
+    started = clock[0]
+    handoff_deadline = (
+        started + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+    )
+
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            deadline_monotonic=handoff_deadline,
+            direct_probe=lambda *_args: _bootstrap_root_observation(asset_host),
+            bootstrap_direct_probe=direct_asset,
+            bootstrap_geph_probe=geph_asset,
+            bootstrap_resolver=lambda host: (
+                ["1.1.1.1"] if host == asset_host else []
+            ),
+        )
+    )
+
+    assert claim is None
+    assert len(direct_deadlines) == 1
+    assert len(geph_deadlines) == 1
+    direct = direct_deadlines[0]
+    assert direct[:2] == ("1.1.1.1", asset_host)
+    assert direct[3] - started > 7.5
+    assert direct[4] == pytest.approx(handoff_deadline, abs=0.05)
+    assert direct[4] - direct[3] >= (
+        tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE - 0.05
+    )
+    assert geph_deadlines[0][1] == direct[2]
+    assert geph_deadlines[0][2] == pytest.approx(
+        handoff_deadline,
+        abs=0.05,
+    )
+    asset_jobs = [job for host, job in minted_jobs if host == asset_host]
+    assert len(asset_jobs) == 2
+    assert asset_jobs[0].capability != asset_jobs[1].capability
+    observed_at_unix_ms = int(wall[0] * 1000)
+    assert observed_at_unix_ms > asset_jobs[0].deadline_unix_ms
+    assert observed_at_unix_ms < asset_jobs[1].deadline_unix_ms
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert tproxy._auto_geph_learned_exact_host(asset_host)
+
+
+def test_cross_origin_bootstrap_geph_probe_has_its_own_eight_second_capability(
+    monkeypatch,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "fast-eof-parent.example"
+    asset_host = "fast-eof-critical-cdn.example"
+    geph_deadlines = []
+    clock = [100.0]
+    wall = [1_000.0]
+
+    monkeypatch.setattr(
+        tproxy,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: clock[0],
+            time=lambda: wall[0],
+        ),
+    )
+
+    def direct_asset(_ip, _host, _request, _direct_deadline, _final_deadline):
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            body_bytes=16 * 1024,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF,
+        )
+
+    def geph_asset(_host, _request, deadline):
+        geph_deadlines.append(deadline)
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+            body_bytes=65_536,
+        )
+
+    started = clock[0]
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            deadline_monotonic=(
+                started + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+            ),
+            direct_probe=lambda *_args: _bootstrap_root_observation(asset_host),
+            bootstrap_direct_probe=direct_asset,
+            bootstrap_geph_probe=geph_asset,
+            bootstrap_resolver=lambda _host: ["1.1.1.1"],
+        )
+    )
+
+    assert claim is None
+    assert len(geph_deadlines) == 1
+    assert geph_deadlines[0] == pytest.approx(
+        started + (tproxy.route_preflight.MAX_DEADLINE_MS / 1000.0),
+        abs=0.05,
+    )
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert tproxy._auto_geph_learned_exact_host(asset_host)
+
+
 def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch):
     _enable_owned_geph_preflight(monkeypatch)
     parent_host = "slow-app-shell.example"
     asset_host = "slow-critical-cdn.example"
     direct_requests = []
+    clock = [100.0]
+    wall = [1_000.0]
 
-    def direct_asset(ip, host, request, _direct_deadline, _final_deadline):
-        direct_requests.append((ip, host, request))
+    monkeypatch.setattr(
+        tproxy,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: clock[0],
+            time=lambda: wall[0],
+        ),
+    )
+
+    def direct_asset(ip, host, request, direct_deadline, final_deadline):
+        direct_requests.append(
+            (ip, host, request, direct_deadline, final_deadline)
+        )
+        clock[0] += 6.8
+        wall[0] += 6.8
         return _bootstrap_evidence(
             tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
             body_bytes=16 * 1024,
             termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT,
         )
 
+    started = clock[0]
+    handoff_deadline = (
+        started + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+    )
     claim = asyncio.run(
         tproxy._run_initial_route_preflight(
             parent_host,
             "8.8.8.8",
+            deadline_monotonic=handoff_deadline,
             direct_probe=lambda *_args: _bootstrap_root_observation(asset_host),
             bootstrap_direct_probe=direct_asset,
             bootstrap_geph_probe=lambda *_args: pytest.fail(
@@ -10967,6 +11149,11 @@ def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch):
 
     assert claim is None
     assert direct_requests[0][:2] == ("1.1.1.1", asset_host)
+    assert direct_requests[0][3] - started > 7.5
+    assert direct_requests[0][4] == pytest.approx(
+        handoff_deadline,
+        abs=0.05,
+    )
     assert parent_host not in tproxy._route_preflight_cache
     assert asset_host not in tproxy._route_preflight_cache
     assert not tproxy._auto_geph_learned_exact_host(parent_host)
@@ -11181,25 +11368,58 @@ def test_route_preflight_never_uses_geph_for_complete_bootstrap_direct(
 ):
     _enable_owned_geph_preflight(monkeypatch)
     asset_host = "healthy-cdn.example"
+    direct_deadlines = []
+    clock = [100.0]
+    wall = [1_000.0]
+
+    monkeypatch.setattr(
+        tproxy,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: clock[0],
+            time=lambda: wall[0],
+        ),
+    )
 
     def geph_asset(*_args):
         raise AssertionError("complete direct bootstrap unexpectedly probed Geph")
+
+    def direct_asset(
+        _ip,
+        _host,
+        _request,
+        direct_deadline,
+        final_deadline,
+    ):
+        direct_deadlines.append((direct_deadline, final_deadline))
+        clock[0] += 6.8
+        wall[0] += 6.8
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+            body_bytes=65_536,
+        )
+
+    started = clock[0]
+    handoff_deadline = (
+        started + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
+    )
 
     assert asyncio.run(
         tproxy._run_initial_route_preflight(
             "app-shell.example",
             "8.8.8.8",
+            deadline_monotonic=handoff_deadline,
             direct_probe=lambda *_args: _bootstrap_root_observation(asset_host),
-            bootstrap_direct_probe=lambda *_args: (
-                _bootstrap_evidence(
-                    tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
-                    body_bytes=65_536,
-                )
-            ),
+            bootstrap_direct_probe=direct_asset,
             bootstrap_geph_probe=geph_asset,
             bootstrap_resolver=lambda _host: ["1.1.1.1"],
         )
     ) is None
+    assert direct_deadlines[0][0] - started > 7.5
+    assert direct_deadlines[0][1] == pytest.approx(
+        handoff_deadline,
+        abs=0.05,
+    )
     assert not tproxy._auto_geph_learned_exact_host(asset_host)
     assert tproxy._route_preflight_cache[asset_host][1] == (
         tproxy.SEMANTIC_OUTCOME_USABLE

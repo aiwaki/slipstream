@@ -1252,10 +1252,13 @@ local bypass and direct routes out of Geph.
 ### The root loads but a critical resource closes early
 
 If a physical Safari/Chrome failure leaves the public auto-geo-exit counters at
-`learned=0`, `pending=0`, and `last_state=idle`, first prove that foreground
-browser provenance admitted the socket; do not add a parent or CDN hostname
-rule. A closed loopback TLS listener can identify the exact socket-owning PID
-without visiting the affected site. The expected current verifier boundary is:
+`learned=0`, `pending=0`, and `last_state=idle`, first distinguish a complete
+usable parent plus an incomplete critical object from an ambiguous incomplete
+final document; do not add a parent or CDN hostname rule. The critical-object
+path is network-authoritative and must not consult foreground/recent-input
+provenance. Only the ambiguous final-document path may use a closed loopback
+TLS listener to identify the exact socket-owning PID without visiting the
+affected site. The expected verifier boundary for that latter path is:
 
 - official Chrome root/helpers: `codesign --verify --strict=symlinks`; Finder
   metadata on the root bundle must not be converted into an unrelated resource
@@ -1266,7 +1269,8 @@ without visiting the affected site. The expected current verifier boundary is:
   exact Apple designated-requirement check.
 
 Never apply `--ignore-resources` to Chrome, a user path, or an arbitrary binary.
-Passing the verifier is not sufficient: exact canonical path, identifier,
+Passing the verifier is not sufficient for an ambiguous final document: exact
+canonical path, identifier,
 designated requirement/team, UID/start time, process ancestry, socket owner,
 frontmost application, and recent physical input must all still agree. Browser
 automation is useful for reproducing socket/signature attribution, but it must
@@ -1322,17 +1326,25 @@ adding a site rule:
    reserving 1.5 seconds for cold signed-browser provenance, 50 ms of provenance
    wait grace, 2.0 seconds for proof, and 25 ms scheduling grace; it does not
    widen the ordinary 400-ms direct or 500-ms healthy first-contact path.
-2. In normal signed Safari or Chrome, use recent physical input and require the
-   original navigation to recover without a second manual reload. A headless or
-   CDP navigation rejected by foreground provenance is not product evidence.
+2. In normal Safari or Chrome, require the original navigation to recover
+   without a second manual reload. Browser focus and recent input do not
+   authorize or reject a critical-child route. A headless/CDP reproduction is
+   diagnostic rather than physical product evidence; foreground provenance
+   remains relevant only if the separate ambiguous final-document worker is
+   admitted.
 3. Inspect only a bounded critical resource discovered from the usable root.
    Compare the same URL and bounded range direct and through the verified owned
-   Geph. An idle timeout remains inconclusive even after a length-framed partial
-   root response or partial critical range: publish no cache and do not start or
-   authorize Geph. Reaching the local read-size cap (`truncated=True`) is also
-   `UNKNOWN`. Only stable explicit EOF or reset (normalized as EOF) with valid
-   incomplete framing can make the direct result actionable, and learning that
-   exact child hostname still requires a complete same-object Geph result.
+   Geph. An enumerated cross-origin child uses the already-held fixed
+   twelve-second replay-safe handoff: its direct observation receives at most
+   eight seconds, three seconds stay reserved for Geph, and a fresh
+   RoutePreflightV1 authority is minted for Geph only after direct EOF/reset
+   validates. An idle timeout remains inconclusive even after a length-framed
+   partial root response or partial critical range: publish no cache and do not
+   start or authorize Geph. Reaching the local read-size cap
+   (`truncated=True`) is also `UNKNOWN`. Only stable explicit EOF or reset
+   (normalized as EOF) with valid incomplete framing can make the direct result
+   actionable, and learning that exact child hostname still requires a
+   complete same-object Geph result using the identical transient request.
 4. Keep status-only `403`/`429`, login, CAPTCHA, and generic security pages
    inert unless the strict bounded semantic classifier identifies its reviewed
    denial shape and the independent Geph response is complete and usable.

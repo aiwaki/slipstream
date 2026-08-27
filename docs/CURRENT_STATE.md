@@ -10,48 +10,60 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-28 (critical-child frontmost root cause locally green): the
-user's dirty primary checkout remains untouched. macOS removed the prior
-temporary PR #373 worktree, so the same local branch was restored in a fresh
-isolated worktree at exact committed base
-`ee1e377bc98a13233a76207b168781e99ed72d55`; no source work was lost. Live PR
-#373 remains open at remote head
-`513484ac43ae0348df06e61fca5af9d3105eb225` with its exact-head CI and
-dependency audit green; the six later local commits and the current correction
-have not yet been pushed.
+Update 2026-08-28 (critical-child deadline root cause reproduced and corrected
+locally): the user's dirty primary checkout remains untouched. Work continues
+only in the isolated PR #373 worktree on `codex/aikido-cdn-recovery`; its exact
+committed base is `eccfccf9bd650027368b245df6a2b84758c504e2`. Live PR #373
+remains open at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`
+with its old exact-head CI and dependency audit green. The later local commits
+and the current uncommitted timing correction have not yet been pushed.
 
-The installed `ee1e377` build fixed the learned-route direct and QUIC leaks and
-a genuinely fresh Chrome loaded Capacitor normally. Aikido still returned an
-HTTP `200` shell with an empty DOM while critical `cdn.aikido.dev` CSS/JS
-requests ended in `ERR_CONNECTION_CLOSED`. The exact asset returned only
-`15,711` of a requested `65,536` bytes on the transparent path, while the same
-range completed through the ownership-verified Geph SOCKS listener. A healthy
-daemon/PF/canary snapshot and usable parent document therefore were not product
-success.
+The installed exact-`eccfccf` build removed the incorrect foreground/recent-
+input prerequisite from network-authoritative critical-child comparison, but a
+fresh Chrome Aikido navigation still produced an HTTP `200` shell with an empty
+DOM and `161` `ERR_CONNECTION_CLOSED` errors for critical
+`cdn.aikido.dev/assets/...` resources. Public StatusV2 stayed at `learned=0`,
+`pending=0`, and `last_state=idle`; owned Geph was up and PF/QUIC TCP fallback
+was active. The exact current JS object returned only `16,384` bytes directly
+while declaring `1,242,476`, but returned a complete `206` range of `65,536`
+bytes through the verified owned-Geph SOCKS listener.
 
-Exact source history identified the generic cause in `49aa6fc`. Its critical
-bootstrap path correctly required direct incomplete range evidence plus a
-complete same-object owned-Geph range, but it first required the initiating
-browser to be frontmost with recent input. Background tabs and non-browser
-clients consequently skipped the independent network comparison before the
-failing child could learn. The current correction removes UI provenance only
-from that network-authoritative critical-object path. Foreground/recent-input
-provenance remains mandatory before an ambiguous incomplete final document may
-launch the privacy-bounded browser worker. Slow/idle delivery is still
-inconclusive; exact-host coalescing, deadlines, owned-Geph identity, policy
-exclusions, and Discord/YouTube/googlevideo protections are unchanged. No
-Aikido, CDN, Capacitor, status-code, or frontmost rule was added.
+Exact code-level reproduction identified the remaining causal boundary. The
+cross-origin child received only a one-second direct range deadline, so the
+real stable EOF at roughly `6.8` to `7.3` seconds was prematurely classified as
+an idle timeout and the Geph comparison never started. Even after manually
+allowing the EOF inside the old shared eight-second final deadline, only
+`1.228` seconds remained and the otherwise healthy Geph comparison expired at
+`8.001` seconds. The identical Geph probe succeeds in about `1.4` to `1.6`
+seconds; its TLS session selects no ALPN and correctly carries HTTP/1.1, ruling
+out the suspected HTTP/2 mismatch.
 
-Deterministic verification passes the adjacent routing/provenance/bootstrap
-set (`684` tests) and the complete local project (`1781` tests plus `181`
-subtests); the sole warning is the existing Scapy finite-field-DH deprecation,
-and `git diff --check` passes. Codebase-memory again returned
-`Transport closed`, so the documented narrow `rtk` fallback and exact git blame
-were used. The next verified action is one exact commit, rebuild/install, then
-fresh ordinary Chrome and Safari validation of the complete Capacitor and
-Aikido pages, including critical resources, without depending on which app is
-frontmost. No account-backed workflow, publisher, or 30-minute soak is relevant
-to this correction, and no new Aikido physical-success claim exists yet.
+The current correction changes only an enumerated cross-origin critical child.
+It uses the already-held fixed twelve-second handler handoff, gives the direct
+observation at most the unchanged eight-second RoutePreflightV1 window while
+reserving three seconds for Geph, validates only explicit EOF/reset, then mints
+a fresh exact-host eight-second authority for the sequential same-object Geph
+observation. Slow or idle direct delivery remains retryable-inconclusive and
+cannot start Geph, cache, or learning; a slow complete direct object remains
+direct. Same-origin, ordinary healthy, ambiguous-browser, policy exclusion,
+ownership, coalescing, Discord, YouTube, and googlevideo behavior is unchanged.
+No Aikido, CDN, Capacitor, status-code, IP, suffix, or frontmost rule was added.
+
+Ten focused deterministic regressions pass, including simulated `6.8`-second
+EOF followed by a `1.5`-second Geph proof, simulated slow idle and slow complete
+direct outcomes, distinct one-shot authorities, same-object mismatch, and the
+existing provenance boundary. The adjacent routing/provenance/bootstrap set is
+green (`685 passed`), the complete local project is green (`1782 passed`, `181`
+subtests, and only the existing Scapy finite-field-DH deprecation warning),
+documentation checks pass (`8 passed`), and `git diff --check` is clean. The
+exact current blocking production function also returned
+`_RoutePreflightOwnedGephProof` for the live Aikido object in `9.251` seconds
+with all `65,536` Geph bytes, without committing a route. The next verified
+action is an exact commit and rebuild/install, then one genuinely fresh
+ordinary Chrome and one Safari validation of complete Aikido and Capacitor
+resources. No account-backed workflow, publisher, or 30-minute soak is
+relevant to this correction, and no new physical browser success is claimed
+yet.
 
 Update 2026-08-26 (first-request handoff correction locally green): the user's
 dirty primary checkout remains untouched; work continues only in the isolated

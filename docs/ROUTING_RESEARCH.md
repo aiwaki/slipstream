@@ -1612,6 +1612,40 @@ learned route is still exact-host, bounded, and shared by every eligible
 connection; ordinary 403/429, CAPTCHA/login, timeout, slow usable direct,
 Discord, YouTube, and googlevideo behavior is unchanged.
 
+The installed network-only critical-child correction then isolated a timing
+defect rather than another policy or browser-attribution defect. A fresh clean
+Chrome Aikido page retained the empty shell and emitted 161
+`ERR_CONNECTION_CLOSED` resource errors while StatusV2 remained idle. The
+current exact `cdn.aikido.dev/assets/index-DLov-Unh.js` object declared
+`1,242,476` bytes but delivered only `16,384` directly. The production range
+probe's one-second child deadline classified that partial transfer as
+`idle_timeout` before the same connection produced stable EOF at approximately
+`6.8` to `7.3` seconds, so the exact-object Geph comparison never ran. Giving
+the direct half the old shared eight-second final deadline exposed the second
+boundary: only `1.228` seconds remained and Geph returned
+`DEADLINE_EXCEEDED` at `8.001` seconds. With an independent five-second window,
+the unchanged Geph probe completed repeatedly in `1.4` to `1.6` seconds as
+HTTP `206`, all `65,536` requested bytes, matching range, validator, and prefix
+digest. Live TLS selected no ALPN and carried HTTP/1.1 correctly, ruling out an
+HTTP/2 implementation defect.
+
+The correction keeps the slow-link invariant by changing scheduling rather
+than evidence. Only an enumerated cross-origin critical child may use the
+already-held twelve-second replay-safe handler handoff. Its direct observation
+gets at most one eight-second RoutePreflightV1 window and must still end in
+explicit EOF/reset with valid incomplete framing; three seconds are reserved
+for the sequential Geph comparison. After that direct result validates, the
+daemon mints a fresh exact-host eight-second one-shot authority for Geph and
+compares the same transient request bytes with `proves_same_object_as`. A
+simulated `6.8`-second direct EOF plus `1.5`-second complete Geph response now
+learns only the child. Simulated slow idle remains uncacheable and never calls
+Geph; simulated slow complete direct remains usable and direct. A live
+non-committing call through the corrected production function returned an
+owned-Geph proof for the current Aikido object in `9.251` seconds with all
+`65,536` bytes. This adds no hostname, IP, suffix, status-code, browser-focus,
+or broad timeout rule and does not change the eight-second limit of either
+individual route observation.
+
 ## Transfer Backlog
 
 Safe candidates:

@@ -2212,10 +2212,15 @@ ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE = 2.0
 ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE = 0.025
 # A complete parent document may name a critical cross-origin script only
 # after the ordinary root probe has consumed most of the healthy budget.  Give
-# that exact child one fresh, bounded direct range attempt inside the unchanged
-# eight-second job; the comparison is network evidence and remains available
-# to background browser tabs and non-browser clients alike.
-ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT = 1.0
+# that exact child one full RoutePreflightV1 observation window, then preserve
+# a separate bounded slice of the already-held handler handoff for the
+# same-object owned-Geph confirmation.  Each route observation remains inside
+# the unchanged eight-second contract; the complete child comparison remains
+# network-only and available to background tabs and non-browser clients.
+ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT = (
+    route_preflight.MAX_DEADLINE_MS / 1000.0
+)
+ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE = 3.0
 ROUTE_PREFLIGHT_HEADLESS_FAILURE_WINDOW = 5 * 60.0
 ROUTE_PREFLIGHT_HEADLESS_FAILURE_LIMIT = 3
 ROUTE_PREFLIGHT_HEADLESS_BREAKER_COOLDOWN = 5 * 60.0
@@ -6648,7 +6653,7 @@ def _bootstrap_asset_preflight_blocking(
             pass
         return None, cache_outcome
 
-    job = _new_direct_route_preflight_job(h)
+    direct_job = _new_direct_route_preflight_job(h)
     try:
         request = asset.build_range_request()
         direct_probe = (
@@ -6693,7 +6698,7 @@ def _bootstrap_asset_preflight_blocking(
         if direct_termination != _BOOTSTRAP_RANGE_TERMINATION_EOF:
             return None, cache_outcome
         if _validated_route_preflight_outcome(
-            job,
+            direct_job,
             "system",
             SEMANTIC_OUTCOME_NAVIGATION_PENDING,
         ) != SEMANTIC_OUTCOME_NAVIGATION_PENDING:
@@ -6713,17 +6718,27 @@ def _bootstrap_asset_preflight_blocking(
             if geph_probe is None
             else geph_probe
         )
-        geph_observation = geph_probe(h, request, final_deadline)
+        # The stable direct EOF may consume almost all of its own eight-second
+        # observation window.  Mint a fresh exact-host authority for the
+        # sequential Geph observation instead of silently expiring the direct
+        # authority while comparing the same transient request bytes.
+        geph_job = _new_direct_route_preflight_job(h)
+        geph_deadline = min(
+            final_deadline,
+            time.monotonic()
+            + (route_preflight.MAX_DEADLINE_MS / 1000.0),
+        )
+        geph_observation = geph_probe(h, request, geph_deadline)
         geph_evidence, _geph_termination = (
             _decode_bootstrap_range_probe_observation(geph_observation)
         )
         if (
             geph_evidence is None
             or not direct_evidence.proves_same_object_as(geph_evidence)
-            or time.monotonic() >= final_deadline
-            or int(time.time() * 1000) > job.deadline_unix_ms
+            or time.monotonic() >= geph_deadline
+            or int(time.time() * 1000) > geph_job.deadline_unix_ms
             or _validated_route_preflight_outcome(
-                job,
+                geph_job,
                 "owned_geph",
                 SEMANTIC_OUTCOME_USABLE,
             )
@@ -6734,11 +6749,11 @@ def _bootstrap_asset_preflight_blocking(
         return (
             _RoutePreflightOwnedGephProof(
                 marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
-                capability=job.capability,
+                capability=geph_job.capability,
                 host=h,
-                deadline_monotonic=final_deadline,
-                issued_at_unix_ms=job.issued_at_unix_ms,
-                deadline_unix_ms=job.deadline_unix_ms,
+                deadline_monotonic=geph_deadline,
+                issued_at_unix_ms=geph_job.issued_at_unix_ms,
+                deadline_unix_ms=geph_job.deadline_unix_ms,
                 confirmed_pid=confirmed_pid,
                 reason=(
                     "critical bootstrap asset completed through owned Geph"
@@ -7041,7 +7056,11 @@ async def _run_initial_route_preflight(
     handoff_deadline = proof_deadline
     if deadline_monotonic is not None:
         try:
-            handoff_deadline = float(deadline_monotonic)
+            handoff_deadline = min(
+                float(deadline_monotonic),
+                preflight_started
+                + UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT,
+            )
         except (TypeError, ValueError):
             return None
     # Semantic evidence keeps its historical full eight-second budget.  A
@@ -7314,21 +7333,30 @@ async def _run_initial_route_preflight(
                     )
         elif outcome == SEMANTIC_OUTCOME_USABLE and eligible_asset is not None:
             asset_host = normalize_host(eligible_asset.exact_host)
-            direct_asset_deadline = min(
-                deadline,
-                (
+            asset_final_deadline = deadline
+            if eligible_asset_is_cross_origin:
+                # The production handler already holds the replay-safe first
+                # flight for a fixed twelve-second semantic handoff.  Use that
+                # existing envelope only for this enumerated child, reserving
+                # the tail for a sequential same-object Geph confirmation.
+                asset_final_deadline = handoff_deadline
+                direct_asset_deadline = min(
                     time.monotonic()
-                    + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
-                    if eligible_asset_is_cross_origin
-                    else preflight_started + ROUTE_PREFLIGHT_HEALTHY_BUDGET
-                ),
-            )
+                    + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT,
+                    asset_final_deadline
+                    - ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
+                )
+            else:
+                direct_asset_deadline = min(
+                    deadline,
+                    preflight_started + ROUTE_PREFLIGHT_HEALTHY_BUDGET,
+                )
             asset_selected, asset_outcome = await _run_bootstrap_asset_preflight(
                 eligible_asset,
                 h,
                 str(address),
                 direct_asset_deadline,
-                deadline,
+                asset_final_deadline,
                 direct_probe=bootstrap_direct_probe,
                 geph_probe=bootstrap_geph_probe,
                 resolver=bootstrap_resolver,
