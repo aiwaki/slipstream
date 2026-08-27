@@ -10,10 +10,11 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-28 (critical-child deadline root cause reproduced and corrected
+Update 2026-08-28 (parent-latency deadline root cause reproduced and corrected
 locally): the user's dirty primary checkout remains untouched. Work continues
-only in the isolated PR #373 worktree on `codex/aikido-cdn-recovery`; its exact
-recovery head is `d9b79f02e7cb5c1c1ef44be3edab1d5be2fc474e`. Live PR #373
+only in the isolated PR #373 worktree on `codex/aikido-cdn-recovery`; its
+automated bundle-verification baseline is
+`ce07db1f0ed05ccac358e8bbd256314edf4f9231`. Live PR #373
 remains open at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`
 with its old exact-head CI and dependency audit green. The current automation
 work is based on packaging safeguard
@@ -40,18 +41,35 @@ allowing the EOF inside the old shared eight-second final deadline, only
 seconds; its TLS session selects no ALPN and correctly carries HTTP/1.1, ruling
 out the suspected HTTP/2 mismatch.
 
-The current correction changes only an enumerated cross-origin critical child.
-It uses the already-held fixed twelve-second handler handoff, gives the direct
-observation at most the unchanged eight-second RoutePreflightV1 window while
-reserving three seconds for Geph, validates only explicit EOF/reset, then mints
-a fresh exact-host eight-second authority for the sequential same-object Geph
-observation. Slow or idle direct delivery remains retryable-inconclusive and
-cannot start Geph, cache, or learning; a slow complete direct object remains
-direct. Same-origin, ordinary healthy, ambiguous-browser, policy exclusion,
-ownership, coalescing, Discord, YouTube, and googlevideo behavior is unchanged.
-No Aikido, CDN, Capacitor, status-code, IP, suffix, or frontmost rule was added.
+The first genuinely fresh temporary-profile real Chrome validation of the
+installed `d9b79f0` daemon reproduced the same empty Aikido shell and exactly
+`161` `ERR_CONNECTION_CLOSED` child failures. Navigation timing showed the
+root response held for about `10.04` seconds; the four primary CDN resources
+then failed together after about `6.86` seconds. StatusV2 remained
+`learned=0`, `pending=0`, `last_state=idle` while owned Geph was up and owned.
+The exact production root probe explained why the earlier correction still
+missed: a usable parent currently takes about `2.3` to `4.8` seconds, but the
+child's direct deadline was still capped at parent-start plus nine seconds.
+That left only about `4.2` to `6.7` seconds for a child whose stable EOF needs
+about `6.8`, silently converting the real close back into `idle_timeout`.
 
-Ten focused deterministic regressions pass, including simulated `6.8`-second
+The current correction changes only deadline accounting for an
+enumerated cross-origin critical child. Once a complete usable parent has
+actually exposed that child, it starts a fresh bounded child envelope: at most
+the unchanged eight-second direct RoutePreflightV1 observation followed by a
+separate three-second same-object Geph slice. It validates only explicit
+EOF/reset before Geph and mints a fresh exact-host eight-second authority for
+that Geph observation. Parent latency can no longer consume child evidence.
+Slow or idle direct delivery remains retryable-inconclusive and cannot start
+Geph, cache, or learning; a slow complete direct object remains direct.
+Same-origin, ordinary healthy, ambiguous-browser, policy exclusion, ownership,
+coalescing, Discord, YouTube, and googlevideo behavior is unchanged. No Aikido,
+CDN, Capacitor, status-code, IP, suffix, or frontmost rule was added.
+
+The adjacent bootstrap set passes `48` focused tests. The new regression
+simulates a `4.7`-second usable parent, `6.8`-second explicit child EOF, and
+`1.5`-second complete Geph result; it learns only the exact child after the old
+parent cutoff. Existing regressions still cover simulated `6.8`-second
 EOF followed by a `1.5`-second Geph proof, simulated slow idle and slow complete
 direct outcomes, distinct one-shot authorities, same-object mismatch, and the
 existing provenance boundary. The adjacent routing/provenance/bootstrap set is
@@ -61,8 +79,8 @@ documentation checks pass (`8 passed`), and `git diff --check` is clean. The
 exact current blocking production function also returned
 `_RoutePreflightOwnedGephProof` for the live Aikido object in `9.251` seconds
 with all `65,536` Geph bytes, without committing a route. The next verified
-action is an exact commit and rebuild/install, then one genuinely fresh
-ordinary Chrome and one Safari validation of complete Aikido and Capacitor
+action is an exact commit and automated rebuild/install, then one genuinely
+fresh ordinary Chrome and one Safari validation of complete Aikido and Capacitor
 resources. No account-backed workflow, publisher, or 30-minute soak is
 relevant to this correction, and no new physical browser success is claimed
 yet.

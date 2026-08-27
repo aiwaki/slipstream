@@ -2211,12 +2211,15 @@ ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT = 5.0
 ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE = 2.0
 ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE = 0.025
 # A complete parent document may name a critical cross-origin script only
-# after the ordinary root probe has consumed most of the healthy budget.  Give
-# that exact child one full RoutePreflightV1 observation window, then preserve
-# a separate bounded slice of the already-held handler handoff for the
-# same-object owned-Geph confirmation.  Each route observation remains inside
-# the unchanged eight-second contract; the complete child comparison remains
-# network-only and available to background tabs and non-browser clients.
+# after the ordinary root probe has consumed part of its own bounded budget.
+# Give that exact child a fresh RoutePreflightV1 observation window, then a
+# separate bounded slice for the same-object owned-Geph confirmation.  Do not
+# charge parent latency against the child's direct-EOF observation: doing so
+# turns a repeatable close near 6.8 seconds into an idle timeout whenever the
+# usable parent itself takes more than roughly two seconds.  Each individual
+# route observation remains inside the unchanged eight-second contract; the
+# complete child comparison remains network-only and available to background
+# tabs and non-browser clients.
 ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT = (
     route_preflight.MAX_DEADLINE_MS / 1000.0
 )
@@ -7335,16 +7338,19 @@ async def _run_initial_route_preflight(
             asset_host = normalize_host(eligible_asset.exact_host)
             asset_final_deadline = deadline
             if eligible_asset_is_cross_origin:
-                # The production handler already holds the replay-safe first
-                # flight for a fixed twelve-second semantic handoff.  Use that
-                # existing envelope only for this enumerated child, reserving
-                # the tail for a sequential same-object Geph confirmation.
-                asset_final_deadline = handoff_deadline
-                direct_asset_deadline = min(
-                    time.monotonic()
-                    + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT,
-                    asset_final_deadline
-                    - ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
+                # The parent probe may legitimately spend several seconds
+                # producing a complete usable document.  Mint the enumerated
+                # child's bounded window only now so parent latency cannot
+                # truncate a stable late EOF into an inconclusive idle
+                # timeout.  The following Geph slice is still sequential and
+                # may commit only after that EOF plus same-object validation.
+                child_started = time.monotonic()
+                direct_asset_deadline = (
+                    child_started + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
+                )
+                asset_final_deadline = (
+                    direct_asset_deadline
+                    + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE
                 )
             else:
                 direct_asset_deadline = min(

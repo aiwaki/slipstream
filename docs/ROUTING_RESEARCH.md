@@ -1646,6 +1646,28 @@ owned-Geph proof for the current Aikido object in `9.251` seconds with all
 or broad timeout rule and does not change the eight-second limit of either
 individual route observation.
 
+The first genuinely fresh temporary-profile Chrome validation then proved that
+the fixed twelve-second parent envelope was itself the remaining causal bug.
+The page root was held for about `10.04` seconds; its four primary CDN objects
+failed together after about `6.86` seconds, the DOM stayed empty, and StatusV2
+remained idle with owned Geph up. Exact production probes showed that the usable
+parent currently consumes about `2.3` to `4.8` seconds before exposing
+`cdn.aikido.dev`, while the child's parent-relative direct cutoff remained at
+parent-start plus nine seconds. The child therefore received only about `4.2`
+to `6.7` seconds and again reported idle just before its repeatable EOF.
+
+Deadline ownership now follows evidence ownership. The parent's bounded probe
+is unchanged. Only after a complete usable parent enumerates one allowed
+cross-origin child does that child receive a fresh eight-second direct window
+plus a separately capped three-second sequential Geph slice. Explicit EOF/reset,
+valid incomplete framing, identical transient request bytes, same-object proof,
+owned-listener checks, and exact-host commit guards remain mandatory. A new
+regression consumes `4.7` seconds in the parent, then proves the measured
+`6.8`-second child EOF plus `1.5`-second Geph completion after the old parent
+cutoff; the idle variant still does not call Geph or learn. The focused
+bootstrap set is green (`48 passed`). Physical validation of the rebuilt exact
+daemon remains open.
+
 ## Transfer Backlog
 
 Safe candidates:

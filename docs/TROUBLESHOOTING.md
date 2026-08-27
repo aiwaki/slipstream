@@ -1336,11 +1336,14 @@ adding a site rule:
    admitted.
 3. Inspect only a bounded critical resource discovered from the usable root.
    Compare the same URL and bounded range direct and through the verified owned
-   Geph. An enumerated cross-origin child uses the already-held fixed
-   twelve-second replay-safe handoff: its direct observation receives at most
-   eight seconds, three seconds stay reserved for Geph, and a fresh
+   Geph. For an enumerated cross-origin child, start its bounded envelope only
+   after the complete usable parent exposes it: its direct observation receives
+   at most eight seconds, a separate Geph slice receives at most three seconds,
+   and a fresh
    RoutePreflightV1 authority is minted for Geph only after direct EOF/reset
-   validates. An idle timeout remains inconclusive even after a length-framed
+   validates. Do not subtract parent latency from either child observation; a
+   parent-relative cutoff previously turned the measured 6.8-second EOF back
+   into idle. An idle timeout remains inconclusive even after a length-framed
    partial root response or partial critical range: publish no cache and do not
    start or authorize Geph. Reaching the local read-size cap
    (`truncated=True`) is also `UNKNOWN`. Only stable explicit EOF or reset
