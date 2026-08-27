@@ -18,6 +18,24 @@ unknown-host promotion.
 Use Geph only for services that need a foreign exit because the service rejects
 Russian IP addresses. Do not route Discord or YouTube through Geph as a fix.
 
+### A site shell opens but scripts, styles, or content stay blank
+
+Do not treat an active daemon, ready PF, green canaries, HTTP `200` root, or
+partially rendered page as success. Identify one critical failed object and
+compare the exact bounded range directly and through Slipstream's verified
+owned Geph listener. Explicit EOF/reset with valid incomplete range framing on
+direct plus a complete same-object owned-Geph range is actionable exact-child
+evidence. An idle timeout or slow progressive delivery is `unclear` and must
+not teach a route.
+
+The critical-object comparison is network-only. It must work for background
+tabs, Safari, Chrome, and non-browser clients without a frontmost/recent-input
+condition. Foreground browser provenance is relevant only if an ambiguous final
+document may launch the privacy-bounded browser worker. Never work around this
+symptom with a CDN hostname rule, repeated reloads, or by asking the user to
+keep a browser frontmost. After a correction, require genuinely fresh Chrome
+and Safari connections and verify the complete page, not only the root request.
+
 ### Slipstream briefly opens Chrome or takes focus while idle
 
 This is a defect in `v0.1.9-preview.22`, not expected background activity. Its
@@ -35,11 +53,13 @@ fails closed.
 Its fresh owner-private temporary profile must disappear with the single owned
 process tree and never touches a user's Safari or Chrome profile.
 The legacy transport-idle broker is disabled permanently. Its replacement is
-an exact-host pre-routing path that additionally requires signed foreground
-Safari/Chrome provenance and recent input. That replacement is implemented in
-the `.23` candidate source but is not a claim about the installed `.22`; it
-must still pass packaged visibility, live-site, transport, and idle-soak gates
-before publication.
+an exact-host pre-routing path. Signed foreground Safari/Chrome provenance and
+recent input are required only before an ambiguous incomplete final document
+may admit the privacy-bounded browser worker; independently verified strict
+denials and critical-object range comparisons are network-authoritative and do
+not depend on UI focus. That replacement is implemented in the `.23` source
+but must still pass every applicable packaged visibility, live-site, transport,
+and release gate before a later publication claim.
 
 The installed `.22` also lacks `LSUIElement`, so setting the Tauri runtime to
 `Accessory` can happen after macOS has already classified the process as an

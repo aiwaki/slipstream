@@ -2180,8 +2180,11 @@ SEMANTIC_PLAIN_PROBE_WINDOW_MAX = 8
 # the healthy-first-contact latency budget.  One inconclusive fast probe may
 # spend a bounded direct network retry inside the full eight-second contract;
 # the timeout itself never authorizes a route.  Signed foreground-browser
-# provenance remains mandatory only for an ambiguous final document or a
-# critical-child comparison.
+# provenance remains mandatory only for an ambiguous final document that may
+# admit the bounded browser worker.  A critical-child comparison is already
+# authorized by a complete parent document plus independent direct-incomplete
+# and same-object owned-Geph network evidence, so it must not depend on UI
+# focus or recent input.
 ROUTE_PREFLIGHT_DIRECT_TIMEOUT = 0.4
 ROUTE_PREFLIGHT_CACHE_TTL = 10 * 60.0
 ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
@@ -2208,9 +2211,10 @@ ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT = 5.0
 ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE = 2.0
 ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE = 0.025
 # A complete parent document may name a critical cross-origin script only
-# after the ordinary root probe has consumed most of the healthy budget.  Once
-# signed foreground-browser provenance is accepted, give that exact child one
-# fresh, bounded direct range attempt inside the unchanged eight-second job.
+# after the ordinary root probe has consumed most of the healthy budget.  Give
+# that exact child one fresh, bounded direct range attempt inside the unchanged
+# eight-second job; the comparison is network evidence and remains available
+# to background browser tabs and non-browser clients alike.
 ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT = 1.0
 ROUTE_PREFLIGHT_HEADLESS_FAILURE_WINDOW = 5 * 60.0
 ROUTE_PREFLIGHT_HEADLESS_FAILURE_LIMIT = 3
@@ -7021,10 +7025,13 @@ async def _run_initial_route_preflight(
     denial may learn only after the same exact host has a complete usable
     response through the owned Geph exit.  One inconclusive fast direct probe
     gets one bounded direct network retry before any browser check; neither
-    timeout is route evidence.  A final ambiguous incomplete document or a
-    critical-bootstrap path additionally requires a foreground, recently-used
-    signed Safari/Chrome socket.  The exact-host work remains coalesced and
-    bounded; no page-private bytes enter routing state, status, or logs.
+    timeout is route evidence.  An ambiguous incomplete final document
+    additionally requires a foreground, recently-used signed Safari/Chrome
+    socket before the bounded browser worker may run.  A critical-bootstrap
+    object instead relies on its independent
+    direct-incomplete plus same-object owned-Geph range proof and never depends
+    on which application is frontmost.  The exact-host work remains coalesced
+    and bounded; no page-private bytes enter routing state, status, or logs.
     """
     h = normalize_host(host)
     preflight_started = time.monotonic()
@@ -7199,31 +7206,16 @@ async def _run_initial_route_preflight(
                 eligible_asset_is_cross_origin,
             ) = _select_route_preflight_bootstrap_asset(bootstrap_assets, h)
         requires_browser_provenance = bool(
-            (
-                outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
-                and direct_safe_incomplete
-            )
-            or eligible_asset is not None
+            outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
+            and direct_safe_incomplete
         )
         if requires_browser_provenance:
-            # Same-origin bootstrap inspection remains on the ordinary 500 ms
-            # healthy path.  A final ambiguous document or a critical
-            # cross-origin child is different: the parent must stay held until
-            # signed foreground provenance and the bounded comparison finish,
-            # or the browser will fetch the unresolved route direct.  A
-            # complete strict denial above or after the network retry never
-            # enters this browser-dependent path.
-            provenance_deadline = deadline
-            if (
-                outcome == SEMANTIC_OUTCOME_USABLE
-                and eligible_asset is not None
-                and not eligible_asset_is_cross_origin
-            ):
-                provenance_deadline = min(
-                    provenance_deadline,
-                    preflight_started + ROUTE_PREFLIGHT_HEALTHY_BUDGET,
-                )
-            remaining = provenance_deadline - time.monotonic()
+            # A final ambiguous document may admit the bounded browser worker,
+            # so the parent must stay held until signed foreground provenance
+            # and that comparison finish.  Complete strict denials and
+            # independently verifiable critical-child range comparisons never
+            # enter this UI-dependent path.
+            remaining = deadline - time.monotonic()
             try:
                 provenance_ok = bool(
                     remaining > 0

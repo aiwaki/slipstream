@@ -10,6 +10,49 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-28 (critical-child frontmost root cause locally green): the
+user's dirty primary checkout remains untouched. macOS removed the prior
+temporary PR #373 worktree, so the same local branch was restored in a fresh
+isolated worktree at exact committed base
+`ee1e377bc98a13233a76207b168781e99ed72d55`; no source work was lost. Live PR
+#373 remains open at remote head
+`513484ac43ae0348df06e61fca5af9d3105eb225` with its exact-head CI and
+dependency audit green; the six later local commits and the current correction
+have not yet been pushed.
+
+The installed `ee1e377` build fixed the learned-route direct and QUIC leaks and
+a genuinely fresh Chrome loaded Capacitor normally. Aikido still returned an
+HTTP `200` shell with an empty DOM while critical `cdn.aikido.dev` CSS/JS
+requests ended in `ERR_CONNECTION_CLOSED`. The exact asset returned only
+`15,711` of a requested `65,536` bytes on the transparent path, while the same
+range completed through the ownership-verified Geph SOCKS listener. A healthy
+daemon/PF/canary snapshot and usable parent document therefore were not product
+success.
+
+Exact source history identified the generic cause in `49aa6fc`. Its critical
+bootstrap path correctly required direct incomplete range evidence plus a
+complete same-object owned-Geph range, but it first required the initiating
+browser to be frontmost with recent input. Background tabs and non-browser
+clients consequently skipped the independent network comparison before the
+failing child could learn. The current correction removes UI provenance only
+from that network-authoritative critical-object path. Foreground/recent-input
+provenance remains mandatory before an ambiguous incomplete final document may
+launch the privacy-bounded browser worker. Slow/idle delivery is still
+inconclusive; exact-host coalescing, deadlines, owned-Geph identity, policy
+exclusions, and Discord/YouTube/googlevideo protections are unchanged. No
+Aikido, CDN, Capacitor, status-code, or frontmost rule was added.
+
+Deterministic verification passes the adjacent routing/provenance/bootstrap
+set (`684` tests) and the complete local project (`1781` tests plus `181`
+subtests); the sole warning is the existing Scapy finite-field-DH deprecation,
+and `git diff --check` passes. Codebase-memory again returned
+`Transport closed`, so the documented narrow `rtk` fallback and exact git blame
+were used. The next verified action is one exact commit, rebuild/install, then
+fresh ordinary Chrome and Safari validation of the complete Capacitor and
+Aikido pages, including critical resources, without depending on which app is
+frontmost. No account-backed workflow, publisher, or 30-minute soak is relevant
+to this correction, and no new Aikido physical-success claim exists yet.
+
 Update 2026-08-26 (first-request handoff correction locally green): the user's
 dirty primary checkout remains untouched; work continues only in the isolated
 PR #373 worktree on `codex/aikido-cdn-recovery`. A clean installed-candidate

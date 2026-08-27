@@ -10831,55 +10831,40 @@ def test_bootstrap_range_preserves_idle_vs_closed_transport_termination(
     assert observation.evidence.received_body_bytes == 16 * 1024
 
 
-def test_same_origin_bootstrap_provenance_shares_first_contact_budget():
+def test_same_origin_bootstrap_does_not_require_ui_provenance():
     host = "budgeted-root.example"
-    entered = threading.Event()
-    release = threading.Event()
     asset_probes = []
 
-    def slow_provenance(*_args, **_kwargs):
-        entered.set()
-        assert release.wait(2.0)
-        return False
-
-    async def scenario():
-        started = time.monotonic()
-        task = asyncio.create_task(
-            tproxy._run_initial_route_preflight(
-                "budgeted-root.example",
-                "8.8.8.8",
-                peer_endpoint=("127.0.0.1", 49152),
-                provenance_assessor=slow_provenance,
-                direct_probe=lambda *_args: _bootstrap_root_observation(host),
-                bootstrap_direct_probe=lambda *_args: (
-                    asset_probes.append(True)
-                    or _bootstrap_evidence(
-                        tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
-                        body_bytes=65_536,
-                    )
-                ),
-            )
+    started = time.monotonic()
+    result = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            peer_endpoint=("127.0.0.1", 49152),
+            provenance_assessor=lambda *_args, **_kwargs: pytest.fail(
+                "network-only bootstrap evidence consulted UI provenance"
+            ),
+            direct_probe=lambda *_args: _bootstrap_root_observation(host),
+            bootstrap_direct_probe=lambda *_args: (
+                asset_probes.append(True)
+                or _bootstrap_evidence(
+                    tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+                    body_bytes=65_536,
+                )
+            ),
         )
-        assert await asyncio.to_thread(entered.wait, 1.0)
-        try:
-            result = await asyncio.wait_for(
-                task,
-                timeout=tproxy.ROUTE_PREFLIGHT_HEALTHY_BUDGET + 0.25,
-            )
-            elapsed = time.monotonic() - started
-        finally:
-            release.set()
-        return result, elapsed
-
-    result, elapsed = asyncio.run(scenario())
+    )
+    elapsed = time.monotonic() - started
 
     assert result is None
     assert elapsed <= tproxy.ROUTE_PREFLIGHT_HEALTHY_BUDGET + 0.15
-    assert asset_probes == []
-    assert host not in tproxy._route_preflight_cache
+    assert asset_probes == [True]
+    assert tproxy._route_preflight_cache[host][1] == (
+        tproxy.SEMANTIC_OUTCOME_USABLE
+    )
 
 
-def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance(
+def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_without_ui_provenance(
     monkeypatch,
 ):
     _enable_owned_geph_preflight(monkeypatch)
@@ -10898,11 +10883,6 @@ def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance
             )
         time.sleep(0.45)
         return _bootstrap_root_observation(asset_host)
-
-    def delayed_provenance(peer, _assessor):
-        events.append(("provenance", peer))
-        time.sleep(0.2)
-        return True
 
     def direct_asset(ip, host, request, direct_deadline, final_deadline):
         events.append(("direct", ip, host, direct_deadline, final_deadline))
@@ -10923,7 +10903,9 @@ def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance
     monkeypatch.setattr(
         tproxy,
         "_browser_navigation_provenance_accepted",
-        delayed_provenance,
+        lambda *_args, **_kwargs: pytest.fail(
+            "critical-child network proof consulted UI provenance"
+        ),
     )
     claim = asyncio.run(
         tproxy._run_initial_route_preflight(
@@ -10943,7 +10925,6 @@ def test_cross_origin_bootstrap_gets_fresh_bounded_range_budget_after_provenance
     assert [event[0] for event in events] == [
         "root",
         "root",
-        "provenance",
         "direct",
         "geph",
     ]
@@ -11145,6 +11126,13 @@ def test_route_preflight_learns_exact_bootstrap_host_after_eof_incomplete(
     monkeypatch,
 ):
     _enable_owned_geph_preflight(monkeypatch)
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: pytest.fail(
+            "critical-child network proof consulted UI provenance"
+        ),
+    )
     asset_host = "critical-cdn.example"
     direct_requests = []
     geph_requests = []

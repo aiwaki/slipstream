@@ -1,9 +1,43 @@
 # Routing Research Notes
 
-Updated: 2026-08-26
+Updated: 2026-08-28
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-08-28 critical-child UI-provenance root cause
+
+Fresh ordinary Chrome proved the current installed correction could restore
+Capacitor, but Aikido still returned a usable `app.aikido.dev` shell with an
+empty DOM while its critical `cdn.aikido.dev` CSS/JavaScript connections ended
+in `ERR_CONNECTION_CLOSED`. The exact asset control returned only `15,711` of
+the requested `65,536` bytes on the transparent path, whereas the verified
+owned Geph SOCKS listener returned the complete same range. This is a
+critical-child routing failure even though the parent document, daemon, PF,
+canaries, and public status appeared healthy.
+
+Source and history comparison found the causal boundary introduced by commit
+`49aa6fc`: after extracting a bounded critical object from a complete usable
+parent, `_run_initial_route_preflight` required signed foreground/recent-input
+browser provenance before it would run the independent child direct-vs-Geph
+range comparison. A background tab, another frontmost application, or a client
+without browser UI therefore skipped the very network proof intended to learn
+the exact failing child. Repeated reloads could appear to help only when timing
+and focus happened to cross that unrelated gate.
+
+The correction does not add an Aikido/CDN rule or weaken evidence. Critical
+objects now use the existing explicit direct EOF/reset with valid incomplete
+range framing plus a complete same-object range through the ownership-verified
+Geph listener. Idle timeout and slow progress remain inconclusive. Foreground
+and recent input remain required only for the privacy-bounded browser worker on
+an ambiguous incomplete final document. Same-origin and cross-origin tests
+fail if this network-only path consults UI provenance; adjacent routing tests
+pass `684`, and the complete local suite passes `1781` tests plus `181`
+subtests. Fresh installed Chrome and Safari validation remains open, so this is
+not yet a physical product-success claim.
+
+The codebase-memory graph transport again returned `Transport closed`; this
+investigation used the documented narrow `rtk` fallback and exact git blame.
 
 ## 2026-08-26 first-request late-handoff regression
 
