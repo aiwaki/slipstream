@@ -10761,6 +10761,187 @@ def _bootstrap_evidence(
     return tproxy._BootstrapRangeProbeObservation(evidence, termination)
 
 
+def _bootstrap_root_range_response(asset_host, *, full_representation):
+    body = (
+        f'<html><script type="module" src="https://{asset_host}/assets/index.js">'
+        f'</script><link rel="modulepreload" href="https://{asset_host}/assets/vendor.js">'
+        f'<link rel="modulepreload" href="https://{asset_host}/assets/icons.js">'
+        f'<link rel="stylesheet" href="https://{asset_host}/assets/index.css"></html>'
+    ).encode()
+    total_length = len(body) if full_representation else len(body) + 100
+    return (
+        b"HTTP/1.1 206 Partial Content\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        + f"Content-Length: {len(body)}\r\n".encode()
+        + f"Content-Range: bytes 0-{len(body) - 1}/{total_length}\r\n\r\n".encode()
+        + body
+    )
+
+
+def test_full_ranged_root_learns_cold_child_before_exact_payload(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "cold-app-shell.example"
+    asset_host = "cold-critical-cdn.example"
+    response = _bootstrap_root_range_response(
+        asset_host, full_representation=True
+    )
+    child_direct_calls = []
+    child_geph_calls = []
+
+    class RootTlsSocket:
+        def __init__(self):
+            self.request = b""
+            self.responses = deque((response, b""))
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            self.request += request
+
+        def recv(self, _size):
+            return self.responses.popleft()
+
+        def close(self):
+            return None
+
+    root_socket = RootTlsSocket()
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: root_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda *_args, **_kwargs: root_socket
+        ),
+    )
+
+    def direct_asset(_ip, host, _request, _direct_deadline, _final_deadline):
+        child_direct_calls.append(host)
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF,
+        )
+
+    def geph_asset(host, _request, _deadline):
+        child_geph_calls.append(host)
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+            body_bytes=tproxy.bootstrap_asset_preflight.DEFAULT_RANGE_END + 1,
+        )
+
+    exact_result = (object(), object(), b"held root payload")
+
+    async def exact_probe(_ip, _port, _first_flight, **_kwargs):
+        return tproxy.SYSTEM_PROBE_PAYLOAD, exact_result
+
+    async def route_preflight(host, ip, **kwargs):
+        return await tproxy._run_initial_route_preflight(
+            host,
+            ip,
+            peer_endpoint=kwargs.get("peer_endpoint"),
+            deadline_monotonic=kwargs["deadline_monotonic"],
+            local_recovery_deadline_monotonic=kwargs.get(
+                "local_recovery_deadline_monotonic"
+            ),
+            bootstrap_direct_probe=direct_asset,
+            bootstrap_geph_probe=geph_asset,
+            bootstrap_resolver=lambda child: (
+                ["1.1.1.1"] if child == asset_host else []
+            ),
+        )
+
+    async def scenario():
+        now = time.monotonic()
+        return await tproxy._run_unknown_initial_route_race(
+            parent_host,
+            "8.8.8.8",
+            443,
+            b"client hello",
+            hard_recovery_deadline_monotonic=now + 20.0,
+            semantic_handoff_deadline_monotonic=now + 12.0,
+            exact_probe=exact_probe,
+            route_preflight=route_preflight,
+        )
+
+    state, exact, claim = asyncio.run(scenario())
+
+    assert state == tproxy.SYSTEM_PROBE_PAYLOAD
+    assert exact is exact_result
+    assert claim is None
+    assert (
+        f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
+        in root_socket.request
+    )
+    assert child_direct_calls == [asset_host]
+    assert child_geph_calls == [asset_host]
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert tproxy._auto_geph_learned_exact_host(asset_host)
+
+
+def test_partial_ranged_root_is_retryable_and_never_cached(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "partial-app-shell.example"
+    asset_host = "partial-critical-cdn.example"
+    response = _bootstrap_root_range_response(
+        asset_host, full_representation=False
+    )
+    requests = []
+
+    class RootTlsSocket:
+        def __init__(self):
+            self.responses = deque((response, b""))
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            requests.append(request)
+
+        def recv(self, _size):
+            return self.responses.popleft()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: RootTlsSocket(),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(wrap_socket=lambda sock, **_kwargs: sock),
+    )
+
+    async def scenario():
+        now = time.monotonic()
+        return await tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            deadline_monotonic=now + 8.0,
+            bootstrap_direct_probe=lambda *_args: pytest.fail(
+                "partial root must not probe a child"
+            ),
+            bootstrap_geph_probe=lambda *_args: pytest.fail(
+                "partial root must not use Geph"
+            ),
+            bootstrap_resolver=lambda *_args: pytest.fail(
+                "partial root must not resolve a child"
+            ),
+        )
+
+    assert asyncio.run(scenario()) is None
+    assert len(requests) == 2
+    assert parent_host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert not tproxy._auto_geph_learned_exact_host(asset_host)
+
+
 @pytest.mark.parametrize(
     ("termination_event", "expected_termination"),
     (

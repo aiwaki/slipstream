@@ -4276,13 +4276,23 @@ def _semantic_plain_preflight_probe_detail(
         )
         assets = ()
         if outcome == SEMANTIC_OUTCOME_USABLE:
-            assets = bootstrap_asset_preflight.extract_critical_bootstrap_assets(
+            inspection = bootstrap_asset_preflight.inspect_critical_bootstrap_assets(
                 f"https://{h}/",
                 data,
                 stream_closed=stream_closed,
                 truncated=truncated,
                 deadline=deadline,
+                requested_range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
             )
+            if (
+                inspection.outcome
+                is bootstrap_asset_preflight.RootDocumentOutcome.INCONCLUSIVE
+            ):
+                return _SemanticPlainPreflightObservation(
+                    SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                    retryable_inconclusive=True,
+                )
+            assets = inspection.assets
         return _SemanticPlainPreflightObservation(outcome, assets)
     except TimeoutError:
         return _SemanticPlainPreflightObservation(

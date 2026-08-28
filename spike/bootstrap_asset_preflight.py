@@ -57,6 +57,22 @@ class RangeProbeOutcome(str, Enum):
     DEADLINE_EXCEEDED = "deadline_exceeded"
 
 
+class RootDocumentOutcome(str, Enum):
+    """Whether one bounded root reply is safe to scan for bootstrap assets."""
+
+    COMPLETE = "complete"
+    INCONCLUSIVE = "inconclusive"
+    UNSCANNABLE = "unscannable"
+
+
+@dataclass(frozen=True, slots=True)
+class RootDocumentInspection:
+    """One-shot root-document result; asset paths remain ephemeral."""
+
+    outcome: RootDocumentOutcome
+    assets: tuple = ()
+
+
 @dataclass(frozen=True, slots=True)
 class RangeProbeEvidence:
     """Non-sensitive proof metadata for one exact ranged JS object.
@@ -147,6 +163,105 @@ class EphemeralBootstrapAsset:
         raise TypeError("ephemeral bootstrap targets must not be serialized")
 
 
+def inspect_critical_bootstrap_assets(
+    root_url,
+    response,
+    *,
+    stream_closed,
+    truncated,
+    deadline,
+    clock=time.monotonic,
+    max_assets=MAX_CRITICAL_ASSETS,
+    requested_range_end=MAX_RANGE_END,
+):
+    """Inspect one complete root representation for critical JS targets.
+
+    A ranged response is scannable only when it contains the entire identity
+    representation (``bytes 0-(total-1)/total``).  A proper prefix-only 206,
+    malformed range metadata, inconsistent framing, or an exhausted inspection
+    deadline remains explicitly inconclusive so callers cannot publish a false
+    healthy-root cache entry.
+    """
+
+    if not _deadline_open(deadline, clock):
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    if (
+        not isinstance(response, bytes)
+        or len(response) > MAX_ROOT_RESPONSE_BYTES
+        or not isinstance(max_assets, int)
+        or isinstance(max_assets, bool)
+        or max_assets < 0
+        or max_assets > MAX_CRITICAL_ASSETS
+        or not isinstance(requested_range_end, int)
+        or isinstance(requested_range_end, bool)
+        or requested_range_end < 0
+        or requested_range_end > MAX_RANGE_END
+    ):
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    normalized_root = _normalize_https_url(root_url, require_root=True)
+    if normalized_root is None:
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    parsed_head = _response_head(response)
+    if parsed_head is None:
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    status, headers = parsed_head
+    expected_body_length = None
+    if status == 206:
+        range_descriptor = _content_range(headers, requested_range_end)
+        if range_descriptor is None:
+            return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+        range_end, total_length = range_descriptor
+        expected_body_length = range_end + 1
+        if (
+            total_length != expected_body_length
+            or not _range_length_consistent(headers, expected_body_length)
+        ):
+            return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    elif status != 200:
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    if not _identity_encoded(headers) or not _html_content(headers):
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    body = http_response_body(
+        response,
+        stream_closed=stream_closed,
+        truncated=truncated,
+    )
+    if (
+        body is None
+        or len(body) > MAX_ROOT_RESPONSE_BYTES
+        or (
+            expected_body_length is not None
+            and len(body) != expected_body_length
+        )
+    ):
+        return RootDocumentInspection(
+            RootDocumentOutcome.INCONCLUSIVE
+            if status == 206
+            else RootDocumentOutcome.UNSCANNABLE
+        )
+
+    parser = _CriticalAssetParser(normalized_root[3], max_assets=max_assets)
+    decoded = body.decode("utf-8", "replace")
+    for offset in range(0, len(decoded), 16_384):
+        if not _deadline_open(deadline, clock):
+            return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+        parser.feed(decoded[offset : offset + 16_384])
+    parser.close()
+    if not _deadline_open(deadline, clock):
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    return RootDocumentInspection(
+        RootDocumentOutcome.COMPLETE,
+        tuple(
+            EphemeralBootstrapAsset(
+                exact_host=candidate[0],
+                host_header=candidate[1],
+                request_target=candidate[2],
+            )
+            for candidate in parser.candidates
+        )
+    )
+
+
 def extract_critical_bootstrap_assets(
     root_url,
     response,
@@ -156,58 +271,21 @@ def extract_critical_bootstrap_assets(
     deadline,
     clock=time.monotonic,
     max_assets=MAX_CRITICAL_ASSETS,
+    requested_range_end=MAX_RANGE_END,
 ):
-    """Extract a few critical JS targets from one complete HTTPS root page.
+    """Return assets only from a proven-complete root representation."""
 
-    The return values are one-shot, non-serializable objects.  The function is
-    fail-closed for non-HTML, compressed, partial, oversized, or expired input.
-    """
-
-    if not _deadline_open(deadline, clock):
-        return ()
-    if (
-        not isinstance(response, bytes)
-        or len(response) > MAX_ROOT_RESPONSE_BYTES
-        or not isinstance(max_assets, int)
-        or isinstance(max_assets, bool)
-        or max_assets < 0
-        or max_assets > MAX_CRITICAL_ASSETS
-    ):
-        return ()
-    normalized_root = _normalize_https_url(root_url, require_root=True)
-    if normalized_root is None:
-        return ()
-    parsed_head = _response_head(response)
-    if parsed_head is None:
-        return ()
-    status, headers = parsed_head
-    if status != 200 or not _identity_encoded(headers) or not _html_content(headers):
-        return ()
-    body = http_response_body(
+    inspection = inspect_critical_bootstrap_assets(
+        root_url,
         response,
         stream_closed=stream_closed,
         truncated=truncated,
+        deadline=deadline,
+        clock=clock,
+        max_assets=max_assets,
+        requested_range_end=requested_range_end,
     )
-    if body is None or len(body) > MAX_ROOT_RESPONSE_BYTES:
-        return ()
-
-    parser = _CriticalAssetParser(normalized_root[3], max_assets=max_assets)
-    decoded = body.decode("utf-8", "replace")
-    for offset in range(0, len(decoded), 16_384):
-        if not _deadline_open(deadline, clock):
-            return ()
-        parser.feed(decoded[offset : offset + 16_384])
-    parser.close()
-    if not _deadline_open(deadline, clock):
-        return ()
-    return tuple(
-        EphemeralBootstrapAsset(
-            exact_host=candidate[0],
-            host_header=candidate[1],
-            request_target=candidate[2],
-        )
-        for candidate in parser.candidates
-    )
+    return inspection.assets
 
 
 def classify_range_response(

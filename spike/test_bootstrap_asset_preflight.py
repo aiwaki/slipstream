@@ -10,8 +10,10 @@ from bootstrap_asset_preflight import (
     EphemeralBootstrapAsset,
     RangeProbeEvidence,
     RangeProbeOutcome,
+    RootDocumentOutcome,
     classify_range_response,
     extract_critical_bootstrap_assets,
+    inspect_critical_bootstrap_assets,
     inspect_range_response,
 )
 
@@ -187,6 +189,100 @@ def test_root_page_must_be_complete_bounded_identity_https_html(
         )
         == ()
     )
+
+
+def test_full_representation_206_emits_assets_but_prefix_206_is_inconclusive():
+    body = (
+        b'<script type="module" src="https://cdn.example/entry.js"></script>'
+        b'<link rel="modulepreload" href="https://cdn.example/vendor.js">'
+    )
+    full = _response(
+        body,
+        status="206 Partial Content",
+        headers=(f"Content-Range: bytes 0-{len(body) - 1}/{len(body)}",),
+    )
+    partial = _response(
+        body,
+        status="206 Partial Content",
+        headers=(
+            f"Content-Range: bytes 0-{len(body) - 1}/{len(body) + 100}",
+        ),
+    )
+    arguments = dict(
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: 0.0,
+        requested_range_end=len(body) + 100,
+    )
+
+    full_inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/", full, **arguments
+    )
+    partial_inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/", partial, **arguments
+    )
+
+    assert full_inspection.outcome is RootDocumentOutcome.COMPLETE
+    assert [asset.exact_host for asset in full_inspection.assets] == [
+        "cdn.example",
+        "cdn.example",
+    ]
+    assert (
+        partial_inspection.outcome
+        is RootDocumentOutcome.INCONCLUSIVE
+    )
+    assert partial_inspection.assets == ()
+
+
+@pytest.mark.parametrize(
+    "content_range",
+    [
+        "bytes 1-10/11",
+        "bytes 0-10/*",
+        "bytes 0-10/10",
+        "bytes 0-999/1000",
+        "not-a-range",
+    ],
+)
+def test_malformed_or_out_of_bound_root_206_is_inconclusive(content_range):
+    body = b'<script src="https://cdn.example/entry.js"></script>'
+    response = _response(
+        body,
+        status="206 Partial Content",
+        headers=(f"Content-Range: {content_range}",),
+    )
+
+    inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/",
+        response,
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: 0.0,
+        requested_range_end=len(body) + 100,
+    )
+
+    assert inspection.outcome is RootDocumentOutcome.INCONCLUSIVE
+    assert inspection.assets == ()
+
+
+def test_expired_root_inspection_is_inconclusive_not_healthy():
+    response = _response(
+        b'<script src="https://cdn.example/entry.js"></script>'
+    )
+
+    inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/",
+        response,
+        stream_closed=True,
+        truncated=False,
+        deadline=0.0,
+        clock=lambda: 0.0,
+    )
+
+    assert inspection.outcome is RootDocumentOutcome.INCONCLUSIVE
+    assert inspection.assets == ()
 
 
 def test_partial_truncated_and_expired_root_pages_do_not_emit_targets():
