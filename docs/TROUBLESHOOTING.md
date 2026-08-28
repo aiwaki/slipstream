@@ -28,6 +28,16 @@ direct plus a complete same-object owned-Geph range is actionable exact-child
 evidence. An idle timeout or slow progressive delivery is `unclear` and must
 not teach a route.
 
+Inspect the bounded parent/root response before concluding that no critical
+asset exists. Status `206` does not by itself mean failure: when one valid
+`Content-Range` begins at zero, covers the entire declared identity HTML
+representation, and agrees with framing and observed bytes, the root is
+complete and must be scanned exactly like a complete `200`. A true prefix-only
+response, malformed/out-of-bound range, inconsistent framing, or an exhausted
+inspection deadline is `unclear`; it receives at most the existing bounded
+direct retry and must not publish a healthy-root cache, probe Geph, or teach a
+route.
+
 The critical-object comparison is network-only. It must work for background
 tabs, Safari, Chrome, and non-browser clients without a frontmost/recent-input
 condition. Foreground browser provenance is relevant only if an ambiguous final
@@ -35,6 +45,9 @@ document may launch the privacy-bounded browser worker. Never work around this
 symptom with a CDN hostname rule, repeated reloads, or by asking the user to
 keep a browser frontmost. After a correction, require genuinely fresh Chrome
 and Safari connections and verify the complete page, not only the root request.
+Capture the starting learned count: a helper-only child proof or a browser
+reload that consumes an already learned overlay is diagnostic evidence, not a
+cold first-navigation success.
 
 ### Slipstream briefly opens Chrome or takes focus while idle
 

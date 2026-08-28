@@ -10,93 +10,82 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-28 (parent-latency deadline root cause reproduced and corrected
+Update 2026-08-28 (cold Aikido request/parser boundary reproduced and corrected
 locally): the user's dirty primary checkout remains untouched. Work continues
-only in the isolated PR #373 worktree on `codex/aikido-cdn-recovery`; its
-automated bundle-verification baseline is
-`ce07db1f0ed05ccac358e8bbd256314edf4f9231`. Live PR #373
-remains open at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`
-with its old exact-head CI and dependency audit green. The current automation
-work is based on packaging safeguard
-`dc54fbc0ccccb802be4e6272640c90d8d4bd1849`; the later local commits,
-including the canonical verifier, have not yet been pushed.
+only in the isolated worktree on `codex/aikido-cdn-recovery`. The exact product
+correction is commit `9baf1110b5b4d17fd5a31df9cb42aa1986eead02`, with two
+independent no-findings reviews complete; this checkpoint is its following
+documentation-only update. Live PR #373 remains open at the older remote head
+`513484ac43ae0348df06e61fca5af9d3105eb225` with its exact-head CI and
+dependency audit green. No current browser result or local patch is attributed
+to that remote head.
 
-The installed exact-`eccfccf` build removed the incorrect foreground/recent-
-input prerequisite from network-authoritative critical-child comparison, but a
-fresh Chrome Aikido navigation still produced an HTTP `200` shell with an empty
-DOM and `161` `ERR_CONNECTION_CLOSED` errors for critical
-`cdn.aikido.dev/assets/...` resources. Public StatusV2 stayed at `learned=0`,
-`pending=0`, and `last_state=idle`; owned Geph was up and PF/QUIC TCP fallback
-was active. The exact current JS object returned only `16,384` bytes directly
-while declaring `1,242,476`, but returned a complete `206` range of `65,536`
-bytes through the verified owned-Geph SOCKS listener.
+The exact `dfe300e017103dc3db7de25dea795cd49cc02567` app was subsequently built,
+verified, installed, and observed through the embedded/root-daemon SHA-256
+`23f5ce6342d396d7e6789cf1e2e97f5ed45efb6029c23b43b6e4766ad7b6c707`
+at launchd PID `65464`. A genuinely fresh temporary-profile Chrome navigation
+started at public `learned=0`, `pending=0`, and `last_state=idle`, but Aikido
+remained an empty shell. Its four primary critical CDN requests failed after
+about `8.7` seconds and the wider resource set failed after about `31.6`
+seconds; this was not an observation made too early. StatusV2 still showed no
+learning or pending proof, so the deadline correction's isolated child proof
+had not been entered by the real first-navigation path.
 
-Exact code-level reproduction identified the remaining causal boundary. The
-cross-origin child received only a one-second direct range deadline, so the
-real stable EOF at roughly `6.8` to `7.3` seconds was prematurely classified as
-an idle timeout and the Geph comparison never started. Even after manually
-allowing the EOF inside the old shared eight-second final deadline, only
-`1.228` seconds remained and the otherwise healthy Geph comparison expired at
-`8.001` seconds. The identical Geph probe succeeds in about `1.4` to `1.6`
-seconds; its TLS session selects no ALPN and correctly carries HTTP/1.1, ruling
-out the suspected HTTP/2 mismatch.
+History explains why Aikido appeared to work earlier. At exact product commit
+`513484ac43ae0348df06e61fca5af9d3105eb225`, daemon SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`,
+and PID `68160`, Chrome and Safari both rendered the login page. Before the
+Aikido navigation, however, one exact route was already learned; Capacitor
+advanced the learned count from one to two. That physical result proved reuse
+of an automatically learned shared overlay across browsers, not the missing
+clean transition `learned=0 -> first Aikido navigation -> child learned -> full
+render`.
 
-The first genuinely fresh temporary-profile real Chrome validation of the
-installed `d9b79f0` daemon reproduced the same empty Aikido shell and exactly
-`161` `ERR_CONNECTION_CLOSED` child failures. Navigation timing showed the
-root response held for about `10.04` seconds; the four primary CDN resources
-then failed together after about `6.86` seconds. StatusV2 remained
-`learned=0`, `pending=0`, `last_state=idle` while owned Geph was up and owned.
-The exact production root probe explained why the earlier correction still
-missed: a usable parent currently takes about `2.3` to `4.8` seconds, but the
-child's direct deadline was still capped at parent-start plus nine seconds.
-That left only about `4.2` to `6.7` seconds for a child whose stable EOF needs
-about `6.8`, silently converting the real close back into `idle_timeout`.
+The remaining production composition defect is exact. The bounded root
+preflight always sends `Range`, and the semantic classifier accepts a complete,
+non-empty `206` as usable. The bootstrap extractor added later accepted only
+status `200`, so a valid full-representation `206` yielded zero critical assets.
+`_run_initial_route_preflight` then skipped the child direct/owned-Geph branch
+and could cache the parent as usable for ten minutes. This is sufficient to
+produce the observed `learned=0`, `pending=0`, idle state and direct CDN
+failures. The retained physical artifact does not include the internal root
+preflight's status and headers, so it is not falsely described as a captured
+live `206`; the defect is instead reproduced through the exact production
+request -> response classifier -> root inspector -> child proof chain.
 
-The current correction changes only deadline accounting for an
-enumerated cross-origin critical child. Once a complete usable parent has
-actually exposed that child, it starts a fresh bounded child envelope: at most
-the unchanged eight-second direct RoutePreflightV1 observation followed by a
-separate three-second same-object Geph slice. It validates only explicit
-EOF/reset before Geph and mints a fresh exact-host eight-second authority for
-that Geph observation. Parent latency can no longer consume child evidence.
-Slow or idle direct delivery remains retryable-inconclusive and cannot start
-Geph, cache, or learning; a slow complete direct object remains direct.
-Same-origin, ordinary healthy, ambiguous-browser, policy exclusion, ownership,
-coalescing, Discord, YouTube, and googlevideo behavior is unchanged. No Aikido,
-CDN, Capacitor, status-code, IP, suffix, or frontmost rule was added.
+The exact correction introduces an explicit root-inspection result. A
+`206` is scannable only when one valid in-bound `Content-Range` proves the
+entire identity HTML representation and observed/declared lengths agree. A
+proper prefix response, malformed/out-of-bound metadata, inconsistent framing,
+or an exhausted inspection deadline is retryable-inconclusive: it triggers at
+most the existing one bounded direct retry and publishes no healthy cache,
+child probe, Geph authority, or learning. A complete parent may expose the same
+bounded ephemeral critical objects as before; only explicit child EOF/reset
+plus complete same-object owned-Geph evidence may learn that exact child. No
+Aikido, CDN, Capacitor, IP, suffix, status-only, browser-focus, Discord,
+YouTube, or googlevideo rule was added.
 
-The adjacent bootstrap set passes `48` focused tests. The new regression
-simulates a `4.7`-second usable parent, `6.8`-second explicit child EOF, and
-`1.5`-second complete Geph result; it learns only the exact child after the old
-parent cutoff. Existing regressions still cover simulated `6.8`-second
-EOF followed by a `1.5`-second Geph proof, simulated slow idle and slow complete
-direct outcomes, distinct one-shot authorities, same-object mismatch, and the
-existing provenance boundary. The adjacent routing/provenance/bootstrap set is
-green (`685 passed`), the complete local project is green (`1783 passed`, `181`
-subtests, and only the existing Scapy finite-field-DH deprecation warning),
-documentation checks pass (`9 passed`), and `git diff --check` is clean. The
-exact current blocking production function also returned
-`_RoutePreflightOwnedGephProof` for the live Aikido object in `9.251` seconds
-with all `65,536` Geph bytes, without committing a route.
+Deterministic verification now covers the formerly absent composition boundary.
+One cold production-chain regression feeds an Aikido-shaped full-representation
+`206` through the real TLS root probe and `_run_unknown_initial_route_race`,
+requires the parent payload to remain held, and proves that only the critical
+child is learned after direct EOF and complete same-object owned-Geph evidence.
+The negative production-chain regression feeds prefix-only `206` twice and
+requires zero child resolution/Geph calls, zero learned routes, and no healthy
+cache. The complete extractor tests plus both regressions pass `39` tests; the
+adjacent plain-preflight, route-preflight, critical-child, adaptive-retry, and
+slow/inconclusive set passes `25` tests with `594` unrelated tests deselected.
+Compilation and `git diff --check` are clean. These are change-scoped checks
+against the previously green full-suite baseline; no unchanged full suite,
+protected browser matrix, soak, or account-backed workflow was repeated.
 
-The correction is committed as product commit
-`dfe300e017103dc3db7de25dea795cd49cc02567`. The canonical local build and
-bundle verifier passed from that exact commit: fresh, staged, and bundled
-daemon copies all have SHA-256
-`23f5ce6342d396d7e6789cf1e2e97f5ed45efb6029c23b43b6e4766ad7b6c707`;
-the app bundle is structurally valid and ad-hoc signed, with bundle tree
-SHA-256 `87df7511ef8481110d091fe63904ffae7943036bcc6460e7f078e8726b5b33b9`.
-It is intentionally unnotarized. The old failed temporary Chrome session was
-closed cleanly. Installation is the only remaining local transaction:
-`sudo -n true` reports that administrator authorization is required, and the
-root-owned `0700` install directory cannot be updated without it. Do not test
-the candidate against the still-installed old daemon or treat such a run as
-product evidence. After one authorized install, run the canonical installed
-verifier, then one genuinely fresh ordinary Chrome and one real Safari
-validation of complete Aikido and Capacitor resources. No account-backed
-workflow, publisher, full suite, or 30-minute soak is relevant to this local
-causal correction, and no new physical browser success is claimed yet.
+No physical browser validation has been started for exact product commit
+`9baf1110b5b4d17fd5a31df9cb42aa1986eead02`. The next verified action is to
+run the canonical fresh/staged/bundled daemon verifier, and only then install
+that exact bundle
+for one genuinely fresh Chrome and one real Safari qualification. A warm
+route, manual seed, reload, helper-only probe, or a root page without complete
+critical resources will not count as product success.
 
 The first local Tauri rebuild exposed a separate repeated packaging hazard:
 `npm run build:local` rebuilt the tray but silently reused the preceding frozen
@@ -325,10 +314,13 @@ public auto-geo-exit state advanced from one to two learned exact hosts; Aikido
 then completed to its login page. A separate private Safari window likewise
 loaded the normal Capacitor page and the complete Aikido login page, after which
 only that temporary window was closed and the user's ordinary four-tab window
-remained intact. There is still no Capacitor/Aikido hostname rule, broad `403`
-rule, or foreground requirement for the strict-denial decision. That correction
-was committed as exact PR head `513484ac43ae0348df06e61fca5af9d3105eb225`;
-exact-head CI `32867878889` and dependency audit `32867879962` passed.
+remained intact. This was a warm Aikido result: one automatically learned exact
+route existed before Aikido was opened, so Chrome and Safari proved overlay
+reuse rather than cold critical-child discovery from `learned=0`. There is
+still no Capacitor/Aikido hostname rule, broad `403` rule, or foreground
+requirement for the strict-denial decision. That correction was committed as
+exact PR head `513484ac43ae0348df06e61fca5af9d3105eb225`; exact-head CI
+`32867878889` and dependency audit `32867879962` passed.
 
 A broader physical sweep then exposed slow convergence without invalidating the
 Capacitor/Aikido proof. RuTracker eventually completed in Chrome only after a

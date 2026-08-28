@@ -5,6 +5,60 @@ Updated: 2026-08-28
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
 
+## 2026-08-28 ranged-root request/parser boundary
+
+The exact installed `dfe300e` candidate reached the intended child deadline
+logic in isolation but did not enter it from a cold physical Aikido navigation.
+The fresh Chrome session started with no learned route and stayed at
+`learned=0`, `pending=0`, and `last_state=idle`; the empty shell's four primary
+CDN failures arrived after about `8.7` seconds and the broader failures after
+about `31.6` seconds. This ruled out an early screenshot and moved the causal
+boundary before child comparison.
+
+History and production composition exposed the missing edge. The root semantic
+probe has sent a bounded `Range` request since `a38c6d1`. The critical-asset
+extractor added by `c7f1942` accepted only an HTTP `200`, while the surrounding
+semantic classifier accepted any complete non-empty successful `2xx`/`3xx`
+response, including `206`, as usable. A server that satisfies the oversized
+range with its entire shorter representation therefore produced a valid full
+`206`, zero extracted assets, no child direct/Geph comparison, and a usable
+parent cache entry. The later UI-provenance and deadline corrections never
+exercised this request -> classifier -> extractor boundary: their helper built
+a synthetic `200` root and pre-extracted assets before invoking production
+preflight.
+
+The retained physical artifact does not contain status/headers for the
+daemon's internal root preflight, so it does not directly prove that the live
+Aikido observation was that `206`. The path is nevertheless a concrete product
+defect and a sufficient reproduction of the exact observed state. The new
+regression passes an Aikido-shaped full-representation `206` through the real
+TLS root probe, production classifier, root inspector, initial route preflight,
+unknown-route race, direct child EOF, same-object owned-Geph result, and exact
+child commit. The old `0de928e` extractor returns zero assets for the same
+response, and a behavior-equivalent old empty-assets mutation makes the new
+full-path regression fail.
+
+The generic correction distinguishes a complete representation from an
+unresolved ranged prefix. A root `206` is scannable only when one valid
+`Content-Range` starts at zero, ends inside the requested bound, declares
+`end + 1 == total`, agrees with transfer/content-length framing and observed
+body bytes, is identity encoded HTML, and is inspected before its deadline.
+A proper prefix, malformed/out-of-bound range, inconsistent body/framing, or
+expired inspection is `inconclusive`: the existing bounded same-IP retry may
+run once, but neither attempt can publish a healthy cache, resolve/probe a
+child, contact Geph, or learn a route. A fully scanned `200` retains its prior
+behavior. Asset targets remain one-shot and non-serializable, and only explicit
+child EOF/reset plus complete same-object evidence through the ownership-
+verified Geph listener can learn that exact child.
+
+The complete extractor plus production-chain tests pass `39` checks. The
+adjacent plain-preflight, route-preflight, critical-child, adaptive-retry, and
+slow/inconclusive selection passes `25` checks with `594` unrelated tests
+deselected. Two independent read-only reviews found no correctness,
+false-cache, slow-network, or test-boundary defects; one separately confirmed
+the regression fails under the old behavior. No physical browser test was run
+for exact product commit `9baf1110b5b4d17fd5a31df9cb42aa1986eead02`.
+
 ## 2026-08-28 critical-child UI-provenance root cause
 
 Fresh ordinary Chrome proved the current installed correction could restore
@@ -82,12 +136,16 @@ were explicitly allowed to exit before relaunch, so the result did not reuse
 the direct Cloudflare connection seen by the prior build. The first clean
 Capacitor navigation loaded the normal site and advanced public exact-host
 learning from one entry to two; the same Chrome then completed Aikido to its
-login page. A separate private Safari window independently loaded the normal
-Capacitor page and the complete Aikido login page; closing the temporary window
-left the user's ordinary Safari tabs intact. This confirms the intended product
-path without a hostname exception: a complete strict direct denial plus a
-complete same-host owned-Geph payload proof may learn the exact network route,
-and the resulting runtime overlay is available to every eligible connection.
+login page. A separate private Safari window loaded the normal Capacitor page
+and consumed the shared overlay to render the complete Aikido login page;
+closing the temporary window left the user's ordinary Safari tabs intact. This
+proves reuse of an automatically learned overlay without a hostname exception,
+but it is not cold Aikido discovery evidence: one route was already learned
+before Aikido was opened. It therefore does not prove the missing transition
+from `learned=0` through first Aikido navigation to critical-child discovery
+and completion. A complete strict direct denial plus a complete same-host
+owned-Geph payload proof may still learn the exact network route, and the
+resulting runtime overlay is available to every eligible connection.
 Foreground signed-browser evidence remains limited to ambiguous incomplete or
 retry paths.
 
