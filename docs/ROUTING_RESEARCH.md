@@ -58,6 +58,10 @@ deselected. Two independent read-only reviews found no correctness,
 false-cache, slow-network, or test-boundary defects; one separately confirmed
 the regression fails under the old behavior. No physical browser test was run
 for exact product commit `9baf1110b5b4d17fd5a31df9cb42aa1986eead02`.
+Its canonical local build subsequently passed with the same daemon SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`
+in the fresh, staged, and final app-bundled locations; no existing installation
+or browser state was changed by that build.
 
 ## 2026-08-28 critical-child UI-provenance root cause
 

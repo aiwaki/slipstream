@@ -80,10 +80,18 @@ against the previously green full-suite baseline; no unchanged full suite,
 protected browser matrix, soak, or account-backed workflow was repeated.
 
 No physical browser validation has been started for exact product commit
-`9baf1110b5b4d17fd5a31df9cb42aa1986eead02`. The next verified action is to
-run the canonical fresh/staged/bundled daemon verifier, and only then install
-that exact bundle
-for one genuinely fresh Chrome and one real Safari qualification. A warm
+`9baf1110b5b4d17fd5a31df9cb42aa1986eead02`. Its canonical `npm run
+build:local` completed successfully after a fresh Python 3.13 freeze. The
+fresh, staged, and final bundled daemon copies are byte-identical at SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`;
+the canonical verifier reports `overall=pass`, `build_chain.status=pass`, a
+valid ad-hoc app signature, app tree SHA-256
+`3c2582ccff8e9349df5906b39c66ef32de40cb65244bce1a8ea62094b2f3a9d6`,
+and bundled materialized-daemon tree SHA-256
+`019efc6ee023da3c25f8c795a2e006a899223cb5773cb7161f72e6ad0756a0d6`.
+The installed app still carries the older `dfe300e` daemon and has not been
+mutated by this build. The next verified action is to install only this exact
+bundle for one genuinely fresh Chrome and one real Safari qualification. A warm
 route, manual seed, reload, helper-only probe, or a root page without complete
 critical resources will not count as product success.
 
