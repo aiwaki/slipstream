@@ -10,6 +10,48 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-30 (selected-representation root boundary isolated locally):
+the user's dirty primary checkout remains untouched; work continues only in the
+isolated `codex/aikido-cdn-recovery` worktree. The exact installed `9baf111`
+predecessor, app tree SHA-256
+`3c2582ccff8e9349df5906b39c66ef32de40cb65244bce1a8ea62094b2f3a9d6`, and
+bundled/root daemon SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`
+still left a genuinely cold Chrome Aikido navigation empty with no learned
+route. The earlier visible result on `513484a` reused an already learned exact
+overlay, so neither result proves cold first-navigation recovery. Physical
+success in fresh ordinary Chrome and Safari remains open.
+
+History and bounded diagnostics identify the next causal boundary without a
+hostname rule or longer timeout. The semantic root request asked for identity
+content, and shared extractor blob
+`477e2796bd8b4daf525df47c347627c88d7740d0` had no gzip decoder. Against the
+same direct root target, range, and cache controls, the identity request
+received HTTP `200` with `19,688` response-body bytes and `9.219354` seconds to
+first byte; changing only request negotiation to advertise gzip received HTTP
+`200` with `3,561` response-body bytes and `1.872561` seconds to first byte. The
+capture retained no response headers, so this evidence does not assert live
+`Content-Encoding`, `Content-Length`, or `Content-Range` values.
+
+The exact product correction is commit
+`7d3c871582f1b795e7cf7ac061f718255ab3cdaa`. It makes direct and owned-Geph
+semantic root requests byte-identical with gzip negotiation, requires complete raw framing
+and a full selected representation before decode/classification/extraction,
+and accepts only identity content or one bounded gzip stream. Every malformed,
+truncated, concatenated, trailing, unsupported, capped, range, framing, or
+deadline failure remains retryable-inconclusive. On the direct path, at most
+the existing one retry may run, with no healthy cache, child resolution/probe,
+Geph call, or learning; an invalid Geph representation is likewise unusable and
+cannot authorize learning. Critical-child probes remain identity encoded. Change-scoped
+coverage includes the decoder/framing limits, full-versus-prefix `206`, exact
+request equality, and route/cache/learning guards. With an isolated clean
+bytecode cache, the decoder/extractor set passes `54` tests and the exact
+production-chain set passes `17`; the documentation set passes `9` tests,
+compilation and `git diff --check` are clean, and mutation controls fail when
+request equality or the full-selected-representation guard is removed. The
+canonical bundle/daemon equality and one genuinely cold Chrome result must be
+recorded before Safari validation or any product-success claim.
+
 Update 2026-08-28 (cold Aikido request/parser boundary reproduced and corrected
 locally): the user's dirty primary checkout remains untouched. Work continues
 only in the isolated worktree on `codex/aikido-cdn-recovery`. The exact product

@@ -1,9 +1,56 @@
 # Routing Research Notes
 
-Updated: 2026-08-28
+Updated: 2026-08-30
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-08-30 selected-representation root boundary
+
+The exact installed `9baf111` predecessor, with bundled/root daemon SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`,
+still left a genuinely cold Chrome Aikido navigation empty with no learned
+route. That result invalidates the earlier plan to treat its `200`/full-`206`
+extractor correction as the completed cold path. The visible Aikido result on
+`513484a` remains warm-route evidence: an exact overlay was already learned
+before that navigation, so it did not prove the missing first-navigation
+transition.
+
+Source history locates the next causal boundary in root content negotiation.
+The semantic root request asked for identity content, and the shared historical
+extractor blob
+`477e2796bd8b4daf525df47c347627c88d7740d0` had no gzip decoder. On the same
+direct Aikido root target with the same bounded range and cache controls, the
+identity request received HTTP `200` with `19,688` response-body bytes and
+`9.219354` seconds to first byte; changing only the request's content
+negotiation to advertise gzip received HTTP `200` with `3,561` response-body
+bytes and `1.872561` seconds to first byte. The capture did not retain the
+response headers, so these numbers establish only the request variant,
+received byte count, status, and timing. They do not establish the live
+`Content-Encoding`, `Content-Length`, or `Content-Range` values.
+
+Exact product commit `7d3c871582f1b795e7cf7ac061f718255ab3cdaa`
+makes the direct and owned-Geph semantic root requests byte-identical,
+including the bounded range and gzip negotiation. Raw encoded
+HTTP framing must complete first; a `206` must additionally prove the whole
+selected representation rather than a prefix. Only then may an absent/identity
+encoding or one bounded gzip stream be decoded and classified or scanned for a
+critical asset. Unsupported, malformed, corrupt, truncated, concatenated,
+trailing, input/output-cap, framing, range, or inspection-deadline failures are
+retryable-inconclusive. On the direct path they may consume only the existing
+one retry and may not publish a healthy cache, expose/probe a child, contact
+Geph, or learn a route; an invalid Geph representation is unusable and cannot
+authorize learning. Critical-child same-object range requests remain identity
+encoded.
+
+Change-scoped tests cover gzip content-length and chunked responses, corrupt
+and truncated streams, limits/deadlines, full versus prefix `206`, exact
+direct/Geph request equality, and the production route/cache/learning guards.
+With an isolated clean bytecode cache, the decoder/extractor set passes `54`
+tests and the exact production-chain set passes `17`; the documentation set
+passes `9`, compilation and `git diff --check` are clean, and mutation controls
+fail when either request equality or the full-selected-representation guard is
+removed. No physical Chrome or Safari success is claimed for this correction.
 
 ## 2026-08-28 ranged-root request/parser boundary
 
