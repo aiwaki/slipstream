@@ -62,6 +62,8 @@ import bootstrap_asset_preflight
 import geph_backend
 from http2_response_probe import probe_http2_response
 from http_response_completion import (
+    HttpContentDecodeOutcome,
+    decode_http_response_content,
     http_response_body,
     http_response_body_length,
     http_response_complete,
@@ -2268,11 +2270,11 @@ AUTO_GEPH_RECOVERY_GRACE = 5.0
 AUTO_GEPH_RECOVERY_POLL = 0.1
 AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX = 2
-SEMANTIC_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
-SEMANTIC_GEPH_PROBE_RANGE_END = 262143
+SEMANTIC_GEPH_PROBE_MAX_BYTES = SEMANTIC_PLAIN_PROBE_MAX_BYTES
+SEMANTIC_GEPH_PROBE_RANGE_END = SEMANTIC_PLAIN_PROBE_RANGE_END
 SEMANTIC_GEPH_INITIAL_ATTEMPT_MAX = 3.0
 SEMANTIC_GEPH_RETRY_MIN_BUDGET = 1.0
-INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = SEMANTIC_GEPH_PROBE_MAX_BYTES
+INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
 INCOMPLETE_RESPONSE_GEPH_PROBE_TIMEOUT = 20.0
 SEMANTIC_REGIONAL_DENIAL_MARKERS = (
     b"no longer available in your area",
@@ -2406,6 +2408,7 @@ class _SemanticPlainPreflightObservation:
     safe_incomplete: bool = False
     retryable_inconclusive: bool = False
     hard_transport_failure: bool = False
+    payload_bytes: int = 0
 
 
 _BOOTSTRAP_RANGE_TERMINATION_COMPLETE = "complete"
@@ -4051,17 +4054,38 @@ def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     return _semantic_geph_payload_probe(host, timeout)
 
 
-def _semantic_geph_probe_request(host, range_end=SEMANTIC_GEPH_PROBE_RANGE_END):
+def _semantic_root_probe_request(host, range_end, *, accept_encoding):
+    if accept_encoding not in {"identity", "gzip"}:
+        raise ValueError("unsupported semantic root content coding")
     return (
         "GET / HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         "User-Agent: SlipstreamSemanticGeo/1\r\n"
         "Accept: text/html,application/xhtml+xml\r\n"
-        "Accept-Encoding: identity\r\n"
+        f"Accept-Encoding: {accept_encoding}\r\n"
         f"Range: bytes=0-{int(range_end)}\r\n"
         "Cache-Control: no-cache\r\n"
         "Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
+
+
+def _semantic_geph_probe_request(host, range_end=SEMANTIC_GEPH_PROBE_RANGE_END):
+    return _semantic_root_probe_request(
+        host,
+        range_end,
+        accept_encoding="gzip",
+    )
+
+
+def _semantic_plain_preflight_probe_request(
+    host,
+    range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
+):
+    return _semantic_root_probe_request(
+        host,
+        range_end,
+        accept_encoding="gzip",
+    )
 
 
 def _semantic_http_response_outcome(
@@ -4069,8 +4093,9 @@ def _semantic_http_response_outcome(
     *,
     stream_closed=True,
     truncated=False,
+    decoded_body=None,
 ):
-    """Classify one complete, identity-encoded service-root response.
+    """Classify one complete service-root body already safe to inspect.
 
     The result is deliberately coarse and contains no page text, URL path,
     cookies, request identifiers, or provider-specific identifiers.  A generic
@@ -4100,17 +4125,20 @@ def _semantic_http_response_outcome(
                 normalized_value
             )
         if (
-            separator
+            decoded_body is None
+            and separator
             and normalized_name == b"content-encoding"
             and normalized_value not in {b"", b"identity"}
         ):
             return SEMANTIC_OUTCOME_TERMINAL_ERROR
-    body = http_response_body(
-        data,
-        stream_closed=stream_closed,
-        truncated=truncated,
-        allow_error_status=True,
-    )
+    body = decoded_body
+    if body is None:
+        body = http_response_body(
+            data,
+            stream_closed=stream_closed,
+            truncated=truncated,
+            allow_error_status=True,
+        )
     if body is None:
         return SEMANTIC_OUTCOME_TERMINAL_ERROR
     lowered = body.lower()
@@ -4168,11 +4196,102 @@ def _semantic_plain_response_is_regional_denial(
     truncated=False,
 ):
     """Recognize only a strong regional-denial marker in a plain HTTP reply."""
-    return _semantic_http_response_outcome(
+    return _semantic_plain_response_observation(
         data,
         stream_closed=stream_closed,
         truncated=truncated,
-    ) == SEMANTIC_OUTCOME_REGIONAL_DENIAL
+    ).outcome == SEMANTIC_OUTCOME_REGIONAL_DENIAL
+
+
+def _semantic_root_response_observation(
+    data,
+    *,
+    stream_closed=True,
+    truncated=False,
+    deadline=None,
+    clock=None,
+    max_input_bytes,
+    requested_range_end,
+):
+    if clock is None:
+        clock = time.monotonic
+    if not bootstrap_asset_preflight.response_has_full_selected_representation(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        requested_range_end=requested_range_end,
+    ):
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+        )
+    content = decode_http_response_content(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=True,
+        deadline=float("inf") if deadline is None else deadline,
+        max_input_bytes=max_input_bytes,
+        max_output_bytes=bootstrap_asset_preflight.MAX_ROOT_RESPONSE_BYTES,
+        clock=clock,
+    )
+    if content.outcome is HttpContentDecodeOutcome.DEADLINE_EXCEEDED:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+        )
+    if content.outcome is not HttpContentDecodeOutcome.COMPLETE:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+        )
+    return _SemanticPlainPreflightObservation(
+        _semantic_http_response_outcome(
+            data,
+            stream_closed=stream_closed,
+            truncated=truncated,
+            decoded_body=content.body,
+        ),
+        payload_bytes=len(content.body),
+    )
+
+
+def _semantic_plain_response_observation(
+    data,
+    *,
+    stream_closed=True,
+    truncated=False,
+    deadline=None,
+    clock=None,
+):
+    return _semantic_root_response_observation(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        deadline=deadline,
+        clock=clock,
+        max_input_bytes=SEMANTIC_PLAIN_PROBE_MAX_BYTES,
+        requested_range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
+    )
+
+
+def _semantic_geph_root_response_observation(
+    data,
+    *,
+    stream_closed=True,
+    truncated=False,
+    deadline=None,
+    clock=None,
+):
+    return _semantic_root_response_observation(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        deadline=deadline,
+        clock=clock,
+        max_input_bytes=SEMANTIC_GEPH_PROBE_MAX_BYTES,
+        requested_range_end=SEMANTIC_GEPH_PROBE_RANGE_END,
+    )
 
 
 def _semantic_plain_response_outcome(
@@ -4182,11 +4301,11 @@ def _semantic_plain_response_outcome(
     truncated=False,
 ):
     """Return one fixed RoutePreflightV1 outcome for a direct root reply."""
-    return _semantic_http_response_outcome(
+    return _semantic_plain_response_observation(
         data,
         stream_closed=stream_closed,
         truncated=truncated,
-    )
+    ).outcome
 
 
 def _semantic_plain_preflight_probe_detail(
@@ -4220,7 +4339,7 @@ def _semantic_plain_preflight_probe_detail(
         )
         _set_socket_deadline_timeout(tls_sock, deadline)
         tls_sock.sendall(
-            _semantic_geph_probe_request(
+            _semantic_plain_preflight_probe_request(
                 h,
                 range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
             )
@@ -4269,11 +4388,15 @@ def _semantic_plain_preflight_probe_detail(
                     stream_closed and not safe_incomplete
                 ),
             )
-        outcome = _semantic_plain_response_outcome(
+        response_observation = _semantic_plain_response_observation(
             data,
             stream_closed=stream_closed,
             truncated=truncated,
+            deadline=deadline,
         )
+        if response_observation.retryable_inconclusive:
+            return response_observation
+        outcome = response_observation.outcome
         assets = ()
         if outcome == SEMANTIC_OUTCOME_USABLE:
             inspection = bootstrap_asset_preflight.inspect_critical_bootstrap_assets(
@@ -4631,12 +4754,14 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     if response is None:
         return 0
     data, stream_closed, truncated = response
-    if _semantic_geph_response_usable(data):
-        return http_response_body_length(
-            data,
-            stream_closed=stream_closed,
-            truncated=truncated,
-        ) or 0
+    observation = _semantic_geph_root_response_observation(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        deadline=deadline,
+    )
+    if observation.outcome == SEMANTIC_OUTCOME_USABLE:
+        return observation.payload_bytes
 
     redirect_host = _semantic_geph_canonical_root_redirect_target(host, data)
     if redirect_host is None:
@@ -4645,13 +4770,15 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     if redirected is None:
         return 0
     redirected_data, redirected_closed, redirected_truncated = redirected
-    if not _semantic_geph_response_usable(redirected_data):
-        return 0
-    return http_response_body_length(
+    redirected_observation = _semantic_geph_root_response_observation(
         redirected_data,
         stream_closed=redirected_closed,
         truncated=redirected_truncated,
-    ) or 0
+        deadline=deadline,
+    )
+    if redirected_observation.outcome != SEMANTIC_OUTCOME_USABLE:
+        return 0
+    return redirected_observation.payload_bytes
 
 
 def _incomplete_response_probe_request(host, *, bounded_range):

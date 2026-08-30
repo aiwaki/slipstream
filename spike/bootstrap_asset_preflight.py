@@ -16,6 +16,8 @@ import time
 from urllib.parse import quote, urljoin, urlsplit
 
 from http_response_completion import (
+    HttpContentDecodeOutcome,
+    decode_http_response_content,
     http_response_body,
     http_response_complete,
     http_response_incomplete,
@@ -71,6 +73,56 @@ class RootDocumentInspection:
 
     outcome: RootDocumentOutcome
     assets: tuple = ()
+
+
+def response_has_full_selected_representation(
+    response,
+    *,
+    stream_closed,
+    truncated,
+    requested_range_end=MAX_RANGE_END,
+):
+    """Return whether a ranged root reply contains its whole representation.
+
+    A server may ignore ``Range`` and return an ordinary complete response.
+    When it does honor the request with 206, semantic use is safe only when the
+    encoded response body is the entire selected representation, not a valid
+    but prefix-only gzip member whose decoded text happens to look decisive.
+    """
+
+    if (
+        not isinstance(response, bytes)
+        or not isinstance(requested_range_end, int)
+        or isinstance(requested_range_end, bool)
+        or requested_range_end < 0
+        or requested_range_end > MAX_RANGE_END
+    ):
+        return False
+    parsed_head = _response_head(response)
+    if parsed_head is None:
+        return False
+    status, headers = parsed_head
+    if status != 206:
+        return True
+    range_descriptor = _content_range(headers, requested_range_end)
+    if range_descriptor is None:
+        return False
+    range_end, total_length = range_descriptor
+    expected_body_length = range_end + 1
+    if (
+        total_length != expected_body_length
+        or not _range_length_consistent(headers, expected_body_length)
+    ):
+        return False
+    encoded_body = http_response_body(
+        response,
+        stream_closed=stream_closed,
+        truncated=truncated,
+    )
+    return (
+        encoded_body is not None
+        and len(encoded_body) == expected_body_length
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +228,12 @@ def inspect_critical_bootstrap_assets(
 ):
     """Inspect one complete root representation for critical JS targets.
 
-    A ranged response is scannable only when it contains the entire identity
-    representation (``bytes 0-(total-1)/total``).  A proper prefix-only 206,
-    malformed range metadata, inconsistent framing, or an exhausted inspection
-    deadline remains explicitly inconclusive so callers cannot publish a false
-    healthy-root cache entry.
+    A ranged response is scannable only when it contains the entire selected
+    representation (``bytes 0-(total-1)/total``).  Identity and exactly one
+    complete gzip member are accepted.  A proper prefix-only 206, malformed
+    range metadata, unsafe coding, inconsistent framing, or an exhausted
+    inspection deadline remains explicitly inconclusive so callers cannot
+    publish a false healthy-root cache entry.
     """
 
     if not _deadline_open(deadline, clock):
@@ -205,40 +258,33 @@ def inspect_critical_bootstrap_assets(
     if parsed_head is None:
         return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
     status, headers = parsed_head
-    expected_body_length = None
     if status == 206:
-        range_descriptor = _content_range(headers, requested_range_end)
-        if range_descriptor is None:
-            return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
-        range_end, total_length = range_descriptor
-        expected_body_length = range_end + 1
-        if (
-            total_length != expected_body_length
-            or not _range_length_consistent(headers, expected_body_length)
+        if not response_has_full_selected_representation(
+            response,
+            stream_closed=stream_closed,
+            truncated=truncated,
+            requested_range_end=requested_range_end,
         ):
             return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
     elif status != 200:
         return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
-    if not _identity_encoded(headers) or not _html_content(headers):
+    if not _html_content(headers):
         return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
-    body = http_response_body(
+    decoded = decode_http_response_content(
         response,
         stream_closed=stream_closed,
         truncated=truncated,
+        allow_error_status=False,
+        deadline=deadline,
+        max_input_bytes=MAX_ROOT_RESPONSE_BYTES,
+        max_output_bytes=MAX_ROOT_RESPONSE_BYTES,
+        clock=clock,
     )
-    if (
-        body is None
-        or len(body) > MAX_ROOT_RESPONSE_BYTES
-        or (
-            expected_body_length is not None
-            and len(body) != expected_body_length
-        )
-    ):
-        return RootDocumentInspection(
-            RootDocumentOutcome.INCONCLUSIVE
-            if status == 206
-            else RootDocumentOutcome.UNSCANNABLE
-        )
+    if decoded.outcome is not HttpContentDecodeOutcome.COMPLETE:
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    body = decoded.body
+    if not body:
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
 
     parser = _CriticalAssetParser(normalized_root[3], max_assets=max_assets)
     decoded = body.decode("utf-8", "replace")

@@ -2,6 +2,7 @@ import asyncio
 import ast
 import base64
 import errno
+import gzip
 import hashlib
 import inspect
 import json
@@ -9631,6 +9632,30 @@ def test_semantic_edge_denial_is_strict_generic_and_challenge_precedes_it():
     assert not tproxy._semantic_geph_response_usable(edge)
 
 
+def test_plain_semantic_response_decodes_gzip_but_geph_classifier_stays_identity():
+    body = (
+        b"Sorry, you have been blocked. "
+        b"This website is using a security service. Cloudflare Ray ID opaque"
+    )
+    compressed = gzip.compress(body, mtime=0)
+    response = (
+        b"HTTP/1.1 403 Forbidden\r\n"
+        b"Content-Type: text/html\r\n"
+        b"Content-Encoding: gzip\r\n"
+        + f"Content-Length: {len(compressed)}\r\n\r\n".encode()
+        + compressed
+    )
+
+    assert tproxy._semantic_plain_response_outcome(response) == (
+        tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+    )
+    assert not tproxy._semantic_geph_response_usable(response)
+    corrupt = response[:-1]
+    assert tproxy._semantic_plain_response_outcome(corrupt) == (
+        tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    )
+
+
 def test_plain_preflight_deadline_is_retryable_inconclusive(monkeypatch):
     def timeout(*_args, **_kwargs):
         raise TimeoutError
@@ -9707,6 +9732,87 @@ def test_plain_preflight_empty_eof_is_hard_transport_failure(monkeypatch):
     assert not observation.safe_incomplete
     assert not observation.retryable_inconclusive
     assert observation.hard_transport_failure
+
+
+def test_partial_gzip_eof_enters_local_recovery_without_browser_or_geph(
+    monkeypatch,
+):
+    host = "partial-gzip-eof.example"
+    body = b'<script src="https://cdn.example/entry.js"></script>'
+    compressed = gzip.compress(body, mtime=0)
+    partial = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+        b"Content-Encoding: gzip\r\n"
+        + f"Content-Length: {len(compressed)}\r\n\r\n".encode()
+        + compressed[:-1]
+    )
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.responses = deque((partial, b""))
+            self.request = b""
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            self.request = request
+
+        def recv(self, _size):
+            return self.responses.popleft()
+
+        def close(self):
+            return None
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda *_args, **_kwargs: tls_socket
+        ),
+    )
+
+    observation = tproxy._semantic_plain_preflight_probe_detail(
+        "8.8.8.8",
+        host,
+        0.4,
+    )
+
+    assert b"Accept-Encoding: gzip\r\n" in tls_socket.request
+    assert observation.outcome == tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING
+    assert not observation.safe_incomplete
+    assert not observation.retryable_inconclusive
+    assert observation.hard_transport_failure
+
+    _enable_owned_geph_preflight(monkeypatch)
+    monkeypatch.setattr(
+        tproxy,
+        "_browser_navigation_provenance_accepted",
+        lambda *_args, **_kwargs: pytest.fail(
+            "partial gzip EOF must not enter browser provenance"
+        ),
+    )
+    result = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            direct_probe=lambda *_args: observation,
+            geph_probe=lambda *_args: pytest.fail(
+                "partial gzip EOF must enter local recovery before Geph"
+            ),
+        )
+    )
+
+    assert isinstance(result, tproxy._RoutePreflightLocalRecoveryClaim)
+    assert result.marker is tproxy._ROUTE_PREFLIGHT_LOCAL_RECOVERY
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
 
 
 def test_plain_preflight_framed_partial_idle_is_retryable_inconclusive(
@@ -10523,6 +10629,13 @@ def test_plain_preflight_range_leaves_bounded_space_for_http_headers():
         f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
         in request
     )
+    direct_request = tproxy._semantic_plain_preflight_probe_request(
+        "bounded.example",
+        range_end=tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END,
+    )
+    assert request == direct_request
+    assert b"Accept-Encoding: gzip\r\n" in request
+    assert b"Accept-Encoding: gzip\r\n" in direct_request
 
 
 def test_route_preflight_healthy_direct_does_not_require_geph_ready(monkeypatch):
@@ -10778,6 +10891,277 @@ def _bootstrap_root_range_response(asset_host, *, full_representation):
     )
 
 
+def _bootstrap_root_gzip_response(asset_host):
+    body = (
+        f'<html><script type="module" src="https://{asset_host}/assets/index.js">'
+        f'</script><link rel="modulepreload" href="https://{asset_host}/assets/vendor.js">'
+        f'<link rel="modulepreload" href="https://{asset_host}/assets/icons.js">'
+        f'<link rel="stylesheet" href="https://{asset_host}/assets/index.css"></html>'
+    ).encode()
+    compressed = gzip.compress(body, mtime=0)
+    return (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        b"Content-Encoding: gzip\r\n"
+        + f"Content-Length: {len(compressed)}\r\n\r\n".encode()
+        + compressed
+    )
+
+
+def _semantic_gzip_range_response(body, *, total_extra=0):
+    compressed = gzip.compress(body, mtime=0)
+    total_length = len(compressed) + total_extra
+    return (
+        b"HTTP/1.1 206 Partial Content\r\n"
+        b"Content-Type: text/html\r\n"
+        b"Content-Encoding: gzip\r\n"
+        + f"Content-Length: {len(compressed)}\r\n".encode()
+        + (
+            f"Content-Range: bytes 0-{len(compressed) - 1}/"
+            f"{total_length}\r\n\r\n"
+        ).encode()
+        + compressed
+    )
+
+
+def test_gzip_prefix_206_cannot_classify_or_authorize_geph(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "gzip-prefix-denial.example"
+    denial = (
+        b"Sorry, you have been blocked. This website uses a security service "
+        b"to protect itself from online attacks."
+    )
+    prefix = _semantic_gzip_range_response(denial, total_extra=100)
+    full = _semantic_gzip_range_response(denial)
+
+    prefix_observation = tproxy._semantic_plain_response_observation(prefix)
+    assert prefix_observation.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    assert prefix_observation.retryable_inconclusive
+    assert tproxy._semantic_plain_response_outcome(full) == (
+        tproxy.SEMANTIC_OUTCOME_EDGE_DENIAL
+    )
+
+    calls = []
+
+    def direct_probe(*_args):
+        calls.append(True)
+        return prefix_observation
+
+    now = time.monotonic()
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            host,
+            "8.8.8.8",
+            deadline_monotonic=now + 8.0,
+            direct_probe=direct_probe,
+            geph_probe=lambda *_args: pytest.fail(
+                "a prefix-only root representation cannot authorize Geph"
+            ),
+        )
+    )
+
+    assert claim is None
+    assert calls == [True, True]
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_geph_gzip_root_requires_full_selected_representation():
+    body = b"<html><main>usable alternate route</main></html>"
+    prefix = _semantic_gzip_range_response(body, total_extra=100)
+    full = _semantic_gzip_range_response(body)
+
+    prefix_observation = tproxy._semantic_geph_root_response_observation(prefix)
+    full_observation = tproxy._semantic_geph_root_response_observation(full)
+
+    assert prefix_observation.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    assert prefix_observation.retryable_inconclusive
+    assert full_observation.outcome == tproxy.SEMANTIC_OUTCOME_USABLE
+    assert full_observation.payload_bytes == len(body)
+
+
+def test_gzip_root_retry_learns_only_exact_cold_child(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "gzip-cold-app-shell.example"
+    asset_host = "gzip-cold-critical-cdn.example"
+    response = _bootstrap_root_gzip_response(asset_host)
+    root_requests = []
+    child_direct_requests = []
+    child_geph_requests = []
+
+    class RootTlsSocket:
+        def __init__(self, responses):
+            self.responses = deque(responses)
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            root_requests.append(request)
+
+        def recv(self, _size):
+            result = self.responses.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def close(self):
+            return None
+
+    sockets = deque(
+        (
+            RootTlsSocket((tproxy.socket.timeout(),)),
+            RootTlsSocket((response, b"")),
+        )
+    )
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: sockets.popleft(),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(wrap_socket=lambda sock, **_kwargs: sock),
+    )
+
+    def direct_asset(_ip, host, request, _direct_deadline, _final_deadline):
+        child_direct_requests.append((host, request))
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF,
+        )
+
+    def geph_asset(host, request, _deadline):
+        child_geph_requests.append((host, request))
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+            body_bytes=tproxy.bootstrap_asset_preflight.DEFAULT_RANGE_END + 1,
+        )
+
+    now = time.monotonic()
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            deadline_monotonic=now + 8.0,
+            bootstrap_direct_probe=direct_asset,
+            bootstrap_geph_probe=geph_asset,
+            bootstrap_resolver=lambda child: (
+                ["1.1.1.1"] if child == asset_host else []
+            ),
+        )
+    )
+
+    assert claim is None
+    assert len(root_requests) == 2
+    assert all(b"Accept-Encoding: gzip\r\n" in request for request in root_requests)
+    assert child_direct_requests == child_geph_requests
+    assert [host for host, _request in child_direct_requests] == [asset_host]
+    assert b"Accept-Encoding: identity\r\n" in child_direct_requests[0][1]
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+    assert tproxy._auto_geph_learned_exact_host(asset_host)
+
+
+def test_two_incomplete_gzip_roots_stay_uncached_and_never_use_geph(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "gzip-incomplete-app-shell.example"
+    complete = _bootstrap_root_gzip_response("never-discovered.example")
+    boundary = complete.find(b"\r\n\r\n") + 4
+    declared = complete[:boundary]
+    partial = declared + complete[boundary:-1]
+    root_requests = []
+
+    class RootTlsSocket:
+        def __init__(self):
+            self.responses = deque((partial, tproxy.socket.timeout()))
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            root_requests.append(request)
+
+        def recv(self, _size):
+            result = self.responses.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: RootTlsSocket(),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(wrap_socket=lambda sock, **_kwargs: sock),
+    )
+
+    now = time.monotonic()
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            deadline_monotonic=now + 8.0,
+            geph_probe=lambda *_args: pytest.fail(
+                "an incomplete gzip root cannot authorize Geph"
+            ),
+            bootstrap_direct_probe=lambda *_args: pytest.fail(
+                "an incomplete gzip root cannot expose a child"
+            ),
+            bootstrap_geph_probe=lambda *_args: pytest.fail(
+                "an incomplete gzip root cannot expose a child"
+            ),
+            bootstrap_resolver=lambda *_args: pytest.fail(
+                "an incomplete gzip root cannot expose a child"
+            ),
+        )
+    )
+
+    assert claim is None
+    assert len(root_requests) == 2
+    assert parent_host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+
+
+def test_invalid_gzip_root_retries_once_without_cache_or_geph(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    parent_host = "invalid-gzip-app-shell.example"
+    valid = _bootstrap_root_gzip_response("never-discovered.example")
+    response = valid[:-1] + bytes([valid[-1] ^ 1])
+    calls = []
+
+    def direct_probe(*_args):
+        calls.append(True)
+        return tproxy._semantic_plain_response_observation(response)
+
+    now = time.monotonic()
+    claim = asyncio.run(
+        tproxy._run_initial_route_preflight(
+            parent_host,
+            "8.8.8.8",
+            deadline_monotonic=now + 8.0,
+            direct_probe=direct_probe,
+            geph_probe=lambda *_args: pytest.fail(
+                "invalid gzip cannot authorize Geph"
+            ),
+            bootstrap_direct_probe=lambda *_args: pytest.fail(
+                "invalid gzip cannot expose a child"
+            ),
+        )
+    )
+
+    assert claim is None
+    assert calls == [True, True]
+    assert parent_host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(parent_host)
+
+
 def test_full_ranged_root_learns_cold_child_before_exact_payload(monkeypatch):
     _enable_owned_geph_preflight(monkeypatch)
     parent_host = "cold-app-shell.example"
@@ -10876,6 +11260,7 @@ def test_full_ranged_root_learns_cold_child_before_exact_payload(monkeypatch):
         f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
         in root_socket.request
     )
+    assert b"Accept-Encoding: gzip\r\n" in root_socket.request
     assert child_direct_calls == [asset_host]
     assert child_geph_calls == [asset_host]
     assert not tproxy._auto_geph_learned_exact_host(parent_host)
@@ -12047,7 +12432,7 @@ def test_plain_semantic_probe_requires_complete_exact_ip_response(
     ) is complete
     assert connections == [(('1.1.1.1', 443), 6.0)]
     assert server_names == ["regional-denial.example"]
-    assert b"Accept-Encoding: identity\r\n" in tls_socket.request
+    assert b"Accept-Encoding: gzip\r\n" in tls_socket.request
     assert (
         f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
         in tls_socket.request
@@ -13426,7 +13811,81 @@ def test_semantic_geph_probe_requires_complete_http_response(
     result = tproxy._semantic_geph_payload_probe("complete-response.example")
 
     assert (result > 0) is expected_positive
-    assert b"Range: bytes=0-262143\r\n" in tls_socket.request
+    assert (
+        f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
+        in tls_socket.request
+    )
+    assert b"Accept-Encoding: gzip\r\n" in tls_socket.request
+    assert tls_socket.closed
+
+
+@pytest.mark.parametrize(
+    ("response_kind", "expected_payload_bytes"),
+    [
+        ("ok", 128),
+        ("full_range", 128),
+        ("prefix_range", 0),
+    ],
+)
+def test_semantic_geph_payload_probe_decodes_only_full_gzip_root(
+    monkeypatch,
+    response_kind,
+    expected_payload_bytes,
+):
+    body = b"x" * 128
+    compressed = gzip.compress(body, mtime=0)
+    if response_kind == "ok":
+        response = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/html\r\n"
+            b"Content-Encoding: gzip\r\n"
+            + f"Content-Length: {len(compressed)}\r\n\r\n".encode()
+            + compressed
+        )
+    else:
+        response = _semantic_gzip_range_response(
+            body,
+            total_extra=100 if response_kind == "prefix_range" else 0,
+        )
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.chunks = deque([response, b""])
+            self.closed = False
+            self.request = b""
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, payload):
+            self.request += payload
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    host = "gzip-root.example"
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda _host, _port, _timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda _sock, server_hostname: tls_socket
+        ),
+    )
+
+    result = tproxy._semantic_geph_payload_probe(host)
+
+    assert result == expected_payload_bytes
+    assert tls_socket.request == tproxy._semantic_plain_preflight_probe_request(host)
     assert tls_socket.closed
 
 
@@ -13606,7 +14065,7 @@ def test_semantic_geph_probe_rejects_redirect_chain(monkeypatch):
     assert second.closed
 
 
-def test_semantic_geph_probe_accepts_complete_large_response(monkeypatch):
+def test_semantic_geph_probe_rejects_response_over_shared_root_cap(monkeypatch):
     body = b"x" * 1_100_000
     response_chunks = [
         b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
@@ -13649,8 +14108,12 @@ def test_semantic_geph_probe_accepts_complete_large_response(monkeypatch):
 
     result = tproxy._semantic_geph_payload_probe("large-response.example")
 
-    assert result == len(body)
-    assert b"Range: bytes=0-262143\r\n" in tls_socket.request
+    assert result == 0
+    assert (
+        f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
+        in tls_socket.request
+    )
+    assert b"Accept-Encoding: gzip\r\n" in tls_socket.request
     assert tls_socket.closed
 
 
