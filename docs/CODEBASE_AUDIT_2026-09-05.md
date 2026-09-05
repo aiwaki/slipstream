@@ -656,3 +656,45 @@ installation or physical target navigation has occurred yet. The next action
 is a user-run exact installer command, followed by installed identity and cold
 status checks. Do not export `/private/var/tmp/slipstream-qualification-20260905.B5fQMm`:
 it is a private recovery directory, not a diagnostic artifact.
+
+### Authorized installation outcome — 2026-09-05 17:11 UTC
+
+User ran the exact one-shot installer. `npm run verify:local-install` completed
+with overall/build_chain/installed pass; installed app tree `0baa30fc...`,
+daemon `3d86a086...`, valid schema-3 attestation and fresh active root PID 11973.
+Full machine-readable output is the final line of
+`output/workstation-qualification-20260905.B5fQMm/installed-verification.log`.
+Verifier privileged runtime checks are separately `not_run`; do not imply
+independent kernel PF/listener ownership verification from the non-root result.
+The immutable install-time dormant/PF-inactive attestation fields are not live
+status: current StatusV2 is active. Original backup is present root-private
+0700; actual old app remains under `/Applications/.Slipstream.previous-B5fQMm.app`.
+
+New installed tray PID 13022 launched, but Geph is off, owned false, no owned
+LaunchAgent. User setting enabled is `1`; old Quit-resume marker remains.
+Setup permits resume for a Valid marker and intentionally blocks Geph during
+unresolved resume. With exact installation and explicitly enabled label,
+request_daemon_install returns false without a new OS authorization request.
+No osascript/authorization process was observed. No target
+navigation has started, and this is not yet a routing failure or browser pass.
+Auto-Geph learned/pending are zero; some unrelated ambient local strategies
+exist. Persisted target-key absence alone cannot prove RAM-cold probes.
+External Geph remains untouched. Learning restoration remains mandatory after
+the authorized qualification transaction. Live main and PR #373 are unchanged;
+their old CI does not qualify this new source.
+
+Read-only startup diagnosis isolated a failing predicate in lib.rs:1267:
+`listener == Some(status_pid)` is false because listener_pid(1080) returns None.
+Fresh status, heartbeat, all PF readiness flags, root PID11973/executable and
+enabled label were checked; the marker is not cleared before this full gate.
+Non-root lsof exits1 empty; netstat TCP exits0 with empty stdout/stderr. A
+bounded loopback-only Node listener on ephemeral59579, PID19582, confirmed
+netstat is empty even for a same-user socket while lsof correctly returns19582.
+The diagnostic socket was closed immediately; no target or external connection
+was made. netstat is the genuine system Mach-O, and its interface output works.
+Thus its TCP fallback is unusable in this observed environment; this does not
+yet independently prove the root daemon's actual listener state. A root
+read-only lsof exact1080 is the next discriminator. sudo -n requires user
+authentication. No marker deletion, privilege-policy change, production edit,
+rebuild, unchanged suite or browser probe was attempted. Tray stdout/stderr are
+/dev/null; bounded process sampling shows a normal event loop, not pending auth.

@@ -10,7 +10,36 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-05 (workstation transaction authorized; waiting for OS authentication):
+Update 2026-09-05 17:11 UTC (exact installation verified; browser gate not started):
+the user ran the authorized one-shot installer successfully. Canonical
+`npm run verify:local-install` reports overall/build_chain/installed pass for
+product source `b172617`: installed app tree `0baa30fc...`, daemon `3d86a086...`,
+valid schema-3 attestation and fresh active root daemon PID 11973. Full verifier
+output is `output/workstation-qualification-20260905.B5fQMm/installed-verification.log`.
+The root-private original learning/runtime backup exists at
+`/private/var/tmp/slipstream-qualification-20260905.B5fQMm` (root, 0700), and
+the actual previous app is `/Applications/.Slipstream.previous-B5fQMm.app`.
+Do not rerun the installer, delete backups, or export the private runtime backup.
+Installed tray PID 13022 is running, but owned Geph remains off and its
+LaunchAgent absent; enabled setting is `1`, and the Aug-31 Quit-resume marker
+remains. A Valid marker permits resume but does not force reinstall when exact
+installation and enabled label already match. The watchdog cannot clear the
+marker: `listener_pid(1080)` returns None. Non-root lsof sees no root listener;
+netstat TCP output is empty even for a bounded same-user ephemeral listener
+which lsof correctly sees. Fresh status/PF/owned PID checks pass; current
+listener ownership still needs independent proof. No pending OS auth exists.
+Next: user runs read-only `sudo /usr/sbin/lsof -nP -iTCP:1080 -sTCP:LISTEN`
+in their own Terminal (sudo -n still requires authentication). Inspect the
+result before a causal code correction; do not delete the marker or replace
+current listener proof with historical attestation. Target navigation remains
+blocked on this startup boundary, not yet a browser-routing failure.
+Auto-Geph learned/pending are zero. Ambient apps have learned a few unrelated
+local strategies; that is not a global-zero cache claim or proof of RAM-cold
+targets. No physical target navigation has occurred in this transaction.
+Original learning restoration and ordinary Chrome/Safari/Quit/Restart gates
+remain pending. External Geph and the dirty primary checkout are untouched.
+
+Previous update 2026-09-05 (workstation transaction authorized; waiting for OS authentication):
 the user explicitly authorized installation of the exact `b172617` bundle and
 temporary learning reset with backup/restoration. The user performed old tray
 Quit: its PID and root daemon are absent, `system/dev.slipstream.tproxy` is
