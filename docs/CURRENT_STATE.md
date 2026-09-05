@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-05 (workstation transaction authorized; waiting for OS authentication):
+the user explicitly authorized installation of the exact `b172617` bundle and
+temporary learning reset with backup/restoration. The user performed old tray
+Quit: its PID and root daemon are absent, `system/dev.slipstream.tproxy` is
+absent and disabled. The separate Geph.app service remains untouched; it is not
+Slipstream's owned bundled Geph. Old `/Applications/Slipstream.app` is unchanged
+and copied to `output/workstation-qualification-20260905.B5fQMm/previous-Slipstream.app`.
+Incoming `/Applications/.Slipstream.qualification-B5fQMm.app` passed the whole
+bundle verifier with app tree `0baa30fc54851f2eab1b250b08d4005fe8e20389a5dc428bc27e0413f5637b16`.
+No root backup/reset/install has executed: the sudo prompt could not be entered
+through the app panel and was cancelled. The narrow user-run installer and
+reviewed prepare/reset/restore helper are in that output directory. Root backup
+will be `/private/var/tmp/slipstream-qualification-20260905.B5fQMm`; it may
+contain private runtime secrets and must never enter diagnostic exports.
+Next: user runs the exact `install-exact-bundle.sh` with sudo, then inspect its
+outcome and run installed-identity verification before opening any target site.
+Never rerun that one-shot installer blindly; preserve both old app copies and
+the original learned-state backup until qualification/restoration is complete.
+
 Update 2026-09-05 16:48 UTC (canonical local build verified; not installed):
 the controlled integration is committed as
 `b172617b105b3cab758288ec1bd686b4da94fef5`, with audit parent `84873f2` and

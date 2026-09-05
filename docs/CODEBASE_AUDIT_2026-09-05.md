@@ -612,3 +612,47 @@ CI tools, не готовые команды для primary workstation. Ни у
 сброс learned state, ни физические пробы, ни protected workflow/soak/release
 на этом этапе не запускались. Remote CI и audit должны отдельно квалифицировать
 новый PR head; прежние green runs не относятся к `b172617`.
+
+### Authorized workstation transaction — preparation, 2026-09-05
+
+User explicitly authorized installation plus temporary learned-route reset,
+with private backup and restoration. After the user selected old tray Quit,
+old tray PID 77991 and root daemon PID 79095 disappeared; the exact root label
+is absent and disabled. This is observed old-version shutdown, not qualification
+of the new Quit implementation. The process at
+`/Library/Application Support/geph/bin/geph5-client` belongs to the separate
+`/Applications/Geph.app/Contents/Resources/geph` parent (started Aug 26), not to
+Slipstream's private bundled Geph. No external Geph process/service was changed.
+
+The original app was copied to
+`output/workstation-qualification-20260905.B5fQMm/previous-Slipstream.app`;
+tray/daemon hashes remain `40130d34…` / `4fbd59f2…`. Incoming app was copied to
+`/Applications/.Slipstream.qualification-B5fQMm.app`. Complete verifier output
+is `staged-app-verification.json` in the same output directory: overall and
+build_chain pass, exact app tree `0baa30fc…`, installed not_run.
+
+The new operational `learning-transaction.sh` has only prepare/reset/restore:
+require absent exact tray/root/owned-Geph processes and services, disabled root
+label, absent proxy listener and empty private PF rules; snapshot the two exact
+learning files with original presence, bytes and metadata; preserve experiment
+files instead of deleting them; restore original TTLs unchanged. Runtime backup
+also protects tgws-secret against installer rollback and stays root-private.
+Independent review found a fixed staging-name retry trap in restore; corrected
+to unique staging, with all original copies verified before moving live files.
+The reviewed helper passed shell syntax checking. No product code changed.
+
+The one-shot `install-exact-bundle.sh` verifies old/new critical hashes and
+signature, prepares the private backup, resets only the two learned files,
+preserves the actual old app under `/Applications/.Slipstream.previous-B5fQMm.app`,
+places the new app at its final path and invokes that final frozen `--install`
+(never the checkout copy), then verifies the root daemon hash. Installer failure
+preserves backups and a private log and must be diagnosed without blind retry.
+The old attestation/PID/PF ownership are not restored as configuration.
+
+Administrative authorization remains pending. `sudo -n` required authentication;
+a PTY Password prompt was not connected to the app terminal panel, so it was
+cancelled. Native Terminal automation was unavailable. No root backup, reset,
+installation or physical target navigation has occurred yet. The next action
+is a user-run exact installer command, followed by installed identity and cold
+status checks. Do not export `/private/var/tmp/slipstream-qualification-20260905.B5fQMm`:
+it is a private recovery directory, not a diagnostic artifact.
