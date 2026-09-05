@@ -429,3 +429,27 @@ attestations проверены. Подготовлен universal sidecar (`arm6
 `40130d34ddf55f5d510cd4664c005c9c6a8d639b351cb59882011f0a5bb7a410`.
 Tray mtime — `2026-08-31T18:05:10Z`; это locator для истории, не source proof.
 Текущий source всё ещё не заявляется равным этой установленной версии.
+
+### Независимая проверка восстановленного Python source
+
+Original successful main/child patch calls воспроизведены по времени в отдельном
+durable `/Users/aiwaki/Developer/slipstream-recover-aikido-tail-full-20260905` от
+`8cee1ca`. На этом промежуточном этапе Python и build patches применились,
+оставшиеся Rust context gaps разбираются отдельно, включая исторический rustfmt.
+Не исполнялись исторические JS/shell-команды; применяются только данные патчей.
+
+Для независимого контроля прочитан PyInstaller CArchive установленного daemon
+`4fbd59f2…` без его запуска. Pinned/hash-checked PyInstaller `6.21.0` используется
+только как локальный archive reader. Восстановленный `spike/tproxy.py`, SHA-256
+`011d913e308005aeced1ed75d3f13f0733a332e2f5e04fa4f03bdf64ffe50cb2`, скомпилирован
+Python 3.13 без import/exec продуктового кода. Сравнение структуры code objects
+исключает paths/line tables и только compiler-generated class `__firstlineno__`,
+но сохраняет opcodes, остальные constants, names, flags и exception tables.
+**Все 800/800 qualified names, включая модуль целиком, совпали**; missing/extra/
+different списки пусты. Контроли инструмента проверили эквивалентность при сдвиге
+source locations и обнаружение изменённой константы.
+
+Это сильный контроль полноты Python-recovery, не побайтовое равенство исходных
+файлов, не доказательство Rust source и не физическая проверка сайтов. Подробный
+JSON: `output/post-audit-bundle-20260905/installed-python-comparison-full.json`;
+reusable read-only helper: `compare-installed-python.py` в той же папке.
