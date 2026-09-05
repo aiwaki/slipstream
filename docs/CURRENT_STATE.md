@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-05 (post-audit reconciliation in progress; do not install):
+the user authorized the next stage. Live main and PR #373 remain at the exact
+SHAs below, and the primary checkout is unchanged. Before bundling, inspection
+found metadata for additional uncommitted TLS-stall / multi-address preflight
+and Quit-resume work in the old temporary worktree's graph, but no source there
+or in its retained Git index. This is a real source-continuity gap, not proof
+that the audit contains those changes. Original patch calls have now been
+located in this task's saved transcript and recovery is being attempted in a
+separate worktree; never replay historical shell commands or credentials.
+Audit source is not being overwritten. Exact pinned Chromium and Geph resource
+preparation is independent of recovery; product build and installation remain
+pending reconciliation. Progress and limits belong in the post-audit section of
+[`CODEBASE_AUDIT_2026-09-05.md`](CODEBASE_AUDIT_2026-09-05.md).
+
 Update 2026-09-05 (whole-project source audit; not installed qualification):
 the user requested an audit prompt, a pass across the codebase, causal fixes and
 a separate persistent Markdown record. The prompt, inventory, twelve defect

@@ -388,3 +388,44 @@ os.execv(".audit-venv/bin/python", [".audit-venv/bin/python", "-m", "pytest", "-
   production bundle/подпись и release gates здесь не выполнялись.
 - Малые диагностические `voiceprobe`, `tcpsweep`, `tlsproxy`, `primes`
   инвентаризированы, но не прошли глубокую построчную проверку.
+
+## После аудита: сверка перед bundle — 2026-09-05
+
+Пользователь разрешил следующий этап. Повторная read-only сверка подтвердила
+прежние primary HEAD `a22a698e809af5c1892e90ad462512f6719e56e7`, live main
+`2780de4b3f5d77ab3852e46381b997c618bd5080` и PR #373
+`513484ac43ae0348df06e61fca5af9d3105eb225` с прежними required checks. Эти checks
+не являются CI аудита. Tracked source аудита до сверки — `c060518`, checkpoint
+commit — `4ba3cd9f7247294d3ea06dd9a6b8e7bc5c7680bb`.
+
+Обнаружен существенный continuity gap: старый graph index хранит metadata
+незакоммиченных Quit-resume, TLS-stall и multi-address preflight symbols, которых
+нельзя считать восстановленными из saved branch `8cee1ca`. Старый temp source
+отсутствует, retained worktree index равен saved base. Оригинальные patch calls
+этой задачи найдены в сохранённом transcript; отдельный recovery worktree
+должен проверить возможность точного восстановления. Исторические JS/shell
+команды не исполняются, учетные данные не переносятся, audit source не заменяется
+непроверенной реконструкцией. Bundle/install отложены до сверки этого разрыва.
+
+Сборочные prerequisites готовятся независимо: `npm ci --ignore-scripts` прошёл
+(5 packages), materializer проверил pinned Chromium `151.0.7922.77`, архив
+`98,976,279` bytes / SHA-256
+`44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e`, executable
+SHA-256 `650f70c6d3e4a902d2ad6d91bb7cc15a08aa0720487b28324563b0f61c219058`.
+Geph ingestion следует canonical CI contract для `geph-vendor-0.3.9-r1`, без
+обновления до 0.3.10 и без использования локального SBOM как release attestation.
+Ingestion завершился успешно: lightweight tag commit
+`21fcaab9d35bdfdbdaacd28bf835acf7585318c3`, все восемь assets/API digests/checksums,
+source/lock/license, SBOM и historical-policy audit, восемь SLSA и binary SPDX
+attestations проверены. Подготовлен universal sidecar (`arm64`, `x86_64`),
+`47,012,976` bytes / SHA-256
+`39f5ecf8cfe2981061071d0802d79bf4853d2404adc05a27a8abe32ffae5aca4`.
+Команды и полные логи — `output/post-audit-bundle-20260905/` (локальные данные,
+не release proofs). Неизменённые полные тесты повторно не запускаются.
+
+Установленный app только прочитан, не изменён. Его version `.23` не различает
+локальные исправления; frozen daemon SHA-256
+`4fbd59f26210ec5151909afe7a2ccfc25fbbba37b3f57fb6b03d2bb6b38cf7e3`, tray
+`40130d34ddf55f5d510cd4664c005c9c6a8d639b351cb59882011f0a5bb7a410`.
+Tray mtime — `2026-08-31T18:05:10Z`; это locator для истории, не source proof.
+Текущий source всё ещё не заявляется равным этой установленной версии.
