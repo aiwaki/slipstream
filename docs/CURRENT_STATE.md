@@ -10,7 +10,33 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-05 (source integration verified; canonical build next; do not install yet):
+Update 2026-09-05 16:48 UTC (canonical local build verified; not installed):
+the controlled integration is committed as
+`b172617b105b3cab758288ec1bd686b4da94fef5`, with audit parent `84873f2` and
+preserved recovery parent `ee8ba0e`. One canonical `npm run build:local`
+completed successfully with no test resource override. The tracked source
+remained clean at that exact commit throughout the build. The automatic whole
+bundle verifier reports `overall=pass`, `build_chain=pass`, and
+`installed=not_run`. Fresh, staged and bundled daemon SHA-256 all equal
+`3d86a086ec9cd171ea4f67a861e8127d6f1c1dddc27ba8e028a22e19ea913a22`.
+App tree SHA-256 is
+`0baa30fc54851f2eab1b250b08d4005fe8e20389a5dc428bc27e0413f5637b16`.
+The DMG checksum is valid; full artifact identities, commands, logs and limits
+are recorded in [`CODEBASE_AUDIT_2026-09-05.md`](CODEBASE_AUDIT_2026-09-05.md).
+This is an ad-hoc signed, unnotarized local build, not a published or physically
+qualified release. Later documentation commits do not change its source SHA.
+
+The primary checkout and installed tray/daemon hashes remain unchanged. No
+installation, privileged networking, learned-state reset, physical browser
+test, account-backed workflow, soak, push or new PR was performed in this stage.
+Next is a separately authorized workstation installation/qualification
+transaction or a disposable macOS test environment. Require exact installed
+identity before ordinary Chrome/Safari critical-resource recovery and tray
+Quit/Restart proof. Quit/Restart preserve learned state: they do not establish
+`learned=0`. Do not silently delete the cache or call a warmed run cold.
+Disposable CI lifecycle scripts must not be run on the primary workstation.
+
+Previous update 2026-09-05 (source integration verified; before canonical build):
 the user authorized the next stage. Live main and PR #373 remain at the exact
 SHAs below, and the primary checkout is unchanged. The lost uncommitted tail is
 now preserved as `ee8ba0e8f78b1070f41b54f75b06cd6e802c557b` on durable branch
@@ -40,7 +66,7 @@ Final lib.rs SHA-256 is
 `c40613341a7838776ce4cabe7207507174725baffbba9e8c141315967c06d6c6`;
 file-only rustfmt and whitespace checks pass. Full unchanged suites were not rerun.
 
-Pinned Chromium and Geph preparation is complete. Next: commit/pin this merge,
+At that checkpoint Chromium and Geph preparation was complete. The next step was to commit/pin this merge,
 run one canonical `npm run build:local` with no test resource override, and
 require fresh/staged/bundled identity plus the complete bundle verifier before
 considering installation. Build logs belong in

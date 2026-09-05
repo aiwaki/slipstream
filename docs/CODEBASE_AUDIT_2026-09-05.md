@@ -551,3 +551,64 @@ Final lib.rs SHA-256:
 `c40613341a7838776ce4cabe7207507174725baffbba9e8c141315967c06d6c6`.
 Version sync check и project-state continuity contract также прошли. Дальше —
 pin combined source commit и один canonical product build, без test override.
+
+### Canonical local build — 2026-09-05 16:48 UTC
+
+Controlled merge зафиксирован как
+`b172617b105b3cab758288ec1bd686b4da94fef5` (parents: audit
+`84873f2e89d44acc7813b230691ca47a0c9d760f` и recovery
+`ee8ba0e8f78b1070f41b54f75b06cd6e802c557b`). До и после сборки tracked tree
+чистый; это точный source SHA артефактов ниже, не последующего docs-only commit.
+
+Из `app-tauri` выполнен один `npm run build:local`, с Python 3.13.0 по точному
+пути `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13` и без
+`TAURI_CONFIG`/stage-test overrides. Один `beforeBuildCommand` создал fresh
+daemon, атомарно staged его, затем Cargo/Tauri собрали tray, helpers, app и DMG.
+Команда завершилась exit 0. Автоматический `verify:bundle:local` дал
+`overall=pass`, `build_chain=pass`, coverage `build-chain, artifact`,
+`installed.status=not_run`. Повторного freeze или неизменившихся тестовых suites
+не было. Python 3.13.0 — локальная сборка; это не release CI с pinned 3.13.14.
+
+Артефакты в `app-tauri/src-tauri/target/release/bundle/`:
+
+| Объект | SHA-256 / результат |
+|---|---|
+| Fresh = staged = bundled daemon | `3d86a086ec9cd171ea4f67a861e8127d6f1c1dddc27ba8e028a22e19ea913a22` |
+| Fresh = staged daemon tree | `9fd3d7bcbe339fd2f6f291c98da98cdbd7e01f87a96cdea861b5d3ff0c87483e` |
+| Materialized = bundled daemon tree | `eedda9f4e63a9fffa835a1d74de7b2fa6d30cd01a2bcf4eff88a261ba7771589` |
+| `macos/Slipstream.app` tree | `0baa30fc54851f2eab1b250b08d4005fe8e20389a5dc428bc27e0413f5637b16` |
+| Tray | `08459feb32ab41400448861c25198676cd5cd561aaa9c7355cfa035a722c5dae` |
+| Browser probe | `dda683ded1a1bdc44ad3d4d90f761158f6459e9015b2d34c5c9755863fdf2882` |
+| Update watchdog | `89610929189e8753cc697c4790e6ee0ee3b9b4e66b807ac21305eb04ee2fef52` |
+| Bundled Geph after Tauri re-signing | `2ddb34a98e9643d2554b1e7e4c09ee4b995eefd89fd7ef5595430348c24ef5d6` |
+| Chromium | `650f70c6d3e4a902d2ad6d91bb7cc15a08aa0720487b28324563b0f61c219058` |
+| `dmg/Slipstream_0.1.9-preview.23_aarch64.dmg` | `33aa0da4b7b92570f1f38fddd6a4381742ad01e6a0116f5a33f3657575230489` |
+
+DMG: 147,699,648 bytes; отдельный `hdiutil verify` — exit 0, checksum VALID.
+Bundle identity `dev.slipstream.tray`, version `0.1.9-preview.23`, signature
+valid ad-hoc, Team ID отсутствует. Нотариализации нет; совместимость с
+Gatekeeper не заявляется. Local version label не означает опубликованный релиз.
+
+Полный verifier JSON находится последней строкой
+`output/post-audit-bundle-20260905/build-local.log`; SHA-256 лога
+`bd9f33ee6e895fc6629d2d84c657338a360b3c3261b4ff6cc43b9c8a1b432efc`.
+Лог целостности DMG: `output/post-audit-bundle-20260905/dmg-verify.log`.
+Исходный primary checkout остался на `a22a698` с прежними untracked diagnostics.
+Installed tray и daemon по read-only hashing по-прежнему `40130d34…` и
+`4fbd59f2…`; `/Applications/Slipstream.app` не заменён.
+
+Открытая следующая граница — установка и физическая квалификация. После
+разрешённой установки точного bundle нужен `npm run verify:local-install`,
+затем ordinary Chrome/Safari с проверкой полной страницы и критических ресурсов
+(Aikido/Capacitor/Weather/StarrToy), фоновых соединений, медленного, но
+прогрессирующего direct path и явных tray Quit/Restart. HTTP 200, один
+успешный root, скелетоны Weather и тёплый learned route не являются успехом.
+Quit/Restart сохраняют `/var/run/slipstream-autogeph.json`, поэтому сами по себе
+не создают cold baseline. Не найден документированный безопасный workstation
+reset CLI: отдельный backup/reset/restore требует согласованной транзакции,
+либо используется действительно холодная disposable среда. Ничего не удалялось.
+`live_site_release_smoke.py` и packaged lifecycle drivers — protected/disposable
+CI tools, не готовые команды для primary workstation. Ни установка, ни
+сброс learned state, ни физические пробы, ни protected workflow/soak/release
+на этом этапе не запускались. Remote CI и audit должны отдельно квалифицировать
+новый PR head; прежние green runs не относятся к `b172617`.
