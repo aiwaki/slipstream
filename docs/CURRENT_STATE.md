@@ -10,6 +10,185 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-31 (TLS wire evidence and deadline ownership corrected locally):
+installation was **not** the next action when this correction began because the
+pre-install build-integrity gate was still open. The exact app recorded in the
+following Quit-lifecycle checkpoint was built before the latest production
+routing edits and is now historical evidence only; it must not be installed.
+That missing gate has since completed for the current source tree. Work remains
+only in the isolated
+`codex/aikido-cdn-recovery` worktree at local base HEAD
+`8cee1ca1ab14e27dca377e44960718867fd3e71a`; the user's dirty primary checkout
+remains untouched. Open PR #373 and its green checks still apply only to remote
+head `513484ac43ae0348df06e61fca5af9d3105eb225`, not this uncommitted tree.
+
+The last static review found two concrete causal defects and both are corrected.
+First, an all-edge TLS-stall consensus previously counted semantic payload bytes,
+so a partial encrypted `ServerHello` could look like zero ingress. The production
+probe now keeps the exact raw socket under cancellation control, drives TLS with
+`MemoryBIO`, and measures every encrypted byte received before decryption. A
+zero-ingress candidate is admissible only after the complete initial
+`ClientHello` flight was sent, at least four seconds of post-send receive budget
+remained, that whole remaining receive budget was actually consumed, and raw
+ingress stayed exactly zero. Slow TCP connect, a blocked or partial ClientHello
+send, a short post-send wait, EOF/cancellation, or even one received ciphertext
+byte remains `retryable_inconclusive` and cannot create a capability, cache,
+route, status event, successor, or learning.
+
+Second, the exact stream's eight-second request-only boundary could cancel an
+unfinished ordinary semantic or critical-child proof that historically owned a
+longer bounded evidence window. Only an explicit system `closed` result now
+fast-cancels that ordinary proof. At exact `timeout` or `unclear`, the handler
+snapshots whether the preflight had already finished: a request-only claim that
+appears later is rejected, while a later ordinary semantic/critical-child result
+may still win within its own unchanged deadline. This preserves the hard
+request-only boundary without silently shortening unrelated evidence.
+
+Change-scoped evidence is green: the affected TLS/preflight selection passes
+`33` tests (`656` deselected), the independent exact-race/ownership/cancellation
+selection passes `21`, and Python compilation plus `git diff --check` are clean.
+Independent post-patch reviews found no blocking TLS measurement, cancellation,
+deadline, ownership, or direct-priority defect. No broad suite, soak,
+account-backed workflow, installation, or browser run was repeated.
+
+One canonical `npm run build:local` then rebuilt the current Python 3.13 frozen
+daemon, Tauri app, and DMG and completed its built-in verifier at
+`overall=pass`, `build_chain.status=pass`, and
+`installed.status=not_run`. Fresh, staged, and bundled daemon executables are
+byte-identical at SHA-256
+`4fbd59f26210ec5151909afe7a2ccfc25fbbba37b3f57fb6b03d2bb6b38cf7e3`;
+the fresh/staged daemon trees both hash to
+`27fc14e7df20a38503b8d69fffae6b072fa23abced06614e346240e97246737e`;
+the materialized/bundled daemon tree hashes to
+`e044f45a7e5686b9f0a4fbf4baceaaf32aab006bf3220d077e29e0b807802f22`;
+and the valid ad-hoc-signed, unnotarized app tree hashes to
+`e49d75322c5c9744eae2061fce8bdbae1d815470927dfed65b5cc5e7cab85467`.
+The automated pre-install gate is therefore complete. This checkpoint stops
+before installation; installation and cold ordinary Chrome/Safari validation
+remain later, separate transactions. Aikido, Capacitor, Weather, and full-page
+recovery are not yet claimed.
+
+Update 2026-08-31 (explicit Quit lifecycle corrected locally): the user-visible
+symptom was structural, not a browser or timing issue. The tray exited while
+the root LaunchDaemon and user Geph LaunchAgent remained `KeepAlive`, so killing
+one process allowed launchd to restore it and the owned layers could appear to
+restore each other. Work remains only in the isolated
+`codex/aikido-cdn-recovery` worktree; the user's dirty primary checkout has not
+been used for these edits.
+
+The local correction makes Quit a serialized, fail-closed transaction. It
+writes an exact owner-private resume marker, runs the bundled daemon's
+non-destructive and idempotent `--stop`, proves root launchd/PF/listener absence
+without deleting the installed runtime, plist, attestation, strategy cache, or
+auto-Geph state, then proves the Geph LaunchAgent and exact private process are
+absent before exiting the tray. Launchctl state is checked: only success means
+loaded and only the exact service-not-found response means absent. Geph TERM
+requires current UID, label, exact private executable/config, stable process
+birth, exact command, and listener; a later KILL requires the same birth
+identity after the verified TERM boundary. Missing or stale ownership never
+authorizes signalling and instead requires a bounded all-process proof that no
+exact private Geph remains. Unrelated listeners remain external. Startup
+quiesces a stale sidecar before status reconciliation, while watchdog repair
+rechecks stop intent, installed attestation, enabled label, status, and listener
+under the lifecycle lock so queued work cannot undo Quit, manual disable, or a
+partial uninstall.
+
+The final static review found and closed one separate process-level race: a
+previously started asynchronous updater could finish during Quit or Uninstall,
+exit the tray, and hand control to its relaunch watchdog. Update, Quit, and
+Uninstall now share one atomic terminal-operation owner. Each claims it
+synchronously before spawning work, prompting, or mutating lifecycle state;
+every cancellation or failure releases only its own claim, while success keeps
+the claim through an owner-checked exit. A late updater therefore cannot
+interrupt or relaunch across an explicit Quit/Uninstall transaction.
+
+Change-scoped evidence is green. The focused Rust process-identity selection
+passes `3`, signal-boundary `1`, stale-ownership `1`, watchdog `1`, startup-order
+`1`, checked-launchctl classifier/bootout `2`, and bounded Geph-stop `6` tests;
+the terminal-operation arbiter passes `2`, and the earlier coordinator/marker/
+setup/root-proof filters remain green. The exact Python `--stop` preservation/
+idempotence/CLI selection passes `4` cases. Independent fresh reviews found no
+blocking root/Geph stop or Update/Quit/Uninstall ownership defect; their
+remaining observations fail closed. Rust formatting and `git diff --check` are
+clean. One canonical exact-tree `npm run build:local` then completed with the
+automated verifier at `overall=pass`: fresh, staged, and bundled daemon copies
+are byte-identical at SHA-256
+`3d2dd1b8f62d10246a9f1a00efe2a9022e3aaa80855884c773f50c4ad4e59669`;
+the materialized/bundled daemon tree is
+`021c9a493987819cc4acebde727f21035f6e56a6118afe0839518e4b0d841a03`;
+the ad-hoc-signed app tree is
+`9efb75eb5d704f8a91ba9db694c7917843b7db9acdd5f076cf8e85891628604f`.
+The build is intentionally unnotarized. No install, process stop, physical
+Quit/relaunch, or browser run followed that exact bundle. Later production
+routing corrections invalidated it as a current-tree artifact, so it must not
+be installed. Its hashes remain only historical proof that the automated
+fresh/staged/bundled daemon-equality guard worked on that older exact tree.
+
+Update 2026-08-31 (all-edge TLS-stall first-request boundary implemented and
+reviewed): the user's dirty primary checkout remains untouched. Work continues
+only in the isolated `codex/aikido-cdn-recovery` worktree at local base HEAD
+`8cee1ca1ab14e27dca377e44960718867fd3e71a`; the production, build-guard, test,
+and documentation changes are still uncommitted. They are not qualified by
+open PR #373, whose live remote head remains
+`513484ac43ae0348df06e61fca5af9d3105eb225`. Its old exact-head checks are green
+but apply to another tree. Live `origin/main` remains
+`2780de4b3f5d77ab3852e46381b997c618bd5080`.
+
+The generic causal chain is now explicit. One exact-numeric-IP root socket is
+owned continuously through TCP, TLS, request, receive, framing, decode,
+classification, and inspection; direct cache/in-flight authority is exact
+host plus PF IP, QUIC evidence is destination-specific, and each critical
+object proves itself without borrowing root/other-object cache. One timeout is
+still `retryable_inconclusive`: it cannot cache, consult provenance, expose a
+child, contact Geph, recover locally, or learn. Cancellation drains the owned
+worker/socket before releasing its authority.
+
+Current read-only evidence shows a real but timing-ambiguous split. The complete
+current public A set for `app.aikido.dev` is `54.195.217.18`, `63.33.115.70`,
+and `54.229.203.255`. Every production continuous-root observation actually
+spent its full five-second allocation in `tls_handshake_timeout` with zero wire
+or payload bytes, no hard error, and no assets. A separate exact edge also
+remained byte-empty through the full eight-second hard window. The identical
+root through the already-owned Geph listener returned a complete usable payload
+in roughly 2.2 seconds (19,603 decoded bytes; 6,314 compressed wire bytes). No
+route, cache, learning state, browser, or external setting was mutated by these
+diagnostics.
+
+The correction does not persist that timing as route evidence. Only the
+production probe, with a complete bounded set of two or three current public
+system IPv4 addresses all exhausting the real five-second TLS window in the
+same zero-byte boundary, may mint one volatile request capability. It is bound
+to normalized host, exact PF IP, port 443, the current verified owned-Geph PID,
+random owner token, exact-system not-before time, and common twelve-second
+handoff deadline. The handler keeps its separate exact PF stream alive through
+the full eight-second hard window and then races it against at least 64 bytes
+from the same held Geph PID. Any direct byte before the no-await commit wins,
+including bytes arriving during PID validation. The capability is burned before
+runtime awaits, cannot be shared or retried, and creates no route/cache/status,
+confirmation, successor, or learning. Invalid identity/readiness/PID/session/
+drain/deadline/payload falls back to the held exact stream when possible; both
+streams ending byte-empty closes only that request.
+
+Change-scoped verification is green without repeating the known-green full
+baseline: all `62` newly added root/address/object/cancellation/diagnostic/cache/
+QUIC/request-only cases pass; the affected existing root/preflight/QUIC/cache
+selection passes `62`; the handler/request-only/owned-Geph selection passes
+`43`; narrower consensus/claim and exact-race selections pass `21` and `33`.
+Python compilation and `git diff --check` are clean. Deterministic tests cover
+single use, fragmented `1+31+32` Geph payload, host/IP/port/time/PID mismatch,
+late and tied direct bytes, deadline expiry inside PID validation, cancellation,
+session cleanup, generic-helper rejection, and absence of routing-state side
+effects. Independent fresh review found no remaining concrete ownership,
+direct-priority, PID/deadline, cancellation, or session-leak defect.
+
+No app bundle, install, physical browser, route-learning/cache mutation, soak,
+or account-backed run has followed this local tree. The remaining pre-install
+gate is the automated fresh/staged/bundled daemon-equality and build-entrypoint
+guard. Only after its static review and narrow tests are green may this exact
+tree be built once, verified, installed, and tested from a genuinely cold
+ordinary Chrome and Safari first request. Do not claim Aikido, Capacitor,
+Weather, or complete-page recovery before that physical evidence.
+
 Update 2026-08-30 (selected-representation root boundary isolated locally):
 the user's dirty primary checkout remains untouched; work continues only in the
 isolated `codex/aikido-cdn-recovery` worktree. The exact installed `9baf111`

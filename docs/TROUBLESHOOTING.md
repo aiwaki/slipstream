@@ -34,9 +34,11 @@ asset exists. Status `206` does not by itself mean failure: when one valid
 representation, and agrees with framing and observed bytes, the root is
 complete and must be scanned exactly like a complete `200`. A true prefix-only
 response, malformed/out-of-bound range, inconsistent framing, or an exhausted
-inspection deadline is `unclear`; it receives at most the existing bounded
-direct retry and must not publish a healthy-root cache, probe Geph, or teach a
-route.
+inspection deadline is `unclear`. The root keeps one exact-IP connection for
+its whole bounded observation; it does not discard a 400-ms socket and open a
+fresh retry. An unclear result must not publish a healthy-root cache, consult
+provenance, expose or probe a child, contact Geph, enter local recovery, or
+teach a route.
 
 The critical-object comparison is network-only. It must work for background
 tabs, Safari, Chrome, and non-browser clients without a frontmost/recent-input
@@ -184,20 +186,38 @@ or the same denial on both routes remain non-actionable.
 
 ### A blocked or unstyled page recovers only after many retries
 
-Do not classify this from elapsed time alone. The initial 400-ms direct probe is
-only the ordinary fast slice; an idle/deadline timeout is
-`retryable_inconclusive`, may use exactly one bounded same-IP direct network
-retry before any browser provenance check, and never authorizes Geph by itself.
-If that retry is also inconclusive, recovery returns without cache, provenance,
-or Geph. This protects a slow connection that is still making useful progress.
+Do not classify this from elapsed time alone. The semantic root uses one owned
+exact-IP socket continuously through TCP connect, TLS, request send, receive,
+framing, decode, classification, and root inspection. Its bounded I/O allowance
+is derived from the unchanged route job after preserving only classification
+and scheduling capacity, capped at five seconds; browser or Geph time is not
+reserved until the root outcome needs that branch. A fast complete response
+still returns immediately, while every downstream proof must fit inside the
+same remaining job deadline. An idle/deadline timeout is
+`retryable_inconclusive` and returns without cache, provenance, a child probe,
+Geph, local recovery, or learning. This protects a slow connection that is
+still making useful progress without paying for a second fresh handshake.
 
-The immediate path is narrower: while the original TLS first flight is still
-held and the browser has received zero server bytes, a socket/TLS exception or
-EOF without admissible HTTP framing closes the suspect exact stream and enters
-the existing app-owned DNS/local strategy ladder in the same request. A
-complete ordinary `403` is not such a failure. The ladder still needs its normal
-independent local-failure and complete exact-host owned-Geph proof before it can
-learn a foreign exit.
+Use the private root diagnostic to locate the exact non-authorizing boundary:
+TCP connect, TLS handshake, send, incomplete read/framing, selected-
+representation/decode, classification/inspection, or outer cancellation. The
+stage is diagnostic only; it never becomes route evidence and is not exposed
+through StatusV2. An explicit socket/TLS error or EOF without admissible HTTP
+framing is different: while the original first flight is still held and no
+server bytes reached the client, that hard result may enter the existing
+guarded local-recovery ladder. A complete ordinary `403` is not such a hard
+failure. The ladder still needs its normal independent local-failure and
+complete exact-host owned-Geph proof before it can learn a foreign exit.
+
+If one reload works only after another address or another resource was tried,
+inspect evidence scope before changing timeouts. Direct root cache and in-flight
+ownership must match the normalized host and exact PF destination IP; a usable
+alternate A record cannot mark the PF-primary address healthy. QUIC may suppress
+TCP fallback only for that same destination IP. A critical child must prove its
+own request object and must neither consume nor publish direct root/other-object
+cache. Two scripts, stylesheets, or bootstrap objects on the same CDN host and
+IP are not interchangeable evidence. Only a still-live committed learned
+owned-Geph exact host is deliberately host-wide.
 
 If the owned route returns only a bodyless redirect, it is not payload evidence
 by itself. Production may follow exactly one absolute HTTPS root redirect only
@@ -649,14 +669,50 @@ explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 
-`Quit Slipstream` closes the tray UI but intentionally leaves its background
-routing service and owned Geph LaunchAgent running. This preserves routing if
-the menu process exits or crashes.
+`Quit Slipstream` now stops the complete owned runtime before the tray exits.
+It asks for administrator access, records an exact private relaunch marker, and
+then runs the bundled daemon's non-destructive `--stop`: disable the root label,
+clear only Slipstream's PF anchor/lease, boot out the launchd `KeepAlive` job,
+stop only exact owned survivors, remove transient status, and prove listener
+absence without deleting the installed daemon, plist, install attestation, or
+persistent routing state. Only after root/PF cleanup succeeds does Quit boot out
+and stop the exact owned Geph LaunchAgent. A launchctl failure is never treated
+as an unloaded job: only the exact service-not-found result proves absence.
+Geph signalling requires the private ownership record, current UID, exact
+runtime/config command, stable process birth, and initial listener to agree.
+When that record is missing or stale, Slipstream does not guess or signal; it
+scans for the exact private runtime and fails closed while one remains. A
+listener owned by another process is external and is left untouched. If either
+owned layer cannot prove absence, the tray remains open and reports an
+incomplete Quit instead of hiding a live background process.
 
-`Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
-daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does
-not claim an active PF redirect; it identifies the remaining user-side job so it
-is not mistaken for an external VPN or proxy.
+Signed Update installation, Quit, and Uninstall are mutually exclusive terminal
+operations. Ownership is claimed synchronously before the updater task, the
+uninstall confirmation, or any Quit mutation. Cancellation and failure release
+only that operation's claim; success retains it through an owner-checked exit.
+Consequently, an updater that finishes late cannot exit or relaunch Slipstream
+in the middle of Quit/Uninstall. If ownership or Tauri exit handling ever becomes
+uncertain, Slipstream stays open and blocks another terminal action rather than
+running two destructive lifecycle paths concurrently.
+
+Do not use Activity Monitor or repeated process termination as the normal Quit
+path. Killing one tray, daemon, or Geph process is not a coordinated stop and a
+still-loaded launchd `KeepAlive` job may correctly recreate it. Use the tray
+action and complete its administrator prompt. On a later explicit app launch,
+only the exact valid marker authorizes restoration of the previously enabled
+root service; Slipstream clears it after fresh owned daemon/listener/heartbeat/PF
+proof, then resumes Geph independently. A manually disabled root label remains
+disabled, and an unreadable or malformed marker blocks automatic recovery.
+The one-time relaunch cleanup runs before status reconciliation, so a stale
+Geph sidecar cannot be disabled after reconciliation has already recorded it as
+resumed. Watchdog repair also rechecks the exact installed attestation, enabled
+label, missing status, and absent owned listener under the same lifecycle lock;
+a queued repair cannot revive a later manual disable or partial uninstall.
+
+`Copy Diagnostics` may report `summary.geph_lifecycle: sidecar_only` only as an
+incomplete/legacy lifecycle fact when the root daemon is absent but Slipstream's
+own Geph LaunchAgent remains loaded. It does not claim an active PF redirect and
+is not a successful Quit outcome.
 
 To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
 native dialog. It first disables tray autostart, stops new transparent accepts,
@@ -1336,11 +1392,17 @@ adding a site rule:
 
 1. Start from a fresh daemon/preflight cache and do not prime the host through
    PF with curl, Playwright, or a background browser before the real foreground
-   attempt. The same-IP direct network retry is adaptive and capped at 5.0
-   seconds. It uses only the remainder of the unchanged eight-second job after
-   reserving 1.5 seconds for cold signed-browser provenance, 50 ms of provenance
-   wait grace, 2.0 seconds for proof, and 25 ms scheduling grace; it does not
-   widen the ordinary 400-ms direct or 500-ms healthy first-contact path.
+   attempt. The semantic root uses one exact-IP socket, not a 400-ms socket plus
+   a fresh retry. Its I/O allowance is capped at 5.0 seconds and uses only the
+   remainder of the unchanged eight-second job after reserving 1.5 seconds for
+   cold signed-browser provenance, 50 ms provenance wait grace, 2.0 seconds for
+   proof, 50 ms classification, and 25 ms scheduling. Complete responses return
+   early; results explicitly typed retryable-inconclusive, including timeout or
+   bounded framing/decode/classification/inspection/parser deadlines, remain
+   `unclear` and do not admit provenance, child work, Geph, local recovery,
+   cache, or learning. An identity-body shortfall that reaches EOF and meets
+   the existing safe-incomplete contract is different: it retains the guarded
+   provenance/headless-owned-Geph path.
 2. In normal Safari or Chrome, require the original navigation to recover
    without a second manual reload. Browser focus and recent input do not
    authorize or reject a critical-child route. A headless/CDP reproduction is
@@ -1390,6 +1452,35 @@ ownership conflict does not wait, clear the hold, or select Geph.
 Google and Spotify use `direct_first`: the next connection always starts with
 plain TLS, then can use bounded local desync only if direct did not work. They
 never fall through to Geph.
+
+### Every current system edge stalls in TLS, but owned Geph has payload
+
+A single TLS timeout is still ambiguous and must remain direct/`unclear`. Do
+not add a hostname, CDN, IP, `403`, or larger-timeout rule. The exceptional
+first-request path is admitted only by the production continuous-root probe
+when the complete bounded set of two or three current public system IPv4
+addresses all actually spend the full five-second I/O window at
+`tls_handshake_timeout`, with zero wire and payload bytes, no asset, no hard
+error, and no mixed/usable result. Synthetic or injected probes cannot mint
+this authority.
+
+Even then, the result is not learned. The original exact PF connection stays
+open through its full eight-second hard deadline and then keeps racing one
+same-PID owned-Geph qualifier inside the twelve-second semantic handoff window.
+The direct stream wins every byte observed before commit, including bytes that
+arrive while listener/PID ownership is being checked; Geph needs at least 64
+server bytes. The single-use capability is bound to exact host, PF IP, port
+443, owned PID, not-before time, deadline, and its random owner token, and is
+spent before runtime waits. A mismatch, restart/drain, unavailable listener,
+expired deadline, short response, or failed qualifier returns the held exact
+stream when it remains usable. It never creates a route/cache/status event,
+confirmation, successor, or retry.
+
+This is an explicit bounded liveness tradeoff: no finite timeout can prove that
+an arbitrary direct server would never answer later. Timing therefore remains
+forbidden as persistent route authority. Validate the mechanism from a cold
+daemon and fresh ordinary browser connection; a warm learned overlay is not
+evidence for this path.
 
 ## Installed Daemon
 
