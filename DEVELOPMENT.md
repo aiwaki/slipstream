@@ -86,6 +86,14 @@ crate is linked into the Windows production host.
 
 ## Build
 
+Keep long-lived development and qualification work in a durable checkout, not
+in an OS-managed temporary directory. Before replacing an installed app, retain
+the exact source revision and any uncommitted diff that produced it. If a prior
+worktree disappeared, an older saved branch or graph index is not proof that its
+uncommitted tail is present: reconcile that tail before building a replacement.
+Record the source, artifact verification result and remaining physical gates in
+`docs/CURRENT_STATE.md` and the relevant investigation log.
+
 The app scripts rebuild the self-contained Python daemon with Python 3.13,
 stage it into Tauri through a temporary directory, build the final app, and run
 the canonical macOS bundle verifier. That verifier checks the complete
@@ -100,6 +108,15 @@ A complete local app build also needs the Geph sidecar at:
 ```text
 app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
 ```
+
+Use the recorded Geph release contract and the verification sequence in
+`.github/workflows/ci.yml` before staging that sidecar; neither the upstream
+source crate nor a locally generated audit report substitutes for its binary
+attestations. The complete version- and hash-pinned Chromium headless runtime
+must also be materialized with
+`scripts/materialize_chromium_headless_shell.py` into
+`app-tauri/src-tauri/chromium-headless-shell`. The tracked README alone is not a
+runtime. Do not use test-only resource overrides for a product build.
 
 Then build the app without updater signing:
 
