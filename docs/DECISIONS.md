@@ -3,6 +3,33 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Audit corrections — 2026-09-05
+
+These rules apply to the source correction in `codex/codebase-audit-20260905`;
+they are not a claim about the currently installed bundle. Evidence, regression
+results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-05.md).
+
+- Direct root health and root inflight coalescing belong to the normalized host
+  **and canonical destination IP**. An IPv4 result cannot clear another IPv4
+  or IPv6 endpoint, including its QUIC admission. Only a committed, still-valid
+  learned exact-host route retains host-wide routing authority.
+- A root or another critical object is not health proof for a transient child
+  URL. Child negative/healthy outcomes cannot populate a host-wide health cache;
+  an unresolved critical child cannot populate its parent's retry cache. Existing
+  proof, ownership, concurrency, exclusions and deadline limits remain active.
+- Explicit **Quit Slipstream** means stopping the owned runtime, not only the
+  tray. It must serialize with privileged mutations, invalidate stale queued
+  requests, complete the installed root-owned daemon's non-destructive `--stop`
+  before stopping owned Geph, and exit only on verified success. `--stop`
+  preserves installation, configuration, learned state and immutable install
+  attestation. Unknown process/launchd state or incomplete cleanup is not success.
+  This supersedes historical wording that an explicit Quit intentionally leaves
+  the tunnel running; crash recovery and updater exits keep their own semantics.
+- Tests after a known-green matching baseline remain change-scoped. A whole-tree
+  audit may establish a new baseline where saved local changes have no matching
+  CI, but passing unit tests never replace fresh ordinary Chrome/Safari, native
+  Windows or exact-bundle lifecycle qualification.
+
 > **P0 supersession scope (2026-08-13):** every historical row below that
 > describes a production Aqua/LaunchServices worker, installed Google Chrome,
 > extension-driven reload, or transport-idle browser admission is superseded by

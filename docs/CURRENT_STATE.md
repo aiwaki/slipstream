@@ -10,6 +10,52 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-05 (whole-project source audit; not installed qualification):
+the user requested an audit prompt, a pass across the codebase, causal fixes and
+a separate persistent Markdown record. The prompt, inventory, twelve defect
+groups, reproductions, focused checks and remaining limits are in
+[`CODEBASE_AUDIT_2026-09-05.md`](CODEBASE_AUDIT_2026-09-05.md).
+
+Work is in the durable worktree
+`/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`, branch
+`codex/codebase-audit-20260905`, based on the latest saved local
+`codex/aikido-cdn-recovery` commit `8cee1ca1ab14e27dca377e44960718867fd3e71a`.
+The completed audit source correction and regressions are committed locally as
+`c060518d52ab888dfd9e92c7472a10dbabe8e555`; this checkpoint is the following
+documentation-only commit. No push, new PR or merge was performed.
+The user's primary checkout remains at
+`a22a698e809af5c1892e90ad462512f6719e56e7` with its existing untracked
+diagnostics untouched. The former `/private/tmp/slipstream-aikido-rootfix.Bekk7h/worktree`
+is incomplete; its historical uncommitted tail and the current installed app
+must not be assumed to match this saved source. Live main is
+`2780de4b3f5d77ab3852e46381b997c618bd5080`; PR #373 is still open at
+`513484ac43ae0348df06e61fca5af9d3105eb225` with matching CI `32867878889`
+and audit `32867879962`. Those remote checks do not qualify this audit diff.
+
+Source fixes isolate root cache/inflight/QUIC health by host and destination IP,
+prevent one root/child object's health from clearing another critical resource,
+add non-destructive explicit Quit coordination, retain ambiguous owned-Geph
+state, enforce CDP absolute read deadlines, redact escaped secret values, bound
+companion retention and Windows terminal-event backpressure, preserve an old
+staged daemon on early build failure, and reject nonfinite soak evidence and
+oversized runtime downloads. Launch at Login reports only verified state
+instead of optimistic success. Local Python/Rust/JS/Swift baselines and scoped
+regressions are recorded in the audit log. App tests use a test-only resource
+override, not a production bundle. Dependency policy scans pass, but existing
+Geph exceptions still expire on 2026-09-30; Chromium integrity-only coverage is
+not a vulnerability scan.
+
+The next product gate is canonical fresh/staged/bundled/installed identity,
+then genuinely cold ordinary Chrome and Safari recovery and explicit Quit /
+Restart lifecycle evidence. No installation, privileged networking, protected
+account workflow, soak or publication was performed during the audit. Do not
+rerun unchanged full suites merely for reassurance, reuse remote CI as current
+source proof, or claim that the original Aikido symptom is physically resolved.
+Legacy source-only installs and unknown/partial cleanup state deliberately fail
+closed rather than executing a mutable privileged fallback.
+
+### Previous checkpoints (historical)
+
 Update 2026-08-30 (selected-representation root boundary isolated locally):
 the user's dirty primary checkout remains untouched; work continues only in the
 isolated `codex/aikido-cdn-recovery` worktree. The exact installed `9baf111`
