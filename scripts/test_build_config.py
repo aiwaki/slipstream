@@ -102,8 +102,20 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_package_scripts_split_local_and_release_builds(self) -> None:
         package = json.loads((ROOT / "app-tauri/package.json").read_text())
+        tauri = json.loads(
+            (ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text()
+        )
         scripts = package["scripts"]
 
+        self.assertEqual(
+            tauri["build"]["beforeBuildCommand"],
+            "../scripts/build_and_stage_daemon.sh",
+        )
+        # Cargo's tauri-build resource copy needs the daemon before compilation.
+        # A beforeBundle hook runs too late on a clean checkout; retaining both
+        # hooks would freeze the daemon twice in the same canonical build.
+        self.assertNotIn("beforeBundleCommand", tauri["build"])
+        self.assertNotIn("beforeDevCommand", tauri["build"])
         self.assertIn("tauri.local.conf.json", scripts["build:local"])
         self.assertIn("tauri build", scripts["build:release"])
         self.assertIn(f"--target {TAURI_RELEASE_TARGET}", scripts["build:release"])
@@ -116,12 +128,8 @@ class BuildConfigTests(unittest.TestCase):
             ("build:local", "verify:bundle:local"),
             ("build:release", "verify:bundle:release"),
         ):
-            self.assertIn("npm run build:daemon", scripts[name])
+            self.assertNotIn("npm run build:daemon", scripts[name])
             self.assertIn(f"npm run {verifier_name}", scripts[name])
-            self.assertLess(
-                scripts[name].index("npm run build:daemon"),
-                scripts[name].index("tauri build"),
-            )
             self.assertLess(
                 scripts[name].index("tauri build"),
                 scripts[name].index(f"npm run {verifier_name}"),
@@ -525,7 +533,12 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         self.assertIn("--source-archive-sha256", ci)
         self.assertIn("--app-tree", ci)
         self.assertIn("actions/attest@", ci)
-        self.assertEqual(ci.count("Build the frozen daemon"), 1)
+        self.assertNotIn("Prepare frozen daemon policy inputs", ci)
+        self.assertIn(
+            "SLIPSTREAM_EPHEMERAL_ROUTE_POLICY_KEY_ID: ci-packaged-lifecycle",
+            ci,
+        )
+        self.assertNotIn("pyinstaller --noconfirm --clean slipstreamd.spec", ci)
         self.assertEqual(ci.count("Build the packaged app"), 1)
         self.assertIn("Seal the single packaged build for parallel qualification", ci)
         self.assertNotIn("--bundles app", ci)
@@ -540,6 +553,56 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         )
         self.assertGreaterEqual(
             ci.count("name: release-candidate-${{ github.sha }}"), 3
+        )
+
+        packaged_app = ci[
+            ci.index("  packaged-app-build:") : ci.index(
+                "  sign-updater-archive:",
+            )
+        ]
+        self.assertNotIn("--generate-keypair", packaged_app)
+
+        daemon_builder = (ROOT / "spike/build_daemon.sh").read_text(
+            encoding="utf-8"
+        )
+        dependency_install = daemon_builder.index("-r requirements-build.txt")
+        policy_generation = daemon_builder.index(
+            "../scripts/make_route_policy_bundle.py"
+        )
+        daemon_freeze = daemon_builder.index(
+            ".buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec"
+        )
+        self.assertLess(dependency_install, policy_generation)
+        self.assertLess(policy_generation, daemon_freeze)
+        self.assertIn(
+            ".buildvenv/bin/python ../scripts/make_route_policy_bundle.py",
+            daemon_builder,
+        )
+        self.assertIn(
+            'policy_key_dir="$(mktemp -d ',
+            daemon_builder,
+        )
+        self.assertIn(
+            'policy_private_key="$policy_key_dir/private.key"',
+            daemon_builder,
+        )
+        self.assertIn(
+            'policy_public_keys="$policy_key_dir/public.json"',
+            daemon_builder,
+        )
+        self.assertNotIn('policy_private_key="$(mktemp ', daemon_builder)
+        self.assertIn(
+            '--public-keys-output "$policy_public_keys"',
+            daemon_builder,
+        )
+        self.assertIn(
+            'mv -f "$policy_public_keys" route-policy-keys.json',
+            daemon_builder,
+        )
+        self.assertIn(
+            "trap 'rm -f \"$policy_private_key\" \"$policy_public_keys\"; "
+            'rmdir "$policy_key_dir" 2>/dev/null || true\' EXIT',
+            daemon_builder,
         )
 
         self.assertIn("release-candidate-${{ github.sha }}", qualification)
@@ -1550,9 +1613,13 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
         ]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in build_sources)
 
-        self.assertGreaterEqual(combined.count("requirements-build.txt"), 3)
-        self.assertGreaterEqual(combined.count("--require-hashes"), 3)
-        self.assertGreaterEqual(combined.count("--only-binary=:all:"), 3)
+        # CI has one locked test-dependency install. The only build-dependency
+        # install now lives in build_daemon.sh, reached by Tauri's mandatory
+        # beforeBuildCommand; the removed standalone CI freeze must not be
+        # counted as a second build path.
+        self.assertEqual(combined.count("requirements-build.txt"), 2)
+        self.assertEqual(combined.count("--require-hashes"), 2)
+        self.assertEqual(combined.count("--only-binary=:all:"), 2)
         self.assertNotIn("-r spike/requirements.txt pyinstaller", combined)
         self.assertNotIn("scapy cryptography certifi pyinstaller", combined)
         self.assertNotIn("pip install --quiet --upgrade pip", combined)

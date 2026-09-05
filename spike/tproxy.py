@@ -25,6 +25,7 @@ import base64
 import contextvars
 from datetime import datetime, timezone
 import errno
+from enum import Enum
 import filecmp
 import fcntl
 import hashlib
@@ -38,6 +39,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import os
 import plistlib
 import pwd
+import queue
 import re
 import resource
 import secrets
@@ -52,7 +54,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlencode, urlparse
 import urllib.request
 from xml.sax.saxutils import escape as xml_escape
@@ -2177,17 +2179,23 @@ SEMANTIC_PLAIN_PROBE_RANGE_END = (
 SEMANTIC_PLAIN_CONFIRM_MAX = 2
 SEMANTIC_PLAIN_PROBE_WINDOW = 60.0
 SEMANTIC_PLAIN_PROBE_WINDOW_MAX = 8
-# The held browser connection already proved that the exact system endpoint can
-# speak TLS.  The independent semantic root probe must therefore stay inside
-# the healthy-first-contact latency budget.  One inconclusive fast probe may
-# spend a bounded direct network retry inside the full eight-second contract;
-# the timeout itself never authorizes a route.  Signed foreground-browser
-# provenance remains mandatory only for an ambiguous final document that may
-# admit the bounded browser worker.  A critical-child comparison is already
-# authorized by a complete parent document plus independent direct-incomplete
-# and same-object owned-Geph network evidence, so it must not depend on UI
-# focus or recent input.
-ROUTE_PREFLIGHT_DIRECT_TIMEOUT = 0.4
+# The accepted client has supplied only a ClientHello to Slipstream; it has not
+# proved that a second direct TLS handshake can complete.  Give one independent
+# root connection the available bounded I/O slice instead of aborting it after
+# 400 ms and immediately creating another connection.  A fast result still
+# returns immediately.  A final timeout remains inconclusive and cannot cache,
+# contact Geph, or learn a route.
+ROUTE_PREFLIGHT_ROOT_IO_MAX_TIMEOUT = 5.0
+# One exact host can legitimately resolve to several independently behaving
+# CDN edges.  Inspect at most three system-resolved addresses inside the same
+# root I/O deadline; this is a bounded address race, not a serial retry budget.
+ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT = 3
+# Classification begins only after strict HTTP framing is complete.  Keep its
+# small CPU-only allowance separate from socket I/O so a response completed at
+# the I/O edge is not rejected merely because the network deadline just
+# expired.  This slice is subtracted before the root probe starts and does not
+# enlarge the eight-second RoutePreflight job.
+ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET = 0.05
 ROUTE_PREFLIGHT_CACHE_TTL = 10 * 60.0
 ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
 ROUTE_PREFLIGHT_CACHE_MAX = 4096
@@ -2203,15 +2211,17 @@ ROUTE_PREFLIGHT_HEALTHY_BUDGET = 0.5
 ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET = 1.5
 ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT = 0.5
 ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE = 0.05
-# A deadline-expired root probe is inconclusive, not a stable terminal result.
-# Spend exactly one additional direct network retry without consulting browser
-# focus.  It may use at most five seconds of the unchanged eight-second job and
-# must leave the full browser-provenance budget plus two seconds for a
-# same-attempt proof.  The scheduling grace is also subtracted before the retry
-# starts, so a joined worker cannot consume either reserve.
-ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT = 5.0
-ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE = 2.0
+# Classification and scheduling stay outside the socket window.  Browser and
+# Geph branches are not pre-reserved: they run only for outcomes that need them
+# and remain guarded by the unchanged common RoutePreflight deadline.
 ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE = 0.025
+# A zero-ingress exception is request-only and deliberately conservative: the
+# exact TLS ClientHello must have reached a WantRead boundary with at least
+# four seconds left, and that entire remaining receive slice must expire.  A
+# slow connect or outbound path therefore remains inconclusive.
+ROUTE_PREFLIGHT_ROOT_TLS_ZERO_INGRESS_MIN_WAIT = (
+    ROUTE_PREFLIGHT_ROOT_IO_MAX_TIMEOUT - 1.0
+)
 # A complete parent document may name a critical cross-origin script only
 # after the ordinary root probe has consumed part of its own bounded budget.
 # Give that exact child a fresh RoutePreflightV1 observation window, then a
@@ -2347,6 +2357,8 @@ _ROUTE_PREFLIGHT_OWNED_GEPH_CLAIM = object()
 _ROUTE_PREFLIGHT_OWNED_GEPH_PROOF = object()
 _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE = object()
 _ROUTE_PREFLIGHT_LOCAL_RECOVERY = object()
+_ROOT_TLS_STALL_CONSENSUS = object()
+_ROUTE_PREFLIGHT_REQUEST_ONLY_GEPH = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -2361,6 +2373,61 @@ class _RoutePreflightOwnedGephClaim:
     capability: str
     host: str
     deadline_monotonic: float
+
+
+@dataclass(frozen=True, slots=True)
+class _RoutePreflightRequestOnlyGephClaim:
+    marker: object
+    capability: str
+    host: str
+    exact_address: str
+    port: int
+    confirmed_geph_pid: int
+    eligible_after_monotonic: float
+    deadline_monotonic: float
+
+    def __post_init__(self):
+        if self.marker is not _ROUTE_PREFLIGHT_REQUEST_ONLY_GEPH:
+            raise ValueError("invalid request-only Geph marker")
+        if normalize_host(self.host) != self.host:
+            raise ValueError("request-only Geph host must be normalized")
+        address = ipaddress.ip_address(self.exact_address)
+        normalized = str(address)
+        if normalized != self.exact_address:
+            raise ValueError("request-only Geph address must be normalized")
+        if not isinstance(address, ipaddress.IPv4Address) or not address.is_global:
+            raise ValueError("request-only Geph address must be global IPv4")
+        if self.port != 443:
+            raise ValueError("request-only Geph claim must target port 443")
+        if type(self.confirmed_geph_pid) is not int or self.confirmed_geph_pid <= 0:
+            raise ValueError("request-only Geph claim requires a positive PID")
+        if not re.fullmatch(r"[0-9a-f]{32}", self.capability):
+            raise ValueError("request-only Geph capability must be 128-bit hex")
+        if not (
+            math.isfinite(self.eligible_after_monotonic)
+            and math.isfinite(self.deadline_monotonic)
+            and time.monotonic() < self.eligible_after_monotonic
+            and self.eligible_after_monotonic < self.deadline_monotonic
+        ):
+            raise ValueError("request-only Geph eligibility must precede expiry")
+
+
+class _RequestOnlyRouteOutcome(str, Enum):
+    EXACT = "exact"
+    GEPH_HANDLED = "geph_handled"
+    NO_ROUTE = "no_route"
+
+
+@dataclass(frozen=True, slots=True)
+class _RequestOnlyRouteResult:
+    outcome: _RequestOnlyRouteOutcome
+    exact: object = None
+
+    def __post_init__(self):
+        if (self.outcome is _RequestOnlyRouteOutcome.EXACT) != (
+            self.exact is not None
+        ):
+            raise ValueError("request-only exact ownership is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -2393,12 +2460,144 @@ class _RoutePreflightOwnedGephProof:
     marker: object
     capability: str
     host: str
+    exact_address: str
     deadline_monotonic: float
     issued_at_unix_ms: int
     deadline_unix_ms: int
     confirmed_pid: int
     reason: str
     bytes_read: int = 0
+
+    def __post_init__(self):
+        if normalize_host(self.host) != self.host:
+            raise ValueError("proof host must be normalized")
+        normalized = str(ipaddress.ip_address(self.exact_address))
+        if normalized != self.exact_address:
+            raise ValueError("proof exact_address must be normalized")
+
+
+class _RootPreflightBoundary(str, Enum):
+    UNSPECIFIED = "unspecified"
+    INVALID_INPUT = "invalid_input"
+    TCP_CONNECT_TIMEOUT = "tcp_connect_timeout"
+    TCP_CONNECT_ERROR = "tcp_connect_error"
+    TLS_HANDSHAKE_TIMEOUT = "tls_handshake_timeout"
+    TLS_HANDSHAKE_ERROR = "tls_handshake_error"
+    SEND_TIMEOUT = "send_timeout"
+    SEND_ERROR = "send_error"
+    IO_TIMEOUT_INCOMPLETE = "io_timeout_incomplete"
+    IO_ERROR = "io_error"
+    FRAMING_EOF_INCOMPLETE = "framing_eof_incomplete"
+    FRAMING_LIMIT_INCOMPLETE = "framing_limit_incomplete"
+    FRAMING_ERROR = "framing_error"
+    SELECTION_DEADLINE = "selection_deadline"
+    FULL_SELECTION_INCONCLUSIVE = "full_selection_inconclusive"
+    DECODE_DEADLINE = "decode_deadline"
+    DECODE_INCONCLUSIVE = "decode_inconclusive"
+    CLASSIFIER_DEADLINE = "classifier_deadline"
+    CLASSIFICATION_ERROR = "classification_error"
+    INSPECTION_DEADLINE = "inspection_deadline"
+    INSPECTION_INCONCLUSIVE = "inspection_inconclusive"
+    INSPECTION_ERROR = "inspection_error"
+    INTERNAL_ERROR = "internal_error"
+    CLASSIFIED = "classified"
+    USABLE = "usable"
+    OUTER_BUDGET_TIMEOUT = "outer_budget_timeout"
+
+
+class _RootPreflightAddressSource(str, Enum):
+    EXACT = "exact"
+    SYSTEM_FALLBACK = "system_fallback"
+
+
+class _RootPreflightAddressCardinality(str, Enum):
+    UNVERIFIED = "unverified"
+    SINGLE = "single"
+    MULTIPLE = "multiple"
+
+
+@dataclass(frozen=True, slots=True)
+class _RootTlsStallConsensus:
+    marker: object
+    host: str
+    exact_address: str
+    resolved_address_count: int
+    candidate_count: int
+    completed_count: int
+    io_deadline_monotonic: float
+
+    def __post_init__(self):
+        if self.marker is not _ROOT_TLS_STALL_CONSENSUS:
+            raise ValueError("invalid root TLS-stall consensus marker")
+        if normalize_host(self.host) != self.host:
+            raise ValueError("TLS-stall consensus host must be normalized")
+        address = ipaddress.ip_address(self.exact_address)
+        normalized = str(address)
+        if normalized != self.exact_address:
+            raise ValueError("TLS-stall consensus address must be normalized")
+        if not isinstance(address, ipaddress.IPv4Address) or not address.is_global:
+            raise ValueError("TLS-stall consensus address must be global IPv4")
+        if not (
+            2
+            <= self.resolved_address_count
+            <= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT
+        ):
+            raise ValueError("TLS-stall consensus requires two or three current A records")
+        if not (
+            self.resolved_address_count
+            <= self.candidate_count
+            <= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT
+        ):
+            raise ValueError("TLS-stall consensus candidate count is invalid")
+        if self.completed_count != self.candidate_count:
+            raise ValueError("TLS-stall consensus requires every candidate")
+        if not math.isfinite(self.io_deadline_monotonic):
+            raise ValueError("TLS-stall consensus deadline must be finite")
+
+
+class _RootPreflightProbeControl:
+    """Bind one worker to an absolute deadline and close it on cancellation."""
+
+    def __init__(self, deadline_monotonic):
+        self.deadline_monotonic = float(deadline_monotonic)
+        self._lock = threading.Lock()
+        self._socket = None
+        self._cancelled = False
+
+    def attach(self, active_socket):
+        with self._lock:
+            if self._cancelled:
+                should_close = True
+            else:
+                self._socket = active_socket
+                should_close = False
+        if should_close:
+            try:
+                active_socket.close()
+            except Exception:
+                pass
+            return False
+        return True
+
+    def clear(self, active_socket):
+        with self._lock:
+            if self._socket is active_socket:
+                self._socket = None
+
+    def cancelled(self):
+        with self._lock:
+            return self._cancelled
+
+    def cancel(self):
+        with self._lock:
+            self._cancelled = True
+            active_socket = self._socket
+            self._socket = None
+        if active_socket is not None:
+            try:
+                active_socket.close()
+            except Exception:
+                pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -2409,6 +2608,87 @@ class _SemanticPlainPreflightObservation:
     retryable_inconclusive: bool = False
     hard_transport_failure: bool = False
     payload_bytes: int = 0
+    root_boundary: _RootPreflightBoundary = _RootPreflightBoundary.UNSPECIFIED
+    root_address_source: _RootPreflightAddressSource = (
+        _RootPreflightAddressSource.EXACT
+    )
+    root_address_cardinality: _RootPreflightAddressCardinality = (
+        _RootPreflightAddressCardinality.SINGLE
+    )
+    root_tls_stall_consensus: object = None
+    wire_bytes: int = 0
+    wire_bytes_measured: bool = False
+    tls_initial_flight_sent: bool = False
+    tls_receive_budget_seconds: float = 0.0
+    tls_zero_ingress_wait_seconds: float = 0.0
+
+    def __post_init__(self):
+        if type(self.root_boundary) is not _RootPreflightBoundary:
+            raise TypeError("root_boundary must be _RootPreflightBoundary")
+        if type(self.root_address_source) is not _RootPreflightAddressSource:
+            raise TypeError(
+                "root_address_source must be _RootPreflightAddressSource"
+            )
+        if (
+            type(self.root_address_cardinality)
+            is not _RootPreflightAddressCardinality
+        ):
+            raise TypeError(
+                "root_address_cardinality must be "
+                "_RootPreflightAddressCardinality"
+            )
+        if self.root_tls_stall_consensus is not None and not isinstance(
+            self.root_tls_stall_consensus,
+            _RootTlsStallConsensus,
+        ):
+            raise TypeError(
+                "root_tls_stall_consensus must be _RootTlsStallConsensus"
+            )
+        if type(self.wire_bytes_measured) is not bool:
+            raise TypeError("wire_bytes_measured must be bool")
+        if type(self.tls_initial_flight_sent) is not bool:
+            raise TypeError("tls_initial_flight_sent must be bool")
+        for field_name, duration in (
+            ("tls_receive_budget_seconds", self.tls_receive_budget_seconds),
+            (
+                "tls_zero_ingress_wait_seconds",
+                self.tls_zero_ingress_wait_seconds,
+            ),
+        ):
+            if (
+                isinstance(duration, bool)
+                or not isinstance(duration, (int, float))
+                or not math.isfinite(float(duration))
+                or float(duration) < 0.0
+            ):
+                raise TypeError(f"{field_name} must be a finite nonnegative number")
+
+
+@dataclass(frozen=True, slots=True)
+class _RoutePreflightCacheEntry:
+    """One private cache decision, scoped to its exact direct address."""
+
+    expires_at: float
+    outcome: str
+    exact_address: str = ""
+
+    def __post_init__(self):
+        if self.exact_address:
+            normalized = str(ipaddress.ip_address(self.exact_address))
+            if normalized != self.exact_address:
+                raise ValueError("exact_address must be normalized")
+
+
+@dataclass(frozen=True, slots=True)
+class _RoutePreflightSharedLocalRecovery:
+    """One coalesced local-recovery result bound to its observed address."""
+
+    exact_address: str
+
+    def __post_init__(self):
+        normalized = str(ipaddress.ip_address(self.exact_address))
+        if normalized != self.exact_address:
+            raise ValueError("exact_address must be normalized")
 
 
 _BOOTSTRAP_RANGE_TERMINATION_COMPLETE = "complete"
@@ -2422,6 +2702,13 @@ _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN = "unknown"
 class _BootstrapRangeProbeObservation:
     evidence: object
     termination: str
+
+
+@dataclass(frozen=True, slots=True)
+class _BootstrapAssetPreflightResult:
+    proof: object
+    outcome: object
+    exact_address: str = ""
 
 
 @dataclass(slots=True)
@@ -2477,8 +2764,8 @@ _transport_incomplete_client_first_evidence = {}  # host -> deque[(monotonic, ip
 _semantic_plain_confirming = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
-_route_preflight_cache = OrderedDict()  # (root host, IP) or learned asset host -> (expiry, outcome)
-_route_preflight_inflight = {}  # (root host, IP) or asset host -> concurrent Future
+_route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
+_route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
 _route_preflight_window = deque()
 _route_preflight_consumed = OrderedDict()  # capability -> expiry monotonic
 _route_preflight_lock = threading.RLock()
@@ -3247,13 +3534,13 @@ def _geph_session_started():
         return True
 
 
-def _geph_session_finished():
+def _geph_session_finished(*, retry_pending=True):
     global _geph_active_sessions
     became_idle = False
     with _geph_session_lock:
         _geph_active_sessions = max(0, _geph_active_sessions - 1)
         became_idle = _geph_active_sessions == 0 and not _geph_restart_draining
-    if became_idle:
+    if became_idle and retry_pending:
         _retry_pending_auto_geph_confirmations_after_drain()
 
 
@@ -4215,6 +4502,14 @@ def _semantic_root_response_observation(
 ):
     if clock is None:
         clock = time.monotonic
+    classify_deadline = float("inf") if deadline is None else float(deadline)
+    if clock() >= classify_deadline:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.SELECTION_DEADLINE,
+            wire_bytes=len(data) if isinstance(data, bytes) else 0,
+        )
     if not bootstrap_asset_preflight.response_has_full_selected_representation(
         data,
         stream_closed=stream_closed,
@@ -4224,13 +4519,24 @@ def _semantic_root_response_observation(
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR,
             retryable_inconclusive=True,
+            root_boundary=(
+                _RootPreflightBoundary.FULL_SELECTION_INCONCLUSIVE
+            ),
+            wire_bytes=len(data) if isinstance(data, bytes) else 0,
+        )
+    if clock() >= classify_deadline:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.SELECTION_DEADLINE,
+            wire_bytes=len(data),
         )
     content = decode_http_response_content(
         data,
         stream_closed=stream_closed,
         truncated=truncated,
         allow_error_status=True,
-        deadline=float("inf") if deadline is None else deadline,
+        deadline=classify_deadline,
         max_input_bytes=max_input_bytes,
         max_output_bytes=bootstrap_asset_preflight.MAX_ROOT_RESPONSE_BYTES,
         clock=clock,
@@ -4239,20 +4545,41 @@ def _semantic_root_response_observation(
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR,
             retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.DECODE_DEADLINE,
+            wire_bytes=len(data),
         )
     if content.outcome is not HttpContentDecodeOutcome.COMPLETE:
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR,
             retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.DECODE_INCONCLUSIVE,
+            wire_bytes=len(data),
+        )
+    if clock() >= classify_deadline:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.CLASSIFIER_DEADLINE,
+            wire_bytes=len(data),
+        )
+    outcome = _semantic_http_response_outcome(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        decoded_body=content.body,
+    )
+    if clock() >= classify_deadline:
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.CLASSIFIER_DEADLINE,
+            wire_bytes=len(data),
         )
     return _SemanticPlainPreflightObservation(
-        _semantic_http_response_outcome(
-            data,
-            stream_closed=stream_closed,
-            truncated=truncated,
-            decoded_body=content.body,
-        ),
+        outcome,
         payload_bytes=len(content.body),
+        root_boundary=_RootPreflightBoundary.CLASSIFIED,
+        wire_bytes=len(data),
     )
 
 
@@ -4308,45 +4635,334 @@ def _semantic_plain_response_outcome(
     ).outcome
 
 
+class _RootPreflightTlsStream:
+    """Drive TLS on one raw exact-IP socket and count encrypted ingress."""
+
+    wire_bytes_measured = True
+
+    def __init__(self, raw_socket, context, host, deadline_monotonic):
+        self._raw_socket = raw_socket
+        self._deadline_monotonic = float(deadline_monotonic)
+        self._incoming = ssl.MemoryBIO()
+        self._outgoing = ssl.MemoryBIO()
+        self._tls = context.wrap_bio(
+            self._incoming,
+            self._outgoing,
+            server_side=False,
+            server_hostname=host,
+        )
+        self._wire_bytes = 0
+        self._wire_eof = False
+        self._initial_flight_sent = False
+        self._receive_budget_seconds = 0.0
+        self._zero_ingress_wait_started = None
+
+    @property
+    def wire_bytes(self):
+        return self._wire_bytes
+
+    @property
+    def tls_initial_flight_sent(self):
+        return self._initial_flight_sent
+
+    @property
+    def tls_receive_budget_seconds(self):
+        return self._receive_budget_seconds
+
+    @property
+    def tls_zero_ingress_wait_seconds(self):
+        if (
+            not self._initial_flight_sent
+            or self._zero_ingress_wait_started is None
+            or self._wire_bytes != 0
+        ):
+            return 0.0
+        return max(0.0, time.monotonic() - self._zero_ingress_wait_started)
+
+    def settimeout(self, timeout):
+        self._raw_socket.settimeout(timeout)
+
+    def _flush_outgoing(self):
+        flushed = 0
+        while True:
+            ciphertext = self._outgoing.read()
+            if not ciphertext:
+                return flushed
+            _set_socket_deadline_timeout(
+                self._raw_socket,
+                self._deadline_monotonic,
+            )
+            self._raw_socket.sendall(ciphertext)
+            flushed += len(ciphertext)
+
+    def _mark_initial_flight_sent(self, flushed_bytes):
+        if self._initial_flight_sent or flushed_bytes <= 0:
+            return
+        now = time.monotonic()
+        self._initial_flight_sent = True
+        self._receive_budget_seconds = max(
+            0.0,
+            self._deadline_monotonic - now,
+        )
+        self._zero_ingress_wait_started = now
+
+    def _receive_wire(self):
+        if self._wire_eof:
+            return False
+        _set_socket_deadline_timeout(
+            self._raw_socket,
+            self._deadline_monotonic,
+        )
+        ciphertext = self._raw_socket.recv(65536)
+        if ciphertext:
+            self._wire_bytes += len(ciphertext)
+            self._incoming.write(ciphertext)
+            return True
+        self._incoming.write_eof()
+        self._wire_eof = True
+        return False
+
+    def do_handshake(self):
+        handshake_outgoing_bytes = 0
+        while True:
+            try:
+                self._tls.do_handshake()
+                self._flush_outgoing()
+                return
+            except ssl.SSLWantReadError:
+                handshake_outgoing_bytes += self._flush_outgoing()
+                self._mark_initial_flight_sent(handshake_outgoing_bytes)
+                if self._wire_eof:
+                    raise ssl.SSLEOFError("EOF during TLS handshake")
+                self._receive_wire()
+            except ssl.SSLWantWriteError:
+                handshake_outgoing_bytes += self._flush_outgoing()
+
+    def sendall(self, cleartext):
+        remaining = memoryview(cleartext)
+        while remaining:
+            try:
+                written = self._tls.write(remaining)
+            except ssl.SSLWantReadError:
+                self._flush_outgoing()
+                if self._wire_eof:
+                    raise ssl.SSLEOFError("EOF while writing TLS request")
+                self._receive_wire()
+                continue
+            except ssl.SSLWantWriteError:
+                self._flush_outgoing()
+                continue
+            if written <= 0:
+                raise OSError("TLS request write made no progress")
+            remaining = remaining[written:]
+            self._flush_outgoing()
+        self._flush_outgoing()
+
+    def recv(self, size):
+        while True:
+            try:
+                cleartext = self._tls.read(size)
+                self._flush_outgoing()
+                return cleartext
+            except ssl.SSLWantReadError:
+                self._flush_outgoing()
+                if self._wire_eof:
+                    return b""
+                self._receive_wire()
+            except ssl.SSLWantWriteError:
+                self._flush_outgoing()
+            except (ssl.SSLZeroReturnError, ssl.SSLEOFError):
+                return b""
+
+    def close(self):
+        self._raw_socket.close()
+
+
+def _open_root_preflight_tls_stream(raw_socket, host, deadline_monotonic):
+    """Wrap one exact socket without hiding TLS wire progress from policy."""
+    context = _local_payload_ssl_context()
+    if callable(getattr(context, "wrap_bio", None)):
+        return _RootPreflightTlsStream(
+            raw_socket,
+            context,
+            host,
+            deadline_monotonic,
+        )
+    if isinstance(context, ssl.SSLContext):
+        raise RuntimeError("SSLContext.wrap_bio is required for root preflight")
+    # Injected legacy test doubles may retain the old SSLSocket seam, but the
+    # resulting observation is explicitly unmeasured and cannot form TLS-stall
+    # consensus.
+    return context.wrap_socket(
+        raw_socket,
+        server_hostname=host,
+        do_handshake_on_connect=False,
+    )
+
+
+def _open_root_preflight_socket(ip, io_deadline, control=None):
+    """Open one exact-IP socket, attaching it before a cancellable connect."""
+    if not isinstance(control, _RootPreflightProbeControl):
+        return socket.create_connection(
+            (ip, 443),
+            timeout=max(io_deadline - time.monotonic(), 0.001),
+        )
+    address = ipaddress.ip_address(ip)
+    family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+    active_socket = socket.socket(family, socket.SOCK_STREAM)
+    if not control.attach(active_socket):
+        return None
+    try:
+        _set_socket_deadline_timeout(active_socket, io_deadline)
+        endpoint = (
+            (str(address), 443, 0, 0)
+            if address.version == 6
+            else (str(address), 443)
+        )
+        active_socket.connect(endpoint)
+        return active_socket
+    except Exception:
+        control.clear(active_socket)
+        try:
+            active_socket.close()
+        except Exception:
+            pass
+        raise
+
+
 def _semantic_plain_preflight_probe_detail(
     ip,
     host,
     timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
+    *,
+    deadline_monotonic=None,
+    control=None,
 ):
     """Classify one exact system IP and retain only ephemeral bootstrap targets."""
     h = normalize_host(host)
     if not h or not ip:
         return _SemanticPlainPreflightObservation(
-            SEMANTIC_OUTCOME_TERMINAL_ERROR
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            root_boundary=_RootPreflightBoundary.INVALID_INPUT,
         )
-    deadline = time.monotonic() + max(float(timeout), 0.001)
+    relative_deadline = time.monotonic() + max(float(timeout), 0.001)
+    io_deadline = relative_deadline
+    if deadline_monotonic is not None:
+        io_deadline = min(io_deadline, float(deadline_monotonic))
+    if isinstance(control, _RootPreflightProbeControl):
+        io_deadline = min(io_deadline, control.deadline_monotonic)
     sock = None
     tls_sock = None
+
+    def wire_measurement():
+        measured = bool(
+            getattr(tls_sock, "wire_bytes_measured", False)
+        )
+        initial_flight_sent = bool(
+            getattr(tls_sock, "tls_initial_flight_sent", False)
+        )
+        try:
+            count = max(0, int(getattr(tls_sock, "wire_bytes", 0)))
+            receive_budget = max(
+                0.0,
+                float(
+                    getattr(
+                        tls_sock,
+                        "tls_receive_budget_seconds",
+                        0.0,
+                    )
+                ),
+            )
+            zero_ingress_wait = max(
+                0.0,
+                float(
+                    getattr(
+                        tls_sock,
+                        "tls_zero_ingress_wait_seconds",
+                        0.0,
+                    )
+                ),
+            )
+        except (TypeError, ValueError, OverflowError):
+            count = 0
+            measured = False
+            initial_flight_sent = False
+            receive_budget = 0.0
+            zero_ingress_wait = 0.0
+        if not (
+            math.isfinite(receive_budget)
+            and math.isfinite(zero_ingress_wait)
+        ):
+            measured = False
+            initial_flight_sent = False
+            receive_budget = 0.0
+            zero_ingress_wait = 0.0
+        return {
+            "wire_bytes": count,
+            "wire_bytes_measured": measured,
+            "tls_initial_flight_sent": initial_flight_sent,
+            "tls_receive_budget_seconds": receive_budget,
+            "tls_zero_ingress_wait_seconds": zero_ingress_wait,
+        }
+
+    def cancelled_observation():
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.OUTER_BUDGET_TIMEOUT,
+            **wire_measurement(),
+        )
+
+    if (
+        io_deadline <= time.monotonic()
+        or (
+            isinstance(control, _RootPreflightProbeControl)
+            and control.cancelled()
+        )
+    ):
+        return cancelled_observation()
     chunks = []
     size = 0
     stream_closed = False
     idle_timed_out = False
     complete = False
+    assets = ()
+    retain_assets = False
+    root_stage = "connect"
     try:
-        sock = socket.create_connection(
-            (ip, 443),
-            timeout=max(deadline - time.monotonic(), 0.001),
-        )
-        _set_socket_deadline_timeout(sock, deadline)
-        tls_sock = _local_payload_ssl_context().wrap_socket(
+        sock = _open_root_preflight_socket(ip, io_deadline, control)
+        if sock is None:
+            return cancelled_observation()
+        if (
+            isinstance(control, _RootPreflightProbeControl)
+            and not control.attach(sock)
+        ):
+            return cancelled_observation()
+        _set_socket_deadline_timeout(sock, io_deadline)
+        root_stage = "tls"
+        tls_sock = _open_root_preflight_tls_stream(
             sock,
-            server_hostname=h,
+            h,
+            io_deadline,
         )
-        _set_socket_deadline_timeout(tls_sock, deadline)
+        _set_socket_deadline_timeout(tls_sock, io_deadline)
+        tls_sock.do_handshake()
+        root_stage = "send"
         tls_sock.sendall(
             _semantic_plain_preflight_probe_request(
                 h,
                 range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
             )
         )
+        root_stage = "recv"
         while size < SEMANTIC_PLAIN_PROBE_MAX_BYTES:
+            if (
+                isinstance(control, _RootPreflightProbeControl)
+                and control.cancelled()
+            ):
+                return cancelled_observation()
             try:
-                _set_socket_deadline_timeout(tls_sock, deadline)
+                _set_socket_deadline_timeout(tls_sock, io_deadline)
                 chunk = tls_sock.recv(
                     min(4096, SEMANTIC_PLAIN_PROBE_MAX_BYTES - size)
                 )
@@ -4359,13 +4975,17 @@ def _semantic_plain_preflight_probe_detail(
             chunks.append(chunk)
             size += len(chunk)
             data = b"".join(chunks)
-            if http_response_framing_complete(
+            root_stage = "framing"
+            framed = http_response_framing_complete(
                 data,
                 stream_closed=False,
                 truncated=False,
-            ):
+            )
+            root_stage = "recv"
+            if framed:
                 complete = True
                 break
+        root_stage = "framing"
         data = b"".join(chunks)
         truncated = size >= SEMANTIC_PLAIN_PROBE_MAX_BYTES and not complete
         response_complete = complete or http_response_framing_complete(
@@ -4387,24 +5007,49 @@ def _semantic_plain_preflight_probe_detail(
                 hard_transport_failure=bool(
                     stream_closed and not safe_incomplete
                 ),
+                root_boundary=(
+                    _RootPreflightBoundary.IO_TIMEOUT_INCOMPLETE
+                    if idle_timed_out
+                    else _RootPreflightBoundary.FRAMING_LIMIT_INCOMPLETE
+                    if truncated
+                    else _RootPreflightBoundary.FRAMING_EOF_INCOMPLETE
+                    if stream_closed
+                    else _RootPreflightBoundary.IO_ERROR
+                ),
+                **wire_measurement(),
             )
+        if (
+            isinstance(control, _RootPreflightProbeControl)
+            and control.cancelled()
+        ):
+            return cancelled_observation()
+        classify_deadline = (
+            time.monotonic() + ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET
+        )
+        root_stage = "classify"
         response_observation = _semantic_plain_response_observation(
             data,
             stream_closed=stream_closed,
             truncated=truncated,
-            deadline=deadline,
+            deadline=classify_deadline,
         )
         if response_observation.retryable_inconclusive:
-            return response_observation
+            return replace(response_observation, **wire_measurement())
+        if (
+            isinstance(control, _RootPreflightProbeControl)
+            and control.cancelled()
+        ):
+            return cancelled_observation()
         outcome = response_observation.outcome
-        assets = ()
         if outcome == SEMANTIC_OUTCOME_USABLE:
+            root_stage = "inspect"
             inspection = bootstrap_asset_preflight.inspect_critical_bootstrap_assets(
                 f"https://{h}/",
                 data,
                 stream_closed=stream_closed,
                 truncated=truncated,
-                deadline=deadline,
+                deadline=classify_deadline,
+                clock=time.monotonic,
                 requested_range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
             )
             if (
@@ -4414,20 +5059,95 @@ def _semantic_plain_preflight_probe_detail(
                 return _SemanticPlainPreflightObservation(
                     SEMANTIC_OUTCOME_TERMINAL_ERROR,
                     retryable_inconclusive=True,
+                    root_boundary=(
+                        _RootPreflightBoundary.INSPECTION_DEADLINE
+                        if time.monotonic() >= classify_deadline
+                        else _RootPreflightBoundary.INSPECTION_INCONCLUSIVE
+                    ),
+                    **wire_measurement(),
                 )
             assets = inspection.assets
-        return _SemanticPlainPreflightObservation(outcome, assets)
+            if (
+                isinstance(control, _RootPreflightProbeControl)
+                and control.cancelled()
+            ):
+                return cancelled_observation()
+        observation = _SemanticPlainPreflightObservation(
+            outcome,
+            assets,
+            payload_bytes=response_observation.payload_bytes,
+            root_boundary=(
+                _RootPreflightBoundary.USABLE
+                if outcome == SEMANTIC_OUTCOME_USABLE
+                else _RootPreflightBoundary.CLASSIFIED
+            ),
+            **wire_measurement(),
+        )
+        retain_assets = bool(assets)
+        return observation
     except TimeoutError:
+        if (
+            isinstance(control, _RootPreflightProbeControl)
+            and control.cancelled()
+        ):
+            return cancelled_observation()
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR,
             retryable_inconclusive=True,
+            root_boundary={
+                "connect": _RootPreflightBoundary.TCP_CONNECT_TIMEOUT,
+                "tls": _RootPreflightBoundary.TLS_HANDSHAKE_TIMEOUT,
+                "send": _RootPreflightBoundary.SEND_TIMEOUT,
+                "recv": _RootPreflightBoundary.IO_TIMEOUT_INCOMPLETE,
+                "framing": _RootPreflightBoundary.FRAMING_ERROR,
+                "classify": _RootPreflightBoundary.CLASSIFICATION_ERROR,
+                "inspect": _RootPreflightBoundary.INSPECTION_DEADLINE,
+            }.get(
+                root_stage,
+                _RootPreflightBoundary.IO_TIMEOUT_INCOMPLETE,
+            ),
+            **wire_measurement(),
         )
-    except Exception:
+    except Exception as exc:
+        if (
+            isinstance(control, _RootPreflightProbeControl)
+            and control.cancelled()
+        ):
+            return cancelled_observation()
+        post_io_boundary = {
+            "framing": _RootPreflightBoundary.FRAMING_ERROR,
+            "classify": _RootPreflightBoundary.CLASSIFICATION_ERROR,
+            "inspect": _RootPreflightBoundary.INSPECTION_ERROR,
+        }.get(root_stage)
+        if post_io_boundary is not None or not isinstance(exc, OSError):
+            return _SemanticPlainPreflightObservation(
+                SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=True,
+                root_boundary=(
+                    post_io_boundary or _RootPreflightBoundary.INTERNAL_ERROR
+                ),
+                **wire_measurement(),
+            )
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR,
             hard_transport_failure=True,
+            root_boundary={
+                "connect": _RootPreflightBoundary.TCP_CONNECT_ERROR,
+                "tls": _RootPreflightBoundary.TLS_HANDSHAKE_ERROR,
+                "send": _RootPreflightBoundary.SEND_ERROR,
+                "recv": _RootPreflightBoundary.IO_ERROR,
+            }.get(root_stage, _RootPreflightBoundary.IO_ERROR),
+            **wire_measurement(),
         )
     finally:
+        if not retain_assets:
+            for asset in assets:
+                try:
+                    asset.forget()
+                except Exception:
+                    pass
+        if isinstance(control, _RootPreflightProbeControl):
+            control.clear(sock)
         try:
             (tls_sock or sock).close()
         except Exception:
@@ -6246,7 +6966,12 @@ def _prune_semantic_plain_probes(now):
         _semantic_plain_probe_window.popleft()
 
 
-def _new_direct_route_preflight_job(host, now_unix_ms=None):
+def _new_direct_route_preflight_job(
+    host,
+    now_unix_ms=None,
+    *,
+    capability=None,
+):
     """Mint the private, one-shot RoutePreflightV1 authority for one probe."""
     now_unix_ms = (
         int(time.time() * 1000)
@@ -6254,7 +6979,11 @@ def _new_direct_route_preflight_job(host, now_unix_ms=None):
         else now_unix_ms
     )
     return route_preflight.RoutePreflightJobV1(
-        capability=secrets.token_hex(16),
+        capability=(
+            secrets.token_hex(16)
+            if capability is None
+            else capability
+        ),
         host=normalize_host(host),
         candidate_routes=("system", "owned_geph"),
         issued_at_unix_ms=now_unix_ms,
@@ -6300,14 +7029,64 @@ def _validated_direct_route_preflight_outcome(job, outcome, now_unix_ms=None):
     )
 
 
+def _route_preflight_cache_entry_matches_address(entry, address):
+    """Keep direct cache authority on the exact numeric address observed."""
+    if not isinstance(entry, _RoutePreflightCacheEntry):
+        return False
+    try:
+        normalized = str(ipaddress.ip_address(address))
+    except (TypeError, ValueError):
+        return False
+    return bool(entry.exact_address and entry.exact_address == normalized)
+
+
+def _route_preflight_exact_address(
+    host,
+    parent_host,
+    parent_ip,
+    resolver=None,
+):
+    """Select one public numeric address before address-scoped coalescing."""
+    h = normalize_host(host)
+    parent = normalize_host(parent_host)
+    resolver = system_resolve if resolver is None else resolver
+    try:
+        addresses = [parent_ip] if h == parent else resolver(h)
+    except Exception:
+        return ""
+    for candidate in addresses or ():
+        try:
+            address = ipaddress.ip_address(candidate)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(
+            address,
+            (ipaddress.IPv4Address, ipaddress.IPv6Address),
+        ) and address.is_global:
+            return str(address)
+    return ""
+
+
+def _route_preflight_inflight_key(host, address):
+    """Keep direct in-flight authority on one exact host/address pair."""
+    h = normalize_host(host)
+    try:
+        exact_address = str(ipaddress.ip_address(address))
+    except (TypeError, ValueError):
+        return None
+    return h, exact_address
+
+
 def _prune_initial_route_preflights_locked(now):
     cutoff = now - ROUTE_PREFLIGHT_WINDOW
     while _route_preflight_window and _route_preflight_window[0] <= cutoff:
         _route_preflight_window.popleft()
-    for key, (expiry, _outcome) in tuple(_route_preflight_cache.items()):
-        host = key[0] if isinstance(key, tuple) else key
-        if expiry <= now or not _auto_geph_base_host_allowed(host):
-            _route_preflight_cache.pop(key, None)
+    for host, entry in tuple(_route_preflight_cache.items()):
+        if (
+            entry.expires_at <= now
+            or not _auto_geph_base_host_allowed(host)
+        ):
+            _route_preflight_cache.pop(host, None)
     while len(_route_preflight_cache) > ROUTE_PREFLIGHT_CACHE_MAX:
         _route_preflight_cache.popitem(last=False)
     for capability, expiry in tuple(_route_preflight_consumed.items()):
@@ -6332,6 +7111,90 @@ def _owned_geph_preflight_claim(host, capability, deadline_monotonic):
         capability=capability,
         host=h,
         deadline_monotonic=deadline_monotonic,
+    )
+
+
+def _request_only_geph_preflight_claim(
+    host,
+    exact_address,
+    capability,
+    confirmed_geph_pid,
+    eligible_after_monotonic,
+    deadline_monotonic,
+):
+    """Bind one silent exact request to one already-owned Geph process."""
+    h = normalize_host(host)
+    current = time.monotonic()
+    try:
+        address = ipaddress.ip_address(exact_address)
+        eligible_after = float(eligible_after_monotonic)
+        deadline = float(deadline_monotonic)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not h
+        or not isinstance(address, ipaddress.IPv4Address)
+        or not address.is_global
+        or not _auto_geph_base_host_allowed(h)
+        or not isinstance(capability, str)
+        or not re.fullmatch(r"[0-9a-f]{32}", capability)
+        or type(confirmed_geph_pid) is not int
+        or confirmed_geph_pid <= 0
+        or not math.isfinite(eligible_after)
+        or not math.isfinite(deadline)
+        or not current < eligible_after < deadline
+    ):
+        return None
+    try:
+        return _RoutePreflightRequestOnlyGephClaim(
+            marker=_ROUTE_PREFLIGHT_REQUEST_ONLY_GEPH,
+            capability=capability,
+            host=h,
+            exact_address=str(address),
+            port=443,
+            confirmed_geph_pid=confirmed_geph_pid,
+            eligible_after_monotonic=eligible_after,
+            deadline_monotonic=deadline,
+        )
+    except ValueError:
+        return None
+
+
+def _request_only_geph_preflight_claim_matches_request(
+    claim,
+    host,
+    exact_address,
+    port,
+    *,
+    eligible_after_monotonic,
+    deadline_monotonic,
+    require_eligible=False,
+    now=None,
+):
+    """Validate one provisional claim without consuming its capability."""
+    h = normalize_host(host)
+    try:
+        address = ipaddress.ip_address(exact_address)
+        eligible_after = float(eligible_after_monotonic)
+        deadline = float(deadline_monotonic)
+        current = time.monotonic() if now is None else float(now)
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        isinstance(claim, _RoutePreflightRequestOnlyGephClaim)
+        and claim.marker is _ROUTE_PREFLIGHT_REQUEST_ONLY_GEPH
+        and claim.host == h
+        and claim.exact_address == str(address)
+        and claim.port == port == 443
+        and math.isfinite(eligible_after)
+        and math.isfinite(deadline)
+        and math.isfinite(current)
+        and claim.eligible_after_monotonic == eligible_after
+        and claim.deadline_monotonic == deadline
+        and eligible_after < deadline
+        and current < deadline
+        and (not require_eligible or eligible_after <= current)
+        and _auto_geph_base_host_allowed(h)
     )
 
 
@@ -6370,6 +7233,46 @@ def _consume_owned_geph_preflight_claim(claim, host):
         _route_preflight_consumed[claim.capability] = claim.deadline_monotonic
         _route_preflight_consumed.move_to_end(claim.capability)
     return True
+
+
+def _consume_request_only_geph_preflight_claim(
+    claim,
+    host,
+    exact_address,
+    port,
+    *,
+    eligible_after_monotonic,
+    deadline_monotonic=None,
+):
+    """Atomically spend one exact-request TLS-stall handoff capability."""
+    now = time.monotonic()
+    try:
+        expected_deadline = (
+            claim.deadline_monotonic
+            if deadline_monotonic is None
+            else float(deadline_monotonic)
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None
+    valid = _request_only_geph_preflight_claim_matches_request(
+        claim,
+        host,
+        exact_address,
+        port,
+        eligible_after_monotonic=eligible_after_monotonic,
+        deadline_monotonic=expected_deadline,
+        require_eligible=True,
+        now=now,
+    )
+    if not valid:
+        return None
+    with _route_preflight_lock:
+        _prune_initial_route_preflights_locked(now)
+        if claim.capability in _route_preflight_consumed:
+            return None
+        _route_preflight_consumed[claim.capability] = expected_deadline
+        _route_preflight_consumed.move_to_end(claim.capability)
+    return expected_deadline
 
 
 def _route_preflight_job_payload(job):
@@ -6469,6 +7372,7 @@ async def _run_headless_owned_geph_preflight(
     peer_endpoint,
     deadline_monotonic,
     *,
+    exact_address,
     provenance_assessor=None,
     provenance_already_accepted=False,
 ):
@@ -6554,6 +7458,7 @@ async def _run_headless_owned_geph_preflight(
             marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
             capability=job.capability,
             host=job.host,
+            exact_address=exact_address,
             deadline_monotonic=deadline_monotonic,
             issued_at_unix_ms=job.issued_at_unix_ms,
             deadline_unix_ms=job.deadline_unix_ms,
@@ -6586,9 +7491,14 @@ def _prove_preflight_owned_geph_route(
     probe=None,
     job=None,
     deadline_monotonic=None,
+    exact_address=None,
 ):
     """Return a non-mutating proof from one pinned owned exit."""
     h = normalize_host(host)
+    try:
+        proof_address = str(ipaddress.ip_address(exact_address))
+    except (TypeError, ValueError):
+        return None
     now_monotonic = time.monotonic()
     deadline_monotonic = (
         now_monotonic + max(0.0, float(timeout))
@@ -6633,6 +7543,7 @@ def _prove_preflight_owned_geph_route(
         marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
         capability=job.capability,
         host=h,
+        exact_address=proof_address,
         deadline_monotonic=deadline_monotonic,
         issued_at_unix_ms=job.issued_at_unix_ms,
         deadline_unix_ms=job.deadline_unix_ms,
@@ -6642,14 +7553,32 @@ def _prove_preflight_owned_geph_route(
     )
 
 
-def _commit_preflight_owned_geph_proof(proof, owner_epoch, *, owner_key=None):
+def _commit_preflight_owned_geph_proof(
+    proof,
+    inflight_key,
+    owner_epoch,
+    expected_capability,
+):
     """Commit a still-owned proof on the event-loop side of cancellation."""
     now_monotonic = time.monotonic()
     now_unix_ms = int(time.time() * 1000)
+    try:
+        key_host = normalize_host(inflight_key[0])
+        key_address = str(ipaddress.ip_address(inflight_key[1]))
+    except (IndexError, TypeError, ValueError):
+        return False
     if (
         not isinstance(proof, _RoutePreflightOwnedGephProof)
         or proof.marker is not _ROUTE_PREFLIGHT_OWNED_GEPH_PROOF
         or not isinstance(owner_epoch, Future)
+        or owner_epoch.done()
+        or not isinstance(inflight_key, tuple)
+        or len(inflight_key) not in {2, 3}
+        or key_host != inflight_key[0]
+        or key_address != inflight_key[1]
+        or proof.host != key_host
+        or proof.exact_address != key_address
+        or proof.capability != expected_capability
         or proof.deadline_monotonic <= now_monotonic
         or proof.deadline_unix_ms < now_unix_ms
         or proof.bytes_read < 0
@@ -6676,12 +7605,8 @@ def _commit_preflight_owned_geph_proof(proof, owner_epoch, *, owner_key=None):
         or not _auto_geph_persistent_learning_allowed(proof.host)
     ):
         return False
-    if owner_key is None:
-        owner_key = proof.host
-    if (owner_key[0] if isinstance(owner_key, tuple) else owner_key) != proof.host:
-        return False
     with _route_preflight_lock:
-        if _route_preflight_inflight.get(owner_key) is not owner_epoch:
+        if _route_preflight_inflight.get(inflight_key) is not owner_epoch:
             return False
     with _auto_geph_lock:
         if (
@@ -6757,11 +7682,14 @@ def _bootstrap_asset_preflight_blocking(
     direct_probe=None,
     geph_probe=None,
     resolver=None,
+    exact_address=None,
+    proof_capability=None,
 ):
     """Compare one transient critical asset without retaining its URL target."""
     h = normalize_host(getattr(asset, "exact_host", ""))
     parent = normalize_host(parent_host)
     cache_outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
+    selected_ip = ""
     request = b""
     if (
         not h
@@ -6772,23 +7700,26 @@ def _bootstrap_asset_preflight_blocking(
             asset.forget()
         except Exception:
             pass
-        return None, cache_outcome
+        return _BootstrapAssetPreflightResult(None, cache_outcome)
 
-    resolver = system_resolve if resolver is None else resolver
-    addresses = [parent_ip] if h == parent else resolver(h)
-    selected_ip = None
-    for candidate in addresses or ():
+    if exact_address is None:
+        selected_ip = _route_preflight_exact_address(
+            h,
+            parent,
+            parent_ip,
+            resolver,
+        )
+    else:
         try:
-            address = ipaddress.ip_address(candidate)
+            address = ipaddress.ip_address(exact_address)
         except (TypeError, ValueError):
-            continue
+            address = None
         if isinstance(
             address,
             (ipaddress.IPv4Address, ipaddress.IPv6Address),
         ) and address.is_global:
             selected_ip = str(address)
-            break
-    if selected_ip is None or time.monotonic() >= min(
+    if not selected_ip or time.monotonic() >= min(
         healthy_deadline,
         final_deadline,
     ):
@@ -6796,7 +7727,7 @@ def _bootstrap_asset_preflight_blocking(
             asset.forget()
         except Exception:
             pass
-        return None, cache_outcome
+        return _BootstrapAssetPreflightResult(None, cache_outcome)
 
     direct_job = _new_direct_route_preflight_job(h)
     try:
@@ -6818,20 +7749,36 @@ def _bootstrap_asset_preflight_blocking(
             direct_termination,
         ) = _decode_bootstrap_range_probe_observation(direct_observation)
         if time.monotonic() >= final_deadline:
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         if direct_evidence is None:
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         if (
             direct_evidence.outcome
             is bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE
         ):
             cache_outcome = SEMANTIC_OUTCOME_USABLE
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         if (
             direct_evidence.outcome
             is not bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
         ):
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         if (
             direct_termination
             == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
@@ -6839,15 +7786,27 @@ def _bootstrap_asset_preflight_blocking(
             # Slow delivery is not a stable direct failure.  Do not use it to
             # authorize an alternative route and do not suppress a later
             # foreground attempt with either the child or parent cache.
-            return None, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+            return _BootstrapAssetPreflightResult(
+                None,
+                _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE,
+                selected_ip,
+            )
         if direct_termination != _BOOTSTRAP_RANGE_TERMINATION_EOF:
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         if _validated_route_preflight_outcome(
             direct_job,
             "system",
             SEMANTIC_OUTCOME_NAVIGATION_PENDING,
         ) != SEMANTIC_OUTCOME_NAVIGATION_PENDING:
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         cache_outcome = SEMANTIC_OUTCOME_NAVIGATION_PENDING
 
         confirmed_pid = _owned_geph_confirmation_pid()
@@ -6857,7 +7816,11 @@ def _bootstrap_asset_preflight_blocking(
             or not _auto_geph_persistent_learning_allowed(h)
             or time.monotonic() >= final_deadline
         ):
-            return None, cache_outcome
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
         geph_probe = (
             _bootstrap_asset_geph_range_probe
             if geph_probe is None
@@ -6867,7 +7830,10 @@ def _bootstrap_asset_preflight_blocking(
         # observation window.  Mint a fresh exact-host authority for the
         # sequential Geph observation instead of silently expiring the direct
         # authority while comparing the same transient request bytes.
-        geph_job = _new_direct_route_preflight_job(h)
+        geph_job = _new_direct_route_preflight_job(
+            h,
+            capability=proof_capability,
+        )
         geph_deadline = min(
             final_deadline,
             time.monotonic()
@@ -6890,12 +7856,17 @@ def _bootstrap_asset_preflight_blocking(
             != SEMANTIC_OUTCOME_USABLE
             or not _owned_geph_confirmation_pid_matches(confirmed_pid)
         ):
-            return None, cache_outcome
-        return (
+            return _BootstrapAssetPreflightResult(
+                None,
+                cache_outcome,
+                selected_ip,
+            )
+        return _BootstrapAssetPreflightResult(
             _RoutePreflightOwnedGephProof(
                 marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
                 capability=geph_job.capability,
                 host=h,
+                exact_address=selected_ip,
                 deadline_monotonic=geph_deadline,
                 issued_at_unix_ms=geph_job.issued_at_unix_ms,
                 deadline_unix_ms=geph_job.deadline_unix_ms,
@@ -6906,9 +7877,14 @@ def _bootstrap_asset_preflight_blocking(
                 bytes_read=geph_evidence.received_body_bytes,
             ),
             "owned_geph",
+            selected_ip,
         )
     except Exception:
-        return None, cache_outcome
+        return _BootstrapAssetPreflightResult(
+            None,
+            cache_outcome,
+            selected_ip,
+        )
     finally:
         request = b""
         try:
@@ -6928,7 +7904,7 @@ async def _run_bootstrap_asset_preflight(
     geph_probe=None,
     resolver=None,
 ):
-    """Coalesce a critical asset by exact host inside the parent capability."""
+    """Probe one critical object under an address-bound private epoch."""
     h = normalize_host(getattr(asset, "exact_host", ""))
     parent = normalize_host(parent_host)
     if not h or time.monotonic() >= final_deadline:
@@ -6941,13 +7917,42 @@ async def _run_bootstrap_asset_preflight(
         asset.forget()
         return True, "owned_geph"
 
+    try:
+        resolve_remaining = min(
+            healthy_deadline,
+            final_deadline,
+        ) - time.monotonic()
+        if resolve_remaining <= 0:
+            asset.forget()
+            return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+        selected_ip = await asyncio.wait_for(
+            asyncio.to_thread(
+                _route_preflight_exact_address,
+                h,
+                parent,
+                parent_ip,
+                resolver,
+            ),
+            timeout=resolve_remaining,
+        )
+    except (asyncio.TimeoutError, RuntimeError):
+        asset.forget()
+        return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+    if not selected_ip:
+        asset.forget()
+        return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+    exact_inflight_key = _route_preflight_inflight_key(h, selected_ip)
+    if exact_inflight_key is None:
+        asset.forget()
+        return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+
     owner = h == parent
-    owner_key = _route_preflight_root_key(parent, parent_ip) if owner else h
     future = None
     owner_epoch = None
     if owner:
+        inflight_key = exact_inflight_key
         with _route_preflight_lock:
-            owner_epoch = _route_preflight_inflight.get(owner_key)
+            owner_epoch = _route_preflight_inflight.get(inflight_key)
         if not isinstance(owner_epoch, Future):
             asset.forget()
             return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
@@ -6955,54 +7960,50 @@ async def _run_bootstrap_asset_preflight(
         now = time.monotonic()
         with _route_preflight_lock:
             _prune_initial_route_preflights_locked(now)
-            # A root response (or another asset) on this host says nothing
-            # about this exact transient object.  Only a committed learned
-            # route, checked above, has host-wide authority.  Keep admission
-            # coalesced by host, but never consume root health as child proof.
-            future = _route_preflight_inflight.get(h)
-            if future is None:
-                if (
-                    len(_route_preflight_inflight)
-                    >= ROUTE_PREFLIGHT_CONCURRENT_MAX
-                    or len(_route_preflight_window)
-                    >= ROUTE_PREFLIGHT_WINDOW_MAX
-                ):
-                    asset.forget()
-                    return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
-                future = Future()
-                _route_preflight_inflight[h] = future
-                _route_preflight_window.append(now)
-                owner = True
-                owner_epoch = future
-        if not owner:
-            asset.forget()
-            try:
-                shared_result = await asyncio.wait_for(
-                    asyncio.shield(asyncio.wrap_future(future)),
-                    timeout=max(0.001, final_deadline - time.monotonic()),
-                )
-                if shared_result is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
-                    return False, shared_result
-                selected = bool(
-                    shared_result and _auto_geph_learned_exact_host(h)
-                )
-                # The owner may have observed a different root/object.  Its
-                # negative or healthy result cannot clear this waiting child.
-                return (True, "owned_geph") if selected else (
-                    False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
-                )
-            except (asyncio.TimeoutError, RuntimeError):
-                return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
+            cached = _route_preflight_cache.get(h)
+            if (
+                isinstance(cached, _RoutePreflightCacheEntry)
+                and cached.outcome == "owned_geph"
+                and _auto_geph_learned_exact_host(h)
+            ):
+                _route_preflight_cache.move_to_end(h)
+                asset.forget()
+                return True, cached.outcome
+            if (
+                len(_route_preflight_inflight)
+                >= ROUTE_PREFLIGHT_CONCURRENT_MAX
+                or len(_route_preflight_window)
+                >= ROUTE_PREFLIGHT_WINDOW_MAX
+            ):
+                asset.forget()
+                return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+            # A critical object is stronger evidence than a host root and is
+            # not interchangeable with another path on the same host/IP.  Its
+            # private request target may not become routing/cache state, so
+            # use an opaque per-attempt key rather than sharing a direct
+            # result across objects.  Only a committed learned owned-Geph
+            # route is host-wide.
+            inflight_key = (
+                exact_inflight_key[0],
+                exact_inflight_key[1],
+                secrets.token_hex(16),
+            )
+            future = Future()
+            _route_preflight_inflight[inflight_key] = future
+            _route_preflight_window.append(now)
+            owner = True
+            owner_epoch = future
 
     selected = False
     cache_outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
     publish_cache = True
+    proof_capability = secrets.token_hex(16)
     try:
         remaining = final_deadline - time.monotonic()
         if remaining <= 0:
             asset.forget()
             return False, cache_outcome
-        proof, cache_outcome = await asyncio.wait_for(
+        blocking_worker = asyncio.create_task(
             asyncio.to_thread(
                 _bootstrap_asset_preflight_blocking,
                 asset,
@@ -7013,14 +8014,29 @@ async def _run_bootstrap_asset_preflight(
                 direct_probe=direct_probe,
                 geph_probe=geph_probe,
                 resolver=resolver,
-            ),
+                exact_address=selected_ip,
+                proof_capability=proof_capability,
+            )
+        )
+        blocking_result = await _await_owned_preflight_worker(
+            blocking_worker,
             timeout=remaining + 0.05,
         )
+        proof = blocking_result.proof
+        cache_outcome = blocking_result.outcome
         if cache_outcome is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
             publish_cache = False
             return False, cache_outcome
+        if (
+            proof is not None
+            and blocking_result.exact_address != exact_inflight_key[1]
+        ):
+            return False, SEMANTIC_OUTCOME_NAVIGATION_PENDING
         selected = _commit_preflight_owned_geph_proof(
-            proof, owner_epoch, owner_key=owner_key,
+            proof,
+            inflight_key,
+            owner_epoch,
+            proof_capability,
         )
         if not selected and cache_outcome == "owned_geph":
             cache_outcome = SEMANTIC_OUTCOME_NAVIGATION_PENDING
@@ -7036,19 +8052,14 @@ async def _run_bootstrap_asset_preflight(
         if h != parent:
             completed_at = time.monotonic()
             with _route_preflight_lock:
-                # Object identity is deliberately ephemeral.  A complete
-                # child must not mark the whole CDN healthy, nor may an
-                # unresolved child suppress a later independent proof while
-                # the owned backend recovers.  Only committed routing proof
-                # is safely reusable for every object on this exact host.
                 if publish_cache and selected:
-                    _route_preflight_cache[h] = (
+                    _route_preflight_cache[h] = _RoutePreflightCacheEntry(
                         completed_at + AUTO_GEPH_TTL,
                         "owned_geph",
                     )
                     _route_preflight_cache.move_to_end(h)
                 _prune_initial_route_preflights_locked(completed_at)
-                _route_preflight_inflight.pop(h, None)
+                _route_preflight_inflight.pop(inflight_key, None)
                 if future is not None and not future.done():
                     future.set_result(
                         _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
@@ -7061,6 +8072,59 @@ async def _run_bootstrap_asset_preflight(
                     )
 
 
+def _forget_route_preflight_observation_assets(observation):
+    """Release one discarded worker result without changing route state."""
+    if not isinstance(observation, _SemanticPlainPreflightObservation):
+        return
+    for asset in observation.bootstrap_assets:
+        try:
+            asset.forget()
+        except Exception:
+            pass
+
+
+async def _drain_root_preflight_worker(worker):
+    """Drain one owned worker despite repeated cancellation of its caller."""
+    cancelled_while_draining = False
+    while not worker.done():
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            caller = asyncio.current_task()
+            if caller is not None and caller.cancelling():
+                cancelled_while_draining = True
+            if worker.done() and worker.cancelled():
+                break
+        except Exception:
+            break
+    discarded = None
+    if worker.done() and not worker.cancelled():
+        try:
+            discarded = worker.result()
+        except Exception:
+            pass
+    return discarded, cancelled_while_draining
+
+
+async def _await_owned_preflight_worker(worker, *, timeout):
+    """Keep one blocking proof epoch owned until its worker has exited."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(worker),
+            timeout=timeout,
+        )
+    except asyncio.CancelledError:
+        await _drain_root_preflight_worker(worker)
+        raise
+    except asyncio.TimeoutError:
+        _discarded, cancelled_while_draining = (
+            await _drain_root_preflight_worker(worker)
+        )
+        if cancelled_while_draining:
+            raise asyncio.CancelledError
+        raise
+
+
 async def _run_bounded_direct_route_preflight(
     direct_probe,
     address,
@@ -7068,34 +8132,550 @@ async def _run_bounded_direct_route_preflight(
     timeout,
 ):
     """Run one pure direct probe and preserve deadline expiry as local state."""
+    outer_timeout = (
+        timeout
+        + ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET
+        + ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+    )
+    if direct_probe is _semantic_plain_preflight_probe_detail:
+        io_deadline = time.monotonic() + max(0.0, float(timeout))
+        control = _RootPreflightProbeControl(io_deadline)
+        worker = asyncio.create_task(
+            asyncio.to_thread(
+                direct_probe,
+                address,
+                host,
+                timeout,
+                deadline_monotonic=io_deadline,
+                control=control,
+            )
+        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(worker),
+                timeout=outer_timeout,
+            )
+        except asyncio.CancelledError:
+            control.cancel()
+            discarded, _ = await _drain_root_preflight_worker(worker)
+            _forget_route_preflight_observation_assets(discarded)
+            raise
+        except asyncio.TimeoutError:
+            control.cancel()
+            discarded, cancelled_while_draining = (
+                await _drain_root_preflight_worker(worker)
+            )
+            _forget_route_preflight_observation_assets(discarded)
+            if cancelled_while_draining:
+                raise asyncio.CancelledError
+            return _SemanticPlainPreflightObservation(
+                SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                retryable_inconclusive=True,
+                root_boundary=_RootPreflightBoundary.OUTER_BUDGET_TIMEOUT,
+            )
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(direct_probe, address, host, timeout),
-            timeout=(
-                timeout + ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
-            ),
+            timeout=outer_timeout,
         )
     except asyncio.TimeoutError:
         return _SemanticPlainPreflightObservation(
             SEMANTIC_OUTCOME_TERMINAL_ERROR,
             retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.OUTER_BUDGET_TIMEOUT,
         )
 
 
-def _route_preflight_network_retry_timeout(deadline_monotonic):
-    """Spend one adaptive retry slice while preserving proof capacity."""
-    retry_capacity = (
+def _route_preflight_root_system_addresses(primary_address, resolved):
+    """Return a bounded, global-only exact-host address set."""
+    candidates = []
+    for candidate in (primary_address, *(resolved or ())):
+        try:
+            address = ipaddress.ip_address(candidate)
+        except (TypeError, ValueError):
+            continue
+        normalized = str(address)
+        if not address.is_global or normalized in candidates:
+            continue
+        candidates.append(normalized)
+        if len(candidates) >= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT:
+            break
+    return tuple(candidates)
+
+
+async def _run_bounded_direct_route_preflight_candidates(
+    direct_probe,
+    address,
+    host,
+    timeout,
+    *,
+    resolver,
+    clock=None,
+):
+    """Race exact-host system edges without turning one timeout into evidence.
+
+    The PF-selected address remains authoritative whenever it produces a
+    stable result.  Only a complete usable HTTP response from another
+    system-resolved address may replace a retryable-inconclusive primary
+    observation, and then solely as direct root/asset evidence.  Alternate
+    timeouts, hard failures, and denials never authorize recovery or Geph.
+    """
+    if resolver is None:
+        return await _run_bounded_direct_route_preflight(
+            direct_probe,
+            address,
+            host,
+            timeout,
+        )
+
+    clock = time.monotonic if clock is None else clock
+    started = clock()
+    io_deadline = started + max(0.0, float(timeout))
+    outer_deadline = (
+        io_deadline
+        + ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET
+        + ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+    )
+    candidate_allocations = {}
+    candidate_elapsed = {}
+
+    async def run_candidate(candidate):
+        candidate_started = clock()
+        allocated_timeout = max(0.0, io_deadline - candidate_started)
+        candidate_allocations[candidate] = allocated_timeout
+        try:
+            return await _run_bounded_direct_route_preflight(
+                direct_probe,
+                candidate,
+                host,
+                allocated_timeout,
+            )
+        finally:
+            candidate_elapsed[candidate] = max(
+                0.0,
+                clock() - candidate_started,
+            )
+
+    root_address_cardinality = _RootPreflightAddressCardinality.UNVERIFIED
+
+    def contextualize(observation, *, source=None):
+        if not isinstance(observation, _SemanticPlainPreflightObservation):
+            return observation
+        changes = {
+            "root_address_cardinality": root_address_cardinality,
+        }
+        if source is not None:
+            changes["root_address_source"] = source
+        return replace(observation, **changes)
+
+    primary_address = str(ipaddress.ip_address(address))
+    primary_task = asyncio.create_task(run_candidate(primary_address))
+    resolver_task = asyncio.create_task(resolver(host))
+    probe_tasks = {primary_task: primary_address}
+    all_tasks = [primary_task, resolver_task]
+    forgotten_tasks = set()
+    resolver_verified = False
+    resolver_records_valid = False
+    admitted_candidates = {primary_address}
+    started_candidates = {primary_address}
+    completed_candidates = {}
+    candidate_failed = False
+    selected_task = None
+    selected_observation = None
+    primary_observation = None
+    fallback_usable_observation = None
+    fallback_usable_task = None
+    try:
+        while probe_tasks or resolver_task is not None:
+            waiters = set(probe_tasks)
+            if resolver_task is not None:
+                waiters.add(resolver_task)
+            remaining = outer_deadline - clock()
+            if not waiters or remaining <= 0:
+                break
+            done, _pending = await asyncio.wait(
+                waiters,
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                break
+
+            completed_resolver = None
+            candidates_to_start = ()
+            if resolver_task is not None and resolver_task in done:
+                completed_resolver = resolver_task
+                resolver_task = None
+                try:
+                    resolved = await completed_resolver
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    resolved = None
+                try:
+                    resolved = tuple(resolved or ())
+                except TypeError:
+                    resolved = ()
+                if resolved:
+                    resolved_candidates = []
+                    resolver_records_valid = True
+                    for candidate in resolved:
+                        try:
+                            current_address = ipaddress.ip_address(candidate)
+                        except (TypeError, ValueError):
+                            resolver_records_valid = False
+                            continue
+                        normalized = str(current_address)
+                        if (
+                            not isinstance(
+                                current_address,
+                                ipaddress.IPv4Address,
+                            )
+                            or not current_address.is_global
+                        ):
+                            resolver_records_valid = False
+                            continue
+                        if normalized in resolved_candidates:
+                            continue
+                        resolved_candidates.append(normalized)
+                    candidates = _route_preflight_root_system_addresses(
+                        primary_address,
+                        resolved,
+                    )
+                    combined_candidates = set(resolved_candidates)
+                    combined_candidates.add(primary_address)
+                    resolver_verified = bool(
+                        resolver_records_valid
+                        and isinstance(
+                            ipaddress.ip_address(primary_address),
+                            ipaddress.IPv4Address,
+                        )
+                        and 2
+                        <= len(resolved_candidates)
+                        <= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT
+                        and len(combined_candidates)
+                        <= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT
+                        and set(candidates) == combined_candidates
+                    )
+                    root_address_cardinality = (
+                        _RootPreflightAddressCardinality.MULTIPLE
+                        if len(resolved_candidates) > 1
+                        else _RootPreflightAddressCardinality.SINGLE
+                    )
+                    admitted_candidates = set(candidates)
+                    candidates_to_start = tuple(
+                        candidate
+                        for candidate in candidates
+                        if candidate != primary_address
+                    )
+
+            ordered_done = []
+            if primary_task in done:
+                ordered_done.append(primary_task)
+            ordered_done.extend(
+                task
+                for task in done
+                if task is not primary_task and task is not completed_resolver
+            )
+            for task in ordered_done:
+                candidate = probe_tasks.pop(task, None)
+                if candidate is None:
+                    continue
+                is_primary = task is primary_task
+                try:
+                    observation = await task
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    if is_primary:
+                        raise
+                    candidate_failed = True
+                    continue
+                observation = contextualize(observation)
+                completed_candidates[candidate] = observation
+                if is_primary:
+                    primary_observation = observation
+                    if not observation.retryable_inconclusive:
+                        selected_task = task
+                        selected_observation = observation
+                        return observation
+                    if fallback_usable_observation is not None:
+                        selected_task = fallback_usable_task
+                        selected_observation = contextualize(
+                            fallback_usable_observation,
+                            source=(
+                                _RootPreflightAddressSource.SYSTEM_FALLBACK
+                            ),
+                        )
+                        return selected_observation
+                    continue
+                if (
+                    isinstance(
+                        observation,
+                        _SemanticPlainPreflightObservation,
+                    )
+                    and not observation.retryable_inconclusive
+                    and observation.outcome == SEMANTIC_OUTCOME_USABLE
+                ):
+                    if (
+                        primary_observation is not None
+                        and primary_observation.retryable_inconclusive
+                    ):
+                        selected_task = task
+                        selected_observation = contextualize(
+                            observation,
+                            source=(
+                                _RootPreflightAddressSource.SYSTEM_FALLBACK
+                            ),
+                        )
+                        return selected_observation
+                    if fallback_usable_observation is None:
+                        fallback_usable_observation = observation
+                        fallback_usable_task = task
+                        continue
+                _forget_route_preflight_observation_assets(observation)
+                forgotten_tasks.add(task)
+
+            if io_deadline > clock():
+                for candidate in candidates_to_start:
+                    task = asyncio.create_task(run_candidate(candidate))
+                    probe_tasks[task] = candidate
+                    started_candidates.add(candidate)
+                    all_tasks.append(task)
+
+        if primary_observation is not None:
+            selected_task = primary_task
+            candidate_consensus = None
+            minimum_candidate_window = (
+                ROUTE_PREFLIGHT_ROOT_IO_MAX_TIMEOUT
+                - ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+            )
+            if (
+                resolver_verified
+                and not candidate_failed
+                and float(timeout) >= minimum_candidate_window
+                and len(admitted_candidates) >= 2
+                and started_candidates == admitted_candidates
+                and set(completed_candidates) == admitted_candidates
+                and set(candidate_allocations) == admitted_candidates
+                and set(candidate_elapsed) == admitted_candidates
+                and all(
+                    allocated >= minimum_candidate_window
+                    for allocated in candidate_allocations.values()
+                )
+                and all(
+                    candidate_elapsed[candidate]
+                    >= candidate_allocations[candidate]
+                    - ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+                    for candidate in admitted_candidates
+                )
+                and all(
+                    isinstance(
+                        candidate_observation,
+                        _SemanticPlainPreflightObservation,
+                    )
+                    and candidate_observation.outcome
+                    == SEMANTIC_OUTCOME_TERMINAL_ERROR
+                    and candidate_observation.retryable_inconclusive
+                    and not candidate_observation.hard_transport_failure
+                    and not candidate_observation.safe_incomplete
+                    and candidate_observation.root_boundary
+                    is _RootPreflightBoundary.TLS_HANDSHAKE_TIMEOUT
+                    and candidate_observation.payload_bytes == 0
+                    and candidate_observation.wire_bytes_measured
+                    and candidate_observation.wire_bytes == 0
+                    and candidate_observation.tls_initial_flight_sent
+                    and candidate_observation.tls_receive_budget_seconds
+                    >= ROUTE_PREFLIGHT_ROOT_TLS_ZERO_INGRESS_MIN_WAIT
+                    and candidate_observation.tls_zero_ingress_wait_seconds
+                    >= candidate_observation.tls_receive_budget_seconds
+                    - ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
+                    and not candidate_observation.bootstrap_assets
+                    for candidate_observation in completed_candidates.values()
+                )
+            ):
+                candidate_consensus = _RootTlsStallConsensus(
+                    _ROOT_TLS_STALL_CONSENSUS,
+                    normalize_host(host),
+                    primary_address,
+                    len(resolved_candidates),
+                    len(admitted_candidates),
+                    len(completed_candidates),
+                    io_deadline,
+                )
+            selected_observation = contextualize(
+                replace(
+                    primary_observation,
+                    root_tls_stall_consensus=candidate_consensus,
+                )
+            )
+            return selected_observation
+        return _SemanticPlainPreflightObservation(
+            SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=_RootPreflightBoundary.OUTER_BUDGET_TIMEOUT,
+            root_address_cardinality=root_address_cardinality,
+        )
+    finally:
+        for task in all_tasks:
+            if task is selected_task:
+                continue
+            if not task.done():
+                task.cancel()
+        cancelled_while_draining = False
+        for task in all_tasks:
+            if task is selected_task:
+                continue
+            discarded, cancelled = await _drain_root_preflight_worker(task)
+            cancelled_while_draining = cancelled_while_draining or cancelled
+            if task not in forgotten_tasks:
+                _forget_route_preflight_observation_assets(discarded)
+        if cancelled_while_draining:
+            _forget_route_preflight_observation_assets(selected_observation)
+            raise asyncio.CancelledError
+
+
+def _route_preflight_root_io_timeout(deadline_monotonic):
+    """Bound root I/O; downstream proof uses only the time actually left."""
+    io_capacity = (
         deadline_monotonic
         - time.monotonic()
-        - ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET
-        - ROUTE_PREFLIGHT_BROWSER_WAIT_GRACE
-        - ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE
+        - ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET
         - ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
     )
+    # Do not reserve browser/Geph branches before the root outcome is known.
+    # A slow-but-complete usable system edge needs neither branch and must get
+    # the full bounded I/O window.  A late denial/incomplete result remains
+    # fail-closed because every downstream proof checks the still-live common
+    # deadline before it can select or remember another route.
     return min(
-        ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT,
-        max(0.0, retry_capacity),
+        ROUTE_PREFLIGHT_ROOT_IO_MAX_TIMEOUT,
+        max(0.0, io_capacity),
     )
+
+
+def _route_preflight_wire_bytes_bucket(size):
+    """Return one fixed, non-payload root diagnostic bucket."""
+    try:
+        value = max(0, int(size))
+    except (TypeError, ValueError):
+        return "unknown"
+    if value == 0:
+        return "zero"
+    if value < 4 * 1024:
+        return "lt4k"
+    if value < 16 * 1024:
+        return "4k_to_16k"
+    if value < 64 * 1024:
+        return "16k_to_64k"
+    return "ge64k"
+
+
+def _route_preflight_elapsed_bucket(seconds):
+    """Return one fixed root timing bucket without retaining exact timings."""
+    try:
+        value = max(0.0, float(seconds))
+    except (TypeError, ValueError):
+        return "unknown"
+    if value < 0.1:
+        return "lt100ms"
+    if value < 0.5:
+        return "100ms_to_500ms"
+    if value < 2.0:
+        return "500ms_to_2s"
+    if value < 5.0:
+        return "2s_to_5s"
+    return "ge5s"
+
+
+def _route_preflight_logged_outcome(outcome):
+    """Return only a fixed RoutePreflight outcome token for diagnostics."""
+    if outcome in {
+        SEMANTIC_OUTCOME_NAVIGATION_PENDING,
+        SEMANTIC_OUTCOME_REGIONAL_DENIAL,
+        SEMANTIC_OUTCOME_EDGE_DENIAL,
+        SEMANTIC_OUTCOME_CHALLENGE_OR_AUTH,
+        SEMANTIC_OUTCOME_USABLE,
+        SEMANTIC_OUTCOME_TERMINAL_ERROR,
+    }:
+        return outcome
+    return "invalid"
+
+
+def _format_route_preflight_root_observation(
+    host,
+    observation,
+    *,
+    elapsed_seconds,
+):
+    """Build one allowlisted owner record without response or endpoint data."""
+    try:
+        if not isinstance(observation, _SemanticPlainPreflightObservation):
+            return None
+        return (
+            ">> route-preflight-root "
+            f"host={normalize_host(host)} "
+            f"boundary={observation.root_boundary.value} "
+            f"address={observation.root_address_source.value} "
+            f"address_set={observation.root_address_cardinality.value} "
+            f"outcome={_route_preflight_logged_outcome(observation.outcome)} "
+            f"retryable={int(bool(observation.retryable_inconclusive))} "
+            f"hard={int(bool(observation.hard_transport_failure))} "
+            f"safe_incomplete={int(bool(observation.safe_incomplete))} "
+            f"tls_consensus={int(isinstance(observation.root_tls_stall_consensus, _RootTlsStallConsensus))} "
+            f"elapsed={_route_preflight_elapsed_bucket(elapsed_seconds)} "
+            f"wire_measured={int(observation.wire_bytes_measured)} "
+            f"wire={_route_preflight_wire_bytes_bucket(observation.wire_bytes)} "
+            f"assets={len(observation.bootstrap_assets)}"
+        )
+    except Exception:
+        return None
+
+
+_ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_QUEUE = queue.Queue(maxsize=32)
+
+
+def _write_route_preflight_root_diagnostic(record):
+    """Write one preformatted record only from the private sink thread."""
+    try:
+        if isinstance(record, str):
+            print(record, file=sys.stderr)
+    except Exception:
+        return
+
+
+def _route_preflight_root_diagnostic_worker():
+    """Keep diagnostic sink latency outside route authority and cancellation."""
+    while True:
+        record = _ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_QUEUE.get()
+        try:
+            _write_route_preflight_root_diagnostic(record)
+        finally:
+            try:
+                _ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_QUEUE.task_done()
+            except Exception:
+                pass
+
+
+def _enqueue_route_preflight_root_diagnostic_record(record):
+    """Drop, rather than wait, when the private diagnostic sink is saturated."""
+    try:
+        if isinstance(record, str):
+            _ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_QUEUE.put_nowait(record)
+    except Exception:
+        return
+
+
+_ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_THREAD = threading.Thread(
+    target=_route_preflight_root_diagnostic_worker,
+    name="slipstream-route-preflight-diagnostic",
+    daemon=True,
+)
+try:
+    _ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_THREAD.start()
+except Exception:
+    # The bounded producer remains drop-only even if diagnostics are unavailable.
+    pass
 
 
 def _decode_direct_route_preflight_observation(job, observation):
@@ -7152,14 +8732,6 @@ def _select_route_preflight_bootstrap_asset(assets, parent_host):
     return selected, selected_is_cross_origin
 
 
-def _route_preflight_root_key(host, ip):
-    """Root health belongs to the exact system/PF endpoint that was probed."""
-    try:
-        return normalize_host(host), str(ipaddress.ip_address(ip))
-    except (TypeError, ValueError):
-        return None
-
-
 async def _run_initial_route_preflight(
     host,
     ip,
@@ -7179,9 +8751,11 @@ async def _run_initial_route_preflight(
 
     A healthy direct root stays browser-free.  A strict, complete semantic
     denial may learn only after the same exact host has a complete usable
-    response through the owned Geph exit.  One inconclusive fast direct probe
-    gets one bounded direct network retry before any browser check; neither
-    timeout is route evidence.  An ambiguous incomplete final document
+    response through the owned Geph exit.  The root uses one continuous,
+    bounded system connection. One inconclusive timeout is never route
+    evidence. Only a complete, same-window zero-byte TLS-handshake stall on
+    every current system A edge may mint a non-shareable request-only handoff;
+    it never learns or caches a route. An ambiguous incomplete final document
     additionally requires a foreground, recently-used signed Safari/Chrome
     socket before the bounded browser worker may run.  A critical-bootstrap
     object instead relies on its independent
@@ -7242,22 +8816,29 @@ async def _run_initial_route_preflight(
     ):
         return None
 
-    key = _route_preflight_root_key(h, str(address))
     job = _new_direct_route_preflight_job(h)
+    inflight_key = _route_preflight_inflight_key(h, address)
+    if inflight_key is None:
+        return None
     owner = False
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
-        cached = _route_preflight_cache.get(key)
-        if cached is not None:
-            _route_preflight_cache.move_to_end(key)
-            if cached[1] == "owned_geph" and _auto_geph_learned_exact_host(h):
-                return _owned_geph_preflight_claim(
-                    h,
-                    job.capability,
-                    handoff_deadline,
-                )
+        cached = _route_preflight_cache.get(h)
+        if (
+            isinstance(cached, _RoutePreflightCacheEntry)
+            and cached.outcome == "owned_geph"
+            and _auto_geph_learned_exact_host(h)
+        ):
+            _route_preflight_cache.move_to_end(h)
+            return _owned_geph_preflight_claim(
+                h,
+                job.capability,
+                handoff_deadline,
+            )
+        if _route_preflight_cache_entry_matches_address(cached, address):
+            _route_preflight_cache.move_to_end(h)
             return None
-        future = _route_preflight_inflight.get(key)
+        future = _route_preflight_inflight.get(inflight_key)
         if future is None:
             if (
                 len(_route_preflight_inflight) >= ROUTE_PREFLIGHT_CONCURRENT_MAX
@@ -7265,7 +8846,7 @@ async def _run_initial_route_preflight(
             ):
                 return None
             future = Future()
-            _route_preflight_inflight[key] = future
+            _route_preflight_inflight[inflight_key] = future
             _route_preflight_window.append(now)
             owner = True
     if not owner:
@@ -7277,11 +8858,21 @@ async def _run_initial_route_preflight(
                 asyncio.shield(asyncio.wrap_future(future)),
                 timeout=remaining,
             )
+            if isinstance(
+                selected_by_owner,
+                _RoutePreflightSharedLocalRecovery,
+            ):
+                if selected_by_owner.exact_address == str(address):
+                    return _local_recovery_preflight_claim(
+                        h,
+                        local_recovery_deadline,
+                    )
+                return None
             if selected_by_owner is _ROUTE_PREFLIGHT_LOCAL_RECOVERY:
-                return _local_recovery_preflight_claim(
-                    h,
-                    local_recovery_deadline,
-                )
+                # Refuse legacy/untyped coalesced local recovery: it has no
+                # address authority and may belong to a different service
+                # edge for the same SNI.
+                return None
             if selected_by_owner and _auto_geph_learned_exact_host(h):
                 return _owned_geph_preflight_claim(
                     h,
@@ -7305,16 +8896,28 @@ async def _run_initial_route_preflight(
     eligible_asset = None
     eligible_asset_is_cross_origin = False
     direct_safe_incomplete = False
+    root_diagnostic_record = None
     try:
-        direct_timeout = min(
-            ROUTE_PREFLIGHT_DIRECT_TIMEOUT,
-            max(0.001, deadline - time.monotonic()),
-        )
-        observation = await _run_bounded_direct_route_preflight(
+        direct_timeout = _route_preflight_root_io_timeout(deadline)
+        if direct_timeout <= 0:
+            publish_cache = False
+            return None
+        root_probe_started = time.monotonic()
+        observation = await _run_bounded_direct_route_preflight_candidates(
             direct_probe,
             str(address),
             h,
             direct_timeout,
+            resolver=(
+                system_resolve_async
+                if direct_probe is _semantic_plain_preflight_probe_detail
+                else None
+            ),
+        )
+        root_diagnostic_record = _format_route_preflight_root_observation(
+            h,
+            observation,
+            elapsed_seconds=time.monotonic() - root_probe_started,
         )
         (
             outcome,
@@ -7324,43 +8927,62 @@ async def _run_initial_route_preflight(
             direct_hard_transport_failure,
         ) = _decode_direct_route_preflight_observation(job, observation)
         cache_outcome = outcome
+        if (
+            isinstance(observation, _SemanticPlainPreflightObservation)
+            and observation.root_address_source
+            is _RootPreflightAddressSource.SYSTEM_FALLBACK
+        ):
+            # A complete alternate edge can enumerate ephemeral critical
+            # assets, but it cannot prove that the PF-selected parent edge is
+            # healthy.  Never hide that heterogeneous parent behind the
+            # ordinary ten-minute usable-root cache.  Any exact child route is
+            # still committed only by its independent same-object proof.
+            publish_cache = False
         if direct_retryable_inconclusive:
-            # The fast probe did not produce a stable semantic result.  It must
-            # neither poison the retry cache nor authorize Geph.  Retry the
-            # same system endpoint exactly once with a larger but still
-            # bounded slice of the original job.  This is pure network
-            # evidence and must not depend on browser focus or recent input.
+            # One timeout stays unclear.  A production-only consensus is much
+            # narrower: every current A edge completed the full same-window
+            # probe with zero wire bytes and the identical TLS-handshake stall.
+            # It may bind only this still-replay-safe request to the already
+            # running owned Geph PID after the independent exact stream has
+            # also exhausted its hard direct deadline.  It never publishes a
+            # cache, learning candidate, route, successor, or shared result.
             for asset in bootstrap_assets:
                 asset.forget()
             bootstrap_assets = ()
             eligible_asset = None
             eligible_asset_is_cross_origin = False
-            retry_timeout = _route_preflight_network_retry_timeout(
-                deadline
+            publish_cache = False
+            consensus = (
+                observation.root_tls_stall_consensus
+                if isinstance(
+                    observation,
+                    _SemanticPlainPreflightObservation,
+                )
+                else None
             )
-            if retry_timeout <= 0:
-                publish_cache = False
-                return None
-            observation = await _run_bounded_direct_route_preflight(
-                direct_probe,
-                str(address),
-                h,
-                retry_timeout,
-            )
-            if time.monotonic() >= deadline:
-                publish_cache = False
-                return None
-            (
-                outcome,
-                bootstrap_assets,
-                direct_safe_incomplete,
-                direct_retryable_inconclusive,
-                direct_hard_transport_failure,
-            ) = _decode_direct_route_preflight_observation(job, observation)
-            if direct_retryable_inconclusive:
-                publish_cache = False
-                return None
-            cache_outcome = outcome
+            if (
+                direct_probe is _semantic_plain_preflight_probe_detail
+                and local_recovery_deadline_monotonic is not None
+                and isinstance(consensus, _RootTlsStallConsensus)
+                and consensus.marker is _ROOT_TLS_STALL_CONSENSUS
+                and consensus.host == h
+                and consensus.exact_address == str(address)
+            ):
+                confirmed_pid = _owned_geph_confirmation_pid()
+                if (
+                    confirmed_pid
+                    and _owned_geph_ready_for_semantic_confirmation()
+                    and _owned_geph_confirmation_pid_matches(confirmed_pid)
+                ):
+                    selected_claim = _request_only_geph_preflight_claim(
+                        h,
+                        str(address),
+                        job.capability,
+                        confirmed_pid,
+                        local_recovery_deadline,
+                        handoff_deadline,
+                    )
+            return selected_claim
         if outcome == SEMANTIC_OUTCOME_USABLE:
             (
                 eligible_asset,
@@ -7444,7 +9066,7 @@ async def _run_initial_route_preflight(
                     # owned-Geph payload proof, but do not make network-level
                     # recovery depend on which application happens to be
                     # frontmost.  Ordinary 403s never reach this branch.
-                    proof = await asyncio.wait_for(
+                    proof_worker = asyncio.create_task(
                         asyncio.to_thread(
                             _prove_preflight_owned_geph_route,
                             h,
@@ -7453,7 +9075,11 @@ async def _run_initial_route_preflight(
                             geph_probe,
                             job,
                             deadline,
-                        ),
+                            str(address),
+                        )
+                    )
+                    proof = await _await_owned_preflight_worker(
+                        proof_worker,
                         timeout=remaining + 0.1,
                     )
                 else:
@@ -7461,11 +9087,15 @@ async def _run_initial_route_preflight(
                         job,
                         peer_endpoint,
                         deadline,
+                        exact_address=str(address),
                         provenance_assessor=provenance_assessor,
                         provenance_already_accepted=True,
                     )
                 selected = _commit_preflight_owned_geph_proof(
-                    proof, future, owner_key=key,
+                    proof,
+                    inflight_key,
+                    future,
+                    job.capability,
                 )
                 if selected:
                     publish_cache = True
@@ -7553,22 +9183,37 @@ async def _run_initial_route_preflight(
         )
         with _route_preflight_lock:
             if publish_cache:
-                _route_preflight_cache[key] = (
+                _route_preflight_cache[h] = _RoutePreflightCacheEntry(
                     completed_at + ttl,
                     "owned_geph" if selected else cache_outcome,
+                    "" if selected else str(address),
                 )
-                _route_preflight_cache.move_to_end(key)
+                _route_preflight_cache.move_to_end(h)
             _prune_initial_route_preflights_locked(completed_at)
-            _route_preflight_inflight.pop(key, None)
+            _route_preflight_inflight.pop(inflight_key, None)
             if not future.done():
                 future.set_result(
-                    _ROUTE_PREFLIGHT_LOCAL_RECOVERY
+                    _RoutePreflightSharedLocalRecovery(str(address))
                     if isinstance(
                         selected_claim,
                         _RoutePreflightLocalRecoveryClaim,
                     )
-                    else bool(selected_claim)
+                    else bool(
+                        selected_claim
+                        and not isinstance(
+                            selected_claim,
+                            _RoutePreflightRequestOnlyGephClaim,
+                        )
+                    )
                 )
+        try:
+            _enqueue_route_preflight_root_diagnostic_record(
+                root_diagnostic_record
+            )
+        except Exception:
+            # Diagnostics are downstream of route authority and never observable
+            # as a routing, cache, coalescing, or cancellation failure.
+            pass
     return selected_claim
 
 
@@ -8344,15 +9989,15 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
     return None
 
 
-def _quic_route_tcp_fallback(host, ip=None, *, now=None):
+def _quic_route_tcp_fallback(host, *, destination_ip=None, now=None):
     """Move only route-relevant QUIC first contact onto the TCP evidence path.
 
     A fresh unknown exact hostname has no trustworthy semantic route decision
     yet. Its one exact QUIC flow falls back to TCP so the existing bounded
     direct preflight can classify it before any Geph route is possible. A fresh
-    usable/challenge result restores QUIC only for that host and destination IP.
-    A complete response on one CDN address cannot clear another. Learned exact
-    hosts keep falling back because the owned Geph route is TCP-only.
+    usable/challenge result restores QUIC only for the exact destination
+    address that produced it. Learned exact hosts keep falling back because
+    the owned Geph route is TCP-only.
     """
     h = normalize_host(host)
     if not (
@@ -8383,14 +10028,17 @@ def _quic_route_tcp_fallback(host, ip=None, *, now=None):
     now = time.monotonic() if now is None else float(now)
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
-        key = _route_preflight_root_key(h, ip)
-        cached = _route_preflight_cache.get(key) if key is not None else None
+        cached = _route_preflight_cache.get(h)
         if cached is not None:
-            _route_preflight_cache.move_to_end(key)
+            _route_preflight_cache.move_to_end(h)
     return not bool(
-        cached
-        and cached[0] > now
-        and cached[1]
+        isinstance(cached, _RoutePreflightCacheEntry)
+        and cached.expires_at > now
+        and _route_preflight_cache_entry_matches_address(
+            cached,
+            destination_ip,
+        )
+        and cached.outcome
         in {
             SEMANTIC_OUTCOME_USABLE,
             SEMANTIC_OUTCOME_CHALLENGE_OR_AUTH,
@@ -11752,8 +13400,11 @@ def _quic_initial_tcp_fallback_response(
 ):
     """Return one exact-flow VN response only when TCP classification is due."""
     host = _observe_quic_initial_sni(initial_flows, flow_key, payload)
-    destination_ip = flow_key[-2] if len(flow_key) in {4, 5} else None
-    if not _quic_route_tcp_fallback(host, destination_ip, now=now):
+    if not _quic_route_tcp_fallback(
+        host,
+        destination_ip=flow_key[-2],
+        now=now,
+    ):
         return None
     now = time.monotonic() if now is None else now
     cutoff = now - QUIC_TCP_FALLBACK_FLOW_IDLE
@@ -14772,16 +16423,28 @@ async def _dial_via_geph_first_payload(
     port,
     first_flight,
     timeout=GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT,
+    *,
+    minimum_payload_bytes=1,
+    deadline_monotonic=None,
 ):
-    """Require one target byte before committing a client stream to Geph.
+    """Require a bounded target payload before committing a Geph stream.
 
     A successful SOCKS CONNECT only proves that the local listener accepted a
     stream.  The exit may still stall before the target TLS response.  Keep one
-    absolute deadline across SOCKS setup and the first target byte.  The same
-    buffered request may then be replayed once through a payload-qualified
-    owned successor; reviewed geo-exit policy never exposes it to direct.
+    absolute deadline across SOCKS setup and the configured payload minimum.
+    The same buffered request may then be replayed once through a
+    payload-qualified owned successor; reviewed geo-exit policy never exposes
+    it to direct.
     """
-    deadline = time.monotonic() + max(float(timeout), 0.001)
+    try:
+        minimum_payload_bytes = int(minimum_payload_bytes)
+        deadline = time.monotonic() + max(float(timeout), 0.001)
+        if deadline_monotonic is not None:
+            deadline = min(deadline, float(deadline_monotonic))
+    except (TypeError, ValueError):
+        return None, "first payload timeout"
+    if minimum_payload_bytes <= 0 or not math.isfinite(deadline):
+        return None, "first payload timeout"
     upstream = None
     try:
         try:
@@ -14795,10 +16458,18 @@ async def _dial_via_geph_first_payload(
             return None, "SOCKS connect failed"
         up_r, up_w = upstream
         try:
-            first_payload = await asyncio.wait_for(
-                up_r.read(65536),
-                timeout=max(deadline - time.monotonic(), 0.001),
-            )
+            first_payload = bytearray()
+            while len(first_payload) < minimum_payload_bytes:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                chunk = await asyncio.wait_for(
+                    up_r.read(65536),
+                    timeout=remaining,
+                )
+                if not chunk:
+                    break
+                first_payload.extend(chunk)
         except asyncio.TimeoutError:
             await _close_stream_writer(up_w)
             return None, "first payload timeout"
@@ -14808,7 +16479,10 @@ async def _dial_via_geph_first_payload(
         if not first_payload:
             await _close_stream_writer(up_w)
             return None, "remote closed without response"
-        return (up_r, up_w, first_payload), None
+        if len(first_payload) < minimum_payload_bytes:
+            await _close_stream_writer(up_w)
+            return None, "remote closed without response"
+        return (up_r, up_w, bytes(first_payload)), None
     except asyncio.CancelledError:
         if upstream is not None:
             await _close_stream_writer(upstream[1])
@@ -15588,6 +17262,9 @@ async def _discard_initial_exact_probe_task(task):
     try:
         _state, exact = await task
     except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
         return
     except Exception:
         return
@@ -15607,6 +17284,9 @@ async def _cancel_initial_route_preflight_task(task):
     try:
         await task
     except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
         return
     except Exception:
         return
@@ -15627,11 +17307,14 @@ async def _run_unknown_initial_route_race(
     """Run held exact-system and independent semantic probes concurrently.
 
     The exact stream remains replay-safe until this function returns.  A
-    complete actionable semantic claim wins immediately and closes that
-    stream.  A healthy, slow, or inconclusive semantic result never converts a
-    timeout into route evidence: it waits for and returns the held exact
-    result.  A hard exact close cancels the semantic branch so the existing
-    bounded local proof can begin without serial delay.
+    normal actionable semantic claim wins immediately and closes that stream.
+    A provisional multi-A TLS-stall claim never does: the independent exact
+    stream keeps its full hard direct window, and any payload on it wins.  At
+    exact timeout the provisional claim is usable only if it already completed.
+    An unfinished ordinary semantic or critical-child proof keeps its historical
+    bounded window, but a provisional claim that finishes after the hard direct
+    boundary is rejected.  A hard close or unclear connect can never consume
+    the provisional claim.
     """
     exact_probe = _try_exact_system_probe if exact_probe is None else exact_probe
     route_preflight = (
@@ -15644,7 +17327,7 @@ async def _run_unknown_initial_route_race(
             dst_ip,
             dst_port,
             first_flight,
-            deadline_monotonic=semantic_handoff_deadline_monotonic,
+            deadline_monotonic=hard_recovery_deadline_monotonic,
             preserve_timeout_stream=True,
         )
     )
@@ -15659,6 +17342,22 @@ async def _run_unknown_initial_route_race(
             ),
         )
     )
+
+    def request_only_claim_ready(claim):
+        return _request_only_geph_preflight_claim_matches_request(
+            claim,
+            host,
+            dst_ip,
+            dst_port,
+            eligible_after_monotonic=(
+                hard_recovery_deadline_monotonic
+            ),
+            deadline_monotonic=(
+                semantic_handoff_deadline_monotonic
+            ),
+            require_eligible=True,
+        )
+
     try:
         done, _pending = await asyncio.wait(
             (exact_task, preflight_task),
@@ -15666,6 +17365,20 @@ async def _run_unknown_initial_route_race(
         )
         if preflight_task in done:
             claim = await preflight_task
+            if isinstance(claim, _RoutePreflightRequestOnlyGephClaim):
+                system_probe, exact = await exact_task
+                if system_probe == SYSTEM_PROBE_PAYLOAD:
+                    return system_probe, exact, None
+                if system_probe == SYSTEM_PROBE_TIMEOUT:
+                    if (
+                        exact is not None
+                        and request_only_claim_ready(claim)
+                    ):
+                        return system_probe, exact, claim
+                    return system_probe, exact, None
+                if exact is not None:
+                    await _close_stream_writer(exact[1])
+                return system_probe, None, None
             if claim is not None:
                 if exact_task.done():
                     system_probe, exact = await exact_task
@@ -15681,16 +17394,41 @@ async def _run_unknown_initial_route_race(
         if system_probe == SYSTEM_PROBE_CLOSED:
             await _cancel_initial_route_preflight_task(preflight_task)
             return system_probe, None, None
-
+        preflight_finished_at_exact = preflight_task.done()
         claim = await preflight_task
+        if isinstance(claim, _RoutePreflightRequestOnlyGephClaim):
+            if not preflight_finished_at_exact:
+                return system_probe, exact, None
+            if system_probe == SYSTEM_PROBE_PAYLOAD:
+                return system_probe, exact, None
+            if (
+                system_probe == SYSTEM_PROBE_TIMEOUT
+                and exact is not None
+                and request_only_claim_ready(claim)
+            ):
+                return system_probe, exact, claim
+            return system_probe, exact, None
         if claim is not None:
             if exact is not None:
                 await _close_stream_writer(exact[1])
             return system_probe, None, claim
         return system_probe, exact, None
     except asyncio.CancelledError:
-        await _discard_initial_exact_probe_task(exact_task)
-        await _cancel_initial_route_preflight_task(preflight_task)
+        for task in (exact_task, preflight_task):
+            if not task.done():
+                task.cancel()
+        results = await asyncio.gather(
+            exact_task,
+            preflight_task,
+            return_exceptions=True,
+        )
+        exact_result = results[0]
+        if (
+            isinstance(exact_result, tuple)
+            and len(exact_result) == 2
+            and exact_result[1] is not None
+        ):
+            await _close_stream_writer(exact_result[1][1])
         raise
     except Exception:
         await _discard_initial_exact_probe_task(exact_task)
@@ -15755,6 +17493,350 @@ async def _try_exact_system_passthrough(
     return True
 
 
+async def _adopt_request_only_exact_watcher(held_exact, watcher):
+    """Return exact-stream ownership without losing a raced first payload."""
+    if held_exact is None:
+        return None
+    up_r, up_w, buffered_first = held_exact
+    if watcher is None:
+        return held_exact
+    if not watcher.done():
+        watcher.cancel()
+    try:
+        late_first = await watcher
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+        return held_exact
+    except Exception:
+        late_first = b""
+    if late_first:
+        return up_r, up_w, buffered_first + late_first
+    await _close_stream_writer(up_w)
+    return None
+
+
+async def _discard_request_only_geph_task(task):
+    """Cancel one Geph qualifier and close a concurrently won stream."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        geph_payload, _error = await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+        return
+    except Exception:
+        return
+    if geph_payload is not None:
+        await _close_stream_writer(geph_payload[1])
+
+
+async def _try_request_only_tls_stall_geph_route(
+    host,
+    exact_address,
+    port,
+    first_flight,
+    reader,
+    writer,
+    *,
+    held_exact,
+    claim,
+    eligible_after_monotonic,
+    deadline_monotonic=None,
+):
+    """Race one held exact stream against one non-learning Geph payload."""
+    if held_exact is None:
+        return _RequestOnlyRouteResult(_RequestOnlyRouteOutcome.NO_ROUTE)
+    up_r, up_w, exact_first = held_exact
+    if exact_first:
+        return _RequestOnlyRouteResult(
+            _RequestOnlyRouteOutcome.EXACT,
+            held_exact,
+        )
+    effective_deadline = _consume_request_only_geph_preflight_claim(
+        claim,
+        host,
+        exact_address,
+        port,
+        eligible_after_monotonic=eligible_after_monotonic,
+        deadline_monotonic=deadline_monotonic,
+    )
+    if effective_deadline is None:
+        return _RequestOnlyRouteResult(
+            _RequestOnlyRouteOutcome.EXACT,
+            held_exact,
+        )
+    if (
+        not _owned_geph_ready_for_semantic_confirmation()
+        or not _owned_geph_confirmation_pid_matches(
+            claim.confirmed_geph_pid
+        )
+        or not _geph_session_started()
+    ):
+        return _RequestOnlyRouteResult(
+            _RequestOnlyRouteOutcome.EXACT,
+            held_exact,
+        )
+
+    exact_task = asyncio.create_task(up_r.read(65536))
+    geph_task = None
+    geph_upstream = None
+    try:
+        if not _owned_geph_confirmation_pid_matches(
+            claim.confirmed_geph_pid
+        ):
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task,
+            )
+            return _RequestOnlyRouteResult(
+                (
+                    _RequestOnlyRouteOutcome.EXACT
+                    if exact is not None
+                    else _RequestOnlyRouteOutcome.NO_ROUTE
+                ),
+                exact,
+            )
+        remaining = effective_deadline - time.monotonic()
+        if remaining <= 0:
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task,
+            )
+            return _RequestOnlyRouteResult(
+                (
+                    _RequestOnlyRouteOutcome.EXACT
+                    if exact is not None
+                    else _RequestOnlyRouteOutcome.NO_ROUTE
+                ),
+                exact,
+            )
+        geph_task = asyncio.create_task(
+            _dial_via_geph_first_payload(
+                claim.host,
+                claim.port,
+                first_flight,
+                timeout=min(
+                    GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT,
+                    remaining,
+                ),
+                minimum_payload_bytes=AUTO_GEPH_CONFIRM_MIN_BYTES,
+                deadline_monotonic=effective_deadline,
+            )
+        )
+        done, _pending = await asyncio.wait(
+            (exact_task, geph_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if exact_task in done:
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task,
+            )
+            if exact is not None:
+                await _discard_request_only_geph_task(geph_task)
+                geph_task = None
+                return _RequestOnlyRouteResult(
+                    _RequestOnlyRouteOutcome.EXACT,
+                    exact,
+                )
+            held_exact = None
+
+        try:
+            if geph_task not in done:
+                geph_payload, _geph_error = await geph_task
+            else:
+                geph_payload, _geph_error = geph_task.result()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            geph_payload, _geph_error = None, "first payload unavailable"
+        geph_task = None
+        if geph_payload is None:
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task if held_exact is not None else None,
+            )
+            return _RequestOnlyRouteResult(
+                (
+                    _RequestOnlyRouteOutcome.EXACT
+                    if exact is not None
+                    else _RequestOnlyRouteOutcome.NO_ROUTE
+                ),
+                exact,
+            )
+        geph_upstream = geph_payload
+        # Give a direct read made ready in the same event-loop turn one final
+        # deterministic chance before the replay-safe commit point.
+        await asyncio.sleep(0)
+        if exact_task.done() and held_exact is not None:
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task,
+            )
+            if exact is not None:
+                await _close_stream_writer(geph_upstream[1])
+                geph_upstream = None
+                return _RequestOnlyRouteResult(
+                    _RequestOnlyRouteOutcome.EXACT,
+                    exact,
+                )
+            held_exact = None
+        if time.monotonic() >= effective_deadline:
+            await _close_stream_writer(geph_upstream[1])
+            geph_upstream = None
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task if held_exact is not None else None,
+            )
+            return _RequestOnlyRouteResult(
+                (
+                    _RequestOnlyRouteOutcome.EXACT
+                    if exact is not None
+                    else _RequestOnlyRouteOutcome.NO_ROUTE
+                ),
+                exact,
+            )
+        # The ownership check is synchronous and may spend measurable time in
+        # listener/process inspection.  Keep the exact watcher live across it;
+        # the held Geph session prevents a daemon restart before commit.
+        if not _owned_geph_confirmation_pid_matches(
+            claim.confirmed_geph_pid
+        ):
+            await _close_stream_writer(geph_upstream[1])
+            geph_upstream = None
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task if held_exact is not None else None,
+            )
+            return _RequestOnlyRouteResult(
+                (
+                    _RequestOnlyRouteOutcome.EXACT
+                    if exact is not None
+                    else _RequestOnlyRouteOutcome.NO_ROUTE
+                ),
+                exact,
+            )
+        # Let bytes that arrived while the synchronous ownership check was in
+        # progress become observable.  Direct wins every pre-commit tie.
+        await asyncio.sleep(0)
+        if exact_task.done() and held_exact is not None:
+            exact = await _adopt_request_only_exact_watcher(
+                held_exact,
+                exact_task,
+            )
+            if exact is not None:
+                await _close_stream_writer(geph_upstream[1])
+                geph_upstream = None
+                return _RequestOnlyRouteResult(
+                    _RequestOnlyRouteOutcome.EXACT,
+                    exact,
+                )
+            held_exact = None
+
+        geph_r, geph_w, server_first = geph_upstream
+        try:
+            # The commit point contains no await or blocking ownership probe:
+            # revalidate time, close exact, and queue the already-qualified
+            # Geph bytes in one event-loop turn.
+            if time.monotonic() >= effective_deadline:
+                await _close_stream_writer(geph_w)
+                geph_upstream = None
+                exact = await _adopt_request_only_exact_watcher(
+                    held_exact,
+                    exact_task,
+                )
+                return _RequestOnlyRouteResult(
+                    (
+                        _RequestOnlyRouteOutcome.EXACT
+                        if exact is not None
+                        else _RequestOnlyRouteOutcome.NO_ROUTE
+                    ),
+                    exact,
+                )
+            try:
+                up_w.close()
+            except Exception:
+                pass
+            held_exact = None
+            if not exact_task.done():
+                exact_task.cancel()
+            writer.write(server_first)
+            remaining = effective_deadline - time.monotonic()
+            if remaining <= 0:
+                return _RequestOnlyRouteResult(
+                    _RequestOnlyRouteOutcome.GEPH_HANDLED
+                )
+            await asyncio.wait_for(writer.drain(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return _RequestOnlyRouteResult(
+                _RequestOnlyRouteOutcome.GEPH_HANDLED
+            )
+        except (ConnectionError, OSError):
+            return _RequestOnlyRouteResult(
+                _RequestOnlyRouteOutcome.GEPH_HANDLED
+            )
+        try:
+            await exact_task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+        except (ConnectionError, OSError):
+            pass
+        activity = _RelayActivity(
+            last_downstream_at=time.monotonic(),
+            downstream_bytes=len(server_first),
+            first_downstream_seen=True,
+        )
+        await relay_local_stream(
+            reader,
+            geph_w,
+            geph_r,
+            writer,
+            activity,
+        )
+        geph_upstream = None
+        return _RequestOnlyRouteResult(
+            _RequestOnlyRouteOutcome.GEPH_HANDLED
+        )
+    except asyncio.CancelledError:
+        cleanup_tasks = [exact_task]
+        if geph_task is not None:
+            cleanup_tasks.append(geph_task)
+        for task in cleanup_tasks:
+            if not task.done():
+                task.cancel()
+        cleanup_results = await asyncio.gather(
+            *cleanup_tasks,
+            return_exceptions=True,
+        )
+        if geph_task is not None:
+            geph_result = cleanup_results[-1]
+            if (
+                isinstance(geph_result, tuple)
+                and geph_result
+                and geph_result[0] is not None
+            ):
+                await _close_stream_writer(geph_result[0][1])
+            geph_task = None
+        if held_exact is not None:
+            await _close_stream_writer(held_exact[1])
+            held_exact = None
+        raise
+    finally:
+        try:
+            if geph_upstream is not None:
+                await _close_stream_writer(geph_upstream[1])
+        finally:
+            _geph_session_finished(retry_pending=False)
+
+
 async def _try_unknown_owned_geph_route(
     host,
     port,
@@ -15772,6 +17854,10 @@ async def _try_unknown_owned_geph_route(
     against owned-Geph restart until the relay finishes.
     """
     h = normalize_host(host)
+    if isinstance(successor_claim, _RoutePreflightRequestOnlyGephClaim):
+        # This authority has a stricter exact-IP/PID/deadline consumer and may
+        # never fall through to generic candidate, one-shot, or learned state.
+        return False
     if isinstance(successor_claim, _RoutePreflightOwnedGephClaim):
         deadline_monotonic = min(
             successor_claim.deadline_monotonic,
@@ -16459,7 +18545,43 @@ async def _handle_impl(reader, writer):
             )
         finally:
             _PENDING_NAVIGATION_FIXTURE_HOST.reset(fixture_host_token)
-        if (
+        if isinstance(
+            preflight_claim,
+            _RoutePreflightRequestOnlyGephClaim,
+        ):
+            request_only = await _try_request_only_tls_stall_geph_route(
+                host,
+                dst_ip,
+                dst_port,
+                head + body,
+                reader,
+                writer,
+                held_exact=exact,
+                claim=preflight_claim,
+                eligible_after_monotonic=(
+                    unknown_recovery_deadline
+                ),
+                deadline_monotonic=(
+                    unknown_semantic_handoff_deadline
+                ),
+            )
+            if (
+                request_only.outcome
+                is _RequestOnlyRouteOutcome.GEPH_HANDLED
+            ):
+                return
+            if request_only.outcome is _RequestOnlyRouteOutcome.EXACT:
+                result = request_only.exact
+                chosen_name = "plain"
+                via_system_exact = True
+                preflight_claim = None
+            else:
+                # Both exact and the single payload-qualified Geph stream
+                # ended before either produced a server byte. This capability
+                # cannot fall through to learning, recovery, or a second PID.
+                writer.close()
+                return
+        elif (
             isinstance(
                 preflight_claim,
                 _RoutePreflightLocalRecoveryClaim,
@@ -17768,7 +19890,7 @@ def _cleanup_install_incomplete(reason):
     return False
 
 
-def _remove_daemon_status_artifacts(*, preserve_attestation=False):
+def _remove_daemon_status_artifacts(*, remove_install_attestation=True):
     for path in (STATUS_PATH + ".tmp", STATUS_PATH):
         try:
             os.remove(path)
@@ -17777,7 +19899,9 @@ def _remove_daemon_status_artifacts(*, preserve_attestation=False):
         except OSError:
             return False
     attestation_clean = (
-        True if preserve_attestation else _remove_install_attestation_artifacts()
+        _remove_install_attestation_artifacts()
+        if remove_install_attestation
+        else True
     )
     semantic_socket_clean = (
         semantic_route_signal_runtime.remove_stale_owned_socket(
@@ -17805,7 +19929,10 @@ def _remove_daemon_status_artifacts(*, preserve_attestation=False):
 
 
 def _disable_and_cleanup_install(
-    port=PROXY_PORT, remove_runtime=True, *, preserve_attestation=False,
+    port=PROXY_PORT,
+    remove_runtime=True,
+    *,
+    remove_install_attestation=True,
 ):
     status = _daemon_status_record() or {}
     pid = status.get("pid")
@@ -17866,12 +19993,9 @@ def _disable_and_cleanup_install(
     pf_release_result = _pf_release_enable_token()
     if pf_release_result is not None and pf_release_result.returncode != 0:
         return _cleanup_install_incomplete("owned PF enable token was not released")
-    status_clean = (
-        _remove_daemon_status_artifacts(preserve_attestation=True)
-        if preserve_attestation
-        else _remove_daemon_status_artifacts()
-    )
-    if not status_clean:
+    if not _remove_daemon_status_artifacts(
+        remove_install_attestation=remove_install_attestation,
+    ):
         return _cleanup_install_incomplete("daemon status could not be removed")
     listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
     if not listener_clean:
@@ -18149,25 +20273,6 @@ def do_install(port):
     return True
 
 
-def do_stop(port=PROXY_PORT):
-    """Durably stop interception without uninstalling the trusted payload.
-
-    The existing cleanup transaction disables KeepAlive before bootout and
-    verifies owned process/listener absence.  Keep configuration, learned
-    state, the payload, plist and immutable install witness for an explicit
-    later Restart Proxy.  The user-level owner stops its Geph only after this
-    succeeds, so existing daemon sessions can finish their bounded drain.
-    """
-    clean = _disable_and_cleanup_install(
-        port, remove_runtime=False, preserve_attestation=True,
-    )
-    if clean:
-        print("stopped + Slipstream pf anchor cleared; installation retained")
-    else:
-        print("warning: Slipstream stop incomplete; installation retained", file=sys.stderr)
-    return clean
-
-
 def do_uninstall():
     clean = _disable_and_cleanup_install(PROXY_PORT)
     if clean:
@@ -18175,6 +20280,23 @@ def do_uninstall():
     else:
         print("warning: Slipstream cleanup incomplete; inspect launchd, PF token, and TCP/1080",
               file=sys.stderr)
+    return clean
+
+
+def do_stop():
+    """Stop installed routing without deleting its immutable install proof."""
+    clean = _disable_and_cleanup_install(
+        PROXY_PORT,
+        remove_runtime=False,
+        remove_install_attestation=False,
+    )
+    if clean:
+        print("stopped + Slipstream pf anchor cleared")
+    else:
+        print(
+            "warning: Slipstream stop incomplete; inspect launchd, PF token, and TCP/1080",
+            file=sys.stderr,
+        )
     return clean
 
 
@@ -18517,10 +20639,10 @@ def main():
                     help="disable the UDP voice plane")
     ap.add_argument("--install", action="store_true",
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the LaunchDaemon and clear private pf state")
     ap.add_argument("--uninstall", action="store_true",
                     help="remove the LaunchDaemon and clear private pf state")
-    ap.add_argument("--stop", action="store_true",
-                    help="disable and stop the LaunchDaemon without uninstalling")
     ap.add_argument("--recover-network", action="store_true",
                     help=argparse.SUPPRESS)
     ap.add_argument("--status", action="store_true",
@@ -18611,10 +20733,10 @@ def main():
 
     if args.install:
         sys.exit(0 if do_install(args.port) else 1)
+    if args.stop:
+        sys.exit(0 if do_stop() else 1)
     if args.uninstall:
         sys.exit(0 if do_uninstall() else 1)
-    if args.stop:
-        sys.exit(0 if do_stop(args.port) else 1)
     if args.recover_network:
         sys.exit(0 if recover_owned_network_state() else 1)
 

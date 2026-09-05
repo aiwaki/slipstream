@@ -1,9 +1,113 @@
 # Routing Research Notes
 
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-08-31 continuous root and address/object authority boundary
+
+Cold production-shaped diagnostics moved the causal boundary earlier than
+gzip decoding or critical-child selection. For `app.aikido.dev`, TCP connect
+completed, TLS exhausted the bounded root slice, and HTTP send never began;
+therefore the attempt could not discover `cdn.aikido.dev`. The historical
+implementation also closed its first socket after 400 ms and spent the adaptive
+allowance on a second fresh TCP/TLS connection. That deterministic churn lost
+handshake progress, but removing it was not sufficient to make the current
+direct path usable.
+
+The correction keeps one exact-numeric-IP socket from connect through TLS,
+request send, bounded receive, strict framing, selected-representation decode,
+semantic classification, and critical-root inspection. Root I/O receives the
+remaining common job time after only classification and scheduling capacity,
+with a five-second cap. Browser provenance and Geph proof capacity are no
+longer reserved before the root outcome says either branch is relevant. A late
+denial or incomplete response still fails closed because every downstream
+branch must fit inside the same live job deadline. Any explicit
+`retryable_inconclusive` result--including connect, TLS, send, read, framing,
+decode, classification, inspection, or parser timeout/failure--authorizes no
+cache, provenance, child, Geph, local recovery, or learning. Existing admissible
+EOF/hard-error contracts are not broadened.
+
+The first source probe exposed the premature reservation directly: the
+five-second cap received only `4.375` seconds after subtracting 1.5 seconds of
+browser provenance, 50 ms of provenance grace, and two seconds of proof that a
+usable direct result would never need. It completed TCP, then reported
+`tls_handshake_timeout`, `retryable=1`, `hard=0`, `wire=zero`, and `assets=0`.
+The resolver returned exactly three current public A records and admitted all
+of them: `54.195.217.18`, `63.33.115.70`, and `54.229.203.255`. Repeating the
+single bounded source observation after the outcome-conditioned correction
+gave the root the full five-second cap but still timed out in TLS. One
+distinguishing eight-second observation to `54.229.203.255`, which had
+previously returned a complete usable gzip root with critical assets, also
+timed out before HTTP. Thus the current direct network/backend state no longer
+reproduces the earlier usable edge. This is negative source evidence, not
+authority to route: elapsed time remains `unclear`, and no larger timeout or
+retry ladder is justified.
+
+The bounded discriminator through the already-owned Geph listener did complete
+the identical Aikido root: it returned a usable response in roughly 2.2 seconds
+with 19,603 decoded payload bytes (6,314 bytes on the compressed wire). That
+locates a real current direct-versus-owned-exit split, but it does not convert
+one timeout into persistent route evidence. The production resolver set was
+therefore exercised as a whole. All three current public A records actually
+spent their full five-second continuous root allocation in the identical TLS
+handshake boundary with zero wire bytes, zero payload, no asset, no hard error,
+and no usable or mixed edge. An injected probe, an immediate synthetic timeout,
+a shortened window, an invalid/private or IPv6 resolver set, partial
+completion, or heterogeneous outcome cannot create this consensus.
+
+The resulting correction is a one-request liveness mechanism, not learning.
+The semantic consensus can mint one volatile capability bound to the normalized
+host, exact PF destination, port 443, verified owned-Geph PID, random owner
+capability, exact-system not-before boundary, and common semantic handoff
+deadline. Meanwhile the handler's separate exact PF stream stays open for its
+full eight-second hard window. After that boundary it continues to race the
+same held stream against at least 64 server bytes from the same held Geph PID;
+any direct byte before the no-await commit wins, including a byte that arrives
+during the synchronous PID ownership check. The capability is consumed before
+runtime awaits and has no second attempt. It cannot cache, learn, publish
+status, schedule confirmation, create a successor, or enter the generic Geph
+helper. Invalid identity, readiness, PID, session, drain, deadline, EOF, or
+short-payload outcomes return the held exact stream when possible. If both
+streams end without bytes, the request ends without route mutation. This
+bounded policy intentionally does not claim to distinguish an arbitrarily slow
+direct server; that is why timing remains forbidden as persistent authority.
+
+The same audit found a second root defect: transport evidence had been shared
+at host scope even though PF may select a different destination IP. Direct root
+cache and in-flight ownership are now `(normalized host, exact PF IP)`. An
+alternate system A record may complete the current root observation, but its
+usable result cannot mark the PF-primary address healthy. QUIC may suppress the
+TCP fallback only when direct evidence matches the packet's exact destination
+IP. A learned owned-Geph exact host remains the only host-wide cache authority.
+
+Critical child evidence is object-scoped, not merely host- or address-scoped.
+The child resolves one exact numeric address before taking ownership, never
+reads or writes direct root/other-object cache, and proves its own request
+bytes. Cross-origin child attempts use distinct opaque in-flight identities
+even for the same host and IP because routing state intentionally retains no
+path or query. Same-origin child work may reuse only the parent's exact-IP
+epoch as cancellation/authority context and still probes the child object.
+Discarded or cancelled work cannot commit, cache, or learn; the owned socket or
+bounded worker is closed/drained before authority is released. Private
+diagnostics remain fixed/coarse, drop-only, and outside StatusV2.
+
+Change-scoped coverage is green. The complete set of newly added direct-root,
+address/object, cancellation, diagnostic, cache, QUIC, and request-only tests
+passes (`62` cases). The affected existing root/preflight/QUIC/cache contracts
+pass (`62` cases), and the handler/request-only/owned-Geph contract selection
+passes (`43` cases); the narrower consensus/claim and exact race selections
+also pass (`21` and `33` cases). Python compilation and `git diff --check` are
+clean. No full suite was rerun because the prior broad baseline remains valid
+and the current diff has narrower executable contracts. Independent review of
+the fresh request-only ownership, deadline, direct-priority, cancellation, and
+session cleanup path found no remaining concrete defect. No bundle, install,
+browser, route learning, cache mutation, or account-backed run followed. The
+next boundary is the canonical fresh/staged/bundled daemon-equality guard,
+followed only then by one exact build/install and genuinely cold ordinary
+Chrome/Safari first-request validation. No Aikido, Capacitor, Weather, or
+complete-page success is claimed.
 
 ## 2026-08-30 selected-representation root boundary
 
@@ -258,6 +362,7 @@ outcome, never from visual incompleteness, a status code, or elapsed time alone.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-31 | Initial semantic root discarded a live connection at 400 ms | Continuous one-socket correction implemented; focused and physical verification open | Production-shaped Aikido diagnostics completed TCP but timed out in TLS before HTTP send, while isolated identical requests sometimes completed in roughly one to two seconds with a gzip root and critical assets. The old adaptive path closed the first socket and opened a second fresh handshake. Production now gives one exact-IP connection the derived root-I/O remainder, keeps explicitly retryable-inconclusive timeout/framing/decode/parser outcomes non-authorizing while preserving the guarded safe-incomplete EOF path, and closes plus drains cancellation before same-host ownership is released. The observation locates the stage but does not speculate about the peer's reason. | Run only the focused changed-path tests and independent review. If green, verify exact bundle equality, then install and require genuinely cold first-request completion in ordinary Chrome and Safari. Do not run a full suite, soak, protected browser matrix, or account-backed workflow for this local correction. |
 | 2026-08-26 | Exact route learned after the initiating request had already failed | Shared-deadline/current-attempt correction locally green; physical proof open | A clean Capacitor curl ended in `SSL_ERROR_SYSCALL` at roughly eleven seconds even though public state learned the exact host. The hard marker entered a legacy sequential ladder, its claim deadline was reduced to boolean authorization before Geph, and timeout could count as closed evidence. Production now uses one eight-second client deadline, reserves four seconds for Geph delivery, races Xbox DNS plus exactly two distinct local strategies, admits Geph only when all current-attempt stages explicitly close, and schedules confirmation only after the original client drain succeeds before deadline. | Commit and build the exact tree, install it without touching the user's dirty primary checkout, reset only controlled product state, and require the first clean curl plus fresh Chrome and Safari connections to converge. No account-backed run or soak is relevant. |
 | 2026-08-25 | Strict denial was hidden behind the provenance gate after the fast probe | Root cause corrected; full local suite green | Exact comparison with successful head `513484a` showed that the strict-denial classifier, owned-Geph payload proof, and exact-host commit path still existed. Live direct probes instead exposed the timing boundary: the 400-ms root slice could end inconclusive before the complete strict denial arrived, while the same-host owned-Geph proof completed normally. Production then asked for browser provenance before its adaptive retry, so a network-only strict denial could be rejected as `not_frontmost` or `input_not_recent` before the retry revealed it. The correction gives exactly one bounded same-IP direct network retry first. A final usable result stays direct, a second inconclusive result returns no-cache/no-provenance/no-Geph, a final strict denial reaches only the existing complete exact-host proof, and final safe-incomplete or critical-resource evidence still requires signed foreground/recent-input provenance. Actionable branches default to no cache until proof commits. Existing h2/TCP/QUIC sessions cannot be migrated after learning and are excluded from clean first-request evidence. | Build and install the exact corrected commit, reset process-local learned state, and require first-request convergence on genuinely fresh Chrome and Safari connections before pushing PR #373. No hostname rule, account-backed run, or soak is relevant. |
 | 2026-08-25 | Hard first-contact and strict minimal edge denial converged only after repeated browser retries | Generic same-request corrections under local verification | A few retained TLS bytes made the exact system stream truthy even when the independent direct probe then produced a hard TLS/socket failure. The handler committed that stream instead of entering the existing guarded local ladder. Production now carries a distinct hard-transport bit from the direct probe and reuses the same replay-safe first flight for app-owned DNS/local recovery; idle timeout, slow progress, complete ordinary `403`, and unusable results on both direct and owned routes remain non-authorizing. A separate bounded exception follows one apex/`www` HTTPS root redirect only to obtain a complete usable final owned-Geph payload under the same deadline and still learns only the original host. Weather then proved its critical `dsx` resource used a complete minimal strict-denial fingerprint not covered by the prose classifier and that one owned target connection could fail while a second succeeded inside the existing proof budget. The new classifier is exact status/body/header bound and the proof has exactly one remaining-budget retry under its unchanged deadline. | Finish full local verification, rebuild/install the exact branch head, and require fresh physical Chrome and Safari convergence plus exact-head CI/audit before merging PR #373. No new soak or account-backed run is relevant. |
@@ -1776,6 +1881,61 @@ regression consumes `4.7` seconds in the parent, then proves the measured
 cutoff; the idle variant still does not call Geph or learn. The focused
 bootstrap set is green (`48 passed`). Physical validation of the rebuilt exact
 daemon remains open.
+
+## 2026-08-31 TLS wire evidence and deadline ownership
+
+The all-edge first-request work exposed two independent implementation defects
+after its initial review. Both were causal proof-boundary defects rather than a
+need for an Aikido rule, a longer generic timeout, more retries, or browser
+focus.
+
+First, the original `wire_bytes == 0` observation counted bytes only after the
+TLS layer exposed plaintext. A server could therefore deliver a partial
+encrypted `ServerHello`, leave the handshake incomplete, and still appear to
+have produced zero wire ingress. A second false candidate existed when TCP
+connect or the outgoing `ClientHello` consumed the I/O allocation: the stage
+could end as `tls_handshake_timeout` with zero received bytes even though the
+server had never received a complete usable TLS opening and had not been given
+the intended observation interval.
+
+The production continuous-root transport now retains the exact raw numeric-IP
+socket and drives `SSLObject` through `MemoryBIO`. Every successful raw `recv`
+increments an encrypted-ingress counter before decryption, and cancellation
+closes that same raw socket. The transport separately records when all initial
+handshake output has been sent, the receive budget remaining at that boundary,
+and the actual zero-ingress wait after it. An all-edge candidate is eligible
+only when the complete `ClientHello` flight was sent, at least four seconds of
+post-send receive budget remained, the whole remaining budget was consumed,
+and encrypted ingress remained exactly zero. A slow connect, blocked or partial
+send, short receive window, EOF/cancellation, unmeasured state, or one partial
+ciphertext byte remains inconclusive. It cannot contribute to consensus or
+authorize capability, cache, route, status, successor, recovery, or learning.
+
+Second, the exact stream's eight-second hard boundary was accidentally treated
+as authority to cancel every parallel result. That is correct only for the
+new request-only exception. An ordinary semantic or critical-child preflight
+already owns its historical bounded evidence window. The race now fast-cancels
+that work only when the system stream explicitly closes. At exact `timeout` or
+`unclear`, it snapshots whether the preflight was finished: a later
+request-only claim is rejected as outside the hard boundary, while a later
+ordinary semantic/critical-child result may still win within its unchanged
+deadline. This separates deadline authority without making a slow usable
+direct path into Geph evidence.
+
+The affected TLS/preflight selection passes `33` tests with `656` unrelated
+tests deselected. Exact-race, handler ownership, cancellation, and the existing
+cold-child path pass an independently reviewed `21`-test selection. Python
+compilation and `git diff --check` are clean, and separate post-patch reviews
+found no blocking TLS measurement, cancellation, ownership, direct-priority,
+or deadline defect. The earlier exact app bundle predates these production
+changes and is obsolete. The following single canonical current-tree build
+completed at `overall=pass`: fresh, staged, and bundled daemon executables are
+byte-identical at
+`4fbd59f26210ec5151909afe7a2ccfc25fbbba37b3f57fb6b03d2bb6b38cf7e3`,
+the materialized and bundled daemon trees match, and the app is validly ad-hoc
+signed and unnotarized. The verifier records `installed.status=not_run`. No
+installation, broad suite, soak, account-backed workflow, or physical browser
+run followed this correction; build integrity is proved, not product success.
 
 ## Transfer Backlog
 

@@ -453,3 +453,101 @@ source locations и обнаружение изменённой констант
 файлов, не доказательство Rust source и не физическая проверка сайтов. Подробный
 JSON: `output/post-audit-bundle-20260905/installed-python-comparison-full.json`;
 reusable read-only helper: `compare-installed-python.py` в той же папке.
+
+### Полный recovery baseline и controlled integration
+
+Восстановление сохранено отдельно от исправлений аудита: commit
+`ee8ba0e8f78b1070f41b54f75b06cd6e802c557b`, branch
+`codex/recover-aikido-tail-full-20260905`. Coverage ledger учитывает 238 уникальных
+подтверждённых вызовов (195 main + 43 child), 13 tracked files, все 54 вызова с
+Rust-патчами. Восемь локальных поправок восстанавливают только доказанное
+форматирование контекста; исторические команды и credentials не исполнялись.
+Известных незакрытых recovery gaps нет. Python source остался тем же, что в
+независимой проверке 800/800 выше. Это сохранённая история, не новый green test.
+
+Controlled merge выполняется в `codex/codebase-audit-20260905`, сохраняя оба
+родителя. Исторические continuous-root TLS, bounded multi-address/request-only
+race, exact proof capability/epoch и per-attempt critical-child authority не
+заменяются более ранней архитектурой аудита. То же относится к существующему
+Quit-resume marker и единственному `DaemonLifecycleCoordinator`: второй
+независимый lifecycle gate не накладывается. Недостающие audit fixes переносятся
+отдельно, с узкой проверкой соответствующих изменений.
+
+Обнаружен и исправлен дополнительный cold-build defect. Историческая automation
+убрала npm pre-step и перенесла freeze в `beforeBundleCommand`, но pinned
+`tauri-build 2.6.3` копирует glob resources уже в Cargo `build.rs`. На чистом
+checkout отсутствующий `slipstreamd/**/*` останавливает компиляцию раньше этого
+hook. В pinned CLI `2.11.3` порядок также однозначен:
+[build setup, compile, then bundle](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.3/crates/tauri-cli/src/build.rs),
+[beforeBundle inside bundle stage](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.3/crates/tauri-cli/src/bundle.rs).
+Freeze/staging перенесён в `beforeBuildCommand`; второго freeze нет. Canonical
+`build:local` / `build:release` сохраняют post-bundle identity verifier.
+Standalone `tauri bundle` — только repack existing output, не поддерживаемый
+fresh-source/release path. Dev hook отдельно и этим изменением не затронут.
+Change-scoped `scripts/test_build_config.py`: **53 passed, 5 subtests passed**
+за 40.15 s. Лог: `output/post-audit-bundle-20260905/build-config-tests.log`.
+
+Python integration поверх recovery baseline меняет production ровно в двух
+местах: `publish_cache=False` для unresolved critical child (включая parent
+retry-cache), и argparse rejection для `--stop` вместе с `--install`,
+`--uninstall` либо `--recover-network`. Recovered proof binding уже проверяет
+canonical host/IP, exact capability и живую identity своего inflight epoch;
+аудиторская более слабая замена ему не применяется. Обновлены/добавлены восемь
+узких regression functions, включая exact-IP QUIC clearing, competing lifecycle
+flags и hardlink witness при повторном stop. **13 passed in 12.35s**, exit 0;
+лог `output/post-audit-bundle-20260905/python-recovery-audit-focused.log`.
+Production `spike/tproxy.py` после этих двух изменений: SHA-256
+`0800b616e3a7fb053c17f7b74ee45120ded4c611ca0ce8c9a7b22d50eb27d225`.
+До интеграции он совпадал с installed compiled structure; эти две намеренные
+дельты теперь проверены отдельно, не выдаются за прежнее совпадение 800/800.
+
+Rust integration сохраняет recovered coordinator, terminal ownership/generation,
+Quit-resume marker и весь более строгий Geph identity/signal/absence chain.
+Перенесены root-owned installed `--stop` authority со строгими absence witnesses
+для pristine state и verified Launch at Login initial/write/readback. Более
+ранний, теперь не подключённый `src/lifecycle.rs` удалён как дублирующая модель;
+его история сохраняется в audit parent `c060518`.
+
+Первый scoped Rust pass: `quit` 9, `geph_` 34, `launch_at_login` 3,
+`diagnostics_redacts_entire` 1, `queued_admin_action` 1, `terminal_operation` 2 —
+всего 50 успешных выполнений. Это тестовая сборка с явно test-only resource
+override, не доказательство product bundle. Логи: `rust-integration-*.log` в
+той же output-папке. Unchanged full baseline не повторялся.
+
+Независимый review поймал две ошибки ещё до commit/build/install этой интеграции.
+Наличие любого каталога не давало права записывать Valid resume marker: root
+stop мог отвергнуть wrong-owner/mode или partial install, а marker позже обходил
+disabled/absent-label guard при startup. Дополнительно genuinely never-installed
+Quit не доходил до root absence witnesses, поскольку отсутствующий label в
+успешном `print-disabled` парсился как unknown и отклонялся слишком рано.
+
+Исправление переиспользует существующий schema-3 install-attestation contract,
+а не вводит новый privileged probe: enabled runtime перед marker требует
+non-symlink root-owned0700 directory, valid bundled executable и
+`!daemon_needs_install(bundled)` (exact bundle hash, root-owned bounded JSON,
+immutable daemon witness/hardlink и exact LaunchDaemon plist). В root-only child
+из user process не заглядываем. Partial/unknown/mismatched enabled installation
+не получает marker. Более старый installed daemon против нового bundle здесь
+намеренно fail-closed, как у существующего watchdog; mutable privileged fallback
+не возвращается. Known-disabled runtime marker не получает. При отсутствии
+installed directory label/bundle proof не запрашиваются и marker не пишется;
+окончательный stop всё равно требует все root absence witnesses.
+
+Добавлены whole-decision regressions, а не только тесты нового helper. После
+этой дельты повторяется только affected `quit` selection. Исторический lib.rs
+сам имел около 301 строк rustfmt diff; применён file-only rustfmt с
+`skip_children=true`, без форматирования остальных модулей.
+
+Финальная независимая проверка actual delta подтвердила обе коррекции и не нашла
+других actionable findings в заданной границе. Финальный `quit` запуск дал
+9 успешных behavior cases и один failure старого source-shape assertion, который
+запрещал вообще упоминать bundled path. Он стал неверным после разрешённой
+read-only attestation validation; исправлен только assertion, не production.
+Его отдельный повтор прошёл: все 10 текущих Quit cases покрыты успешными
+результатами этих двух запусков. Логи: `rust-integration-quit-final.log` и
+`rust-integration-quit-root-authority-final.log`. Остальные 41 scoped checks не
+повторялись. Финальные rustfmt check и `git diff --check` — exit 0.
+Final lib.rs SHA-256:
+`c40613341a7838776ce4cabe7207507174725baffbba9e8c141315967c06d6c6`.
+Version sync check и project-state continuity contract также прошли. Дальше —
+pin combined source commit и один canonical product build, без test override.

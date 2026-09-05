@@ -94,14 +94,22 @@ uncommitted tail is present: reconcile that tail before building a replacement.
 Record the source, artifact verification result and remaining physical gates in
 `docs/CURRENT_STATE.md` and the relevant investigation log.
 
-The app scripts rebuild the self-contained Python daemon with Python 3.13,
-stage it into Tauri through a temporary directory, build the final app, and run
+The canonical `build:local` and `build:release` app scripts rebuild the
+self-contained Python daemon with Python 3.13 through Tauri's
+`beforeBuildCommand`, stage it through a temporary directory, build the final app, and run
 the canonical macOS bundle verifier. That verifier checks the complete
 fresh/staged/materialized bundle chain, critical binary hashes and
 architectures, app identity, helper isolation, routing invariants, and the
 ad-hoc signature's integrity. A tray rebuild therefore cannot silently reuse
 an older frozen daemon. If `python3.13` is not on `PATH`, set
 `SLIPSTREAM_PYTHON_313` to its exact executable path.
+
+The daemon must be staged before Cargo compilation: `tauri-build` copies its
+resources during `build.rs`, before any `beforeBundleCommand` could run. There
+is one freeze per canonical build, not a second npm or bundle-hook freeze.
+Standalone `tauri bundle` only repackages existing build output and is not a
+supported fresh-source build or release path; use the canonical scripts above.
+`tauri dev` has its separate development lifecycle and does not run this hook.
 
 A complete local app build also needs the Geph sidecar at:
 

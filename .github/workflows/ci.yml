@@ -471,6 +471,7 @@ jobs:
       updater-signing-artifact-digest: ${{ steps.upload-updater-signing-input.outputs.artifact-digest }}
     env:
       SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
+      SLIPSTREAM_EPHEMERAL_ROUTE_POLICY_KEY_ID: ci-packaged-lifecycle
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -505,28 +506,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-
-      - name: Build the frozen daemon
-        run: |
-          set -euo pipefail
-          python3 -m venv spike/.buildvenv
-          spike/.buildvenv/bin/python -m pip install \
-            --quiet \
-            --disable-pip-version-check \
-            --only-binary=:all: \
-            --require-hashes \
-            -r spike/requirements-build.txt
-          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
-            --generate-keypair \
-            --key-id ci-packaged-lifecycle \
-            --private-key-output /tmp/slipstream-route-policy.key \
-            --public-keys-output spike/route-policy-keys.json
-          ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
-          rm -rf app-tauri/src-tauri/slipstreamd
-          cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
-          test -x app-tauri/src-tauri/slipstreamd/slipstreamd
-          /usr/bin/lipo app-tauri/src-tauri/slipstreamd/slipstreamd \
-            -verify_arch arm64
 
       - name: Fetch and verify the recorded Geph build
         env:
