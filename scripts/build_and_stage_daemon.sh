@@ -55,6 +55,7 @@ stage_root="$(mktemp -d "$repo_root/app-tauri/src-tauri/.slipstreamd-stage.XXXXX
 stage_dir="$stage_root/slipstreamd"
 backup_dir="$stage_root/previous"
 stage_committed=false
+stage_swap_started=false
 
 cleanup() {
   status=$?
@@ -65,7 +66,7 @@ cleanup() {
         echo "Failed to restore the preceding staged daemon; backup preserved at $backup_dir" >&2
         exit 1
       fi
-    elif [[ ! -e "$stage_dir" ]]; then
+    elif [[ "$stage_swap_started" == true && ! -e "$stage_dir" ]]; then
       if ! rm -rf "$target_dir"; then
         echo "Failed to remove the uncommitted staged daemon: $target_dir" >&2
         exit 1
@@ -105,6 +106,9 @@ if [[ -e "$target_dir" ]]; then
   mv "$target_dir" "$backup_dir"
 fi
 fail_for_test after_backup
+# A missing stage before this point means validation/copy failed, not that
+# this transaction installed a target. Never delete a preceding payload then.
+stage_swap_started=true
 mv "$stage_dir" "$target_dir"
 fail_for_test after_swap
 

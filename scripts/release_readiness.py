@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import invisibility_soak_contract
@@ -285,6 +286,7 @@ def validate_soak_report(report: dict, exit_status: int) -> str:
         and requested >= MIN_SOAK_SECONDS
         and isinstance(measured, (int, float))
         and not isinstance(measured, bool)
+        and (type(measured) is int or math.isfinite(measured))
         and measured >= requested
         and isinstance(interval, (int, float))
         and not isinstance(interval, bool)

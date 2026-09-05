@@ -165,6 +165,20 @@ class ReleaseReadinessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "measured evidence"):
             release_readiness.validate_soak_report(visible, 0)
 
+    def test_soak_nonfinite_timings_cannot_authorize_success(self) -> None:
+        for field in (
+            "measured_duration_seconds", "sample_interval_seconds",
+            "max_sample_gap_seconds",
+        ):
+            for value in (float("inf"), float("-inf"), float("nan")):
+                with self.subTest(field=field, value=value):
+                    report = soak_report()
+                    report[field] = value
+                    # Python's JSON reader accepts these non-standard numbers.
+                    report = json.loads(json.dumps(report))
+                    with self.assertRaisesRegex(ValueError, "measured evidence"):
+                        release_readiness.validate_soak_report(report, 0)
+
     def test_soak_cleanup_diagnostics_are_bounded_and_block_success(self) -> None:
         report = soak_report()
         report["cleanup_failures"] = ["residue:daemon_status"]

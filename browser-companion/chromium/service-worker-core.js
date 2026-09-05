@@ -11,6 +11,7 @@
   const CONFIRMATION_RELOAD_DELAY_MS = 7000;
   const COMPLETED_CONFIRMATION_RELOAD_DELAY_MS = 250;
   const INCOMPLETE_RESPONSE_CANDIDATE_TTL_MS = 5 * 60 * 1000;
+  const MAX_INCOMPLETE_RESPONSE_CANDIDATES = 128;
   const PENDING_NAVIGATION_DELAY_MS = 8000;
   const INCOMPLETE_RESPONSE_STORAGE_PREFIX =
     "slipstream.incomplete-response.";
@@ -245,8 +246,9 @@
     };
   }
 
-  function createIncompleteResponseTracker(storageSession) {
+  function createIncompleteResponseTracker(storageSession, now = Date.now) {
     const memory = new Map();
+    let restored = false;
     let pending = Promise.resolve();
     const durable =
       storageSession &&
@@ -265,14 +267,70 @@
       return result;
     }
 
+    async function prune(nowUnixMs) {
+      if (!restored && durable) {
+        const stored = await durable.get(null);
+        for (const [key, candidate] of Object.entries(stored ?? {})) {
+          if (key.startsWith(INCOMPLETE_RESPONSE_STORAGE_PREFIX)) {
+            memory.set(key, candidate);
+          }
+        }
+        restored = true;
+      }
+      const removed = [];
+      for (const [key, candidate] of memory) {
+        if (
+          !candidate ||
+          typeof candidate !== "object" ||
+          Array.isArray(candidate) ||
+          Object.keys(candidate).sort().join(",") !==
+            "expires_at_unix_ms,host,request_id,request_started_at_unix_ms,tab_id" ||
+          typeof candidate.host !== "string" ||
+          normalizedHttpsHostname(`https://${candidate.host}/`) !== candidate.host ||
+          !Number.isInteger(candidate.tab_id) ||
+          candidate.tab_id < 0 ||
+          !Number.isSafeInteger(candidate.request_started_at_unix_ms) ||
+          candidate.request_started_at_unix_ms <= 0 ||
+          candidate.request_started_at_unix_ms > nowUnixMs ||
+          !Number.isSafeInteger(candidate.expires_at_unix_ms) ||
+          candidate.expires_at_unix_ms !==
+            candidate.request_started_at_unix_ms +
+              INCOMPLETE_RESPONSE_CANDIDATE_TTL_MS ||
+          candidate.expires_at_unix_ms <= nowUnixMs ||
+          incompleteResponseStorageKey(candidate.request_id) !== key
+        ) {
+          memory.delete(key);
+          removed.push(key);
+        }
+      }
+      const oldest = [...memory].sort((a, b) =>
+        a[1].request_started_at_unix_ms - b[1].request_started_at_unix_ms ||
+        a[0].localeCompare(b[0])
+      );
+      for (const [key] of oldest.slice(
+        0, Math.max(0, memory.size - MAX_INCOMPLETE_RESPONSE_CANDIDATES)
+      )) {
+        memory.delete(key);
+        removed.push(key);
+      }
+      if (durable && removed.length) {
+        await durable.remove(removed);
+      }
+    }
+
     function remember(details, nowUnixMs) {
       return enqueue(async () => {
+        await prune(nowUnixMs);
         const candidate = incompleteResponseCandidate(details, nowUnixMs);
         const key = incompleteResponseStorageKey(details?.requestId);
         if (!candidate || !key) {
           return false;
         }
         memory.set(key, candidate);
+        await prune(nowUnixMs);
+        if (!memory.has(key)) {
+          return false;
+        }
         if (durable) {
           await durable.set({ [key]: candidate });
         }
@@ -282,16 +340,13 @@
 
     function take(details) {
       return enqueue(async () => {
+        await prune(now());
         const key = incompleteResponseStorageKey(details?.requestId);
         if (!key) {
           return null;
         }
-        let candidate = memory.get(key) ?? null;
+        const candidate = memory.get(key) ?? null;
         memory.delete(key);
-        if (!candidate && durable) {
-          const stored = await durable.get(key);
-          candidate = stored?.[key] ?? null;
-        }
         if (durable) {
           await durable.remove(key);
         }
@@ -301,21 +356,18 @@
 
     function peek(details) {
       return enqueue(async () => {
+        await prune(now());
         const key = incompleteResponseStorageKey(details?.requestId);
         if (!key) {
           return null;
         }
-        let candidate = memory.get(key) ?? null;
-        if (!candidate && durable) {
-          const stored = await durable.get(key);
-          candidate = stored?.[key] ?? null;
-        }
-        return candidate;
+        return memory.get(key) ?? null;
       });
     }
 
     function discard(details) {
       return enqueue(async () => {
+        await prune(now());
         const key = incompleteResponseStorageKey(details?.requestId);
         if (!key) {
           return;

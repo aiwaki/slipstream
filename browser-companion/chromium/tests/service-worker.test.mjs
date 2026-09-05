@@ -49,13 +49,13 @@ function createWorker({
       session: {
         get(key) {
           return Promise.resolve(
-            Object.hasOwn(sessionValues, key)
+            key === null ? { ...sessionValues } : Object.hasOwn(sessionValues, key)
               ? { [key]: sessionValues[key] }
               : {}
           );
         },
         remove(key) {
-          delete sessionValues[key];
+          for (const entry of Array.isArray(key) ? key : [key]) delete sessionValues[entry];
           return Promise.resolve();
         },
         set(entries) {

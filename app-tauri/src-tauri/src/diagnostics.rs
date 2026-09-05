@@ -98,11 +98,20 @@ pub(crate) fn redact_sensitive_text(input: &str) -> String {
             .filter(|ch| *ch == '"' || *ch == '\'');
         if let Some(quote) = quoted {
             pos += quote.len_utf8();
+            let mut escaped = false;
             while pos < input.len() {
                 let Some(ch) = input[pos..].chars().next() else {
                     break;
                 };
                 pos += ch.len_utf8();
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if ch == '\\' {
+                    escaped = true;
+                    continue;
+                }
                 if ch == quote {
                     break;
                 }

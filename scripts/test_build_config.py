@@ -246,6 +246,44 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
                         list(resources_dir.glob(".slipstreamd-stage.*")), []
                     )
 
+    def test_daemon_staging_preserves_previous_payload_before_swap(self) -> None:
+        """Validation failure is not evidence that this transaction owns target."""
+        builder = ROOT / "scripts/build_and_stage_daemon.sh"
+        for invalid_source in ("missing", "non_executable", "symlink"):
+            with self.subTest(source=invalid_source), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                (repo / "scripts").mkdir()
+                (repo / "spike").mkdir()
+                target = repo / "app-tauri/src-tauri/slipstreamd"
+                target.mkdir(parents=True)
+                (target / "slipstreamd").write_text("previous-daemon")
+                (target / "resource.dat").write_text("previous-resource")
+                staged_builder = repo / "scripts" / builder.name
+                staged_builder.write_bytes(builder.read_bytes())
+                fake_python = repo / "python3.13"
+                write_executable(fake_python, 'printf "3.13\\n"\n')
+                write_executable(repo / "spike/build_daemon.sh")
+                source = repo / "spike/dist/slipstreamd"
+                if invalid_source != "missing":
+                    source.mkdir(parents=True)
+                    if invalid_source == "symlink":
+                        (source / "slipstreamd").symlink_to(fake_python)
+                    else:
+                        (source / "slipstreamd").write_text("invalid-daemon")
+                env = os.environ.copy()
+                env.pop("SLIPSTREAM_BUILD_STAGE_TESTING", None)
+                env.pop("SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT", None)
+                env["SLIPSTREAM_PYTHON_313"] = str(fake_python)
+                result = subprocess.run(
+                    ["/bin/bash", str(staged_builder)], cwd=repo, env=env,
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(target.is_dir(), "validation failure deleted previous daemon")
+                self.assertEqual((target / "slipstreamd").read_text(), "previous-daemon")
+                self.assertEqual((target / "resource.dat").read_text(), "previous-resource")
+                self.assertEqual(list(target.parent.glob(".slipstreamd-stage.*")), [])
+
     def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
         config = json.loads((ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text())
         cargo = (ROOT / "app-tauri/src-tauri/Cargo.toml").read_text(encoding="utf-8")

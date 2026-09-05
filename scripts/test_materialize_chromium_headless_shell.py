@@ -94,6 +94,65 @@ class ChromiumHeadlessShellMaterializationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                     materialize.materialize(root / "output", archive)
 
+    def test_download_stops_at_reviewed_size_before_reading_unbounded_body(self) -> None:
+        class CountingResponse(io.BytesIO):
+            consumed = 0
+
+            def read(self, size=-1):
+                block = super().read(size)
+                self.consumed += len(block)
+                return block
+
+        response = CountingResponse(b"x" * 4096)
+        source = {
+            "archive": {
+                "url": "https://example.invalid/runtime.zip",
+                "length": 64,
+                "sha256": "0" * 64,
+            }
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            with (
+                mock.patch.object(materialize, "load_source", return_value=source),
+                mock.patch.object(materialize, "_download_tls_context"),
+                mock.patch.object(
+                    materialize.urllib.request, "urlopen", return_value=response
+                ) as download,
+            ):
+                with self.assertRaisesRegex(ValueError, "length mismatch"):
+                    materialize.materialize(output)
+            self.assertEqual(response.consumed, 65)
+            download.assert_called_once()
+            self.assertFalse(output.exists())
+
+    def test_download_accepts_exact_reviewed_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "runtime.zip"
+            digest = self._archive(archive)
+            source = {
+                "archive": {
+                    "url": "https://example.invalid/runtime.zip",
+                    "length": archive.stat().st_size,
+                    "sha256": digest,
+                },
+                "component": "headless-shell",
+                "version": "fixture",
+                "platform": "mac-arm64",
+                "license_path": "LICENSE.headless_shell",
+            }
+            with (
+                mock.patch.object(materialize, "load_source", return_value=source),
+                mock.patch.object(materialize, "_download_tls_context"),
+                mock.patch.object(
+                    materialize.urllib.request, "urlopen",
+                    return_value=io.BytesIO(archive.read_bytes()),
+                ),
+            ):
+                result = materialize.materialize(root / "output")
+            self.assertEqual(result["archive_sha256"], digest)
+
     def test_rejects_archive_length_mismatch_before_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

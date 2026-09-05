@@ -87,7 +87,19 @@ def materialize(output: Path, archive_override: Path | None = None) -> dict:
                         context=_download_tls_context(),
                     ) as response:
                         with archive.open("wb") as destination:
-                            shutil.copyfileobj(response, destination)
+                            remaining = archive_contract["length"]
+                            while True:
+                                # Bound transfer by the reviewed source, not a
+                                # remote Content-Length or eventual EOF. Read
+                                # one sentinel byte to detect excess, but never
+                                # write oversized content to the staging disk.
+                                block = response.read(min(64 * 1024, remaining + 1))
+                                if not block:
+                                    break
+                                if len(block) > remaining:
+                                    raise ValueError("headless-shell archive length mismatch")
+                                destination.write(block)
+                                remaining -= len(block)
                     last_error = None
                     break
                 except (OSError, urllib.error.URLError) as exc:

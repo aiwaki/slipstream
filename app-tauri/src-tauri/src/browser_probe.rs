@@ -1815,6 +1815,64 @@ fn remaining_timeout(deadline: Instant, cap: Duration) -> ProbeResult<Duration> 
         .ok_or_else(|| error("classification_deadline_exceeded"))
 }
 
+fn read_before(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    cap: Duration,
+) -> io::Result<usize> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "read deadline expired"))?;
+    stream.set_read_timeout(Some(remaining.min(cap)))?;
+    let received = stream.read(buffer)?;
+    if Instant::now() >= deadline {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "read deadline expired",
+        ));
+    }
+    Ok(received)
+}
+
+fn read_exact_before(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    cap: Duration,
+) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < buffer.len() {
+        match read_before(stream, &mut buffer[offset..], deadline, cap) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "incomplete frame",
+                ))
+            }
+            Ok(received) => offset += received,
+            Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
+            Err(failure)
+                if offset > 0
+                    && matches!(
+                        failure.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+            {
+                // The next poll cannot resume midway through a consumed frame
+                // header. Fail closed instead of treating it as an idle socket.
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "incomplete frame before deadline",
+                ));
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+    Ok(())
+}
+
 fn http_response_extent(response: &[u8]) -> ProbeResult<Option<(usize, usize)>> {
     let Some(body_offset) = response
         .windows(4)
@@ -1867,8 +1925,7 @@ fn http_get(port: u16, path: &str, deadline: Instant) -> ProbeResult<Vec<u8>> {
     let mut response = Vec::new();
     let mut chunk = [0_u8; 4_096];
     let (body_offset, response_length) = loop {
-        let received = stream
-            .read(&mut chunk)
+        let received = read_before(&mut stream, &mut chunk, deadline, CDP_CONNECT_TIMEOUT)
             .map_err(|_| error("devtools_http_invalid"))?;
         if received == 0 {
             return Err(error("devtools_http_invalid"));
@@ -1948,8 +2005,7 @@ fn websocket_connect(
     let mut response = Vec::new();
     let mut byte = [0_u8; 1];
     while response.len() <= 16 * 1024 {
-        stream
-            .read_exact(&mut byte)
+        read_exact_before(&mut stream, &mut byte, deadline, CDP_CONNECT_TIMEOUT)
             .map_err(|_| error("devtools_websocket_invalid"))?;
         response.push(byte[0]);
         if response.ends_with(b"\r\n\r\n") {
@@ -2017,7 +2073,7 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
             return Ok(None);
         }
         let mut first = [0_u8; 2];
-        match stream.read_exact(&mut first) {
+        match read_exact_before(stream, &mut first, deadline, Duration::from_millis(250)) {
             Ok(()) => {}
             Err(failure)
                 if matches!(
@@ -2037,14 +2093,12 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
         let mut length = u64::from(first[1] & 0x7f);
         if length == 126 {
             let mut encoded = [0_u8; 2];
-            stream
-                .read_exact(&mut encoded)
+            read_exact_before(stream, &mut encoded, deadline, Duration::from_millis(250))
                 .map_err(|_| error("devtools_unavailable"))?;
             length = u64::from(u16::from_be_bytes(encoded));
         } else if length == 127 {
             let mut encoded = [0_u8; 8];
-            stream
-                .read_exact(&mut encoded)
+            read_exact_before(stream, &mut encoded, deadline, Duration::from_millis(250))
                 .map_err(|_| error("devtools_unavailable"))?;
             length = u64::from_be_bytes(encoded);
         }
@@ -2055,8 +2109,7 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
             return Err(error("devtools_message_invalid"));
         }
         let mut payload = vec![0_u8; length];
-        stream
-            .read_exact(&mut payload)
+        read_exact_before(stream, &mut payload, deadline, Duration::from_millis(250))
             .map_err(|_| error("devtools_unavailable"))?;
         match opcode {
             0x0 | 0x1 => {
@@ -2079,6 +2132,68 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    fn drip_server(bytes: Vec<u8>) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            for byte in bytes {
+                if connection.write_all(&[byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        });
+        (port, server)
+    }
+
+    #[test]
+    fn http_slow_drip_cannot_extend_the_absolute_deadline() {
+        let (port, server) =
+            drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}".to_vec());
+        let start = Instant::now();
+        assert!(http_get(port, "/json/list", start + Duration::from_millis(150)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(800));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn websocket_payload_slow_drip_cannot_extend_the_absolute_deadline() {
+        let mut bytes = vec![0x81, 32];
+        bytes.extend_from_slice(b"{\"message\":\"slow frame payload!\"}");
+        let (port, server) = drip_server(bytes);
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let start = Instant::now();
+        assert!(websocket_read_json(&mut connection, start + Duration::from_millis(150)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(800));
+        drop(connection);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn partial_websocket_header_timeout_is_not_an_idle_poll() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(&[0x81]).unwrap();
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        ready_rx.recv().unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        release_tx.send(()).unwrap();
+        drop(connection);
+        server.join().unwrap();
+        assert!(result.is_err());
+    }
 
     fn job(now: u64) -> ProbeJob {
         ProbeJob {

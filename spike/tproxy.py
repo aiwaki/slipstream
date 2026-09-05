@@ -2477,8 +2477,8 @@ _transport_incomplete_client_first_evidence = {}  # host -> deque[(monotonic, ip
 _semantic_plain_confirming = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
-_route_preflight_cache = OrderedDict()  # host -> (expiry, outcome)
-_route_preflight_inflight = {}  # host -> concurrent Future[bool]
+_route_preflight_cache = OrderedDict()  # (root host, IP) or learned asset host -> (expiry, outcome)
+_route_preflight_inflight = {}  # (root host, IP) or asset host -> concurrent Future
 _route_preflight_window = deque()
 _route_preflight_consumed = OrderedDict()  # capability -> expiry monotonic
 _route_preflight_lock = threading.RLock()
@@ -6304,9 +6304,10 @@ def _prune_initial_route_preflights_locked(now):
     cutoff = now - ROUTE_PREFLIGHT_WINDOW
     while _route_preflight_window and _route_preflight_window[0] <= cutoff:
         _route_preflight_window.popleft()
-    for host, (expiry, _outcome) in tuple(_route_preflight_cache.items()):
+    for key, (expiry, _outcome) in tuple(_route_preflight_cache.items()):
+        host = key[0] if isinstance(key, tuple) else key
         if expiry <= now or not _auto_geph_base_host_allowed(host):
-            _route_preflight_cache.pop(host, None)
+            _route_preflight_cache.pop(key, None)
     while len(_route_preflight_cache) > ROUTE_PREFLIGHT_CACHE_MAX:
         _route_preflight_cache.popitem(last=False)
     for capability, expiry in tuple(_route_preflight_consumed.items()):
@@ -6641,7 +6642,7 @@ def _prove_preflight_owned_geph_route(
     )
 
 
-def _commit_preflight_owned_geph_proof(proof, owner_epoch):
+def _commit_preflight_owned_geph_proof(proof, owner_epoch, *, owner_key=None):
     """Commit a still-owned proof on the event-loop side of cancellation."""
     now_monotonic = time.monotonic()
     now_unix_ms = int(time.time() * 1000)
@@ -6675,8 +6676,12 @@ def _commit_preflight_owned_geph_proof(proof, owner_epoch):
         or not _auto_geph_persistent_learning_allowed(proof.host)
     ):
         return False
+    if owner_key is None:
+        owner_key = proof.host
+    if (owner_key[0] if isinstance(owner_key, tuple) else owner_key) != proof.host:
+        return False
     with _route_preflight_lock:
-        if _route_preflight_inflight.get(proof.host) is not owner_epoch:
+        if _route_preflight_inflight.get(owner_key) is not owner_epoch:
             return False
     with _auto_geph_lock:
         if (
@@ -6937,11 +6942,12 @@ async def _run_bootstrap_asset_preflight(
         return True, "owned_geph"
 
     owner = h == parent
+    owner_key = _route_preflight_root_key(parent, parent_ip) if owner else h
     future = None
     owner_epoch = None
     if owner:
         with _route_preflight_lock:
-            owner_epoch = _route_preflight_inflight.get(h)
+            owner_epoch = _route_preflight_inflight.get(owner_key)
         if not isinstance(owner_epoch, Future):
             asset.forget()
             return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
@@ -6949,15 +6955,10 @@ async def _run_bootstrap_asset_preflight(
         now = time.monotonic()
         with _route_preflight_lock:
             _prune_initial_route_preflights_locked(now)
-            cached = _route_preflight_cache.get(h)
-            if cached is not None:
-                _route_preflight_cache.move_to_end(h)
-                asset.forget()
-                selected = bool(
-                    cached[1] == "owned_geph"
-                    and _auto_geph_learned_exact_host(h)
-                )
-                return selected, cached[1]
+            # A root response (or another asset) on this host says nothing
+            # about this exact transient object.  Only a committed learned
+            # route, checked above, has host-wide authority.  Keep admission
+            # coalesced by host, but never consume root health as child proof.
             future = _route_preflight_inflight.get(h)
             if future is None:
                 if (
@@ -6982,18 +6983,13 @@ async def _run_bootstrap_asset_preflight(
                 )
                 if shared_result is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
                     return False, shared_result
-                selected = bool(shared_result)
-                with _route_preflight_lock:
-                    completed = _route_preflight_cache.get(h)
-                if not selected and completed is None:
-                    return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
-                return (
-                    selected,
-                    "owned_geph"
-                    if selected
-                    else completed[1]
-                    if completed is not None
-                    else SEMANTIC_OUTCOME_TERMINAL_ERROR,
+                selected = bool(
+                    shared_result and _auto_geph_learned_exact_host(h)
+                )
+                # The owner may have observed a different root/object.  Its
+                # negative or healthy result cannot clear this waiting child.
+                return (True, "owned_geph") if selected else (
+                    False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
                 )
             except (asyncio.TimeoutError, RuntimeError):
                 return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
@@ -7023,7 +7019,9 @@ async def _run_bootstrap_asset_preflight(
         if cache_outcome is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
             publish_cache = False
             return False, cache_outcome
-        selected = _commit_preflight_owned_geph_proof(proof, owner_epoch)
+        selected = _commit_preflight_owned_geph_proof(
+            proof, owner_epoch, owner_key=owner_key,
+        )
         if not selected and cache_outcome == "owned_geph":
             cache_outcome = SEMANTIC_OUTCOME_NAVIGATION_PENDING
         return bool(selected), (
@@ -7037,21 +7035,16 @@ async def _run_bootstrap_asset_preflight(
     finally:
         if h != parent:
             completed_at = time.monotonic()
-            ttl = (
-                AUTO_GEPH_TTL
-                if selected
-                else ROUTE_PREFLIGHT_CACHE_TTL
-                if cache_outcome == SEMANTIC_OUTCOME_USABLE
-                else ROUTE_PREFLIGHT_RETRY_TTL
-            )
             with _route_preflight_lock:
-                if (
-                    publish_cache
-                    and cache_outcome != SEMANTIC_OUTCOME_TERMINAL_ERROR
-                ):
+                # Object identity is deliberately ephemeral.  A complete
+                # child must not mark the whole CDN healthy, nor may an
+                # unresolved child suppress a later independent proof while
+                # the owned backend recovers.  Only committed routing proof
+                # is safely reusable for every object on this exact host.
+                if publish_cache and selected:
                     _route_preflight_cache[h] = (
-                        completed_at + ttl,
-                        "owned_geph" if selected else cache_outcome,
+                        completed_at + AUTO_GEPH_TTL,
+                        "owned_geph",
                     )
                     _route_preflight_cache.move_to_end(h)
                 _prune_initial_route_preflights_locked(completed_at)
@@ -7159,6 +7152,14 @@ def _select_route_preflight_bootstrap_asset(assets, parent_host):
     return selected, selected_is_cross_origin
 
 
+def _route_preflight_root_key(host, ip):
+    """Root health belongs to the exact system/PF endpoint that was probed."""
+    try:
+        return normalize_host(host), str(ipaddress.ip_address(ip))
+    except (TypeError, ValueError):
+        return None
+
+
 async def _run_initial_route_preflight(
     host,
     ip,
@@ -7241,13 +7242,14 @@ async def _run_initial_route_preflight(
     ):
         return None
 
+    key = _route_preflight_root_key(h, str(address))
     job = _new_direct_route_preflight_job(h)
     owner = False
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
-        cached = _route_preflight_cache.get(h)
+        cached = _route_preflight_cache.get(key)
         if cached is not None:
-            _route_preflight_cache.move_to_end(h)
+            _route_preflight_cache.move_to_end(key)
             if cached[1] == "owned_geph" and _auto_geph_learned_exact_host(h):
                 return _owned_geph_preflight_claim(
                     h,
@@ -7255,7 +7257,7 @@ async def _run_initial_route_preflight(
                     handoff_deadline,
                 )
             return None
-        future = _route_preflight_inflight.get(h)
+        future = _route_preflight_inflight.get(key)
         if future is None:
             if (
                 len(_route_preflight_inflight) >= ROUTE_PREFLIGHT_CONCURRENT_MAX
@@ -7263,7 +7265,7 @@ async def _run_initial_route_preflight(
             ):
                 return None
             future = Future()
-            _route_preflight_inflight[h] = future
+            _route_preflight_inflight[key] = future
             _route_preflight_window.append(now)
             owner = True
     if not owner:
@@ -7462,7 +7464,9 @@ async def _run_initial_route_preflight(
                         provenance_assessor=provenance_assessor,
                         provenance_already_accepted=True,
                     )
-                selected = _commit_preflight_owned_geph_proof(proof, future)
+                selected = _commit_preflight_owned_geph_proof(
+                    proof, future, owner_key=key,
+                )
                 if selected:
                     publish_cache = True
                     cache_outcome = "owned_geph"
@@ -7522,8 +7526,9 @@ async def _run_initial_route_preflight(
             ):
                 # The root itself was usable, but a critical bootstrap object
                 # was not independently cleared.  Do not hide that unresolved
-                # child behind a ten-minute healthy-root cache.
+                # child behind either a healthy-root or retry cache.
                 cache_outcome = asset_outcome
+                publish_cache = False
     except asyncio.CancelledError:
         publish_cache = False
         raise
@@ -7548,13 +7553,13 @@ async def _run_initial_route_preflight(
         )
         with _route_preflight_lock:
             if publish_cache:
-                _route_preflight_cache[h] = (
+                _route_preflight_cache[key] = (
                     completed_at + ttl,
                     "owned_geph" if selected else cache_outcome,
                 )
-                _route_preflight_cache.move_to_end(h)
+                _route_preflight_cache.move_to_end(key)
             _prune_initial_route_preflights_locked(completed_at)
-            _route_preflight_inflight.pop(h, None)
+            _route_preflight_inflight.pop(key, None)
             if not future.done():
                 future.set_result(
                     _ROUTE_PREFLIGHT_LOCAL_RECOVERY
@@ -8339,13 +8344,14 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
     return None
 
 
-def _quic_route_tcp_fallback(host, *, now=None):
+def _quic_route_tcp_fallback(host, ip=None, *, now=None):
     """Move only route-relevant QUIC first contact onto the TCP evidence path.
 
     A fresh unknown exact hostname has no trustworthy semantic route decision
     yet. Its one exact QUIC flow falls back to TCP so the existing bounded
     direct preflight can classify it before any Geph route is possible. A fresh
-    usable/challenge result restores QUIC for that hostname. Learned exact
+    usable/challenge result restores QUIC only for that host and destination IP.
+    A complete response on one CDN address cannot clear another. Learned exact
     hosts keep falling back because the owned Geph route is TCP-only.
     """
     h = normalize_host(host)
@@ -8377,9 +8383,10 @@ def _quic_route_tcp_fallback(host, *, now=None):
     now = time.monotonic() if now is None else float(now)
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
-        cached = _route_preflight_cache.get(h)
+        key = _route_preflight_root_key(h, ip)
+        cached = _route_preflight_cache.get(key) if key is not None else None
         if cached is not None:
-            _route_preflight_cache.move_to_end(h)
+            _route_preflight_cache.move_to_end(key)
     return not bool(
         cached
         and cached[0] > now
@@ -11745,7 +11752,8 @@ def _quic_initial_tcp_fallback_response(
 ):
     """Return one exact-flow VN response only when TCP classification is due."""
     host = _observe_quic_initial_sni(initial_flows, flow_key, payload)
-    if not _quic_route_tcp_fallback(host, now=now):
+    destination_ip = flow_key[-2] if len(flow_key) in {4, 5} else None
+    if not _quic_route_tcp_fallback(host, destination_ip, now=now):
         return None
     now = time.monotonic() if now is None else now
     cutoff = now - QUIC_TCP_FALLBACK_FLOW_IDLE
@@ -17760,7 +17768,7 @@ def _cleanup_install_incomplete(reason):
     return False
 
 
-def _remove_daemon_status_artifacts():
+def _remove_daemon_status_artifacts(*, preserve_attestation=False):
     for path in (STATUS_PATH + ".tmp", STATUS_PATH):
         try:
             os.remove(path)
@@ -17768,7 +17776,9 @@ def _remove_daemon_status_artifacts():
             pass
         except OSError:
             return False
-    attestation_clean = _remove_install_attestation_artifacts()
+    attestation_clean = (
+        True if preserve_attestation else _remove_install_attestation_artifacts()
+    )
     semantic_socket_clean = (
         semantic_route_signal_runtime.remove_stale_owned_socket(
             SEMANTIC_SIGNAL_SOCKET_PATH
@@ -17794,7 +17804,9 @@ def _remove_daemon_status_artifacts():
     ))
 
 
-def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
+def _disable_and_cleanup_install(
+    port=PROXY_PORT, remove_runtime=True, *, preserve_attestation=False,
+):
     status = _daemon_status_record() or {}
     pid = status.get("pid")
     disable_result = _run("/bin/launchctl", "disable", _launchd_target())
@@ -17854,7 +17866,12 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     pf_release_result = _pf_release_enable_token()
     if pf_release_result is not None and pf_release_result.returncode != 0:
         return _cleanup_install_incomplete("owned PF enable token was not released")
-    if not _remove_daemon_status_artifacts():
+    status_clean = (
+        _remove_daemon_status_artifacts(preserve_attestation=True)
+        if preserve_attestation
+        else _remove_daemon_status_artifacts()
+    )
+    if not status_clean:
         return _cleanup_install_incomplete("daemon status could not be removed")
     listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
     if not listener_clean:
@@ -18130,6 +18147,25 @@ def do_install(port):
     print(f"logs:      tail -f {LOG_PATH}")
     print(f"uninstall: {uninstall_hint}")
     return True
+
+
+def do_stop(port=PROXY_PORT):
+    """Durably stop interception without uninstalling the trusted payload.
+
+    The existing cleanup transaction disables KeepAlive before bootout and
+    verifies owned process/listener absence.  Keep configuration, learned
+    state, the payload, plist and immutable install witness for an explicit
+    later Restart Proxy.  The user-level owner stops its Geph only after this
+    succeeds, so existing daemon sessions can finish their bounded drain.
+    """
+    clean = _disable_and_cleanup_install(
+        port, remove_runtime=False, preserve_attestation=True,
+    )
+    if clean:
+        print("stopped + Slipstream pf anchor cleared; installation retained")
+    else:
+        print("warning: Slipstream stop incomplete; installation retained", file=sys.stderr)
+    return clean
 
 
 def do_uninstall():
@@ -18483,6 +18519,8 @@ def main():
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
     ap.add_argument("--uninstall", action="store_true",
                     help="remove the LaunchDaemon and clear private pf state")
+    ap.add_argument("--stop", action="store_true",
+                    help="disable and stop the LaunchDaemon without uninstalling")
     ap.add_argument("--recover-network", action="store_true",
                     help=argparse.SUPPRESS)
     ap.add_argument("--status", action="store_true",
@@ -18500,6 +18538,8 @@ def main():
     )
     args = ap.parse_args()
     VERBOSE = args.verbose
+    if args.stop and any((args.install, args.uninstall, args.recover_network)):
+        ap.error("--stop cannot be combined with another lifecycle action")
 
     if args.transport_mechanics_selftest:
         protected = bool(
@@ -18573,6 +18613,8 @@ def main():
         sys.exit(0 if do_install(args.port) else 1)
     if args.uninstall:
         sys.exit(0 if do_uninstall() else 1)
+    if args.stop:
+        sys.exit(0 if do_stop(args.port) else 1)
     if args.recover_network:
         sys.exit(0 if recover_owned_network_state() else 1)
 
