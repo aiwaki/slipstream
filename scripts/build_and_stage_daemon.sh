@@ -47,6 +47,13 @@ if [[ "$("$python_313" -c 'import sys; print(f"{sys.version_info.major}.{sys.ver
   exit 1
 fi
 
+# Fail before the expensive freeze if the separately materialized, pinned
+# Chromium source is incomplete. This is read-only and never downloads a fix;
+# the final exact-bundle verifier remains mandatory after Tauri packages it.
+"$python_313" "$script_dir/materialize_chromium_headless_shell.py" \
+  --output "$repo_root/app-tauri/src-tauri/chromium-headless-shell" \
+  --verify-only > /dev/null
+
 PYTHON="$python_313" "$repo_root/spike/build_daemon.sh"
 
 source_dir="$repo_root/spike/dist/slipstreamd"

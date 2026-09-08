@@ -781,3 +781,50 @@ timestamps, or the two lifecycle-locked fallback call sites. Visible conflicting
 owners still veto readiness; fixed-path root-file authentication, freshness,
 PF and exact process/install checks remain. Review and ephemeral socket tests
 do not qualify the installed application, ordinary browsers, or full Quit.
+
+### Incomplete Chromium staging caught by canonical verifier — 2026-09-08
+
+Listener correction committed as `dd5be8e8d33d33e712ebdec639bbbd873a2a76b6`.
+The clean-source `npm run build:local` compiled and produced app/DMG, but
+`verify:bundle:local` correctly returned failure because packaged
+`Contents/Resources/chromium-headless-shell/chrome-headless-shell` was absent.
+Complete log: `output/post-listener-bundle-20260908.ju62L0/build-local.log`,
+`BUILD_LOCAL_EXIT=1`. Context-mode's background launcher reported timeout while
+the build continued; the process/log were checked instead of dispatching twice.
+No incomplete artifact was installed or described as verified.
+
+Both source staging and the bundle contained the same remaining 16 entries.
+Production configuration still included Chromium resources and Geph/daemon
+were packaged, so the test-only Tauri override/cache hypothesis is unsupported.
+The source directory timestamp was Sep-6 02:58 local, with the resource files
+dated Sep-5; this does not identify who removed the executable. The existing
+hook only rebuilt the daemon and lacked an early Chromium prerequisite check.
+
+The installed app and previous-app backups still contain the runtime. The
+installed executable SHA-256 matches both the saved pinned materialization
+evidence and manifest exactly:
+`650f70c6d3e4a902d2ad6d91bb7cc15a08aa0720487b28324563b0f61c219058`.
+`diff -qr` showed that executable was the sole difference between the complete
+installed Chromium tree and source staging. Only that verified file was copied
+back with metadata preserved. Rehash, full tree comparison and arm64 inspection
+passed. No download, installed-app edit or private-backup mutation occurred.
+Add a narrow fail-fast build prerequisite check before another canonical build;
+the final whole-bundle verifier remains mandatory.
+
+The existing materializer now has a read-only `--verify-only` path. Before
+daemon freeze, the build hook requires a non-symlink runtime directory and
+regular required files, executable permission, a bounded valid manifest whose
+source fields match the pinned contract, and the executable hash recorded by
+materialization. This is input-integrity validation, not a new independent
+upstream attestation. It does not execute the browser, download, repair or
+relax the final verifier. Test fixtures exercise the real guard without a
+test-mode bypass, including rejection before the daemon build starts.
+
+Focused command (prefix `rtk proxy`):
+`.audit-venv/bin/python -m pytest -q scripts/test_materialize_chromium_headless_shell.py scripts/test_build_config.py -k 'verify_only or app_build_rebuilds_and_hash_checks_the_frozen_daemon or daemon_staging_preserves_previous_payload_before_swap' --tb=short`
+passed **5 tests and 28 subtests**, 59 deselected, 2.39s. This result was returned
+by the test tool session, not saved to a separate logfile; do not invent one or
+rerun merely to create a log. Canonical Python 3.13 `--verify-only` also passed
+on the restored real staging tree. `git diff --check` is clean.
+Independent final guard review found no actionable blocker and confirmed the
+failure occurs before daemon freeze without altering the previous stage.

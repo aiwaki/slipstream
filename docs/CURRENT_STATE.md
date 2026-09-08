@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (listener fix committed; incomplete packaging caught):
+listener source is `dd5be8e8d33d33e712ebdec639bbbd873a2a76b6`, with 47 Python
+and 16 matching Rust tests passing and independent review clear. Its one
+canonical build compiled successfully but the final bundle verifier failed:
+the staged Chromium tree lacked `chrome-headless-shell` before packaging.
+Do not install that incomplete app/DMG. Tauri copied the other resources;
+there is no evidence of a Tauri configuration/cache failure or who removed
+the staging executable. Log: `output/post-listener-bundle-20260908.ju62L0/build-local.log`.
+The unchanged installed app retains the exact pinned executable (`650f70c6...`).
+All other Chromium files matched byte-for-byte; copying only that verified
+file restored the staging tree, which now fully matches the installed tree
+and passes arm64 inspection. No installed file was changed. The narrow pre-build
+input guard now rejects missing/mismatched Chromium before daemon freeze.
+Its affected selection passes 5 tests and 28 subtests (59 deselected), the
+real staging check passes, and independent final review found no blocker.
+Next: commit and rebuild once with corrected inputs. No listener/Rust/full-suite
+rerun is needed.
+Keep original private backups; learning restoration and physical gates remain.
+
 Update 2026-09-08 (listener correction tests green; no new installation):
 audit HEAD remains `6b7bf54`, with the preserved uncommitted witness correction.
 Live main `2780de4` and PR #373 head `513484a` are unchanged; required CI

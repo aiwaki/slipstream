@@ -23,6 +23,102 @@ class ChromiumHeadlessShellMaterializationTests(unittest.TestCase):
                 bundle.writestr(root + "../escape", b"bad")
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
+    def _verified_runtime(self, root: Path) -> tuple[Path, dict, dict]:
+        archive = root / "runtime.zip"
+        digest = self._archive(archive)
+        source = materialize.load_source()
+        source["archive"]["sha256"] = digest
+        source["archive"]["length"] = archive.stat().st_size
+        output = root / "runtime"
+        with mock.patch.object(materialize, "load_source", return_value=source):
+            manifest = materialize.materialize(output, archive)
+        return output, source, manifest
+
+    def test_verify_only_accepts_complete_runtime_without_writes_or_downloads(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output, source, manifest = self._verified_runtime(Path(temporary))
+
+            def snapshot() -> dict:
+                return {
+                    path.name: (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_mode)
+                    for path in output.iterdir()
+                }
+
+            before = snapshot()
+            with (
+                mock.patch.object(materialize, "load_source", return_value=source),
+                mock.patch.object(materialize, "materialize", side_effect=AssertionError("must not materialize")),
+                mock.patch.object(materialize.urllib.request, "urlopen", side_effect=AssertionError("must not download")),
+                mock.patch("sys.stdout", new_callable=io.StringIO) as printed,
+            ):
+                self.assertEqual(materialize.main(["--output", str(output), "--verify-only"]), 0)
+            self.assertEqual(json.loads(printed.getvalue()), manifest)
+            self.assertEqual(snapshot(), before)
+
+    def test_verify_only_rejects_incomplete_or_unpinned_runtime(self) -> None:
+        cases = (
+            "missing_binary", "symlink_binary", "directory_binary", "non_executable",
+            "changed_binary", "missing_license", "symlink_license", "missing_about",
+            "symlink_runtime", "missing_manifest", "symlink_manifest", "nonobject_manifest",
+            "oversized_manifest", "malformed_manifest", "invalid_digest",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output, source, manifest = self._verified_runtime(root)
+                executable = output / "chrome-headless-shell"
+                metadata = output / "manifest.json"
+                if case in {"missing_binary", "symlink_binary", "directory_binary"}:
+                    executable.unlink()
+                    if case == "symlink_binary":
+                        executable.symlink_to(output / "ABOUT")
+                    elif case == "directory_binary":
+                        executable.mkdir()
+                elif case == "non_executable":
+                    executable.chmod(0o600)
+                elif case == "changed_binary":
+                    executable.write_bytes(b"changed")
+                elif case in {"missing_license", "symlink_license", "missing_about"}:
+                    path = output / ("ABOUT" if case == "missing_about" else "LICENSE.headless_shell")
+                    path.unlink()
+                    if case == "symlink_license":
+                        path.symlink_to(output / "ABOUT")
+                elif case == "symlink_runtime":
+                    alias = root / "alias"
+                    alias.symlink_to(output, target_is_directory=True)
+                    output = alias
+                elif case in {"missing_manifest", "symlink_manifest"}:
+                    metadata.unlink()
+                    if case == "symlink_manifest":
+                        metadata.symlink_to(output / "ABOUT")
+                elif case == "nonobject_manifest":
+                    metadata.write_text("[]")
+                elif case == "oversized_manifest":
+                    metadata.write_text(" " * (16 * 1024 + 1))
+                elif case == "malformed_manifest":
+                    metadata.write_text("{")
+                else:
+                    manifest["executable_sha256"] = "invalid"
+                    metadata.write_text(json.dumps(manifest))
+                with mock.patch.object(materialize, "load_source", return_value=source):
+                    with self.assertRaises((OSError, ValueError)):
+                        materialize.verify_existing(output)
+
+    def test_verify_only_requires_every_manifest_source_field_to_match(self) -> None:
+        fields = (
+            "schema_version", "component", "version", "platform", "archive_url",
+            "archive_length", "archive_sha256", "license",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output, source, manifest = self._verified_runtime(Path(temporary))
+            for field in fields:
+                with self.subTest(field=field):
+                    changed = {**manifest, field: False if field == "schema_version" else "wrong"}
+                    (output / "manifest.json").write_text(json.dumps(changed))
+                    with mock.patch.object(materialize, "load_source", return_value=source):
+                        with self.assertRaisesRegex(ValueError, "does not match pinned source"):
+                            materialize.verify_existing(output)
+
     def test_repository_source_contract_is_exact_and_canonical(self) -> None:
         source = materialize.load_source()
 

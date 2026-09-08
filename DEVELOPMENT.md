@@ -125,6 +125,11 @@ must also be materialized with
 `scripts/materialize_chromium_headless_shell.py` into
 `app-tauri/src-tauri/chromium-headless-shell`. The tracked README alone is not a
 runtime. Do not use test-only resource overrides for a product build.
+The canonical daemon staging hook first performs a read-only Chromium input
+check: required regular files, executable permission, manifest/source contract
+and executable digest must match before the expensive daemon freeze begins.
+It never silently downloads or repairs missing inputs. This catches incomplete
+staging early; the final whole-bundle verifier is still required.
 
 Then build the app without updater signing:
 

@@ -71,6 +71,48 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def verify_existing(output: Path) -> dict:
+    """Read-only prerequisite check; never fetch, repair or execute the runtime."""
+    source = load_source()
+    if output.is_symlink() or not output.is_dir():
+        raise ValueError("headless-shell runtime directory is missing or symlinked")
+    for name in sorted(REQUIRED | {"manifest.json"}):
+        path = output / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"headless-shell prerequisite is not a regular file: {name}")
+    executable = output / "chrome-headless-shell"
+    if not os.access(executable, os.X_OK):
+        raise ValueError("headless-shell prerequisite is not executable")
+    manifest_path = output / "manifest.json"
+    if manifest_path.stat().st_size > 16 * 1024:
+        raise ValueError("headless-shell manifest is oversized")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("headless-shell manifest is not an object")
+    expected = {
+        "schema_version": 1,
+        "component": source["component"],
+        "version": source["version"],
+        "platform": source["platform"],
+        "archive_url": source["archive"]["url"],
+        "archive_length": source["archive"]["length"],
+        "archive_sha256": source["archive"]["sha256"],
+        "license": source["license_path"],
+    }
+    for key, value in expected.items():
+        if type(manifest.get(key)) is not type(value) or manifest[key] != value:
+            raise ValueError(f"headless-shell manifest does not match pinned source: {key}")
+    digest = manifest.get("executable_sha256")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or _hash(executable) != digest
+    ):
+        raise ValueError("headless-shell source executable SHA-256 mismatch")
+    return manifest
+
+
 def materialize(output: Path, archive_override: Path | None = None) -> dict:
     source = load_source()
     archive_contract = source["archive"]
@@ -161,7 +203,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args(argv)
+    if args.verify_only:
+        if args.archive is not None:
+            parser.error("--verify-only cannot be combined with --archive")
+        try:
+            manifest = verify_existing(args.output)
+        except (OSError, ValueError) as error:
+            print(f"Chromium prerequisite verification failed: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(manifest, sort_keys=True))
+        return 0
     print(json.dumps(materialize(args.output, args.archive), sort_keys=True))
     return 0
 

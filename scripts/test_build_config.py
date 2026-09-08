@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,6 +68,38 @@ ACTION_PINS = {
 def write_executable(path: Path, body: str = "exit 0\n") -> None:
     path.write_text(f"#!/bin/bash\nset -eu\n{body}", encoding="utf-8")
     path.chmod(0o755)
+
+
+def stage_chromium_prerequisite_fixture(repo: Path) -> None:
+    source_path = Path("vendor/chromium-headless-shell/SOURCE.json")
+    (repo / source_path).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / source_path, repo / source_path)
+    helper = Path("scripts/materialize_chromium_headless_shell.py")
+    shutil.copyfile(ROOT / helper, repo / helper)
+    source = json.loads((repo / source_path).read_text())
+    runtime = repo / "app-tauri/src-tauri/chromium-headless-shell"
+    runtime.mkdir(parents=True, exist_ok=True)
+    executable = runtime / "chrome-headless-shell"
+    executable.write_bytes(b"fixture-chromium")
+    executable.chmod(0o755)
+    (runtime / "LICENSE.headless_shell").write_text("fixture-license")
+    (runtime / "ABOUT").write_text("fixture-about")
+    (runtime / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "component": source["component"],
+        "version": source["version"],
+        "platform": source["platform"],
+        "archive_url": source["archive"]["url"],
+        "archive_length": source["archive"]["length"],
+        "archive_sha256": source["archive"]["sha256"],
+        "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "license": source["license_path"],
+    }))
+
+
+def write_build_python_fixture(path: Path) -> None:
+    write_executable(path, 'if [[ "$1" == "-c" ]]; then printf "3.13\\n"; '
+                     f'else exec {shlex.quote(sys.executable)} "$@"; fi\n')
 
 
 class BuildConfigTests(unittest.TestCase):
@@ -166,7 +200,8 @@ class BuildConfigTests(unittest.TestCase):
             staged_builder.write_bytes(builder.read_bytes())
             staged_builder.chmod(0o755)
             fake_python = repo / "python3.13"
-            write_executable(fake_python, 'printf "3.13\\n"\n')
+            write_build_python_fixture(fake_python)
+            stage_chromium_prerequisite_fixture(repo)
             write_executable(
                 spike_dir / "build_daemon.sh",
                 """root="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -194,6 +229,20 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
                 )
 
             seed_preceding_daemon()
+            # The missing Chromium binary must fail before build_daemon.sh
+            # creates even its stub output, without replacing the old daemon.
+            chromium = resources_dir / "chromium-headless-shell/chrome-headless-shell"
+            chromium.unlink()
+            failed_prerequisite = subprocess.run(
+                [str(staged_builder)], cwd=repo / "app-tauri", env=base_env,
+                check=False, capture_output=True, text=True, timeout=5,
+            )
+            self.assertNotEqual(failed_prerequisite.returncode, 0)
+            self.assertIn("Chromium prerequisite verification failed", failed_prerequisite.stderr)
+            self.assertFalse((spike_dir / "dist").exists(), "freeze ran before prerequisite check")
+            self.assertEqual((target / "slipstreamd").read_text(), "preceding-daemon\n")
+            self.assertEqual(list(resources_dir.glob(".slipstreamd-stage.*")), [])
+            stage_chromium_prerequisite_fixture(repo)
             completed = subprocess.run(
                 [str(staged_builder)],
                 cwd=repo / "app-tauri",
@@ -269,7 +318,8 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
                 staged_builder = repo / "scripts" / builder.name
                 staged_builder.write_bytes(builder.read_bytes())
                 fake_python = repo / "python3.13"
-                write_executable(fake_python, 'printf "3.13\\n"\n')
+                write_build_python_fixture(fake_python)
+                stage_chromium_prerequisite_fixture(repo)
                 write_executable(repo / "spike/build_daemon.sh")
                 source = repo / "spike/dist/slipstreamd"
                 if invalid_source != "missing":
