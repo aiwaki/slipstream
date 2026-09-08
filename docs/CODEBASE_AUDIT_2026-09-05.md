@@ -1381,3 +1381,31 @@ gated installation and fresh ordinary Chrome/Safari evidence. Do not replay
 prior replacement transactions or erase learned state/backups.
 No live network/browser request, build, installation, service restart, learning
 reset, full suite, protected workflow or soak is part of this source correction.
+
+#### AUD-14 exact bundle and replacement preparation — 2026-09-08
+
+Following the user's readiness confirmation, the canonical local build ran
+once on clean committed source `10e2cd6186303d89ad6f49905460e24d7afd1366`
+and exited0 at13:54:20Z. The canonical automatic verifier returned overall
+and build_chain PASS; fresh/staged/bundled daemon SHA-256 all equal
+`bcaf262dae85ed82c1bdc7e0b837460f5fa3398b422f546d28ce2f78d6d098c8`.
+Complete app tree SHA-256 is
+`82b81cd9fc9e5070085db2ea1933d5c765766897ff2364ab208cbd7ad70c6a47`.
+The full staged copy `/Applications/.Slipstream.incoming-dHZffB.app` also
+passed the canonical verifier. Signature is valid ad-hoc, not notarized.
+Evidence directory: `output/aud14-bundle-20260908.dHZffB`; build-run/exit
+metadata, private build log, extracted verification JSON, and staged-copy
+verification log are retained there. No unchanged tests or soak were rerun.
+
+User performed normal Quit before replacement. At14:02Z, read-only inspection
+found no owned process, both root/owned-Geph jobs absent, root label disabled,
+and status/status.tmp absent; external Geph854/874 were left untouched.
+The newly reviewed script `replace-exact-bundle.sh` in that evidence directory
+has SHA-256 `b046c0aca303fdf745de420c68715455dd7b7f4c0afce1c49ab5d2f976db40ba`.
+`bash -n` passed and the parent reviewed its full contents and exact delta
+against the already-used nBz5za transaction. Changes bind the new identities
+and unique dHZffB paths and require preservation of all three prior backup
+generations. Stable privileged service/process/1080/1443/PF absence, protected
+incoming verification, current private learning snapshot, and fail-closed
+installer/rollback boundaries remain unchanged. Execution and browser proof
+are still pending; these build checks do not establish Aikido recovery.

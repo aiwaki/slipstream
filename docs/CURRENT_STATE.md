@@ -10,6 +10,34 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 14:02 UTC (AUD-14 bundle verified; user Quit complete):
+one canonical `npm run build:local` on clean exact source
+`10e2cd6186303d89ad6f49905460e24d7afd1366` exited0 at13:54:20Z;
+automatic overall/build_chain PASS. Fresh/staged/bundled daemon SHA-256:
+`bcaf262dae85ed82c1bdc7e0b837460f5fa3398b422f546d28ce2f78d6d098c8`.
+App tree `82b81cd9fc9e5070085db2ea1933d5c765766897ff2364ab208cbd7ad70c6a47`.
+The complete `/Applications/.Slipstream.incoming-dHZffB.app` copy separately
+passes the canonical verifier. Evidence: `output/aud14-bundle-20260908.dHZffB/`
+(`build-exit.json`, `build-verification.json`, `incoming-verification.log`).
+Ad-hoc signature only; unnotarized. Installed build is still `dc2937bc`.
+User authorized proceeding and performed normal Quit. Read-only observation:
+no owned processes, both launchd jobs absent, root label disabled, status and
+status.tmp absent. External Geph854/874 untouched. Privileged port/PF absence
+must still be proven by the transaction. New reviewed one-shot script:
+`output/aud14-bundle-20260908.dHZffB/replace-exact-bundle.sh`, SHA-256
+`b046c0aca303fdf745de420c68715455dd7b7f4c0afce1c49ab5d2f976db40ba`.
+It binds old/new full app and daemon identities, preserves all three previous
+backup generations, snapshots current learning without reset, and requires
+three stable privileged absence samples. New backup paths:
+`/Applications/.Slipstream.before-dHZffB.app` and
+`/private/var/tmp/slipstream-replacement-20260908.dHZffB`.
+Next: execute once with native macOS authorization, inspect completion, run
+canonical installed verifier, then normal app launch and ordinary Aikido
+evidence. Do not replay any transaction on uncertain outcome. No tests or
+soaks repeated; build success is not site success. Main`2780de4` and PR373
+OPEN/exact`513484a` required PASS rechecked. This checkpoint is docs-only;
+the product artifact remains bound to exact source`10e2cd6`.
+
 Update 2026-09-08 (AUD-14 source correction; installed build unchanged):
 the user authorized fixing the diagnosed child admission starvation. Source
 now separates execution leases from root coalescing/child proof Futures.
