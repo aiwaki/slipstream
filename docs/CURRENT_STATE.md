@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 12:02 UTC (user navigation still fails; fresh export needed):
+user accidentally opened Aikido in Safari first, then Chrome; reports unchanged
+failure and supplies a Chrome screenshot with only the loading spinner. Keep
+that order in the evidence; it is not an isolated Chrome-first comparison.
+Installed daemon2946 remains active; Geph is up/owned/no conflict with learned1/
+pending0, which does not identify the learned host or prove critical resources.
+The default diagnostic file still has mtime 10:31:37Z, predating the new bundle
+and navigation; do not interpret it as this attempt's child record. Next:
+built-in Copy Diagnostics with local authorization, without another reload,
+then inspect the fresh bounded child decisions. No speculative routing changes,
+new tests, build, runtime mutation or browser navigation occurred in response.
+
 Update 2026-09-08 11:58 UTC (diagnostic replacement verified; browser UI blocked):
 the native macOS-authorized `nBz5za` transaction exited0 and reported exact
 `dc2937bc` app installed/root daemon hash matched, without learning reset.

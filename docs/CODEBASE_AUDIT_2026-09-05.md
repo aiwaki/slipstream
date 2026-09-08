@@ -1246,6 +1246,18 @@ Chrome Aikido navigation and invoke Copy Diagnostics so the newly installed
 child-decision record and visual outcome can be inspected. Aikido recovery,
 Safari and full browser qualification remain unproven; no build or broad suite
 should be repeated to work around this UI limitation.
+
+### User Aikido observation after diagnostic installation — 2026-09-08
+
+User reports opening Safari inadvertently before Chrome; both remain unusable.
+The supplied Chrome screenshot shows `app.aikido.dev` with a loading spinner,
+not a recovered page. At 12:02:14Z daemon2946 and owned Geph remained active
+(up/owned=true/port_conflict=false, learned1/pending0). Aggregate learning is
+not exact-host/page proof. The diagnostic file was still the old 10:31:37Z
+export, so no new child decision can yet be attributed to this navigation.
+Request built-in Copy Diagnostics without another navigation/reload. Preserve
+the Safari-then-Chrome order; do not label this a clean isolated Chrome trial.
+No source/runtime mutation, test or build was justified by the screenshot alone.
 Actual Aikido recovery, Safari qualification, full Quit/Restart and original
 learning restoration remain open. No site reload/probe, new rules, runtime
 change, full test suite, rebuild/install, workflow or soak ran in this pass.
