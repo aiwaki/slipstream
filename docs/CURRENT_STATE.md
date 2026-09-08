@@ -10,6 +10,51 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (first browser observations; Aikido failure captured):
+ordinary Chrome navigation to Capacitor rendered the real homepage with CSS
+and hero imagery, no manual reload/rule/reset. It was observed loaded 33s after
+navigation; this is an observation bound, NOT a measured load time. Ordinary
+Chrome Aikido remained at its spinner beyond 45s. DevTools, opened only after
+failure and without reloading, reported 162 errors; visible CDN JavaScript
+resources failed with `net::ERR_CONNECTION_CLOSED` on `cdn.aikido.dev`.
+Do not call this qualification successful or infer a routing cause from the
+spinner alone. Root StatusV2 still reports owned Geph up/no conflict, active
+daemon PID39797 and live dual-stack descriptor witness. The startup defect is
+separate from this still-open critical-resource failure.
+
+Next: user invokes built-in Copy Diagnostics and authenticates its bounded
+root-log export, then inspect the freshly saved sanitized diagnostic file for
+this navigation before changing code or repeating the site. Raw root log
+`/var/log/slipstream.log` is root0600 and sudo-n still requires authentication;
+no password was reused, no new privileged read or speculative fix occurred.
+If the default 80-line exported tail omits this attempt, request a scoped
+historical log slice rather than reloading to manufacture new evidence. The
+first Safari app-selection attempt hit a ScreenCaptureKit capture error before
+target navigation; Safari remains unverified. Preserve both browser tabs and
+all existing runtime/learning backups. Detailed observations are in the audit.
+
+Update 2026-09-08 10:20 UTC (replacement verified; owned Geph now starts):
+user reports the fixed replacement completed. Canonical `verify:local-install`
+passes overall/build_chain/installed for exact `dde2498` bundle tree
+`b1690537...` and daemon `5af9020b...`; log:
+`output/workstation-replacement-20260908.ywqzED/installed-verification.log`.
+Root daemon PID39797 is active with a fresh dual-stack descriptor witness and
+StatusV2 PF ready. Historical schema-3 install attestation is valid; its dormant
+snapshot is not current PF state. Independent privileged runtime checks were
+not rerun by the unprivileged verifier. The new backup paths exist; do NOT
+replay the transaction or export its root-private runtime snapshot.
+
+After normal app launch, installed tray PID41298 and owned Geph PID41356 run;
+`gui/502/dev.slipstream.geph` is loaded/running and StatusV2 reports Geph up,
+owned=true, port_conflict=false. The app cleared the old Quit-resume marker
+itself; no manual marker removal or learning reset occurred. External Geph
+PID854/874 remains separately identified and untouched. This closes the
+evidenced old listener-visibility/startup blocker, not the browser gate.
+Next: ordinary Chrome/Safari Capacitor/Aikido observations, then remaining
+critical-resource and full Quit/Restart qualification. Keep original learning
+restoration open. Audit/primary/live main/PR373 checks show no source delta;
+older PR CI does not qualify local `dde2498`. No rebuilt or repeated test suite.
+
 Update 2026-09-08 (Quit observed; exact replacement staged, awaiting local sudo):
 after the user's normal Quit, at 10:06:44 UTC no owned tray/root daemon/Geph
 process remained; both launchd labels were absent, root label disabled, and

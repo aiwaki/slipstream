@@ -915,3 +915,68 @@ not this local correction. Primary checkout HEAD `a22a698` and its tracked
 state are unchanged. Next is user-authenticated execution of the fixed command,
 completion inspection, canonical installed proof and actual owned Geph start.
 Ordinary Chrome/Safari critical-resource and full Quit/Restart gates stay open.
+
+### Installed listener correction and first ordinary browser observations — 2026-09-08
+
+After the user reported successful execution, canonical
+`npm run verify:local-install` passed overall/build_chain/installed. Log:
+`output/workstation-replacement-20260908.ywqzED/installed-verification.log`.
+Installed app tree is `b1690537bdc4b4270c0a8c3a02e475efaa24086b1f5b68017221feded5471d6c`;
+daemon attestation hash and fresh/staged/bundled daemon are
+`5af9020bbb42e931b4bb0e5a3e4bd04e725f6f45f416683bf9e2356f8cf58a95`.
+Schema3 install attestation is valid; its dormant/PF-false snapshot describes
+installation time, not live PF. Unprivileged verification did not independently
+rerun installed-root-file hash, listener-owner or kernel-PF checks. Live status
+and exact root launchd program/PID agree; fresh StatusV2 is active/PF-ready.
+
+Normal `open /Applications/Slipstream.app` started tray PID41298. At 10:20:47
+UTC owned Geph PID41356 and its gui/502 launchd job were running, and StatusV2
+reported up/owned=true/port_conflict=false. Root PID39797 now supplies the fresh
+actual-descriptor witness for 127.0.0.1:1080 and [::1]:1080. The old Quit-resume
+marker disappeared through product code, not a manual deletion. External
+Geph.app PID854 and its PID874 client remain untouched and distinct. This
+observably resolves the old installed startup boundary; it does not prove
+any website recovery, cold cache or full new-bundle Quit behavior.
+
+Ordinary installed Chrome was controlled through native UI, without proxy
+flags, browser-profile reset, manual routing rules or page reloads. Capacitor's
+homepage was visibly complete in the captured viewport, with real heading,
+navigation, stylesheet layout and hero image. First loaded observation was
+33s after navigation, interrupted by a Safari capture attempt; do NOT report
+33s as actual load latency. This is a warmed/uncontrolled browser observation,
+not an exact cold-load benchmark or all-resources network proof.
+
+Aikido's page remained an empty shell/spinner beyond 45s. Its existing console
+was opened after failure, without reloading; Chrome showed 162 errors. Visible
+examples include `cdn.aikido.dev/assets/DeviceProtectionMacOsMdmInstallModal-Ct2yf_FB.js`,
+`DomainChecksPage-J-tCOW6r.js` and `RepositoryOverviewRepoList-CPs80Lzw.js`, all
+`net::ERR_CONNECTION_CLOSED`. The initial Network panel cannot retroactively
+supply these requests; no reload was used to overwrite the failing attempt.
+At 10:24:09 UTC root daemon was active, owned Geph still up/no conflict, two
+active sessions and auto-geo-exit learned=1/pending=0. These aggregate values
+do not identify which host was learned or explain the CDN decision.
+
+Safari selection returned ScreenCaptureKit error -3811 before any target
+navigation. It remains unverified. One Chrome state capture returned the same
+tool error after Aikido navigation, but a subsequent read confirmed the exact
+Aikido tab; the navigation was not repeated.
+
+The private daemon log is `/var/log/slipstream.log` (root0600, 453361 bytes at
+10:26 UTC); `sudo -n true` still requires user authentication. No credentials
+were retrieved/replayed and no private runtime backups were opened. Use the
+existing Copy Diagnostics admin fallback to obtain a fresh sanitized report;
+the standard root-log tail is 80 lines, so absence from that tail is not proof
+of an unexecuted preflight. If needed, obtain one scoped historical slice of
+this failed attempt rather than repeated target navigations. The exact root
+connect/TLS/send/read/classification or child-proof decision remains unknown.
+
+Historical comparison pointers from independent read-only review:
+`ROUTING_RESEARCH.md`, 2026-08-25 strict-denial physical validation, records
+Chrome/Safari Aikido login on daemon `b66b7d5b...` with an already-learned shared
+overlay, not cold discovery. The 2026-08-28 critical-child entry records an
+incorrect UI-provenance gate; the 2026-08-31 continuous-root entry records an
+earlier TLS-before-HTTP failure. Neither alone identifies today's cause.
+No source correction, rebuild, full suite, soak or other site matrix was run.
+Browser critical-resource recovery, full Quit/Restart and original learning
+restoration remain open. Live main/PR373/required CI and primary checkout have
+no relevant delta; prior PR CI still does not qualify local product `dde2498`.
