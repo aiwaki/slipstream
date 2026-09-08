@@ -10,7 +10,27 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-08 14:02 UTC (AUD-14 bundle verified; user Quit complete):
+Update 2026-09-08 14:06 UTC (AUD-14 installed and active; browser gate pending):
+the native macOS-authorized `dHZffB` transaction exited0 and reported exact
+`10e2cd6` installed/root daemon hash matched, without resetting learning.
+Do NOT rerun it. All prior backups and the new app/runtime/learning snapshot
+are retained; no stored/replayed password was used. Canonical
+`npm run verify:local-install` returned overall/build_chain/installed PASS:
+same complete app tree and daemon below, schema3 witness valid, exact live
+launchd/StatusV2 PID86054 and fresh active heartbeat. The verifier's independent
+privileged live kernel PF/listener checks remain not_run; the transaction
+itself checked pre-install privileged absence and final daemon hash.
+Evidence: `output/aud14-bundle-20260908.dHZffB/installed-verification.log`.
+Opened `/Applications/Slipstream.app` normally; tray86978 and owned Geph
+launchd87038 are running. At14:05:55Z StatusV2 reports Geph up/owned=true/
+port_conflict=false and local engine ready. These are runtime checks, not
+Aikido success. Next requires the user's single ordinary Chrome Aikido
+navigation and built-in Copy Diagnostics; no repeated reload, manual route,
+profile reset or artificial proxy flags. Then inspect the fresh bounded child
+decisions and ordinary Safari outcome. CUA browser control was previously
+blocked by ScreenCaptureKit -3811; no repeated unchanged permission attempt.
+
+Build/replacement evidence (14:02 UTC preparation, now executed):
 one canonical `npm run build:local` on clean exact source
 `10e2cd6186303d89ad6f49905460e24d7afd1366` exited0 at13:54:20Z;
 automatic overall/build_chain PASS. Fresh/staged/bundled daemon SHA-256:
@@ -19,11 +39,11 @@ App tree `82b81cd9fc9e5070085db2ea1933d5c765766897ff2364ab208cbd7ad70c6a47`.
 The complete `/Applications/.Slipstream.incoming-dHZffB.app` copy separately
 passes the canonical verifier. Evidence: `output/aud14-bundle-20260908.dHZffB/`
 (`build-exit.json`, `build-verification.json`, `incoming-verification.log`).
-Ad-hoc signature only; unnotarized. Installed build is still `dc2937bc`.
+Ad-hoc signature only; unnotarized. Replaced installed source was `dc2937bc`.
 User authorized proceeding and performed normal Quit. Read-only observation:
 no owned processes, both launchd jobs absent, root label disabled, status and
 status.tmp absent. External Geph854/874 untouched. Privileged port/PF absence
-must still be proven by the transaction. New reviewed one-shot script:
+was subsequently checked by the successful transaction. Reviewed one-shot script:
 `output/aud14-bundle-20260908.dHZffB/replace-exact-bundle.sh`, SHA-256
 `b046c0aca303fdf745de420c68715455dd7b7f4c0afce1c49ab5d2f976db40ba`.
 It binds old/new full app and daemon identities, preserves all three previous
@@ -31,9 +51,8 @@ backup generations, snapshots current learning without reset, and requires
 three stable privileged absence samples. New backup paths:
 `/Applications/.Slipstream.before-dHZffB.app` and
 `/private/var/tmp/slipstream-replacement-20260908.dHZffB`.
-Next: execute once with native macOS authorization, inspect completion, run
-canonical installed verifier, then normal app launch and ordinary Aikido
-evidence. Do not replay any transaction on uncertain outcome. No tests or
+Transaction, canonical installed verifier and normal launch are complete;
+ordinary Aikido evidence remains pending. Do not replay any transaction. No tests or
 soaks repeated; build success is not site success. Main`2780de4` and PR373
 OPEN/exact`513484a` required PASS rechecked. This checkpoint is docs-only;
 the product artifact remains bound to exact source`10e2cd6`.

@@ -1409,3 +1409,30 @@ generations. Stable privileged service/process/1080/1443/PF absence, protected
 incoming verification, current private learning snapshot, and fail-closed
 installer/rollback boundaries remain unchanged. Execution and browser proof
 are still pending; these build checks do not establish Aikido recovery.
+
+#### AUD-14 installation result — 2026-09-08 14:06 UTC
+
+The user completed normal Quit and native macOS authorization. The reviewed
+dHZffB transaction ran once and exited0, reporting exact10e2cd6 installed and
+the root daemon hash matched. All previous backups plus the new dHZffB
+app/runtime/current-learning snapshot remain retained. No password was saved
+or replayed; no learning reset or external Geph mutation was requested.
+Do not rerun the transaction or any earlier generation.
+
+`rtk proxy npm run verify:local-install` then exited0 with canonical overall,
+build_chain and installed PASS. Built/installed app tree82b81cd9... and daemon
+bcaf262d... match; schema3 install witness is valid and exact launchd PID86054
+matches fresh active StatusV2. The install-time attestation's dormant/PFfalse
+is historical install evidence, not current runtime state. Independent
+privileged kernel PF/listener checks remain not_run in this unprivileged
+verifier; pre-install privileged absence and final root daemon hash were
+checked by the successful transaction. Full canonical result is retained at
+`output/aud14-bundle-20260908.dHZffB/installed-verification.log` (mode0600).
+
+The app was opened normally from `/Applications/Slipstream.app`: tray86978
+and owned Geph launchd87038 run. StatusV2 at14:05:55Z shows daemon86054 active,
+local engine ready and Geph up/owned=true/port_conflict=false. No browser
+success follows from these checks. The next user action requested is one
+ordinary Chrome Aikido navigation and built-in Copy Diagnostics, with no
+repeat reload, rule insertion, cache/profile reset or proxy launch flags.
+Fresh child admission/proof evidence and ordinary Safari result are pending.
