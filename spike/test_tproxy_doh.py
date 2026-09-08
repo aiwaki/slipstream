@@ -48,6 +48,7 @@ _PENDING_NAVIGATION_PROBE_CONTRACT = json.loads(
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "_status_listener_binding", None)
+    monkeypatch.setattr(tproxy, "_bootstrap_local_routes", OrderedDict())
     shutdown_started = tproxy._shutdown_started.is_set()
     pf_teardown_complete = tproxy._pf_teardown_complete.is_set()
     route_policy_trial_generation = tproxy._route_policy_trial_generation
@@ -14362,12 +14363,13 @@ def test_cross_origin_bootstrap_delayed_eof_gets_separate_geph_authority(
     assert direct[:2] == ("1.1.1.1", asset_host)
     assert direct[3] - started > 7.5
     assert direct[4] == pytest.approx(
-        direct[3] + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
+        direct[3] + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
+        + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
         abs=0.05,
     )
     assert geph_deadlines[0][1] == direct[2]
     assert geph_deadlines[0][2] == pytest.approx(
-        direct[4],
+        direct[3] + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
         abs=0.05,
     )
     asset_jobs = [job for host, job in minted_jobs if host == asset_host]
@@ -14449,11 +14451,12 @@ def test_cross_origin_bootstrap_parent_latency_cannot_truncate_child_eof(
     assert deadlines["direct"] > parent_handoff_deadline
     assert deadlines["final"] == pytest.approx(
         deadlines["direct"]
+        + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
         + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
         abs=0.05,
     )
     assert deadlines["geph"] == pytest.approx(
-        deadlines["final"],
+        deadlines["direct"] + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
         abs=0.05,
     )
     assert clock[0] > parent_handoff_deadline
@@ -14602,6 +14605,7 @@ def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch, 
     assert direct_requests[0][3] - started > 7.5
     assert direct_requests[0][4] == pytest.approx(
         direct_requests[0][3]
+        + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
         + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
         abs=0.05,
     )
@@ -14808,6 +14812,7 @@ def test_route_preflight_never_uses_geph_for_complete_bootstrap_direct(
     assert direct_deadlines[0][0] - started > 7.5
     assert direct_deadlines[0][1] == pytest.approx(
         direct_deadlines[0][0]
+        + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
         + tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
         abs=0.05,
     )

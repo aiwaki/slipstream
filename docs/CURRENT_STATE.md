@@ -10,6 +10,66 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (AUD-17 exact source qualified; canonical build next):
+Autonomous exact-object recovery and pending-request lifetime corrections are
+complete in the active audit checkout. Independent final review found no open
+blocker. Same/cross-origin children both get one fresh8+8+3 bounded window;
+owner, coalesced-parent and exact-child callers preserve that admitted bound,
+including early exact-CLOSED. Committed same-origin local/Geph claims get a fresh
+4s handoff; no delivered TLS replay. Selected-local cancellation closes its
+owned upstream. Fixed allowlisted local-stage diagnostics expose proof stops.
+Scoped evidence: TLS28; bounded DNS32; autonomous60 unique cases accumulated
+without unchanged reruns; pending/local-plan focused logs under
+output/pending-child-focused-u9FHJk; existing ownership/budget35, diagnostic30,
+and root coalescing/cancellation5 affected cases passed. These groups overlap;
+do not add them into a fictitious total. Detailed exact logs: audit AUD-17.
+Next: commit this exact delta, one canonical npm run build:local with automatic
+fresh/staged/bundled equivalence verification. Installed d1c81c1 is unchanged;
+ordinary Chrome/Safari product success, exact replacement and full Quit remain
+open. No network or workstation mutation during source qualification.
+
+Update 2026-09-08 (AUD-17 autonomous recovery authorized; source in progress):
+User explicitly authorized bounded recovery beyond AUD-16 diagnostic-only idle.
+Work remains in slipstream-codebase-audit-20260905 at HEAD84fa8e3, source dirty;
+installed d1c81c1 remains unchanged and Aikido is NOT fixed in the installed app.
+New measured TLS ingress, shared-deadline Xbox DNS, three-stage parallel exact
+critical-object qualification and same-object owned-Geph proof are implemented.
+A full local object instead selects an ephemeral exact local plan. Pending
+parallel child requests join their admitted observation before consulting stale
+root health. Review is closing the early exact-CLOSED branch that could cancel
+that waiter. No runtime, settings, learning, browser or external Geph mutation.
+New narrow tests are underway; completed TLS28 and DNS32 passed. Autonomous
+blocking/async integration and local-plan/join tests have first-run evidence;
+test-only expectations are being corrected and only affected selectors rerun.
+Do not build/install until exact-delta regressions and independent review finish.
+Do not repeat unchanged full suites. Current PR373 remains OPEN at513484ac with
+17 SUCCESS/SKIPPED checks; those checks are not evidence for this local delta.
+Detailed bounds and source qualification: DECISIONS AUD-17 and audit AUD-17.
+
+Update 2026-09-08 (AUD-16 fresh Chrome attempt FAILED; continuation gap located):
+The new user screenshot after the16:48 install shows Aikido spinner and169
+Console errors. This IS a new d1c81c1 attempt, not the retained14:11 report.
+Fresh daemon93766/owned-Geph status and read-only private-log extraction show
+critical cdn.aikido.dev `direct_idle_timeout` with
+`geph=diagnostic_same_object_complete` at21:51:39+0500. Thus the owned comparison
+ran and completed the same object; its diagnostic-only contract cannot route.
+Two CDN relays were closed by `local_partial_record_watchdog` (system/plain,
+then Xbox/plain); their separate recovery events say confirmation_not_scheduled.
+`relay-end recovery=not_attempted` is only the pre-handler default, NOT absence
+of recovery. Source confirms callbacks run, but remaining local strategies wait
+for future browser connections. Post-relay state advancement schedules no local
+continuation; tests manually feed stage evidence and do not prove this liveness.
+Do not attribute all169 JS errors to the two observed relays. Detailed evidence,
+limits and exact source pointers: audit AUD-16 post-install continuation gap.
+Logs0600: `aikido-relay-child-20260908T1656.log` and
+`aikido-existing-events-20260908T1705.log` under the existing b8M9iA output dir;
+osascript records are CR-separated. No production edit/test/build/install,
+new site request, reload or runtime/learning change in this diagnosis turn.
+Next: explicit authorization for bounded autonomous recovery qualification
+beyond the diagnostic-only idle exception; retain independent local proof,
+same-object/owned-Geph guards and protected exclusions. Do not replay a delivered
+TLS stream or imply advancing a route resurrects already-failed browser imports.
+
 Update 2026-09-08 16:48 UTC (AUD-16 installed and active; new browser gate pending):
 The authorized b8M9iA transaction executed ONCE through native macOS
 administrator authorization and exited0: exact d1c81c1 installed, root daemon

@@ -1838,3 +1838,180 @@ performed, so this is not new-build failure evidence. A fresh ordinary Chrome
 attempt is next; Aikido recovery and ordinary Safari qualification remain
 unproven. No tests/build were rerun and no site probe or learning reset was
 performed during this installation turn.
+
+### AUD-16 post-install continuation gap — fresh failed Chrome attempt
+
+The user supplied a new ordinary Chrome screenshot after the authorized16:48
+installation: app.aikido.dev remains on its spinner with Console counter169
+and repeated JavaScript ERR_CONNECTION_CLOSED. Do not reuse the old14:11
+failure or ask for another screenshot/export/reload of this unchanged attempt.
+
+Read-only StatusV2 at16:56:07Z identified active daemon93766, fresh heartbeat,
+owned Geph up and relay counters including two local_partial_record_watchdog
+terminations. These aggregates alone cannot identify an Aikido connection.
+Native macOS administrator authorization was used only to read the existing
+root-private log; no password was stored/replayed. Two mode0600 extracts under
+`output/aud16-bundle-20260908.b8M9iA/` preserve the evidence:
+
+- `aikido-relay-child-20260908T1656.log`: seven child/root/relay-end records.
+- `aikido-existing-events-20260908T1705.log`: eleven records including the
+  separate relay-recovery events omitted by the first filter. The osascript
+  result uses CR separators; split CR/LF when counting, not LF alone.
+
+Both filters select the exact Aikido app/CDN hosts after21:45:00+0500. Decisive
+records, in local log time:
+
+- 21:51:39 child cdn.aikido.dev: direct incomplete_idle_timeout,
+  decision direct_idle_timeout, Geph diagnostic_same_object_complete.
+  Parent app.aikido.dev is usable with three enumerated assets.
+- 21:51:45 CDN system_plain: local_partial_record_watchdog, followed by
+  relay-recovery confirmation_not_scheduled.
+- 21:51:58 CDN system_plain: upstream_read_error, followed by
+  relay-recovery local_ladder_unchanged.
+- 21:53:35 CDN xbox_plain: write_error.
+- 21:53:41 CDN xbox_plain: local_partial_record_watchdog, followed by
+  relay-recovery confirmation_not_scheduled.
+
+The successful category establishes owned same-object Geph completion under
+AUD-16 checks. It intentionally remains non-authorizing; timeout alone is not
+proof a foreign route is needed. The watchdog is a local close, not peer EOF.
+The initial relay-end recovery=not_attempted is a default emitted before caller
+recovery; an initial interpretation of that field as no recovery was corrected
+after inspecting `_record_relay_recovery` and the complete same-attempt extract.
+Bounded/drop-only logs cannot prove an event never occurred, and there is no
+request/stream mapping that attributes all169 browser errors to these two closes.
+
+Confirmed source-level liveness gap on d1c81c1:
+
+- `note_partial_tls_stall` at6746 retains evidence but schedules confirmation
+  only after system + app-owned Xbox DNS + two distinct local strategies.
+  `_local_route_evidence_complete` at6438 defines that conjunction.
+- The watchdog flag survives into the caller: `_local_stream_stalled` at14646
+  returns true. Xbox handling at19623 calls evidence recording and
+  `_mark_xbox_dns_exhausted`; this is not a lost-callback defect.
+- `_mark_xbox_dns_exhausted` at16387 only changes host state. It starts no
+  task/probe. `unknown_recovery_stage` at16334 consumes that state on a later
+  incoming connection; the current handler ends after relay bookkeeping.
+- The local-strategy loop at19424/19451 stops after an initial-payload result.
+  A later partial-response failure therefore needs another browser connection
+  before another strategy's evidence can be obtained. No guarantee exists that
+  the browser will retry failed module requests.
+  This gap is post-payload-specific: zero-payload dial failures can continue
+  the ladder within the same still-unanswered connection.
+- Existing test_tproxy_doh cases
+  `test_distinct_local_partial_stalls_schedule_owned_geph_confirmation` and
+  `test_exact_system_partial_tls_stall_waits_for_full_local_ladder` manually
+  invoke the stage notifications. They cover the evidence gate, not automatic
+  progression without additional browser connections.
+
+Independent read-only review agreed. No production patch, test rerun, build,
+installation, new site probe, browser reload or runtime/learning mutation was
+performed. Next correction must address bounded autonomous qualification and
+safe pending-request lifecycle, with a no-additional-browser-connection
+regression. It must not convert the diagnostic category into routing authority,
+replay a delivered TLS stream, force browser reloads, or claim that merely
+learning a route repairs already-failed imports. The current explicit idle
+exception prohibits extra tasks/admission/routing; obtain authorization for the
+new bounded recovery scope before implementing that policy change.
+
+## AUD-17 — autonomous critical-object recovery (2026-09-08, in progress)
+
+The user explicitly authorized the new bounded recovery scope. Installed
+d1c81c1/AUD-16 remains unchanged; no browser success is claimed. This delta
+addresses the source liveness defect documented above, not a guessed cause for
+all169 browser errors.
+
+Implementation: actual TLS MemoryBIO encrypted-ingress measurement; one
+shared-deadline app-owned Xbox DNS path; three parallel exact-object local
+observations within the existing child lease; same-object complete owned-Geph
+qualification only after every local observation independently fails with valid
+EOF/measured-idle evidence. Continuous wire progress, absolute expiry, unknown
+framing, cancellation or network-wide failures stay non-authorizing. Any
+complete local response vetoes Geph; a matching local winner becomes an exact
+ephemeral plan actually consumed by the normal handler. Pending exact-edge
+requests join admitted children without borrowing their result as authority.
+All child ownership checks now use the shrinking shared deadline, including
+hard-EOF proofs; generic semantic-denial proofs are unchanged. Hard EOF retains
+its historical up-to-eight-second comparison capped by direct-deadline+3, not
+the additional idle-only local-observation reserve.
+
+Initial change-scoped evidence (no external network):
+
+- TLS transport:28 passed; log output/bootstrap-tls-stream-20260908.cpR3Kp.
+- Bounded DNS plus one legacy resolver/cache compatibility case:32 passed;
+  output/xbox-dns-deadline-SwHWxv/pytest.log.
+- Autonomous blocking and actual parent→child→commit:46 unique cases green.
+  First43 passed/1 test-only expected ownership-call-count failure; corrected
+  expectation and two new late-commit fences:5 affected cases passed,41
+  deselected. Logs output/bootstrap-autonomous-recovery-20260908.XUr38I and
+  output/bootstrap-autonomous-owner-commit-20260908.8C59vk. No unchanged rerun.
+- Pending-child/local-plan tests:48 cases passed across focused runs; test-only
+  collection indentation and fake-clock teardown errors were corrected. New
+  exact-CLOSED race/cleanup selection:6 passed,16 deselected. Logs under
+  output/pending-child-focused-u9FHJk. Independent review ongoing.
+- Existing bootstrap/idle/commit/continuous-root regression selection:
+  107 passed,8 failed,721 deselected. Seven failed assertions encoded the former
+  child final deadline; the new bounded local slice legitimately extends that
+  upper bound. One exposed an unintended shortened hard-EOF comparison: restored
+  its historical capability budget and explicitly kept it outside the extra
+  local reserve. Updated tests retain actual EOF/diagnostic substage bounds;
+  affected rerun pending. Log output/aud17-existing-bootstrap-Vn3Art/pytest.log.
+
+Follow-up qualification:
+
+- Child EOF/ownership/budget/identity/cancellation and changed deadline
+  assertions:35 passed,752 deselected in2.08s. Log
+  output/aud17-child-ownership-gmZDtx/pytest.log. This replaces the failed
+  expectations above and rechecks the actual changed ownership branch; unrelated
+  green cases are reused.
+- Reader composition uses the real range reader, BootstrapTlsStream,
+  MemoryBIO and range classifier with a fake TLS engine/raw transport:3 passed,
+  46 deselected. True six-second wire silence is distinguished from encrypted
+  drips (including no plaintext) reaching the absolute deadline. Log
+  output/bootstrap-reader-composition-20260908.9MkZ8M.
+- Read-only independent review confirmed the hard-EOF budget blocker is closed
+  and the exact local plan is actually consumed once by the normal handler.
+  It found cancellation at the initial client drain could leak the newly owned
+  local stream, and owner/coalesced-parent joins needed the same child-bound
+  lifetime protection. These follow-ups are being completed before build.
+
+Next: focused reruns for changed ownership/budget branches, actual TLS-reader
+composition regression and independent exact-delta review. Build/install and
+ordinary Chrome/Safari product qualification remain open. No PF/DNS/proxy/PAC,
+external Geph, settings/learning reset or browser reload performed.
+
+Final source qualification (before build):
+
+- Root owner and coalesced callers now retain only the one actually admitted
+  child deadline, including its resolution phase and exact-CLOSED race. Metadata
+  binds the root epoch, execution lease, task and host/IP; cleanup is identity
+  checked and cancellation never cancels a different owner's observation.
+- Same-origin critical objects now receive the same fresh bounded child window
+  as cross-origin objects. Both local and Geph winners return a fresh bounded
+  claim to the still-unanswered owner, instead of falling back to the old exact
+  stream. Two actual parent→child→parallel-probe→commit regressions passed after
+  a four-second parent probe. Log
+  output/bootstrap-same-origin-owner-20260908.XcuneW (2 passed,58 deselected).
+- Initial selected-local client-drain cancellation now closes the owned upstream
+  and invalidates only its exact claim. The ordinary non-selected branch is not
+  widened. Owner/coalesced/binding/cancellation follow-ups:9 initial cases and5
+  fixture-corrected coalesced variants passed; logs root-owner-extension-tests.log
+  and coalesced-deadline-fixture-fixed.log under the pending-child output above.
+- Local diagnostic states are fixed allowlisted categories, not route authority.
+  New result→formatter/hostile-input selection:9 passed,49 deselected, log
+  output/bootstrap-local-diagnostics-20260908.A9tBxZ. Existing privacy/formatter
+  compatibility:30 passed,757 deselected, log
+  output/aud17-diagnostic-compat-njknlq/pytest.log.
+- Existing same-origin/hard-local coalescing2 and root cancellation/diagnostic
+  ordering3 passed in the final affected selections:
+  output/aud17-root-join-compat-5H8Soi/pytest.log and
+  output/aud17-root-cancel-compat-45A8wa/pytest.log.
+- Final independent review: no remaining blocker in bounded ownership, local
+  plan consumption, owner/child lifetimes, same-origin claims or cancellation.
+  A suspected root-cache ordering issue was rejected as unreachable through
+  this path: healthy children never publish root health and exact root owners
+  coalesce. It was not patched speculatively.
+
+Source gates passed. Next is one canonical build and artifact verification;
+installed/browser/lifecycle gates remain open. No claim that synthetic passing
+tests alone prove Aikido or Weather works on the workstation.

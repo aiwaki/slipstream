@@ -5,6 +5,39 @@ survive across sessions and agents.
 
 ## Audit corrections — 2026-09-05
 
+### AUD-17 bounded autonomous bootstrap recovery — authorized 2026-09-08
+
+The user's explicit authorization permits the critical-object idle path to
+advance independently of future browser retries. This narrowly supersedes
+AUD-16's diagnostic-only restriction, not the generic unknown-host policy.
+
+- A valid incomplete critical range plus at least six seconds of measured
+  encrypted-ingress silence may start three parallel local observations:
+  app-owned Xbox DNS/plain and exact-system-IP split64/split16. They reuse the
+  same transient request, share one eight-second DNS/connect/TLS/read budget,
+  and drain under the already-admitted child lease. No system DNS is changed.
+- Geph authority requires all three observations to be valid incomplete objects
+  terminated by EOF or measured wire silence, plus a complete same-object range
+  through the verified owned listener. Compare object identity against every
+  local result. Ownership, readiness, cancellation, policy and deadlines are
+  rechecked before effect. The owned comparison and identity checks share a
+  three-second slice; the child total is bounded to eight plus eight plus three
+  seconds. Unknown/framing errors, ongoing encrypted progress, absolute expiry,
+  cancellation and network-wide failure do not authorize this recovery.
+- A complete local object vetoes Geph. A matching complete local observation
+  may select only its exact host/original-IP/selected-IP/strategy plan, under
+  the child epoch and capability. This ephemeral plan has a 30-second TTL,
+  at most 512 entries and a fresh browser dial bounded to four seconds. Failure
+  invalidates it; neither raw target nor payload becomes routing state.
+- Parallel exact-host/IP requests may join an already-admitted nonce child
+  within its original bounded deadline. Its result is not authority: only a
+  committed route may be claimed afterward. Do not treat child health as root
+  health, renew its observation budget, replay a delivered TLS stream, or force
+  reloads. Discord/YouTube/googlevideo and other protected exclusions remain.
+
+These are source requirements, not an installed-browser success claim. The
+audit and CURRENT_STATE record the implementation and qualification boundary.
+
 These rules apply to the source correction in `codex/codebase-audit-20260905`;
 they are not a claim about the currently installed bundle. Evidence, regression
 results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-05.md).
