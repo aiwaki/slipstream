@@ -1772,3 +1772,69 @@ requested again. Build/installation evidence, when available, follows here.
   learning. Verify installed identity through the canonical command, then
   evaluate new physical browser evidence; never reuse the old failed report
   as if it observed this newly built code.
+
+### AUD-16 workstation replacement preparation
+
+User explicitly authorized installation. Canonical staged-copy verification
+of `/Applications/.Slipstream.incoming-b8M9iA.app` passed overall/build-chain
+with the previously recorded e8a4f984… app tree and5828f2d1… daemon, valid adhoc
+signature. Log: `output/aud16-bundle-20260908.b8M9iA/incoming-verification.log`.
+No unchanged tests or build were repeated. PR373 remains OPEN at513484ac,
+17 successful/skipped checks; not evidence for the new source.
+
+CUA could not select the installed tray (timeouts, including exact app path);
+the user was asked to perform normal Quit. Subsequent live read-only checks
+found both system/dev.slipstream.tproxy and gui/502/dev.slipstream.geph absent
+(exit113) and no owned daemon/tray/runtime process. External Geph854/874 are
+distinct and were not touched. Non-root process absence does not replace the
+transaction's three privileged service/listener/private-PF absence samples.
+
+New one-shot script: `output/aud16-bundle-20260908.b8M9iA/replace-exact-bundle.sh`,
+SHA-256 `2ac6782918a4f3ded07a4a82c8669955aa039ddc080f1757d123446dfac2f475`.
+Parent read the full prior dHZffB transaction and applied only exact new/old
+identities, unique paths and preservation checks for the extra dHZffB backups.
+`bash -n` and independent final delta review pass. Existing backup generations
+B5fQMm/ywqzED/nBz5za/dHZffB must remain intact. New app backup
+`/Applications/.Slipstream.before-b8M9iA.app` and root-private snapshot
+`/private/var/tmp/slipstream-replacement-20260908.b8M9iA` are absent before
+execution. The transaction has not executed at this checkpoint.
+
+Failure boundary explicitly reviewed: do_install's error cleanup can remove
+live learning files along with runtime. The transaction snapshots current
+learning before installation, so deliberate recovery is possible; do not
+claim automatic live-state preservation on failure, rerun the script, or
+replay an older learning snapshot. Next is native macOS authorization of the
+fixed script, one exit inspection and canonical installed verification.
+
+### AUD-16 installation result — 2026-09-08 16:48 UTC
+
+The b8M9iA transaction was hash-checked against the reviewed script, invoked
+exactly once through native `osascript` administrator authorization, and
+completed exit0. It reports exact d1c81c1 installed, final root daemon hash
+matched, learning not reset. Private log:
+`output/aud16-bundle-20260908.b8M9iA/replacement-execution.log` (0600).
+The successful transaction enforced stable privileged stopped-state checks
+and preserved all original backups, adding before-b8M9iA app and private
+current-runtime/current-learning snapshot. No password was stored/replayed,
+and neither this transaction nor any prior one should be executed again.
+
+After normal `/Applications/Slipstream.app` launch, canonical
+`rtk proxy npm run verify:local-install` completed exit0 with overall,
+build-chain and installed PASS. Log:
+`output/aud16-bundle-20260908.b8M9iA/installed-verification.log` (0600).
+Built/installed app tree e8a4f984… and daemon5828f2d1… match. Schema3 witness is
+valid; exact launchd PID93766/program/arguments match fresh StatusV2, phase and
+state active, heartbeat48, age0.454s. Status reports PF enabled/applied/loaded.
+The attestation's dormant/PFfalse values describe installation time, not current
+runtime. Unprivileged verifier explicitly leaves independent kernel PF,
+listener ownership and installed-root-file hashing as not_run; the transaction
+did perform pre-install privileged absence and final root hash verification.
+
+Normal tray PID94371 and owned Geph launchd PID94411 are running. At16:48:38Z,
+fresh `backends.geph` reports state=up and owned=true. External Geph was not
+modified. CUA could select ordinary Chrome and read the existing Aikido tab;
+it still contains the old Console169 error view. No new navigation/reload was
+performed, so this is not new-build failure evidence. A fresh ordinary Chrome
+attempt is next; Aikido recovery and ordinary Safari qualification remain
+unproven. No tests/build were rerun and no site probe or learning reset was
+performed during this installation turn.

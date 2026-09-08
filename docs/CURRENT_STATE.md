@@ -10,6 +10,45 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 16:48 UTC (AUD-16 installed and active; new browser gate pending):
+The authorized b8M9iA transaction executed ONCE through native macOS
+administrator authorization and exited0: exact d1c81c1 installed, root daemon
+hash5828f2d1… matched, learning not reset. All prior backups and new
+`/Applications/.Slipstream.before-b8M9iA.app` plus root-private
+`/private/var/tmp/slipstream-replacement-20260908.b8M9iA` snapshot are retained.
+Do not rerun this or previous transactions. No password stored/replayed.
+Canonical `npm run verify:local-install` exited0 with overall/build-chain/
+installed PASS, app treee8a4f984…, valid schema3 witness and live launchd PID
+93766 matching fresh active StatusV2. Its privileged runtime checks remain
+not_run; pre-install privileged absence and final root daemon hash were checked
+inside the successful transaction. Logs: `replacement-execution.log` and
+`installed-verification.log` under `output/aud16-bundle-20260908.b8M9iA/`.
+Opened `/Applications/Slipstream.app` normally: tray94371, owned Geph launchd
+94411. Fresh backends.geph reports state=up, owned=true. External Geph untouched.
+CUA read the existing ordinary Chrome Aikido tab with its prior169 Console
+errors; no new navigation/reload was performed. Those old errors are NOT a
+failure observation of AUD-16. Next: one fresh normal Chrome Aikido navigation,
+then correlate its new child/relay diagnostics; Safari qualification remains
+open. No new tests/build, route/learning reset or other site probes this turn.
+
+Update 2026-09-08 (AUD-16 replacement authorized; ready for native authorization):
+the user explicitly authorized installing the exact d1c81c1 bundle. Its copy at
+`/Applications/.Slipstream.incoming-b8M9iA.app` passed the canonical verifier
+again: overall/build-chain PASS, tree e8a4f984…, daemon5828f2d1…. No tests/build
+repeated. Both owned launchd jobs are now absent (113) and no owned process
+remains; root-private stable listener/PF absence will be checked inside the
+transaction. External Geph854/874 were observed separately and untouched.
+Reviewed one-shot script (NOT executed yet):
+`output/aud16-bundle-20260908.b8M9iA/replace-exact-bundle.sh`, SHA-256
+`2ac6782918a4f3ded07a4a82c8669955aa039ddc080f1757d123446dfac2f475`.
+Syntax and independent exact-delta review PASS. New before-b8M9iA app backup
+and private replacement directory do not yet exist. It requires all prior
+backup generations, snapshots current learning, and does not reset it on
+success. Installer failure can remove live learning; the private snapshot is
+the recovery source, never automatically rerun the transaction. Next: native
+macOS administrator authorization of this fixed script, inspect exit once,
+then canonical installed verification and normal app launch/browser gate.
+
 Update 2026-09-08 (AUD-16 exact local bundle PASS; NOT installed):
 the user answered YES to the bounded diagnostic-only same-object Geph request.
 Source based on c15da33 now enters one owned comparison for valid critical-child
