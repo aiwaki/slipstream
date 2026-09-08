@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 11:49 UTC (normal Quit confirmed; new transaction ready):
+user performed Quit. Read-only inspection found no owned processes, both
+launchd services absent (113), root label disabled, and status/status.tmp absent.
+External Geph854/874 remain untouched. Nonroot absence is not the privileged
+port/PF proof; the transaction must check three stable absence samples itself.
+New reviewed one-shot script:
+`output/aikido-child-diagnostic-20260908.nBz5za/replace-exact-bundle.sh`, SHA-256
+`53986e902973dff9639f12f0ae2f7ebaad6d58057fd7afe41e8411bb574b59ff`.
+It binds old `dde2498` and incoming `dc2937bc` bundle/daemon hashes, checks
+TCP1080/1443 and private PF filter/translation/child anchors, preserves both
+prior backup generations, snapshots current runtime/learning privately, and
+does not reset learning or manually remove the Quit-resume marker.
+New backup paths: `/Applications/.Slipstream.before-nBz5za.app` and
+`/private/var/tmp/slipstream-replacement-20260908.nBz5za`. They are absent before
+dispatch; their creation forbids blind retry. `bash -n` and parent diff review
+passed. A native macOS authorization prompt is the next execution boundary;
+no password is stored/replayed. Do not infer success from this checkpoint:
+inspect transaction completion and run the canonical installed verifier first.
+
 Update 2026-09-08 (diagnostic bundle built/staged; awaiting normal Quit):
 one canonical local build on clean source
 `dc2937bc887d47d4af14b0d3cea703ee13d67a1b` completed with exit0 and automatic
