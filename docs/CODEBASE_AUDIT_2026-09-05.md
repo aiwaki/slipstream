@@ -1148,6 +1148,55 @@ The original report/private copy and source logs remain unchanged. They are
 still potentially sensitive and must not be uploaded or committed. Next
 product step is a canonical bundle of the new source, separate authorized
 replacement, then one Aikido observation with the new child-decision record.
+
+### Authorized diagnostic bundle and staging — 2026-09-08
+
+The user explicitly authorized building/installing the diagnostic changes and
+one Aikido attempt. Product source changes remain `fb19315` and `a728100`;
+the clean build source, including the authorization checkpoint, is
+`dc2937bc887d47d4af14b0d3cea703ee13d67a1b`. Remote main `2780de4` and open
+PR373/374/362 heads/checks were reconciled without drift. Prior PR CI does not
+qualify this local source. The primary checkout was untouched.
+
+One `npm run build:local` ran in `app-tauri`, with
+`SLIPSTREAM_PYTHON_313=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13`
+and `TAURI_CONFIG`, `SLIPSTREAM_BUILD_STAGE_TESTING`, and
+`SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT` explicitly unset. The background
+context-mode call yielded a timeout response while its child continued; the
+build was NOT restarted. Its log subsequently recorded `BUILD_LOCAL_EXIT=0`.
+Automatic canonical verification passed overall/build_chain; installed status
+was not_run. The 67 Python / 17 Rust passing affected cases were reused;
+no unchanged tests, protected workflow or soak ran.
+
+Evidence: `output/aikido-child-diagnostic-20260908.nBz5za/build-local.log`.
+
+| Artifact | SHA-256 |
+|---|---|
+| App tree | `156680611337a40ac8fffcf5c66bb0d285f7dfa288ae671d71cacd03ea692c85` |
+| Fresh / staged / bundled daemon | `7bef1eb8dc5d153ec2d234eb60681845e237e2177d52d90d8b8b8c25fd81456e` |
+| Tray | `591d170ce7836da9d30785d6bd95d906f8d3b3daa74b80dce6f0a2a79a69761c` |
+
+The bundled Chromium, Geph, browser worker and update watchdog match the prior
+verified bundle values. The app has valid ad-hoc signature integrity and no
+Developer ID/notarization claim. App and DMG were produced, but the DMG was not
+used or independently checksummed: installation uses the verified app tree.
+
+Copied the built app to the previously absent exact staging path
+`/Applications/.Slipstream.incoming-nBz5za.app`. Re-ran the canonical verifier
+at this new copy boundary with explicit fresh/staged daemon inputs; it passed
+with the same tree/hash and installed=not_run. Evidence:
+`output/aikido-child-diagnostic-20260908.nBz5za/incoming-verification.json`.
+Tracked source remained clean before this documentation update.
+
+Installed app/runtime remain unchanged. Read-only process identity showed
+root daemon39797, tray41298 and owned runtime Geph81799; external Geph854/874
+were separately identified and not touched. `sudo -n true` was unavailable.
+CUA could list surfaces but two Slipstream selections timed out; a Chrome app
+selection failed ScreenCaptureKit -3811 before any action/navigation. No
+process was killed, no app Quit/replacement/learning reset occurred, and no
+password from chat was reused. Next requires the user's ordinary Quit and
+local authorization, a new exact one-shot replacement preserving all prior
+backups, then installed verification/owned startup and one Aikido observation.
 Actual Aikido recovery, Safari qualification, full Quit/Restart and original
 learning restoration remain open. No site reload/probe, new rules, runtime
 change, full test suite, rebuild/install, workflow or soak ran in this pass.

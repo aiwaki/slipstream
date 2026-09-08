@@ -10,6 +10,27 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (diagnostic bundle built/staged; awaiting normal Quit):
+one canonical local build on clean source
+`dc2937bc887d47d4af14b0d3cea703ee13d67a1b` completed with exit0 and automatic
+verifier overall/build_chain pass. Fresh/staged/bundled daemon SHA-256 is
+`7bef1eb8dc5d153ec2d234eb60681845e237e2177d52d90d8b8b8c25fd81456e`;
+app tree is `156680611337a40ac8fffcf5c66bb0d285f7dfa288ae671d71cacd03ea692c85`.
+The complete copy at `/Applications/.Slipstream.incoming-nBz5za.app` separately
+passes that canonical verifier. Both logs are under
+`output/aikido-child-diagnostic-20260908.nBz5za/`. Tracked source remained clean
+through build/staging. No tests repeated; no soak or browser navigation.
+Installed `dde2498` has NOT been replaced or stopped. Last live observation:
+daemon39797/tray41298/owned Geph81799; external Geph854/874 remain distinct and
+untouched. sudo-n is unavailable. CUA Slipstream selection timed out; selecting
+Chrome failed with ScreenCaptureKit -3811, so no UI Quit/navigation occurred.
+Next: user performs normal Quit and local macOS authentication, then a NEW
+fixed replacement with old/new identities and new backup paths, preserving
+learning and every Sep5/ywqzED backup. Do not replay either old transaction.
+After replacement, `verify:local-install`, owned startup, then one ordinary
+Aikido navigation plus bounded child decisions. Aikido remains unqualified;
+the app is ad-hoc signed/unnotarized, not a published release.
+
 Update 2026-09-08 11:17 UTC (diagnostic replacement authorized):
 the user explicitly approved building/installing the child-diagnostic and
 privacy-export source changes, followed by one ordinary Aikido attempt.
