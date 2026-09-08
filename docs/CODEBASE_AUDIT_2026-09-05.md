@@ -1746,3 +1746,29 @@ Aikido remains physically unqualified until an exact new build is verified,
 installed through the approved lifecycle, and ordinary browser behavior is
 observed. The original failed14:11 report is unchanged and must not be
 requested again. Build/installation evidence, when available, follows here.
+
+### AUD-16 exact local build — PASS, not installed
+
+- Source commit: `d1c81c1f4b2d3aa8a86e70cfee2921aac20e607f`; tracked worktree
+  clean before the build and unchanged afterward. Subsequent audit/checkpoint
+  text is documentation only, not another executable build input change.
+- Exactly one `rtk proxy npm run build:local` in `app-tauri`, exit0. Canonical
+  hook froze and staged the current daemon before Tauri compilation and signing;
+  its built-in `verify:bundle:local` returned overall/build-chain/artifact PASS.
+  Log: `output/aud16-bundle-20260908.b8M9iA/build.log`.
+- All fresh/staged/bundled daemon copies:
+  `5828f2d14204d466107976208418de96cb6c587e6271112dc2f88402724dd071`.
+  App tree:
+  `e8a4f984f8d6ea145556f4c91e30c8840af709d64c1ffcd2d00a03d2be0972dc`.
+  Bundle: `app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app`;
+  companion DMG: `app-tauri/src-tauri/target/release/bundle/dmg/Slipstream_0.1.9-preview.23_aarch64.dmg`.
+- Signature is valid adhoc, version0.1.9-preview.23; not notarized. The freeze
+  emitted the non-target Windows `winreg` import warning, then completed.
+  Installed verification explicitly `not_run`; no workstation replacement,
+  network probe, ordinary browser attempt, runtime/learning change or backup
+  removal happened. This is source/build evidence, not Aikido recovery proof.
+- Next requires the user's exact workstation-replacement confirmation and the
+  normal Quit/authorized install lifecycle. Retain all existing backups and
+  learning. Verify installed identity through the canonical command, then
+  evaluate new physical browser evidence; never reuse the old failed report
+  as if it observed this newly built code.

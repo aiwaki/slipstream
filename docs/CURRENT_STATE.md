@@ -10,7 +10,7 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-08 (AUD-16 authorized diagnostic comparison; source checks PASS):
+Update 2026-09-08 (AUD-16 exact local bundle PASS; NOT installed):
 the user answered YES to the bounded diagnostic-only same-object Geph request.
 Source based on c15da33 now enters one owned comparison for valid critical-child
 INCOMPLETE + IDLE_TIMEOUT, still returns retryable-inconclusive with no proof,
@@ -25,11 +25,20 @@ ownership runner change, only seven affected integration cases were rerun: PASS.
 The new helper/cancellation file passes49 synthetic cases, including shrinking
 lsof/ps deadlines and pre/post readiness. Independent review has no remaining
 blocker. See audit AUD-16 for exact commands, logs and limits.
+Source committed as `d1c81c1f4b2d3aa8a86e70cfee2921aac20e607f`. One canonical
+`npm run build:local` completed exit0; embedded verification reports overall,
+artifact and build-chain PASS. Fresh/staged/bundled daemon all `5828f2d1…`;
+app tree `e8a4f984…`, valid adhoc signature, not notarized. Full log and hashes:
+`output/aud16-bundle-20260908.b8M9iA/build.log`, audit AUD-16. Artifact is
+`app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app`. Post-build
+worktree had only untracked output; later checkpoint-only docs do not change
+the built source. Do not repeat build/tests for those documentation updates.
 PR373 remains OPEN at513484ac with17 SUCCESS/SKIPPED checks; it is not this local
-delta. No network probe, build/install or runtime change yet; installed10e2cd6
-and the failed14:11 report are unchanged. Next: record exact source, then one
-canonical build/verification before any installation
-or fresh physical browser attempt. No further permission needed for the source
+delta. No site probe, installation or runtime change; installed10e2cd6 and the
+failed14:11 report are unchanged. Next: obtain confirmation for the exact
+workstation replacement, use normal Quit/authorized lifecycle without losing
+settings or learning, then canonical installed verification and ordinary
+Chrome/Safari qualification. No further permission needed for the source
 diagnostic-only behavior; do not repeat the resolved policy question below.
 
 Update 2026-09-08 (AUD-15 source fixes and causal relay diagnostics; NOT installed):
