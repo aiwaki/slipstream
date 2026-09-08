@@ -10,24 +10,36 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-08 (listener fix committed; incomplete packaging caught):
-listener source is `dd5be8e8d33d33e712ebdec639bbbd873a2a76b6`, with 47 Python
-and 16 matching Rust tests passing and independent review clear. Its one
-canonical build compiled successfully but the final bundle verifier failed:
-the staged Chromium tree lacked `chrome-headless-shell` before packaging.
-Do not install that incomplete app/DMG. Tauri copied the other resources;
-there is no evidence of a Tauri configuration/cache failure or who removed
-the staging executable. Log: `output/post-listener-bundle-20260908.ju62L0/build-local.log`.
-The unchanged installed app retains the exact pinned executable (`650f70c6...`).
-All other Chromium files matched byte-for-byte; copying only that verified
-file restored the staging tree, which now fully matches the installed tree
-and passes arm64 inspection. No installed file was changed. The narrow pre-build
-input guard now rejects missing/mismatched Chromium before daemon freeze.
-Its affected selection passes 5 tests and 28 subtests (59 deselected), the
-real staging check passes, and independent final review found no blocker.
-Next: commit and rebuild once with corrected inputs. No listener/Rust/full-suite
-rerun is needed.
-Keep original private backups; learning restoration and physical gates remain.
+Update 2026-09-08 (corrected exact bundle verified; replacement not started):
+product source `dde2498bc9107999726d6f9709b7ac96c16a83b5` includes listener fix
+`dd5be8e` and the fail-fast Chromium input guard. One canonical build on this
+clean source completed: overall/build_chain pass, installed not_run. App tree
+`b1690537bdc4b4270c0a8c3a02e475efaa24086b1f5b68017221feded5471d6c`;
+fresh/staged/bundled daemon all
+`5af9020bbb42e931b4bb0e5a3e4bd04e725f6f45f416683bf9e2356f8cf58a95`.
+DMG checksum is valid. Complete evidence is in
+`output/post-input-guard-bundle-20260908.aCajiw/` and the audit log. This is an
+ad-hoc signed, unnotarized local bundle, not a published or browser-qualified
+release. Documentation-only commits after this source need no rebuild.
+
+Scoped evidence: Python listener/status 47 passed; matching Rust witness/resume
+11 + 5 passed (unchanged, reused); build guard 5 tests + 28 subtests passed.
+Both independent narrow reviews found no actionable blocker. An earlier build
+was correctly rejected because staging lacked the Chromium executable; only
+that verified pinned file was restored from the unchanged installed app.
+No speculative Tauri cache fix, full-suite rerun, protected workflow or soak.
+
+Next: user performs normal Quit on current `/Applications/Slipstream.app`,
+then verify complete owned root/tray/Geph absence before a new narrowly scoped
+replacement transaction for the exact bundle above. The installed app is still
+`b172617`, with the previously diagnosed old resume marker/Geph-off state.
+Do not rerun the old one-shot installer or delete the marker. Preserve
+`/Applications/.Slipstream.previous-B5fQMm.app` and original root-private backup
+`/private/var/tmp/slipstream-qualification-20260905.B5fQMm`; original learning
+restoration remains outstanding. External Geph and primary checkout untouched.
+After replacement, verify exact installed identity and actual owned Geph start,
+then ordinary Chrome/Safari critical resources and full Quit/Restart. No sites
+have yet been qualified against this correction.
 
 Update 2026-09-08 (listener correction tests green; no new installation):
 audit HEAD remains `6b7bf54`, with the preserved uncommitted witness correction.

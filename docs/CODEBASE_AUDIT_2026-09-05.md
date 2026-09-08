@@ -828,3 +828,40 @@ rerun merely to create a log. Canonical Python 3.13 `--verify-only` also passed
 on the restored real staging tree. `git diff --check` is clean.
 Independent final guard review found no actionable blocker and confirmed the
 failure occurs before daemon freeze without altering the previous stage.
+
+### Corrected canonical bundle verified — 2026-09-08
+
+Input guard committed as `dde2498bc9107999726d6f9709b7ac96c16a83b5` on top of
+listener fix `dd5be8e`. The tracked tree was clean before and after one canonical
+`npm run build:local` on this source. Test-only TAURI_CONFIG and stage failpoints
+were unset. This is the justified build after restoring the evidenced missing
+input, not a blind retry of unchanged failure. `BUILD_LOCAL_EXIT=0` and the
+automatic verifier reports `overall=pass`, `build_chain.status=pass`, and
+`installed.status=not_run`.
+
+Evidence directory: `output/post-input-guard-bundle-20260908.aCajiw/`.
+`build-local.log` contains the complete build/verifier JSON;
+`dmg-verify.log` records hdiutil checksum VALID. Artifact identities:
+
+| Artifact | SHA-256 |
+|---|---|
+| App tree | `b1690537bdc4b4270c0a8c3a02e475efaa24086b1f5b68017221feded5471d6c` |
+| Fresh / staged / bundled daemon | `5af9020bbb42e931b4bb0e5a3e4bd04e725f6f45f416683bf9e2356f8cf58a95` |
+| Tray executable | `3ef395cabd712d3d7206fb05fe0aa94a54d255a58dfb7f6a2b69b7c4e8bb6a8c` |
+| Chromium | `650f70c6d3e4a902d2ad6d91bb7cc15a08aa0720487b28324563b0f61c219058` |
+| Geph (bundled signed bytes) | `2ddb34a98e9643d2554b1e7e4c09ee4b995eefd89fd7ef5595430348c24ef5d6` |
+| DMG | `f0cc23da8ac04b2a67757509cc3df9f93d023e269d1c7f7d214faf2092cf9d0e` |
+
+App: `app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app`.
+DMG: `app-tauri/src-tauri/target/release/bundle/dmg/Slipstream_0.1.9-preview.23_aarch64.dmg`.
+Fresh and staged daemon trees also match; the expected Tauri-materialized tree
+matches the bundled daemon tree. App signature integrity is valid ad-hoc with
+no team identity. No notarization or Gatekeeper compatibility is claimed.
+
+No app replacement, privileged stop/install, marker removal, learning reset,
+target browser navigation, external Geph mutation, push/merge, account-backed
+workflow or soak occurred. The primary tracked checkout remains unchanged.
+Installed `b172617` is still the old runtime. Next is its normal user-driven
+Quit, complete owned-runtime absence proof and a new exact-bundle replacement
+transaction, preserving the existing original backups and learning restoration
+obligation. Site recovery and full Quit/Restart remain physical open gates.
