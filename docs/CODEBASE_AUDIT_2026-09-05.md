@@ -1436,3 +1436,54 @@ success follows from these checks. The next user action requested is one
 ordinary Chrome Aikido navigation and built-in Copy Diagnostics, with no
 repeat reload, rule insertion, cache/profile reset or proxy launch flags.
 Fresh child admission/proof evidence and ordinary Safari result are pending.
+
+#### AUD-14 post-install Chrome failure and precise comparison — 2026-09-08
+
+The user reports no change and supplies a Chrome Aikido spinner screenshot.
+This is a failed product gate, not successful recovery. Fresh Copy Diagnostics
+is generated14:11:40.680Z, file mtime14:11:44.352Z,18393 bytes,mode0600;
+daemon PID86054 is the installed exact10e2cd6 process. It was copied without
+overwrite to `output/aud14-bundle-20260908.dHZffB/diagnostics-20260908T141144Z.json`.
+Only relevant `log_tail.lines` were inspected; Geph payload logs were excluded.
+The report has a truncated80-line tail, not a complete browser-attributed trace.
+
+Before: the12:05:22Z nBz5za report recorded two `concurrent_refused` and one
+`window_refused` child decision before network I/O. It also contains an older
+17:00:28+0500 `cdn.aikido.dev` learned event from the separate incomplete-browser
+path; do not attribute that success to the child preflight that never ran.
+After: the14:11:40Z report records at19:10:12+0500:
+`route-preflight-child parent=app.aikido.dev host=cdn.aikido.dev origin=cross decision=direct_idle_timeout direct=incomplete_idle_timeout geph=not_started`.
+The parent record is usable, assets3, elapsed>=5s. Thus admission advanced to
+the direct child probe in this attempt, but Geph comparison was never reached.
+The report has Geph up and auto_geo_exit learned0/pending0. This establishes
+neither that all admission contention disappeared nor why the peer did not
+finish delivering the child response.
+
+Code and independent review agree: `spike/tproxy.py:7850` deliberately returns
+retryable-inconclusive for INCOMPLETE plus IDLE_TIMEOUT before Geph prerequisites
+and comparison; parent cache publication is suppressed at9425. The affected
+source has no diff from installed10e2cd6. `bootstrap_asset_preflight.py:360`
+requires bounded parsed206 identity JavaScript, consistent valid range/framing,
+and unfinished declared response before classification deadline. That label
+does not establish EOF/reset, a particular received-body size, mandatory strong
+validator, or a successful same-object Geph response.
+
+Important diagnostic limit: `tproxy.py:4288` uses remaining absolute I/O budget.
+Both pre-read budget exhaustion and a recv timeout are caught at5211–5215 and
+labelled idle. Recent progress can therefore end in `direct_idle_timeout`;
+the record is not proof of eight seconds of inactivity. The cross-child
+deadline is minted after parent completion (9384 onward), so this is not the
+previous parent-relative deadline bug. DECISIONS critical-child contract110
+and `test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence` at14509
+explicitly forbid Geph comparison/cache/learning on this evidence. Tests were
+read, not rerun; the old passing baseline remains applicable to unchanged code.
+
+Next evidence should come from already-recorded resource/transport errors in
+the current Chrome Console, without replaying navigation. CUA inventory shows
+native Chrome running but exposes only an empty in-app browser, not the user's
+Chrome tabs. Prior native capture failed ScreenCaptureKit -3811; no repeated
+native screenshot attempt or new test browser/profile was created. If Console
+is inaccessible, ask the user for its existing errors. Do not rebuild solely
+to rename this diagnostic, remove the idle guard, blindly extend its deadline,
+or insert a host rule. No source/runtime mutation, tests, build/install,
+learning reset, new network probe, workflow or soak occurred in this diagnosis.

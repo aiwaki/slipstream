@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (AUD-14 physical Chrome attempt FAILED; next boundary identified):
+user still sees Aikido's spinner on exact installed10e2cd6. Fresh Copy Diagnostics
+generated14:11:40.680Z, mtime14:11:44.352Z, daemon86054, preserved mode0600:
+`output/aud14-bundle-20260908.dHZffB/diagnostics-20260908T141144Z.json`.
+Its bounded80-line tail records at19:10:12+0500 child cdn.aikido.dev:
+`decision=direct_idle_timeout direct=incomplete_idle_timeout geph=not_started`;
+parent app.aikido.dev is usable/assets3. Earlier concurrent/window refusals no
+longer occur in this captured child attempt, but product recovery has failed.
+Source7850 intentionally returns retryable-inconclusive before Geph; the
+reader's timeout is an absolute eight-second budget, not measured eight-second
+silence. Parsed incomplete206 identity-JS framing is established, but neither
+EOF/reset nor actual progress/silence duration nor same-object Geph success.
+No cache/learn is allowed here; do not remove that guard or increase timing
+based on this label. See audit AUD-14 post-install comparison for exact paths.
+Next: inspect already-recorded errors in the current Chrome Console without
+reload; getState exposes no Chrome browser tab-control surface, and native
+screen capture previously failed -3811. Request user Console screenshot if
+needed. No new source changes, tests, build/install, route reset, network
+probe or navigation were run. Installed runtime and backups stay intact.
+
 Update 2026-09-08 14:06 UTC (AUD-14 installed and active; browser gate pending):
 the native macOS-authorized `dHZffB` transaction exited0 and reported exact
 `10e2cd6` installed/root daemon hash matched, without resetting learning.
