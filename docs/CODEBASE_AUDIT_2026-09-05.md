@@ -1487,3 +1487,172 @@ is inaccessible, ask the user for its existing errors. Do not rebuild solely
 to rename this diagnostic, remove the idle guard, blindly extend its deadline,
 or insert a host rule. No source/runtime mutation, tests, build/install,
 learning reset, new network probe, workflow or soak occurred in this diagnosis.
+
+#### AUD-14 Console evidence and real-relay causality — 2026-09-08
+
+The user supplied the existing Chrome Console for the same failed navigation:
+many visible JavaScript loads from cdn.aikido.dev report
+`net::ERR_CONNECTION_CLOSED`; the Console counter is169 (not proof of169
+distinct resources). The user confirms the retained14:11 report was already
+exported immediately after that attempt. Opening Console later does NOT prove
+these errors happened after the report. The agent's contrary statement and
+request for another Copy Diagnostics were wrong and withdrawn. Do not request
+another export, reload or screenshot merely to repeat this unchanged state.
+
+Current installed-source trace, independently reviewed:
+
+- `_handle_impl` at19311 enables partial-TLS tracking for unknown routes.
+  `_watch_partial_tls_record` at16409 requires a complete valid TLS record plus
+  an unfinished next record and six seconds without downstream progress.
+  It then marks `partial_tls_record_stalled`; watchdog completion in
+  `relay_local_stream` at16524 cancels the relay tasks. `splice.finally` at16373
+  closes the browser writer. This can produce a browser connection-closed
+  error WITHOUT upstream EOF. It is a separate mechanism/socket from the
+  child preflight's eight-second absolute receive budget.
+- Actual upstream EOF/reset in `splice` at16347–16352 and a proved retry-event
+  abort in `relay_local_stream` at16516–16522 are other closure mechanisms.
+  The idle observer by itself does not close the browser connection.
+- After a partial-record watchdog close, the handler at19372–19400 records
+  the observed local stage. `note_partial_tls_stall` at6740 still requires
+  independent system, app-owned DNS and local-strategy evidence before
+  scheduling alternate/content confirmation. It intentionally cannot learn
+  Geph from opaque TLS bytes or replay an already-delivered live stream.
+
+Evidence limit: the retained80-line tail has exactly the two Aikido preflight
+lines quoted above and no attributable live-relay close reason. StatusV2
+`route_health` holds only aggregate class/ok values, `recovery` is idle/count0,
+and auto_geo_exit is idle/learned0/pending0. None identifies who closed those
+Chrome streams. The detailed handler close log at19448 is VERBOSE plus
+Discord-only and does not provide Aikido causality. Thus local watchdog
+closure is a source-confirmed POSSIBILITY, not a confirmed cause of this
+specific attempt. Do not equate cancellation's `server_end_at` in finally
+with an observed upstream EOF.
+
+The confirmed diagnostic gap is absence of a bounded, privacy-safe real-relay
+termination reason and recovery disposition at the decision point. The next
+source step should address that gap without changing routing authority,
+timeouts or retry policy; it is not a reason to rebuild the unchanged product
+or ask the user to repeat the same procedure now. Existing tests named
+`test_relay_detects_incomplete_tls_record_then_idle_without_client_abort`,
+`test_relay_observer_without_retry_permission_does_not_cancel_stream`,
+`test_exact_system_partial_tls_stall_waits_for_full_local_ladder`, and
+`test_server_reset_advances_unknown_host_without_waiting_for_repeat` cover
+the distinct mechanisms and remain the unchanged baseline, not newly run
+evidence. Only source/report reading and this documentation changed; no
+runtime mutation, new network probe, test, build or install was performed.
+
+### AUD-15 — actual relay causality, backpressure and diagnostic boundary
+
+2026-09-08; source based on9c73287 in the audit checkout. The user explicitly
+requested closing the gaps and fixing the Aikido failure, including explaining
+why the comparison does not reach internal Geph. This section describes new
+source work, NOT a successful installed-browser recovery.
+
+Confirmed and corrected defects:
+
+1. `splice` observed TLS framing/progress only after `await dst.drain()`. A
+   browser that stopped consuming could leave already-received record bytes
+   invisible to the watchdog, which could close the stream as a partial-record
+   stall. Ingress/framing is now observed immediately after upstream read;
+   delivery counters and the first-downstream callback still require a successful
+   browser drain. The watchdog is disabled during drain and measures the current
+   upstream-read interval, excluding preceding browser backpressure. A genuinely
+   partial valid TLS record stalled while awaiting upstream still triggers the
+   unchanged six-second boundary.
+2. Peer-end order was derived from coroutine completion/cleanup timestamps and
+   task completion, not the peer read events. Slow half-close/`wait_closed` could
+   invert the order; cancellation could acquire a misleading server-end timestamp.
+   Read EOF/error now records its timestamp and synchronous first-peer marker
+   before cleanup. Equal clock ticks retain observed event order. Write/drain
+   failures and cancellation do not create peer EOF. Ordinary client half-close
+   is nonterminal; the later actual close cause remains the termination reason.
+
+New observations, not new routing authority:
+
+- `spike/relay_diagnostics.py` keeps fixed12-reason counters and a bounded64-event
+  private ring. It has no clocks, sockets, sinks or routing callbacks and uses
+  nonblocking try-lock/drop-on-failure behavior. Hosts are accepted only as
+  already-normalized DNS names; IPs, URLs and arbitrary objects are not retained.
+- `relay_local_stream` captures the first causal terminal reason at the branch
+  performing/observing the action: upstream EOF/read-error/reset, terminal client
+  EOF/read-error, local partial-record watchdog, local half-close idle, authorized
+  retry, cancellation, write-error or internal error. Cleanup cannot replace it.
+  All six production relay entry points supply normalized host and stage.
+- A relay records one counter event. Subsequent `relay-recovery` log records
+  describe existing confirmation scheduling or local-ladder advancement without
+  incrementing the relay count. Independent review found that `False` from
+  `note_server_first_route_close` may still schedule confirmation, so its label
+  is `local_ladder_unchanged`, NOT `not_attempted`. This is a label correction,
+  not a change to the boolean API or recovery policy.
+- Each heartbeat projects a fresh counts-only `daemon.relay_diagnostics`.
+  Rust StatusV2 uses typed fixed fields and tolerates absent/malformed/future
+  diagnostic data without invalidating the whole heartbeat. The tray projection
+  preserves only that typed aggregate view; recent hosts are not public status.
+  The complete script-runtime payload now includes `relay_diagnostics.py`.
+- Host-level lines use the existing drop-only private queue32 and bounded log
+  tail. Normal EOF bursts and failures can displace each other; aggregate accepted
+  counters remain, but missing host lines cannot establish that no close happened.
+  These are bounded observations, not a complete transaction log or proof of a
+  failed resource's HTTP semantics.
+
+Why Geph is not started, and the remaining boundary:
+
+The preserved14:11 report really says
+`decision=direct_idle_timeout direct=incomplete_idle_timeout geph=not_started`.
+The critical-child early return explicitly implements the existing DECISIONS
+contract: an absolute-budget timeout is inconclusive, not hard direct failure,
+and cannot even start Geph comparison. That guard predates AUD-14. The report
+does not prove whether the actual Chrome relay ended by upstream EOF/reset,
+the local watchdog or an authorized retry. These new source fixes cannot
+retroactively establish that cause.
+
+A separate architectural limit remains: the generic incomplete-response
+transport-confirmation request uses `GET /`, not the actual failed JS object.
+Success or404 at a CDN root is not same-object proof. Do not splice an EOF from
+one live encrypted relay into an independent child preflight's evidence, weaken
+framing/ownership guards, or persist opaque TLS/timing as route authority.
+
+The user has been asked explicitly whether an idle-inconclusive child may use
+one bounded diagnostic-only **same-object** comparison through verified internal
+Geph, without switching the route, cache or learning. Await that choice; no such
+behavior or policy change has been implemented. The installed10e2cd6 runtime,
+settings, learning, all backups and external Geph were left untouched.
+
+Verification and review (reuse these exact unchanged selections):
+
+- `output/relay-diagnostics-module-gauCN7/pytest.log`:60 passed for the bounded
+  module, privacy, counter cardinality, unavailable/saturation and fail-open
+  diagnostic contracts; `pytest-new-reasons.log`:2 new reason cases passed.
+- The added `local_ladder_unchanged` enum automatically expands
+  `test_recovery_disposition_is_observed_not_computed`; that one new case passed
+  in0.02s, run by exact node ID without repeating the other60 module cases.
+- `output/relay-diagnostics-module-gauCN7/rust-core.log`:3 typed StatusV2 tests;
+  `rust-status-client.log`:8 status-client tests, including the new projection
+  contracts. Locked/offline focused Rust runs; no bundle resource mutation.
+- `output/relay-focused-BQnhb4/pytest.log`:43 passed,746 deselected. Command:
+  `.audit-venv/bin/python -m pytest spike/test_relay_diagnostics_integration.py
+  spike/test_tproxy_doh.py -k 'relay or script_runtime or server_reset_advances
+  or server_first_route_close or server_eof or status_heartbeat' -q
+  --disable-warnings`.
+- After the final explicit read-order marker and recovery hooks,
+  `output/relay-order-final-BPrsgH/pytest.log`:36 passed,765 deselected. Command:
+  `.audit-venv/bin/python -m pytest spike/test_relay_lifecycle.py
+  spike/test_relay_diagnostics_integration.py spike/test_tproxy_doh.py
+  -k 'relay or server_reset_advances or server_first_route_close or server_eof'
+  -q --disable-warnings`. Includes10 deterministic socket-free lifecycle cases,
+  seven integration cases and19 existing affected cases. Selections overlap;
+  do not sum them as distinct tests. Unchanged packaging/heartbeat and prior
+  full-suite/preflight baselines were reused.
+- The lifecycle tests cover browser drain blocked past the watchdog threshold,
+  completed/still-partial ingress, genuine read silence, EOF order despite slow
+  cleanup/half-close, cancellation and four write/drain failure variants. Equal
+  clock ticks are covered by the integration tests. No external site requests.
+- Changed Rust files pass `rustfmt --edition 2021 --check`; `git diff --check`
+  passes. Independent read-only review found no remaining blocking I/O or policy
+  regression after the recovery-label correction, and noted the queue limit above.
+
+No whole-suite rerun, protected matrix, soak, network probe/navigation, build or
+installation was performed for this source delta. Aikido remains unqualified.
+Next is the explicit diagnostic-probe policy choice and its source contract,
+then exact artifact verification and ordinary Chrome/Safari qualification only
+when the source work is ready. No repeated Copy Diagnostics for the old attempt.

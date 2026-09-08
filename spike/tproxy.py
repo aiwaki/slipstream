@@ -63,6 +63,7 @@ from xml.sax.saxutils import escape as xml_escape
 import connection_probe
 import bootstrap_asset_preflight
 import geph_backend
+import relay_diagnostics
 from http2_response_probe import probe_http2_response
 from http_response_completion import (
     HttpContentDecodeOutcome,
@@ -2151,6 +2152,7 @@ TRANSPORT_IDLE_EVIDENCE_ADVANCE = "advance"
 TRANSPORT_IDLE_EVIDENCE_CONFIRMING = "confirming"
 TRANSPORT_IDLE_EVIDENCE_HOLD = "hold"
 PARTIAL_TLS_RECORD_IDLE = 6.0
+_relay_diagnostics = relay_diagnostics.RelayDiagnostics()
 TLS_RECORD_HEADER_SIZE = 5
 TLS_RECORD_MAX_CIPHERTEXT = (1 << 14) + 2048
 TLS_RECORD_CONTENT_TYPES = frozenset((20, 21, 22, 23, 24))
@@ -11796,6 +11798,7 @@ def _publish_cached_status(now=None):
         snapshot["daemon"]["updated_at"] = now
         snapshot["daemon"]["heartbeat_at"] = _rfc3339_utc(now)
         snapshot["daemon"]["heartbeat_seq"] = _status_heartbeat_seq
+        snapshot["daemon"]["relay_diagnostics"] = _relay_diagnostics.snapshot()
         daemon = snapshot["daemon"]
         daemon.pop("listener_ownership", None)
         if (
@@ -12964,6 +12967,7 @@ def _script_runtime_payload(source_file):
         (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
         (os.path.join(source_dir, "connection_race_io.py"), "connection_race_io.py"),
         (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
+        (os.path.join(source_dir, "relay_diagnostics.py"), "relay_diagnostics.py"),
         (
             os.path.join(source_dir, "http_response_completion.py"),
             "http_response_completion.py",
@@ -14411,6 +14415,15 @@ def ip_attempt_limit(host):
 @dataclass
 class _RelayActivity:
     last_downstream_at: float
+    last_upstream_at: float = 0.0
+    upstream_read_started_at: float = 0.0
+    upstream_read_pending: bool = True
+    client_read_ended_at: float = 0.0
+    server_read_ended_at: float = 0.0
+    read_ended_first: str = ""
+    diagnostic_reason: str = ""
+    diagnostic_host: str = ""
+    diagnostic_stage: str = "unknown"
     downstream_bytes: int = 0
     client_end_at: float = 0.0
     server_end_at: float = 0.0
@@ -16338,31 +16351,106 @@ async def _half_close_stream_writer(writer):
         return False
 
 
+def _note_relay_termination(activity, reason):
+    """Capture the first causal branch, never infer it from task cleanup."""
+    if activity is not None and not activity.diagnostic_reason:
+        activity.diagnostic_reason = reason
+
+
+def _note_relay_peer_end(activity, peer):
+    """Capture read-event order before yielding, including equal clock ticks."""
+    if activity is not None:
+        if peer == "server":
+            activity.server_read_ended_at = time.monotonic()
+        else:
+            activity.client_read_ended_at = time.monotonic()
+        if not activity.read_ended_first:
+            activity.read_ended_first = peer
+
+
+def _record_relay_diagnostic(activity):
+    """Drop-only observations; this return value never controls a route."""
+    try:
+        event = dict(
+            host=activity.diagnostic_host,
+            stage=activity.diagnostic_stage,
+            reason=activity.diagnostic_reason or "unknown",
+        )
+        _relay_diagnostics.record(**event)
+        # EOF is necessary here too: a peer's short response must not become
+        # invisible just because cleanup completed normally. Host-level events
+        # use the existing private bounded queue, never public StatusV2.
+        if event["host"] and event["reason"] != "unknown":
+            record = relay_diagnostics.format_event(**event)
+            if record is not None:
+                _enqueue_route_preflight_root_diagnostic_record(
+                    ">> " + record
+                )
+    except Exception:
+        pass
+
+
+def _record_relay_recovery(activity, disposition):
+    """Report the handler's subsequent action without counting another relay."""
+    try:
+        record = relay_diagnostics.format_event(
+            host=activity.diagnostic_host,
+            stage=activity.diagnostic_stage,
+            reason=activity.diagnostic_reason or "unknown",
+            recovery=disposition,
+        )
+        if record is not None:
+            _enqueue_route_preflight_root_diagnostic_record(
+                ">> relay-recovery " + record.removeprefix("relay-end ")
+            )
+    except Exception:
+        pass
+
+
 async def splice(src, dst, activity=None):
     total = 0
     try:
         while True:
             try:
+                if activity is not None:
+                    activity.upstream_read_started_at = time.monotonic()
+                    activity.upstream_read_pending = True
                 data = await src.read(65536)
-            except (ConnectionResetError, BrokenPipeError, OSError):
+            except (ConnectionResetError, BrokenPipeError, OSError) as exc:
                 if activity is not None:
                     activity.server_read_failed = True
+                _note_relay_peer_end(activity, "server")
+                _note_relay_termination(
+                    activity,
+                    "upstream_reset" if isinstance(exc, ConnectionResetError)
+                    else "upstream_read_error",
+                )
                 break
+            finally:
+                if activity is not None:
+                    activity.upstream_read_pending = False
             if not data:
+                _note_relay_peer_end(activity, "server")
+                _note_relay_termination(activity, "upstream_eof")
                 break
             total += len(data)
+            if activity is not None:
+                # Ingress is observed before browser backpressure. A blocked
+                # drain is not silence from the upstream peer.
+                activity.last_upstream_at = time.monotonic()
+                if activity.track_tls_records:
+                    _track_tls_records(activity, data)
             try:
                 dst.write(data)
                 await dst.drain()
             except (ConnectionResetError, BrokenPipeError, OSError):
                 if activity is not None:
                     activity.downstream_write_failed = True
+                _note_relay_termination(activity, "write_error")
                 break
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
                 activity.downstream_bytes += len(data)
-                if activity.track_tls_records:
-                    _track_tls_records(activity, data)
                 if not activity.first_downstream_seen:
                     activity.first_downstream_seen = True
                     if activity.on_first_downstream is not None:
@@ -16384,19 +16472,25 @@ async def pump(reader, up_w, activity=None):
             except (ConnectionResetError, BrokenPipeError, OSError):
                 if activity is not None:
                     activity.client_read_failed = True
+                _note_relay_peer_end(activity, "client")
+                _note_relay_termination(activity, "client_read_error")
                 break
             if not data:
                 if activity is not None:
                     activity.client_eof = True
+                _note_relay_peer_end(activity, "client")
                 half_closed = await _half_close_stream_writer(up_w)
                 if activity is not None:
                     activity.client_half_closed = half_closed
+                if not half_closed:
+                    _note_relay_termination(activity, "client_eof")
                 break
             total += len(data)
             try:
                 up_w.write(data)
                 await up_w.drain()
             except (ConnectionResetError, BrokenPipeError, OSError):
+                _note_relay_termination(activity, "write_error")
                 break
     finally:
         if activity is not None:
@@ -16408,17 +16502,22 @@ async def pump(reader, up_w, activity=None):
 
 async def _watch_partial_tls_record(activity, idle_timeout):
     while True:
-        if not activity.first_downstream_seen:
+        if not activity.first_downstream_seen or not activity.upstream_read_pending:
             await asyncio.sleep(idle_timeout)
             continue
         if not _incomplete_tls_record_visible(activity):
             await asyncio.sleep(idle_timeout)
             continue
-        idle_for = time.monotonic() - activity.last_downstream_at
+        idle_for = time.monotonic() - max(
+            activity.last_downstream_at,
+            activity.last_upstream_at,
+            activity.upstream_read_started_at,
+        )
         if idle_for < idle_timeout:
             await asyncio.sleep(idle_timeout - idle_for)
             continue
         activity.partial_tls_record_stalled = True
+        _note_relay_termination(activity, "local_partial_record_watchdog")
         return
 
 
@@ -16456,6 +16555,8 @@ async def relay_local_stream(
     activity=None,
     *,
     detect_partial_tls_stall=False,
+    diagnostic_host="",
+    diagnostic_stage="unknown",
 ):
     """Relay both directions with bounded support for an orderly half-close.
 
@@ -16466,6 +16567,8 @@ async def relay_local_stream(
     the bounded cancellation behavior so no pair of FDs remains indefinitely.
     """
     relay_activity = activity or _RelayActivity(last_downstream_at=time.monotonic())
+    relay_activity.diagnostic_host = diagnostic_host
+    relay_activity.diagnostic_stage = diagnostic_stage
     relay_activity.track_tls_records = bool(
         relay_activity.track_tls_records or detect_partial_tls_stall
     )
@@ -16519,6 +16622,7 @@ async def relay_local_stream(
             # reachable only after the owner-only worker proved the exact live
             # relay pending for eight seconds and the daemon accepted the
             # correlated route effect, so reset only that client stream.
+            _note_relay_termination(relay_activity, "authorized_retry")
             await _abort_stream_writer(writer)
             pending = {task for task in tasks if not task.done()}
         if watchdog_task is not None and watchdog_task in done:
@@ -16527,25 +16631,11 @@ async def relay_local_stream(
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
             pending = {task for task in tasks if not task.done()}
-        client_done = client_task in done
-        server_done = server_task in done
-        relay_activity.client_ended_first = client_done and not server_done
-        relay_activity.server_ended_first = server_done and not client_done
-        if client_done and server_done:
-            if (
-                relay_activity.server_end_at
-                and relay_activity.client_end_at
-                and relay_activity.server_end_at
-                < relay_activity.client_end_at
-            ):
-                relay_activity.server_ended_first = True
-            elif (
-                relay_activity.client_end_at
-                and relay_activity.server_end_at
-                and relay_activity.client_end_at
-                < relay_activity.server_end_at
-            ):
-                relay_activity.client_ended_first = True
+        # wait_closed()/half-close latency does not determine who ended the
+        # stream. Only observed read EOF/errors count; cancellation and failed
+        # writes must never manufacture upstream EOF evidence.
+        relay_activity.client_ended_first = relay_activity.read_ended_first == "client"
+        relay_activity.server_ended_first = relay_activity.read_ended_first == "server"
         if relay_activity.client_ended_first and relay_activity.client_half_closed:
             while not server_task.done():
                 last_progress_at = max(
@@ -16558,6 +16648,7 @@ async def relay_local_stream(
                     - time.monotonic()
                 )
                 if idle_left <= 0:
+                    _note_relay_termination(relay_activity, "local_half_close_idle")
                     server_task.cancel()
                     break
                 try:
@@ -16580,7 +16671,12 @@ async def relay_local_stream(
             else:
                 totals.append(result)
         return tuple(totals)
-    except BaseException:
+    except BaseException as exc:
+        _note_relay_termination(
+            relay_activity,
+            "cancellation" if isinstance(exc, asyncio.CancelledError)
+            else "internal_error",
+        )
         if watchdog_task is not None and not watchdog_task.done():
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
@@ -16610,6 +16706,7 @@ async def relay_local_stream(
         _unregister_pending_navigation_relay(relay_activity)
         if relay_activity.client_half_closed:
             await _close_stream_writer(up_w)
+        _record_relay_diagnostic(relay_activity)
 
 
 # Control-RPC port paired with each SOCKS port. The external mapping is used only
@@ -16988,7 +17085,10 @@ async def _commit_owned_geph_first_payload(
         downstream_bytes=len(server_first),
         first_downstream_seen=True,
     )
-    await relay_local_stream(reader, gw, gr, writer, activity)
+    await relay_local_stream(
+        reader, gw, gr, writer, activity,
+        diagnostic_host=host, diagnostic_stage="geph",
+    )
     return True
 
 
@@ -17861,6 +17961,8 @@ async def _try_exact_system_passthrough(
         writer,
         activity,
         detect_partial_tls_stall=track_unknown,
+        diagnostic_host=host,
+        diagnostic_stage="system_plain",
     )
     duration = time.monotonic() - started_at
     if track_unknown and host:
@@ -18195,6 +18297,8 @@ async def _try_request_only_tls_stall_geph_route(
             geph_r,
             writer,
             activity,
+            diagnostic_host=host,
+            diagnostic_stage="geph",
         )
         geph_upstream = None
         return _RequestOnlyRouteResult(
@@ -18415,6 +18519,8 @@ async def _try_unknown_owned_geph_route(
             up_r,
             writer,
             activity,
+            diagnostic_host=h,
+            diagnostic_stage="geph",
         )
         client_bytes = relay_result[0] if relay_result is not None else None
         late_handoff = bool(
@@ -18468,7 +18574,10 @@ async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writ
         last_downstream_at=time.monotonic(),
         on_first_downstream=record_first_payload,
     )
-    result = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    result = await relay_local_stream(
+        reader, up_w, up_r, writer, activity,
+        diagnostic_host=host, diagnostic_stage="system_plain",
+    )
     if not payload_recorded and not (result[1] or 0):
         route_health_event(
             policy["service_group"],
@@ -19318,6 +19427,12 @@ async def _handle_impl(reader, writer):
         writer,
         activity,
         detect_partial_tls_stall=detect_partial_tls_stall,
+        diagnostic_host=host,
+        diagnostic_stage=(
+            "system_plain" if via_system_exact
+            else "xbox_plain" if via_xbox_dns
+            else "local_strategy"
+        ),
     )
     duration = time.monotonic() - t0
     client_first_response_candidate = False
@@ -19370,9 +19485,10 @@ async def _handle_impl(reader, writer):
     # Protected and direct groups never enter this path.
     if is_tls and host:
         if _local_stream_stalled(activity, now=t0 + duration):
+            confirmation_scheduled = False
             if via_system_exact:
                 if activity.partial_tls_record_stalled:
-                    note_partial_tls_stall(
+                    confirmation_scheduled = note_partial_tls_stall(
                         host,
                         AUTO_GEPH_STAGE_SYSTEM,
                         now=t0 + duration,
@@ -19382,7 +19498,7 @@ async def _handle_impl(reader, writer):
                 note_local_stream_stall(host, chosen_name)
             elif via_xbox_dns:
                 if activity.partial_tls_record_stalled:
-                    note_partial_tls_stall(
+                    confirmation_scheduled = note_partial_tls_stall(
                         host,
                         AUTO_GEPH_STAGE_XBOX_DNS,
                         now=t0 + duration,
@@ -19397,7 +19513,15 @@ async def _handle_impl(reader, writer):
                     activity.partial_tls_record_stalled
                     and unknown_stage == UNKNOWN_RECOVERY_LOCAL_LADDER
                 ):
-                    note_local_ladder_partial_stall(host, chosen_name)
+                    confirmation_scheduled = note_local_ladder_partial_stall(
+                        host, chosen_name
+                    )
+            if route_class == ROUTE_UNKNOWN:
+                _record_relay_recovery(
+                    activity,
+                    "confirmation_scheduled" if confirmation_scheduled
+                    else "confirmation_not_scheduled",
+                )
         elif (
             not client_first_response_candidate
             and _clean_eof_stream_stalled(activity, now=t0 + duration)
@@ -19412,7 +19536,7 @@ async def _handle_impl(reader, writer):
         elif activity.server_ended_first:
             _clear_clean_eof_stalls(host)
             if observed_stage is not None:
-                note_server_first_route_close(
+                local_advanced = note_server_first_route_close(
                     host,
                     observed_stage,
                     activity,
@@ -19428,6 +19552,11 @@ async def _handle_impl(reader, writer):
                         if observed_stage == server_first_repeat_stage
                         else None
                     ),
+                )
+                _record_relay_recovery(
+                    activity,
+                    "local_ladder_advanced" if local_advanced
+                    else "local_ladder_unchanged",
                 )
         elif observed_stage is not None:
             _clear_server_first_closes(host, observed_stage)

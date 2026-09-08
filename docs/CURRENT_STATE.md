@@ -10,6 +10,38 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (AUD-15 source fixes and causal relay diagnostics; NOT installed):
+continuation source is `codex/codebase-audit-20260905`, based on9c73287.
+Two independently reviewed defects are fixed in `spike/tproxy.py`: TLS ingress
+was observed only after browser drain, allowing a false partial-record watchdog
+under downstream backpressure; peer EOF order came from coroutine cleanup,
+allowing cleanup/cancellation to masquerade as upstream-first EOF. Ingress is
+now observed before drain, delivery remains after drain, the watchdog runs only
+during an actual upstream read, and peer read-end order is captured before
+cleanup (including equal clock ticks). None proves which mechanism caused the
+retained physical Aikido failure; that report lacks the new event evidence.
+New bounded `relay_diagnostics.py` records causal termination reasons and
+recovery dispositions without routing authority. StatusV2 and tray projection
+expose typed counters only; normalized host/stage/reason is private-log-only,
+never URL/path/body. Script install payload includes the new module. Private
+queue/tail can drop events; absence is not negative evidence. Independent review
+found one misleading recovery label, corrected to `local_ladder_unchanged`.
+Change-scoped checks: module60+2 and new enum1, core3, status_client8; focused
+Python43, then36 after the final read-order change (overlapping selections,
+not additive totals). Exact commands/logs and limits: audit AUD-15. Changed-file
+rustfmt and diff-check pass. No full suite, network navigation/probe, build,
+installation or runtime/learning change. Installed source remains10e2cd6 and
+the14:11 report above remains the same failed attempt; do not request it again.
+OPEN POLICY CHOICE: the existing critical-child idle-timeout contract explicitly
+forbids even starting Geph. The user was asked whether one bounded diagnostic-only
+same-object probe through verified internal Geph is allowed, with NO route/cache/
+learning authority. No answer yet; the guard remains unchanged. Actual relay
+EOF cannot be substituted for EOF of the separate critical-object probe, and
+the existing incomplete-response fallback's `GET /` is not same-object proof.
+Next: resolve that explicit policy choice before implementing its comparison;
+then finish the source contract and affected checks before any exact build or
+ordinary Chrome/Safari qualification. Do not claim Aikido recovered.
+
 Update 2026-09-08 (AUD-14 physical Chrome attempt FAILED; next boundary identified):
 user still sees Aikido's spinner on exact installed10e2cd6. Fresh Copy Diagnostics
 generated14:11:40.680Z, mtime14:11:44.352Z, daemon86054, preserved mode0600:
@@ -24,11 +56,22 @@ silence. Parsed incomplete206 identity-JS framing is established, but neither
 EOF/reset nor actual progress/silence duration nor same-object Geph success.
 No cache/learn is allowed here; do not remove that guard or increase timing
 based on this label. See audit AUD-14 post-install comparison for exact paths.
-Next: inspect already-recorded errors in the current Chrome Console without
-reload; getState exposes no Chrome browser tab-control surface, and native
-screen capture previously failed -3811. Request user Console screenshot if
-needed. No new source changes, tests, build/install, route reset, network
-probe or navigation were run. Installed runtime and backups stay intact.
+Console evidence RECEIVED: the user's screenshot shows many cdn.aikido.dev
+JavaScript requests with ERR_CONNECTION_CLOSED and counter169. The user
+explicitly confirms this report was exported immediately AFTER the same
+attempt. Opening Console later does not move the errors after the export;
+the request for another Copy Diagnostics was mistaken and withdrawn. Do not
+ask for another export/reload of this unchanged attempt.
+Source trace finds three distinct real-relay close mechanisms: upstream
+EOF/reset, Slipstream's six-second partial-TLS-record watchdog, and a proved
+pending-navigation retry abort. The separate eight-second child probe does
+not identify which mechanism closed Chrome's streams. The current report
+contains no matching per-relay reason; aggregate route_health is not such
+evidence. See the audit's Console/relay causality section. Next: close the
+bounded per-relay diagnostics gap at the actual close decision, preserving
+slow-link/routing guards, before requesting any further workstation attempt.
+No source changes, tests, build/install, route reset, network probe or
+navigation were run during this trace. Installed runtime and backups stay intact.
 
 Update 2026-09-08 14:06 UTC (AUD-14 installed and active; browser gate pending):
 the native macOS-authorized `dHZffB` transaction exited0 and reported exact

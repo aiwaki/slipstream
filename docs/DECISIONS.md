@@ -33,6 +33,24 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   left, a new root cannot start without room for its possible child, even
   when that root would ultimately need none. These scheduling rights confer
   no routing authority and change no proof, timeout or exclusion policy.
+- Relay ingress, downstream delivery and cleanup are different observations.
+  Observe received TLS framing before waiting for browser drain; publish delivered
+  bytes and the first-delivery callback only after successful drain. A partial-TLS
+  watchdog may count silence only while actually waiting for upstream input, not
+  while blocked delivering already-received bytes to the browser. Preserve its
+  existing timeout and framing conditions. Capture peer read EOF/reset and their
+  causal order before asynchronous half-close/cleanup; write errors, cancellation
+  and cleanup timestamps cannot invent an upstream EOF or reorder the peer ends.
+  An orderly client half-close is not, by itself, a terminal reason.
+- Relay diagnostics are bounded, drop-only observations, never route proof or
+  permission to retry/close/learn. Public StatusV2 carries only typed fixed-category
+  aggregate counters; private logs may include a validated normalized DNS host and
+  fixed stage/reason/disposition, never a URL/path/query/body or arbitrary exception.
+  Missing/dropped records cannot prove absence, and an unavailable snapshot must
+  not pretend to be zero observations. Recovery scheduling and ladder advancement
+  are distinct: a false ladder-advanced return cannot be labelled recovery-not-
+  attempted. These corrections do not change the critical-child idle prohibition
+  or permit a separate socket's EOF to authorize the critical object's route.
 - Explicit **Quit Slipstream** means stopping the owned runtime, not only the
   tray. It must serialize with privileged mutations, invalidate stale queued
   requests, complete the installed root-owned daemon's non-destructive `--stop`
