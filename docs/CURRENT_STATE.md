@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 11:58 UTC (diagnostic replacement verified; browser UI blocked):
+the native macOS-authorized `nBz5za` transaction exited0 and reported exact
+`dc2937bc` app installed/root daemon hash matched, without learning reset.
+Do NOT rerun it. New previous app and root-private backup must be preserved.
+`output/aikido-child-diagnostic-20260908.nBz5za/installed-verification.log`
+records canonical overall/build_chain/installed pass: app tree `15668061...`,
+daemon `7bef1eb8...`, schema3 witness valid, fresh active StatusV2 and exact live
+launchd PID2946. Coverage is installed-unprivileged: the transaction itself
+proved pre-install privileged absence and final daemon hash; independent live
+kernel PF/listener verification is not claimed by the unprivileged verifier.
+Opened `/Applications/Slipstream.app` normally. Tray3774 and owned Geph3834
+run; `gui/502/dev.slipstream.geph` is running, StatusV2 Geph up/owned=true/
+port_conflict=false. No manual resume-marker deletion or learning reset.
+No Aikido navigation has happened: Chrome CUA selection again failed
+ScreenCaptureKit -3811 before interaction. Next requires the user's one normal
+Chrome Aikido navigation (no reload/rules/profile changes), then built-in Copy
+Diagnostics with local authorization and visual result. Capture the NEW bounded
+child-decision record; do not reuse the old sensitive report or claim the
+site is fixed. No further build, unchanged tests or soak are required.
+
 Update 2026-09-08 11:49 UTC (normal Quit confirmed; new transaction ready):
 user performed Quit. Read-only inspection found no owned processes, both
 launchd services absent (113), root label disabled, and status/status.tmp absent.

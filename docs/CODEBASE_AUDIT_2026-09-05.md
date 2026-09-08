@@ -1197,6 +1197,55 @@ process was killed, no app Quit/replacement/learning reset occurred, and no
 password from chat was reused. Next requires the user's ordinary Quit and
 local authorization, a new exact one-shot replacement preserving all prior
 backups, then installed verification/owned startup and one Aikido observation.
+
+### Diagnostic replacement completed; awaiting one user navigation — 2026-09-08
+
+After user-confirmed normal Quit, live inspection at 11:49:35Z showed no owned
+processes, both launchd services absent (113), root label disabled, and no
+status/status.tmp. External Geph854/874 were distinguished and untouched.
+These nonroot observations were not substituted for privileged absence checks.
+
+Created and independently reviewed the new one-shot
+`output/aikido-child-diagnostic-20260908.nBz5za/replace-exact-bundle.sh`, SHA256
+`53986e902973dff9639f12f0ae2f7ebaad6d58057fd7afe41e8411bb574b59ff`.
+Its delta from the previous transaction pins the new exact old/new identities,
+new paths, requires both older backup generations, and includes TCP1443 and
+PF child-anchor absence alongside TCP1080 and PF filter/translation checks.
+`bash -n` passed; no broad tests repeated. Main verified this matches the
+production stop contract. Existing config/learning remain in place and are
+privately snapshotted; no resume marker is removed manually.
+
+Executed once through native `osascript` administrator authorization, without
+passing or persisting any password. Execution completed exit0 with:
+`Exact dc2937bc bundle installed; root daemon hash matches. Learning was not reset.`
+The script creates the new previous app at
+`/Applications/.Slipstream.before-nBz5za.app` and root-private recovery state at
+`/private/var/tmp/slipstream-replacement-20260908.nBz5za`. Both earlier backup
+generations are preserved. Do not replay this or any older transaction.
+
+`npm run verify:local-install` completed exit0 and reports
+overall/build_chain/installed pass. Evidence:
+`output/aikido-child-diagnostic-20260908.nBz5za/installed-verification.log`.
+App tree `156680611337a40ac8fffcf5c66bb0d285f7dfa288ae671d71cacd03ea692c85`
+and daemon `7bef1eb8dc5d153ec2d234eb60681845e237e2177d52d90d8b8b8c25fd81456e`
+match the build/staged proof. Schema3 attestation/witness are valid and bind
+fresh active StatusV2 to exact live launchd PID2946. The attestation's dormant
+PF snapshot is historical, not current runtime; StatusV2 reports PF applied/
+enabled/rules_loaded. Verifier coverage is installed-unprivileged; its separate
+live privileged kernel/listener/hash checks remain not_run. The transaction
+proved its own pre-install absence and post-install root daemon hash.
+
+Normal `open -a /Applications/Slipstream.app` started tray3774, then owned
+Geph3834. At 11:57:52Z the owned LaunchAgent was running and StatusV2 showed
+Geph up/owned=true/port_conflict=false, learned0/pending0. This aggregate does
+not identify historical route retention; no manual learning reset occurred.
+
+Chrome CUA selection still failed ScreenCaptureKit -3811 before interaction.
+No browser navigation/reload occurred. User must perform the one ordinary
+Chrome Aikido navigation and invoke Copy Diagnostics so the newly installed
+child-decision record and visual outcome can be inspected. Aikido recovery,
+Safari and full browser qualification remain unproven; no build or broad suite
+should be repeated to work around this UI limitation.
 Actual Aikido recovery, Safari qualification, full Quit/Restart and original
 learning restoration remain open. No site reload/probe, new rules, runtime
 change, full test suite, rebuild/install, workflow or soak ran in this pass.
