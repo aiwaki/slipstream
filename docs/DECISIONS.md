@@ -17,6 +17,22 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   URL. Child negative/healthy outcomes cannot populate a host-wide health cache;
   an unresolved critical child cannot populate its parent's retry cache. Existing
   proof, ownership, concurrency, exclusions and deadline limits remain active.
+- Root coalescing/proof epochs are distinct from execution admission. After
+  all root candidate workers drain, only that root's owning coroutine may
+  transfer its execution lease to its one selected cross-origin critical
+  child. The child keeps a separate opaque exact-address proof epoch and
+  capability; its completion must not resolve root waiters. The execution
+  cap remains two admitted jobs (each retains its existing internal probe
+  bounds). Root admission charges its own start and reserves one potential
+  cross-child start: recent starts plus outstanding reservations must never
+  exceed eight per 60 seconds. A child converts its reservation to its own
+  current start timestamp; actual starts are never refunded or backdated.
+  Unused reservations are released when no cross-child is selected or after
+  cancellation drains owned workers. Standalone child work retains ordinary
+  admission. This is intentionally conservative: with only one window credit
+  left, a new root cannot start without room for its possible child, even
+  when that root would ultimately need none. These scheduling rights confer
+  no routing authority and change no proof, timeout or exclusion policy.
 - Explicit **Quit Slipstream** means stopping the owned runtime, not only the
   tray. It must serialize with privileged mutations, invalidate stale queued
   requests, complete the installed root-owned daemon's non-destructive `--stop`

@@ -2780,6 +2780,7 @@ _semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
 _route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
 _route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
+_route_preflight_execution_leases = {}  # proof Future -> shared execution lease
 _route_preflight_window = deque()
 _route_preflight_consumed = OrderedDict()  # capability -> expiry monotonic
 _route_preflight_lock = threading.RLock()
@@ -7091,6 +7092,53 @@ def _route_preflight_inflight_key(host, address):
     return h, exact_address
 
 
+@dataclass(eq=False, slots=True)
+class _RoutePreflightExecutionLease:
+    """Scheduling ownership only; never substitutes for an exact proof epoch."""
+
+    root_key: tuple
+    root_epoch: Future
+    owner_task: asyncio.Task
+    child_reserved: bool = True
+    child_ready: bool = False
+    child_epoch: Future | None = None
+
+
+def _route_preflight_execution_count_locked():
+    # A root and its sequential child retain separate proof/coalescing epochs
+    # but use only one execution slot. Unregistered epochs (standalone child
+    # work, including legacy callers) still count independently and fail closed.
+    return len(
+        set(_route_preflight_execution_leases.values())
+        | {
+            _route_preflight_execution_leases.get(epoch, epoch)
+            for epoch in _route_preflight_inflight.values()
+        }
+    )
+
+
+def _route_preflight_reserved_count_locked():
+    return sum(
+        lease.child_reserved
+        for lease in set(_route_preflight_execution_leases.values())
+    )
+
+
+def _route_preflight_child_lease_valid_locked(lease, parent, parent_ip):
+    # Only the original coroutine can hand off its drained root's slot. A
+    # coalesced waiter or an unrelated object cannot borrow by hostname/IP.
+    return bool(
+        isinstance(lease, _RoutePreflightExecutionLease)
+        and lease.owner_task is asyncio.current_task()
+        and lease.root_key == _route_preflight_inflight_key(parent, parent_ip)
+        and _route_preflight_inflight.get(lease.root_key) is lease.root_epoch
+        and _route_preflight_execution_leases.get(lease.root_epoch) is lease
+        and not lease.root_epoch.done()
+        and lease.child_ready
+        and lease.child_epoch is None
+    )
+
+
 def _prune_initial_route_preflights_locked(now):
     cutoff = now - ROUTE_PREFLIGHT_WINDOW
     while _route_preflight_window and _route_preflight_window[0] <= cutoff:
@@ -7907,6 +7955,7 @@ async def _run_bootstrap_asset_preflight(
     direct_probe=None,
     geph_probe=None,
     resolver=None,
+    execution_lease=None,
 ):
     """Report one child decision only after its existing cleanup has settled."""
     diagnostic = _BootstrapAssetDiagnostic()
@@ -7920,6 +7969,7 @@ async def _run_bootstrap_asset_preflight(
             direct_probe=direct_probe,
             geph_probe=geph_probe,
             resolver=resolver,
+            execution_lease=execution_lease,
             diagnostic=diagnostic,
         )
     except asyncio.CancelledError:
@@ -7947,6 +7997,7 @@ async def _run_bootstrap_asset_preflight_observed(
     direct_probe=None,
     geph_probe=None,
     resolver=None,
+    execution_lease=None,
     diagnostic,
 ):
     """Probe one critical object under an address-bound private epoch."""
@@ -8003,6 +8054,15 @@ async def _run_bootstrap_asset_preflight_observed(
     owner = h == parent
     future = None
     owner_epoch = None
+    if execution_lease is not None:
+        with _route_preflight_lock:
+            valid_lease = _route_preflight_child_lease_valid_locked(
+                execution_lease, parent, parent_ip,
+            )
+        if not valid_lease:
+            diagnostic.decision = "parent_epoch_refused"
+            asset.forget()
+            return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
     if owner:
         inflight_key = exact_inflight_key
         with _route_preflight_lock:
@@ -8025,16 +8085,31 @@ async def _run_bootstrap_asset_preflight_observed(
                 diagnostic.decision = "learned_cache_reuse"
                 asset.forget()
                 return True, cached.outcome
-            if (
-                len(_route_preflight_inflight)
-                >= ROUTE_PREFLIGHT_CONCURRENT_MAX
-                or len(_route_preflight_window)
-                >= ROUTE_PREFLIGHT_WINDOW_MAX
+            borrowed = execution_lease is not None
+            if borrowed and not (
+                _route_preflight_child_lease_valid_locked(
+                    execution_lease, parent, parent_ip,
+                )
+                and execution_lease.child_reserved
             ):
+                diagnostic.decision = "parent_epoch_refused"
+                asset.forget()
+                return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+            concurrency_refused = (
+                not borrowed
+                and _route_preflight_execution_count_locked()
+                >= ROUTE_PREFLIGHT_CONCURRENT_MAX
+            )
+            window_refused = (
+                len(_route_preflight_window)
+                + _route_preflight_reserved_count_locked()
+                + (0 if borrowed else 1)
+                > ROUTE_PREFLIGHT_WINDOW_MAX
+            )
+            if concurrency_refused or window_refused:
                 diagnostic.decision = (
                     "concurrent_refused"
-                    if len(_route_preflight_inflight)
-                    >= ROUTE_PREFLIGHT_CONCURRENT_MAX
+                    if concurrency_refused
                     else "window_refused"
                 )
                 asset.forget()
@@ -8052,6 +8127,12 @@ async def _run_bootstrap_asset_preflight_observed(
             )
             future = Future()
             _route_preflight_inflight[inflight_key] = future
+            if borrowed:
+                # Convert one reserved credit to THIS child's actual start;
+                # never backdate it to the root or refund an actual start.
+                execution_lease.child_reserved = False
+                execution_lease.child_epoch = future
+                _route_preflight_execution_leases[future] = execution_lease
             _route_preflight_window.append(now)
             owner = True
             owner_epoch = future
@@ -8134,7 +8215,10 @@ async def _run_bootstrap_asset_preflight_observed(
                     )
                     _route_preflight_cache.move_to_end(h)
                 _prune_initial_route_preflights_locked(completed_at)
-                _route_preflight_inflight.pop(inflight_key, None)
+                if _route_preflight_inflight.get(inflight_key) is future:
+                    _route_preflight_inflight.pop(inflight_key, None)
+                if _route_preflight_execution_leases.get(future) is execution_lease:
+                    _route_preflight_execution_leases.pop(future, None)
                 if future is not None and not future.done():
                     future.set_result(
                         _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
@@ -8994,6 +9078,7 @@ async def _run_initial_route_preflight(
     if inflight_key is None:
         return None
     owner = False
+    execution_lease = None
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
         cached = _route_preflight_cache.get(h)
@@ -9014,12 +9099,19 @@ async def _run_initial_route_preflight(
         future = _route_preflight_inflight.get(inflight_key)
         if future is None:
             if (
-                len(_route_preflight_inflight) >= ROUTE_PREFLIGHT_CONCURRENT_MAX
-                or len(_route_preflight_window) >= ROUTE_PREFLIGHT_WINDOW_MAX
+                _route_preflight_execution_count_locked()
+                >= ROUTE_PREFLIGHT_CONCURRENT_MAX
+                or len(_route_preflight_window)
+                + _route_preflight_reserved_count_locked()
+                + 2 > ROUTE_PREFLIGHT_WINDOW_MAX
             ):
                 return None
             future = Future()
+            execution_lease = _RoutePreflightExecutionLease(
+                inflight_key, future, asyncio.current_task(),
+            )
             _route_preflight_inflight[inflight_key] = future
+            _route_preflight_execution_leases[future] = execution_lease
             _route_preflight_window.append(now)
             owner = True
     if not owner:
@@ -9161,6 +9253,11 @@ async def _run_initial_route_preflight(
                 eligible_asset,
                 eligible_asset_is_cross_origin,
             ) = _select_route_preflight_bootstrap_asset(bootstrap_assets, h)
+        if not eligible_asset_is_cross_origin:
+            with _route_preflight_lock:
+                # No second cross-origin observation will be started. Release
+                # only the reservation; the root's start remains charged.
+                execution_lease.child_reserved = False
         requires_browser_provenance = bool(
             outcome == SEMANTIC_OUTCOME_NAVIGATION_PENDING
             and direct_safe_incomplete
@@ -9279,6 +9376,11 @@ async def _run_initial_route_preflight(
                         handoff_deadline,
                     )
         elif outcome == SEMANTIC_OUTCOME_USABLE and eligible_asset is not None:
+            # The bounded root candidate runner has already drained all its
+            # workers. Keep its Future pending for coalesced callers, while
+            # allowing this coroutine's one selected child to use the slot.
+            with _route_preflight_lock:
+                execution_lease.child_ready = True
             asset_host = normalize_host(eligible_asset.exact_host)
             asset_final_deadline = deadline
             if eligible_asset_is_cross_origin:
@@ -9310,6 +9412,7 @@ async def _run_initial_route_preflight(
                 direct_probe=bootstrap_direct_probe,
                 geph_probe=bootstrap_geph_probe,
                 resolver=bootstrap_resolver,
+                execution_lease=execution_lease,
             )
             if asset_selected and asset_host == h:
                 selected = True
@@ -9363,7 +9466,11 @@ async def _run_initial_route_preflight(
                 )
                 _route_preflight_cache.move_to_end(h)
             _prune_initial_route_preflights_locked(completed_at)
-            _route_preflight_inflight.pop(inflight_key, None)
+            if _route_preflight_inflight.get(inflight_key) is future:
+                _route_preflight_inflight.pop(inflight_key, None)
+            execution_lease.child_reserved = False
+            if _route_preflight_execution_leases.get(future) is execution_lease:
+                _route_preflight_execution_leases.pop(future, None)
             if not future.done():
                 future.set_result(
                     _RoutePreflightSharedLocalRecovery(str(address))

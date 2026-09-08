@@ -1261,8 +1261,10 @@ No source/runtime mutation, test or build was justified by the screenshot alone.
 
 ### AUD-14 — critical-child admission starved by retained parent epoch
 
-Status: diagnosed in source and the fresh installed diagnostic record; not yet
-patched. Fresh Copy Diagnostics mtime is 2026-09-08T12:05:26.300Z (generated
+Status: diagnosed in source and the fresh installed diagnostic record; source
+correction and focused verification are recorded below. The installed bundle
+still predates this correction. Fresh Copy Diagnostics mtime is
+2026-09-08T12:05:26.300Z (generated
 at 12:05:22Z), 16670 bytes, owner502/mode0600. Preserved exact private copy:
 `output/aikido-child-diagnostic-20260908.nBz5za/diagnostics-20260908T120526Z.json`.
 Only bounded root/child decision fields were exported into this audit; no raw
@@ -1313,3 +1315,69 @@ parents/children, window boundary, exact proof isolation and cancellation.
 Actual Aikido recovery, Safari qualification, full Quit/Restart and original
 learning restoration remain open. No site reload/probe, new rules, runtime
 change, full test suite, rebuild/install, workflow or soak ran in this pass.
+
+#### AUD-14 source correction — 2026-09-08
+
+The user authorized implementation after the diagnostic finding. The fix is
+generic: no site rule or new denial/timeout authority. Root `(host, exact-IP)`
+Futures remain pending for coalesced callers. A separate execution lease is
+bound to the exact root epoch and original asyncio task; only after the root
+candidate runner drains may that coroutine transfer its slot to its selected
+critical child. The child still has a new opaque exact-address epoch and
+private proof capability. Lease identity affects scheduling only, never proof
+commit or direct/cache authority. Unmapped inflight entries count independently
+and conservatively; finalizers remove only their own map entries.
+
+Root admission charges one actual start and reserves one possible cross-child
+start. Every admission checks recent actual starts plus live reservations
+against the unchanged eight/60s cap; a borrowed child consumes its reservation
+and records a new timestamp. Window expiry cannot erase a live reservation,
+and cancellation/completion never refunds actual starts. The root releases an
+unused reservation as soon as it knows there is no cross-child, or after
+owned-worker drain on exit. Numeric concurrency remains two execution jobs;
+the existing per-job address racing and direct/Geph budgets are unchanged.
+Tradeoff: seven recent starts can refuse a new root because it cannot reserve
+its possible child; this conservative reduction in root-only burst admission
+is explicit, not a silent allowance increase.
+
+The shared Python test fixture now snapshots/resets/restores lease state.
+Focused existing selection passed **74 tests**, 709 deselected, in2.16s:
+`rtk proxy .audit-venv/bin/python -m pytest -q spike/test_tproxy_doh.py -k '(route_preflight or bootstrap or cancelled_root or cancelled_coalesced or cancelled_strict_denial) and not install_bootstrap and not tgws_restart' --tb=short`.
+Log: `output/aud14-focused-LKpVG3/existing-preflight-tests.log`.
+New `spike/test_preflight_admission.py` adds **11 distinct synthetic cases**:
+two concurrent roots each reach their independent critical child under cap2;
+coalesced waiters remain pending; third execution is refused; live child
+reservation survives window pruning without a ninth start; unused reservation
+is released while actual root start remains; last unreserved credit can admit
+a standalone child but not a new root requiring a child reservation; root and
+child cancellation retain lease/epoch until worker drain; foreign-task,
+wrong-parent-IP, stale-root, not-ready and already-used leases cannot start a
+child probe or mutate counts/epochs/cache.
+
+First command:
+`rtk proxy .audit-venv/bin/python -m pytest -q spike/test_preflight_admission.py --tb=short`
+reported5PASS/1FAIL in1.19s. The failing root-cancel fixture used an arbitrary
+injected callback, which enters the pre-existing unshielded test-only adapter
+rather than the production control/drain branch. Only the fixture was changed
+to use the production probe identity with synthetic callback/resolver; no
+production behavior was broadened to accommodate the injection.
+Then only the corrected/changed/new cases ran:
+`rtk proxy .audit-venv/bin/python -m pytest -q 'spike/test_preflight_admission.py::test_cancellation_retains_execution_until_worker_drains[root]' spike/test_preflight_admission.py::test_invalid_or_reused_child_lease_cannot_admit_work spike/test_preflight_admission.py::test_root_does_not_start_without_room_for_its_child_reservation --tb=short`
+reported7PASS in1.03s. Four unaffected first-run passes were reused; total11
+new cases and74 existing affected cases are green. Logs are private:
+`output/preflight-admission-tests-20260908.sb88Nb/{pytest,pytest-guards}.log`.
+AST parsing and `git diff --check` passed. Independent static review found no
+production blocker in lease identity, admission limits, proof isolation or
+cancellation cleanup. The previously green unrelated Python/Rust baseline is
+reused; this does not replace exact-bundle or browser product qualification.
+
+Live repository reconciliation before the patch: main`2780de4` unchanged;
+PR373 OPEN/head`513484a`, required checks PASS; PR374 OPEN moved to`b1bf2a9`
+without listed checks and remains excluded; PR362 remains diagnostic-only.
+Primary`a22a698` and its pre-existing untracked directories are unchanged.
+Installed exact diagnostic source remains`dc2937bc`; source correction is
+local to the audit branch. Next is canonical build/equality before a separately
+gated installation and fresh ordinary Chrome/Safari evidence. Do not replay
+prior replacement transactions or erase learned state/backups.
+No live network/browser request, build, installation, service restart, learning
+reset, full suite, protected workflow or soak is part of this source correction.

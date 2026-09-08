@@ -10,26 +10,34 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-08 (fresh child record diagnoses admission starvation):
-private fresh export mtime12:05:26Z is saved at
-`output/aikido-child-diagnostic-20260908.nBz5za/diagnostics-20260908T120526Z.json`
-(16670 bytes, mode0600). Its 80-line truncated root tail includes Aikido child
-`concurrent_refused` at16:59:55/16:59:56+0500 and `window_refused` at17:00:21,
-all direct=not_started/geph=not_started; corresponding roots are usable/assets3.
-Source confirms the parent root epoch is retained while awaiting its
-cross-origin child, which attempts an additional epoch in the SAME cap2
-inflight registry and cap8/60s window. Thus completed-parent network work can
-occupy admission needed by its own child; refusal returns without child I/O
-and without healthy/retry caching of the unresolved root. The finite tail
-does not reconstruct all concurrent owners/window consumers or attribute
-records individually to Safari versus Chrome. This diagnoses why these
-recovery comparisons never started, not every underlying CDN transport error.
-No new routing patch, build, install, test or navigation in this investigation.
-Next source correction must separate root coalescing/proof ownership from
-actual worker admission, preserve exact child epochs and cancellation drain,
-and preserve both hard concurrency and actual per-window observation limits;
-do not merely raise limits or collapse independent child proof into root proof.
-Use focused simultaneous-root/child and window-boundary regression cases.
+Update 2026-09-08 (AUD-14 source correction; installed build unchanged):
+the user authorized fixing the diagnosed child admission starvation. Source
+now separates execution leases from root coalescing/child proof Futures.
+Only the original root task can transfer its drained execution slot to its
+one selected cross-child; exact child proof capability/IP and cancellation
+drain remain independent. Root admission reserves one future child start;
+actual starts plus reservations remain <=8/60s and execution jobs <=2. Child
+conversion uses its own timestamp; actual starts are never refunded.
+Conservative tradeoff: a root needs two available window credits initially,
+releasing the unused reservation when it has no cross-child. Details and the
+three pre-I/O refusals are in audit AUD-14, not a new site exception.
+Existing affected Python selection:74PASS/709deselected,
+`output/aud14-focused-LKpVG3/existing-preflight-tests.log`. Independent static
+review found no production blocker. New synthetic admission tests:11 distinct
+cases PASS (four unchanged passes reused, seven corrected/new passes), logs
+`output/preflight-admission-tests-20260908.sb88Nb/{pytest,pytest-guards}.log`.
+The sole initial failure was a test callback bypassing the production drain
+adapter; only that test was corrected. Source verification is complete:
+85 distinct affected cases green, AST and diff checks PASS. No full-suite rerun.
+No new browser/network probe, runtime mutation, learning reset, full suite,
+workflow or soak. Installed exact source remains `dc2937bc`, with last failed
+Aikido observation and fresh report already captured below; no fresh product
+success is claimed. Next: canonical build/equality on the committed fix
+before a separately gated install and ordinary Chrome/Safari evidence.
+Live main remains `2780de4`; PR373 remains OPEN/exact`513484a`, required checks
+PASS. PR374 moved to`b1bf2a9` (OPEN/no listed checks), remains excluded; PR362
+still OPEN/diagnostic-only. Primary checkout remains`a22a698` with only its
+pre-existing untracked directories. Work stays on the audit branch, not main.
 
 Update 2026-09-08 12:02 UTC (user navigation still fails; fresh export needed):
 user accidentally opened Aikido in Safari first, then Chrome; reports unchanged

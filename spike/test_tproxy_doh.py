@@ -125,6 +125,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     semantic_plain_probe_window = deque(tproxy._semantic_plain_probe_window)
     route_preflight_cache = OrderedDict(tproxy._route_preflight_cache)
     route_preflight_inflight = dict(tproxy._route_preflight_inflight)
+    route_preflight_execution_leases = dict(tproxy._route_preflight_execution_leases)
     route_preflight_window = deque(tproxy._route_preflight_window)
     route_preflight_consumed = OrderedDict(tproxy._route_preflight_consumed)
     pending_navigation_probe_available = (
@@ -286,6 +287,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._semantic_plain_probe_window.clear()
         tproxy._route_preflight_cache.clear()
         tproxy._route_preflight_inflight.clear()
+        tproxy._route_preflight_execution_leases.clear()
         tproxy._route_preflight_window.clear()
         tproxy._route_preflight_consumed.clear()
         tproxy._pending_navigation_probe_available = False
@@ -437,6 +439,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._route_preflight_cache.update(route_preflight_cache)
         tproxy._route_preflight_inflight.clear()
         tproxy._route_preflight_inflight.update(route_preflight_inflight)
+        tproxy._route_preflight_execution_leases.clear()
+        tproxy._route_preflight_execution_leases.update(route_preflight_execution_leases)
         tproxy._route_preflight_window.clear()
         tproxy._route_preflight_window.extend(route_preflight_window)
         tproxy._route_preflight_consumed.clear()
