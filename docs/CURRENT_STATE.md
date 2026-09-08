@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 11:17 UTC (diagnostic replacement authorized):
+the user explicitly approved building/installing the child-diagnostic and
+privacy-export source changes, followed by one ordinary Aikido attempt.
+Reuse the recorded 67 Python and 17 Rust passing cases; do not repeat unchanged
+suites or run a soak. Canonical `npm run build:local` will bind fresh/staged/
+bundled daemon identity with test-only overrides unset. Evidence directory:
+`output/aikido-child-diagnostic-20260908.nBz5za/`. Installed `dde2498` remains
+unchanged until the newly verified bundle passes a fresh exact replacement
+transaction; preserve configuration, learned state, Quit-resume semantics and
+all previous app/runtime backups. Do not replay the old replacement script.
+Main/PR373/PR374/PR362 were rechecked and match the checkpoint below; primary
+checkout still has only its pre-existing untracked output directories.
+No routing fix or browser success is claimed. Next: canonical build, scoped
+owned-runtime stop/replacement with local authentication, installed verifier,
+then one Aikido navigation and bounded child-decision evidence.
+
 Update 2026-09-08 (fresh Aikido diagnostics read; child outcome missing):
 the user-authenticated Copy Diagnostics report was preserved privately at
 `output/workstation-replacement-20260908.ywqzED/diagnostics-20260908T103137Z.json`
