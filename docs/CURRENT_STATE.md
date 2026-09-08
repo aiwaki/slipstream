@@ -10,6 +10,40 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (fresh Aikido diagnostics read; child outcome missing):
+the user-authenticated Copy Diagnostics report was preserved privately at
+`output/workstation-replacement-20260908.ywqzED/diagnostics-20260908T103137Z.json`
+(mode0600). Its bounded root tail contains the failed navigation: at
+15:23:34+0500 `app.aikido.dev` and at 15:23:35+0500 `cdn.aikido.dev` both report
+root `boundary=usable`, `outcome=usable`, exact address, multiple candidates,
+no retryable/hard/incomplete failure and three extracted bootstrap assets.
+This excludes the earlier TLS-before-HTTP failure for these root observations;
+it does NOT prove their child files or page were usable. Owned Geph remains up
+in that report. The negative child outcome is transient and not exported:
+StatusV2 aggregates and the root record cannot distinguish child admission,
+range completion/EOF/timeout or Geph proof rejection. Do not guess which ran.
+
+Source work is complete, NOT installed: `fb19315` adds bounded allowlisted
+child-decision diagnostics without changing routing, proof, cache, timing,
+concurrency or cancellation policy (67 distinct affected cases pass).
+`a728100` separately fixes diagnostic export of embedded Geph cookie/route
+records (17 focused cases pass, independent boundary/bypass review and root
+final diff review complete). Incomplete sensitive records and byte-truncated
+Geph tails are omitted; ordinary root decision logs and structured Geph state
+remain. The old saved report is still PRIVATE, not fully sanitized: do not
+dump, upload or commit it. No secret values belong in repository documents.
+No target reload, live probe, runtime mutation, build, install, learning reset
+or protected workflow occurred. Installed product remains `dde2498`; source
+changes are not installed or browser-qualified. Next requires a canonical
+verified bundle of the new source and a separately authorized replacement,
+then one ordinary Aikido attempt with the child record captured. Do not repeat
+the old installed attempt: that daemon discards the missing evidence. Do not
+claim the page is fixed. Primary/recovery worktrees and backups are untouched.
+Main remains `2780de4`, PR373 remains open at `513484a`; CI32867878889 and
+audit32867879962 attempt1 and exact-head required checks pass for that PR only.
+PR374 and diagnostic-only PR362 remain open/unmerged and excluded. Detailed
+commands, failure/retest boundaries and privacy tradeoff are in the audit.
+
 Update 2026-09-08 (first browser observations; Aikido failure captured):
 ordinary Chrome navigation to Capacitor rendered the real homepage with CSS
 and hero imagery, no manual reload/rule/reset. It was observed loaded 33s after

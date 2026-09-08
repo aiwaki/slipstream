@@ -980,3 +980,174 @@ No source correction, rebuild, full suite, soak or other site matrix was run.
 Browser critical-resource recovery, full Quit/Restart and original learning
 restoration remain open. Live main/PR373/required CI and primary checkout have
 no relevant delta; prior PR CI still does not qualify local product `dde2498`.
+
+### Fresh Aikido root evidence and missing child decision — 2026-09-08
+
+The user's completed Copy Diagnostics action produced
+`/var/folders/ys/sgldb5n55616m0lhykv24f280000gp/T/slipstream-diagnostics.json`
+with mtime 10:31:37 UTC, 101037 bytes and mode0600. An exact private copy is
+`output/workstation-replacement-20260908.ywqzED/diagnostics-20260908T103137Z.json`.
+The 80-line bounded root-log tail includes the existing failed attempt; no
+additional sudo read, browser navigation/reload or network probe was needed.
+
+Decisive allowlisted root records (both exact-address/multiple-address-set):
+
+| Time (+0500) | Host | Root outcome | Elapsed bucket | Wire bucket | Assets |
+|---|---|---|---|---|---|
+| 15:23:34 | app.aikido.dev | usable | ge5s | 4k_to_16k | 3 |
+| 15:23:35 | cdn.aikido.dev | usable | 100ms_to_500ms | 4k_to_16k | 3 |
+
+Both records have retryable=0, hard=0, safe_incomplete=0, tls_consensus=0,
+wire_measured=1. Therefore these observations reached usable HTTP/root framing;
+the old TLS-before-HTTP diagnosis does not describe them. The root record is
+prepared after root observation but emitted only after the parent preflight's
+finally block. It does not expose the child result. Owned Geph is up/owned,
+no conflict; aggregate learned=1/pending=0 does not identify the learned host.
+
+Source trace: `_select_route_preflight_bootstrap_asset` retains only the first
+allowed cross-origin candidate, or one same-origin candidate, forgetting the
+others. `_bootstrap_asset_preflight_blocking` treats a complete requested
+0–65535 range as usable, not as full page/all-module completion. Same-origin
+child allowance is still bounded by the parent's healthy budget; cross-origin
+child receives its separate documented envelope. Cross-origin child also
+requires the existing concurrency/window slot and independently resolved
+public exact address. Any of these distinctions can matter; none is proven
+to be the branch taken by this failed browser attempt.
+
+The transient `_BootstrapAssetPreflightResult` is discarded. Only successful
+owned-Geph learning is persisted; negative result and direct health cache are
+not exported. StatusV2 exposes aggregates, not child admission, range outcome,
+termination or proof rejection. Existing three-script tests make the selected
+first file fail; they do not establish recovery when a selected prefix works
+but other modules fail. **Confirmed defect: missing decision observability.
+Unresolved: actual negative branch and routing cause of this Aikido attempt.**
+A narrow allowlisted child diagnostic is being added without policy changes;
+its synthetic tests are not a claim that Aikido is fixed. Preserve the page
+and installed version until that source change is reviewed and qualified.
+
+Separate privacy finding: the report also includes archived Geph text with
+embedded connection-cookie fields. The current structured/text sensitive-key
+lists omit cookie, and the text scanner does not handle escaped JSON keys or
+whole collection values. The report must NOT be described as fully sanitized
+or exported. Neither report nor actual values are committed/uploaded. The
+original and private evidence copy are preserved locally. A separate small
+sanitizer correction and synthetic-only tests are in progress; this is not
+the Aikido routing cause. Do not read/dump archived Geph logs for this fix.
+
+### Child-decision observability correction — source only, 2026-09-08
+
+Local commit `fb19315` changes only `spike/tproxy.py` and
+`spike/test_tproxy_doh.py`. `_run_bootstrap_asset_preflight` now wraps the
+unchanged child owner and sends one bounded `route-preflight-child` record
+after its cleanup. Internal blocking results carry fixed decision/direct/Geph
+categories. Admission refusal, complete sample, incomplete EOF, idle timeout,
+comparison/prerequisite refusal, commit rejection/success and cancellation are
+distinguishable. While a worker result is unavailable its direct/Geph fields
+are `unobserved`, not a false assertion that no probe started.
+
+Only normalized bounded DNS hostnames, same/cross-origin relation and fixed
+enum values enter the existing drop-only private diagnostic queue. No URL
+target, path/query, address, hash, headers, body, exception text, capability or
+exact timing is retained by this record. Formatter/sink failure cannot replace
+the ordinary return, original exception or cancellation. Parent/root and child
+cache/proof/deadline/concurrency/forgetting semantics are unchanged, including
+the original empty-address result of a pre-probe abort. Root independently
+reviewed the final production and test diffs; no remaining concrete regression
+was identified. No new route, retry or domain rule was added.
+
+Scoped verification from this worktree (tool results; no full suite):
+
+```sh
+rtk proxy .audit-venv/bin/python -m pytest -q spike/test_tproxy_doh.py -k 'bootstrap_diagnostic or cancelled_bootstrap_worker' --tb=short
+# 41 passed, 739 deselected
+rtk proxy .audit-venv/bin/python -m pytest -q spike/test_tproxy_doh.py -k 'bootstrap_diagnostic_formatter_failure or bootstrap_diagnostic_resolver_cancel or ((bootstrap or root_diagnostic or gzip_continuous_root_learns_only_exact_cold_child or full_ranged_root_learns_cold_child_before_exact_payload) and not bootstrap_diagnostic and not cancelled_bootstrap_worker)' --tb=short
+# 25 passed, 1 failed, 757 deselected
+rtk proxy .audit-venv/bin/python -m pytest -q spike/test_tproxy_doh.py::test_cross_origin_bootstrap_delayed_eof_gets_separate_geph_authority --tb=short
+# 1 passed after fixing the pre-existing test spy signature
+```
+
+The one failure was an old `mint(host, now_unix_ms=None)` spy that did not
+accept/forward the already-existing production `capability=` keyword. Only
+its signature/forwarding was repaired; its proof assertions were preserved.
+The 25 passing cases included the three later-added formatter/resolver-cancel
+cases, so those were not rerun. Total: **67 distinct passing cases**; unchanged
+green selections were not repeated. `git diff --check` passed. The module was
+imported/executed by these tests; no separate compile/build was necessary.
+
+This fixes the missing diagnostic, not the Aikido page. The installed daemon
+is still `dde2498` and cannot emit the new record until a separately verified
+bundle is installed. Do not interpret an old report without this record as a
+new diagnostic failure, rerun the same old navigation for more evidence, or
+claim physical browser/latency/Quit qualification from these synthetic tests.
+
+### AUD-13 — opaque Geph credentials in Copy Diagnostics (fixed in source)
+
+Outcome: **fixed in source** by local commit `a728100`; not rebuilt, installed
+or claimed fixed in the user's existing report. Files:
+`app-tauri/src-tauri/src/diagnostics.rs` and the import/four Geph-tail call sites
+in `app-tauri/src-tauri/src/lib.rs` only.
+
+Boundary: current/archive Geph stdout/stderr -> bounded log tail -> text/JSON
+sanitization -> Copy Diagnostics clipboard/file export. Cookie/route-subtree
+values must never survive into exported diagnostics; ordinary status, safe
+metadata, root decision evidence, missing-log errors and private export-file
+permissions must remain intact. The previous key list missed cookies, scalar
+scanning could retain collection suffixes, and split-line export lost the
+relationship between a multiline key and its value. This is independent of
+the routing problem. No real private log/report was used by the implementation
+or regression reviewers, and no real values were copied into fixtures/docs.
+
+The `fix-finding` procedure required a fresh boundary investigation and one
+fresh bypass/regression review. Root also independently traced both export
+sanitization passes and inspected the final diff. The candidate's multiline
+bypass was reproduced through the actual log-tail helper before correction
+(`output/listener-resume-20260905/rust-cookie-multiline-before.log`). Fix:
+
+- Redact whole structured cookie/route-subtree values; omit recognized opaque
+  raw records instead of trying to retain a partially sanitized payload.
+- Inspect the entire bounded window before max-lines slicing. If a sensitive
+  value cannot be proven complete on its physical line, omit the tail.
+- Use a Geph-specific wrapper for all four current/archive tails: after byte
+  truncation, the opening key may be outside the 128KiB window, so raw Geph
+  lines are omitted. Generic/root decision tails keep their existing bounded
+  visibility. Structured Geph lifecycle/state and log availability metadata
+  remain available. This loss of uncertain raw Geph detail is intentional.
+- Scan identifier tokens once rather than repeatedly rescanning a long
+  cookie-containing identifier; do not introduce quadratic scanning.
+
+Ordered verification, from the audit worktree (shell wrappers captured output
+in the logs below; these are the underlying Cargo invocations):
+
+```sh
+rtk proxy env 'TAURI_CONFIG={"bundle":{"externalBin":[],"resources":[]}}' cargo test --locked --offline --manifest-path app-tauri/src-tauri/Cargo.toml --lib diagnostic -- --test-threads=1
+# 16 passed, 180 filtered out; library compiled
+rtk proxy env 'TAURI_CONFIG={"bundle":{"externalBin":[],"resources":[]}}' cargo test --locked --offline --manifest-path app-tauri/src-tauri/Cargo.toml --lib redact_sensitive_text_handles_urls_yaml_and_json -- --test-threads=1
+# 1 passed, 195 filtered out
+rtk proxy rustfmt --check --edition 2021 app-tauri/src-tauri/src/diagnostics.rs
+# pass
+rtk proxy git diff --check
+# pass
+```
+
+Final logs:
+`output/listener-resume-20260905/rust-cookie-final-diagnostics-tests.log` and
+`output/listener-resume-20260905/rust-cookie-final-existing-text-test.log`.
+The Tauri resource override is for source-only tests, not bundle verification.
+No packaging result is inferred from it. Source compilation and 17 focused
+tests cover the actual tail/snapshot boundary, plain/escaped JSON, arrays,
+multiline and truncated/keyless continuations, benign prose/metadata,
+neighboring complete records, original YAML/URL/JSON redaction and private
+export permissions. The synthetic leak no longer reproduces; legitimate
+controls remain green. Initial green checks were rerun only after the reviewed
+multiline/truncation correction changed their shared sanitizer boundary.
+No new concrete bypass/regression remained after reconciliation and root's
+final review. This is not a universal guarantee for arbitrary future log
+formats or other producers; the Geph export path is the scoped boundary.
+
+The original report/private copy and source logs remain unchanged. They are
+still potentially sensitive and must not be uploaded or committed. Next
+product step is a canonical bundle of the new source, separate authorized
+replacement, then one Aikido observation with the new child-decision record.
+Actual Aikido recovery, Safari qualification, full Quit/Restart and original
+learning restoration remain open. No site reload/probe, new rules, runtime
+change, full test suite, rebuild/install, workflow or soak ran in this pass.
