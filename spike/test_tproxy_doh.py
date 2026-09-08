@@ -14281,8 +14281,8 @@ def test_cross_origin_bootstrap_delayed_eof_gets_separate_geph_authority(
         ),
     )
 
-    def mint(host, now_unix_ms=None):
-        job = original_mint(host, now_unix_ms)
+    def mint(host, now_unix_ms=None, *, capability=None):
+        job = original_mint(host, now_unix_ms, capability=capability)
         minted_jobs.append((host, job))
         return job
 
@@ -14817,13 +14817,280 @@ def test_bootstrap_route_never_learns_from_a_different_geph_object(monkeypatch):
     assert "mismatched-app-shell.example" not in tproxy._route_preflight_cache
 
 
+@pytest.mark.parametrize("sink_fails", [False, True])
+@pytest.mark.parametrize(
+    "case, decision, direct_state, geph_state",
+    [
+        ("complete", "direct_complete", "complete", "not_started"),
+        ("invalid", "direct_invalid", "invalid", "not_started"),
+        ("idle", "direct_idle_timeout", "incomplete_idle_timeout", "not_started"),
+        ("other", "direct_termination_refused", "incomplete_other", "not_started"),
+        ("unready", "geph_prerequisite_refused", "incomplete_eof", "prerequisite_refused"),
+        ("different", "geph_comparison_refused", "incomplete_eof", "comparison_refused"),
+        ("rejected", "proof_commit_refused", "incomplete_eof", "proof_rejected"),
+        ("commit", "committed", "incomplete_eof", "committed"),
+        ("exception", "worker_exception", "probe_started", "not_started"),
+    ],
+)
+def test_bootstrap_diagnostic_real_parent_flow_is_observational(
+    monkeypatch, sink_fails, case, decision, direct_state, geph_state,
+):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "diagnostic-child.example"
+    parent = "diagnostic-parent.example"
+    records = []
+    geph_calls = []
+    outcomes = tproxy.bootstrap_asset_preflight.RangeProbeOutcome
+
+    def enqueue(record):
+        if record.startswith(">> route-preflight-child "):
+            # The observer cannot run until the private child owner is released.
+            assert not any(key[0] == host for key in tproxy._route_preflight_inflight)
+            records.append(record)
+        if sink_fails:
+            raise OSError("private diagnostic sink failure")
+
+    def direct(*_args):
+        if case == "exception":
+            raise OSError("secret endpoint failure must not be logged")
+        if case == "invalid":
+            return None
+        return _bootstrap_evidence(
+            outcomes.COMPLETE if case == "complete" else outcomes.INCOMPLETE,
+            body_bytes=65_536 if case == "complete" else 16_937,
+            termination=(
+                tproxy._BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
+                if case == "idle"
+                else tproxy._BOOTSTRAP_RANGE_TERMINATION_TRUNCATED
+                if case == "other"
+                else None
+            ),
+        )
+
+    def geph(*_args):
+        geph_calls.append(True)
+        return _bootstrap_evidence(
+            outcomes.COMPLETE,
+            total=2_000_000 if case == "different" else 1_210_087,
+            body_bytes=65_536,
+        )
+
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", enqueue)
+    if case == "unready":
+        monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid", lambda: 0)
+    if case == "rejected":
+        monkeypatch.setattr(tproxy, "_commit_preflight_owned_geph_proof", lambda *_args: False)
+    claim = asyncio.run(tproxy._run_initial_route_preflight(
+        parent, "8.8.8.8",
+        direct_probe=lambda *_args: _bootstrap_root_observation(host),
+        bootstrap_direct_probe=direct,
+        bootstrap_geph_probe=geph,
+        bootstrap_resolver=lambda _host: ["1.1.1.1"],
+    ))
+
+    assert claim is None
+    assert records == [
+        f">> route-preflight-child parent={parent} host={host} origin=cross "
+        f"decision={decision} direct={direct_state} geph={geph_state}"
+    ]
+    assert bool(geph_calls) == (case in {"different", "rejected", "commit"})
+    assert tproxy._auto_geph_learned_exact_host(host) == (case == "commit")
+    assert not tproxy._auto_geph_learned_exact_host(parent)
+    if case in {"complete", "commit"}:
+        assert tproxy._route_preflight_cache[parent].outcome == tproxy.SEMANTIC_OUTCOME_USABLE
+    else:
+        assert parent not in tproxy._route_preflight_cache
+    assert not tproxy._route_preflight_inflight
+
+
+@pytest.mark.parametrize(
+    "case, decision",
+    [
+        ("expired", "admission_host_or_deadline_refused"),
+        ("learned", "learned_reuse"),
+        ("resolve_expired", "resolution_deadline"),
+        ("resolve_timeout", "resolution_unavailable"),
+        ("no_address", "resolution_no_address"),
+        ("bad_key", "address_key_refused"),
+        ("no_parent", "parent_epoch_refused"),
+        ("concurrent", "concurrent_refused"),
+        ("window", "window_refused"),
+    ],
+)
+def test_bootstrap_diagnostic_admission_returns(monkeypatch, case, decision):
+    host = "diagnostic-child.example"
+    parent = host if case == "no_parent" else "parent.example"
+    records = []
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
+    asset = tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+        exact_host=host, host_header=host, request_target="/private.js?secret=1",
+    )
+    now = time.monotonic()
+    direct_deadline, final_deadline = now + 1.0, now + 2.0
+    if case == "expired":
+        final_deadline = now - 1
+    if case == "learned":
+        tproxy._auto_geph[host] = time.time() + 60
+    if case == "resolve_expired":
+        direct_deadline = now - 1
+    if case == "resolve_timeout":
+        async def timeout(*_args, **_kwargs):
+            _args[0].close()
+            raise asyncio.TimeoutError
+        monkeypatch.setattr(tproxy.asyncio, "wait_for", timeout)
+    if case == "bad_key":
+        monkeypatch.setattr(tproxy, "_route_preflight_inflight_key", lambda *_args: None)
+    if case == "concurrent":
+        for index in range(tproxy.ROUTE_PREFLIGHT_CONCURRENT_MAX):
+            tproxy._route_preflight_inflight[(f"busy{index}.example", "8.8.8.8")] = Future()
+    if case == "window":
+        tproxy._route_preflight_window.extend([now] * tproxy.ROUTE_PREFLIGHT_WINDOW_MAX)
+    result = asyncio.run(tproxy._run_bootstrap_asset_preflight(
+        asset, parent, "8.8.8.8", direct_deadline, final_deadline,
+        direct_probe=lambda *_args: pytest.fail("admission refusal entered direct probe"),
+        geph_probe=lambda *_args: pytest.fail("admission refusal entered Geph"),
+        resolver=lambda _host: [] if case == "no_address" else ["1.1.1.1"],
+    ))
+    assert len(records) == 1
+    assert f"decision={decision} direct=not_started geph=not_started" in records[0]
+    expected = (
+        "owned_geph" if case == "learned"
+        else tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE if case == "resolve_timeout"
+        else tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    )
+    assert result == (case == "learned", expected)
+    with pytest.raises(RuntimeError, match="forgotten"):
+        asset.build_range_request()
+
+
+@pytest.mark.parametrize("host", [
+    "bad.example\nsecret", "bad.example/path", "bad.example?query=secret",
+    "https://bad.example", "8.8.8.8", "127.000.0.1", "2001:4860:4860::8888",
+    "UPPER.example", "a" * 254, "bad..example",
+])
+def test_bootstrap_diagnostic_allowlist_rejects_sensitive_values(monkeypatch, host):
+    records = []
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
+    tproxy._enqueue_bootstrap_asset_diagnostic(tproxy._BootstrapAssetDiagnostic(
+        parent=host, child=host,
+        decision="/secret?query=value", direct="raw header", geph="opaque-capability",
+    ))
+    assert records == [
+        ">> route-preflight-child parent=invalid host=invalid origin=unknown "
+        "decision=unknown direct=unknown geph=unknown"
+    ]
+
+
+def test_bootstrap_diagnostic_hostile_attributes_are_drop_only(monkeypatch):
+    class Hostile:
+        def __getattribute__(self, _name):
+            raise RuntimeError("secret diagnostic attribute")
+    monkeypatch.setattr(
+        tproxy, "_enqueue_route_preflight_root_diagnostic_record",
+        lambda _record: pytest.fail("hostile diagnostic must be dropped"),
+    )
+    tproxy._enqueue_bootstrap_asset_diagnostic(Hostile())
+
+
+def test_bootstrap_diagnostic_formatter_failure_preserves_original_exception(monkeypatch):
+    original = ValueError("original asset exception")
+
+    class Asset:
+        @property
+        def exact_host(self):
+            raise original
+
+    def formatter_failure(_diagnostic):
+        raise OSError("formatter unavailable")
+
+    monkeypatch.setattr(tproxy, "_enqueue_bootstrap_asset_diagnostic", formatter_failure)
+    now = time.monotonic()
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(tproxy._run_bootstrap_asset_preflight(
+            Asset(), "parent.example", "8.8.8.8", now + 1, now + 2,
+        ))
+    assert caught.value is original
+
+
+@pytest.mark.parametrize("formatter_fails", [False, True])
+def test_bootstrap_diagnostic_resolver_cancel_preserves_asset_lifetime(
+    monkeypatch, formatter_fails,
+):
+    records = []
+    entered = asyncio.Event()
+    asset = tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+        exact_host="child.example", host_header="child.example", request_target="/entry.js",
+    )
+
+    async def resolving(awaitable, **_kwargs):
+        awaitable.close()
+        entered.set()
+        await asyncio.Event().wait()
+
+    def formatter_failure(_diagnostic):
+        raise OSError("formatter unavailable during cancellation")
+
+    monkeypatch.setattr(tproxy.asyncio, "wait_for", resolving)
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
+    if formatter_fails:
+        monkeypatch.setattr(tproxy, "_enqueue_bootstrap_asset_diagnostic", formatter_failure)
+
+    async def scenario():
+        now = time.monotonic()
+        task = asyncio.create_task(tproxy._run_bootstrap_asset_preflight(
+            asset, "parent.example", "8.8.8.8", now + 1, now + 2,
+        ))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    # Resolution cancellation historically leaves forgetting to the parent.
+    assert b"GET /entry.js " in asset.build_range_request()
+    assert not tproxy._route_preflight_inflight
+    assert not tproxy._route_preflight_cache
+    if not formatter_fails:
+        assert len(records) == 1
+        assert "decision=cancelled direct=not_started geph=not_started" in records[0]
+
+
+def test_bootstrap_diagnostic_preprobe_abort_preserves_empty_address(monkeypatch):
+    clock = iter([1.0, 3.0])
+    monkeypatch.setattr(tproxy, "time", SimpleNamespace(
+        monotonic=lambda: next(clock), time=time.time,
+    ))
+    asset = tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+        exact_host="child.example", host_header="child.example", request_target="/entry.js",
+    )
+    result = tproxy._bootstrap_asset_preflight_blocking(
+        asset, "parent.example", "8.8.8.8", 2.0, 4.0,
+        exact_address="1.1.1.1",
+    )
+    assert result.proof is None
+    assert result.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+    assert result.exact_address == ""
+    assert result.diagnostic_decision == "worker_address_or_deadline_refused"
+
+
+@pytest.mark.parametrize("sink_fails", [False, True])
 def test_cancelled_bootstrap_worker_cannot_mutate_or_publish_stale_cache(
     monkeypatch,
+    sink_fails,
 ):
     _enable_owned_geph_preflight(monkeypatch)
     host = "cancelled-critical-cdn.example"
     entered = threading.Event()
     release = threading.Event()
+    records = []
+
+    def enqueue(record):
+        assert not any(key[0] == host for key in tproxy._route_preflight_inflight)
+        records.append(record)
+        if sink_fails:
+            raise OSError("diagnostic sink failed during cancellation")
+
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", enqueue)
 
     def direct_asset(*_args):
         entered.set()
@@ -14870,6 +15137,8 @@ def test_cancelled_bootstrap_worker_cannot_mutate_or_publish_stale_cache(
     assert not any(key[0] == host for key in tproxy._route_preflight_inflight)
     assert host not in tproxy._route_preflight_cache
     assert not tproxy._auto_geph_learned_exact_host(host)
+    assert len(records) == 1
+    assert "decision=cancelled direct=unobserved geph=unobserved" in records[0]
 
 
 def test_cancelled_strict_denial_geph_worker_keeps_epoch_until_drained(

@@ -2711,6 +2711,18 @@ class _BootstrapAssetPreflightResult:
     proof: object
     outcome: object
     exact_address: str = ""
+    diagnostic_decision: str = "unclassified"
+    diagnostic_direct: str = "not_started"
+    diagnostic_geph: str = "not_started"
+
+
+@dataclass(slots=True)
+class _BootstrapAssetDiagnostic:
+    parent: str = ""
+    child: str = ""
+    decision: str = "unexpected_error"
+    direct: str = "not_started"
+    geph: str = "not_started"
 
 
 @dataclass(slots=True)
@@ -7693,6 +7705,19 @@ def _bootstrap_asset_preflight_blocking(
     cache_outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
     selected_ip = ""
     request = b""
+    diagnostic_direct = "not_started"
+    diagnostic_geph = "not_started"
+
+    def without_proof(decision, outcome=None):
+        return _BootstrapAssetPreflightResult(
+            None,
+            cache_outcome if outcome is None else outcome,
+            selected_ip,
+            decision,
+            diagnostic_direct,
+            diagnostic_geph,
+        )
+
     if (
         not h
         or not _auto_geph_base_host_allowed(h)
@@ -7702,7 +7727,9 @@ def _bootstrap_asset_preflight_blocking(
             asset.forget()
         except Exception:
             pass
-        return _BootstrapAssetPreflightResult(None, cache_outcome)
+        return _BootstrapAssetPreflightResult(
+            None, cache_outcome, diagnostic_decision="worker_admission_refused"
+        )
 
     if exact_address is None:
         selected_ip = _route_preflight_exact_address(
@@ -7729,7 +7756,10 @@ def _bootstrap_asset_preflight_blocking(
             asset.forget()
         except Exception:
             pass
-        return _BootstrapAssetPreflightResult(None, cache_outcome)
+        return _BootstrapAssetPreflightResult(
+            None, cache_outcome,
+            diagnostic_decision="worker_address_or_deadline_refused",
+        )
 
     direct_job = _new_direct_route_preflight_job(h)
     try:
@@ -7739,6 +7769,7 @@ def _bootstrap_asset_preflight_blocking(
             if direct_probe is None
             else direct_probe
         )
+        diagnostic_direct = "probe_started"
         direct_observation = direct_probe(
             selected_ip,
             h,
@@ -7750,37 +7781,24 @@ def _bootstrap_asset_preflight_blocking(
             direct_evidence,
             direct_termination,
         ) = _decode_bootstrap_range_probe_observation(direct_observation)
+        diagnostic_direct = _bootstrap_direct_diagnostic_state(
+            direct_evidence, direct_termination
+        )
         if time.monotonic() >= final_deadline:
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            return without_proof("direct_deadline")
         if direct_evidence is None:
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            return without_proof("direct_invalid")
         if (
             direct_evidence.outcome
             is bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE
         ):
             cache_outcome = SEMANTIC_OUTCOME_USABLE
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            return without_proof("direct_complete")
         if (
             direct_evidence.outcome
             is not bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
         ):
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            return without_proof("direct_invalid")
         if (
             direct_termination
             == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
@@ -7788,27 +7806,17 @@ def _bootstrap_asset_preflight_blocking(
             # Slow delivery is not a stable direct failure.  Do not use it to
             # authorize an alternative route and do not suppress a later
             # foreground attempt with either the child or parent cache.
-            return _BootstrapAssetPreflightResult(
-                None,
-                _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE,
-                selected_ip,
+            return without_proof(
+                "direct_idle_timeout", _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
             )
         if direct_termination != _BOOTSTRAP_RANGE_TERMINATION_EOF:
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            return without_proof("direct_termination_refused")
         if _validated_route_preflight_outcome(
             direct_job,
             "system",
             SEMANTIC_OUTCOME_NAVIGATION_PENDING,
         ) != SEMANTIC_OUTCOME_NAVIGATION_PENDING:
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            return without_proof("direct_authority_refused")
         cache_outcome = SEMANTIC_OUTCOME_NAVIGATION_PENDING
 
         confirmed_pid = _owned_geph_confirmation_pid()
@@ -7818,11 +7826,8 @@ def _bootstrap_asset_preflight_blocking(
             or not _auto_geph_persistent_learning_allowed(h)
             or time.monotonic() >= final_deadline
         ):
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            diagnostic_geph = "prerequisite_refused"
+            return without_proof("geph_prerequisite_refused")
         geph_probe = (
             _bootstrap_asset_geph_range_probe
             if geph_probe is None
@@ -7841,6 +7846,7 @@ def _bootstrap_asset_preflight_blocking(
             time.monotonic()
             + (route_preflight.MAX_DEADLINE_MS / 1000.0),
         )
+        diagnostic_geph = "probe_started"
         geph_observation = geph_probe(h, request, geph_deadline)
         geph_evidence, _geph_termination = (
             _decode_bootstrap_range_probe_observation(geph_observation)
@@ -7858,11 +7864,8 @@ def _bootstrap_asset_preflight_blocking(
             != SEMANTIC_OUTCOME_USABLE
             or not _owned_geph_confirmation_pid_matches(confirmed_pid)
         ):
-            return _BootstrapAssetPreflightResult(
-                None,
-                cache_outcome,
-                selected_ip,
-            )
+            diagnostic_geph = "comparison_refused"
+            return without_proof("geph_comparison_refused")
         return _BootstrapAssetPreflightResult(
             _RoutePreflightOwnedGephProof(
                 marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
@@ -7880,13 +7883,12 @@ def _bootstrap_asset_preflight_blocking(
             ),
             "owned_geph",
             selected_ip,
+            "proof_ready",
+            diagnostic_direct,
+            "proof_ready",
         )
     except Exception:
-        return _BootstrapAssetPreflightResult(
-            None,
-            cache_outcome,
-            selected_ip,
-        )
+        return without_proof("worker_exception")
     finally:
         request = b""
         try:
@@ -7906,16 +7908,61 @@ async def _run_bootstrap_asset_preflight(
     geph_probe=None,
     resolver=None,
 ):
+    """Report one child decision only after its existing cleanup has settled."""
+    diagnostic = _BootstrapAssetDiagnostic()
+    try:
+        return await _run_bootstrap_asset_preflight_observed(
+            asset,
+            parent_host,
+            parent_ip,
+            healthy_deadline,
+            final_deadline,
+            direct_probe=direct_probe,
+            geph_probe=geph_probe,
+            resolver=resolver,
+            diagnostic=diagnostic,
+        )
+    except asyncio.CancelledError:
+        diagnostic.decision = "cancelled"
+        raise
+    except Exception:
+        diagnostic.decision = "unexpected_error"
+        raise
+    finally:
+        try:
+            _enqueue_bootstrap_asset_diagnostic(diagnostic)
+        except Exception:
+            # Even a replaced/failed formatter or sink cannot replace a result,
+            # an exception, or cancellation after the routing owner settles.
+            pass
+
+
+async def _run_bootstrap_asset_preflight_observed(
+    asset,
+    parent_host,
+    parent_ip,
+    healthy_deadline,
+    final_deadline,
+    *,
+    direct_probe=None,
+    geph_probe=None,
+    resolver=None,
+    diagnostic,
+):
     """Probe one critical object under an address-bound private epoch."""
     h = normalize_host(getattr(asset, "exact_host", ""))
     parent = normalize_host(parent_host)
+    diagnostic.parent = parent
+    diagnostic.child = h
     if not h or time.monotonic() >= final_deadline:
+        diagnostic.decision = "admission_host_or_deadline_refused"
         try:
             asset.forget()
         except Exception:
             pass
         return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
     if _auto_geph_learned_exact_host(h):
+        diagnostic.decision = "learned_reuse"
         asset.forget()
         return True, "owned_geph"
 
@@ -7925,8 +7972,10 @@ async def _run_bootstrap_asset_preflight(
             final_deadline,
         ) - time.monotonic()
         if resolve_remaining <= 0:
+            diagnostic.decision = "resolution_deadline"
             asset.forget()
             return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
+        diagnostic.decision = "resolving"
         selected_ip = await asyncio.wait_for(
             asyncio.to_thread(
                 _route_preflight_exact_address,
@@ -7938,13 +7987,16 @@ async def _run_bootstrap_asset_preflight(
             timeout=resolve_remaining,
         )
     except (asyncio.TimeoutError, RuntimeError):
+        diagnostic.decision = "resolution_unavailable"
         asset.forget()
         return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
     if not selected_ip:
+        diagnostic.decision = "resolution_no_address"
         asset.forget()
         return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
     exact_inflight_key = _route_preflight_inflight_key(h, selected_ip)
     if exact_inflight_key is None:
+        diagnostic.decision = "address_key_refused"
         asset.forget()
         return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
 
@@ -7956,6 +8008,7 @@ async def _run_bootstrap_asset_preflight(
         with _route_preflight_lock:
             owner_epoch = _route_preflight_inflight.get(inflight_key)
         if not isinstance(owner_epoch, Future):
+            diagnostic.decision = "parent_epoch_refused"
             asset.forget()
             return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
     if not owner:
@@ -7969,6 +8022,7 @@ async def _run_bootstrap_asset_preflight(
                 and _auto_geph_learned_exact_host(h)
             ):
                 _route_preflight_cache.move_to_end(h)
+                diagnostic.decision = "learned_cache_reuse"
                 asset.forget()
                 return True, cached.outcome
             if (
@@ -7977,6 +8031,12 @@ async def _run_bootstrap_asset_preflight(
                 or len(_route_preflight_window)
                 >= ROUTE_PREFLIGHT_WINDOW_MAX
             ):
+                diagnostic.decision = (
+                    "concurrent_refused"
+                    if len(_route_preflight_inflight)
+                    >= ROUTE_PREFLIGHT_CONCURRENT_MAX
+                    else "window_refused"
+                )
                 asset.forget()
                 return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
             # A critical object is stronger evidence than a host root and is
@@ -8003,8 +8063,12 @@ async def _run_bootstrap_asset_preflight(
     try:
         remaining = final_deadline - time.monotonic()
         if remaining <= 0:
+            diagnostic.decision = "worker_deadline"
             asset.forget()
             return False, cache_outcome
+        diagnostic.decision = "worker_started"
+        diagnostic.direct = "unobserved"
+        diagnostic.geph = "unobserved"
         blocking_worker = asyncio.create_task(
             asyncio.to_thread(
                 _bootstrap_asset_preflight_blocking,
@@ -8026,6 +8090,7 @@ async def _run_bootstrap_asset_preflight(
         )
         proof = blocking_result.proof
         cache_outcome = blocking_result.outcome
+        _copy_bootstrap_asset_diagnostic(diagnostic, blocking_result)
         if cache_outcome is _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE:
             publish_cache = False
             return False, cache_outcome
@@ -8033,6 +8098,8 @@ async def _run_bootstrap_asset_preflight(
             proof is not None
             and blocking_result.exact_address != exact_inflight_key[1]
         ):
+            diagnostic.decision = "proof_address_refused"
+            diagnostic.geph = "proof_rejected"
             return False, SEMANTIC_OUTCOME_NAVIGATION_PENDING
         selected = _commit_preflight_owned_geph_proof(
             proof,
@@ -8041,7 +8108,12 @@ async def _run_bootstrap_asset_preflight(
             proof_capability,
         )
         if not selected and cache_outcome == "owned_geph":
+            diagnostic.decision = "proof_commit_refused"
+            diagnostic.geph = "proof_rejected"
             cache_outcome = SEMANTIC_OUTCOME_NAVIGATION_PENDING
+        if selected:
+            diagnostic.decision = "committed"
+            diagnostic.geph = "committed"
         return bool(selected), (
             "owned_geph" if selected else cache_outcome
         )
@@ -8049,6 +8121,7 @@ async def _run_bootstrap_asset_preflight(
         publish_cache = False
         raise
     except (asyncio.TimeoutError, RuntimeError):
+        diagnostic.decision = "worker_unavailable"
         return False, cache_outcome
     finally:
         if h != parent:
@@ -8665,6 +8738,104 @@ def _enqueue_route_preflight_root_diagnostic_record(record):
         if isinstance(record, str):
             _ROUTE_PREFLIGHT_ROOT_DIAGNOSTIC_QUEUE.put_nowait(record)
     except Exception:
+        return
+
+
+_BOOTSTRAP_DIAGNOSTIC_DECISIONS = frozenset({
+    "unclassified", "unexpected_error", "cancelled", "resolving",
+    "admission_host_or_deadline_refused", "learned_reuse",
+    "resolution_deadline", "resolution_unavailable", "resolution_no_address",
+    "address_key_refused", "parent_epoch_refused", "learned_cache_reuse",
+    "concurrent_refused", "window_refused", "worker_deadline", "worker_started",
+    "worker_unavailable", "worker_admission_refused",
+    "worker_address_or_deadline_refused", "direct_deadline", "direct_invalid",
+    "direct_complete", "direct_idle_timeout", "direct_termination_refused",
+    "direct_authority_refused", "geph_prerequisite_refused",
+    "geph_comparison_refused", "proof_ready", "worker_exception",
+    "proof_address_refused", "proof_commit_refused", "committed",
+})
+_BOOTSTRAP_DIAGNOSTIC_DIRECT = frozenset({
+    "not_started", "unobserved", "probe_started", "invalid", "complete", "incomplete_eof",
+    "incomplete_idle_timeout", "incomplete_other", "deadline",
+})
+_BOOTSTRAP_DIAGNOSTIC_GEPH = frozenset({
+    "not_started", "unobserved", "prerequisite_refused", "probe_started",
+    "comparison_refused", "proof_ready", "proof_rejected", "committed",
+})
+
+
+def _bootstrap_direct_diagnostic_state(evidence, termination):
+    """Reduce transient range evidence to a fixed class, never its contents."""
+    try:
+        if evidence is None:
+            return "invalid"
+        outcome = evidence.outcome
+        if outcome is bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE:
+            return "complete"
+        if outcome is bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED:
+            return "deadline"
+        if outcome is bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE:
+            if termination == _BOOTSTRAP_RANGE_TERMINATION_EOF:
+                return "incomplete_eof"
+            if termination == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT:
+                return "incomplete_idle_timeout"
+            return "incomplete_other"
+    except Exception:
+        pass
+    return "invalid"
+
+
+def _copy_bootstrap_asset_diagnostic(diagnostic, result):
+    """Copy diagnostics without making optional fields part of route authority."""
+    try:
+        diagnostic.decision = result.diagnostic_decision
+        diagnostic.direct = result.diagnostic_direct
+        diagnostic.geph = result.diagnostic_geph
+    except Exception:
+        pass
+
+
+def _bootstrap_diagnostic_host(value):
+    """Accept only an already-normalized DNS host, never an IP or URL target."""
+    if type(value) is not str or not value or len(value) > 253:
+        return "invalid"
+    labels = value.split(".")
+    if len(labels) < 2 or not re.search(r"[a-z]", labels[-1]) or not all(
+        re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+        for label in labels
+    ):
+        return "invalid"
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return value
+    return "invalid"
+
+
+def _enqueue_bootstrap_asset_diagnostic(diagnostic):
+    """Send one bounded child decision to the existing drop-only private sink."""
+    try:
+        parent = _bootstrap_diagnostic_host(diagnostic.parent)
+        child = _bootstrap_diagnostic_host(diagnostic.child)
+
+        def allowed(value, values):
+            return value if type(value) is str and value in values else "unknown"
+
+        origin = (
+            "unknown"
+            if "invalid" in (parent, child)
+            else "same" if parent == child else "cross"
+        )
+        record = (
+            ">> route-preflight-child "
+            f"parent={parent} host={child} origin={origin} "
+            f"decision={allowed(diagnostic.decision, _BOOTSTRAP_DIAGNOSTIC_DECISIONS)} "
+            f"direct={allowed(diagnostic.direct, _BOOTSTRAP_DIAGNOSTIC_DIRECT)} "
+            f"geph={allowed(diagnostic.geph, _BOOTSTRAP_DIAGNOSTIC_GEPH)}"
+        )
+        _enqueue_route_preflight_root_diagnostic_record(record)
+    except Exception:
+        # Formatting, hostile attributes and queue failure are diagnostic-only.
         return
 
 
