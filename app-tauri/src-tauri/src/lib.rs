@@ -38,8 +38,9 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use diagnostics::redact_sensitive_text;
 use diagnostics::{
-    daemon_recovery_status_value, diagnostic_log_tail, diagnostic_log_tail_from_path,
-    diagnostic_snapshot_path, sanitize_json, unix_now_secs, write_diagnostic_snapshot_file,
+    daemon_recovery_status_value, diagnostic_geph_log_tail_from_path, diagnostic_log_tail,
+    diagnostic_log_tail_from_path, diagnostic_snapshot_path, sanitize_json, unix_now_secs,
+    write_diagnostic_snapshot_file,
 };
 use geph_config::{
     geph_config_set, geph_enabled, geph_field, geph_secret, geph_secret_availability,
@@ -765,24 +766,24 @@ fn attach_geph_log_tails(app: &AppHandle, snapshot: &mut Value) {
     };
     snapshot["geph_logs"] = json!({
         "stdout": {
-            "current": diagnostic_log_tail_from_path(
+            "current": diagnostic_geph_log_tail_from_path(
                 GEPH_STDOUT_LOG_FILE,
                 &paths.stdout_log,
                 DIAGNOSTIC_LOG_TAIL_LINES,
             ),
-            "previous": diagnostic_log_tail_from_path(
+            "previous": diagnostic_geph_log_tail_from_path(
                 &format!("{GEPH_STDOUT_LOG_FILE}{GEPH_LOG_ARCHIVE_SUFFIX}"),
                 &geph_log_archive_path(&paths.stdout_log),
                 DIAGNOSTIC_LOG_TAIL_LINES,
             ),
         },
         "stderr": {
-            "current": diagnostic_log_tail_from_path(
+            "current": diagnostic_geph_log_tail_from_path(
                 GEPH_STDERR_LOG_FILE,
                 &paths.stderr_log,
                 DIAGNOSTIC_LOG_TAIL_LINES,
             ),
-            "previous": diagnostic_log_tail_from_path(
+            "previous": diagnostic_geph_log_tail_from_path(
                 &format!("{GEPH_STDERR_LOG_FILE}{GEPH_LOG_ARCHIVE_SUFFIX}"),
                 &geph_log_archive_path(&paths.stderr_log),
                 DIAGNOSTIC_LOG_TAIL_LINES,
