@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (AUD-16 authorized diagnostic comparison; source checks PASS):
+the user answered YES to the bounded diagnostic-only same-object Geph request.
+Source based on c15da33 now enters one owned comparison for valid critical-child
+INCOMPLETE + IDLE_TIMEOUT, still returns retryable-inconclusive with no proof,
+route/cache/learning. Its deadline is min(original final, now+3s), request bytes
+are reused, and the SOCKS connector is pinned to GEPH_OWNED_PORT rather than
+mutable backend state. Cancellation/wait-timeout signals the child before drain;
+the lease remains owned until cleanup. DECISIONS records the narrow supersession.
+Affected existing tests:63 passed initially; three old idle-prohibition
+expectations were updated for the explicit policy change, and those3 passed
+separately (66 affected cases green, no unchanged rerun). After the final bounded
+ownership runner change, only seven affected integration cases were rerun: PASS.
+The new helper/cancellation file passes49 synthetic cases, including shrinking
+lsof/ps deadlines and pre/post readiness. Independent review has no remaining
+blocker. See audit AUD-16 for exact commands, logs and limits.
+PR373 remains OPEN at513484ac with17 SUCCESS/SKIPPED checks; it is not this local
+delta. No network probe, build/install or runtime change yet; installed10e2cd6
+and the failed14:11 report are unchanged. Next: record exact source, then one
+canonical build/verification before any installation
+or fresh physical browser attempt. No further permission needed for the source
+diagnostic-only behavior; do not repeat the resolved policy question below.
+
 Update 2026-09-08 (AUD-15 source fixes and causal relay diagnostics; NOT installed):
 continuation source is `codex/codebase-audit-20260905`, based on9c73287.
 Two independently reviewed defects are fixed in `spike/tproxy.py`: TLS ingress
@@ -32,15 +54,16 @@ not additive totals). Exact commands/logs and limits: audit AUD-15. Changed-file
 rustfmt and diff-check pass. No full suite, network navigation/probe, build,
 installation or runtime/learning change. Installed source remains10e2cd6 and
 the14:11 report above remains the same failed attempt; do not request it again.
-OPEN POLICY CHOICE: the existing critical-child idle-timeout contract explicitly
+HISTORICAL POLICY CHOICE (resolved by the AUD-16 authorization above): the existing critical-child idle-timeout contract explicitly
 forbids even starting Geph. The user was asked whether one bounded diagnostic-only
 same-object probe through verified internal Geph is allowed, with NO route/cache/
-learning authority. No answer yet; the guard remains unchanged. Actual relay
+learning authority. At this checkpoint there was no answer; AUD-16 now records
+the authorized diagnostic-only exception. Actual relay
 EOF cannot be substituted for EOF of the separate critical-object probe, and
 the existing incomplete-response fallback's `GET /` is not same-object proof.
-Next: resolve that explicit policy choice before implementing its comparison;
-then finish the source contract and affected checks before any exact build or
-ordinary Chrome/Safari qualification. Do not claim Aikido recovered.
+The source contract and affected checks are now complete as recorded above;
+exact build and ordinary Chrome/Safari qualification remain. Do not claim
+Aikido recovered.
 
 Update 2026-09-08 (AUD-14 physical Chrome attempt FAILED; next boundary identified):
 user still sees Aikido's spinner on exact installed10e2cd6. Fresh Copy Diagnostics

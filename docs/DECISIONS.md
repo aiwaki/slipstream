@@ -49,8 +49,30 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   Missing/dropped records cannot prove absence, and an unavailable snapshot must
   not pretend to be zero observations. Recovery scheduling and ladder advancement
   are distinct: a false ladder-advanced return cannot be labelled recovery-not-
-  attempted. These corrections do not change the critical-child idle prohibition
-  or permit a separate socket's EOF to authorize the critical object's route.
+  attempted. These corrections do not permit a separate socket's EOF to
+  authorize the critical object's route.
+- Explicit user authorization on 2026-09-08 permits one diagnostic-only Geph
+  comparison after a critical child's valid incomplete range ends in idle timeout.
+  Use the same already-built transient request bytes, the existing admitted child
+  worker/lease and `min(final_deadline, now + 3 seconds)`; no extra retry, task,
+  admission credit, eight-second authority or extended parent/child deadline.
+  The target must still be an allowed exact unknown host; Geph must be enabled,
+  ready and ownership-verified before the probe and the same owned PID verified
+  afterward. Pin its connector to `GEPH_OWNED_PORT`, never the mutable general
+  backend port. Ownership commands use the same shrinking deadline, not their
+  ordinary independent five-second command timeout; recheck readiness before
+  the socket stage and after final ownership checks. Owner cancellation or wait
+  timeout signals the blocking child
+  before draining it so no subsequent diagnostic stage starts; an already-started
+  socket retains its bounded deadline and cleanup before lease release.
+  Only a fixed private diagnostic category may escape, even when the same object
+  completes: the outcome stays retryable-inconclusive, with no proof, route,
+  cache, learned state or success notification. A comparison mismatch means
+  same-object completion was not established, not that a different object was
+  proved. The request target/body never enter the diagnostic record. Ordinary
+  root timeouts, hard-EOF routing proof and all protected-local exclusions remain
+  unchanged. This narrowly supersedes older bans on *starting* Geph for an idle
+  critical-child range; it does not supersede their bans on routing or learning.
 - Explicit **Quit Slipstream** means stopping the owned runtime, not only the
   tray. It must serialize with privileged mutations, invalidate stale queued
   requests, complete the installed root-owned daemon's non-destructive `--stop`

@@ -1656,3 +1656,93 @@ installation was performed for this source delta. Aikido remains unqualified.
 Next is the explicit diagnostic-probe policy choice and its source contract,
 then exact artifact verification and ordinary Chrome/Safari qualification only
 when the source work is ready. No repeated Copy Diagnostics for the old attempt.
+
+### AUD-16 — authorized same-object idle diagnosis through internal Geph
+
+2026-09-08; the user answered YES to the explicit request for one bounded
+diagnostic-only same-resource comparison after critical-child idle timeout,
+without routing/cache/learning. Source starts at c15da33. This resolves the
+AUD-15 policy question; it does not authorize timeout-based route selection.
+
+Implementation:
+
+- `_bootstrap_asset_preflight_blocking` invokes the new
+  `_bootstrap_idle_geph_diagnostic` only after the existing parser returns
+  valid INCOMPLETE range evidence with IDLE_TIMEOUT. It reuses the exact
+  already-built transient request object and existing admitted child worker.
+  There is one sequential probe, no new background job, admission credit or
+  proof epoch. Deadline is `min(final_deadline, now + 3 seconds)`; same-origin
+  children get only the remaining original deadline, never a fresh envelope.
+- The helper returns one fixed diagnostic string. The caller unconditionally
+  returns RETRYABLE_INCONCLUSIVE with no proof; outer child/root cache and
+  learned-route behavior remain non-authorizing. Even complete same-object Geph
+  content is diagnostic only. Generic incomplete-confirmation `GET /` is not
+  substituted for the critical object's request and remains a separate path.
+- `_bootstrap_asset_geph_range_probe` now explicitly passes `GEPH_OWNED_PORT`
+  to the SOCKS connector. Previously, `_socks5_connect_blocking` read mutable
+  `_geph_port`; a concurrent backend change could send a comparison to a port
+  different from the fixed owned listener checked before/after. Both owned
+  critical-range paths now pin their port. Other connector callers retain the
+  previous default behavior through an optional keyword parameter.
+- New `_bootstrap_diagnostic_owned_pid` verifies the fixed listener PID,
+  existing ownership state/process command and listener PID again, with a
+  runner whose EVERY command timeout is the remaining diagnostic slice capped
+  by the ordinary command limit. Independent review caught that reusing the
+  ordinary `_run` would allow5s per lsof/ps despite the new3s deadline. That
+  blocker is fixed without changing `_run` or other ownership checks.
+  Readiness, cancellation and deadline are rechecked around ownership and
+  before accepting any comparison. The final PID must still match the first.
+- `_await_owned_preflight_worker` has an optional cancellation Event, passed
+  only by the child wrapper and set before worker drain on cancellation or
+  wait timeout. This fences the new diagnostic stage while preserving lease
+  ownership until blocking cleanup finishes. Already-started I/O remains
+  deadline-bounded; this is not an immediate interrupt of arbitrary blocking I/O.
+- The private child line retains `decision=direct_idle_timeout` and
+  `direct=incomplete_idle_timeout`; `geph` reports one of
+  `diagnostic_same_object_complete`, `diagnostic_mismatch`,
+  `diagnostic_incomplete`, `diagnostic_invalid`, `diagnostic_deadline`,
+  `diagnostic_prerequisite_refused`, `diagnostic_owner_changed`,
+  `diagnostic_cancelled`, or `diagnostic_exception`. Mismatch means completion
+  of the same object was not established. No target path, query, body, hash or
+  exception text is logged, and no successful route/learning status is emitted.
+- DECISIONS and TROUBLESHOOTING document only this narrow critical-child
+  diagnostic exception. Ordinary root timeout, hard-EOF proof, base-policy
+  exclusions, Discord/YouTube/googlevideo and external DNS/proxy/PAC/VPN
+  invariants are unchanged. No changes to installed runtime or learning.
+
+Source verification evidence:
+
+- `output/aud16-idle-diagnostic-BcKUVI/affected-pytest.log`:63 passed, three
+  failed because they explicitly expected the former no-Geph-on-idle policy.
+  Those expectations were updated for the authorized diagnostic-only contract;
+  `updated-expectations.log`:those3 passed without repeating the63 green cases.
+  The scoped selection was `(bootstrap and not install_bootstrap) or
+  socks5_connect or semantic_geph_probe_shares_deadline` in
+  `spike/test_tproxy_doh.py` (66 total affected cases,721 deselected).
+- After replacing diagnostic ownership with the bounded runner,
+  `bounded-ownership-integration.log`:only the seven affected idle/independent-
+  object integration cases passed (780 deselected). They include complete,
+  incomplete, exception and deadline outcomes, identical request identity,
+  exactly one request, preserved parent/child cache and no learning, private
+  diagnostic sink failures and independent same-host object probes.
+- New `spike/test_bootstrap_idle_diagnostics.py`:49 passed in0.31s, consisting
+  of29 adapted cases and20 added bounded-command/readiness cases. Command:
+  `rtk proxy .audit-venv/bin/python -m pytest spike/test_bootstrap_idle_diagnostics.py -q --disable-warnings`.
+  Log: `output/bootstrap-idle-owned-budget-20260908.XXXXXX.log`.
+  Real ownership functions run against synthetic subprocess/state fixtures:
+  exact lsof/ps/lsof before and after the comparison, shared shrinking budget
+  including probe time, per-command cap, expiry/cancellation before/between/
+  after commands, changed owner, readiness changes and exception privacy.
+  Old unbounded ownership helpers and generic `_run` are poisoned in these
+  cases. No real sockets, lsof/ps, or site requests are used by this file.
+- Independent read-only review accepted the final shrinking-command-deadline,
+  fixed-port, PID, readiness, cancellation and non-authority boundaries after
+  the5s-command blocker was corrected. No remaining blocker reported.
+
+Unchanged AUD-15 relay/StatusV2/Rust and earlier full-suite/preflight evidence
+are reused, not rerun for reassurance. Current PR373 is OPEN at513484ac with
+17 successful/skipped checks; those checks do not cover this new local delta.
+Aikido remains physically unqualified until an exact new build is verified,
+installed through the approved lifecycle, and ordinary browser behavior is
+observed. The original failed14:11 report is unchanged and must not be
+requested again. Build/installation evidence, when available, follows here.

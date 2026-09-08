@@ -26,7 +26,11 @@ compare the exact bounded range directly and through Slipstream's verified
 owned Geph listener. Explicit EOF/reset with valid incomplete range framing on
 direct plus a complete same-object owned-Geph range is actionable exact-child
 evidence. An idle timeout or slow progressive delivery is `unclear` and must
-not teach a route.
+not teach a route. Following the 2026-09-08 diagnostic-only authorization,
+an admitted critical-child idle observation may compare that same transient
+range once through verified internal Geph, within the remaining envelope and
+a three-second cap. `geph=diagnostic_same_object_complete` means this comparison
+completed, NOT that the browser switched route or the host was learned.
 
 Inspect the bounded parent/root response before concluding that no critical
 asset exists. Status `206` does not by itself mean failure: when one valid
@@ -1420,7 +1424,13 @@ adding a site rule:
    parent-relative cutoff previously turned the measured 6.8-second EOF back
    into idle. An idle timeout remains inconclusive even after a length-framed
    partial root response or partial critical range: publish no cache and do not
-   start or authorize Geph. Reaching the local read-size cap
+   authorize a Geph route. Only the valid incomplete critical-range case may now
+   run one diagnostic-only owned-Geph comparison under the 2026-09-08 decision;
+   an unclear root still cannot start it. The private child record keeps
+   `decision=direct_idle_timeout` and reports the Geph observation as a
+   `diagnostic_*` category (completion, unconfirmed object, incomplete, deadline,
+   ownership/readiness refusal, cancellation or exception). Such a record has
+   no route authority. Reaching the local read-size cap
    (`truncated=True`) is also `UNKNOWN`. Only stable explicit EOF or reset
    (normalized as EOF) with valid incomplete framing can make the direct result
    actionable, and learning that exact child hostname still requires a

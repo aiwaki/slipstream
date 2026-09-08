@@ -4294,8 +4294,8 @@ def _set_socket_deadline_timeout(sock, deadline):
     sock.settimeout(remaining)
 
 
-def _socks5_connect_blocking(host, port, timeout=3.0):
-    socks_port = _geph_port
+def _socks5_connect_blocking(host, port, timeout=3.0, *, socks_port=None):
+    socks_port = _geph_port if socks_port is None else socks_port
     if not socks_port:
         return None
     sock = None
@@ -5334,7 +5334,11 @@ def _bootstrap_asset_geph_range_probe(host, request, deadline):
             ),
             _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
         )
-    sock = _socks5_connect_blocking(host, 443, max(remaining, 0.001))
+    # Both authoritative and diagnostic bootstrap comparisons are owned-only.
+    # A concurrent change to the general backend must not redirect this probe.
+    sock = _socks5_connect_blocking(
+        host, 443, max(remaining, 0.001), socks_port=GEPH_OWNED_PORT,
+    )
     if sock is None:
         return _BootstrapRangeProbeObservation(
             bootstrap_asset_preflight.RangeProbeEvidence(
@@ -7736,6 +7740,110 @@ def _decode_bootstrap_range_probe_observation(observation):
     return observation, termination
 
 
+def _bootstrap_diagnostic_owned_pid(deadline, *, expected_pid=None, cancel_event=None):
+    """Verify only the owned listener with command timeouts inside this slice."""
+    def bounded_run(*args):
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("diagnostic cancelled")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("diagnostic deadline")
+        return subprocess.run(
+            list(args), capture_output=True, text=True, env=_RUN_ENV,
+            timeout=min(remaining, RUN_COMMAND_TIMEOUT_SECONDS),
+        )
+
+    pid = geph_backend.listener_pid(bounded_run, GEPH_OWNED_PORT)
+    if not pid or (expected_pid is not None and pid != expected_pid):
+        return None
+    if not geph_backend.listener_owned(
+        bounded_run, GEPH_OWNED_PORT, _read_geph_ownership(),
+        listener_process_id=pid,
+    ):
+        return None
+    return (
+        pid if geph_backend.listener_pid(bounded_run, GEPH_OWNED_PORT) == pid
+        else None
+    )
+
+
+def _bootstrap_idle_geph_diagnostic(
+    host,
+    request,
+    direct_evidence,
+    final_deadline,
+    *,
+    geph_probe=None,
+    cancel_event=None,
+):
+    """Observe one owned, same-object comparison; return no route authority."""
+    deadline = min(
+        final_deadline, time.monotonic() + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
+    )
+    try:
+        if cancel_event is not None and cancel_event.is_set():
+            return "diagnostic_cancelled"
+        if time.monotonic() >= deadline:
+            return "diagnostic_deadline"
+        if (
+            not _auto_geph_base_host_allowed(host)
+            or not _owned_geph_ready_for_semantic_confirmation()
+        ):
+            return "diagnostic_prerequisite_refused"
+        confirmed_pid = _bootstrap_diagnostic_owned_pid(
+            deadline, cancel_event=cancel_event,
+        )
+        # Ownership checks spend this same slice, never renew its deadline.
+        if cancel_event is not None and cancel_event.is_set():
+            return "diagnostic_cancelled"
+        if time.monotonic() >= deadline:
+            return "diagnostic_deadline"
+        if not _owned_geph_ready_for_semantic_confirmation():
+            return "diagnostic_prerequisite_refused"
+        if not confirmed_pid:
+            return "diagnostic_prerequisite_refused"
+        probe = _bootstrap_asset_geph_range_probe if geph_probe is None else geph_probe
+        observation = probe(host, request, deadline)
+        if cancel_event is not None and cancel_event.is_set():
+            return "diagnostic_cancelled"
+        if time.monotonic() >= deadline:
+            return "diagnostic_deadline"
+        current_pid = _bootstrap_diagnostic_owned_pid(
+            deadline, expected_pid=confirmed_pid, cancel_event=cancel_event,
+        )
+        if time.monotonic() >= deadline:
+            return "diagnostic_deadline"
+        if cancel_event is not None and cancel_event.is_set():
+            return "diagnostic_cancelled"
+        if not _owned_geph_ready_for_semantic_confirmation():
+            return "diagnostic_prerequisite_refused"
+        if current_pid != confirmed_pid:
+            return "diagnostic_owner_changed"
+        evidence, _termination = _decode_bootstrap_range_probe_observation(observation)
+        if evidence is None:
+            return "diagnostic_invalid"
+        if evidence.outcome is bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE:
+            return (
+                "diagnostic_same_object_complete"
+                if direct_evidence.proves_same_object_as(evidence)
+                else "diagnostic_mismatch"
+            )
+        if evidence.outcome is bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE:
+            return "diagnostic_incomplete"
+        if evidence.outcome is bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED:
+            return "diagnostic_deadline"
+        return "diagnostic_invalid"
+    except (TimeoutError, subprocess.TimeoutExpired):
+        return "diagnostic_deadline"
+    except Exception:
+        # Exception text may contain the transient target. Retain only the class.
+        return (
+            "diagnostic_cancelled"
+            if cancel_event is not None and cancel_event.is_set()
+            else "diagnostic_exception"
+        )
+
+
 def _bootstrap_asset_preflight_blocking(
     asset,
     parent_host,
@@ -7748,6 +7856,7 @@ def _bootstrap_asset_preflight_blocking(
     resolver=None,
     exact_address=None,
     proof_capability=None,
+    cancel_event=None,
 ):
     """Compare one transient critical asset without retaining its URL target."""
     h = normalize_host(getattr(asset, "exact_host", ""))
@@ -7853,9 +7962,13 @@ def _bootstrap_asset_preflight_blocking(
             direct_termination
             == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
         ):
-            # Slow delivery is not a stable direct failure.  Do not use it to
-            # authorize an alternative route and do not suppress a later
-            # foreground attempt with either the child or parent cache.
+            # Explicitly permitted diagnostic comparison, NOT direct-failure
+            # proof. Keep the exact transient request and the original deadline;
+            # even complete Geph content must return without cache or authority.
+            diagnostic_geph = _bootstrap_idle_geph_diagnostic(
+                h, request, direct_evidence, final_deadline,
+                geph_probe=geph_probe, cancel_event=cancel_event,
+            )
             return without_proof(
                 "direct_idle_timeout", _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
             )
@@ -8143,6 +8256,7 @@ async def _run_bootstrap_asset_preflight_observed(
     cache_outcome = SEMANTIC_OUTCOME_TERMINAL_ERROR
     publish_cache = True
     proof_capability = secrets.token_hex(16)
+    cancel_event = threading.Event()
     try:
         remaining = final_deadline - time.monotonic()
         if remaining <= 0:
@@ -8165,11 +8279,13 @@ async def _run_bootstrap_asset_preflight_observed(
                 resolver=resolver,
                 exact_address=selected_ip,
                 proof_capability=proof_capability,
+                cancel_event=cancel_event,
             )
         )
         blocking_result = await _await_owned_preflight_worker(
             blocking_worker,
             timeout=remaining + 0.05,
+            cancel_event=cancel_event,
         )
         proof = blocking_result.proof
         cache_outcome = blocking_result.outcome
@@ -8267,7 +8383,7 @@ async def _drain_root_preflight_worker(worker):
     return discarded, cancelled_while_draining
 
 
-async def _await_owned_preflight_worker(worker, *, timeout):
+async def _await_owned_preflight_worker(worker, *, timeout, cancel_event=None):
     """Keep one blocking proof epoch owned until its worker has exited."""
     try:
         return await asyncio.wait_for(
@@ -8275,9 +8391,13 @@ async def _await_owned_preflight_worker(worker, *, timeout):
             timeout=timeout,
         )
     except asyncio.CancelledError:
+        if cancel_event is not None:
+            cancel_event.set()
         await _drain_root_preflight_worker(worker)
         raise
     except asyncio.TimeoutError:
+        if cancel_event is not None:
+            cancel_event.set()
         _discarded, cancelled_while_draining = (
             await _drain_root_preflight_worker(worker)
         )
@@ -8847,6 +8967,10 @@ _BOOTSTRAP_DIAGNOSTIC_DIRECT = frozenset({
 _BOOTSTRAP_DIAGNOSTIC_GEPH = frozenset({
     "not_started", "unobserved", "prerequisite_refused", "probe_started",
     "comparison_refused", "proof_ready", "proof_rejected", "committed",
+    "diagnostic_same_object_complete", "diagnostic_mismatch",
+    "diagnostic_incomplete", "diagnostic_invalid", "diagnostic_deadline",
+    "diagnostic_prerequisite_refused", "diagnostic_owner_changed",
+    "diagnostic_cancelled", "diagnostic_exception",
 })
 
 

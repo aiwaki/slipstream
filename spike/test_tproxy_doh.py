@@ -11942,6 +11942,17 @@ def _enable_owned_geph_preflight(monkeypatch):
         "_owned_geph_confirmation_pid_matches",
         lambda pid: pid == 41,
     )
+    monkeypatch.setattr(
+        tproxy,
+        "_bootstrap_diagnostic_owned_pid",
+        lambda _deadline, *, expected_pid=None, cancel_event=None: (
+            tproxy._owned_geph_confirmation_pid()
+            if expected_pid is None
+            else expected_pid
+            if tproxy._owned_geph_confirmation_pid_matches(expected_pid)
+            else None
+        ),
+    )
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
     monkeypatch.setattr(
         tproxy,
@@ -14508,13 +14519,18 @@ def test_cross_origin_bootstrap_geph_probe_has_its_own_eight_second_capability(
     assert tproxy._auto_geph_learned_exact_host(asset_host)
 
 
-def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch):
+@pytest.mark.parametrize("geph_result", ["complete", "incomplete", "exception", "deadline"])
+def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch, geph_result):
     _enable_owned_geph_preflight(monkeypatch)
     parent_host = "slow-app-shell.example"
     asset_host = "slow-critical-cdn.example"
     direct_requests = []
+    geph_requests = []
+    diagnostics = []
     clock = [100.0]
     wall = [1_000.0]
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", diagnostics.append)
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: pytest.fail("diagnosis cannot learn"))
 
     monkeypatch.setattr(
         tproxy,
@@ -14537,6 +14553,18 @@ def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch):
             termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT,
         )
 
+    def geph_asset(host, request, deadline):
+        geph_requests.append((host, request, deadline, clock[0]))
+        if geph_result == "exception":
+            raise RuntimeError("private target must not be logged")
+        if geph_result == "deadline":
+            clock[0] = deadline
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
+            if geph_result == "incomplete"
+            else tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+        )
+
     started = clock[0]
     handoff_deadline = (
         started + tproxy.UNKNOWN_RECOVERY_SEMANTIC_HANDOFF_TIMEOUT
@@ -14548,14 +14576,28 @@ def test_cross_origin_bootstrap_idle_timeout_is_not_route_evidence(monkeypatch):
             deadline_monotonic=handoff_deadline,
             direct_probe=lambda *_args: _bootstrap_root_observation(asset_host),
             bootstrap_direct_probe=direct_asset,
-            bootstrap_geph_probe=lambda *_args: pytest.fail(
-                "an idle direct asset cannot authorize a Geph comparison"
-            ),
+            bootstrap_geph_probe=geph_asset,
             bootstrap_resolver=lambda _host: ["1.1.1.1"],
         )
     )
 
     assert claim is None
+    assert len(direct_requests) == len(geph_requests) == 1
+    assert geph_requests[0][0] == asset_host
+    assert geph_requests[0][1] is direct_requests[0][2]
+    assert geph_requests[0][2] <= direct_requests[0][4]
+    assert geph_requests[0][2] - geph_requests[0][3] <= tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE
+    expected = {
+        "complete": "diagnostic_same_object_complete",
+        "incomplete": "diagnostic_incomplete",
+        "exception": "diagnostic_exception",
+        "deadline": "diagnostic_deadline",
+    }[geph_result]
+    assert any(
+        f"decision=direct_idle_timeout direct=incomplete_idle_timeout geph={expected}" in line
+        for line in diagnostics
+    )
+    assert "private target" not in repr(diagnostics)
     assert direct_requests[0][:2] == ("1.1.1.1", asset_host)
     assert direct_requests[0][3] - started > 7.5
     assert direct_requests[0][4] == pytest.approx(
@@ -14578,6 +14620,14 @@ def test_two_bootstrap_objects_same_host_address_probe_independently(
     second_entered = threading.Event()
     release = threading.Event()
     direct_calls = []
+
+    geph_calls = []
+
+    def geph_asset(host, request, _deadline):
+        geph_calls.append((host, request))
+        return _bootstrap_evidence(
+            tproxy.bootstrap_asset_preflight.RangeProbeOutcome.COMPLETE,
+        )
 
     def direct_asset(ip, host, request, _direct_deadline, _final_deadline):
         direct_calls.append((ip, host, request))
@@ -14611,9 +14661,7 @@ def test_two_bootstrap_objects_same_host_address_probe_independently(
                 now + 1.0,
                 now + 2.0,
                 direct_probe=direct_asset,
-                geph_probe=lambda *_args: pytest.fail(
-                    "an idle direct asset cannot authorize Geph"
-                ),
+                geph_probe=geph_asset,
                 resolver=lambda _host: ["1.1.1.1"],
             )
         )
@@ -14626,9 +14674,7 @@ def test_two_bootstrap_objects_same_host_address_probe_independently(
                 now + 1.0,
                 now + 2.0,
                 direct_probe=direct_asset,
-                geph_probe=lambda *_args: pytest.fail(
-                    "an idle direct asset cannot authorize Geph"
-                ),
+                geph_probe=geph_asset,
                 resolver=lambda _host: ["1.1.1.1"],
             )
         )
@@ -14639,6 +14685,8 @@ def test_two_bootstrap_objects_same_host_address_probe_independently(
     results = asyncio.run(scenario())
 
     assert len(direct_calls) == 2
+    assert len(geph_calls) == 2
+    assert {request for _, request in geph_calls} == {entry[2] for entry in direct_calls}
     assert results == [
         (False, tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE),
         (False, tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE),
@@ -14829,7 +14877,7 @@ def test_bootstrap_route_never_learns_from_a_different_geph_object(monkeypatch):
     [
         ("complete", "direct_complete", "complete", "not_started"),
         ("invalid", "direct_invalid", "invalid", "not_started"),
-        ("idle", "direct_idle_timeout", "incomplete_idle_timeout", "not_started"),
+        ("idle", "direct_idle_timeout", "incomplete_idle_timeout", "diagnostic_same_object_complete"),
         ("other", "direct_termination_refused", "incomplete_other", "not_started"),
         ("unready", "geph_prerequisite_refused", "incomplete_eof", "prerequisite_refused"),
         ("different", "geph_comparison_refused", "incomplete_eof", "comparison_refused"),
@@ -14899,7 +14947,7 @@ def test_bootstrap_diagnostic_real_parent_flow_is_observational(
         f">> route-preflight-child parent={parent} host={host} origin=cross "
         f"decision={decision} direct={direct_state} geph={geph_state}"
     ]
-    assert bool(geph_calls) == (case in {"different", "rejected", "commit"})
+    assert bool(geph_calls) == (case in {"idle", "different", "rejected", "commit"})
     assert tproxy._auto_geph_learned_exact_host(host) == (case == "commit")
     assert not tproxy._auto_geph_learned_exact_host(parent)
     if case in {"complete", "commit"}:
