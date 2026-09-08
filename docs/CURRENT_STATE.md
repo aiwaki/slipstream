@@ -10,6 +10,31 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (Quit observed; exact replacement staged, awaiting local sudo):
+after the user's normal Quit, at 10:06:44 UTC no owned tray/root daemon/Geph
+process remained; both launchd labels were absent, root label disabled, and
+status/status.tmp absent. The private Quit-resume marker is preserved.
+Unprivileged empty lsof is NOT listener absence proof; root lsof/private-PF
+checks remain pending because sudo requires user authentication. External
+Geph.app processes are separately identified and untouched.
+
+Incoming `/Applications/.Slipstream.incoming-ywqzED.app` passed the canonical
+complete bundle/build-chain verifier for source `dde2498`, app tree
+`b1690537bdc4b4270c0a8c3a02e475efaa24086b1f5b68017221feded5471d6c`.
+Installed `b172617` is unchanged and stopped. The fixed one-shot replacement
+is `output/workstation-replacement-20260908.ywqzED/replace-exact-bundle.sh`;
+verification logs, script identity and transaction boundaries are in the audit.
+It has NOT executed. It must recheck privileged absence before writes, preserve
+both original Sep-5 backups and the resume marker, and leave learning in place.
+New backups are `/Applications/.Slipstream.before-ywqzED.app` and root-private
+`/private/var/tmp/slipstream-replacement-20260908.ywqzED`; their existence stops
+a repeat attempt. Never run the old installer/reset or blind-retry a failure.
+Next: user-authenticated execution of this exact script in their own Terminal,
+then inspect completion and verify installed identity/owned Geph startup before
+ordinary browser qualification. Original learning restoration and browser/full
+Quit/Restart proof remain open; no new tests, rebuild, CI or soak are needed
+for this documentation-only checkpoint.
+
 Update 2026-09-08 (corrected exact bundle verified; replacement not started):
 product source `dde2498bc9107999726d6f9709b7ac96c16a83b5` includes listener fix
 `dd5be8e` and the fail-fast Chromium input guard. One canonical build on this

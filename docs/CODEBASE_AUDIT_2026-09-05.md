@@ -865,3 +865,53 @@ Installed `b172617` is still the old runtime. Next is its normal user-driven
 Quit, complete owned-runtime absence proof and a new exact-bundle replacement
 transaction, preserving the existing original backups and learning restoration
 obligation. Site recovery and full Quit/Restart remain physical open gates.
+
+### User Quit observed; fixed replacement staged — 2026-09-08
+
+The user confirmed normal Quit. At 10:06:44 UTC bounded process inspection
+found no owned Slipstream root daemon, tray or Geph; both exact launchd labels
+were absent (exit 113), the root label was disabled, and status/status.tmp were
+absent. The 46-byte UID502/mode600 Quit-resume marker remains unchanged.
+Non-root lsof1080 was empty/exit1, which is explicitly not authoritative given
+the evidenced listener-visibility defect. `sudo -n true` requires authentication;
+root listener/private-PF absence must still be established before replacement.
+The separate external Geph.app parent/client processes were not touched.
+
+On audit HEAD `86766d2` (documentation after product source `dde2498`), the
+canonical bundle was copied to `/Applications/.Slipstream.incoming-ywqzED.app`.
+Complete verifier result is overall/build_chain pass, installed not_run, with
+the exact app tree and daemon identities recorded above. Logs:
+`output/workstation-replacement-20260908.ywqzED/incoming-verification.json` and
+`incoming-verification.log`. The exact isolated Python3.13 tree-digest helper
+used by the transaction also returned the expected app tree. No new product
+tests or build were run for unchanged source.
+
+New one-shot script:
+`output/workstation-replacement-20260908.ywqzED/replace-exact-bundle.sh`.
+SHA-256 `57715f811fd0c2f0d59db68be1230d85c062358d1377501bc0f51a9b75f6eb9e`.
+`bash -n` passes; independent final read-only review found no concrete blocker.
+The script has NOT executed. It requires root/no arguments,
+checks exact old/new full app trees and signatures, old root daemon identity,
+three stable privileged absence samples, and intact original backup boundaries.
+It snapshots current runtime/configuration only into new root0700 private
+storage, checks copies of the two learned-state files and metadata, and does
+not reset live learning or alter the resume marker. A protected incoming copy
+is reverified before final placement. Placement may roll back only before the
+installer executes; an installer failure stops for inspection, never replay.
+The installer runs from the final app path and must leave the exact new root
+daemon hash. No tray/target navigation is launched by the script.
+
+New recovery paths (must not exist before the first attempt):
+`/Applications/.Slipstream.before-ywqzED.app` and
+`/private/var/tmp/slipstream-replacement-20260908.ywqzED`.
+The latter's install.log and runtime snapshot are private and must not be
+exported wholesale. Preserve original `.Slipstream.previous-B5fQMm.app` and
+root-private `slipstream-qualification-20260905.B5fQMm`; original learning
+restoration remains outstanding. Never rerun the old Sep-5 installer/helper.
+
+Live main `2780de4` and PR373 `513484a` remain unchanged; required CI
+`32867878889` and audit `32867879962` are green only for that older PR head,
+not this local correction. Primary checkout HEAD `a22a698` and its tracked
+state are unchanged. Next is user-authenticated execution of the fixed command,
+completion inspection, canonical installed proof and actual owned Geph start.
+Ordinary Chrome/Safari critical-resource and full Quit/Restart gates stay open.
