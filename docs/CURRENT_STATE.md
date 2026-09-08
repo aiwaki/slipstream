@@ -10,6 +10,27 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (fresh child record diagnoses admission starvation):
+private fresh export mtime12:05:26Z is saved at
+`output/aikido-child-diagnostic-20260908.nBz5za/diagnostics-20260908T120526Z.json`
+(16670 bytes, mode0600). Its 80-line truncated root tail includes Aikido child
+`concurrent_refused` at16:59:55/16:59:56+0500 and `window_refused` at17:00:21,
+all direct=not_started/geph=not_started; corresponding roots are usable/assets3.
+Source confirms the parent root epoch is retained while awaiting its
+cross-origin child, which attempts an additional epoch in the SAME cap2
+inflight registry and cap8/60s window. Thus completed-parent network work can
+occupy admission needed by its own child; refusal returns without child I/O
+and without healthy/retry caching of the unresolved root. The finite tail
+does not reconstruct all concurrent owners/window consumers or attribute
+records individually to Safari versus Chrome. This diagnoses why these
+recovery comparisons never started, not every underlying CDN transport error.
+No new routing patch, build, install, test or navigation in this investigation.
+Next source correction must separate root coalescing/proof ownership from
+actual worker admission, preserve exact child epochs and cancellation drain,
+and preserve both hard concurrency and actual per-window observation limits;
+do not merely raise limits or collapse independent child proof into root proof.
+Use focused simultaneous-root/child and window-boundary regression cases.
+
 Update 2026-09-08 12:02 UTC (user navigation still fails; fresh export needed):
 user accidentally opened Aikido in Safari first, then Chrome; reports unchanged
 failure and supplies a Chrome screenshot with only the loading spinner. Keep

@@ -1258,6 +1258,58 @@ export, so no new child decision can yet be attributed to this navigation.
 Request built-in Copy Diagnostics without another navigation/reload. Preserve
 the Safari-then-Chrome order; do not label this a clean isolated Chrome trial.
 No source/runtime mutation, test or build was justified by the screenshot alone.
+
+### AUD-14 — critical-child admission starved by retained parent epoch
+
+Status: diagnosed in source and the fresh installed diagnostic record; not yet
+patched. Fresh Copy Diagnostics mtime is 2026-09-08T12:05:26.300Z (generated
+at 12:05:22Z), 16670 bytes, owner502/mode0600. Preserved exact private copy:
+`output/aikido-child-diagnostic-20260908.nBz5za/diagnostics-20260908T120526Z.json`.
+Only bounded root/child decision fields were exported into this audit; no raw
+Geph logs, URLs, payloads, cookies or private runtime snapshots were printed.
+
+Captured for parent `app.aikido.dev`, cross-origin child `cdn.aikido.dev`:
+
+| Local time (+0500) | Child decision | Direct / Geph |
+|---|---|---|
+| 16:59:55 | concurrent_refused | not_started / not_started |
+| 16:59:56 | concurrent_refused | not_started / not_started |
+| 17:00:21 | window_refused | not_started / not_started |
+
+Each corresponding root is usable with three extracted assets. Therefore
+these failures occur before child direct I/O or Geph comparison; they are not
+an observed failed Geph payload comparison or the old root TLS-before-HTTP
+boundary. User navigation order was Safari then Chrome; logs are not enough
+to assign individual entries to either browser or identify every competing
+epoch/window consumer. The 80-line truncated tail spans16:59:55–17:04:56 and
+contains14 root/3 child records. This is not a complete admission trace.
+
+Current source: `ROUTE_PREFLIGHT_CONCURRENT_MAX=2`, window60s/max8.
+`_run_initial_route_preflight` holds its `(host, exact-IP)` Future until its
+finally block, including while awaiting `_run_bootstrap_asset_preflight`.
+The cross-origin child resolves its independent exact IP, then checks the same
+registry length/window and requests another opaque per-object epoch. Under
+two concurrent parent owners, a child can therefore be refused even after
+its parent's network observation has completed. Repeated root admission also
+charges the same eight-entry window; refused child outcomes deliberately do
+not mint a healthy/retry cache entry. That safety behavior must remain, but
+can expose repeated root cost while the critical child never runs.
+
+The retained epoch is needed for root coalescing and proof lifetime; removing
+its map entry early would allow duplicate root work. The private child epoch
+is needed to prevent evidence reuse across different critical objects; sharing
+the parent's result/Future would conflate authority or resolve waiters early.
+The next correction must distinguish worker admission from those lifetimes,
+retain exact host/IP/object capability checks and cancellation drain, and
+preserve both hard concurrent-worker and actual per-window observation bounds.
+An uncharged child/doubled allowance or numeric limit increase is not a fix.
+
+Local blame attributes the existing child capacity/window checks and private
+epoch to recovered commit `ee8ba0e8f78b`; `fb19315` added the diagnostic labels,
+not that refusal policy. This provenance does not date the original historical
+regression beyond the recovered tree. No code fix or new tests were run during
+this diagnostic step; one scoped regression should first capture simultaneous
+parents/children, window boundary, exact proof isolation and cancellation.
 Actual Aikido recovery, Safari qualification, full Quit/Restart and original
 learning restoration remain open. No site reload/probe, new rules, runtime
 change, full test suite, rebuild/install, workflow or soak ran in this pass.
