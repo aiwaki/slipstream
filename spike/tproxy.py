@@ -52,6 +52,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -245,6 +246,7 @@ _status_heartbeat_seq = 0
 _status_publisher_thread = None
 _status_publisher_wake = threading.Event()
 _status_first_publish = threading.Event()
+_status_listener_binding = None
 STATUS_HEARTBEAT_INTERVAL = 2.0
 _shutdown_started = threading.Event()
 _pf_teardown_complete = threading.Event()
@@ -11365,11 +11367,109 @@ def _write_status_snapshot(snapshot):
     with _status_write_lock:
         if _shutdown_started.is_set():
             return
-        tmp = STATUS_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(snapshot, f)
-        os.chmod(tmp, STATUS_PUBLIC_MODE)
-        os.replace(tmp, STATUS_PATH)
+        # The public file now carries root-authored listener authority. Keep
+        # creation, identity validation and mode changes on one exclusive fd;
+        # never follow a pre-existing temporary pathname or chmod the target.
+        fd, tmp = tempfile.mkstemp(
+            prefix=os.path.basename(STATUS_PATH) + ".",
+            suffix=".tmp",
+            dir=os.path.dirname(STATUS_PATH),
+        )
+        try:
+            identity = os.fstat(fd)
+            if (
+                not stat.S_ISREG(identity.st_mode)
+                or identity.st_nlink != 1
+                or identity.st_uid != os.geteuid()
+            ):
+                raise OSError("untrusted status publication descriptor")
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w") as f:
+                fd = None
+                json.dump(snapshot, f)
+                f.flush()
+                os.fchmod(f.fileno(), STATUS_PUBLIC_MODE)
+                if not _shutdown_started.is_set():
+                    os.replace(tmp, STATUS_PATH)
+        finally:
+            if fd is not None:
+                os.close(fd)
+            try:
+                os.remove(tmp)
+            except FileNotFoundError:
+                pass
+
+
+def _socket_is_kernel_listener(listener):
+    """Read LISTEN state from this fd; an asyncio serving flag is not proof."""
+    try:
+        if sys.platform == "darwin":
+            # Darwin exposes SO_ACCEPTCONN but getsockopt rejects it with
+            # ENOPROTOOPT. netinet/tcp.h's tcp_connection_info has a 112-byte
+            # layout whose first uint8 is tcpi_state; tcp_fsm.h defines
+            # TCPS_LISTEN as 1. Request only this fixed, bounded ABI prefix.
+            info = listener.getsockopt(
+                socket.IPPROTO_TCP, socket.TCP_CONNECTION_INFO, 112,
+            )
+            return type(info) is bytes and len(info) == 112 and info[0] == 1
+        return listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) == 1
+    except (OSError, RuntimeError, AttributeError, TypeError, ValueError):
+        return False
+
+
+def _current_listener_ownership(binding, sampled_at):
+    """Sample this process's actual listening sockets, never cached health."""
+    if (
+        os.geteuid() != 0
+        or _shutdown_started.is_set()
+        or binding is None
+        or not math.isfinite(sampled_at)
+        or sampled_at < 0
+    ):
+        return None
+    server, port = binding
+    if type(port) is not int or not 0 < port <= 65535:
+        return None
+    expected = {
+        socket.AF_INET: "127.0.0.1",
+        socket.AF_INET6: "::1",
+    }
+    observed = {}
+    try:
+        if not server.is_serving():
+            return None
+        sockets = tuple(server.sockets or ())
+        if len(sockets) != len(expected):
+            return None
+        for listener in sockets:
+            family = listener.family
+            address = listener.getsockname()
+            if (
+                family not in expected
+                or family in observed
+                or listener.fileno() < 0
+                or address[:2] != (expected[family], port)
+                or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE)
+                != socket.SOCK_STREAM
+                or not _socket_is_kernel_listener(listener)
+                or (
+                    hasattr(socket, "SO_REUSEPORT")
+                    and listener.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT)
+                    != 0
+                )
+            ):
+                return None
+            observed[family] = {"address": address[0], "port": address[1]}
+        if not server.is_serving() or _shutdown_started.is_set():
+            return None
+    except (OSError, RuntimeError, AttributeError, TypeError, ValueError):
+        return None
+    return {
+        "schema_version": 1,
+        "pid": os.getpid(),
+        "sampled_at": sampled_at,
+        "listeners": [observed[socket.AF_INET], observed[socket.AF_INET6]],
+    }
 
 
 def _rfc3339_utc(timestamp=None):
@@ -11387,6 +11487,7 @@ def _cache_status_snapshot(snapshot, phase, *, health_updated_at=None):
         raise ValueError("invalid daemon phase")
     copied = json.loads(json.dumps(snapshot))
     daemon = copied.setdefault("daemon", {})
+    daemon.pop("listener_ownership", None)
     health_updated_at = (
         time.time() if health_updated_at is None else health_updated_at
     )
@@ -11417,6 +11518,21 @@ def _publish_cached_status(now=None):
         snapshot["daemon"]["updated_at"] = now
         snapshot["daemon"]["heartbeat_at"] = _rfc3339_utc(now)
         snapshot["daemon"]["heartbeat_seq"] = _status_heartbeat_seq
+        daemon = snapshot["daemon"]
+        daemon.pop("listener_ownership", None)
+        if (
+            daemon.get("state") == "active"
+            and daemon.get("phase") == "active"
+            and daemon.get("pid") == os.getpid()
+        ):
+            sampled_at = datetime.fromisoformat(
+                daemon["heartbeat_at"].replace("Z", "+00:00")
+            ).timestamp()
+            ownership = _current_listener_ownership(
+                _status_listener_binding, sampled_at
+            )
+            if ownership is not None:
+                daemon["listener_ownership"] = ownership
         _write_status_snapshot(snapshot)
     _status_first_publish.set()
     return True
@@ -12371,9 +12487,10 @@ def pf_state_snapshot(port=PROXY_PORT):
 
 
 def pf_teardown():
-    global _pf_applied, _pf_interceptor_conflicts
+    global _pf_applied, _pf_interceptor_conflicts, _status_listener_binding
     _shutdown_started.set()
     with _status_write_lock:
+        _status_listener_binding = None
         for path in (STATUS_PATH + ".tmp", STATUS_PATH):
             try:
                 os.remove(path)      # daemon is going away -> app shows "off"
@@ -20353,7 +20470,7 @@ async def _start_transparent_loopback_server(port):
 
 async def amain(port, voice=True):
     global _geph_up, _pending_navigation_probe_available
-    global _route_preflight_headless_available
+    global _route_preflight_headless_available, _status_listener_binding
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(asyncio_exception_handler)
     shutdown = asyncio.Event()
@@ -20378,6 +20495,8 @@ async def amain(port, voice=True):
                   f"kill it and retry:\n  sudo lsof -ti tcp:{port} | xargs sudo kill\n",
                   file=sys.stderr)
         raise
+    with _status_write_lock:
+        _status_listener_binding = (server, port)
     # Publishing a safe state must not depend on DNS, Geph, or PF. This also
     # gives the installer an exact listener/status ownership proof while the
     # bounded startup qualification is still running.
@@ -20492,6 +20611,8 @@ async def amain(port, voice=True):
                 file=sys.stderr,
             )
     finally:
+        with _status_write_lock:
+            _status_listener_binding = None
         _pending_navigation_probe_available = False
         _route_preflight_headless_available = False
         await asyncio.to_thread(_close_pending_navigation_probe_worker)

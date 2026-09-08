@@ -8,6 +8,7 @@
 // later; main.rs is a thin desktop shim.
 
 mod app_update;
+mod daemon_listener;
 mod diagnostics;
 mod geph_config;
 mod install_attestation;
@@ -1239,6 +1240,35 @@ fn clear_quit_resume_intent(path: &Path) -> Result<(), String> {
         Ok(()) => sync_parent_directory(path),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("quit resume state cleanup unavailable: {error}")),
+    }
+}
+
+// The root listener is not necessarily visible to an unprivileged macOS
+// lsof/netstat. Only daemon resume may fall back to the fresh root-owned
+// descriptor snapshot; generic Geph ownership and stop checks stay unchanged.
+fn daemon_listener_for_resume(status: Option<&Value>) -> Option<u32> {
+    daemon_listener_for_resume_with(
+        status,
+        || listener_pid(DAEMON_PROXY_PORT),
+        |pid| daemon_listener::witnessed_listener_pid(pid, DAEMON_PROXY_PORT),
+    )
+}
+
+fn daemon_listener_for_resume_with(
+    status: Option<&Value>,
+    observe: impl FnOnce() -> Option<u32>,
+    witness: impl FnOnce(u32) -> Option<u32>,
+) -> Option<u32> {
+    let expected_pid = status?
+        .get("pid")?
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid > 0)?;
+    match observe() {
+        // A visible different owner must veto readiness, never be overridden
+        // by a file snapshot from an earlier heartbeat.
+        Some(pid) => Some(pid),
+        None => witness(expected_pid).filter(|pid| *pid == expected_pid),
     }
 }
 
@@ -4826,7 +4856,7 @@ pub fn run() {
                             if !quit_resume_daemon_ready(
                                 locked_status.as_ref(),
                                 daemon_label_disabled(),
-                                listener_pid(DAEMON_PROXY_PORT),
+                                daemon_listener_for_resume(locked_status.as_ref()),
                                 daemon_installed_for_watchdog(&app_handle),
                                 status_pid_owned,
                             ) {
@@ -4889,7 +4919,7 @@ pub fn run() {
                             if !quit_resume_daemon_ready(
                                 locked_status.as_ref(),
                                 daemon_label_disabled(),
-                                listener_pid(DAEMON_PROXY_PORT),
+                                daemon_listener_for_resume(locked_status.as_ref()),
                                 daemon_installed_for_watchdog(&app_handle),
                                 status_pid_owned,
                             ) {
@@ -5073,11 +5103,11 @@ mod tests {
         admin_shell_script, app_bundle_for_bundled_daemon, baseline_recovery_detail,
         begin_exit_menu_refresh, claim_terminal_operation, clear_quit_resume_intent,
         clear_stale_geph_ownership_with, command_matches_daemon, command_matches_geph,
-        copy_log_snapshot_direct, daemon_binary_format, daemon_process_owned,
-        daemon_recovery_precondition, daemon_recovery_shell, daemon_recovery_status_value,
-        daemon_state_text, daemon_stop_shell, diagnostic_log_tail, diagnostic_log_tail_from_path,
-        diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
-        exit_catalog_availability, exit_if_terminal_owner, finish_exit_menu_refresh,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_listener_for_resume_with,
+        daemon_process_owned, daemon_recovery_precondition, daemon_recovery_shell,
+        daemon_recovery_status_value, daemon_state_text, daemon_stop_shell, diagnostic_log_tail,
+        diagnostic_log_tail_from_path, diagnostic_snapshot_value, diagnostic_summary_value,
+        exit_catalog, exit_catalog_availability, exit_if_terminal_owner, finish_exit_menu_refresh,
         geph_launch_agent_bootout_with, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_agent_state_from_print, geph_launch_agent_state_with, geph_launch_domain,
         geph_launch_target, geph_launcher_script, geph_launcher_script_with_log_limits,
@@ -5752,6 +5782,59 @@ exit 0
             .unwrap();
         let status_poll = source.find("// ---- status poll every 2s").unwrap();
         assert!(cleanup < status_poll);
+    }
+
+    #[test]
+    fn quit_resume_listener_uses_witness_only_when_system_owner_is_invisible() {
+        let status = json!({"pid": 42});
+        assert_eq!(
+            daemon_listener_for_resume_with(
+                Some(&status),
+                || None,
+                |pid| {
+                    assert_eq!(pid, 42);
+                    Some(pid)
+                }
+            ),
+            Some(42)
+        );
+        for observed in [42, 99] {
+            assert_eq!(
+                daemon_listener_for_resume_with(
+                    Some(&status),
+                    || Some(observed),
+                    |_| { panic!("visible ownership must not consult the fallback") }
+                ),
+                Some(observed)
+            );
+        }
+        for rejected in [None, Some(99)] {
+            assert_eq!(
+                daemon_listener_for_resume_with(Some(&status), || None, |_| rejected),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn quit_resume_listener_rejects_invalid_status_before_any_probe() {
+        for status in [
+            None,
+            Some(json!({})),
+            Some(json!({"pid": 0})),
+            Some(json!({"pid": -1})),
+            Some(json!({"pid": 4294967296_u64})),
+            Some(json!({"pid": "42"})),
+        ] {
+            assert_eq!(
+                daemon_listener_for_resume_with(
+                    status.as_ref(),
+                    || panic!("invalid PID must not probe processes"),
+                    |_| panic!("invalid PID must not consume a witness"),
+                ),
+                None
+            );
+        }
     }
 
     #[test]

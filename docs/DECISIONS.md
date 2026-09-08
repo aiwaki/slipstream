@@ -29,6 +29,17 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   audit may establish a new baseline where saved local changes have no matching
   CI, but passing unit tests never replace fresh ordinary Chrome/Safari, native
   Windows or exact-bundle lifecycle qualification.
+- Only daemon Quit-resume readiness may supplement an unavailable unprivileged
+  listener-owner observation with a fresh root-authored descriptor witness in
+  the existing StatusV2 file. A visible conflicting owner always vetoes it.
+  Every heartbeat must resample retained dual-stack loopback socket FDs, kernel
+  LISTEN state and disabled reuseport; cached health or asyncio serving flags
+  alone cannot mint authority. Darwin uses TCP_CONNECTION_INFO because its
+  SO_ACCEPTCONN query is unsupported. The tray requires a bounded nofollow
+  root-owned nonwritable file, matching PID/generation, active daemon/PF and
+  nonfuture freshness within six seconds. Exact process/install/label/lifecycle
+  guards remain mandatory; generic Geph ownership and stop checks are unchanged.
+  This is bounded snapshot evidence, not continuous kernel observation.
 
 > **P0 supersession scope (2026-08-13):** every historical row below that
 > describes a production Aqua/LaunchServices worker, installed Google Chrome,

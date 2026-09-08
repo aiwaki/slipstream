@@ -10,6 +10,39 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (listener correction tests green; no new installation):
+audit HEAD remains `6b7bf54`, with the preserved uncommitted witness correction.
+Live main `2780de4` and PR #373 head `513484a` are unchanged; required CI
+`32867878889` and audit `32867879962` still pass for that older PR head only.
+The dirty primary checkout's tracked state and HEAD `a22a698` are untouched.
+Rust witness/resume selections already passed 11 + 5 tests and need no rerun
+without a relevant diff. Darwin's unsupported SO_ACCEPTCONN query is replaced
+by bounded TCP_CONNECTION_INFO kernel LISTEN-state evidence. Both previously
+failing real-socket tests plus 24 helper cases pass; the complete affected
+producer selection passes 47 tests (693 deselected). Independent final narrow
+review found no actionable blocker. Next: commit the source and build one
+canonical verified bundle; the installed app remains the old `b172617` build.
+Do not replace actual socket evidence with `is_serving`, alter the resume
+marker, install the unqualified tree, or start browser/account-backed gates.
+Original private backups and learning restoration remain outstanding.
+
+Update 2026-09-05 (root listener confirmed; causal resume correction in progress):
+user-run privileged lsof independently confirms PID11973/root owns BOTH
+`[::1]:1080` and `127.0.0.1:1080`. The installed `b172617` daemon is listening;
+the tray's non-root lsof/netstat visibility failure is the proven blocking
+resume predicate. Enabled Geph in the menu is configuration, not running-state
+proof. No target browser navigation or route-learning shortcut was used.
+The audit branch now adds a root-authored per-heartbeat descriptor witness to
+the existing status file and a bounded, root-file-authenticated tray reader;
+only the two daemon/Geph resume readiness calls may use it when system listener
+ownership is unavailable. A visible conflicting owner still vetoes readiness.
+Exact install, owned process, label, PF, freshness and lifecycle guards remain.
+Source/tests/review are in progress; do NOT install or describe this working
+tree as qualified yet. Keep the running installed app and original private
+learning/runtime backup unchanged. Detailed evidence and focused test outcomes
+belong in `docs/CODEBASE_AUDIT_2026-09-05.md`; next is the completed narrow diff,
+scoped tests and one canonical verified bundle before any replacement.
+
 Update 2026-09-05 17:11 UTC (exact installation verified; browser gate not started):
 the user ran the authorized one-shot installer successfully. Canonical
 `npm run verify:local-install` reports overall/build_chain/installed pass for

@@ -47,6 +47,7 @@ _PENDING_NAVIGATION_PROBE_CONTRACT = json.loads(
 
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(tproxy, "_status_listener_binding", None)
     shutdown_started = tproxy._shutdown_started.is_set()
     pf_teardown_complete = tproxy._pf_teardown_complete.is_set()
     route_policy_trial_generation = tproxy._route_policy_trial_generation
@@ -2385,6 +2386,263 @@ def test_status_heartbeat_keeps_legacy_freshness_during_slow_health_pause(
     assert json.loads(capsys.readouterr().out)["daemon"]["state"] == "active"
 
 
+@pytest.fixture
+def status_listener_pair():
+    # Kernel-backed loopback sockets only: no connect, DNS, root or live port.
+    with (
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ipv4,
+        socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as ipv6,
+    ):
+        ipv6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        ipv4.bind(("127.0.0.1", 0))
+        port = ipv4.getsockname()[1]
+        ipv6.bind(("::1", port))
+        ipv4.listen(1)
+        ipv6.listen(1)
+        server = SimpleNamespace(sockets=(ipv4, ipv6), is_serving=lambda: True)
+        yield server, port
+
+
+@pytest.mark.parametrize(
+    "family,address",
+    [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")],
+)
+def test_socket_is_kernel_listener_tracks_real_bound_listening_and_closed_fd(
+    family, address,
+):
+    # Unlike a serving flag, the live kernel observation must distinguish a
+    # merely bound socket from the same fd after listen(), on each IP family.
+    with socket.socket(family, socket.SOCK_STREAM) as listener:
+        listener.bind((address, 0))
+        assert not tproxy._socket_is_kernel_listener(listener)
+        listener.listen(1)
+        assert tproxy._socket_is_kernel_listener(listener)
+    assert not tproxy._socket_is_kernel_listener(listener)
+
+
+@pytest.mark.parametrize("state", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 255])
+def test_socket_is_kernel_listener_darwin_accepts_only_listen_state(
+    monkeypatch, state,
+):
+    monkeypatch.setattr(tproxy.sys, "platform", "darwin")
+    monkeypatch.setattr(tproxy.socket, "TCP_CONNECTION_INFO", 0x106, raising=False)
+    calls = []
+
+    def getsockopt(*args):
+        calls.append(args)
+        return bytes([state]) + bytes(111)
+
+    assert tproxy._socket_is_kernel_listener(
+        SimpleNamespace(getsockopt=getsockopt),
+    ) is (state == 1)
+    assert calls == [(socket.IPPROTO_TCP, 0x106, 112)]
+
+
+@pytest.mark.parametrize("info", [b"", b"\x01", b"\x01" + bytes(110),
+                                  b"\x01" + bytes(112), 1, None])
+def test_socket_is_kernel_listener_darwin_rejects_invalid_kernel_response(
+    monkeypatch, info,
+):
+    monkeypatch.setattr(tproxy.sys, "platform", "darwin")
+    monkeypatch.setattr(tproxy.socket, "TCP_CONNECTION_INFO", 0x106, raising=False)
+    listener = SimpleNamespace(getsockopt=lambda *args: info)
+    assert not tproxy._socket_is_kernel_listener(listener)
+
+
+def test_socket_is_kernel_listener_darwin_never_falls_back_after_probe_error(
+    monkeypatch,
+):
+    monkeypatch.setattr(tproxy.sys, "platform", "darwin")
+    monkeypatch.setattr(tproxy.socket, "TCP_CONNECTION_INFO", 0x106, raising=False)
+    calls = []
+
+    def getsockopt(*args):
+        calls.append(args)
+        raise OSError(42, "Protocol not available")
+
+    assert not tproxy._socket_is_kernel_listener(
+        SimpleNamespace(getsockopt=getsockopt),
+    )
+    assert calls == [(socket.IPPROTO_TCP, 0x106, 112)]
+
+
+@pytest.mark.parametrize("accepting", [0, 1, 2])
+def test_socket_is_kernel_listener_non_darwin_uses_socket_accept_state(
+    monkeypatch, accepting,
+):
+    monkeypatch.setattr(tproxy.sys, "platform", "linux")
+    calls = []
+
+    def getsockopt(*args):
+        calls.append(args)
+        return accepting
+
+    assert tproxy._socket_is_kernel_listener(
+        SimpleNamespace(getsockopt=getsockopt),
+    ) is (accepting == 1)
+    assert calls == [(socket.SOL_SOCKET, socket.SO_ACCEPTCONN)]
+
+
+def test_listener_ownership_samples_live_dual_stack_socket_fds(
+    monkeypatch, status_listener_pair,
+):
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    server, port = status_listener_pair
+
+    assert tproxy._current_listener_ownership((server, port), 160.123) == {
+        "schema_version": 1,
+        "pid": os.getpid(),
+        "sampled_at": 160.123,
+        "listeners": [
+            {"address": "127.0.0.1", "port": port},
+            {"address": "::1", "port": port},
+        ],
+    }
+    # The retained Python object must not preserve authority after its fd closes.
+    server.sockets[1].close()
+    assert tproxy._current_listener_ownership((server, port), 162.0) is None
+
+
+@pytest.mark.parametrize("kind", [socket.SOCK_STREAM, socket.SOCK_DGRAM])
+def test_listener_ownership_rejects_non_listening_socket_fds(
+    monkeypatch, status_listener_pair, kind,
+):
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    server, port = status_listener_pair
+    ipv4, ipv6 = server.sockets
+    ipv4.close()
+    with socket.socket(socket.AF_INET, kind) as replacement:
+        replacement.bind(("127.0.0.1", port))
+        server.sockets = (replacement, ipv6)
+        assert tproxy._current_listener_ownership((server, port), 160.0) is None
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["nonroot", "shutdown", "not_serving", "missing", "duplicate", "wrong_port",
+     "socket_error", "shared_listener"],
+)
+def test_listener_ownership_rejects_invalid_or_unowned_samples(
+    monkeypatch, status_listener_pair, invalid,
+):
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    server, port = status_listener_pair
+    ipv4, ipv6 = server.sockets
+    if invalid == "nonroot":
+        monkeypatch.setattr(tproxy.os, "geteuid", lambda: 502)
+    elif invalid == "shutdown":
+        tproxy._shutdown_started.set()
+    elif invalid == "not_serving":
+        server.is_serving = lambda: False
+    elif invalid == "missing":
+        server.sockets = (ipv4,)
+    elif invalid == "duplicate":
+        server.sockets = (ipv4, ipv4)
+    elif invalid == "wrong_port":
+        port = 1 if port != 1 else 2
+    else:
+        def getsockopt(level, option, *args):
+            if invalid == "socket_error":
+                raise OSError("socket vanished")
+            if option == socket.SO_REUSEPORT:
+                return 1
+            return ipv4.getsockopt(level, option, *args)
+
+        server.sockets = (
+            SimpleNamespace(
+                family=ipv4.family, getsockname=ipv4.getsockname,
+                fileno=ipv4.fileno, getsockopt=getsockopt,
+            ),
+            ipv6,
+        )
+    assert tproxy._current_listener_ownership((server, port), 160.0) is None
+
+
+def test_status_listener_ownership_is_resampled_every_heartbeat(
+    monkeypatch, status_listener_pair,
+):
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(tproxy, "_status_listener_binding", status_listener_pair)
+    monkeypatch.setattr(tproxy, "_status_snapshot_cache", None)
+    monkeypatch.setattr(tproxy, "_status_heartbeat_seq", 0)
+    published = []
+    monkeypatch.setattr(tproxy, "_write_status_snapshot", published.append)
+    tproxy._cache_status_snapshot(
+        {"schema_version": 2, "daemon": {
+            "state": "active", "pid": os.getpid(),
+            "listener_ownership": {"cached": "must never survive"},
+        }},
+        "active", health_updated_at=100.0,
+    )
+    assert "listener_ownership" not in tproxy._status_snapshot_cache["daemon"]
+    assert tproxy._publish_cached_status(now=160.123456)
+    first = published[-1]["daemon"]
+    assert first["listener_ownership"]["sampled_at"] == 160.123
+    assert first["heartbeat_at"] == "1970-01-01T00:02:40.123Z"
+    assert first["heartbeat_seq"] == 1
+
+    assert tproxy._publish_cached_status(now=162.456789)
+    second = published[-1]["daemon"]
+    assert second["listener_ownership"]["sampled_at"] == 162.456
+    assert second["health_updated_at"] == first["health_updated_at"]
+    assert second["heartbeat_seq"] == 2
+
+    status_listener_pair[0].sockets[0].close()
+    assert tproxy._publish_cached_status(now=164.0)
+    assert "listener_ownership" not in published[-1]["daemon"]
+    tproxy._shutdown_started.set()
+    assert not tproxy._publish_cached_status(now=166.0)
+    assert len(published) == 3
+
+
+@pytest.mark.parametrize(
+    "state,phase,owned_pid",
+    [("dormant", "starting", True), ("active", "recovering", True),
+     ("active", "stopping", True), ("dormant", "active", True),
+     ("active", "active", False)],
+)
+def test_status_listener_ownership_is_absent_outside_active_current_pid(
+    monkeypatch, status_listener_pair, state, phase, owned_pid,
+):
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(tproxy, "_status_listener_binding", status_listener_pair)
+    monkeypatch.setattr(tproxy, "_status_snapshot_cache", None)
+    published = []
+    monkeypatch.setattr(tproxy, "_write_status_snapshot", published.append)
+    tproxy._cache_status_snapshot(
+        {"schema_version": 2, "daemon": {
+            "state": state, "pid": os.getpid() if owned_pid else os.getpid() + 1,
+        }},
+        phase, health_updated_at=100.0,
+    )
+    assert tproxy._publish_cached_status(now=160.0)
+    assert "listener_ownership" not in published[-1]["daemon"]
+
+
+def test_status_atomic_writer_never_follows_temp_or_target_symlinks(
+    monkeypatch, tmp_path,
+):
+    status_path = tmp_path / "status"
+    victim = tmp_path / "untouched"
+    victim.write_bytes(b"unchanged")
+    status_path.symlink_to(victim)
+    legacy_temp = tmp_path / "status.tmp"
+    legacy_temp.symlink_to(victim)
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+
+    tproxy._write_status_snapshot({"schema_version": 2, "daemon": {}})
+
+    assert victim.read_bytes() == b"unchanged"
+    assert legacy_temp.is_symlink()
+    assert not status_path.is_symlink()
+    assert json.loads(status_path.read_text())["schema_version"] == 2
+    metadata = status_path.stat()
+    assert metadata.st_uid == os.geteuid()
+    assert metadata.st_nlink == 1
+    assert stat.S_IMODE(metadata.st_mode) == tproxy.STATUS_PUBLIC_MODE
+    assert list(tmp_path.glob("status.*.tmp")) == []
+
+
 def test_auto_geo_exit_pending_counts_every_confirmation_phase(monkeypatch):
     monkeypatch.setattr(tproxy, "_auto_geph_confirming", {})
     monkeypatch.setattr(tproxy, "_transport_incomplete_confirming", {})
@@ -3031,12 +3289,12 @@ def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
     status_path = tmp_path / "status"
     writer_inside_lock = threading.Event()
     release_writer = threading.Event()
-    real_chmod = tproxy.os.chmod
+    real_fchmod = tproxy.os.fchmod
 
-    def blocking_chmod(path, mode):
+    def blocking_fchmod(fd, mode):
         writer_inside_lock.set()
         assert release_writer.wait(timeout=2)
-        real_chmod(path, mode)
+        real_fchmod(fd, mode)
 
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
     monkeypatch.setattr(tproxy, "status_v2_snapshot", lambda *_: {"state": "active"})
@@ -3046,7 +3304,7 @@ def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
         lambda: SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
-    monkeypatch.setattr(tproxy.os, "chmod", blocking_chmod)
+    monkeypatch.setattr(tproxy.os, "fchmod", blocking_fchmod)
 
     writer = threading.Thread(
         target=tproxy.write_status,
@@ -3068,6 +3326,7 @@ def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
     assert not teardown.is_alive()
     assert not status_path.exists()
     assert not (tmp_path / "status.tmp").exists()
+    assert list(tmp_path.glob("status.*.tmp")) == []
 
     tproxy.write_status("active", "en0", None)
     assert not status_path.exists()

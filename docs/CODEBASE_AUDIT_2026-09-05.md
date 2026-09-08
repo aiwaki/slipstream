@@ -698,3 +698,86 @@ read-only lsof exact1080 is the next discriminator. sudo -n requires user
 authentication. No marker deletion, privilege-policy change, production edit,
 rebuild, unchanged suite or browser probe was attempted. Tray stdout/stderr are
 /dev/null; bounded process sampling shows a normal event loop, not pending auth.
+
+### Proven resume blocker and narrow correction — 2026-09-05
+
+The user supplied privileged lsof output showing the exact installed root
+PID11973 with FD19 IPv6 `[::1]:1080` and FD22 IPv4 `127.0.0.1:1080`, both
+LISTEN. This independently distinguishes missing unprivileged visibility from
+a missing daemon listener. The tray's checked Enable Geph menu item is only
+configuration; Geph remained off because resume could not prove listener PID.
+
+The correction adds `daemon.listener_ownership` to each active root heartbeat:
+schema1, current PID, same-generation millisecond sample time and actual
+loopback socket endpoints. The producer queries retained server socket FDs
+(`getsockname`, stream type, accept/listen state, no reuseport), not configured
+addresses or old health results. It drops authority on close/error/shutdown or
+non-root/inactive publication. Status publication uses an exclusive temporary
+FD, descriptor identity/mode checks and atomic replace.
+
+The daemon-only Rust reader opens the fixed status path nofollow/nonblocking,
+reads at most64KiB, checks root owner/nonwritable regular single-link file and
+stable descriptor metadata, and requires nonfuture file/heartbeat/sample times
+within6s, matching PID, active phase and ready PF. Existing runtime directory
+metadata is `/private/var/run` root:daemon0775; only that exact root/GID1/mode
+combination is accepted as a writable-parent exception. Other ancestors and
+the file itself remain strictly checked. The daemon group may deny access or
+rename an existing root-authored inode within the already bounded snapshot
+window, but cannot mint a UID0 payload or change its readonly content/mtime.
+No second status file/service/cleanup protocol or privilege grant is added.
+
+Only the two resume gates use this witness if system listener lookup is None;
+an observed different owner is never overridden. Existing live owned-process,
+exact installation/attestation, enabled label, PF and lifecycle-lock checks
+remain mandatory. This is bounded fresh root-authored evidence, not a claim of
+continuous kernel observation or absolute prevention of every PID reuse race.
+Generic Geph ownership, stop/uninstall, routing and learned-state logic are
+unchanged. Original private backup and restoration obligation remain intact.
+
+### Resume checkpoint and targeted validation — 2026-09-08
+
+The preserved Rust consumer passed 11 `daemon_listener::tests`; the two-callsite
+integration passed 5 `quit_resume` tests (logs in
+`output/listener-resume-20260905/rust-witness-tests.log` and
+`rust-resume-tests.log`). Those source files are unchanged since that evidence.
+The Python listener/status selection passed 21 tests and failed two real-socket
+cases, with 693 deselected (`python-tests.log`). The failure is specifically
+Darwin `getsockopt(SOL_SOCKET, SO_ACCEPTCONN)` returning ENOPROTOOPT/42 for both
+bound and listening sockets; stream type and reuseport probes work. The next
+correction must obtain actual kernel LISTEN state using a supported Darwin
+query, remain fail-closed on errors, and preserve closed/bound-only negatives.
+No unchanged full suite, Rust selection, protected run, soak or reinstall is
+needed to investigate that platform-specific predicate.
+
+At 2026-09-08T09:33:56Z main remained `2780de4b3f5d77ab3852e46381b997c618bd5080`;
+PR #373 remained open at `513484ac43ae0348df06e61fca5af9d3105eb225`, with exact
+CI `32867878889` and dependency audit `32867879962` successful, attempt 1.
+Required checks remain green but do not qualify this local correction.
+PR #374 remains unrelated. Primary tracked state is unchanged at `a22a698`.
+
+The Darwin correction now queries `IPPROTO_TCP/TCP_CONNECTION_INFO` (0x106),
+the installed SDK's 112-byte `tcp_connection_info` prefix, and requires first
+byte `tcpi_state == TCPS_LISTEN` (1). Real ephemeral IPv4 and IPv6 sockets
+returned state 0 while bound and state 1 while listening. Closed descriptors,
+unsupported queries, missing constants, malformed/short replies and all other
+TCP states fail closed. Other platforms retain their existing SO_ACCEPTCONN
+check. No product listener, network route or target website was touched.
+
+The two prior failures plus 24 helper cases pass (26 tests). The complete
+affected producer selection is **47 passed, 693 deselected**, 0.38s; log:
+`output/listener-resume-20260905/python-darwin-tests.log`. Command:
+`.audit-venv/bin/python -m pytest -q spike/test_tproxy_doh.py` with the bounded
+listener/kernel-listener/status-atomic/status-heartbeat/startup-status/
+PF-teardown/core-status selection; no whole suite was rerun. Rust source is
+unchanged and reuses the 11 + 5 passing results. `git diff --check` is clean.
+At 09:35 UTC the installed old daemon still had PID11973 and a fresh active
+heartbeat; tray PID13022 and the old 46-byte private resume marker remained,
+and internal Geph was off/unowned. External Geph processes were identified
+separately and left untouched. This is not installed correction/browser proof.
+
+Independent final source review found no actionable blocker in the Darwin
+kernel-state helper, heartbeat regeneration, producer/consumer schema and
+timestamps, or the two lifecycle-locked fallback call sites. Visible conflicting
+owners still veto readiness; fixed-path root-file authentication, freshness,
+PF and exact process/install checks remain. Review and ephemeral socket tests
+do not qualify the installed application, ordinary browsers, or full Quit.
