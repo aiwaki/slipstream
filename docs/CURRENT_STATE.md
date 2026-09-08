@@ -10,6 +10,36 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-08 (USER PAUSE at 4% quota; AUD-17 built, NOT installed):
+Resume in /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
+branch codex/codebase-audit-20260905, NOT the baseline-diagnostics cwd.
+Exact source commit:63a0d2c61e7fc4cda9734e80a44acd772fc4fa05.
+The single canonical npm run build:local finished successfully (exit0).
+Its automatic verifier reports overall/build-chain PASS; fresh/staged/bundled
+daemon all c65f4a54127537def2516205eb403be917c00574be210d12e836819e5e9c966b.
+App tree:bf6b37e25d044ca85302224106cb96ed0fdb975905a1641addf753341d5a6273.
+Candidate:app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app;
+version0.1.9-preview.23, valid ad-hoc signature, NOT notarized.
+Evidence:output/aud17-bundle-20260908.kHFT1K/build.log and build-result.json;
+the marker records this exact source head,code0,signal null. No build is pending.
+Source review/scoped tests are recorded below and in audit AUD-17; do not rerun
+unchanged tests or rebuild for this documentation-only checkpoint.
+Installed app remains AUD-16 d1c81c1; Aikido success is NOT established.
+No install, runtime, settings, learning, browser or external-Geph changes in
+this repair turn. User requested saving progress and stopping before install.
+Next after resumption: reconcile git/artifact identity, then prepare ONE new
+exact-artifact workstation replacement, preserving learning and every backup.
+Use normal Quit and native macOS administrator authorization; never store or
+replay a password. Do NOT rerun any previous replacement transaction, including
+output/aud16-bundle-20260908.b8M9iA/replace-exact-bundle.sh. Do NOT use disposable
+CI lifecycle scripts/flags on this primary workstation. After replacement,
+verify installed identity and normal Chrome/Safari fresh site loading with
+matching child/local-stage diagnostics; full Quit remains an open gate.
+No claim that routing recovers already-failed JS imports or replayed TLS.
+Last PR373 check:OPEN at513484ac43ae0348df06e61fca5af9d3105eb225,17
+SUCCESS/SKIPPED; NOT evidence for this local source. No push/CI dispatch this
+turn. output/ remains untracked and contains private evidence: do not add it.
+
 Update 2026-09-08 (AUD-17 exact source qualified; canonical build next):
 Autonomous exact-object recovery and pending-request lifetime corrections are
 complete in the active audit checkout. Independent final review found no open

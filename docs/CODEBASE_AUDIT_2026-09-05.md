@@ -2015,3 +2015,31 @@ Final source qualification (before build):
 Source gates passed. Next is one canonical build and artifact verification;
 installed/browser/lifecycle gates remain open. No claim that synthetic passing
 tests alone prove Aikido or Weather works on the workstation.
+
+### AUD-17 canonical artifact and user-requested pause — 2026-09-08
+
+Source committed as63a0d2c61e7fc4cda9734e80a44acd772fc4fa05
+(`fix: qualify critical-object recovery without browser retries`). The one
+canonical `npm run build:local` completed with exit0. The automatic verifier
+reported overall/build-chain PASS and installed=not_run. Exact build evidence:
+`output/aud17-bundle-20260908.kHFT1K/build.log` and `build-result.json`; the
+completion marker names that exact source head,code0,signal null.
+
+- Fresh/staged/bundled daemon SHA256:
+  c65f4a54127537def2516205eb403be917c00574be210d12e836819e5e9c966b.
+- App tree SHA256:
+  bf6b37e25d044ca85302224106cb96ed0fdb975905a1641addf753341d5a6273.
+- Candidate:app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app.
+  Version0.1.9-preview.23; valid ad-hoc signature, no notarization.
+- Source qualification, review and one build are complete. Installed AUD-16
+  d1c81c1 is unchanged. No browser/site verification or workstation mutation
+  occurred during this repair turn; Aikido is not claimed fixed.
+
+User requested pausing with4% quota remaining. Resume from CURRENT_STATE's top
+checkpoint. Do not rerun unchanged tests or rebuild because of this docs-only
+checkpoint. Next is a NEW exact replacement transaction, with native admin
+authorization and preserved learning/backups, then installed identity, real
+Chrome/Safari qualification and full Quit. Never rerun an old transaction or
+mislabel this workstation as disposable. Existing PR373 checks are for513484ac,
+not this local source; no push/CI dispatch occurred. output/ remains private,
+untracked evidence and must not be staged.
