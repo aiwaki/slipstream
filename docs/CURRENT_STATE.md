@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-19 source4c6d60d INSTALLED; browser result pending):
+kagd4hmw native transaction dispatched ONCE and exited0 at22:06:00.507072Z.
+Never replay this or older runners. All app/private backup generations retained;
+learning not reset. New backup /Applications/.Slipstream.before-kagd4hmw.app,
+private snapshot /private/var/tmp/slipstream-replacement-20260913.kagd4hmw.
+Canonical npm run verify:local-install as console user PASS: exact build/artifact/
+installed-unprivileged, fresh active StatusV2 daemon78127. Normal CUA getApp
+launched tray79492 despite AX timeout. Geph initially off during startup, then
+owned/up verified before requesting navigation. Evidence in
+output/aud19-full-root-bundle-20260913.kagd4hmw/{authorization-result.json,
+authorization-execution.log,installed-verification.log,installed-verification.json,
+launched-backend.json}. CUA ordinary browser capture remains unavailable.
+User asked for ONE fresh ordinary Chrome Capacitor navigation, no reloads.
+Next: correlate user result with new private log after22:06:00Z. New installed
+browser/Quit qualification pending. Weather latency/response-change cause open.
+
 Update 2026-09-13 (AUD-19 candidate READY; awaiting ordinary Quit):
 Built source4c6d60d98a6e386134724eaa776c1d8215823f04 ONCE; build exited0.
 Canonical build-chain/artifact and incoming verification PASS.
