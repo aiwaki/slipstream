@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (user resumes Weather regional-denial investigation):
+Aikido and lifecycle work accepted by user. New attached Chrome screenshot shows
+weather.com with "This content is no longer available in your area".
+No timing/install identity is inferred from screenshot. Read-only filtered live
+log since21:38:02Z contains zero weather/www.weather/dsx.weather records in current
+176049-byte log. User asked for ONE fresh normal Chrome https://weather.com
+navigation on installed73de754; response pending. Do not add a host rule or
+infer route failure from screenshot alone. Current generic semantic detector
+already recognizes this marker; historical extension-only paragraphs are
+superseded by current exact-IP preflight (BROWSER_COMPANION.md P0 header).
+Next: correlate fresh navigation and root semantic/owned-Geph result; diagnose
+actual failure before edits. Graph BM25 returned no matches; bounded direct
+reads used. Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/
+weather-diagnostic-events.json and read-weather-events.py. Preserve initial
+snapshot before collecting later events. Installed app remains running.
+
 Update 2026-09-13 (installed73de754 browser + normal Quit/restart checks PASS):
 User confirmed Aikido works in separate new ordinary Chrome and Safari tabs.
 Then user performed normal Quit. Read-only native-authorized checks passed3
