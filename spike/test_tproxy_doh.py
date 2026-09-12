@@ -16880,10 +16880,7 @@ def test_semantic_geph_probe_requires_complete_http_response(
     result = tproxy._semantic_geph_payload_probe("complete-response.example")
 
     assert (result > 0) is expected_positive
-    assert (
-        f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
-        in tls_socket.request
-    )
+    assert b"Range:" not in tls_socket.request
     assert b"Accept-Encoding: gzip\r\n" in tls_socket.request
     assert tls_socket.closed
 
@@ -16954,7 +16951,7 @@ def test_semantic_geph_payload_probe_decodes_only_full_gzip_root(
     result = tproxy._semantic_geph_payload_probe(host)
 
     assert result == expected_payload_bytes
-    assert tls_socket.request == tproxy._semantic_plain_preflight_probe_request(host)
+    assert tls_socket.request == tproxy._semantic_geph_probe_request(host)
     assert tls_socket.closed
 
 
@@ -17178,10 +17175,7 @@ def test_semantic_geph_probe_rejects_response_over_shared_root_cap(monkeypatch):
     result = tproxy._semantic_geph_payload_probe("large-response.example")
 
     assert result == 0
-    assert (
-        f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
-        in tls_socket.request
-    )
+    assert b"Range:" not in tls_socket.request
     assert b"Accept-Encoding: gzip\r\n" in tls_socket.request
     assert tls_socket.closed
 
@@ -23634,3 +23628,44 @@ def test_quic_root_health_only_clears_the_observed_destination_ip(
         OrderedDict(), OrderedDict(), (family, "192.0.2.10", 51001, other_ip, 443),
         initial,
     ) is not None
+
+
+def test_semantic_geph_requests_complete_document_above_old_prefix(monkeypatch):
+    body = b"<html><body>" + b"x" * 125500 + b"</body></html>"
+
+    class Socket:
+        response = b""
+        request = b""
+
+        def settimeout(self, _timeout):
+            pass
+
+        def sendall(self, request):
+            self.request = request
+            # A range-honoring server exposes the original regression: the
+            # prefix fits the request but cannot prove the whole document.
+            if b"Range:" in request:
+                prefix = body[:tproxy.SEMANTIC_GEPH_PROBE_RANGE_END + 1]
+                self.response = (
+                    b"HTTP/1.1 206 Partial Content\r\n"
+                    + f"Content-Range: bytes 0-{len(prefix)-1}/{len(body)}\r\n".encode()
+                    + f"Content-Length: {len(prefix)}\r\n\r\n".encode() + prefix
+                )
+            else:
+                self.response = (
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode() + body
+                )
+
+        def recv(self, size):
+            chunk, self.response = self.response[:size], self.response[size:]
+            return chunk
+
+        def close(self):
+            pass
+
+    sock = Socket()
+    monkeypatch.setattr(tproxy, "_socks5_connect_blocking", lambda *args: sock)
+    monkeypatch.setattr(tproxy, "_local_payload_ssl_context", lambda: SimpleNamespace(
+        wrap_socket=lambda *args, **kwargs: sock))
+    assert tproxy._semantic_geph_payload_probe("full-root.example") == len(body)

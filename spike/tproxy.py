@@ -4392,19 +4392,25 @@ def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
 def _semantic_root_probe_request(host, range_end, *, accept_encoding):
     if accept_encoding not in {"identity", "gzip"}:
         raise ValueError("unsupported semantic root content coding")
+    range_header = (
+        "" if range_end is None else f"Range: bytes=0-{int(range_end)}\r\n"
+    )
     return (
         "GET / HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         "User-Agent: SlipstreamSemanticGeo/1\r\n"
         "Accept: text/html,application/xhtml+xml\r\n"
         f"Accept-Encoding: {accept_encoding}\r\n"
-        f"Range: bytes=0-{int(range_end)}\r\n"
+        f"{range_header}"
         "Cache-Control: no-cache\r\n"
         "Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
 
 
-def _semantic_geph_probe_request(host, range_end=SEMANTIC_GEPH_PROBE_RANGE_END):
+def _semantic_geph_probe_request(host, range_end=None):
+    # Confirmation needs the whole representation. A fixed prefix request can
+    # force an otherwise usable origin to return an inadmissible partial 206.
+    # The reader still enforces the unchanged byte cap and absolute deadline.
     return _semantic_root_probe_request(
         host,
         range_end,

@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-19 Capacitor prefix defect source-qualified):
+User confirms current Capacitor block. Root log=edge_access_denied, relay direct.
+Verified-owned production control proved request-induced206 prefix98300/125562
+rejected by full_selection_inconclusive. Default owned semantic root request
+now omits Range; same128KiB cap/deadlines/full-representation/ownership guards.
+New full-root control125929 usable bytes in0.607s;30 focused tests PASS.
+See AUD-19 audit and ROUTING_RESEARCH sections for exact evidence/limits.
+Next ONE canonical build, fresh staged verification/new preserved replacement
+transaction after ordinary Quit; NEVER replay ozu40ser or any prior transaction.
+Installed73de754 still active; source-only correction is not browser success.
+Preserve user AGENTS.md, all learning/backups. Weather latency remains open.
+
 Update 2026-09-13 (Weather now loads slowly; Capacitor investigation added):
 User reports fresh Weather no longer shows regional denial and eventually loads
 content, but slowly. User requests causal explanation and investigation of prior

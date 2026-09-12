@@ -2220,3 +2220,29 @@ The user was asked for normal Quit of installed55fd57a, also enabling its full
 Quit qualification. Only after that comes the new native transaction and one
 fresh ordinary Chrome observation. This artifact adds diagnosis, not a routing
 fix; the reported failure in both ordinary browsers remains unresolved.
+
+### AUD-19: Owned semantic confirmation requests an unusable prefix
+
+Current installed73de754 log classifies capacitorjs.com edge_access_denied,
+but observed relay remains system_plain. Independent non-mutating production
+request through verified owned listener returns206, Content-Length98300,
+Content-Range bytes0-98299/125562 in0.803s. Production classifier returns
+full_selection_inconclusive. The request itself forces a prefix although the
+complete representation can fit the unchanged128KiB wire cap. This reproduces
+a confirmation defect; it does not prove the exact guard in the earlier live
+attempt, whose log has no proof-result detail.
+
+Owned semantic confirmation now requests a whole root by default (no Range).
+Explicit range hooks/direct-root request remain unchanged. The same full-response,
+gzip-decode, byte cap, absolute deadline, status/denial and ownership checks remain.
+No partial206 relaxation, hostname rule, persisted route or workstation mutation.
+Live production control after edit returns125929 usable bytes in0.607s with
+same verified owner before/after. A realistic range-honoring socket regression
+covers a125KiB document; existing prefix gzip rejection, oversized reply,
+canonical redirect and semantic proof selections remain green:30 tests passed.
+Initial3 failures were expected old direct/geph request-equality assertions,
+corrected for full-root request. Evidence in output/aud17-comparison-bundle-20260913.ozu40ser/:
+capacitor-owned-{control,detail}.json, capacitor-owned-response.bin (private),
+capacitor-full-root-control.json, capacitor-full-root-final-tests.log.
+Source qualification is not installed-browser success. Weather latency and
+historical response-change cause remain separate open investigations.
