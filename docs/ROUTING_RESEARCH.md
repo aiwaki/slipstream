@@ -1983,3 +1983,28 @@ Unsafe candidates:
 - Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
 - Importing upstream strategy scripts without a pinned, verified, and reviewed
   policy bundle.
+
+## 2026-09-13 Weather current-path control and Capacitor follow-up
+
+User reports fresh ordinary Chrome Weather now loads content slowly instead of
+its earlier regional-denial screenshot. Read-only installed73de754 logs contain
+26 Weather records; observed relays are system_plain, not Geph. At02:48:31+0500
+the exact root probe classified terminal_error in100ms_to_500ms, assets0.
+Later api.weather.com write_error and root client_read_error records do not by
+themselves establish elapsed page timing or fault ownership; upstream_eof alone
+is not an error. No Capacitor record in this snapshot; fresh user attempt pending.
+
+A separate current-route curl control (not browser success evidence) returned
+HTTP/2 302, zero body, in0.526s from https://weather.com/, Location
+https://weather.com/de-DE/?Goto=Redirected. One request to that exact redirect
+returned200 and2041965 bytes in1.763s (first byte1.416s). The root redirect is
+consistent with the generic non-usable empty-root classification, not proof of
+regional denial. No new routing edit occurred between user failure screenshot
+and current success; past screenshot has no bound route/time evidence, so the
+reason the upstream response changed is not established. Do not attribute it to
+the diagnostic-only patch, assume physical egress country from a locale redirect,
+or weaken semantic proof by treating arbitrary redirects as complete payload.
+Root response times do not explain full browser resource latency. Continue with
+current Capacitor observation plus Weather resource timing if needed.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/weather-capacitor-events-2.json
+and weather-{root,redirect}-control.{headers,body}; raw controls are private.

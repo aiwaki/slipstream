@@ -16,9 +16,13 @@ content, but slowly. User requests causal explanation and investigation of prior
 capacitorjs.com Cloudflare "Sorry, you have been blocked" screenshot. Both remain
 active scope: do not drop Weather latency/causality while investigating Capacitor.
 No claim that diagnostic-only73de754 fixed either cause; learning was preserved.
-A new read-only native-authorized log reader is pending system authorization:
+Read-only native-authorized log reader completed:
 output/aud17-comparison-bundle-20260913.ozu40ser/read-weather-capacitor-events.py
-writes weather-capacitor-events-2.{json,stderr}; preserves prior empty snapshot.
+weather-capacitor-events-2.{json,stderr}:26 Weather events, none Capacitor.
+Observed Weather relays system_plain; root terminal_error in100ms_to_500ms.
+Separate current-route control: root302 to/de-DE/?Goto=Redirected in0.526s;
+exact redirect200 with2041965 bytes in1.763s. See ROUTING_RESEARCH.md new section.
+Historical failure cause and full browser latency remain unproven.
 User asked for ONE fresh ordinary Chrome Capacitor navigation to distinguish old
 screenshot from installed current behavior. Reply pending. Source/docs already
 contain generic regional and strict edge-denial handling; no site rule justified.
