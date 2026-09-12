@@ -10,6 +10,31 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (fresh Chrome HTTPS immediate content; capture failed):
+User reports immediate content on one fresh ordinary Chrome HTTPS navigation,
+without intervening routing/browser settings changes. Intermittent failure cause
+remains unproved. Metadata capture ran but root wrapper lost its buffered output
+when tcpdump did not exit within5s after SIGINT at60s timeout. Result JSON records
+the wrapper exception, NOT packet evidence; cannot infer TCP/QUIC from this run.
+Exact orphan capture PID46326 identified by complete argv; targeted native cleanup
+completed successfully (TERM then KILL only if same exact argv remains).
+Do not repeat browser test solely for another successful sample. Before another
+capture, use capture-chrome-metadata-v2.py with TERM/KILL cleanup and unique output;
+syntax checked, not yet executed. Capture a recurrence, not another success.
+Installed sourcebebada1 and all settings/learning/backups remain unchanged.
+
+Update 2026-09-13 (Chrome HTTPS confirmed; protocol capture pending):
+User copied https://capacitorjs.com/ from blocked Chrome tab: HTTP80 hypothesis
+is excluded for this incident. Direct ISP egress remains confirmed by user footer;
+TCP vs QUIC/UDP bypass not yet established. Started a bounded60s, read-only native-
+authorized tcpdump pktap metadata capture scoped to Chrome main/network PIDs
+74403/74603 (pid or effective pid), TCP/UDP443 only, text headers without payload
+output. User asked for one fresh ordinary Chrome HTTPS navigation after approval.
+Evidence runner:output/aud20-redirect-bundle-20260913.pror2xal/capture-chrome-metadata.py;
+result chrome-metadata-capture.json pending. No routing/browser settings changed.
+Next inspect capture status and correlate protocol/destination/time with user
+result before any source or installation change. Preserve installedbebada1/backups.
+
 Update 2026-09-13 (Chrome blocked page confirms direct egress; HTTP hypothesis):
 User reports Cloudflare Your IP is their ordinary ISP address, different from
 verified owned-egress-check.json. This proves Chrome blocked response direct;
