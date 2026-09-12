@@ -10,6 +10,27 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-19 candidate READY; awaiting ordinary Quit):
+Built source4c6d60d98a6e386134724eaa776c1d8215823f04 ONCE; build exited0.
+Canonical build-chain/artifact and incoming verification PASS.
+output/aud19-full-root-bundle-20260913.kagd4hmw contains build/source/result/
+verification and transaction-review.json; staged app
+/Applications/.Slipstream.incoming-kagd4hmw.app.
+New app tree10b7c8586b952dec9e9c21a74001cececb0b9816cd74c87f078ac8da334590e6;
+new daemon2b8c228de812a0556ee872ef4f8b1f41fa7a0fb4ea56578c190f0eea99c5383f.
+Fresh native runner:python3 output/aud19-full-root-bundle-20260913.kagd4hmw/authorize-once.py
+Script SHA33208c1794c95c9e18777edf798e39e2d524391eb270c700771d9e204f5906f4;
+runner SHA9fc7e7dd4beb037f4e503b717120d75afccc08d766b2bc95530440f2b8816f13;
+AppleScript SHAbfdd0fd358d02f8777052556b755616b188f6f8165cda4ccd3f222b7eeac41b6.
+Exact-delta/root review and bash syntax PASS; uses previously reviewed protected
+transaction mechanism, adds required preserved ozu40ser backup. No new independent
+agent review claimed. No dispatch marker; installed73de754 remains running.
+Next: user ordinary Quit (CUA menus unavailable), verify owned stop and hashes,
+then dispatch ONLY new kagd4hmw runner ONCE. Never replay old transactions.
+On success canonical installed verification, normal launch, ONE fresh Chrome
+Capacitor navigation. Current source control passed; installed page fix unproven.
+All learning and backup generations must remain. Weather latency remains open.
+
 Update 2026-09-13 (AUD-19 Capacitor prefix defect source-qualified):
 User confirms current Capacitor block. Root log=edge_access_denied, relay direct.
 Verified-owned production control proved request-induced206 prefix98300/125562
@@ -17,7 +38,9 @@ rejected by full_selection_inconclusive. Default owned semantic root request
 now omits Range; same128KiB cap/deadlines/full-representation/ownership guards.
 New full-root control125929 usable bytes in0.607s;30 focused tests PASS.
 See AUD-19 audit and ROUTING_RESEARCH sections for exact evidence/limits.
-Next ONE canonical build, fresh staged verification/new preserved replacement
+ONE canonical build running for source4c6d60d in
+output/aud19-full-root-bundle-20260913.kagd4hmw/build.log; inspect build-result.json
+before restarting anything. Next fresh staged verification/new preserved replacement
 transaction after ordinary Quit; NEVER replay ozu40ser or any prior transaction.
 Installed73de754 still active; source-only correction is not browser success.
 Preserve user AGENTS.md, all learning/backups. Weather latency remains open.
