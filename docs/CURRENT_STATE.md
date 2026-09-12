@@ -10,32 +10,48 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-13 (AUD-17 resumed; installation held for confirmed packaging defect):
-Physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905;
-the saved Documents project alias resolves here. Resume HEAD was5c4194bb,
-branch codex/codebase-audit-20260905; user AGENTS.md edits remain unstaged.
-PR373 is still OPEN at513484ac with17 SUCCESS/SKIPPED checks; latest merged
-PR372 is2780de4b. Neither is evidence for the local audit source.
-The63a0d2c candidate passed the existing canonical staged verifier with its
-saved bf6b37 app tree/c65f4a daemon. Preserved new staging copy:
-/Applications/.Slipstream.incoming-0o1uetlu.app. DO NOT install this candidate:
-read-only verification of the current installed bundle exposed root-owned
-Chromium0744. The production helper runs as console UID and cannot execute it.
-This also affects the candidate after chown. Old installed verification missed
-it because tree/hash equality ignores ownership and checked execution only in
-the build-user-owned candidate. No replacement script was created or executed.
-AUD-18 records the confirmed cause and narrow materializer/verifier correction.
-26 verifier tests and13 materializer tests passed; independent review has no
-remaining blocker. Pinned Chromium was rematerialized with portable permissions;
-old source is preserved in the private output directory.
-Do not rerun routing suites: routing source is unchanged from63a0d2c.
-Next: commit the reviewed source and run ONE justified canonical build for the
-packaging change. New artifact hashes supersede the earlier candidate for
-installation. Preserve all learning/backups, native authorization and normal
-Quit lifecycle. Installed daemon93766/tray94371 and owned Geph21851 remain;
-external Geph854/874 untouched. CUA cannot retrieve the tray UI (timeout);
-normal user Quit may be needed once the exact new transaction is reviewable.
-Private evidence:output/aud17-replacement-20260913.0o1uetlu/; do not stage it.
+Update 2026-09-13 (AUD-17 + AUD-18 packaging fix built; NOT installed):
+Physical checkout /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
+branch codex/codebase-audit-20260905; source55fd57aab4e14e846e19fbd6a5b0dd7aba42dab0.
+The saved Documents project is a symlink here. Preserve user AGENTS.md edits;
+output/ remains private/untracked. PR373 still OPEN at513484ac with17
+SUCCESS/SKIPPED checks; merged PR372/main2780de4b. Not local-audit CI evidence.
+Resume found a real root-installation blocker (AUD-18): Chromium0744 became
+root-owned and console UID502 could not execute it (kernel errno13). The old
+installed-verification branch could miss this despite tree/hash equality.
+Materializer now emits portable0755 executables/directories and0644 resources;
+canonical verifier checks browser/helper/runtime access before and after install.
+26 verifier +13 materializer tests passed; independent review has no blocker.
+Reuse63a0d2c routing/source qualification; no routing code changed or suites rerun.
+ONE justified npm run build:local on55fd57a completed exit0; automatic canonical
+artifact/build-chain PASS. Fresh/staged/bundled daemon:
+1fd44f14bea8a08efbee6827c82974cb09487567d376d3e59b59c69aa41f255d.
+New app tree:23680d22e1e77dae18e944b2c5ffa51edce1fbe0106cf5884d53ca238bf47d50.
+Canonical verification of /Applications/.Slipstream.incoming-cf4swt_9.app also
+PASS. Evidence:output/aud17-console-bundle-20260913.cf4swt_9/{build.log,
+build-result.json,build-verification.json,incoming-verification.json}.
+The older63a0d2c candidate is superseded, preserved at incoming-0o1uetlu.app;
+old Chromium source and pinned archive retained in the0o1uetlu output directory.
+Do not rebuild for later checkpoint-only edits. Installed AUD-16 is unchanged;
+no new replacement/Stop/Quit, learning/settings reset or site navigation occurred.
+New cf4swt_9 replacement is prepared, bash-n PASS, independent review clear:
+output/aud17-console-bundle-20260913.cf4swt_9/replace-exact-bundle.sh
+SHA256 cf3ce7e8504b06875d756bf9609866aa33aee6f2ecebd71b9f136d9665691537.
+It uses protected Apple CLT Python3.9, a self-contained tree verifier and a new
+root-private learning/runtime snapshot; all prior backup generations required.
+Native entry:python3 output/aud17-console-bundle-20260913.cf4swt_9/authorize-once.py.
+The wrapper hashes/copies the exact script into root-private storage before
+execution and records one dispatch; NEVER rerun it if its dispatch marker exists.
+No dispatch marker, native request, transaction directory or new app backup yet.
+Awaiting user's NORMAL Quit: CUA tray selection returns timeoutReached, and an
+async request was sent. Latest read-only checks still show daemon93766,
+tray94371/owned-Geph21851; external Geph854/874 unchanged.
+Next after user Quit: recheck owned absence, invoke the new native entry ONCE,
+inspect result (on error stop, preserve every snapshot, never replay), then
+npm run verify:local-install from app-tauri as console UID502. Normal launch,
+ordinary Chrome/Safari fresh site loading with matching diagnostics and full
+Quit remain separate gates. No old transactions or disposable lifecycle flags.
+Browser success and full Quit remain open; passing build is not product proof.
 
 Update 2026-09-08 (USER PAUSE at 4% quota; AUD-17 built, NOT installed):
 Resume in /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,

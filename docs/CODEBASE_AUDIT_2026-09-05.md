@@ -2096,3 +2096,54 @@ at `/Applications/.Slipstream.incoming-0o1uetlu.app`; no replacement script was
 created/executed. Existing installed runtime and all learning/backups remain
 untouched. This packaging defect justifies one new canonical build after
 review/rematerialization; it does not justify rerunning unchanged routing suites.
+
+### AUD-18 corrected canonical artifact — 2026-09-13
+
+Source committed as55fd57aab4e14e846e19fbd6a5b0dd7aba42dab0. Before the build,
+a normal UID502 `Popen` attempt of installed Chromium `--version` failed before
+process creation with errno13/Permission denied; evidence
+`output/aud17-replacement-20260913.0o1uetlu/installed-console-execution.json`.
+No website was requested by that failed execution. User AGENTS.md remained
+byte-identical throughout the correction and was not staged.
+
+One canonical `npm run build:local` completed exit0, with automatic artifact
+and build-chain PASS. Fresh/staged/bundled daemon all:
+1fd44f14bea8a08efbee6827c82974cb09487567d376d3e59b59c69aa41f255d.
+App tree:23680d22e1e77dae18e944b2c5ffa51edce1fbe0106cf5884d53ca238bf47d50.
+Version0.1.9-preview.23, valid ad-hoc signature, no notarization.
+`/Applications/.Slipstream.incoming-cf4swt_9.app` passed the canonical verifier
+with the same complete tree/build-chain. Logs and exact reports:
+`output/aud17-console-bundle-20260913.cf4swt_9/`.
+
+This new artifact supersedes the preserved63a0d2c candidate for installation.
+The old staging copy remains; the old Chromium source tree is preserved and its
+tracked README was copied back unchanged after rematerialization. No old
+replacement transaction was rerun and no workstation replacement has occurred.
+Next: exact new transaction review, normal Quit/native authorization, installed
+verification under console UID502 and physical Chrome/Safari/full-Quit gates.
+
+### New replacement prepared; user normal Quit pending
+
+New exact transaction: `output/aud17-console-bundle-20260913.cf4swt_9/replace-exact-bundle.sh`,
+SHA256 cf3ce7e8504b06875d756bf9609866aa33aee6f2ecebd71b9f136d9665691537.
+`bash -n` passed; independent final review found no remaining blocker.
+It retains B5fQMm/ywqzED/nBz5za/dHZffB/b8M9iA generations and captures fresh
+root-private current learning plus complete stopped runtime before replacement.
+Protected copy/tree/signature checks precede the final-path installer. Installer
+failures preserve snapshots and stop; neither runtime nor learning is replayed.
+
+Review found the previously selected Framework Python was group-admin writable.
+The new transaction instead uses the actual Apple CLT3.9 executable with
+root0755/Apple-signature preflight and `-I -S -B`; tree hashing is self-contained.
+A fixed native AppleScript wrapper copies the script into a new root-private
+namespace and checks its exact hash before bash execution. `authorize-once.py`
+checks the wrapper/script identities and creates an exclusive dispatch marker.
+No native request or transaction was dispatched; the new app-backup and private
+transaction paths remain absent. Draft with UNFINISHED guard remains preserved.
+
+CUA could not retrieve the menu-only Slipstream UI (timeoutReached), so the user
+was asked to perform ordinary Quit and the native macOS stop confirmation.
+Latest read-only state still has daemon93766, tray94371, owned-Geph21851; external
+Geph854/874 remain untouched. `pre-quit-current-state.json` records this.
+Source, tests, build, staged verification and exact transaction preparation are
+complete; installed/browser/full-Quit qualification awaits that normal Quit.
