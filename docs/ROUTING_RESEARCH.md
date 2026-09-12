@@ -2100,3 +2100,39 @@ weather-redirect-tests.log. Earlier successful direct Weather response had a
 locale redirect; lack of matching historical failure evidence still prevents a
 claim about why that prior upstream response changed. Full page latency remains
 separate from the measured bounded proof cost.
+
+
+### 2026-09-13 Chrome recurrence: intercepted TCP and ECH outer-name ambiguity
+
+User reproduced Chrome HTTPS Capacitor pending -> ERR_TIMED_OUT -> Cloudflare
+block while Safari works, and Aikido hanging until reload. Installedbebada1
+unchanged. Private capture chrome-metadata-capture-20260913T040126.json in
+output/aud20-redirect-bundle-20260913.pror2xal spans04:00:23-04:01:25+0500,
+Chrome networkPID48444:134 packets for current system Capacitor IPs all TCP onlo0,
+one existing clientport62958, zero SYN and zero target QUIC. Other Google
+addresses used QUIC onen0. This does NOT establish an exact HTTP hostname from a
+shared CDN IP or prove absence of dropped packets (tcpdump required KILL; output
+preserved, no final counters). No metadata evidence of target QUIC bypass.
+
+Private browser-ech-events.json shows cloudflare-ech.com root_admitted/usable at
+03:57:02, then root_cache_reuse and system_plain/local_strategy relay events;
+also similar observations03:41-03:42. Source _handle_impl uses parse_sni(body) as
+routing host and has no ECH distinction. This establishes outer-name semantic
+health being evaluated as ordinary-host health. Cloudflare documents this public
+name as hiding the actual inner hostname:
+https://developers.cloudflare.com/ssl/edge-certificates/ech/
+It is a strong candidate for Chrome direct-egress mismatch, not yet correlated
+with the captured established flow's ClientHello. Do not route the shared outer
+name or CDN IP broadly through Geph, disable browser privacy globally, or claim
+that Safari's ECH behavior was measured. Next exact evidence is a fresh Chrome
+TLS handshake bound to the target flow (retain only SNI/ECH presence and tuple),
+then design exact-host browser-authorized routing without treating the outer
+cover name's root page as proof about the hidden origin.
+
+Aikido evidence is distinct:03:57:13 root window_refused;03:57:23 admitted;
+03:57:38 cdn.aikido.dev child committed after direct/Xbox/split64/split16
+incomplete_idle_timeout;03:57:48 existing system_plain child upstream_read_error
+with local_ladder_unchanged.03:59:30 root usable and learned child reused.
+This explains available recovery timing, not why the user's original tab stayed
+pending. Follow existing-stream handoff/recovery separately; no limit widening
+or forced browser reload is an established fix.

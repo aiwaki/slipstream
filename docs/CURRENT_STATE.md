@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (Chrome block captured; ECH outer-name candidate):
+User reproduced HTTPS Capacitor block during v2 capture; Safari works; Aikido
+hung until reload. Capture output preserved, tcpdump child killed/reaped by
+wrapper after TERM timeout.134 target-IP TCP packets onlo0, existing port62958,
+no SYN/target QUIC; cannot bind shared CDN address to hidden HTTP origin.
+Private chrome-recurrence-summary.json and browser-ech-events.json inpror2xal.
+Logs show cloudflare-ech.com root usable/cache/local routes; source treats outer
+SNI as normal host without ECH distinction. Strong causal candidate, not exact
+flow proof. Next fresh TLS handshake with only SNI/ECH/tuple metadata to confirm;
+then exact-host design. Never broadly Geph-route cover name/shared CDN IP.
+Aikido shows admission refusal then child commit15s after admission, existing
+local stream errors; original-tab recovery remains open. See ROUTING_RESEARCH.
+No source/settings/install mutation; installedbebada1/backups preserved.
+
 Update 2026-09-13 (fresh Chrome HTTPS immediate content; capture failed):
 User reports immediate content on one fresh ordinary Chrome HTTPS navigation,
 without intervening routing/browser settings changes. Intermittent failure cause
