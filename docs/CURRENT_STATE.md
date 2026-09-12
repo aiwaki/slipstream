@@ -10,6 +10,23 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-20 mixed browser result; Chrome Capacitor still fails):
+User initially reports both work, then corrects: Chrome Capacitor ERR_TIMED_OUT
+followed by Cloudflare block, Safari works concurrently. Treat Chromium success
+as unstable, not completed qualification. Weather tab/user content success;
+03:40:47+0500 www.weather.com geph_response_usable/committed confirms new chain.
+Apex weather.com root terminal_error/cache and child window_refused also observed.
+Capacitor03:41:16 two relay-end stage=geph client_read_error records; records lack
+browser identity and do not prove Chrome direct bypass or Geph-origin denial.
+Current owned Geph up/PF ready. No source edits or resets for this symptom.
+User asked to read Cloudflare blocked-page Your IP in Chrome to discriminate
+actual egress; reply pending. Independent verified-owned HTTPS api.ipify.org
+control saved privately as owned-egress-check.json when complete. No external
+Geph/settings mutation. Compare reply with this evidence before choosing protocol,
+route or browser-specific denial diagnosis; do not assume cache/QUIC/fingerprint.
+Evidence:output/aud20-redirect-bundle-20260913.pror2xal/browser-redirect-events.json.
+Full installed Quit gate remains open; all learning/backups preserved.
+
 Update 2026-09-13 (AUD-20 sourcebebada1 INSTALLED; Weather test pending):
 pror2xal transaction dispatched ONCE and exited0 at22:39:36.729560Z. Never replay
 it or any older runner. Learning and every app/private backup retained, including
