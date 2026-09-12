@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (state diagnostic sourcec140aaf INSTALLED):
+gaafxtr6 native transaction dispatched ONCE and exited0 at22:22:51.410714Z.
+Never replay this/older runners. Learning preserved; all previous backups and
+new /Applications/.Slipstream.before-gaafxtr6.app plus
+/private/var/tmp/slipstream-replacement-20260913.gaafxtr6 retained.
+Canonical installed verification PASS, fresh active StatusV2 daemon10357,
+exact artifact/build-chain/installed-unprivileged identity bound. Normal getApp
+launched tray11663 despite CUA AX timeout. Owned Geph up verified before test.
+Evidence:output/aud19-state-bundle-20260913.gaafxtr6/{authorization-result.json,
+installed-verification.log,installed-verification.json,launched-backend.json}.
+User asked for ONE fresh ordinary Chrome Capacitor navigation without reloads,
+plus rough delay if long. Result pending. Next read exact new private host events
+since22:22:51Z, including route-preflight-state admission/proof/stage decisions.
+This is diagnostic qualification; previous source4c6d60d still failed browser.
+New installed full Quit and browser success remain open; Weather latency open.
+
 Update 2026-09-13 (semantic state diagnostic candidate READY; awaiting Quit):
 Sourcec140aaf3fa2eefdbb3268a0a7587819d9e3b7a82 built ONCE, exit0.
 Canonical artifact/build-chain and incoming PASS. Candidate and evidence in
