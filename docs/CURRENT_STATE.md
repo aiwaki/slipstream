@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-20 Weather candidate READY; awaiting Quit):
+Sourcebebada19ff353fb4f58a4843102f2cc9700161a3 built ONCE, exit0.
+Canonical artifact/build-chain/incoming PASS. Evidence
+output/aud20-redirect-bundle-20260913.pror2xal; staged
+/Applications/.Slipstream.incoming-pror2xal.app.
+Tree94ea02a4a02be52d447da3bf2fbee386a2112573ba3ac521f97e9d8f08ff4ad1;
+daemon6df22bcf299bd8915c59eb1b13b4892d41e517239822b98f4be0d34fb0b16cf5.
+NEW native entry:python3 output/aud20-redirect-bundle-20260913.pror2xal/authorize-once.py
+Script SHA64b3bbcb52a59fe0ca076ea99773f8001a35e523abc16e3648b088abaa1c9b6d;
+runner SHA2097e63ce0598d00b26317540b9a18a9fb9abfb7124b2c325161d9802932a188;
+AppleScript SHAf4915b65c45ad9523f658e597f8e31b990ffc72a72ba8c2198d3cdabcfe9b0a7.
+Root exact-delta review/bash syntax PASS; prior protected transaction plus exact
+new identities and required gaafxtr6 backup. No new independent review claimed.
+No dispatch. Current installedc140aaf active: Capacitor user fast success,
+Weather still regional denial. Next user ordinary Quit, verify owned stop and
+script hashes/new paths, dispatch ONLY pror2xal once, inspect result then
+canonical installed verification, normal launch/Geph ready, ONE Chrome Weather
+navigation. Never replay gaafxtr6/kagd4hmw/older transactions. Preserve learning,
+all backups and AGENTS.md. Control success is not installed browser qualification.
+
 Update 2026-09-13 (Capacitor works; AUD-20 Weather cause source-qualified):
 User Chrome Capacitor loads without delay; matching installedc140aaf log shows
 geph_response_usable/committed. Weather user screenshot again regional denial;
@@ -18,7 +38,9 @@ Owned controls locate3-hop redirect chain plus413130-byte decoded page exceeding
 prior256KiB cap. Generic bounded redirect/decode correction qualified,47 tests PASS;
 full production non-mutating control413130 usable bytes in5.288s, same owner.
 See AUD-20 audit, ROUTING_RESEARCH and DECISIONS new section for policy bounds.
-Next commit/source build ONCE, canonical staged verification and NEW preserved
+Sourcebebada1 committed; ONE build running in
+output/aud20-redirect-bundle-20260913.pror2xal; inspect build-result.json.
+Next canonical staged verification and NEW preserved
 replacement after normal Quit. Installedc140aaf unchanged; Weather fix not installed.
 Do not replay gaafxtr6/kagd4hmw/older runners. All learning/backups preserved.
 Prior intermittent direct Weather response-change cause and full latency still
