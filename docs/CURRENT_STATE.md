@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (installed73de754 browser + normal Quit/restart checks PASS):
+User confirmed Aikido works in separate new ordinary Chrome and Safari tabs.
+Then user performed normal Quit. Read-only native-authorized checks passed3
+stable samples at2026-09-12T21:43:55Z: owned launchd jobs absent, root label
+persistently disabled, owned processes/listeners absent, private PF anchor
+filter/NAT/subanchors empty, status/sockets/PF token/lo0 lease absent.
+No learning/backup/runtime mutation by verification; no replacement replay.
+Normal CUA getApp launched tray28320 despite AX timeout. Initial installed check
+ran before StatusV2 existed (saved failure); after service start, readiness
+verification PASS, active fresh StatusV2 and launchd daemon28934, exact installed
+identity retained. App is left running. Evidence in
+output/aud17-comparison-bundle-20260913.ozu40ser/: quit-verification.json,
+restart-verification.{log,json} (initial startup race),
+restart-ready-verification.{log,json} (PASS).
+This qualifies observed browser operation before Quit and service readiness
+after normal restart; post-restart page navigation was not repeated. Earlier
+comparison refusal cause remains undetermined; diagnostics did not change policy.
+All learning/backups preserved. No unchanged build or source suite repeated.
+
 Update 2026-09-13 (73de754 INSTALLED; ordinary navigation pending):
 NEW ozu40ser native transaction dispatched ONCE and exited0 at
 2026-09-12T21:38:02.423173Z. NEVER replay its runner or any older transaction.
