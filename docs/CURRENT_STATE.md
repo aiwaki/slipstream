@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (73de754 INSTALLED; ordinary navigation pending):
+NEW ozu40ser native transaction dispatched ONCE and exited0 at
+2026-09-12T21:38:02.423173Z. NEVER replay its runner or any older transaction.
+Normal Quit of55fd57a was user-confirmed and stable root preflight passed.
+All learning and app/private backup generations were retained, including new
+App backup /Applications/.Slipstream.before-ozu40ser.app and private
+/private/var/tmp/slipstream-replacement-20260913.ozu40ser.
+Canonical npm run verify:local-install exited0 as console user; overall PASS,
+artifact/build-chain/installed-unprivileged PASS. Tree a3b88da3..., daemon c20ef4fd...
+match source73de754. Fresh StatusV2 active, daemon13572; privileged runtime
+verification subset was not run by this unprivileged verifier.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/{authorization-result.json,
+authorization-execution.log,installed-verification.log,installed-verification.json}.
+CUA normal getApp launch attempt reports Mac locked and auto-unlock unavailable;
+normal tray launch and ONE new ordinary Chrome Aikido attempt remain pending.
+After user unlock: launch normally, collect first detailed geph_guard/result/io
+for app/cdn.aikido.dev after21:38:02Z, diagnose actual refusal. No claimed routing
+fix: previous55fd57a failed in both ordinary Chrome and Safari. No repeated suite
+or build for docs; new installed full Quit/browser success remain open.
+
 Update 2026-09-13 (comparison diagnostic artifact READY; awaiting normal Quit):
 Active physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
 branch codex/codebase-audit-20260905. Built source73de7546d09b7c55f6622a91ed11047499c74a3e.
