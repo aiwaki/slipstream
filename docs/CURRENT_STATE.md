@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (Weather now loads slowly; Capacitor investigation added):
+User reports fresh Weather no longer shows regional denial and eventually loads
+content, but slowly. User requests causal explanation and investigation of prior
+capacitorjs.com Cloudflare "Sorry, you have been blocked" screenshot. Both remain
+active scope: do not drop Weather latency/causality while investigating Capacitor.
+No claim that diagnostic-only73de754 fixed either cause; learning was preserved.
+A new read-only native-authorized log reader is pending system authorization:
+output/aud17-comparison-bundle-20260913.ozu40ser/read-weather-capacitor-events.py
+writes weather-capacitor-events-2.{json,stderr}; preserves prior empty snapshot.
+User asked for ONE fresh ordinary Chrome Capacitor navigation to distinguish old
+screenshot from installed current behavior. Reply pending. Source/docs already
+contain generic regional and strict edge-denial handling; no site rule justified.
+Next: inspect reader result and timeline; separate root classification, route
+commit/proof, child recovery and network latency. Do not infer Cloudflare reason
+from page alone or claim historical controls are current proof.
+
 Update 2026-09-13 (user resumes Weather regional-denial investigation):
 Aikido and lifecycle work accepted by user. New attached Chrome screenshot shows
 weather.com with "This content is no longer available in your area".
