@@ -422,3 +422,32 @@ def test_invalid_or_reused_child_lease_cannot_admit_work(case):
         assert not tproxy._auto_geph_learned_exact_host(child)
 
     asyncio.run(scenario())
+
+
+def test_root_window_refusal_is_visible_without_running_probe(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    records = []
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
+    now = tproxy.time.monotonic()
+    tproxy._route_preflight_window.extend([now] * tproxy.ROUTE_PREFLIGHT_WINDOW_MAX)
+    assert asyncio.run(tproxy._run_initial_route_preflight(
+        "admission.example", "8.8.8.8",
+        direct_probe=lambda *_args: pytest.fail("refused admission must not probe"),
+    )) is None
+    assert records == [
+        ">> route-preflight-state host=admission.example decision=window_refused"
+    ]
+
+
+def test_state_diagnostic_sink_failure_cannot_escape(monkeypatch):
+    def fail(_record):
+        raise RuntimeError("sink failed")
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", fail)
+    tproxy._log_route_preflight_state("admission.example", "window_refused")
+
+
+def test_state_diagnostic_rejects_nonallowlisted_detail(monkeypatch):
+    records = []
+    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
+    tproxy._log_route_preflight_state("admission.example", "arbitrary response detail")
+    assert records == []

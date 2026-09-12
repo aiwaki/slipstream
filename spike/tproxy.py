@@ -5692,6 +5692,7 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     ):
         response = _semantic_geph_root_response(host, deadline)
     if response is None:
+        _log_route_preflight_state(host, "geph_no_complete_response")
         return 0
     data, stream_closed, truncated = response
     observation = _semantic_geph_root_response_observation(
@@ -5699,6 +5700,10 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
         stream_closed=stream_closed,
         truncated=truncated,
         deadline=deadline,
+    )
+    _log_route_preflight_state(
+        host, "geph_response_usable" if observation.outcome == SEMANTIC_OUTCOME_USABLE
+        else "geph_response_refused",
     )
     if observation.outcome == SEMANTIC_OUTCOME_USABLE:
         return observation.payload_bytes
@@ -9336,6 +9341,28 @@ def _enqueue_route_preflight_root_diagnostic_record(record):
         return
 
 
+
+_PREFLIGHT_STATE_DECISIONS = frozenset({
+    "host_ineligible", "local_claim_reuse", "root_cache_reuse",
+    "concurrent_refused", "window_refused", "root_admitted",
+    "root_cancelled", "root_exception", "backend_unready", "proof_no_budget",
+    "proof_absent", "commit_refused", "committed", "local_stage_skips_root",
+    "geph_no_complete_response", "geph_response_usable", "geph_response_refused",
+})
+
+
+def _log_route_preflight_state(host, decision):
+    """Fixed private diagnostics; never probe, wait, or affect route authority."""
+    try:
+        if decision not in _PREFLIGHT_STATE_DECISIONS:
+            return
+        _enqueue_route_preflight_root_diagnostic_record(
+            f">> route-preflight-state host={normalize_host(host)} decision={decision}"
+        )
+    except Exception:
+        return
+
+
 _BOOTSTRAP_DIAGNOSTIC_DECISIONS = frozenset({
     "unclassified", "unexpected_error", "cancelled", "resolving",
     "admission_host_or_deadline_refused", "learned_reuse",
@@ -9912,10 +9939,12 @@ async def _run_initial_route_preflight(
         not address.is_global
         or not _auto_geph_base_host_allowed(h)
     ):
+        _log_route_preflight_state(h, "host_ineligible")
         return None
 
     local_claim = _bootstrap_local_route_claim(h, address, handoff_deadline)
     if local_claim is not None:
+        _log_route_preflight_state(h, "local_claim_reuse")
         return local_claim
     child_handoff_deadline = await _wait_for_pending_bootstrap_children(h, address)
     if child_handoff_deadline is not None:
@@ -9957,6 +9986,7 @@ async def _run_initial_route_preflight(
                 handoff_deadline,
             )
         if _route_preflight_cache_entry_matches_address(cached, address):
+            _log_route_preflight_state(h, "root_cache_reuse")
             _route_preflight_cache.move_to_end(h)
             return None
         future = _route_preflight_inflight.get(inflight_key)
@@ -9964,10 +9994,15 @@ async def _run_initial_route_preflight(
             if (
                 _route_preflight_execution_count_locked()
                 >= ROUTE_PREFLIGHT_CONCURRENT_MAX
-                or len(_route_preflight_window)
+            ):
+                _log_route_preflight_state(h, "concurrent_refused")
+                return None
+            if (
+                len(_route_preflight_window)
                 + _route_preflight_reserved_count_locked()
                 + 2 > ROUTE_PREFLIGHT_WINDOW_MAX
             ):
+                _log_route_preflight_state(h, "window_refused")
                 return None
             future = Future()
             execution_lease = _RoutePreflightExecutionLease(
@@ -10026,6 +10061,7 @@ async def _run_initial_route_preflight(
     eligible_asset_is_cross_origin = False
     direct_safe_incomplete = False
     root_diagnostic_record = None
+    _log_route_preflight_state(h, "root_admitted")
     try:
         direct_timeout = _route_preflight_root_io_timeout(deadline)
         if direct_timeout <= 0:
@@ -10184,6 +10220,7 @@ async def _run_initial_route_preflight(
             # without suppressing the next independent connection.
             publish_cache = False
             if not _owned_geph_ready_for_semantic_confirmation():
+                _log_route_preflight_state(h, "backend_unready")
                 # A direct semantic denial is actionable, but a Geph listener
                 # that is still recovering cannot prove the alternate route.
                 # Do not turn that transient state into the two-minute denial
@@ -10192,6 +10229,8 @@ async def _run_initial_route_preflight(
                 publish_cache = False
                 return None
             remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _log_route_preflight_state(h, "proof_no_budget")
             if remaining > 0:
                 proof = None
                 if outcome in SEMANTIC_DENIAL_OUTCOMES:
@@ -10230,6 +10269,10 @@ async def _run_initial_route_preflight(
                     inflight_key,
                     future,
                     job.capability,
+                )
+                _log_route_preflight_state(
+                    h, "committed" if selected else
+                    "proof_absent" if proof is None else "commit_refused",
                 )
                 if selected:
                     publish_cache = True
@@ -10306,9 +10349,11 @@ async def _run_initial_route_preflight(
                 cache_outcome = asset_outcome
                 publish_cache = False
     except asyncio.CancelledError:
+        _log_route_preflight_state(h, "root_cancelled")
         publish_cache = False
         raise
     except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
+        _log_route_preflight_state(h, "root_exception")
         selected = False
     finally:
         for asset in bootstrap_assets:
@@ -19935,6 +19980,9 @@ async def _handle_impl(reader, writer):
             chosen = qualified_local_claim.address
             chosen_name = qualified_local_claim.strategy_name
             via_xbox_dns = qualified_local_claim.via_xbox_dns
+    if (result is None and is_tls and host and route_class == ROUTE_UNKNOWN
+            and unknown_stage != UNKNOWN_RECOVERY_SYSTEM):
+        _log_route_preflight_state(host, "local_stage_skips_root")
     if (
         result is None
         and is_tls

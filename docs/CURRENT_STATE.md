@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (installed AUD-19 browser FAILED; state diagnostics qualified):
+User reports long load and unchanged Capacitor Cloudflare block. Current installed
+4c6d60d remains active. No Capacitor root record after install; system partial-record
+watchdog then Xbox-stage read failures. Other root logging active,34 records.
+Cannot infer precise first admission failure from current logs. Source gate also
+skips initial semantic root for Xbox/local retry stages. Fixed-category drop-only
+state diagnostics added for actual admissions/cache/proof/commit/stage skips;
+no routing/budget/probe changes.40 focused tests and14 overlapping admission cases
+PASS, diff-check clean. See ROUTING_RESEARCH newest section and private evidence.
+Next commit and ONE canonical diagnostic build, new exact preserved transaction
+only after normal Quit; never replay kagd4hmw or older runners. User-visible
+Capacitor and Weather latency remain unresolved. Do not claim AUD-19 solved page.
+
 Update 2026-09-13 (AUD-19 source4c6d60d INSTALLED; browser result pending):
 kagd4hmw native transaction dispatched ONCE and exited0 at22:06:00.507072Z.
 Never replay this or older runners. All app/private backup generations retained;

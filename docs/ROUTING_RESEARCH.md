@@ -2034,3 +2034,31 @@ capacitor-owned-{control,detail}.json, capacitor-owned-response.bin (private),
 capacitor-full-root-control.json, capacitor-full-root-final-tests.log.
 Source qualification is not installed-browser success. Weather latency and
 historical response-change cause remain separate open investigations.
+
+## 2026-09-13 Capacitor still denied after installed AUD-19
+
+User reports long apparent network stall and unchanged Cloudflare block after
+installed4c6d60d. This FAILS user-visible qualification. The request-prefix defect
+is independently fixed but is not sufficient for the installed product path.
+New log after22:06Z has no Capacitor root diagnostic: at03:07:34+0500 system_plain
+partial-record watchdog closed; later03:09-03:10 relays use xbox_plain and end in
+client/upstream read errors. Root diagnostics for other hosts are active (34 total,
+5-7 per minute around attempt), excluding a globally dead diagnostic sink.
+
+Source dispatch calls initial semantic preflight only in UNKNOWN_RECOVERY_SYSTEM;
+subsequent Xbox/local stages skip it. Admission also returns silently for2 concurrent
+executions or8 starts/reservations per60s. Existing logs cannot prove which gate
+skipped the first Capacitor root; load alone is not proof of admission rejection.
+No relaxation or route-policy fix is justified yet.
+
+Added fixed-category drop-only route-preflight-state diagnostics for admission,
+cache, cancellation/error, backend readiness, Geph response/proof/commit and
+local-stage skip. Same queue32, no extra network/ownership/clock probes, all route
+limits unchanged; split short-circuit admission conditions preserve evaluation
+order.40 focused cases pass;14 admission cases (overlapping) pass including a
+refused-window no-probe regression, sink failure isolation and arbitrary-detail
+rejection. Evidence in output/aud19-full-root-bundle-20260913.kagd4hmw/:
+browser-events-after-fix.json, preflight-load-after-fix.json,
+state-diagnostic-tests.log, state-diagnostic-admission-tests.log.
+Next canonical diagnostic build and installed gate observation; do not call
+Capacitor fixed or ask user for repeated reloads as a workaround.
