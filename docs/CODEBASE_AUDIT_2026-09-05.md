@@ -2043,3 +2043,56 @@ Chrome/Safari qualification and full Quit. Never rerun an old transaction or
 mislabel this workstation as disposable. Existing PR373 checks are for513484ac,
 not this local source; no push/CI dispatch occurred. output/ remains private,
 untracked evidence and must not be staged.
+
+## AUD-18 — Chromium loses console-user execution after root installation (2026-09-13)
+
+Discovered while resuming AUD-17, before any workstation mutation. The old
+canonical verifier accepted the saved63a0d2c candidate and its new staged copy
+(tree bf6b37e25d044ca85302224106cb96ed0fdb975905a1641addf753341d5a6273).
+A direct read-only verification of `/Applications/Slipstream.app` failed:
+`required file is not executable: .../chromium-headless-shell/chrome-headless-shell`.
+Live metadata is root:wheel0744; the candidate is build-user-owned0744.
+
+Cause: Python ZIP extraction discards Unix modes; the materializer restored
+only owner execute on the main binary. The replacement's root ownership
+therefore removes execution from the console user. The reachable production
+chain is `tproxy.py` -> `DirectHeadlessBrowserWorkerLauncher` ->
+`pending_navigation_probe_runtime.py:_run_direct_headless_worker_command`
+(`Popen(user=uid, group=gid, extra_groups=())`) ->
+`browser_probe.rs:ChromeProcessSession::start` (`Command::new` and spawn under
+that same UID). This is a real packaged observer blocker, not intended root-only
+execution; it is not by itself a complete explanation for earlier Aikido errors.
+The prior installed-verification branch checked tree/hash/signature/attestation
+but did not repeat console runtime access checks. Tree equality includes modes
+but not ownership, so its previous PASS did not prove this execution boundary.
+
+Narrow correction: materialize directories0755, data0644 and the main plus Unix
+archive executable entries0755, independent of umask and without inherited
+special bits or group/world write. The read-only source prerequisite rejects
+nonportable modes. Canonical verification now checks console helper, Chromium,
+its parent directories and runtime resources for all POSIX access classes and
+actual caller access, both before candidate execution and in the installed
+copy. Run installed verification as the console user, not as root, to retain
+the actual-access check. This does not alter route policy or AUD-17 source.
+
+Focused evidence:26 verifier tests PASS, including owner-can-execute0744 false
+green, private directory/data/helper cases and installed actual-access denial
+despite an unchanged tree; log
+`output/aud17-replacement-20260913.0o1uetlu/verifier-regressions.log`.
+13 materializer tests PASS, including umask022/077, nested executable entries,
+special/write-bit stripping and old0744 prerequisite rejection. Independent
+review found no blocker; unchanged green routing/source tests are reused.
+First-run materializer evidence and scoped diff are retained in
+`materializer-permissions-evidence-20260912T204013118157Z.json` under the same
+output directory. The actual pinned ZIP has five Unix executable entries: main
+and four dylib files. Rematerialization and read-only source preflight passed;
+old source is retained as `chromium-source-before-permissions` in that directory.
+
+The pinned upstream archive was fetched and verified against SOURCE.json:
+98,976,279 bytes, SHA256
+44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e.
+It is retained in the private output directory. Old candidate remains preserved
+at `/Applications/.Slipstream.incoming-0o1uetlu.app`; no replacement script was
+created/executed. Existing installed runtime and all learning/backups remain
+untouched. This packaging defect justifies one new canonical build after
+review/rematerialization; it does not justify rerunning unchanged routing suites.

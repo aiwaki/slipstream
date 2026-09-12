@@ -79,6 +79,43 @@ def regular_file(path: Path, *, executable: bool = False) -> None:
         require(os.access(path, os.X_OK), f"required file is not executable: {path}")
 
 
+def verify_console_browser_access(app: Path) -> None:
+    """Require browser access that survives installing the bundle as root.
+
+    The daemon drops to the console user's UID before launching the worker.
+    Build-owner os.access alone accepts 0744, whose execute permission is lost
+    after chown. Check every POSIX access class as well as the caller's actual
+    access, both on the candidate and on the installed copy.
+    """
+    chromium_dir = app / "Contents/Resources/chromium-headless-shell"
+    helper = app / "Contents/MacOS/slipstream-browser-probe"
+    chromium = chromium_dir / "chrome-headless-shell"
+    directories = (app, app / "Contents", helper.parent, chromium_dir.parent, chromium_dir)
+    for directory in directories:
+        safe_directory(directory, "console browser directory")
+        require(
+            directory.lstat().st_mode & 0o555 == 0o555
+            and os.access(directory, os.R_OK | os.X_OK),
+            f"console browser directory is not accessible after root installation: {directory}",
+        )
+    regular_file(helper)
+    regular_file(chromium)
+    for path in (helper, *sorted(chromium_dir.rglob("*"))):
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            required_mode = 0o555
+            access = os.R_OK | os.X_OK
+        else:
+            regular_file(path)
+            executable = path in (helper, chromium) or bool(metadata.st_mode & 0o111)
+            required_mode = 0o555 if executable else 0o444
+            access = os.R_OK | os.X_OK if executable else os.R_OK
+        require(
+            metadata.st_mode & required_mode == required_mode and os.access(path, access),
+            f"console browser runtime is not accessible after root installation: {path}",
+        )
+
+
 def file_sha256(path: Path) -> str:
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
@@ -252,6 +289,7 @@ def verify_app_bundle(
 
     # Authenticate the complete app before any bundled executable is invoked.
     signature = verify_codesign(app, deep=True)
+    verify_console_browser_access(app)
     for binary in (main, daemon, geph, chromium):
         verify_architecture(binary, architecture)
     verify_non_gui_helper(helper, architecture)
@@ -791,6 +829,7 @@ def verify_installed_app(
     status_path: Path,
 ) -> dict[str, Any]:
     safe_directory(installed_app, "installed app bundle")
+    verify_console_browser_access(installed_app)
     installed_tree = deterministic_tree_sha256(installed_app)
     require(installed_tree == built_report["tree_sha256"], "installed app tree differs from built app")
     installed_daemon = installed_app / "Contents/Resources/slipstreamd/slipstreamd"

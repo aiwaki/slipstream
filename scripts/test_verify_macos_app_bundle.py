@@ -42,6 +42,62 @@ class VerifyMacosAppBundleTests(unittest.TestCase):
         shutil.copytree(fresh, bundled, symlinks=False)
         return fresh, staged, bundled
 
+    def _console_browser_fixture(self, root: Path) -> Path:
+        app = root / "Slipstream.app"
+        self._write_executable(app / "Contents/MacOS/slipstream-browser-probe", b"worker")
+        chromium_dir = app / "Contents/Resources/chromium-headless-shell"
+        self._write_executable(chromium_dir / "chrome-headless-shell", b"chromium")
+        (chromium_dir / "icudtl.dat").write_bytes(b"browser-data")
+        (chromium_dir / "icudtl.dat").chmod(0o644)
+        return app
+
+    def test_console_browser_rejects_owner_only_execution_before_root_install(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self._console_browser_fixture(Path(temporary))
+            chromium = app / "Contents/Resources/chromium-headless-shell/chrome-headless-shell"
+            chromium.chmod(0o744)
+            # This is the old false green: the builder can execute its own file.
+            self.assertTrue(os.access(chromium, os.X_OK))
+            with self.assertRaisesRegex(verifier.VerificationError, "after root installation"):
+                verifier.verify_console_browser_access(app)
+
+    def test_console_browser_accepts_portable_executables_and_readable_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self._console_browser_fixture(Path(temporary))
+            verifier.verify_console_browser_access(app)
+
+    def test_console_browser_rejects_private_directory_or_resource(self) -> None:
+        for relative, mode in (
+            ("Contents/Resources", 0o700),
+            ("Contents/Resources/chromium-headless-shell/icudtl.dat", 0o600),
+            ("Contents/MacOS/slipstream-browser-probe", 0o744),
+        ):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                app = self._console_browser_fixture(Path(temporary))
+                (app / relative).chmod(mode)
+                with self.assertRaisesRegex(verifier.VerificationError, "after root installation"):
+                    verifier.verify_console_browser_access(app)
+
+    def test_installed_browser_rechecks_actual_access_despite_matching_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self._console_browser_fixture(Path(temporary))
+            built_report = {"tree_sha256": verifier.deterministic_tree_sha256(app)}
+            chromium = app / "Contents/Resources/chromium-headless-shell/chrome-headless-shell"
+            real_access = os.access
+            with mock.patch.object(
+                verifier.os, "access",
+                side_effect=lambda path, mode: False if path == chromium else real_access(path, mode),
+            ), mock.patch.object(verifier, "verify_install_attestation") as attestation:
+                with self.assertRaisesRegex(verifier.VerificationError, "after root installation"):
+                    verifier.verify_installed_app(
+                        built_report=built_report,
+                        installed_app=app,
+                        attestation_path=Path(temporary) / "attestation.json",
+                        launchd_plist=Path(temporary) / "launchd.plist",
+                        status_path=Path(temporary) / "status.json",
+                    )
+                attestation.assert_not_called()
+
     @staticmethod
     def _rewrite_attestation(path: Path, evidence: dict) -> None:
         path.write_text(json.dumps(evidence), encoding="utf-8")
@@ -423,6 +479,10 @@ class VerifyMacosAppBundleTests(unittest.TestCase):
             ), mock.patch.object(verifier, "verify_architecture"), mock.patch.object(
                 verifier,
                 "verify_non_gui_helper",
+            ), mock.patch.object(
+                verifier,
+                "verify_console_browser_access",
+                side_effect=lambda *_args: events.append("console-access"),
             ), mock.patch.object(verifier, "regular_file"), mock.patch.object(
                 verifier,
                 "file_sha256",
@@ -443,6 +503,7 @@ class VerifyMacosAppBundleTests(unittest.TestCase):
                 )
 
             self.assertEqual(events[0], "signature")
+            self.assertEqual(events[1], "console-access")
             self.assertEqual(events.count("classification"), 2)
 
     def test_schema3_attestation_witness_and_launchd_plist_are_valid(self) -> None:

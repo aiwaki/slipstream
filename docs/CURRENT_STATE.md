@@ -10,6 +10,33 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-17 resumed; installation held for confirmed packaging defect):
+Physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905;
+the saved Documents project alias resolves here. Resume HEAD was5c4194bb,
+branch codex/codebase-audit-20260905; user AGENTS.md edits remain unstaged.
+PR373 is still OPEN at513484ac with17 SUCCESS/SKIPPED checks; latest merged
+PR372 is2780de4b. Neither is evidence for the local audit source.
+The63a0d2c candidate passed the existing canonical staged verifier with its
+saved bf6b37 app tree/c65f4a daemon. Preserved new staging copy:
+/Applications/.Slipstream.incoming-0o1uetlu.app. DO NOT install this candidate:
+read-only verification of the current installed bundle exposed root-owned
+Chromium0744. The production helper runs as console UID and cannot execute it.
+This also affects the candidate after chown. Old installed verification missed
+it because tree/hash equality ignores ownership and checked execution only in
+the build-user-owned candidate. No replacement script was created or executed.
+AUD-18 records the confirmed cause and narrow materializer/verifier correction.
+26 verifier tests and13 materializer tests passed; independent review has no
+remaining blocker. Pinned Chromium was rematerialized with portable permissions;
+old source is preserved in the private output directory.
+Do not rerun routing suites: routing source is unchanged from63a0d2c.
+Next: commit the reviewed source and run ONE justified canonical build for the
+packaging change. New artifact hashes supersede the earlier candidate for
+installation. Preserve all learning/backups, native authorization and normal
+Quit lifecycle. Installed daemon93766/tray94371 and owned Geph21851 remain;
+external Geph854/874 untouched. CUA cannot retrieve the tray UI (timeout);
+normal user Quit may be needed once the exact new transaction is reviewable.
+Private evidence:output/aud17-replacement-20260913.0o1uetlu/; do not stage it.
+
 Update 2026-09-08 (USER PAUSE at 4% quota; AUD-17 built, NOT installed):
 Resume in /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
 branch codex/codebase-audit-20260905, NOT the baseline-diagnostics cwd.
