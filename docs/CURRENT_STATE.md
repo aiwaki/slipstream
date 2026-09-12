@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (Capacitor works; AUD-20 Weather cause source-qualified):
+User Chrome Capacitor loads without delay; matching installedc140aaf log shows
+geph_response_usable/committed. Weather user screenshot again regional denial;
+new log root_admitted/regional_access_denied/proof_absent twice, no admission miss.
+Owned controls locate3-hop redirect chain plus413130-byte decoded page exceeding
+prior256KiB cap. Generic bounded redirect/decode correction qualified,47 tests PASS;
+full production non-mutating control413130 usable bytes in5.288s, same owner.
+See AUD-20 audit, ROUTING_RESEARCH and DECISIONS new section for policy bounds.
+Next commit/source build ONCE, canonical staged verification and NEW preserved
+replacement after normal Quit. Installedc140aaf unchanged; Weather fix not installed.
+Do not replay gaafxtr6/kagd4hmw/older runners. All learning/backups preserved.
+Prior intermittent direct Weather response-change cause and full latency still
+not fully established; do not equate this control with ordinary browser success.
+
 Update 2026-09-13 (state diagnostic sourcec140aaf INSTALLED):
 gaafxtr6 native transaction dispatched ONCE and exited0 at22:22:51.410714Z.
 Never replay this/older runners. Learning preserved; all previous backups and

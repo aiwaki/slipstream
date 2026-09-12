@@ -2295,6 +2295,8 @@ SEMANTIC_GEPH_PROBE_MAX_BYTES = SEMANTIC_PLAIN_PROBE_MAX_BYTES
 SEMANTIC_GEPH_PROBE_RANGE_END = SEMANTIC_PLAIN_PROBE_RANGE_END
 SEMANTIC_GEPH_INITIAL_ATTEMPT_MAX = 3.0
 SEMANTIC_GEPH_RETRY_MIN_BUDGET = 1.0
+SEMANTIC_GEPH_REDIRECT_MAX = 3
+SEMANTIC_GEPH_DECODE_MAX_BYTES = 2 * 1024 * 1024
 INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
 INCOMPLETE_RESPONSE_GEPH_PROBE_TIMEOUT = 20.0
 SEMANTIC_REGIONAL_DENIAL_MARKERS = (
@@ -4407,15 +4409,21 @@ def _semantic_root_probe_request(host, range_end, *, accept_encoding):
     ).encode("ascii", "ignore")
 
 
-def _semantic_geph_probe_request(host, range_end=None):
+def _semantic_geph_probe_request(host, range_end=None, *, request_target="/"):
     # Confirmation needs the whole representation. A fixed prefix request can
     # force an otherwise usable origin to return an inadmissible partial 206.
     # The reader still enforces the unchanged byte cap and absolute deadline.
-    return _semantic_root_probe_request(
+    request = _semantic_root_probe_request(
         host,
         range_end,
         accept_encoding="gzip",
     )
+
+    if (not isinstance(request_target, str) or not request_target.startswith("/")
+            or request_target.startswith("//") or len(request_target) > 2048
+            or any(ord(c) <= 32 or ord(c) >= 127 or c in "\\#" for c in request_target)):
+        raise ValueError("invalid semantic request target")
+    return request.replace(b"GET / HTTP/1.1", ("GET " + request_target + " HTTP/1.1").encode("ascii"), 1)
 
 
 def _semantic_plain_preflight_probe_request(
@@ -4553,6 +4561,7 @@ def _semantic_root_response_observation(
     clock=None,
     max_input_bytes,
     requested_range_end,
+    max_output_bytes=bootstrap_asset_preflight.MAX_ROOT_RESPONSE_BYTES,
 ):
     if clock is None:
         clock = time.monotonic
@@ -4592,7 +4601,7 @@ def _semantic_root_response_observation(
         allow_error_status=True,
         deadline=classify_deadline,
         max_input_bytes=max_input_bytes,
-        max_output_bytes=bootstrap_asset_preflight.MAX_ROOT_RESPONSE_BYTES,
+        max_output_bytes=max_output_bytes,
         clock=clock,
     )
     if content.outcome is HttpContentDecodeOutcome.DEADLINE_EXCEEDED:
@@ -4672,6 +4681,7 @@ def _semantic_geph_root_response_observation(
         clock=clock,
         max_input_bytes=SEMANTIC_GEPH_PROBE_MAX_BYTES,
         requested_range_end=SEMANTIC_GEPH_PROBE_RANGE_END,
+        max_output_bytes=SEMANTIC_GEPH_DECODE_MAX_BYTES,
     )
 
 
@@ -5620,7 +5630,47 @@ def _semantic_geph_canonical_root_redirect_target(host, data):
     return None
 
 
-def _semantic_geph_root_response(host, deadline):
+
+def _semantic_geph_redirect_target(host, data):
+    """Bound server-provided navigation to same-origin paths or apex/www root."""
+    try:
+        lines = data.split(b"\r\n\r\n", 1)[0].split(b"\r\n")
+        status = lines[0].split()[1]
+        if status not in {b"301", b"302", b"303", b"307", b"308"}:
+            return None
+        values = [line.partition(b":")[2].strip() for line in lines[1:]
+                  if line.partition(b":")[0].strip().lower() == b"location"]
+        if len(values) != 1:
+            return None
+        location = values[0].decode("ascii")
+        if (not location or len(location) > 2048 or "#" in location
+                or any(ord(c) <= 32 or ord(c) >= 127 or c == "\\" for c in location)):
+            return None
+        parsed = urlparse(location)
+        original = normalize_host(host)
+        if parsed.netloc:
+            if (parsed.scheme != "https" or parsed.username is not None
+                    or parsed.password is not None or parsed.port not in (None, 443)):
+                return None
+            target = normalize_host(parsed.hostname or "")
+            if target != original:
+                canonical = _semantic_geph_canonical_root_redirect_target(host, data)
+                return (canonical, "/") if canonical else None
+        elif parsed.scheme or not location.startswith("/") or location.startswith("//"):
+            return None
+        path = parsed.path or "/"
+        if parsed.params:
+            path += ";" + parsed.params
+        if parsed.query:
+            path += "?" + parsed.query
+        if path.startswith("//"):
+            return None
+        return original, path
+    except (ValueError, IndexError, UnicodeDecodeError, AttributeError):
+        return None
+
+
+def _semantic_geph_root_response(host, deadline, request_target="/"):
     sock = _socks5_connect_blocking(
         host,
         443,
@@ -5634,7 +5684,8 @@ def _semantic_geph_root_response(host, deadline):
         _set_socket_deadline_timeout(sock, deadline)
         tls_sock = ctx.wrap_socket(sock, server_hostname=host)
         _set_socket_deadline_timeout(tls_sock, deadline)
-        tls_sock.sendall(_semantic_geph_probe_request(host))
+        tls_sock.sendall(_semantic_geph_probe_request(host) if request_target == "/"
+                         else _semantic_geph_probe_request(host, request_target=request_target))
         chunks = []
         size = 0
         stream_closed = False
@@ -5694,36 +5745,43 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     if response is None:
         _log_route_preflight_state(host, "geph_no_complete_response")
         return 0
-    data, stream_closed, truncated = response
-    observation = _semantic_geph_root_response_observation(
-        data,
-        stream_closed=stream_closed,
-        truncated=truncated,
-        deadline=deadline,
-    )
-    _log_route_preflight_state(
-        host, "geph_response_usable" if observation.outcome == SEMANTIC_OUTCOME_USABLE
-        else "geph_response_refused",
-    )
-    if observation.outcome == SEMANTIC_OUTCOME_USABLE:
-        return observation.payload_bytes
-
-    redirect_host = _semantic_geph_canonical_root_redirect_target(host, data)
-    if redirect_host is None:
-        return 0
-    redirected = _semantic_geph_root_response(redirect_host, deadline)
-    if redirected is None:
-        return 0
-    redirected_data, redirected_closed, redirected_truncated = redirected
-    redirected_observation = _semantic_geph_root_response_observation(
-        redirected_data,
-        stream_closed=redirected_closed,
-        truncated=redirected_truncated,
-        deadline=deadline,
-    )
-    if redirected_observation.outcome != SEMANTIC_OUTCOME_USABLE:
-        return 0
-    return redirected_observation.payload_bytes
+    current_host, request_target = normalize_host(host), "/"
+    visited = {(current_host, request_target)}
+    cross_host_used = False
+    for hop in range(SEMANTIC_GEPH_REDIRECT_MAX + 1):
+        if time.monotonic() >= deadline:
+            return 0
+        data, stream_closed, truncated = response
+        try:
+            status = int(data.split(b"\r\n", 1)[0].split()[1])
+        except (ValueError, IndexError):
+            return 0
+        if 300 <= status < 400:
+            # A redirect body is never final usable content.
+            target = _semantic_geph_redirect_target(current_host, data)
+            if target is None or target in visited or hop == SEMANTIC_GEPH_REDIRECT_MAX:
+                return 0
+            if target[0] != current_host:
+                if cross_host_used or request_target != "/":
+                    return 0
+                cross_host_used = True
+            visited.add(target)
+            current_host, request_target = target
+            response = (_semantic_geph_root_response(current_host, deadline)
+                        if request_target == "/" else
+                        _semantic_geph_root_response(current_host, deadline, request_target))
+            if response is None:
+                return 0
+            continue
+        observation = _semantic_geph_root_response_observation(
+            data, stream_closed=stream_closed, truncated=truncated, deadline=deadline,
+        )
+        _log_route_preflight_state(
+            host, "geph_response_usable" if observation.outcome == SEMANTIC_OUTCOME_USABLE
+            else "geph_response_refused",
+        )
+        return observation.payload_bytes if observation.outcome == SEMANTIC_OUTCOME_USABLE else 0
+    return 0
 
 
 def _incomplete_response_probe_request(host, *, bounded_range):

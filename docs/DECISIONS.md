@@ -424,3 +424,18 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
 - `docs/ROUTING_RESEARCH.md` records supporting investigations and references.
 - `docs/TROUBLESHOOTING.md` records operational checks for repeated symptoms.
 - Root README files should stay short and user-facing.
+
+### 2026-09-13: bounded owned semantic redirect confirmation
+
+Owned semantic payload confirmation may follow at most three complete redirects
+under its unchanged absolute deadline, accepting same-origin HTTPS absolute or
+root-relative server-provided targets (maximum2048 ASCII bytes; no whitespace,
+backslash, fragment, userinfo or non-default port). At most one existing strict
+apex/www HTTPS root transition is allowed, only from a root request. Cycles and
+all other cross-host transitions fail closed. No redirect body is usable payload;
+only a complete final non-denial response may confirm the original exact host.
+No cookie, Referer, browser path or canonical target is learned or logged.
+Per-response encoded cap stays128KiB; owned confirmation decoded cap is2MiB.
+Direct-root/critical-resource caps and all eligibility/ownership/time guards stay
+unchanged. This narrowly supersedes the older single canonical-root redirect and
+256KiB owned semantic decode limits. Evidence: AUD-20 and ROUTING_RESEARCH.

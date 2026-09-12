@@ -2062,3 +2062,41 @@ browser-events-after-fix.json, preflight-load-after-fix.json,
 state-diagnostic-tests.log, state-diagnostic-admission-tests.log.
 Next canonical diagnostic build and installed gate observation; do not call
 Capacitor fixed or ask user for repeated reloads as a workaround.
+
+## 2026-09-13 Weather redirect/decode proof failure (AUD-20)
+
+Installedc140aaf user Chrome Capacitor succeeds without perceived delay. Matching
+03:23:59+0500 states geph_response_usable and committed prove actual Geph selection.
+User independently reopened Weather and got regional denial. Twice the current
+www.weather.com root was admitted and classified regional_access_denied, followed
+by proof_absent. This excludes admission starvation for these Weather attempts.
+
+Verified-owned non-mutating controls show301 www->apex root,302 apex->regional
+forecast path,301 same-origin path canonicalization, then200 gzip. Original code
+allowed only one apex/www root redirect; even after manually following the chain,
+its256KiB decoded cap rejects the413130-byte final body (only~77KiB encoded).
+The165-byte body on the intermediate301 was historically called usable by the
+coarse classifier: confirmation must not accept redirect prose as final content.
+
+Generic correction: maximum3 complete redirect responses inside the SAME existing
+absolute deadline; same-origin HTTPS absolute/root-relative paths up to2048 ASCII
+bytes, no whitespace/backslash/fragment/userinfo/non-default port; at most one
+existing strict apex/www HTTPS root transition and only from a root request.
+Visited host/target pairs reject cycles. No arbitrary cross-host transition, cookie,
+referer, browser path/input, new status fields or learned canonical target.
+All3xx are handled before final semantic success, including redirects with bodies.
+Each wire response retains128KiB cap; owned confirmation decoded cap becomes2MiB,
+while direct-root and critical-asset decode caps remain unchanged. This deliberately
+supersedes the prior single-redirect/256KiB owned confirmation limits only.
+Current full production control yields413130 usable bytes in5.288s with same
+verified owner before/after and no route commit.47 focused cases PASS (including
+17 new redirect/decode/request cases); initial2 failures were malformed synthetic
+HTTP status lines, fixed before final run. No installed success yet.
+Evidence in output/aud19-state-bundle-20260913.gaafxtr6/: browser-state-events.json,
+weather-owned-redirect-control.json, weather-final-control.json,
+weather-canonical-page-control.json, weather-decode-control.json,
+weather-page-response.bin (private), weather-fixed-chain-control.json,
+weather-redirect-tests.log. Earlier successful direct Weather response had a
+locale redirect; lack of matching historical failure evidence still prevents a
+claim about why that prior upstream response changed. Full page latency remains
+separate from the measured bounded proof cost.
