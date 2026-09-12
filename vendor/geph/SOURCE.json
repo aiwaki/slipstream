@@ -1,14 +1,14 @@
 {
   "crate": {
     "name": "geph5-client",
-    "sha256": "6d1d641b2548eab0b4e0e73b6bff4961a1faaab1c333c23d4795e6960cdf11eb",
-    "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.3.9.crate",
-    "version": "0.3.9"
+    "sha256": "aeb9e409281239d367003db63323dc47928c1f63e3ce30c37a8e58ada5365b13",
+    "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.3.10.crate",
+    "version": "0.3.10"
   },
   "features": [
     "aws_lambda"
   ],
-  "lock_sha256": "31458e3754c4353c43aabd6813e77a523fd10451942f930811260eff9101bd3a",
+  "lock_sha256": "69fc7d7f33918660e2966ed33a318afaddfbbcaffb7f88ad75ce720889532e99",
   "release_revision": 1,
   "schema_version": 1,
   "targets": [
