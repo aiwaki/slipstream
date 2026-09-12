@@ -2718,6 +2718,7 @@ class _BootstrapRangeProbeObservation:
     termination: str
     wire_bytes_measured: bool = False
     wire_idle_seconds: float = 0.0
+    diagnostic_io: str = "unobserved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -2730,6 +2731,7 @@ class _BootstrapAssetPreflightResult:
     diagnostic_geph: str = "not_started"
     local_winner: object = None
     diagnostic_local: tuple = ()
+    diagnostic_comparison: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -2753,6 +2755,7 @@ class _BootstrapAssetDiagnostic:
     direct: str = "not_started"
     geph: str = "not_started"
     local: tuple = ()
+    comparison: tuple = ()
 
 
 @dataclass(slots=True)
@@ -5225,6 +5228,7 @@ def _bootstrap_range_response_on_tls_socket(
     stream_closed = False
     idle_timed_out = False
     complete = False
+    diagnostic_phase = "tls_setup"
     try:
         classification_deadline = (
             io_deadline
@@ -5241,15 +5245,19 @@ def _bootstrap_range_response_on_tls_socket(
                 cancel_event=cancel_event,
                 monotonic=time.monotonic,
             )
+            diagnostic_phase = "tls_handshake"
             tls_sock.do_handshake()
         elif first_flight_transform is None and not isinstance(context, ssl.SSLContext):
             # Legacy test doubles have no encrypted-ingress observation and
             # cannot authorize the measured-stall continuation below.
+            diagnostic_phase = "tls_handshake"
             tls_sock = context.wrap_socket(sock, server_hostname=host)
         else:
             raise RuntimeError("measured bootstrap TLS requires MemoryBIO")
+        diagnostic_phase = "request_write"
         _set_socket_deadline_timeout(tls_sock, io_deadline)
         tls_sock.sendall(request)
+        diagnostic_phase = "response_read"
         limit = bootstrap_asset_preflight.MAX_RANGE_RESPONSE_BYTES
         while size < limit:
             try:
@@ -5280,6 +5288,7 @@ def _bootstrap_range_response_on_tls_socket(
                 break
         data = b"".join(chunks)
         truncated = size >= limit and not complete
+        diagnostic_phase = "response_classify"
         evidence = bootstrap_asset_preflight.inspect_range_response(
             data,
             stream_closed=stream_closed,
@@ -5315,6 +5324,7 @@ def _bootstrap_range_response_on_tls_socket(
             evidence, termination,
             wire_bytes_measured=(getattr(tls_sock, "wire_bytes_measured", False) is True),
             wire_idle_seconds=getattr(tls_sock, "wire_idle_seconds", 0.0),
+            diagnostic_io="response",
         )
     except Exception:
         return _BootstrapRangeProbeObservation(
@@ -5322,6 +5332,7 @@ def _bootstrap_range_response_on_tls_socket(
                 bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN,
             ),
             _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
+            diagnostic_io=diagnostic_phase,
         )
     finally:
         try:
@@ -5380,6 +5391,7 @@ def _bootstrap_asset_geph_range_probe(host, request, deadline):
                 bootstrap_asset_preflight.RangeProbeOutcome.DEADLINE_EXCEEDED,
             ),
             _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
+            diagnostic_io="socks_deadline",
         )
     # Both authoritative and diagnostic bootstrap comparisons are owned-only.
     # A concurrent change to the general backend must not redirect this probe.
@@ -5392,6 +5404,7 @@ def _bootstrap_asset_geph_range_probe(host, request, deadline):
                 bootstrap_asset_preflight.RangeProbeOutcome.UNKNOWN,
             ),
             _BOOTSTRAP_RANGE_TERMINATION_UNKNOWN,
+            diagnostic_io="socks_connect",
         )
     return _bootstrap_range_response_on_tls_socket(
         sock,
@@ -8082,6 +8095,7 @@ def _bootstrap_asset_preflight_blocking(
     diagnostic_direct = "not_started"
     diagnostic_geph = "not_started"
     local_observations = ()
+    diagnostic_comparison = ()
     autonomous_recovery = False
 
     def local_diagnostic():
@@ -8103,6 +8117,7 @@ def _bootstrap_asset_preflight_blocking(
             diagnostic_direct,
             diagnostic_geph,
             diagnostic_local=local_diagnostic(),
+            diagnostic_comparison=diagnostic_comparison,
         )
 
     if (
@@ -8295,30 +8310,55 @@ def _bootstrap_asset_preflight_blocking(
         geph_evidence, _geph_termination = (
             _decode_bootstrap_range_probe_observation(geph_observation)
         )
+
+        def comparison_refuses(reason, rejected):
+            # Observe the first original short-circuit guard only. No extra
+            # ownership calls, clocks, object comparisons or routing authority.
+            nonlocal diagnostic_comparison
+            if rejected:
+                try:
+                    diagnostic_comparison = (
+                        reason,
+                        _bootstrap_direct_diagnostic_state(geph_evidence, _geph_termination),
+                        (geph_observation.diagnostic_io if isinstance(
+                            geph_observation, _BootstrapRangeProbeObservation,
+                        ) else "unobserved"),
+                    )
+                except Exception:
+                    diagnostic_comparison = ()
+            return rejected
+
         if (
-            geph_evidence is None
-            or not direct_evidence.proves_same_object_as(geph_evidence)
-            or not all(
-                _decode_bootstrap_range_probe_observation(obs)[0].proves_same_object_as(geph_evidence)
-                for _stage, _ip, obs in local_observations
+            comparison_refuses("invalid_evidence", geph_evidence is None)
+            or comparison_refuses(
+                "direct_same_object", not direct_evidence.proves_same_object_as(geph_evidence),
             )
-            or time.monotonic() >= geph_deadline
-            or int(time.time() * 1000) > geph_job.deadline_unix_ms
-            or _validated_route_preflight_outcome(
+            or not all(
+                not comparison_refuses(
+                    {AUTO_GEPH_STAGE_XBOX_DNS: "xbox_same_object",
+                     "split64": "split64_same_object", "split16": "split16_same_object"}
+                    .get(stage, "local_same_object"),
+                    not _decode_bootstrap_range_probe_observation(obs)[0].proves_same_object_as(geph_evidence),
+                )
+                for stage, _ip, obs in local_observations
+            )
+            or comparison_refuses("probe_deadline", time.monotonic() >= geph_deadline)
+            or comparison_refuses("job_deadline", int(time.time() * 1000) > geph_job.deadline_unix_ms)
+            or comparison_refuses("authority", _validated_route_preflight_outcome(
                 geph_job,
                 "owned_geph",
                 SEMANTIC_OUTCOME_USABLE,
             )
-            != SEMANTIC_OUTCOME_USABLE
-            or _bootstrap_diagnostic_owned_pid(
+            != SEMANTIC_OUTCOME_USABLE)
+            or comparison_refuses("owner_changed", _bootstrap_diagnostic_owned_pid(
                 geph_deadline, expected_pid=confirmed_pid, cancel_event=cancel_event,
-            ) != confirmed_pid
+            ) != confirmed_pid)
             # Ownership observation may itself consume the last budget or
             # observe a backend that changes readiness before returning.
-            or time.monotonic() >= geph_deadline
-            or not _owned_geph_ready_for_semantic_confirmation()
-            or (cancel_event is not None and cancel_event.is_set())
-            or (autonomous_recovery and _network_wide_unknown_failure_visible(time.monotonic()))
+            or comparison_refuses("owner_deadline", time.monotonic() >= geph_deadline)
+            or comparison_refuses("backend_not_ready", not _owned_geph_ready_for_semantic_confirmation())
+            or comparison_refuses("cancelled", cancel_event is not None and cancel_event.is_set())
+            or comparison_refuses("network_wide", autonomous_recovery and _network_wide_unknown_failure_visible(time.monotonic()))
         ):
             diagnostic_geph = "comparison_refused"
             return without_proof("geph_comparison_refused")
@@ -9316,6 +9356,16 @@ _BOOTSTRAP_DIAGNOSTIC_GEPH = frozenset({
     "diagnostic_prerequisite_refused", "diagnostic_owner_changed",
     "diagnostic_cancelled", "diagnostic_exception",
 })
+_BOOTSTRAP_DIAGNOSTIC_COMPARISON = frozenset({
+    "invalid_evidence", "direct_same_object", "local_same_object",
+    "xbox_same_object", "split64_same_object", "split16_same_object",
+    "probe_deadline", "job_deadline", "authority", "owner_changed",
+    "owner_deadline", "backend_not_ready", "cancelled", "network_wide",
+})
+_BOOTSTRAP_DIAGNOSTIC_IO = frozenset({
+    "unobserved", "socks_deadline", "socks_connect", "tls_setup",
+    "tls_handshake", "request_write", "response_read", "response_classify", "response",
+})
 
 
 def _bootstrap_direct_diagnostic_state(evidence, termination):
@@ -9346,6 +9396,7 @@ def _copy_bootstrap_asset_diagnostic(diagnostic, result):
         diagnostic.direct = result.diagnostic_direct
         diagnostic.geph = result.diagnostic_geph
         diagnostic.local = getattr(result, "diagnostic_local", ())
+        diagnostic.comparison = getattr(result, "diagnostic_comparison", ())
     except Exception:
         pass
 
@@ -9389,6 +9440,13 @@ def _enqueue_bootstrap_asset_diagnostic(diagnostic):
             f"geph={allowed(diagnostic.geph, _BOOTSTRAP_DIAGNOSTIC_GEPH)}"
         )
         local = getattr(diagnostic, "local", ())
+        comparison = getattr(diagnostic, "comparison", ())
+        if type(comparison) is tuple and len(comparison) == 3:
+            record += (
+                f" geph_guard={allowed(comparison[0], _BOOTSTRAP_DIAGNOSTIC_COMPARISON)}"
+                f" geph_result={allowed(comparison[1], _BOOTSTRAP_DIAGNOSTIC_DIRECT)}"
+                f" geph_io={allowed(comparison[2], _BOOTSTRAP_DIAGNOSTIC_IO)}"
+            )
         if type(local) is tuple and len(local) == 3:
             record += " " + " ".join(
                 f"local_{name}={allowed(value, _BOOTSTRAP_DIAGNOSTIC_DIRECT)}"

@@ -2147,3 +2147,54 @@ Latest read-only state still has daemon93766, tray94371, owned-Geph21851; extern
 Geph854/874 remain untouched. `pre-quit-current-state.json` records this.
 Source, tests, build, staged verification and exact transaction preparation are
 complete; installed/browser/full-Quit qualification awaits that normal Quit.
+
+### AUD-17/AUD-18 installed; fresh Chrome/Safari still fail — 2026-09-13
+
+User normal Quit was confirmed by both absent owned jobs (113) and no owned
+process. New cf4swt_9 native transaction ran exactly once, exit0 at21:12:43Z.
+All learning and previous backups retained, including the new before-cf4swt_9
+app and root-private transaction snapshots. No password stored/replayed.
+Canonical installed verification under UID502 passed all available boundaries
+(tree23680d22…, daemon1fd44f14…). Chromium now root-owned0755 and UID502
+`--version` exits0 with Chrome for Testing151.0.7922.77, closing AUD-18's actual
+permission failure. Fresh normal launch has daemon72999/tray73741/owned-Geph73793.
+
+CUA ScreenCaptureKit-3811 prevented window observation in both ordinary browsers,
+even after a single session reset. User opened fresh tabs as requested and
+reported unchanged failure in both Chrome and Safari. This is installed55fd57a
+failure evidence, distinct from the older AUD-16 report; no extra reload asked.
+Read-only native-authorized log extraction after21:12:30Z captured19 Aikido
+child/root/relay events. At02:15:13+0500 the cross-child cdn.aikido.dev reported
+direct and all three local stages incomplete_idle_timeout, followed by
+geph_comparison_refused/comparison_refused. Subsequent system, Xbox and local
+strategy relays hit watchdog closures. Local autonomous continuation did run;
+the current diagnostic does not distinguish which Geph guard refused. Do not
+infer a timeout, mismatch, or ownership failure from this shared category.
+Evidence: the cf4swt_9 output's authorization, installed verification, execution
+and aikido-post-install-events files. Next is fixed-category comparison detail
+with unchanged routing guards/bounds; new-bundle full Quit remains open.
+
+### AUD-17 comparison refusal diagnostics qualified
+
+Added private allowlisted geph_guard/geph_result/geph_io fields only when a
+comparison is refused. They identify the first original short-circuit guard,
+the fixed range outcome and the fixed I/O phase. No request/response content,
+object validators, URL or exception text are exported. A failure collecting or
+formatting diagnostics remains drop-only. Existing decision/geph fields remain
+compatible. Socket helpers retain closure and owned SOCKS pinning.
+
+The exact comparison Boolean AST, after removing diagnostic wrappers and
+normalizing the local loop name, is identical to the prior source. No extra
+clock, ownership, object probe, retry or routing-authority check was introduced.
+Evidence:comparison-guard-equivalence.json under cf4swt_9 output.
+Focused tests:76 autonomous cases PASS initially; after making diagnostic
+attribute failures drop-only,14 affected/new cases PASS (65 deselected). These
+overlap; do not sum them. Compatibility selection:45 PASS plus two expected
+log-string failures for the newly emitted fields. Their exact expectations
+were updated, and only those2 passed again (785 deselected). Logs under the
+same output:comparison-diagnostic-tests.log, comparison-diagnostic-drop-tests.log,
+comparison-compat-tests.log, comparison-compat-expectations.log. The unchanged
+76/45 green cases were not rerun. `git diff --check` passed.
+This change improves observation, not routing policy or site success. Next:
+commit the exact source and one canonical build, preserve current installed
+55fd57a/learning/backups, then a NEW replacement after normal Quit.

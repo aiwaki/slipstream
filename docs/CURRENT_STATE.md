@@ -10,6 +10,35 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (55fd57a INSTALLED; user Chrome and Safari both still fail):
+The cf4swt_9 native transaction ran ONCE and exited0 at2026-09-12T21:12:43Z.
+Never rerun authorize-once.py or replacement script; dispatch marker exists.
+All earlier backups plus /Applications/.Slipstream.before-cf4swt_9.app and
+/private/var/tmp/slipstream-replacement-20260913.cf4swt_9 are preserved.
+Canonical npm run verify:local-install as UID502 passed artifact/build-chain/
+installed; exact tree23680d22… and daemon1fd44f14…. Installed Chromium0755,
+root-owned, now executes --version successfully as UID502 (AUD-18 fixed).
+Normal launch: daemon72999, tray73741, owned Geph73793 active/up. No learning reset.
+CUA window capture fails ScreenCaptureKit-3811 in Chrome and Safari, also after
+one session reset. User opened fresh ordinary tabs and reports both unchanged.
+Aikido success is NOT established; no repeated user reload requested.
+New private log at02:15:13+0500: cross-child cdn.aikido.dev direct idle plus all
+three local stages incomplete_idle_timeout; Geph comparison was attempted but
+refused. Current comparison_refused conflates object mismatch, response,
+deadline, authority and owned-backend guards; it cannot identify the cause.
+Later relay events show watchdog closures at system/Xbox/local-strategy stages.
+Evidence in output/aud17-console-bundle-20260913.cf4swt_9/: installed-verification
+{.log,.json}, installed-console-execution.json, aikido-post-install-events.json.
+Fixed-category geph_guard/geph_result/geph_io diagnostics are now source-qualified.
+Original comparison guard AST is preserved; no extra network/ownership/clock
+probes.76 autonomous cases passed, then14 affected/drop-only cases passed;
+45 compatibility cases plus2 corrected log expectations passed (overlapping
+selections are not summed). Logs/audit record exact coverage.
+Next: commit this diagnostic-only source and ONE canonical build, then a NEW
+replacement with preserved learning/backups after normal Quit of installed55fd57a.
+No old transaction replay; all learning/backups preserved. Full Quit of the new
+installed artifact remains open (the prior user Quit qualified the old bundle).
+
 Update 2026-09-13 (AUD-17 + AUD-18 packaging fix built; NOT installed):
 Physical checkout /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
 branch codex/codebase-audit-20260905; source55fd57aab4e14e846e19fbd6a5b0dd7aba42dab0.
@@ -42,10 +71,11 @@ root-private learning/runtime snapshot; all prior backup generations required.
 Native entry:python3 output/aud17-console-bundle-20260913.cf4swt_9/authorize-once.py.
 The wrapper hashes/copies the exact script into root-private storage before
 execution and records one dispatch; NEVER rerun it if its dispatch marker exists.
-No dispatch marker, native request, transaction directory or new app backup yet.
-Awaiting user's NORMAL Quit: CUA tray selection returns timeoutReached, and an
-async request was sent. Latest read-only checks still show daemon93766,
-tray94371/owned-Geph21851; external Geph854/874 unchanged.
+User confirmed NORMAL Quit. Both owned launchd jobs now return113/service-not-found;
+no owned process remains. External Geph854/874 unchanged. Exact script/wrapper
+hashes rechecked; dispatch marker/private transaction/new app backup absent.
+Native one-shot authorization is the immediate next action; inspect its marker
+and result before any continuation, never replay it.
 Next after user Quit: recheck owned absence, invoke the new native entry ONCE,
 inspect result (on error stop, preserve every snapshot, never replay), then
 npm run verify:local-install from app-tauri as console UID502. Normal launch,

@@ -14951,6 +14951,8 @@ def test_bootstrap_diagnostic_real_parent_flow_is_observational(
     assert records == [
         f">> route-preflight-child parent={parent} host={host} origin=cross "
         f"decision={decision} direct={direct_state} geph={geph_state}"
+        + (" geph_guard=direct_same_object geph_result=complete geph_io=unobserved"
+           if case == "different" else "")
     ]
     assert bool(geph_calls) == (case in {"idle", "different", "rejected", "commit"})
     assert tproxy._auto_geph_learned_exact_host(host) == (case == "commit")

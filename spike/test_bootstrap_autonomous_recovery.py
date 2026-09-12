@@ -711,6 +711,11 @@ def test_post_geph_owner_check_cannot_publish_stale_proof(
     result = run_blocking(cancel_event=cancelled)
     assert checks == [None, 41]
     assert result.proof is None and result.local_winner is None
+    assert result.diagnostic_comparison == (
+        {"pid": "owner_changed", "deadline": "owner_deadline",
+         "readiness": "backend_not_ready", "cancelled": "cancelled"}[change],
+        "complete", "unobserved",
+    )
 
 
 def capture_local_diagnostic(monkeypatch, clock, result):
@@ -814,3 +819,111 @@ def test_local_diagnostic_omits_malformed_container(monkeypatch, isolated_recove
     assert "decision=local_recovery_inconclusive " in record
     assert record.endswith("geph=not_started")
     assert "local_xbox=" not in record and "synthetic" not in record and "\n" not in record
+
+
+@pytest.mark.parametrize("failure,guard,state", [
+    ("incomplete", "direct_same_object", "incomplete_idle_timeout"),
+    ("unknown", "direct_same_object", "invalid"),
+    ("mismatch", "direct_same_object", "complete"),
+    ("xbox", "xbox_same_object", "complete"),
+    ("split64", "split64_same_object", "complete"),
+    ("split16", "split16_same_object", "complete"),
+    ("deadline", "probe_deadline", "complete"),
+    ("job_deadline", "job_deadline", "complete"),
+    ("authority", "authority", "complete"),
+    ("network", "network_wide", "complete"),
+])
+def test_comparison_diagnostic_reports_first_refusal_without_proof(
+    monkeypatch, isolated_recovery, failure, guard, state,
+):
+    clock = isolated_recovery
+    stage = {"xbox": tproxy.PLAIN_STRATEGY}.get(failure, failure)
+
+    def local(_ip, _host, _request, _deadline, _final, strategy, _event):
+        return observation(validator="other-object" if strategy == stage else "same-object")
+
+    def geph(_host, _request, deadline):
+        if failure == "deadline":
+            clock.now = deadline
+        elif failure == "job_deadline":
+            monkeypatch.setattr(tproxy.time, "time", lambda: 1_750_001_000.0)
+        elif failure == "authority":
+            monkeypatch.setattr(tproxy, "_validated_route_preflight_outcome", lambda *_args: None)
+        elif failure == "network":
+            monkeypatch.setattr(tproxy, "_network_wide_unknown_failure_visible", lambda _now: True)
+        return observation(
+            {"incomplete": Outcome.INCOMPLETE, "unknown": Outcome.UNKNOWN}.get(failure, Outcome.COMPLETE),
+            validator="different-object" if failure == "mismatch" else "same-object",
+        )
+
+    result = run_blocking(local_probe=local, geph_probe=geph)
+    assert result.proof is None and result.local_winner is None
+    assert result.diagnostic_decision == "geph_comparison_refused"
+    assert result.diagnostic_geph == "comparison_refused"
+    assert result.diagnostic_comparison == (guard, state, "unobserved")
+    diagnostic, record = capture_local_diagnostic(monkeypatch, clock, result)
+    assert diagnostic.comparison == result.diagnostic_comparison
+    assert f"geph_guard={guard} geph_result={state} geph_io=unobserved" in record
+    assert "/assets/" not in record and "other-object" not in record
+
+
+def test_comparison_diagnostic_rejects_hostile_details(monkeypatch, isolated_recovery):
+    result = SimpleNamespace(
+        diagnostic_decision="geph_comparison_refused", diagnostic_direct="complete",
+        diagnostic_geph="comparison_refused",
+        diagnostic_comparison=(HostileLocalDiagnostic(), "token=synthetic\nforged=1", "https://secret.invalid/"),
+    )
+    _diagnostic, record = capture_local_diagnostic(monkeypatch, isolated_recovery, result)
+    assert record.endswith("geph_guard=unknown geph_result=unknown geph_io=unknown")
+    assert "synthetic" not in record and "secret" not in record and "\n" not in record
+
+
+@pytest.mark.parametrize("phase", ["tls_setup", "tls_handshake", "request_write", "response_read", "response_classify"])
+def test_range_diagnostic_keeps_only_io_phase_and_closes_socket(monkeypatch, phase):
+    closed = []
+
+    def fail():
+        raise OSError("https://private.invalid/asset?token=synthetic")
+
+    sock = SimpleNamespace(settimeout=lambda _timeout: None, close=lambda: closed.append(True))
+    sock.sendall = lambda _request: fail() if phase == "request_write" else None
+    sock.recv = lambda _count: fail() if phase == "response_read" else b""
+    context = SimpleNamespace(wrap_socket=lambda *_args, **_kw: fail() if phase == "tls_handshake" else sock)
+    monkeypatch.setattr(tproxy, "_local_payload_ssl_context", lambda: fail() if phase == "tls_setup" else context)
+    if phase == "response_classify":
+        monkeypatch.setattr(tproxy.bootstrap_asset_preflight, "inspect_range_response", lambda *_args, **_kw: fail())
+    result = tproxy._bootstrap_range_response_on_tls_socket(sock, HOST, b"transient-request", 120.0)
+    assert result.evidence.outcome is Outcome.UNKNOWN
+    assert result.diagnostic_io == phase
+    assert closed == [True]
+    assert "private" not in repr(result) and "synthetic" not in repr(result)
+
+
+def test_comparison_diagnostic_failure_preserves_original_refusal():
+    class HostileObservation(tproxy._BootstrapRangeProbeObservation):
+        def __getattribute__(self, name):
+            if name == "diagnostic_io":
+                raise RuntimeError("diagnostic-only failure")
+            return super().__getattribute__(name)
+
+    sample = observation(Outcome.INCOMPLETE)
+    result = run_blocking(geph_probe=lambda *_args: HostileObservation(sample.evidence, sample.termination))
+    assert result.diagnostic_comparison == ()
+    assert result.diagnostic_decision == "geph_comparison_refused"
+    assert result.outcome == tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING
+    assert result.proof is None and result.local_winner is None
+
+
+@pytest.mark.parametrize("remaining,io_state,outcome", [
+    (0.0, "socks_deadline", Outcome.DEADLINE_EXCEEDED),
+    (3.0, "socks_connect", Outcome.UNKNOWN),
+])
+def test_geph_io_diagnostic_distinguishes_absent_socket(monkeypatch, remaining, io_state, outcome):
+    calls = []
+    monkeypatch.setattr(tproxy, "_socks5_connect_blocking", lambda *_args, **kwargs: calls.append(kwargs))
+    result = tproxy._bootstrap_asset_geph_range_probe(HOST, b"transient-request", 100.0 + remaining)
+    assert result.diagnostic_io == io_state
+    assert result.evidence.outcome is outcome
+    assert len(calls) == (1 if remaining else 0)
+    if calls:
+        assert calls[0]["socks_port"] == tproxy.GEPH_OWNED_PORT
