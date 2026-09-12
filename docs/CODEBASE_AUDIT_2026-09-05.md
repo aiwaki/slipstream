@@ -2198,3 +2198,25 @@ comparison-compat-tests.log, comparison-compat-expectations.log. The unchanged
 This change improves observation, not routing policy or site success. Next:
 commit the exact source and one canonical build, preserve current installed
 55fd57a/learning/backups, then a NEW replacement after normal Quit.
+
+### AUD-17 comparison diagnostic bundle prepared — 2026-09-13
+
+Source73de7546d09b7c55f6622a91ed11047499c74a3e completed one canonical build,
+exit0, artifact/build-chain PASS. Daemon c20ef4fdedcbe8cf6b7ee766eb596a0c0a36d48d61a5e6a921786c2779ee6597;
+app tree a3b88da345028e584a41dd69a58a6a53def5367a4393b3076811acfdd5ca6cf5.
+New incoming-ozu40ser app passed the canonical staged check. Exact evidence is
+in `output/aud17-comparison-bundle-20260913.ozu40ser/`.
+
+A NEW unexecuted replacement script is pinned to
+ae9012833f7584947f88e96bef2725fe304a1fffb00a209b46d2f54600c3d267.
+Its exact delta against the independently reviewed cf4swt_9 mechanism changes
+only candidate/current identities, unique paths, the required cf4swt_9 backup
+and a review comment. Root snapshot, trusted interpreter, normal-stop guards,
+learning preservation and failure-stop logic are reused unchanged. Syntax and
+exact-delta review passed; native wrapper dispatches only its hash-verified
+AppleScript buffer, with a root-private script copy authenticated before exec.
+No ozu40ser dispatch marker, app backup or private transaction directory yet.
+The user was asked for normal Quit of installed55fd57a, also enabling its full
+Quit qualification. Only after that comes the new native transaction and one
+fresh ordinary Chrome observation. This artifact adds diagnosis, not a routing
+fix; the reported failure in both ordinary browsers remains unresolved.

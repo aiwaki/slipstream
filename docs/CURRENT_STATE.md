@@ -10,6 +10,38 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (comparison diagnostic artifact READY; awaiting normal Quit):
+Active physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
+branch codex/codebase-audit-20260905. Built source73de7546d09b7c55f6622a91ed11047499c74a3e.
+Installed55fd57a is active and both user Chrome/Safari still fail; details below.
+The new private diagnostics distinguish first refused Geph guard, range result
+and I/O phase without extra probes, changed bounds/authority or sensitive data.
+Focused source evidence is recorded below/audit; original guard AST preserved.
+ONE npm run build:local on73de754 exited0, canonical artifact/build-chain PASS.
+Fresh/staged/bundled daemon:
+c20ef4fdedcbe8cf6b7ee766eb596a0c0a36d48d61a5e6a921786c2779ee6597.
+App tree:a3b88da345028e584a41dd69a58a6a53def5367a4393b3076811acfdd5ca6cf5.
+/Applications/.Slipstream.incoming-ozu40ser.app passed staged canonical verification.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/{build.log,
+build-result.json,build-verification.json,incoming-verification.json}.
+New replacement script SHA256:
+ae9012833f7584947f88e96bef2725fe304a1fffb00a209b46d2f54600c3d267.
+Native entry:python3 output/aud17-comparison-bundle-20260913.ozu40ser/authorize-once.py
+Runner SHA06ad43db5d959c9a998d588e164fdc27ba85e322f6251acc87d799bdf7cae653.
+Exact delta to reviewed prior transaction changes only pinned identities/paths,
+requires preserved cf4swt_9 generation too, and retains every safeguard. New
+snapshot path:/private/var/tmp/slipstream-replacement-20260913.ozu40ser;
+new app backup:/Applications/.Slipstream.before-ozu40ser.app. Neither exists yet;
+no new dispatch marker/authorization request. Do NOT rerun cf4swt_9 or any older
+transaction; its earlier native execution succeeded and marker is consumed.
+User was asked for ordinary Quit of current55fd57a (CUA capture-3811/menus unavailable).
+Next after reply: verify owned absence, dispatch NEW ozu40ser native entry ONCE,
+inspect result; on failure preserve snapshots and stop, never replay. Then
+verify:local-install as UID502, normal launch and ONE fresh user Chrome Aikido
+attempt with matching new geph_guard/geph_result/geph_io logs. This is diagnostic
+qualification, not a claimed routing fix. Preserve learning, all backups and
+AGENTS.md edits; no rebuild for later checkpoint-only edits, no unchanged suites.
+
 Update 2026-09-13 (55fd57a INSTALLED; user Chrome and Safari both still fail):
 The cf4swt_9 native transaction ran ONCE and exited0 at2026-09-12T21:12:43Z.
 Never rerun authorize-once.py or replacement script; dispatch marker exists.
