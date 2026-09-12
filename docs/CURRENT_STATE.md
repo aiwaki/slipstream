@@ -10,6 +10,23 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-20 sourcebebada1 INSTALLED; Weather test pending):
+pror2xal transaction dispatched ONCE and exited0 at22:39:36.729560Z. Never replay
+it or any older runner. Learning and every app/private backup retained, including
+new /Applications/.Slipstream.before-pror2xal.app and
+/private/var/tmp/slipstream-replacement-20260913.pror2xal.
+Canonical installed verification PASS as console user: exact artifact/build-chain/
+installed-unprivileged identity and fresh active StatusV2 daemon40559. Normal CUA
+getApp launched tray40906 despite AX timeout; owned Geph up verified before test.
+Evidence:output/aud20-redirect-bundle-20260913.pror2xal/{authorization-result.json,
+installed-verification.log,installed-verification.json,launched-backend.json}.
+User asked for ONE fresh ordinary Chrome https://www.weather.com navigation,
+without reloads; forecast/denial and approximate delay pending. Next correlate
+new private events since22:39:36Z. Browser success/full Quit qualification open.
+Capacitor succeeded on precedingc140aaf; no repeated matrix yet. Preserve all
+learning/backups/AGENTS edits. Historical intermittent direct Weather cause remains
+unproven; do not equate prior standalone proof with installed page success.
+
 Update 2026-09-13 (AUD-20 Weather candidate READY; awaiting Quit):
 Sourcebebada19ff353fb4f58a4843102f2cc9700161a3 built ONCE, exit0.
 Canonical artifact/build-chain/incoming PASS. Evidence
