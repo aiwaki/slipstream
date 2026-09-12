@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (Chrome blocked page confirms direct egress; HTTP hypothesis):
+User reports Cloudflare Your IP is their ordinary ISP address, different from
+verified owned-egress-check.json. This proves Chrome blocked response direct;
+previous Geph events cannot be attributed to Chrome. Do not assume QUIC.
+Screenshot hides URL scheme and shows info icon. User asked to copy full blocked
+tab URL to distinguish HTTP80 from HTTPS443; answer pending. Independent GET
+http://capacitorjs.com/ returns403 Cloudflare block phrase,4550 bytes, port80,
+in0.154s with NO Location header. Current PF only intercepts TCP443. If blocked
+Chrome URL is HTTP this directly explains bypass; do not claim it until confirmed.
+No browser setting/QUIC/global network changes or packet capture performed.
+Evidence:output/aud20-redirect-bundle-20260913.pror2xal/capacitor-http-control.{headers,body}
+(private). Weather successful route committed; Capacitor Chrome qualification
+still unresolved pending exact URL. Preserve installedbebada1 and all backups.
+
 Update 2026-09-13 (AUD-20 mixed browser result; Chrome Capacitor still fails):
 User initially reports both work, then corrects: Chrome Capacitor ERR_TIMED_OUT
 followed by Cloudflare block, Safari works concurrently. Treat Chromium success
