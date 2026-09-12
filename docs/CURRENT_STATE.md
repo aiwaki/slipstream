@@ -10,6 +10,40 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (independent transport proof; diagnosis remains bounded):
+Wireshark4.6.8 CLI installed globally; native FIFO/tcpdump -> unprivileged tshark
+pipeline checked with UID502 control sourceports50595/51307. All children reaped,
+FIFOs removed. User Chrome restart block; handshake-only file contains control
+only (inconclusive for user ECH). Subsequent new-tab block during all-TCP metadata
+capture tls-20260913T042202.tsv shows Chrome existing sourceport50869 to
+172.67.203.214 via lo0, encrypted request792bytes then response289bytes ~32ms
+later. No new handshake; confirms intercepted established TCP response, not QUIC
+bypass or a contemporaneous connection timeout. Do not label TLS bytes HTTP403.
+Separate initial wait remains unmeasured. This is meaningful evidence, NOT a fix.
+Actual failed-flow SNI/ECH binding still missing. Source outer-name health flaw
+and production idle-broker unavailability confirmed as described in research;
+exact Capacitor ECH causality and Aikido original-tab fate remain open.
+Next avoid repeating blind captures/user restarts: use exact per-connection
+SNI/route correlation or controlled browser ECH A/B with restored settings,
+within routing invariants. No product source/browser/network settings changed.
+Installedbebada1/all backups and user AGENTS preserved.
+
+Update 2026-09-13 (fresh Chrome block then content; TLS proof still open):
+User full Chrome Quit/reopen first immediately blocked, next attempt content.
+Custom TLS collector initially lo0 then PKTAP/pcapng: root and UID502 controlled
+TLS handshakes decoded correctly (sourceport65484/49797, capacitorjs.com no ECH),
+but user capture tls-metadata-20260913T041305.json has no decoded handshake.
+Do NOT infer ECH absence/presence from empty capture. No raw payload retained.
+All captures bounded and child reaped. Current Chrome NetworkService55327 has
+existing TCP104.21.93.31:443 from49369. Installing global Homebrew wireshark CLI
+(HOMEBREW_NO_AUTO_UPDATE=1) to independently decode Chrome TLS; inspect build
+session/result before repeating install. No browser or routing settings changed.
+Aikido source: commit updates _auto_geph only; active local relay not migrated.
+Production sets _pending_navigation_probe_available only for disposable fixtures;
+old idle broker is explicitly disabled in production due missing provenance.
+This explains absence of that recovery mechanism, not exact per-tab causality.
+Next independent handshake decoder and failed-flow correlation; preservebebada1.
+
 Update 2026-09-13 (Chrome block captured; ECH outer-name candidate):
 User reproduced HTTPS Capacitor block during v2 capture; Safari works; Aikido
 hung until reload. Capture output preserved, tcpdump child killed/reaped by

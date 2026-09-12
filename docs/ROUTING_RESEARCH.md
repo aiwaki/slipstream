@@ -2136,3 +2136,41 @@ with local_ladder_unchanged.03:59:30 root usable and learned child reused.
 This explains available recovery timing, not why the user's original tab stayed
 pending. Follow existing-stream handoff/recovery separately; no limit widening
 or forced browser reload is an established fix.
+
+
+### 2026-09-13 continuation: old-stream recovery boundary and decoder qualification
+
+Source _commit_preflight_owned_geph_proof writes the exact-host learned route;
+it does not migrate registered opaque TLS streams. The production startup sets
+_pending_navigation_probe_available=disposable_browser_fixture while enabling
+the separate production root-preflight headless worker. Therefore the old idle
+navigation broker is unavailable in normal production by explicit design, not
+an observed transient service crash. Do not re-enable it wholesale: startup
+comments document missing provenance and earlier visible-browser/focus failures.
+Aikido's observed child learning is not proof of original-tab recovery. Need a
+bounded, provenance-valid first-flight/child-admission or browser-level recovery
+rather than claiming encrypted stream replay is possible.
+
+Custom metadata decoding passed both root direct and UID502 intercepted TLS
+controls, but returned no ClientHello for user restart captures (block then
+content). Those empty samples are inconclusive. Global Homebrew Wireshark CLI
+4.6.8 installed for independent decoding; no BPF permissions/cask installed.
+Native root tcpdump streams via a checked ephemeral FIFO to unprivileged tshark;
+only ClientHello time/IP/sourceport/SNI/extension types saved, no packet files.
+Control TLS sourceport50595 was independently decoded in
+output/aud20-redirect-bundle-20260913.pror2xal/tls-20260913T041830.tsv.
+A preceding wrapper substitution error was caught at root Python parsing; no
+capture launched then, FIFO/decoder cleaned. Wrapper now compiles root source
+before authorization. Current physical Chrome test during independent capture
+pending; no ECH causal confirmation yet.
+
+Independent tshark handshake-only user capture also contained control only;
+no ECH conclusion. Follow-up all-TCP metadata capture tls-20260913T042202.tsv
+captured the user's reproduced block on existing Chrome flow50869 ->
+172.67.203.214:443 onlo0. At04:22:23.293484 Chrome sends792 encrypted bytes;
+04:22:23.325974 receives289 encrypted bytes (~32.49ms). Duplicate interface
+observations are not separate requests. This confirms traffic and timely response
+on intercepted established TCP, not a contemporaneous connect timeout; it does
+not decode HTTP status or prove which hidden hostname the TLS session uses.
+Keep initial delay and subsequent direct-egress denial as distinct observations.
+All native capture subprocesses reaped; ephemeral FIFO removed; no packet file.
