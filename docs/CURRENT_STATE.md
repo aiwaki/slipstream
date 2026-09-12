@@ -23,12 +23,19 @@ match source73de754. Fresh StatusV2 active, daemon13572; privileged runtime
 verification subset was not run by this unprivileged verifier.
 Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/{authorization-result.json,
 authorization-execution.log,installed-verification.log,installed-verification.json}.
-CUA normal getApp launch attempt reports Mac locked and auto-unlock unavailable;
-normal tray launch and ONE new ordinary Chrome Aikido attempt remain pending.
-After user unlock: launch normally, collect first detailed geph_guard/result/io
-for app/cdn.aikido.dev after21:38:02Z, diagnose actual refusal. No claimed routing
-fix: previous55fd57a failed in both ordinary Chrome and Safari. No repeated suite
-or build for docs; new installed full Quit/browser success remain open.
+After user unlock, normal getApp launched tray17966; daemon13572 still present.
+CUA AX menu access times out, Chrome capture still fails ScreenCaptureKit-3811.
+User asked for ONE ordinary Chrome Aikido navigation; visible result pending.
+Read-only authorized private log after install found10 Aikido events. At
+02:40:45+0500 cdn.aikido.dev same-origin child decision=committed geph=committed,
+direct and all three local outcomes=incomplete_idle_timeout; root boundary=usable.
+Eight Geph relay upstream_eof events are not by themselves page success/failure.
+No new comparison_refused in this bounded snapshot; do not infer old refusal
+cause or routing fix from this different same-origin observation.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/aikido-diagnostic-events.json.
+Next: await user ordinary Chrome visible result, then correlate matching app/root
+and cross-child events if failure persists. No claimed routing fix; prior55fd57a
+failed both browsers. New installed full Quit/browser success remain open.
 
 Update 2026-09-13 (comparison diagnostic artifact READY; awaiting normal Quit):
 Active physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
