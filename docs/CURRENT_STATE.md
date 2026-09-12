@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (semantic state diagnostic candidate READY; awaiting Quit):
+Sourcec140aaf3fa2eefdbb3268a0a7587819d9e3b7a82 built ONCE, exit0.
+Canonical artifact/build-chain and incoming PASS. Candidate and evidence in
+output/aud19-state-bundle-20260913.gaafxtr6; incoming
+/Applications/.Slipstream.incoming-gaafxtr6.app.
+Tree4fab20108c28a2172e62031a6fd56d2c7239e6526c269f37379957ab94cb502d;
+daemone15210bd01af840716d888ce684438215369cb8588428ac510ec46498d8182a7.
+NEW native entry:python3 output/aud19-state-bundle-20260913.gaafxtr6/authorize-once.py
+Script SHA6cbdfaae2ed98e635428e3d5f3a6955d5a676328b6c503a6d64d0a9d318aab77;
+runner SHA8296fa903428821657c37dcf89bb9df505eb74c4eaddcc3e2d368ee0c07fee8c;
+AppleScript SHA9c311b39c869f6579ad58ec3f6ae3fba5d73877b74f67b0bc17830f8be6da9cc.
+Exact-delta root review and bash syntax PASS; same protected transaction,
+requires preserved kagd4hmw generation in addition to all earlier backups.
+No dispatch yet. Installed4c6d60d remains active and Capacitor still fails.
+Next user normal Quit; verify owned stop/identities and new absence, dispatch
+ONLY gaafxtr6 ONCE. Never replay kagd4hmw/ozu40ser/any earlier transaction.
+Then canonical installed verification, normal launch/owned-Geph ready and ONE
+Chrome Capacitor attempt; read new route-preflight-state records to distinguish
+admission/cache/local-stage bypass from payload/proof/commit failure.
+This candidate adds diagnostics, not a claimed second routing fix. Preserve
+learning/backups/AGENTS.md. Weather latency remains unresolved.
+
 Update 2026-09-13 (installed AUD-19 browser FAILED; state diagnostics qualified):
 User reports long load and unchanged Capacitor Cloudflare block. Current installed
 4c6d60d remains active. No Capacitor root record after install; system partial-record
@@ -19,7 +41,9 @@ skips initial semantic root for Xbox/local retry stages. Fixed-category drop-onl
 state diagnostics added for actual admissions/cache/proof/commit/stage skips;
 no routing/budget/probe changes.40 focused tests and14 overlapping admission cases
 PASS, diff-check clean. See ROUTING_RESEARCH newest section and private evidence.
-Next commit and ONE canonical diagnostic build, new exact preserved transaction
+Sourcec140aaf committed; ONE canonical build running in
+output/aud19-state-bundle-20260913.gaafxtr6 (inspect build-result.json).
+Next new exact preserved transaction
 only after normal Quit; never replay kagd4hmw or older runners. User-visible
 Capacitor and Weather latency remain unresolved. Do not claim AUD-19 solved page.
 
