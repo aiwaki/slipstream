@@ -25,7 +25,8 @@ Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/{authorization-result.
 authorization-execution.log,installed-verification.log,installed-verification.json}.
 After user unlock, normal getApp launched tray17966; daemon13572 still present.
 CUA AX menu access times out, Chrome capture still fails ScreenCaptureKit-3811.
-User asked for ONE ordinary Chrome Aikido navigation; visible result pending.
+User completed ONE ordinary Chrome Aikido navigation and reports "работает".
+Installed73de754 Chrome user-visible success confirmed; Safari asked next.
 Read-only authorized private log after install found10 Aikido events. At
 02:40:45+0500 cdn.aikido.dev same-origin child decision=committed geph=committed,
 direct and all three local outcomes=incomplete_idle_timeout; root boundary=usable.
@@ -33,9 +34,10 @@ Eight Geph relay upstream_eof events are not by themselves page success/failure.
 No new comparison_refused in this bounded snapshot; do not infer old refusal
 cause or routing fix from this different same-origin observation.
 Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/aikido-diagnostic-events.json.
-Next: await user ordinary Chrome visible result, then correlate matching app/root
-and cross-child events if failure persists. No claimed routing fix; prior55fd57a
-failed both browsers. New installed full Quit/browser success remain open.
+Next: await ordinary Safari result on installed73de754, then full normal Quit
+qualification. Prior55fd57a failed both browsers; diagnostic-only73de754 now works
+in user Chrome, but the earlier refusal cause and durable recovery are not
+established by this single successful observation. No policy change claimed.
 
 Update 2026-09-13 (comparison diagnostic artifact READY; awaiting normal Quit):
 Active physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
