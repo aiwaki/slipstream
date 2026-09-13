@@ -20,8 +20,10 @@ signature checks0.03s helper +0.351s bundle; this supports but does NOT prove th
 precise live failure. Candidate removes premature2s start threshold while every
 actual operation/submission retains same8s absolute deadline; adds fixed reason
 logging for missing proof in service.33 Rust browser-probe tests PASS including
-live1300ms remainder/expired boundary; focused headless Python checks pending.
-No new replacement prepared yet. Current installed cac10760 consumed NEVER replay.
+live1300ms remainder/expired boundary; 4 focused headless Python checks PASS.
+Canonical build-remainder PASS. New transaction31210126 prepared from consumed
+cac10760, source42fb035; staging verification pending29658. Not dispatched.
+Normal Quit and verified service absence required before authorize-once.py. Current installed cac10760 consumed NEVER replay.
 Gauzy and Discord gateway remain OPEN. User AGENTS.md remains untouched.
 
 Historical investigation notes:
