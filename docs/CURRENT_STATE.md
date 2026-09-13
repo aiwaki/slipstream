@@ -16,10 +16,12 @@ never exercised browser-proof path. No proof of remainder patch success.
 Candidate captures admission concurrently after root remains pending0.5s,
 consumes only for incomplete branch and only same request/deadline. Fast roots
 remain UI-free. Observer registry bounded8, cancellation retains slot to drain.
-Focused root/provenance/headless tests pending21470 (78 selected). Existing root
+78 focused root/provenance/headless and118 traffic tests PASS.
+Source ef2550c committed; canonical build-early running exec39472. Existing root
 log-order test filtered to root record; preexisting state log already preceded it.
-Source uninstalled; prior installed31210126 consumed NEVER replay. No prompt or
-collector pending. Gauzy and Discord gateway remain OPEN. Next build candidate
+Canonical build-early PASS. New transactiona8543617 staged, not dispatched.
+Normal Quit/service absence required, then authorize-once.py exactly once.
+Source uninstalled; prior installed31210126 consumed NEVER replay. No collector pending. Gauzy and Discord gateway remain OPEN. Next build candidate
 only after affected tests; canonical verification before any replacement.
 
 Historical investigation notes:
