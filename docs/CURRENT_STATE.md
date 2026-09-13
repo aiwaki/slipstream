@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-22 singleton INSTALLED; Safari verification pending):
+c295501 installed via118f22e4 succeeded09:50:47Z; runner consumed NEVER replay.
+Canonical installed verify PASS, daemon70230 active, ownedGeph up after tray launch.
+App treeb1c4361db3a5eb9e8fd73e73eef1643c4573676b3b8ce1396e68b655abec215d,
+daemonb4d8cde39046f3de20531b60a536dc05dab4ceaca9c667834c4abd3ba41ffc87.
+82 final focused tests and117 traffic tests PASS. All backups/learning retained;
+normal Quit restored original proxy before new install. User asked to open X once
+in fresh Safari tab and wait30s; answer pending. No fresh Chrome warming first.
+Next correlate singleton_payload_usable/refused with user result; do not claim
+Safari fixed until visible login content confirmed. Prior d0b2fa5 Safari X failed.
+
+AUD-22 c295501 canonical singleton build PASS. NEW118f22e4 runner prepared,
+incoming verified. Next normal Quit then single dispatch. dc793e87 consumed,
+never replay; installed still d0b2fa5 until new transaction succeeds.
+
 Update 2026-09-13 (AUD-22 Safari X still stalled; singleton candidate):
 User confirms Safari X hangs after installed d0b2fa5. Its current system DNS has
 one public A address; logs show local_stage_skips_root after partial local TLS.
