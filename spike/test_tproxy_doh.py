@@ -23704,7 +23704,7 @@ def test_singleton_stall_requires_usable_owned_payload_without_learning(monkeypa
 def test_discord_decoy_uses_current_tcp_sequence(monkeypatch, isn, sisn):
     from scapy.all import TCP, IP, Raw
     packets = []
-    monkeypatch.setattr(tproxy, "syn_lookup", lambda port, ip: {"isn": isn, "sisn": sisn})
+    monkeypatch.setattr(tproxy, "syn_lookup", lambda port, ip, **kwargs: {"isn": isn, "sisn": sisn})
     monkeypatch.setattr(tproxy, "_l3send", packets.append)
     tproxy.inject_fake_decoy("192.0.2.1", 52000, "203.0.113.1", 443, repeats=1)
     assert len(packets) == 1
@@ -23718,7 +23718,7 @@ def test_discord_decoy_uses_current_tcp_sequence(monkeypatch, isn, sisn):
 @pytest.mark.parametrize("entry", [None, {}, {"isn": 42}, {"isn": None, "sisn": 42}])
 def test_discord_decoy_skips_unobserved_handshake(monkeypatch, entry):
     packets = []
-    monkeypatch.setattr(tproxy, "syn_lookup", lambda port, ip: entry)
+    monkeypatch.setattr(tproxy, "syn_lookup", lambda port, ip, **kwargs: entry)
     monkeypatch.setattr(tproxy, "_l3send", packets.append)
     tproxy.inject_fake_decoy("192.0.2.1", 52000, "203.0.113.1", 443)
     assert packets == []
@@ -23727,7 +23727,7 @@ def test_discord_decoy_skips_unobserved_handshake(monkeypatch, entry):
 def test_discord_decoy_uses_stale_negotiated_timestamp(monkeypatch):
     from scapy.all import TCP, IP, Raw
     packets = []
-    monkeypatch.setattr(tproxy, "syn_lookup", lambda *_: {
+    monkeypatch.setattr(tproxy, "syn_lookup", lambda *_, **kwargs: {
         "isn": 100, "sisn": 200, "client_ts": 1234, "server_ts": 5678})
     monkeypatch.setattr(tproxy, "_l3send", packets.append)
     tproxy.inject_fake_decoy("192.0.2.1", 52000, "203.0.113.1", 443, repeats=1)
@@ -23745,3 +23745,17 @@ def test_new_syn_discards_previous_connection_timestamp(monkeypatch):
     assert entry["sisn"] is None
     assert "server_ts" not in entry
     assert entry["client_ts"] == 3
+
+
+def test_discord_syn_lookup_waits_for_server_observer(monkeypatch):
+    monkeypatch.setattr(tproxy, "_syn_map", OrderedDict())
+    tproxy.syn_record(52000, "203.0.113.1", isn=100, timestamp=1000)
+    sleeps = []
+    def observe_peer(_delay):
+        sleeps.append(_delay)
+        tproxy.syn_record(52000, "203.0.113.1", sisn=200, timestamp=2000)
+    monkeypatch.setattr(tproxy.time, "sleep", observe_peer)
+    entry = tproxy.syn_lookup(52000, "203.0.113.1", require_peer=True)
+    assert len(sleeps) == 1
+    assert entry["server_ts"] == 2000
+    assert entry["sisn"] == 200

@@ -14584,15 +14584,16 @@ def syn_record(sport, remote_ip, isn=None, sisn=None, timestamp=None):
             _syn_map.popitem(last=False)
 
 
-def syn_lookup(sport, remote_ip, wait=0.03):
+def syn_lookup(sport, remote_ip, wait=0.03, require_peer=False):
     # SYN is on the wire before we inject (connection already opened), so this is
     # almost always a hit; the short retry only covers the sniffer-thread race.
     deadline = time.monotonic() + wait
     while True:
         with _syn_lock:
             ent = _syn_map.get((sport, remote_ip))
-        if ent and ent.get("isn") is not None:
-            return ent
+        if (ent and ent.get("isn") is not None
+                and (not require_peer or ent.get("sisn") is not None)):
+            return dict(ent)
         if time.monotonic() >= deadline:
             return ent
         time.sleep(0.005)
@@ -14666,7 +14667,7 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
         print("  fake-mode needs scapy: run with sudo .venv/bin/python tproxy.py",
               file=sys.stderr)
         return
-    ent = syn_lookup(src_port, dst_ip)
+    ent = syn_lookup(src_port, dst_ip, wait=0.1, require_peer=True)
     if not ent or ent.get("isn") is None or ent.get("sisn") is None:
         return
     seq = (ent["isn"] + 1) & 0xffffffff

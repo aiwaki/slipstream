@@ -10,6 +10,16 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 installed dfbc8ef/588e5b3c consumed: main Discord response426ms but
+JS asset closed; not fixed yet. Native timestamp control downloaded full90KB
+asset in0.23s. Installed packet capture shows no decoy in failed attempts.
+Found syn_lookup returns on ISN while Discord requires SISN; candidate waits
+for peer evidence (100ms bounded) and snapshots complete record.19 focused
+observer tests PASS. Next canonical build/fresh install and browser content.
+
+AUD-23 dfbc8ef canonical build/staged PASS; fresh588e5b3c prepared and reviewed.
+Next normal Quit and one dispatch.4c7f2ba3 consumed, do not replay.
+
 AUD-23 timestamp candidate: installed08fcc49/4c7f2ba3 (consumed) still failed
 Chrome. Independent exact-IP native probes: Discord SNI timeout, cover SNI
 HTTP403 in0.19s; low-TTL poison/disorder/overlap failed; stale timestamp + valid
