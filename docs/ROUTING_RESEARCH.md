@@ -2305,3 +2305,24 @@ but forecast values were placeholders at the sample. NetLog confirms CONNECT
 for www, apex and dsx.weather.com. Own Chrome session closed. This is restored
 user-visible Safari behavior plus deterministic admission regression coverage,
 not a claim that arbitrary unique-host saturation or all data delays are solved.
+
+
+## AUD-22 queued navigation admission (2026-09-13)
+
+Removed synchronous start-per-minute and same-host cooldown refusal; root and
+standalone child jobs wait for active owner futures within their deadline.
+Eight socket jobs and two separately queued browser jobs bound active resource
+use; they are not quotas of sites per minute. Same-address owners are coalesced;
+waiter cancellation cannot cancel another owner. Background probes unchanged.
+Unqualified exact direct TIMEOUT previously fell through `elif exact` and attached
+the silent socket to the browser. Now it closes and enters the existing local
+DNS/strategy path. Partial/already-started responses and qualified request-only
+late-payload handling remain unchanged. Timeout never grants Geph or learning.
+
+Installed d0b2fa5 via dc793e87. Concurrent clean Chrome test recovered Capacitor,
+Facebook and X without reload; document bodies verified, DOM13.29/12.46/28.66s.
+The Capacitor exact Geph proof committed; Facebook and X used local recovery.
+Historical missing proof not reproduced; new explicit context/noise/owner refusal
+states distinguish future occurrences. Slow cold loading remains; abs.twimg.com
+also stalled during TLS. Artifacts output/playwright/aud22-queue and
+output/aud21-recurrence. This is not unlimited throughput or latency qualification.

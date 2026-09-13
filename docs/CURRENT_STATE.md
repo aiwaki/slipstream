@@ -10,15 +10,36 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-22 queued admission INSTALLED, three Chrome sites PASS):
+Installed d0b2fa5 via dc793e87 runner succeeded09:36:10Z; consumed NEVER replay.
+Canonical installed verification PASS, daemon62189/PF active/ownedGeph up/PAC.
+App treeb25aa021b5377f6dedddabf270c15c8aee0000b0482586d774e876decca3dc9d,
+daemon4a4b81ddb7883afdb9903c516d0345711aff3405bc91c0c0ef6da338cf5e0b48.
+All backups/learning retained. Normal Quit restored proxy before replacement.
+Concurrent fresh Chrome three-origin test: Capacitor main content DOM13.29s,
+Facebook login DOM12.46s, X login DOM28.66s; all load events completed, no reload.
+Capacitor exact denial -> geph_response_usable -> committed14:36:49. Facebook
+hard TLS error recovered locally; X TLS timeout recovered via local strategy.
+No claim that historical proof_absent cause is identified (not reproduced).
+Cold delays remain, notably abs.twimg.com TLS timeout. User Safari check pending.
+Evidence output/playwright/aud22-queue/content.log and output/aud21-recurrence/
+postinstall-events.json, installed-verification.log.208 focused tests, final15
+admission and all116 traffic tests PASS. Own diagnostic Chrome session closing.
+
+AUD-22 final d0b2fa5 canonical build PASS. NEW dc793e87 runner prepared and
+incoming verified; next normal Quit then dispatch once. fdc265fa and older
+runners consumed. Source matched build-final.log; no code changes since build.
+
 Update 2026-09-13 (AUD-22 queued admission + expired direct candidate):
 User wants parallel load handling without site refusals caused by quotas.
 Added deadline-bounded waiting for active owners (eight network jobs; two heavy
 browser jobs independently), cancellation isolation, no minute/start cooldown.
 Fixed unqualified held exact TIMEOUT being attached back to browser: close it
 and enter existing DNS/local ladder; timeout does not grant Geph or learning.
-208 focused tests PASS, final15 admission tests PASS; full traffic suite recorded
-in output/aud21-recurrence/traffic-tests.log. Prior31205c1 build passed but NOT
-installed; source changed since build. Next fresh canonical build + new runner.
+208 focused tests PASS, final15 admission tests PASS; all116 traffic tests PASS in
+output/aud21-recurrence/traffic-tests-final.log. Source d0b2fa5 final build running
+(build-final.log). Prior31205c1 build uninstalled; db17441 build cancelled after
+response-preservation correction. Next canonical final build + new runner.
 Installed still3332d27/fdc265fa. All historical runners consumed. Preserve learning.
 
 Update 2026-09-13 (AUD-22 navigation admission candidate):
