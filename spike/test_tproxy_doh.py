@@ -23698,3 +23698,27 @@ def test_singleton_stall_requires_usable_owned_payload_without_learning(monkeypa
         assert result is None
     assert host not in tproxy._route_preflight_cache
     assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+@pytest.mark.parametrize("isn,sisn", [(123456, 987654), (0xffffffff, 0xffffffff)])
+def test_discord_decoy_uses_current_tcp_sequence(monkeypatch, isn, sisn):
+    from scapy.all import TCP, IP, Raw
+    packets = []
+    monkeypatch.setattr(tproxy, "syn_lookup", lambda port, ip: {"isn": isn, "sisn": sisn})
+    monkeypatch.setattr(tproxy, "_l3send", packets.append)
+    tproxy.inject_fake_decoy("192.0.2.1", 52000, "203.0.113.1", 443, repeats=1)
+    assert len(packets) == 1
+    packet = packets[0]
+    assert packet[TCP].seq == (isn + 1) & 0xffffffff
+    assert packet[TCP].ack == (sisn + 1) & 0xffffffff
+    assert packet[IP].ttl == tproxy.FAKE_TTL
+    assert bytes(packet[Raw]) == tproxy._FAKE_CH
+
+
+@pytest.mark.parametrize("entry", [None, {}, {"isn": 42}, {"isn": None, "sisn": 42}])
+def test_discord_decoy_skips_unobserved_handshake(monkeypatch, entry):
+    packets = []
+    monkeypatch.setattr(tproxy, "syn_lookup", lambda port, ip: entry)
+    monkeypatch.setattr(tproxy, "_l3send", packets.append)
+    tproxy.inject_fake_decoy("192.0.2.1", 52000, "203.0.113.1", 443)
+    assert packets == []

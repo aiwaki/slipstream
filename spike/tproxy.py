@@ -14648,9 +14648,14 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
         print("  fake-mode needs scapy: run with sudo .venv/bin/python tproxy.py",
               file=sys.stderr)
         return
+    ent = syn_lookup(src_port, dst_ip)
+    if not ent or ent.get("isn") is None or ent.get("sisn") is None:
+        return
+    seq = (ent["isn"] + 1) & 0xffffffff
+    ack = (ent["sisn"] + 1) & 0xffffffff
     pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
            / TCP(sport=src_port, dport=dst_port, flags="PA",
-                 seq=1, ack=1, window=64240)
+                 seq=seq, ack=ack, window=64240)
            / Raw(_FAKE_CH))
     for _ in range(repeats):
         _l3send(pkt)

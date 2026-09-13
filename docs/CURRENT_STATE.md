@@ -10,6 +10,14 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 Discord OPEN: reproduced fresh Chrome ERR_CONNECTION_CLOSED and explicit
+CONNECT curl TLS close on installed c295501/118f22e4. CONNECT200 is confirmed.
+Found Discord decoy injects seq=ack=1 rather than observed handshake; candidate
+uses observed ISN/SISN with wraparound and skips incomplete evidence.17 focused
+Discord/traffic tests PASS. Next canonical build, fresh transaction, real browser
+qualification; do not claim causal closure until content passes. Evidence
+output/aud23-discord and output/playwright/aud23-discord.118f22e4 consumed.
+
 Update 2026-09-13 (AUD-22 Safari X login CONFIRMED):
 User confirms X login appeared on one fresh Safari navigation after c295501
 install118f22e4. Logs14:52:24 show x.com geph_response_usable and
