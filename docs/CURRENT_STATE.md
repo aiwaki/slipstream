@@ -10,6 +10,29 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 managed CONNECT installed and browser-checked):
+Installed source6b8ca7c63a31fedaa4e2fb41c3db2fd488531394 via NEW39c49075
+runner, succeeded08:50:59Z. Both e0e82cc8 and39c49075 runners consumed; NEVER
+replay. App treea248be10b7e8a59395e2f4feb0dfce75d5cad002ec15b0f025d8a787fab5dcc2,
+daemonb5b96107b663c645f38abc8f3553e17e42734caa35be0e3c8e2e8d43b27bfcfd.
+Canonical installed verification PASS; daemon37864, PF ready, ownedGeph up,
+managed PAC active. PAC HTTP fetch200/556bytes. All learning/backups retained.
+Fresh headed installed Chrome152/no network override flags: Capacitor content
+(first response2697ms/load4728ms), Weather content/no regional denial(first
+response1484ms; load event incomplete at sample), Aikido/login(first470ms/load
+3594ms), no manual reload. NetLog confirms CONNECT for all three exact origins
+plus Aikido CDN via127.0.0.1:1080. Own diagnostic Chrome session closed.
+Safari normal document navigations: correct Capacitor title, Weather forecast
+title, Aikido/login URL. Safari DOM not inspected: Apple Events JS disabled and
+left unchanged; AX heading query empty. Preserve this evidence distinction.
+Artifacts output/playwright/aud21-installed-connect and output/aud21-connect.
+Actual normal Quit of e0e82cc8 restored original scutil proxy dictionary; native
+session SIGKILL canary also passed. Shutdown/lease code unchanged in6b8ca7c.
+54 focused transport/lease tests and27 verifier tests PASS;7 PAC route cases.
+No remaining installation step. Monitor only on reported recurrence; no repeated
+unchanged browser matrix or full-suite soak. Opt-in managed mode is enabled for
+this user, not a claim of extensionless transparent ECH support for all users.
+
 Update 2026-09-13 (AUD-21 e0e82cc8 installed; local PAC transport defect found):
 NEW runner e0e82cc8 dispatched once/succeeded08:44:22Z; now consumed, never
 replay. Canonical installed verification PASS, daemon33833, ownedGeph up,

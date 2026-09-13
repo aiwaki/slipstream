@@ -2239,3 +2239,40 @@ resource durations reached12,730ms. Evidence aikido-page-summary.txt and
 infinite-until-reload event was NOT reproduced; keep that gate open. Production
 idle-broker limitation remains an architectural observation, not a proved cause
 for every historical tab hang. All diagnostic browser sessions closed afterward.
+
+
+### AUD-21 installation: Darwin loopback NAT and restoration (2026-09-13)
+
+The first CONNECT candidate (128b500) passed canonical installation but its
+PAC fetch reset. A native DIOCNATLOOK query for the unprivileged loopback
+connection returned the unchanged destination 127.0.0.1:1080, rather than
+ENOENT. The existing recursive-destination guard therefore discarded it.
+Source6b8ca7c admits that exact unchanged tuple through the same bounded
+CONNECT/PAC parser. Invalid TLS cannot become a recursive upstream dial.
+The targeted suite passed54 tests. Evidence: output/aud21-connect/pac-natlook.json.
+
+Normal Quit was invoked through the observed macOS AX menu item Quit Slipstream
+(System Events; CUA timed out). After the owned daemon/tray exited, scutil showed
+only the original ExceptionsList and FTPPassive: no PAC remained. Evidence:
+output/aud21-connect/proxy-after-normal-quit.txt. This is actual installed
+restoration evidence, in addition to the harmless-key SIGKILL session test.
+
+
+### AUD-21 installed CONNECT browser results (2026-09-13)
+
+Source6b8ca7c is installed by the consumed39c49075 transaction. The local PAC
+fetch returned200 and556bytes; canonical installed verification passed with
+managed mode bound to both the plist and live launchd command. Headed installed
+Chrome152 with a fresh profile and no network override flags loaded Capacitor
+(first response2.697s, load4.728s), Weather (first response1.484s, normal content;
+load event not complete at sample), and Aikido/login (first response0.470s,
+load3.594s), without reload. NetLog records CONNECT for all exact origins and
+cdn.aikido.dev through127.0.0.1:1080. This is proxy-path evidence, unlike an
+intermittent transparent ECH-off success. Private artifacts are under
+output/playwright/aud21-installed-connect; the diagnostic session was closed.
+
+Safari normal navigations produced the expected Capacitor and forecast titles
+and Aikido/login URL. JavaScript from Apple Events was disabled and was not
+enabled; the AX heading query yielded no text. Safari evidence is therefore
+navigation/title-level, not a DOM-content assertion. Earlier infinite Aikido
+hang was not reproduced; do not claim every historical stall shares ECH cause.

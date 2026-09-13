@@ -2286,7 +2286,18 @@ claim about why that prior upstream response changed. Full page latency remains
 separate from the measured bounded proof cost.
 
 
-## AUD-21 — ECH public-name routing mismatch (confirmed, not fixed)
+## AUD-21 — ECH public-name routing mismatch (managed-mode fix installed)
+
+Update2026-09-13: user-authorized opt-in managed PAC/CONNECT mode is installed
+at source6b8ca7c. Chrome NetLog confirms exact CONNECT authorities for Capacitor,
+Weather and Aikido; all three loaded without manual reload. Safari returned the
+normal page titles and Aikido/login (DOM inspection unavailable and unchanged).
+Canonical installation passed. Native normal Quit restored original proxy state;
+process-death cleanup was separately verified with a harmless temporary key.
+The transparent-only ECH identity limitation remains; this fix supplies authority
+through CONNECT rather than decrypting ECH or learning a shared cover name.
+See CURRENT_STATE for exact installed hashes and private evidence paths.
+
 
 Installed Chrome152 NetLog binds Capacitor's hidden origin to outgoing
 cloudflare-ech.com; current SNI-based routing probes that cover root as healthy
