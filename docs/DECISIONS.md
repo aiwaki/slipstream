@@ -516,3 +516,10 @@ stale client timestamp (modulo32-bit) with the observed server timestamp echo so
 PAWS can reject the decoy at the server. Missing evidence retains low-TTL handling;
 missing sequence/ack evidence sends no decoy. A new SYN sequence resets stale
 per-tuple evidence. This changes neither browser TLS bytes nor other service policy.
+
+AUD-24: a RoutePreflight browser worker may attempt any still-live remainder of
+its existing eight-second job. Remove the separate two-second minimum start
+threshold, which silently discarded jobs after root/provenance/launcher latency.
+Runtime verification, navigation, observation and submission retain the same
+absolute deadline; an expired job never starts and only complete usable proof
+can authorize an exact eligible host. Background PendingNavigation is unchanged.

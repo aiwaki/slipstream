@@ -49,7 +49,6 @@ const OUTCOME_CHALLENGE_OR_AUTH: &str = "challenge_or_auth";
 const OUTCOME_USABLE: &str = "usable";
 const OUTCOME_TERMINAL_ERROR: &str = "terminal_error";
 const ROUTE_PREFLIGHT_MAX_DEADLINE_MS: u64 = 8_000;
-const ROUTE_PREFLIGHT_MIN_START_BUDGET_MS: u64 = 2_000;
 const OWNED_GEPH_ROUTE: &str = "owned_geph";
 const OWNED_GEPH_PORT_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT";
 const DOM_CLASSIFICATION_COMMAND_ID: u64 = 4;
@@ -469,7 +468,11 @@ fn claimed_job_has_start_budget(job: &ClaimedProbeJob, now_unix_ms: u64) -> bool
     match job {
         ClaimedProbeJob::PendingNavigation(job) => job_has_start_budget(job, now_unix_ms),
         ClaimedProbeJob::RoutePreflight(job) => {
-            job.deadline_unix_ms.saturating_sub(now_unix_ms) >= ROUTE_PREFLIGHT_MIN_START_BUDGET_MS
+            // Root I/O and signed-browser admission already consumed part of
+            // this same eight-second job. Do not silently discard its live
+            // remainder before attempting the independently bounded probe.
+            // Discovery, navigation and submission all enforce the deadline.
+            job.deadline_unix_ms > now_unix_ms
         }
     }
 }
@@ -2279,6 +2282,17 @@ mod tests {
         let mut over_budget = valid;
         over_budget.deadline_unix_ms += 1;
         assert!(validate_route_preflight_job(&over_budget).is_err());
+    }
+
+    #[test]
+    fn route_preflight_uses_live_remainder_after_root_and_launcher_latency() {
+        let job = ClaimedProbeJob::RoutePreflight(route_preflight_job(10_000));
+        // Five seconds of root I/O, then provenance and launcher verification.
+        assert!(claimed_job_has_start_budget(&job, 16_700));
+        assert_eq!(claimed_job_remaining_budget_ms(&job, 16_700), 1_300);
+        assert!(claimed_job_has_start_budget(&job, 17_999));
+        assert!(!claimed_job_has_start_budget(&job, 18_000));
+        assert!(!claimed_job_has_start_budget(&job, 18_001));
     }
 
     #[test]

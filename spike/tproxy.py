@@ -7798,17 +7798,27 @@ async def _run_admitted_headless_owned_geph_preflight(
     recently-used signed Safari/Chrome socket and can probe only the app-owned
     loopback SOCKS candidate.
     """
+    def absent(reason):
+        try:
+            _enqueue_route_preflight_root_diagnostic_record(
+                f">> browser-proof reason={reason}"
+            )
+        except Exception:
+            pass
+        return None
+
+    if not _route_preflight_headless_available:
+        return absent("worker_unavailable")
     if (
-        not _route_preflight_headless_available
-        or not isinstance(job, route_preflight.RoutePreflightJobV1)
+        not isinstance(job, route_preflight.RoutePreflightJobV1)
         or "owned_geph" not in job.candidate_routes
         or deadline_monotonic <= time.monotonic()
         or not _headless_preflight_breaker_allows()
     ):
-        return None
+        return absent("context_or_deadline_refused")
     remaining = deadline_monotonic - time.monotonic()
     if remaining <= 0:
-        return None
+        return absent("deadline_exhausted")
     provenance_ok = bool(provenance_already_accepted)
     if not provenance_ok:
         try:
@@ -7821,16 +7831,16 @@ async def _run_admitted_headless_owned_geph_preflight(
                 timeout=min(1.05, remaining),
             )
         except (asyncio.TimeoutError, RuntimeError):
-            return None
+            return absent("provenance_timeout")
     if not provenance_ok or deadline_monotonic <= time.monotonic():
-        return None
+        return absent("provenance_refused")
     confirmed_pid = _owned_geph_confirmation_pid()
     if (
         not confirmed_pid
         or not _owned_geph_ready_for_semantic_confirmation()
         or not _owned_geph_confirmation_pid_matches(confirmed_pid)
     ):
-        return None
+        return absent("backend_identity_refused")
 
     result_future = Future()
     capability = _RoutePreflightBrowserCapability(
@@ -7842,21 +7852,21 @@ async def _run_admitted_headless_owned_geph_preflight(
     runtime = _get_pending_navigation_probe_runtime()
     with _route_preflight_lock:
         if job.capability in _route_preflight_browser_capabilities:
-            return None
+            return absent("duplicate_capability")
         _route_preflight_browser_capabilities[job.capability] = capability
     try:
         if not runtime.enqueue(_route_preflight_job_payload(job), prioritize=True):
-            return None
+            return absent("enqueue_refused")
         worker = _get_pending_navigation_probe_worker(
             allow_production_headless=True
         )
         notified = worker.notify_job_ready()
         if not notified and not worker.active():
             runtime.discard(job.capability)
-            return None
+            return absent("worker_not_started")
         remaining = deadline_monotonic - time.monotonic()
         if remaining <= 0:
-            return None
+            return absent("deadline_before_wait")
         result = await asyncio.wait_for(
             asyncio.wrap_future(result_future),
             timeout=remaining,
@@ -7868,7 +7878,7 @@ async def _run_admitted_headless_owned_geph_preflight(
             or time.monotonic() >= deadline_monotonic
             or not _owned_geph_confirmation_pid_matches(confirmed_pid)
         ):
-            return None
+            return absent("result_refused")
         return _RoutePreflightOwnedGephProof(
             marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
             capability=job.capability,
@@ -7882,7 +7892,7 @@ async def _run_admitted_headless_owned_geph_preflight(
             bytes_read=0,
         )
     except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
-        return None
+        return absent("wait_failed")
     finally:
         runtime.discard(job.capability)
         with _route_preflight_lock:

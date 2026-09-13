@@ -10,17 +10,19 @@ file.
 
 ## Current Checkpoint
 
-AUD-24 installed b02747c99ca38851bc07b907aa5cc06ce431bc89 via cac10760
-at2026-09-13T14:11:15Z. Runner consumed NEVER replay. Canonical
-installed-reasons.log PASS, PID62453 active; daemon
-1e84e8b5a1289eddebc97b3490cffa0896efa08d8dfdb1caed344d10b4c76b28.
-Logging-only change records fixed browser-provenance enum reason and per-host
-provenance_accepted/refused.47 affected tests PASS; routing unchanged.
-User asked once to open Gauzy in fresh active Chrome tab. Await result, then run
-output/aud24-gauzy/read-reasons.py (reads current root log since install, includes
-gauzy + browser-provenance records) once. If rotated, read log.1 separately.
-No admin prompt, standalone collector, or automation browser session pending.
-Gauzy and Discord gateway remain OPEN. Source b02747c, docs newer.
+AUD-24 user reports Gauzy still blank. Installed b02747c via cac10760 unchanged.
+Live logs reason-events.json / worker-events.json now prove browser provenance
+ACCEPTED at19:14:02,19:16:14,19:16:27, followed by proof_absent. No worker launch
+error in collected matching log. Raw log read17113 completed; no prompt pending.
+Source mismatch found: Rust silently refuses RoutePreflight with <2s remaining,
+though root consumes5s and provenance/launcher consume further budget. Actual
+signature checks0.03s helper +0.351s bundle; this supports but does NOT prove the
+precise live failure. Candidate removes premature2s start threshold while every
+actual operation/submission retains same8s absolute deadline; adds fixed reason
+logging for missing proof in service.33 Rust browser-probe tests PASS including
+live1300ms remainder/expired boundary; focused headless Python checks pending.
+No new replacement prepared yet. Current installed cac10760 consumed NEVER replay.
+Gauzy and Discord gateway remain OPEN. User AGENTS.md remains untouched.
 
 Historical investigation notes:
 
