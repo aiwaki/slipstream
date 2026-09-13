@@ -14977,7 +14977,7 @@ def test_bootstrap_diagnostic_real_parent_flow_is_observational(
         ("no_address", "resolution_no_address"),
         ("bad_key", "address_key_refused"),
         ("no_parent", "parent_epoch_refused"),
-        ("concurrent", "concurrent_refused"),
+        ("concurrent", "capacity_deadline"),
     ],
 )
 def test_bootstrap_diagnostic_admission_returns(monkeypatch, case, decision):
@@ -15016,7 +15016,7 @@ def test_bootstrap_diagnostic_admission_returns(monkeypatch, case, decision):
     assert f"decision={decision} direct=not_started geph=not_started" in records[0]
     expected = (
         "owned_geph" if case == "learned"
-        else tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE if case == "resolve_timeout"
+        else tproxy._ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE if case in {"resolve_timeout", "concurrent"}
         else tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
     )
     assert result == (case == "learned", expected)

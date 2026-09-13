@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-22 queued admission + expired direct candidate):
+User wants parallel load handling without site refusals caused by quotas.
+Added deadline-bounded waiting for active owners (eight network jobs; two heavy
+browser jobs independently), cancellation isolation, no minute/start cooldown.
+Fixed unqualified held exact TIMEOUT being attached back to browser: close it
+and enter existing DNS/local ladder; timeout does not grant Geph or learning.
+208 focused tests PASS, final18 admission tests PASS; full traffic suite recorded
+in output/aud21-recurrence/traffic-tests.log. Prior31205c1 build passed but NOT
+installed; source changed since build. Next fresh canonical build + new runner.
+Installed still3332d27/fdc265fa. All historical runners consumed. Preserve learning.
+
 Update 2026-09-13 (AUD-22 navigation admission candidate):
 User requests fix and rejects two-wide global preflight bottleneck. Candidate
 removes synchronous rolling-minute quota and per-host cooldown, uses eight

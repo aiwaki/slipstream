@@ -151,14 +151,16 @@ def test_two_roots_transfer_slots_without_completing_coalesced_waiters(monkeypat
                 assert tproxy._route_preflight_execution_leases[child_epoch] is (
                     tproxy._route_preflight_execution_leases[parent_epoch]
                 )
-            assert await tproxy._run_initial_route_preflight(
-                "third-shell.example",
-                "8.8.4.4",
-                direct_probe=lambda *_args: pytest.fail("third execution exceeded cap"),
-            ) is None
+            queued = asyncio.create_task(tproxy._run_initial_route_preflight(
+                "third-shell.example", "8.8.4.4",
+                direct_probe=lambda *_args: tproxy.SEMANTIC_OUTCOME_USABLE,
+            ))
+            await asyncio.sleep(0)
+            assert not queued.done()
             assert _counts() == (2, 0, 4)
             release_children.set()
             assert await asyncio.gather(*owners, *waiters) == [None] * 4
+            assert await queued is None
         finally:
             release_roots.set()
             release_children.set()
@@ -170,7 +172,7 @@ def test_two_roots_transfer_slots_without_completing_coalesced_waiters(monkeypat
     assert all(ip == "1.1.1.1" and b"/entry.js" in request for ip, _, request in child_calls)
     assert all(tproxy._auto_geph_learned_exact_host(child) for child in children)
     assert not any(tproxy._auto_geph_learned_exact_host(parent) for parent in parents)
-    assert _counts() == (0, 0, 4)
+    assert _counts() == (0, 0, 5)
     assert not tproxy._route_preflight_inflight
     assert not tproxy._route_preflight_execution_leases
 
@@ -407,13 +409,26 @@ def test_eight_socket_roots_run_concurrently_and_ninth_is_bounded(monkeypatch):
         try:
             await asyncio.wait_for(ready.wait(), 1)
             assert _counts()[0] == 8
-            assert await tproxy._run_initial_route_preflight(
+            queued = asyncio.create_task(tproxy._run_initial_route_preflight(
                 "overflow.example", "8.8.8.8", direct_probe=lambda *_: None,
-            ) is None
+            ))
+            await asyncio.sleep(0)
+            assert not queued.done()
             assert entered == 8
+            cancelled = asyncio.create_task(tproxy._run_initial_route_preflight(
+                "cancelled-queued.example", "8.8.8.8", direct_probe=lambda *_: None,
+            ))
+            await asyncio.sleep(0)
+            cancelled.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cancelled
+            assert all(not owner.cancelled() for owner in tproxy._route_preflight_inflight.values())
+
         finally:
             release.set()
             await asyncio.gather(*tasks)
+            await queued
+        assert entered == 9
         assert _counts()[0] == 0
     asyncio.run(scenario())
 
@@ -433,11 +448,15 @@ def test_browser_preflight_has_separate_two_worker_bound(monkeypatch):
         tasks = [asyncio.create_task(tproxy._run_headless_owned_geph_preflight()) for _ in range(2)]
         try:
             await asyncio.wait_for(ready.wait(), 1)
-            assert await tproxy._run_headless_owned_geph_preflight() is None
+            queued = asyncio.create_task(tproxy._run_headless_owned_geph_preflight())
+            await asyncio.sleep(0)
+            assert not queued.done()
             assert entered == 2
         finally:
             release.set()
             await asyncio.gather(*tasks)
-        await tproxy._run_headless_owned_geph_preflight()
+        await queued
         assert entered == 3
+        await tproxy._run_headless_owned_geph_preflight()
+        assert entered == 4
     asyncio.run(scenario())

@@ -3326,7 +3326,7 @@ def test_system_plain_route_runs_held_preflight_before_committing(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
-def test_slow_established_direct_timeout_stays_direct_without_geph(monkeypatch):
+def test_expired_direct_stream_enters_local_recovery_without_geph(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "slow-established-direct.example"
     response = b"eventual direct TLS payload"
@@ -3355,6 +3355,10 @@ def test_slow_established_direct_timeout_stays_direct_without_geph(monkeypatch):
     )
     monkeypatch.setattr(tproxy, "_try_unknown_owned_geph_route", forbidden_geph)
 
+    async def local_route(*_args, **_kwargs):
+        assert exact_writer.closed
+        return "8.8.8.8", probed_upstream_response(response)
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", local_route)
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response

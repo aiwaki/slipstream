@@ -85,7 +85,9 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   The parent may transfer its execution slot to one child only after its workers
   drain; standalone children share the same eight-job execution cap. Recent
   starts are a bounded diagnostic history only, never admission authority.
-  Heavy headless preflight workers additionally have a separate two-worker cap.
+  Excess root/standalone-child work waits for an existing proof owner to drain
+  within its absolute deadline; cancelling a waiter never cancels an owner.
+  Heavy headless preflight workers queue separately with two active workers.
   Existing background-only semantic probing retains its own rate limit. None
   of these scheduling changes grants routing or persistent learning authority.
 - Relay ingress, downstream delivery and cleanup are different observations.
@@ -461,3 +463,10 @@ Per-response encoded cap stays128KiB; owned confirmation decoded cap is2MiB.
 Direct-root/critical-resource caps and all eligibility/ownership/time guards stay
 unchanged. This narrowly supersedes the older single canonical-root redirect and
 256KiB owned semantic decode limits. Evidence: AUD-20 and ROUTING_RESEARCH.
+
+
+AUD-22 (2026-09-13): an exact direct socket retained through its full probe
+deadline is not a usable route when that probe reports TIMEOUT. Without a
+qualified request-only claim, close that silent socket and enter the existing
+app-owned DNS/local ladder. Timeout alone still cannot authorize Geph or learning.
+Payload-positive and qualified request-only late-payload paths remain unchanged.

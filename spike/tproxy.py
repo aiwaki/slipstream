@@ -2206,7 +2206,7 @@ ROUTE_PREFLIGHT_CACHE_TTL = 10 * 60.0
 ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
 ROUTE_PREFLIGHT_CACHE_MAX = 4096
 ROUTE_PREFLIGHT_CONCURRENT_MAX = 8
-_ROUTE_PREFLIGHT_BROWSER_SLOTS = threading.BoundedSemaphore(2)
+_ROUTE_PREFLIGHT_BROWSER_TASKS = set()
 ROUTE_PREFLIGHT_WINDOW = 60.0
 ROUTE_PREFLIGHT_WINDOW_MAX = 8
 ROUTE_PREFLIGHT_HEALTHY_BUDGET = 0.5
@@ -7414,6 +7414,36 @@ def _route_preflight_child_lease_valid_locked(lease, parent, parent_ip):
     )
 
 
+async def _wait_for_route_preflight_capacity(host, address, deadline):
+    """Wait for owned work to drain; capacity is not a route decision."""
+    key = _route_preflight_inflight_key(host, address)
+    while True:
+        with _route_preflight_lock:
+            if (key in _route_preflight_inflight
+                    or _route_preflight_cache_entry_matches_address(
+                        _route_preflight_cache.get(host), address)
+                    or _route_preflight_execution_count_locked()
+                    < ROUTE_PREFLIGHT_CONCURRENT_MAX):
+                return True
+            owners = {future for future in _route_preflight_inflight.values()
+                      if isinstance(future, Future) and not future.done()}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not owners:
+            return False
+        # Shield the owners: cancelling one queued browser request must not
+        # cancel another connection's proof or release its execution slot.
+        waits = [asyncio.shield(asyncio.wrap_future(owner)) for owner in owners]
+        try:
+            done, _ = await asyncio.wait(waits, timeout=remaining,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                return False
+        finally:
+            for waiter in waits:
+                if not waiter.done():
+                    waiter.cancel()
+
+
 def _prune_initial_route_preflights_locked(now):
     cutoff = now - ROUTE_PREFLIGHT_WINDOW
     while _route_preflight_window and _route_preflight_window[0] <= cutoff:
@@ -7705,13 +7735,24 @@ def _browser_navigation_provenance_accepted(
 
 
 async def _run_headless_owned_geph_preflight(*args, **kwargs):
-    # Browser processes are heavier than bounded socket-only root checks.
-    if not _ROUTE_PREFLIGHT_BROWSER_SLOTS.acquire(blocking=False):
-        return None
+    # Heavy workers queue separately from socket-only root checks.
+    deadline = kwargs.get("deadline_monotonic", args[2] if len(args) > 2
+                          else time.monotonic() + 8.0)
+    while len(_ROUTE_PREFLIGHT_BROWSER_TASKS) >= 2:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        done, _ = await asyncio.wait(tuple(_ROUTE_PREFLIGHT_BROWSER_TASKS),
+                                     timeout=remaining,
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if not done:
+            return None
+    task = asyncio.current_task()
+    _ROUTE_PREFLIGHT_BROWSER_TASKS.add(task)
     try:
         return await _run_admitted_headless_owned_geph_preflight(*args, **kwargs)
     finally:
-        _ROUTE_PREFLIGHT_BROWSER_SLOTS.release()
+        _ROUTE_PREFLIGHT_BROWSER_TASKS.discard(task)
 
 
 async def _run_admitted_headless_owned_geph_preflight(
@@ -8650,6 +8691,11 @@ async def _run_bootstrap_asset_preflight_observed(
             asset.forget()
             return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
     if not owner:
+        if execution_lease is None and not await _wait_for_route_preflight_capacity(
+                h, selected_ip, healthy_deadline):
+            diagnostic.decision = "capacity_deadline"
+            asset.forget()
+            return False, _ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE
         now = time.monotonic()
         with _route_preflight_lock:
             _prune_initial_route_preflights_locked(now)
@@ -9415,7 +9461,7 @@ _PREFLIGHT_STATE_DECISIONS = frozenset({
     "host_ineligible", "local_claim_reuse", "root_cache_reuse",
     "concurrent_refused", "window_refused", "host_window_refused", "root_admitted",
     "root_cancelled", "root_exception", "backend_unready", "proof_no_budget",
-    "proof_context_refused", "proof_learning_noise_refused", "proof_owner_refused",
+    "capacity_deadline", "proof_context_refused", "proof_learning_noise_refused", "proof_owner_refused",
     "proof_absent", "commit_refused", "committed", "local_stage_skips_root",
     "geph_no_complete_response", "geph_response_usable", "geph_response_refused",
 })
@@ -9438,7 +9484,7 @@ _BOOTSTRAP_DIAGNOSTIC_DECISIONS = frozenset({
     "admission_host_or_deadline_refused", "learned_reuse",
     "resolution_deadline", "resolution_unavailable", "resolution_no_address",
     "address_key_refused", "parent_epoch_refused", "learned_cache_reuse",
-    "concurrent_refused", "window_refused", "worker_deadline", "worker_started",
+    "capacity_deadline", "concurrent_refused", "window_refused", "worker_deadline", "worker_started",
     "worker_unavailable", "worker_admission_refused",
     "worker_address_or_deadline_refused", "direct_deadline", "direct_invalid",
     "direct_complete", "direct_idle_timeout", "direct_termination_refused",
@@ -10041,6 +10087,9 @@ async def _run_initial_route_preflight(
         return None
     owner = False
     execution_lease = None
+    if not await _wait_for_route_preflight_capacity(h, address, deadline):
+        _log_route_preflight_state(h, "capacity_deadline")
+        return None
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(now)
         cached = _route_preflight_cache.get(h)
@@ -20214,11 +20263,14 @@ async def _handle_impl(reader, writer):
             # normal retry use the learned exact-host route.
             writer.close()
             return
-        elif exact:
+        elif exact and system_probe == SYSTEM_PROBE_PAYLOAD:
             result = exact
             chosen_name = "plain"
             via_system_exact = True
         else:
+            if exact is not None:
+                await _close_stream_writer(exact[1])
+                exact = None
             assert system_probe in (
                 SYSTEM_PROBE_CLOSED,
                 SYSTEM_PROBE_TIMEOUT,
