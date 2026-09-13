@@ -22,10 +22,10 @@ host/capability/PID/expiry/cancellation and4s handoff. No Geph for Discord/YouTu
 34 Rust and288 affected Python/traffic/runtime tests PASS. Isolated debug candidate
 with production pinned Chromium/ownedSOCKS submitted usable at10.076s, exit0 at
 10.790s (isolated-worker-v2.json); no production learning from diagnostic broker.
-Candidate NOT installed/built canonically yet. Next canonical build, stagedverify,
-new replacement from consumed a8543617, normal Quit. No native prompt/collector.
-One diagnostic Playwright session aud24-owned remains OPEN and must close before
-installation. User AGENTS.md untouched. Discord gateway remains OPEN.
+Source5fa1d9d canonical build-v2 PASS. New521eff9c staged; not dispatched.
+Canonical stagedverify pending10758; afterPASS normalQuit/serviceabsence before
+authorize-once.py. Base consumed a8543617; never replay. No native prompt/collector.
+Diagnostic Playwright aud24-owned closed. User AGENTS.md untouched. Discord gateway remains OPEN.
 
 Historical investigation notes:
 
