@@ -10,7 +10,7 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-09-13 (AUD-21 fairness INSTALLED; Safari confirmation pending):
+Update 2026-09-13 (AUD-21 fairness INSTALLED; Safari forecast confirmed):
 Installed source3332d27e6495d5e0fd683b5d5061d2c00c7803aa via NEW fdc265fa
 one-shot runner; succeeded09:11:37Z. fdc265fa consumed, NEVER replay.
 Canonical installed verify PASS; daemon48375 active/PF ready/managed PAC.
@@ -21,7 +21,7 @@ Fresh Chrome www.weather.com redirects to weather.com/?Goto=Redirected; no
 regional denial, document contains site UI. Response2415ms/DOM3030ms; forecast
 values placeholders and load event0 at sample, so not full weather-data proof.
 Evidence output/playwright/aud21-www-weather/result.json; installed artifacts
-output/aud21-www-weather. User asked for one Safari www navigation; pending.
+output/aud21-www-weather. User confirmed forecast appeared on one fresh Safari www navigation after install.
 Do not call warm navigation proof of cold admission: www learned before patch.
 Unique-host saturation remains possible; duplicate admission issue fixed.
 

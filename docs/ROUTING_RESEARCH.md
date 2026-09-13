@@ -2297,3 +2297,11 @@ Deterministic replay confirms a duplicate second address consumes no extra start
 and a new host fits while preserving child reservation. Expiry permits a fresh
 address probe.96 preflight/bootstrap tests pass (fairness-tests.log). This bounds
 duplicate starvation; saturation by many unique hosts remains possible.
+
+Installed3332d27 through unique fdc265fa transaction09:11:37Z; canonical installed
+verification passed. User confirmed a fresh Safari www navigation showed forecast.
+Fresh Chrome showed site UI/no denial after redirect (response2415ms/DOM3030ms),
+but forecast values were placeholders at the sample. NetLog confirms CONNECT
+for www, apex and dsx.weather.com. Own Chrome session closed. This is restored
+user-visible Safari behavior plus deterministic admission regression coverage,
+not a claim that arbitrary unique-host saturation or all data delays are solved.
