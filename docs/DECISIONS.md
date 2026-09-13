@@ -78,23 +78,16 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   transfer its execution lease to its one selected cross-origin critical
   child. The child keeps a separate opaque exact-address proof epoch and
   capability; its completion must not resolve root waiters. The execution
-  cap remains two admitted jobs (each retains its existing internal probe
-  bounds). Root admission charges its own start and reserves one potential
-  cross-child start: recent starts plus outstanding reservations must never
-  exceed eight per 60 seconds. A child converts its reservation to its own
-  current start timestamp; actual starts are never refunded or backdated.
-  Unused reservations are released when no cross-child is selected or after
-  cancellation drains owned workers. Standalone child work retains ordinary
-  admission. This is intentionally conservative: with only one window credit
-  left, a new root cannot start without room for its possible child, even
-  when that root would ultimately need none. These scheduling rights confer
-  no routing authority and change no proof, timeout or exclusion policy.
-- Each normalized host may start at most one root preflight per admission
-  window, regardless of outcome or destination address. Exact-address inflight
-  callers still coalesce. This outcome-independent scheduling record expires
-  with the window; it is not health evidence or a retry-result cache and grants
-  no route authority. It prevents duplicate background hosts consuming scarce
-  starts while preserving the global start and child-reservation bounds.
+  cap is eight admitted jobs (each retains its existing internal probe bounds).
+  Synchronous navigation checks have no rolling-minute start quota and no
+  per-host start cooldown: completed work must not prevent the next independent
+  attempt. Exact-address inflight coalescing and outcome-specific caches remain.
+  The parent may transfer its execution slot to one child only after its workers
+  drain; standalone children share the same eight-job execution cap. Recent
+  starts are a bounded diagnostic history only, never admission authority.
+  Heavy headless preflight workers additionally have a separate two-worker cap.
+  Existing background-only semantic probing retains its own rate limit. None
+  of these scheduling changes grants routing or persistent learning authority.
 - Relay ingress, downstream delivery and cleanup are different observations.
   Observe received TLS framing before waiting for browser drain; publish delivered
   bytes and the first-delivery callback only after successful drain. A partial-TLS

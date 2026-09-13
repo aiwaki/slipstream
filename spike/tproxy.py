@@ -2205,7 +2205,8 @@ ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET = 0.05
 ROUTE_PREFLIGHT_CACHE_TTL = 10 * 60.0
 ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
 ROUTE_PREFLIGHT_CACHE_MAX = 4096
-ROUTE_PREFLIGHT_CONCURRENT_MAX = 2
+ROUTE_PREFLIGHT_CONCURRENT_MAX = 8
+_ROUTE_PREFLIGHT_BROWSER_SLOTS = threading.BoundedSemaphore(2)
 ROUTE_PREFLIGHT_WINDOW = 60.0
 ROUTE_PREFLIGHT_WINDOW_MAX = 8
 ROUTE_PREFLIGHT_HEALTHY_BUDGET = 0.5
@@ -2817,8 +2818,7 @@ _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
 _route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
 _route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
 _route_preflight_execution_leases = {}  # proof Future -> shared execution lease
-_route_preflight_window = deque()
-_route_preflight_host_starts = {}
+_route_preflight_window = deque(maxlen=128)  # bounded diagnostic history only
 _route_preflight_consumed = OrderedDict()  # capability -> expiry monotonic
 _route_preflight_lock = threading.RLock()
 
@@ -7418,9 +7418,6 @@ def _prune_initial_route_preflights_locked(now):
     cutoff = now - ROUTE_PREFLIGHT_WINDOW
     while _route_preflight_window and _route_preflight_window[0] <= cutoff:
         _route_preflight_window.popleft()
-    for host, started in tuple(_route_preflight_host_starts.items()):
-        if started <= cutoff:
-            _route_preflight_host_starts.pop(host, None)
     for host, entry in tuple(_route_preflight_cache.items()):
         if (
             entry.expires_at <= now
@@ -7707,7 +7704,17 @@ def _browser_navigation_provenance_accepted(
     )
 
 
-async def _run_headless_owned_geph_preflight(
+async def _run_headless_owned_geph_preflight(*args, **kwargs):
+    # Browser processes are heavier than bounded socket-only root checks.
+    if not _ROUTE_PREFLIGHT_BROWSER_SLOTS.acquire(blocking=False):
+        return None
+    try:
+        return await _run_admitted_headless_owned_geph_preflight(*args, **kwargs)
+    finally:
+        _ROUTE_PREFLIGHT_BROWSER_SLOTS.release()
+
+
+async def _run_admitted_headless_owned_geph_preflight(
     job,
     peer_endpoint,
     deadline_monotonic,
@@ -7854,11 +7861,15 @@ def _prove_preflight_owned_geph_route(
         or observed_outcome not in SEMANTIC_DENIAL_OUTCOMES
         or not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
-        or not _auto_geph_persistent_learning_allowed(h)
     ):
+        _log_route_preflight_state(h, "proof_context_refused")
+        return None
+    if not _auto_geph_persistent_learning_allowed(h):
+        _log_route_preflight_state(h, "proof_learning_noise_refused")
         return None
     confirmed_pid = _owned_geph_confirmation_pid()
     if not confirmed_pid:
+        _log_route_preflight_state(h, "proof_owner_refused")
         return None
     probe = _semantic_geph_payload_probe if probe is None else probe
     bytes_read = probe(
@@ -8667,18 +8678,8 @@ async def _run_bootstrap_asset_preflight_observed(
                 and _route_preflight_execution_count_locked()
                 >= ROUTE_PREFLIGHT_CONCURRENT_MAX
             )
-            window_refused = (
-                len(_route_preflight_window)
-                + _route_preflight_reserved_count_locked()
-                + (0 if borrowed else 1)
-                > ROUTE_PREFLIGHT_WINDOW_MAX
-            )
-            if concurrency_refused or window_refused:
-                diagnostic.decision = (
-                    "concurrent_refused"
-                    if concurrency_refused
-                    else "window_refused"
-                )
+            if concurrency_refused:
+                diagnostic.decision = "concurrent_refused"
                 asset.forget()
                 return False, SEMANTIC_OUTCOME_TERMINAL_ERROR
             # A critical object is stronger evidence than a host root and is
@@ -9414,6 +9415,7 @@ _PREFLIGHT_STATE_DECISIONS = frozenset({
     "host_ineligible", "local_claim_reuse", "root_cache_reuse",
     "concurrent_refused", "window_refused", "host_window_refused", "root_admitted",
     "root_cancelled", "root_exception", "backend_unready", "proof_no_budget",
+    "proof_context_refused", "proof_learning_noise_refused", "proof_owner_refused",
     "proof_absent", "commit_refused", "committed", "local_stage_skips_root",
     "geph_no_complete_response", "geph_response_usable", "geph_response_refused",
 })
@@ -10059,25 +10061,11 @@ async def _run_initial_route_preflight(
             return None
         future = _route_preflight_inflight.get(inflight_key)
         if future is None:
-            if h in _route_preflight_host_starts:
-                # Scheduling fairness only: even a different CDN address may
-                # not spend a second root start for this host in the window.
-                # No result, health cache or route is shared across addresses;
-                # exact-key in-flight waiters still join their existing owner.
-                _log_route_preflight_state(h, "host_window_refused")
-                return None
             if (
                 _route_preflight_execution_count_locked()
                 >= ROUTE_PREFLIGHT_CONCURRENT_MAX
             ):
                 _log_route_preflight_state(h, "concurrent_refused")
-                return None
-            if (
-                len(_route_preflight_window)
-                + _route_preflight_reserved_count_locked()
-                + 2 > ROUTE_PREFLIGHT_WINDOW_MAX
-            ):
-                _log_route_preflight_state(h, "window_refused")
                 return None
             future = Future()
             execution_lease = _RoutePreflightExecutionLease(
@@ -10086,7 +10074,6 @@ async def _run_initial_route_preflight(
             _route_preflight_inflight[inflight_key] = future
             _route_preflight_execution_leases[future] = execution_lease
             _route_preflight_window.append(now)
-            _route_preflight_host_starts[h] = now
             owner = True
     if not owner:
         try:

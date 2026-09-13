@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-22 navigation admission candidate):
+User requests fix and rejects two-wide global preflight bottleneck. Candidate
+removes synchronous rolling-minute quota and per-host cooldown, uses eight
+execution leases and a separate two-worker headless cap. Exact-IP coalescing,
+proof, exclusions, background-probe limiter unchanged. Recent starts telemetry
+bounded128.178 focused admission/preflight/bootstrap tests PASS. Added explicit
+proof_context_refused/proof_learning_noise_refused/proof_owner_refused states;
+old proof_absent did not distinguish pre-probe admission from payload failure.
+Read-only owned SOCKS Capacitor control returned200 in1.38s; not proof of the
+historical failure cause. Install still3332d27; fdc265fa consumed NEVER replay.
+Next canonical build/new unique replacement then targeted reproduction. TLS
+stall recovery and original missing proof remain unqualified; do not claim fixed.
+
 Update 2026-09-13 (AUD-21 recurrence OPEN after fairness install):
 User reports Chrome Capacitor block and Safari Facebook/X navigation stalls.
 Fresh daemon48375/PAC active/ownedGeph up; source3332d27 still installed.

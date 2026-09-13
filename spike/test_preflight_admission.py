@@ -66,6 +66,7 @@ async def _standalone_child(host, probe=_complete):
 
 def test_two_roots_transfer_slots_without_completing_coalesced_waiters(monkeypatch):
     _enable_owned_geph_preflight(monkeypatch)
+    monkeypatch.setattr(tproxy, "ROUTE_PREFLIGHT_CONCURRENT_MAX", 2)
     parents = ["first-shell.example", "second-shell.example"]
     children = ["first-critical.example", "second-critical.example"]
     root_entered = [threading.Event(), threading.Event()]
@@ -174,65 +175,19 @@ def test_two_roots_transfer_slots_without_completing_coalesced_waiters(monkeypat
     assert not tproxy._route_preflight_execution_leases
 
 
-def test_child_reservation_survives_window_pruning_without_refunding_starts(monkeypatch):
-    clock = [100.0]
-    monkeypatch.setattr(
-        tproxy, "time", SimpleNamespace(monotonic=lambda: clock[0], time=lambda: 1_000.0)
-    )
-    tproxy._route_preflight_window.extend([40.1] * 6)
-    root_entered = threading.Event()
-    release_root = threading.Event()
-    child_calls = []
-
-    def root_probe(*_args):
-        root_entered.set()
-        assert release_root.wait(5.0)
-        return _bootstrap_root_observation("reserved-child.example")
-
-    def child_probe(*args):
-        child_calls.append(args)
-        return _complete()
-
-    async def scenario():
-        owner = asyncio.create_task(
-            tproxy._run_initial_route_preflight(
-                "reserved-shell.example",
-                "8.8.8.8",
-                direct_probe=root_probe,
-                bootstrap_direct_probe=child_probe,
-                bootstrap_resolver=lambda _host: ["1.1.1.1"],
-            )
-        )
-        try:
-            assert await asyncio.to_thread(root_entered.wait, 2.0)
-            assert _counts() == (1, 1, 7)
-            rejected = await _standalone_child(
-                "window-full.example",
-                lambda *_args: pytest.fail("reserved credit was stolen"),
-            )
-            assert rejected == (False, tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR)
-            assert _counts() == (1, 1, 7)
-
-            clock[0] = 100.2
-            for index in range(6):
-                assert await _standalone_child(f"new-window-{index}.example") == (
-                    False, tproxy.SEMANTIC_OUTCOME_USABLE
-                )
-                assert _counts() == (1, 1, index + 2)
-            assert await _standalone_child(
-                "ninth-start.example",
-                lambda *_args: pytest.fail("more than eight starts in live window"),
-            ) == (False, tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR)
-            release_root.set()
-            assert await owner is None
-        finally:
-            release_root.set()
-            await asyncio.gather(owner, return_exceptions=True)
-
-    asyncio.run(scenario())
-    assert len(child_calls) == 1
-    assert _counts() == (0, 0, 8)
-    assert list(tproxy._route_preflight_window) == [100.0] + [100.2] * 7
+def test_completed_starts_do_not_block_parent_child_execution(monkeypatch):
+    _enable_owned_geph_preflight(monkeypatch)
+    now = tproxy.time.monotonic()
+    tproxy._route_preflight_window.extend([now] * 20)
+    calls = []
+    assert asyncio.run(tproxy._run_initial_route_preflight(
+        "shell.example", "8.8.8.8",
+        direct_probe=lambda *_args: _bootstrap_root_observation("child.example"),
+        bootstrap_direct_probe=lambda *_args: calls.append("child") or _complete(),
+        bootstrap_resolver=lambda _host: ["1.1.1.1"],
+    )) is None
+    assert calls == ["child"]
+    assert _counts() == (0, 0, 22)
     assert not tproxy._route_preflight_execution_leases
 
 
@@ -249,29 +204,23 @@ def test_root_without_child_releases_only_unused_reservation():
         assert not tproxy._route_preflight_execution_leases
 
 
-def test_root_does_not_start_without_room_for_its_child_reservation():
-    now = tproxy.time.monotonic()
-    tproxy._route_preflight_window.extend([now] * 7)
-    assert asyncio.run(
-        tproxy._run_initial_route_preflight(
-            "unreserved-shell.example",
-            "8.8.8.8",
-            direct_probe=lambda *_args: pytest.fail("root borrowed the child's last credit"),
+def test_retryable_root_can_retry_without_minute_cooldown():
+    calls = []
+    def probe(*_args):
+        calls.append(1)
+        return tproxy._SemanticPlainPreflightObservation(
+            tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+            retryable_inconclusive=True,
+            root_boundary=tproxy._RootPreflightBoundary.TLS_HANDSHAKE_TIMEOUT,
         )
-    ) is None
-    assert _counts() == (0, 0, 7)
-    assert not tproxy._route_preflight_execution_leases
-    assert asyncio.run(_standalone_child("last-unreserved-credit.example")) == (
-        False, tproxy.SEMANTIC_OUTCOME_USABLE
-    )
-    assert _counts() == (0, 0, 8)
-    assert asyncio.run(
-        _standalone_child(
-            "past-last-credit.example",
-            lambda *_args: pytest.fail("standalone child exceeded window cap"),
-        )
-    ) == (False, tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR)
-    assert _counts() == (0, 0, 8)
+    for _ in range(12):
+        assert asyncio.run(tproxy._run_initial_route_preflight(
+            "retry.example", "8.8.8.8", direct_probe=probe,
+        )) is None
+    assert len(calls) == 12
+    assert not tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host("retry.example")
+    assert _counts() == (0, 0, 12)
 
 
 @pytest.mark.parametrize("phase", ["root", "child"])
@@ -424,21 +373,6 @@ def test_invalid_or_reused_child_lease_cannot_admit_work(case):
     asyncio.run(scenario())
 
 
-def test_root_window_refusal_is_visible_without_running_probe(monkeypatch):
-    _enable_owned_geph_preflight(monkeypatch)
-    records = []
-    monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
-    now = tproxy.time.monotonic()
-    tproxy._route_preflight_window.extend([now] * tproxy.ROUTE_PREFLIGHT_WINDOW_MAX)
-    assert asyncio.run(tproxy._run_initial_route_preflight(
-        "admission.example", "8.8.8.8",
-        direct_probe=lambda *_args: pytest.fail("refused admission must not probe"),
-    )) is None
-    assert records == [
-        ">> route-preflight-state host=admission.example decision=window_refused"
-    ]
-
-
 def test_state_diagnostic_sink_failure_cannot_escape(monkeypatch):
     def fail(_record):
         raise RuntimeError("sink failed")
@@ -451,3 +385,59 @@ def test_state_diagnostic_rejects_nonallowlisted_detail(monkeypatch):
     monkeypatch.setattr(tproxy, "_enqueue_route_preflight_root_diagnostic_record", records.append)
     tproxy._log_route_preflight_state("admission.example", "arbitrary response detail")
     assert records == []
+
+
+def test_eight_socket_roots_run_concurrently_and_ninth_is_bounded(monkeypatch):
+    assert tproxy.ROUTE_PREFLIGHT_CONCURRENT_MAX == 8
+    async def scenario():
+        entered = 0
+        ready = asyncio.Event()
+        release = asyncio.Event()
+        async def probe(*_args):
+            nonlocal entered
+            entered += 1
+            if entered == 8:
+                ready.set()
+            await release.wait()
+            return tproxy._SemanticPlainPreflightObservation(tproxy.SEMANTIC_OUTCOME_USABLE)
+        monkeypatch.setattr(tproxy, "_run_bounded_direct_route_preflight", probe)
+        tasks = [asyncio.create_task(tproxy._run_initial_route_preflight(
+            f"parallel-{i}.example", "8.8.8.8", direct_probe=lambda *_: None,
+        )) for i in range(8)]
+        try:
+            await asyncio.wait_for(ready.wait(), 1)
+            assert _counts()[0] == 8
+            assert await tproxy._run_initial_route_preflight(
+                "overflow.example", "8.8.8.8", direct_probe=lambda *_: None,
+            ) is None
+            assert entered == 8
+        finally:
+            release.set()
+            await asyncio.gather(*tasks)
+        assert _counts()[0] == 0
+    asyncio.run(scenario())
+
+
+def test_browser_preflight_has_separate_two_worker_bound(monkeypatch):
+    async def scenario():
+        entered = 0
+        ready = asyncio.Event()
+        release = asyncio.Event()
+        async def browser(*_args, **_kwargs):
+            nonlocal entered
+            entered += 1
+            if entered == 2:
+                ready.set()
+            await release.wait()
+        monkeypatch.setattr(tproxy, "_run_admitted_headless_owned_geph_preflight", browser)
+        tasks = [asyncio.create_task(tproxy._run_headless_owned_geph_preflight()) for _ in range(2)]
+        try:
+            await asyncio.wait_for(ready.wait(), 1)
+            assert await tproxy._run_headless_owned_geph_preflight() is None
+            assert entered == 2
+        finally:
+            release.set()
+            await asyncio.gather(*tasks)
+        await tproxy._run_headless_owned_geph_preflight()
+        assert entered == 3
+    asyncio.run(scenario())
