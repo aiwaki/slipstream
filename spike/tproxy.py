@@ -14531,6 +14531,21 @@ def build_fake_clienthello(sni: str) -> bytes:
 
 _FAKE_CH = build_fake_clienthello(FAKE_DECOY_SNI)
 
+
+def _build_discord_decoy():
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    client = context.wrap_bio(incoming, outgoing, server_side=False,
+                              server_hostname="cloudflare-ech.com")
+    try:
+        client.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    return outgoing.read()
+
+
+_DISCORD_FAKE_CH = _build_discord_decoy()
+
 # zapret-style "fake"/disorder POISON. Proven on this TSPU (2026-07-07): a fake
 # TLS-record-shaped GARBAGE segment injected at the connection's REAL next-seq
 # (isn+1) with a fooling that makes the SERVER drop it (ttl=4 dies in transit)
@@ -14551,14 +14566,18 @@ _syn_lock = threading.Lock()
 SYN_MAP_MAX = 4096
 
 
-def syn_record(sport, remote_ip, isn=None, sisn=None):
+def syn_record(sport, remote_ip, isn=None, sisn=None, timestamp=None):
     with _syn_lock:
         k = (sport, remote_ip)
         ent = _syn_map.get(k) or {"isn": None, "sisn": None}
         if isn is not None:
+            if ent.get("isn") != isn:
+                ent = {"isn": None, "sisn": None}
             ent["isn"] = isn
+            ent["client_ts"] = timestamp
         if sisn is not None:
             ent["sisn"] = sisn
+            ent["server_ts"] = timestamp
         _syn_map[k] = ent
         _syn_map.move_to_end(k)
         while len(_syn_map) > SYN_MAP_MAX:
@@ -14636,11 +14655,10 @@ def inject_fake_poison(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats
 
 
 def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6):
-    """Inject a low-TTL decoy ClientHello on the same tuple.
+    """Send a Discord decoy bound to this observed TCP handshake.
 
-    This mirrors the zapret/Flowseal fake mode for Discord-family traffic: the DPI
-    sees a harmless SNI first, while the server never receives the decoy because
-    the TTL expires in transit.
+    Negotiated timestamps allow server-side PAWS rejection; without timestamp
+    evidence retain the low-TTL variant. Browser TLS bytes remain unchanged.
     """
     try:
         from scapy.all import IP, TCP, Raw
@@ -14653,10 +14671,17 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
         return
     seq = (ent["isn"] + 1) & 0xffffffff
     ack = (ent["sisn"] + 1) & 0xffffffff
+    options = []
+    if ent.get("client_ts") is not None and ent.get("server_ts") is not None:
+        # PAWS rejects the stale timestamp at the server while the observer
+        # sees the decoy. Unlike a low TTL this reaches the complete path.
+        options = [("Timestamp", ((ent["client_ts"] - 60000) & 0xffffffff,
+                                  ent["server_ts"]))]
+        ttl = 64
     pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
            / TCP(sport=src_port, dport=dst_port, flags="PA",
-                 seq=seq, ack=ack, window=64240)
-           / Raw(_FAKE_CH))
+                 seq=seq, ack=ack, window=64240, options=options)
+           / Raw(_DISCORD_FAKE_CH))
     for _ in range(repeats):
         _l3send(pkt)
 
@@ -14990,10 +15015,12 @@ def network_monitor(
         if TCP is not None and p.haslayer(TCP) and p.haslayer(IP):
             t = p[TCP]
             f = int(t.flags)
+            timestamp = next((value[0] for name, value in t.options
+                              if name == "Timestamp" and len(value) == 2), None)
             if t.dport == 443 and (f & 0x02) and not (f & 0x10):
-                syn_record(t.sport, p[IP].dst, isn=t.seq)          # outbound SYN
+                syn_record(t.sport, p[IP].dst, isn=t.seq, timestamp=timestamp)          # outbound SYN
             elif t.sport == 443 and (f & 0x02) and (f & 0x10):
-                syn_record(t.dport, p[IP].src, sisn=t.seq)         # inbound SYN-ACK
+                syn_record(t.dport, p[IP].src, sisn=t.seq, timestamp=timestamp)         # inbound SYN-ACK
             return
         if not p.haslayer(UDP):
             return

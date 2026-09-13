@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 timestamp candidate: installed08fcc49/4c7f2ba3 (consumed) still failed
+Chrome. Independent exact-IP native probes: Discord SNI timeout, cover SNI
+HTTP403 in0.19s; low-TTL poison/disorder/overlap failed; stale timestamp + valid
+cover ClientHello returned Discord /login HTTP200 in0.19s. Candidate captures
+negotiated TCP timestamps, uses stale PAWS timestamp for Discord decoy, retaining
+lowTTL fallback without evidence.19 focused tests PASS; canonical build next.
+No Geph for Discord. output/aud23-discord/timestamp-result.json contains proof.
+
+AUD-23 08fcc49 canonical build and staged verifier PASS. Fresh4c7f2ba3
+transaction prepared/reviewed; next normal Quit and dispatch once. Installed
+remains c295501 until transaction succeeds. All previous runners consumed.
+
 AUD-23 Discord OPEN: reproduced fresh Chrome ERR_CONNECTION_CLOSED and explicit
 CONNECT curl TLS close on installed c295501/118f22e4. CONNECT200 is confirmed.
 Found Discord decoy injects seq=ack=1 rather than observed handshake; candidate
