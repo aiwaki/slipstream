@@ -10,19 +10,20 @@ file.
 
 ## Current Checkpoint
 
-AUD-24 PAUSED at native Quit authorization, not installation. Candidate61bcb2a
-canonical build-input.log and staged-input.log PASS; NEW82e0d6a5 prepared,
-reviewed, NOT DISPATCHED. Incoming /Applications/.Slipstream.incoming-82e0d6a5.app.
-Normal Quit clicked; service stillrunning39477, app39679, native osascript
-waiting SecurityAgent with prompt to stop background daemon. Do NOT dispatch
-replacement until normal Quit finishes and launchctl service is absent.
-Then run ONLY output/aud23-discord-bundle-20260913.82e0d6a5/authorize-once.py
-once, open app, canonical verify:local-install, ask one user-initiated navigation
-Gauzy (automatic Playwright navigation has no physical-input provenance).
-Installed remains9e76e89; Gauzy last physical automated test FAILED. All owned
-Chrome aud24 sessions closed. No capture running. No Discord gateway fix claim.
-Source fixes134 completion/traffic +45 root/gzip/input checks; no unchanged reruns.
-Current source61bcb2a, docs newer; user AGENTS.md untouched/uncommitted.
+AUD-24 installed61bcb2a73b58da0f0bff0ce829d515715dcec075 via82e0d6a5
+at2026-09-13T13:42:14Z. Runner consumed NEVER replay. Canonical
+output/aud24-gauzy/installed-input.log PASS, live PID48233 active/PF applied.
+Daemon dbb68203c45c385796d72cb9298e974b69a7fb7cf0613283e9e9bdc035c40ddd.
+All three source corrections installed. 134 completion/traffic and45 root/gzip/
+input tests reused; no unchanged suite rerun. User asked asynchronously to open
+https://gauzy.co/ once in a fresh ordinary Chrome tab without reload. Awaiting
+content/blank/error result; automated navigation is not physical input evidence.
+No Chrome automation sessions or admin prompts pending. No current capture.
+Next correlate user's result with fresh exact-attempt logs if failure persists.
+Do not claim Gauzy fixed yet; Discord gateway remains OPEN, local-only unchanged.
+Source61bcb2a, docs newer; user AGENTS.md remains untouched/uncommitted.
+
+Previous AUD-24 checkpoints below are historical:
 
 AUD-24 input timing candidate: gzip-events.json confirms safe_incomplete=1
 but no subsequent comparison. Independent code defect: recent input checked
