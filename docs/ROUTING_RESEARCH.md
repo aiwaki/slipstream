@@ -2174,3 +2174,68 @@ on intercepted established TCP, not a contemporaneous connect timeout; it does
 not decode HTTP status or prove which hidden hostname the TLS session uses.
 Keep initial delay and subsequent direct-egress denial as distinct observations.
 All native capture subprocesses reaped; ephemeral FIFO removed; no packet file.
+
+
+### 2026-09-13 confirmed Chrome ECH routing mismatch (AUD-21)
+
+Independent installed Google Chrome152 headed diagnostics used fresh temporary
+profiles via Playwright CLI, keeping the ordinary profile and system settings
+unchanged. Current daemon40559/PF ready/owned Geph up verified first; morning
+learned routes had expired (learned0). Private evidence:
+output/playwright/capacitor-netlog-20260913T130313/comparison-summary.json,
+per-case netlog.json/clienthello-summary.json, diagnostic-route-events.json.
+
+- Default fresh Chrome: Capacitor socket118 TCP completed immediately on local
+  port61838 to172.67.203.214. SSL_ECH_CONFIG_LIST and decoded outgoing
+  SSL_HANDSHAKE_MESSAGE_SENT establish actual public SNI cloudflare-ech.com;
+  separate SSL_ENCRYPTED_CLIENT_HELLO event contains inner capacitorjs.com.
+  After sending1946 bytes, SSL connect job expired at30,003ms with net_error=-7.
+  Chrome's own later retries also stalled. This locates the delay after TCP,
+  during TLS, rather than attributing it generically to network slowness.
+- A second fresh profile with --disable-features=EncryptedClientHello returned
+  Cloudflare403 and revealed the same user-reported direct ISP IP. NetLog still
+  proves actual ECH/outer cloudflare-ech.com: that flag was ineffective on this
+  Chrome build, so this is NOT an ECH-off control. No persistent policy written.
+- A fresh temporary profile seeded with Local State ssl.ech_enabled=false
+  actually sent capacitorjs.com without ECH. Page content loaded. Daemon logs
+ 13:07:32 root admitted,13:07:39 exact Capacitor denial classified plus owned
+  usable proof and route committed. Initial TLS7,585ms, next787ms. Current
+  source thus works when the actual host is visible. Only diagnostic profile
+  was changed; no ordinary-profile/global preference or DNS/proxy/PAC changed.
+- Default ECH-capable fresh profile AFTER learning also loaded. Crucially it
+  did NOT actually encrypt SNI: DNS job98 began A/HTTPS at884278761; A arrived
+  at884278791; HTTPS task timed out/cancelled at884278798 (~37ms from start),
+  leaving endpoint_metadatas empty. Outgoing SNI capacitorjs.com was visible.
+  An ECH extension remained as GREASE; extension presence alone is not proof
+  of real ECH. This observed DNS timing explains a successful default-browser
+  sample amid failures without assuming a cache reset fixed the product.
+
+Source _handle_impl routes using parse_sni(body); it cannot read the inner name.
+Correlated daemon logs probe cloudflare-ech.com as healthy then use system_plain
+or local_strategy. A healthy cover-name root cannot prove the hidden origin's
+health, and a learned capacitorjs.com route cannot match that cover name.
+This is a confirmed product compatibility gap. Do not fix it by Geph-routing
+all shared cover names/CDN IPs or globally disabling ECH. Next product work needs
+an authenticated exact-origin signal/connection binding compatible with ECH;
+merely detecting extension65037 also catches GREASE and is insufficient.
+
+Primary protocol/config references:
+https://developers.cloudflare.com/ssl/edge-certificates/ech/
+https://chromeenterprise.google/intl/en_uk/policies/encrypted-client-hello-enabled/
+https://chromium.googlesource.com/chromium/src/+/1e8e9dc69d467/chrome/browser/ssl/ssl_config_service_manager.cc
+
+### 2026-09-13 Aikido cold-navigation latency measured
+
+Same ordinary installed Chrome binary, diagnostic default profile, one navigation
+(no reload) to app.aikido.dev. Root admitted13:10:36; CDN child committed13:10:58
+following direct/Xbox/split64/split16 incomplete_idle_timeout, with owned Geph
+proof. Browser navigation responseStart22,246ms, responseEnd22,262ms,
+DOMContentLoaded24,192ms/load24,193ms; eventually /login with visible GitHub sign-in.
+Thus this sample's long initial wait is the held root/child recovery sequence,
+not an unexplained whole-network stall. Additional app-origin image requests
+hit system/Xbox partial-record watchdog and confirmation_not_scheduled; some
+resource durations reached12,730ms. Evidence aikido-page-summary.txt and
+ diagnostic-aikido-events.json beside the comparison. Earlier user-reported
+infinite-until-reload event was NOT reproduced; keep that gate open. Production
+idle-broker limitation remains an architectural observation, not a proved cause
+for every historical tab hang. All diagnostic browser sessions closed afterward.

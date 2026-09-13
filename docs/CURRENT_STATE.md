@@ -10,6 +10,24 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 cause CONFIRMED via Chrome NetLog; not fixed):
+Installed Chrome152 headed temporary profiles via Playwright. Daemon40559/PF/
+ownedGeph active checked; earlier learning expired. Evidence under
+output/playwright/capacitor-netlog-20260913T130313/comparison-summary.json.
+Default failure: actual ECH innercapacitorjs.com/publiccloudflare-ech.com decoded,
+TCP immediate then TLS30,003ms timeout. Another actual-ECH profile got403/direct
+ISP IP. --disable-features=EncryptedClientHello ineffective; do not reuse as off.
+Temporary Local State ssl.ech_enabled=false actually disables ECH: visible host,
+root denial/proof committed13:07:39, content. Ordinary profile unchanged.
+Default later success: HTTPS DNS task cancelled37ms, no ECH config, visible SNI
+(with GREASE extension). This explains intermittent success. See AUD-21/research.
+Aikido one cold navigation: first response22,246ms, load24,193ms then /login
+without reload; matching22s child recovery. Historical infinite hang not reproduced.
+All diagnostic sessions closed; preserve profiles/netlogs as private evidence.
+Next exact-origin/connection-binding design for ECH; do not blanket-route public
+cover names/sharedIPs or mistake GREASE for ECH. No product source/install changes;
+installedbebada1 learning/backups and user AGENTS preserved. Full Quit gate open.
+
 Update 2026-09-13 (independent transport proof; diagnosis remains bounded):
 Wireshark4.6.8 CLI installed globally; native FIFO/tcpdump -> unprivileged tshark
 pipeline checked with UID502 control sourceports50595/51307. All children reaped,

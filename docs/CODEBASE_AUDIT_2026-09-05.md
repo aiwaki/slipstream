@@ -2284,3 +2284,18 @@ weather-redirect-tests.log. Earlier successful direct Weather response had a
 locale redirect; lack of matching historical failure evidence still prevents a
 claim about why that prior upstream response changed. Full page latency remains
 separate from the measured bounded proof cost.
+
+
+## AUD-21 — ECH public-name routing mismatch (confirmed, not fixed)
+
+Installed Chrome152 NetLog binds Capacitor's hidden origin to outgoing
+cloudflare-ech.com; current SNI-based routing probes that cover root as healthy
+and misses the exact Capacitor Geph route. Reproduced TLS30s timeout and direct
+Cloudflare403. Actual ECH-off temporary-profile control loads via learned exact
+route. A default successful control had a37ms DNS HTTPS timeout and visible SNI,
+explaining intermittency; GREASE ECH extension is not real encrypted SNI proof.
+See ROUTING_RESEARCH confirmed ECH section and private comparison-summary.json.
+No product source/policy/settings change or installation. Fix must preserve
+exact-origin authority; no blanket cover-name/IP Geph rule or global ECH disable.
+Aikido cold-navigation delay separately measured22.2s held response/24.2s load;
+original infinite-until-reload symptom remains unqualified.
