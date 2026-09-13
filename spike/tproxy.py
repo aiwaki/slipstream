@@ -148,6 +148,7 @@ class OwnedPfStateError(RuntimeError):
 
 
 PROXY_PORT = 1080
+_managed_proxy_lease = None
 DIOCNATLOOK = 0xC0544417
 PF_OUT = 2
 PF_NATLOOK_SIZE = 84
@@ -3274,7 +3275,12 @@ def current_system_proxy_status():
     res = _run("scutil", "--proxy")
     if res.returncode != 0:
         return {"state": "unknown", "kind": "", "error": res.stderr[:200]}
-    return system_proxy_status_from_scutil(res.stdout)
+    result = system_proxy_status_from_scutil(res.stdout)
+    lease = _managed_proxy_lease
+    result["managed_by_slipstream"] = bool(
+        lease is not None and lease.owns_effective_proxy()
+    )
+    return result
 
 
 def system_dns_status_from_scutil(raw):
@@ -13836,6 +13842,7 @@ async def serve_until_shutdown(
     shutdown,
     drain_timeout=SHUTDOWN_DRAIN_SECONDS,
     auxiliary_servers=(),
+    before_stop=None,
 ):
     """Stop new interception before giving accepted streams time to finish."""
     async with server:
@@ -13845,6 +13852,8 @@ async def serve_until_shutdown(
             (serving, stopping),
             return_when=asyncio.FIRST_COMPLETED,
         )
+        if before_stop is not None:
+            before_stop()
         if serving in done:
             stopping.cancel()
             await asyncio.gather(stopping, return_exceptions=True)
@@ -13982,6 +13991,8 @@ def _script_runtime_payload(source_file):
         ),
         (os.path.join(source_dir, "route_preflight.py"), "route_preflight.py"),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
+        (os.path.join(source_dir, "https_connect.py"), "https_connect.py"),
+        (os.path.join(source_dir, "managed_https_proxy.py"), "managed_https_proxy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
         (
             os.path.join(source_dir, "semantic_route_signal.py"),
@@ -19614,13 +19625,25 @@ async def _handle_impl(reader, writer):
     connection_started_at_unix_ms = int(time.time() * 1000)
     sock = writer.get_extra_info("socket")
     peer_endpoint = writer.get_extra_info("peername")
+    connect_host = None
     try:
         dst_ip, dst_port = orig_dst(sock)
-    except OSError as e:
-        if VERBOSE:
-            print(f"  DIOCNATLOOK failed: {e}", file=sys.stderr)
-        writer.close()
-        return
+    except OSError:
+        # A browser explicitly connected to our loopback listener has no PF
+        # NAT entry. CONNECT supplies the exact origin before ECH hides it.
+        # Keep this authority on this stream only; never attach it to a CDN IP.
+        import https_connect
+        try:
+            admission = await https_connect.admit(
+                reader, writer, system_resolve_async,
+            )
+            if admission is None:
+                writer.close()
+                return
+            connect_host, dst_ip, dst_port = admission
+        except (ValueError, OSError):
+            writer.close()
+            return
     if VERBOSE:
         print(f"  accepted PF stream -> {dst_ip}:{dst_port}", file=sys.stderr)
     if _recursive_proxy_destination(dst_ip, dst_port):
@@ -19637,9 +19660,14 @@ async def _handle_impl(reader, writer):
         head = await asyncio.wait_for(reader.readexactly(5), timeout=15)
         if head[0] == 0x16:
             is_tls = True
-            body = await reader.readexactly(struct.unpack("!H", head[3:5])[0])
-            host = parse_sni(body)
+            body = await asyncio.wait_for(
+                reader.readexactly(struct.unpack("!H", head[3:5])[0]), timeout=15,
+            )
+            host = connect_host or parse_sni(body)
         else:
+            if connect_host is not None:
+                writer.close()
+                return
             body = await reader.read(65536)
     except (asyncio.IncompleteReadError, asyncio.TimeoutError, OSError):
         writer.close()
@@ -21649,6 +21677,8 @@ def _installed_browser_worker_from_launchd(*, expected_uid=0):
         or tuple(arguments[1:]) not in {
             ("--port", str(PROXY_PORT)),
             ("--port", str(PROXY_PORT), "--no-voice"),
+            ("--port", str(PROXY_PORT), "--managed-https-proxy"),
+            ("--port", str(PROXY_PORT), "--no-voice", "--managed-https-proxy"),
         }
         or not _installed_daemon_command_owned(shlex.join(arguments))
     ):
@@ -21716,7 +21746,30 @@ def _packaged_browser_worker_executable(source_executable):
     return candidate
 
 
-def do_install(port):
+def _installed_managed_https_proxy_requested():
+    """Preserve an explicitly enabled mode across normal app reinstalls."""
+    try:
+        descriptor = os.open(LAUNCHD_PLIST, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+                    or metadata.st_mode & 0o022 or metadata.st_size > 65536):
+                return False
+            value = plistlib.loads(stream.read(65537))
+        arguments = value.get("ProgramArguments", [])
+        return bool(value.get("Label") == LAUNCHD_LABEL
+                    and isinstance(arguments, list)
+                    and all(isinstance(item, str) for item in arguments)
+                    and _installed_daemon_command_owned(shlex.join(arguments))
+                    and "--managed-https-proxy" in arguments)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def do_install(port, managed_https_proxy=False):
+    managed_https_proxy = bool(
+        managed_https_proxy or _installed_managed_https_proxy_requested()
+    )
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
     #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
@@ -21802,6 +21855,8 @@ def do_install(port):
             with open(secret_path, "w") as handle:
                 handle.write(tgws_secret_backup.strip())
             os.chmod(secret_path, 0o600)
+        if managed_https_proxy:
+            prog_args.append("--managed-https-proxy")
         plist = launchd_plist_text(
             prog_args,
             INSTALL_DIR,
@@ -21923,9 +21978,29 @@ async def _start_transparent_loopback_server(port):
     return server
 
 
-async def amain(port, voice=True):
+async def _monitor_managed_https_proxy(lease, shutdown):
+    try:
+        while not shutdown.is_set():
+            try:
+                await asyncio.wait_for(shutdown.wait(), 2)
+            except asyncio.TimeoutError:
+                if lease.needs_refresh():
+                    lease.close()
+                    await asyncio.sleep(0.2)  # let configd reveal original state
+                    if shutdown.is_set():
+                        return
+                    try:
+                        lease.start()
+                    except (OSError, ValueError):
+                        pass  # external configuration wins; retry after changes
+    finally:
+        lease.close()
+
+
+async def amain(port, voice=True, managed_https_proxy=False):
     global _geph_up, _pending_navigation_probe_available
     global _route_preflight_headless_available, _status_listener_binding
+    global _managed_proxy_lease
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(asyncio_exception_handler)
     shutdown = asyncio.Event()
@@ -22052,6 +22127,31 @@ async def amain(port, voice=True):
     print(">> quit + reopen Discord normally; its updater is captured too")
     print(">> Ctrl-C (or close terminal) to stop and restore pf")
     try:
+        proxy_lease = None
+        proxy_monitor = None
+        if managed_https_proxy:
+            from managed_https_proxy import ProxyLease
+            proxy_lease = ProxyLease(port)
+            try:
+                proxy_lease.start()
+                # configd recomputes effective proxies asynchronously. Never
+                # claim this lease is active merely because a key was added.
+                for _ in range(20):
+                    if proxy_lease.owns_effective_proxy():
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    raise ValueError("temporary proxy did not become effective")
+                _managed_proxy_lease = proxy_lease
+            except (OSError, ValueError) as error:
+                # The transparent path remains available if external settings
+                # preclude a non-destructive temporary overlay.
+                print(f">> managed HTTPS proxy unavailable: {error}", file=sys.stderr)
+                proxy_lease.close()
+            _managed_proxy_lease = proxy_lease
+            proxy_monitor = asyncio.create_task(
+                _monitor_managed_https_proxy(proxy_lease, shutdown)
+            )
         drained = await serve_until_shutdown(
             server,
             shutdown,
@@ -22059,6 +22159,7 @@ async def amain(port, voice=True):
                 semantic_server,
                 pending_navigation_server,
             ),
+            before_stop=proxy_lease.close if proxy_lease is not None else None,
         )
         if not drained:
             print(
@@ -22066,6 +22167,12 @@ async def amain(port, voice=True):
                 file=sys.stderr,
             )
     finally:
+        if proxy_monitor is not None:
+            proxy_monitor.cancel()
+            await asyncio.gather(proxy_monitor, return_exceptions=True)
+        if proxy_lease is not None:
+            proxy_lease.close()
+        _managed_proxy_lease = None
         with _status_write_lock:
             _status_listener_binding = None
         _pending_navigation_probe_available = False
@@ -22213,6 +22320,8 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--no-voice", action="store_true",
                     help="disable the UDP voice plane")
+    ap.add_argument("--managed-https-proxy", action="store_true",
+                    help="temporarily publish the loopback HTTPS CONNECT proxy")
     ap.add_argument("--install", action="store_true",
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
     ap.add_argument("--stop", action="store_true",
@@ -22308,7 +22417,7 @@ def main():
         sys.exit(1)
 
     if args.install:
-        sys.exit(0 if do_install(args.port) else 1)
+        sys.exit(0 if do_install(args.port, managed_https_proxy=args.managed_https_proxy) else 1)
     if args.stop:
         sys.exit(0 if do_stop() else 1)
     if args.uninstall:
@@ -22367,7 +22476,8 @@ def main():
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
     try:
-        asyncio.run(amain(args.port, voice=not args.no_voice))
+        asyncio.run(amain(args.port, voice=not args.no_voice,
+                          managed_https_proxy=args.managed_https_proxy))
     except KeyboardInterrupt:
         pass
     finally:

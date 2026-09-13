@@ -695,6 +695,19 @@ class VerifyMacosAppBundleTests(unittest.TestCase):
                 expected_pid=4242,
             )
 
+    def test_launchctl_accepts_only_exact_managed_proxy_flag(self) -> None:
+        payload = self._launchctl_payload().replace(
+            f"        {verifier.LISTENER_PORT}\n",
+            f"        {verifier.LISTENER_PORT}\n        --managed-https-proxy\n",
+        )
+        report = verifier.parse_launchctl_print(payload, expected_pid=4242)
+        self.assertEqual(report["arguments"][-1], "--managed-https-proxy")
+        with self.assertRaises(verifier.VerificationError):
+            verifier.parse_launchctl_print(
+                payload.replace("--managed-https-proxy", "--other-proxy"),
+                expected_pid=4242,
+            )
+
     def test_launchctl_print_rejects_truncated_or_ambiguous_snapshot(self) -> None:
         payload = self._launchctl_payload()
         truncated = payload.rstrip().removesuffix("}")

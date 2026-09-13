@@ -3,6 +3,29 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## AUD-21 managed HTTPS proxy — authorized 2026-09-13
+
+The user explicitly authorized a Slipstream-managed proxy after confirmation
+that ECH hides the origin from transparent SNI routing. This supersedes the
+no-proxy-mutation rule only for this opt-in mode. DNS, VPN, foreign proxy
+configuration and persistent macOS preferences remain untouched.
+
+The loopback listener accepts bounded HTTPS CONNECT requests when no PF NAT
+entry exists. The authority is bound to that stream and enters the existing
+routing/proof machinery; it never becomes an IP-to-origin association. TLS
+remains end-to-end. Shared ECH cover names do not acquire Geph authority.
+
+`--managed-https-proxy` publishes only temporary per-service State PAC values
+using SCDynamicStoreAddTemporaryValue. Existing keys and explicit proxy choices
+win. Setup preferences are never overwritten. configd removes the lease on
+process death; normal shutdown closes it before closing the listener. A network
+change replaces only the owned lease. Installation can opt in explicitly and
+preserves that choice on subsequent normal reinstalls. This is candidate code,
+not installed qualification. The local PAC selects CONNECT only for Internet DNS authorities on port 443;
+HTTP, IP literals, local destinations and other ports remain direct. CONNECT
+itself rejects non-public destinations. The mode remains opt-in pending
+physical browser and installed shutdown qualification.
+
 ## Audit corrections — 2026-09-05
 
 ### AUD-17 bounded autonomous bootstrap recovery — authorized 2026-09-08

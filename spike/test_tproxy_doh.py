@@ -750,6 +750,9 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
 
 
 _SCRIPT_RUNTIME_FIXTURE = {
+    "bootstrap_tls_stream.py": "# bootstrap TLS stream\n",
+    "https_connect.py": "# HTTPS CONNECT\n",
+    "managed_https_proxy.py": "# temporary proxy lease\n",
     "tproxy.py": "import connection_probe\nimport geph_backend\n",
     "requirements-runtime.txt": "certifi==2026.6.17 --hash=sha256:fixture\n",
     "address_attempts.py": "VALUE = 1\n",

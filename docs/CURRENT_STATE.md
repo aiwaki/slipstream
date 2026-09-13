@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 candidate implementation; NOT installed):
+User explicitly authorized managed proxy mode in this task. Added bounded
+CONNECT admission on the existing loopback listener when no PF entry exists;
+per-stream authority feeds existing routing, no IP/cover-name learning.
+Added opt-in temporary SCDynamicStore HTTPS lease, refusal of foreign settings,
+shutdown-before-listener cleanup, primary-network refresh, installed flag
+preservation and managed status. New modules https_connect.py and
+managed_https_proxy.py; user AGENTS.md remains untouched by agent.
+Focused tests in output/aud21-connect/focused-tests.log; native harmless-key SIGKILL selftest passed and
+modified no network preferences. Frozen daemon built; app build/install still
+pending. CLI flag --managed-https-proxy is opt-in. Local PAC preserves HTTP/non443/IP-literal/intranet direct paths; CONNECT
+admits only public DNS authorities on443. Installedbebada1/learning/backups remain unchanged. Next: candidate
+integration/browser proof, canonical bundle, new one-shot replacement only.
+
 Update 2026-09-13 (AUD-21 cause CONFIRMED via Chrome NetLog; not fixed):
 Installed Chrome152 headed temporary profiles via Playwright. Daemon40559/PF/
 ownedGeph active checked; earlier learning expired. Evidence under

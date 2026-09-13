@@ -604,7 +604,7 @@ def verify_install_attestation(
         "LaunchDaemon plist must not override the frozen production executable",
     )
     require(
-        arguments == expected_arguments,
+        arguments in (expected_arguments, expected_arguments + ["--managed-https-proxy"]),
         "LaunchDaemon plist does not use the exact frozen production arguments",
     )
     require(plist.get("RunAtLoad") is True, "LaunchDaemon plist must run at load")
@@ -645,6 +645,7 @@ def verify_install_attestation(
         "launchd_pid": launchd_pid,
         "state": attested_state,
         "pf_active": pf_active,
+        "managed_https_proxy": arguments == expected_arguments + ["--managed-https-proxy"],
     }
 
 
@@ -789,7 +790,8 @@ def parse_launchctl_print(payload: str, *, expected_pid: int) -> dict[str, Any]:
     require(program == str(INSTALLED_DAEMON), "launchctl is running the wrong daemon program")
     arguments = _launchctl_first_block(payload, "arguments")
     require(
-        arguments == [str(INSTALLED_DAEMON), "--port", str(LISTENER_PORT)],
+        arguments in ([str(INSTALLED_DAEMON), "--port", str(LISTENER_PORT)],
+                      [str(INSTALLED_DAEMON), "--port", str(LISTENER_PORT), "--managed-https-proxy"]),
         "launchctl is running the wrong daemon arguments",
     )
     pid_text = _launchctl_first_scalar(payload, "pid")
@@ -848,6 +850,11 @@ def verify_installed_app(
         expected_pid=attestation["launchd_pid"],
     )
     launchd_live = verify_live_launchd(expected_pid=attestation["launchd_pid"])
+    require(
+        ("--managed-https-proxy" in launchd_live["arguments"])
+        == attestation["managed_https_proxy"],
+        "live managed HTTPS proxy mode differs from installed plist",
+    )
     return {
         "path": str(installed_app.resolve()),
         "tree_sha256": installed_tree,
