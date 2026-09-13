@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 user confirms latest61bcb2a STILL blank. Logs input-rotated-events.json
+and input-events.json show safe_incomplete=1, no comparison, then Xbox-local
+partial-record stall: local progression fixed but transport still fails.
+One read-only live-peer provenance diagnostic verified Chrome ownership/signature,
+rejected not_frontmost (current app state, NOT proof of original failure).
+The45s new-peer collector completed with results=[]: no new peer observed;
+this does not establish absence of navigation (connection reuse possible).
+Replacement read-only collector output/aud24-gauzy/provenance-foreground.py
+waits up to300s for Chrome foreground, checks up to3 existing peers with exact
+production1.5s/.5s/5s admission limits. Native exec72834 pending, output
+provenance-foreground-result.json. User asked to open Gauzy, leave Chrome
+foreground15s; response pending. No app source edits or installation this turn.
+Resume collector output before any additional probe; avoid duplicate prompts.
+No route/proxy/DNS changes. All runners through82e0d6a5 consumed.
+
 AUD-24 installed61bcb2a73b58da0f0bff0ce829d515715dcec075 via82e0d6a5
 at2026-09-13T13:42:14Z. Runner consumed NEVER replay. Canonical
 output/aud24-gauzy/installed-input.log PASS, live PID48233 active/PF applied.
