@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 e0e82cc8 installed; local PAC transport defect found):
+NEW runner e0e82cc8 dispatched once/succeeded08:44:22Z; now consumed, never
+replay. Canonical installed verification PASS, daemon33833, ownedGeph up,
+PAC active/managed. Normal tray relaunched. HTTP PAC fetch reset: native
+DIOCNATLOOK control proves local unredirected flow returns127.0.0.1:1080,
+not ENOENT, so recursion guard discarded legitimate proxy requests.
+Evidence output/aud21-connect/pac-natlook.json. Fixed source to admit this
+exact unchanged loopback tuple as CONNECT/PAC; no recursive TLS dialing.
+Regression test added; next build/new unique replacement required.
+Preserve e0e82cc8 backups and all earlier generations. User already authorized
+managed proxy/install; no new permission needed. Physical site success is OPEN.
+
 Update 2026-09-13 (AUD-21 candidate READY, awaiting normal user Quit):
 Source128b5002ddfe5a59989226b6ad8ad552c3567727 committed.53 focused tests plus
 27 canonical verifier tests PASS;7 PAC routing cases PASS. Native temporary

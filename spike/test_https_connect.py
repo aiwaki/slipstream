@@ -190,3 +190,20 @@ def test_connect_authority_overrides_cover_name_only_on_its_stream(monkeypatch):
             await tproxy._handle_impl(reader, Writer())
     asyncio.run(run())
     assert names == ['example.com', 'cloudflare-ech.com']
+
+
+def test_darwin_untranslated_loopback_nat_entry_serves_pac(monkeypatch):
+    import tproxy
+    monkeypatch.setattr(tproxy, 'orig_dst', lambda _sock: ('127.0.0.1', 1080))
+    class ClosingWriter(Writer):
+        def close(self):
+            self.closed = True
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'GET /slipstream-https.pac HTTP/1.1\r\n\r\n')
+        writer = ClosingWriter()
+        await tproxy._handle_impl(reader, writer)
+        assert b'200 OK' in writer.data
+        assert b'FindProxyForURL' in writer.data
+        assert writer.closed
+    asyncio.run(run())

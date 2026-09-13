@@ -19628,6 +19628,11 @@ async def _handle_impl(reader, writer):
     connect_host = None
     try:
         dst_ip, dst_port = orig_dst(sock)
+        if _recursive_proxy_destination(dst_ip, dst_port):
+            # Darwin can return an unchanged loopback destination for a
+            # non-redirected local flow. It is an explicit proxy request, not
+            # a TLS origin to dial. Admission below still rejects raw TLS.
+            raise OSError(errno.ENOENT, "untranslated loopback proxy flow")
     except OSError:
         # A browser explicitly connected to our loopback listener has no PF
         # NAT entry. CONNECT supplies the exact origin before ECH hides it.
