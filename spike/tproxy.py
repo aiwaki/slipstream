@@ -2818,6 +2818,7 @@ _route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
 _route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
 _route_preflight_execution_leases = {}  # proof Future -> shared execution lease
 _route_preflight_window = deque()
+_route_preflight_host_starts = {}
 _route_preflight_consumed = OrderedDict()  # capability -> expiry monotonic
 _route_preflight_lock = threading.RLock()
 
@@ -7417,6 +7418,9 @@ def _prune_initial_route_preflights_locked(now):
     cutoff = now - ROUTE_PREFLIGHT_WINDOW
     while _route_preflight_window and _route_preflight_window[0] <= cutoff:
         _route_preflight_window.popleft()
+    for host, started in tuple(_route_preflight_host_starts.items()):
+        if started <= cutoff:
+            _route_preflight_host_starts.pop(host, None)
     for host, entry in tuple(_route_preflight_cache.items()):
         if (
             entry.expires_at <= now
@@ -9408,7 +9412,7 @@ def _enqueue_route_preflight_root_diagnostic_record(record):
 
 _PREFLIGHT_STATE_DECISIONS = frozenset({
     "host_ineligible", "local_claim_reuse", "root_cache_reuse",
-    "concurrent_refused", "window_refused", "root_admitted",
+    "concurrent_refused", "window_refused", "host_window_refused", "root_admitted",
     "root_cancelled", "root_exception", "backend_unready", "proof_no_budget",
     "proof_absent", "commit_refused", "committed", "local_stage_skips_root",
     "geph_no_complete_response", "geph_response_usable", "geph_response_refused",
@@ -10055,6 +10059,13 @@ async def _run_initial_route_preflight(
             return None
         future = _route_preflight_inflight.get(inflight_key)
         if future is None:
+            if h in _route_preflight_host_starts:
+                # Scheduling fairness only: even a different CDN address may
+                # not spend a second root start for this host in the window.
+                # No result, health cache or route is shared across addresses;
+                # exact-key in-flight waiters still join their existing owner.
+                _log_route_preflight_state(h, "host_window_refused")
+                return None
             if (
                 _route_preflight_execution_count_locked()
                 >= ROUTE_PREFLIGHT_CONCURRENT_MAX
@@ -10075,6 +10086,7 @@ async def _run_initial_route_preflight(
             _route_preflight_inflight[inflight_key] = future
             _route_preflight_execution_leases[future] = execution_lease
             _route_preflight_window.append(now)
+            _route_preflight_host_starts[h] = now
             owner = True
     if not owner:
         try:

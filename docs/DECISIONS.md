@@ -89,6 +89,12 @@ results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-0
   left, a new root cannot start without room for its possible child, even
   when that root would ultimately need none. These scheduling rights confer
   no routing authority and change no proof, timeout or exclusion policy.
+- Each normalized host may start at most one root preflight per admission
+  window, regardless of outcome or destination address. Exact-address inflight
+  callers still coalesce. This outcome-independent scheduling record expires
+  with the window; it is not health evidence or a retry-result cache and grants
+  no route authority. It prevents duplicate background hosts consuming scarce
+  starts while preserving the global start and child-reservation bounds.
 - Relay ingress, downstream delivery and cleanup are different observations.
   Observe received TLS framing before waiting for browser drain; publish delivered
   bytes and the first-delivery callback only after successful drain. A partial-TLS

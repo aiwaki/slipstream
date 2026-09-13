@@ -2276,3 +2276,24 @@ and Aikido/login URL. JavaScript from Apple Events was disabled and was not
 enabled; the AX heading query yielded no text. Safari evidence is therefore
 navigation/title-level, not a DOM-content assertion. Earlier infinite Aikido
 hang was not reproduced; do not claim every historical stall shares ECH cause.
+
+
+## AUD-21 www Weather recurrence (2026-09-13)
+
+User Safari screenshot shows a regional denial for www.weather.com; earlier
+apex Weather title checks did not validate this origin or Safari document body.
+Installed source6b8ca7c had managed PAC active. At13:57:53,13:58:10 and13:58:11
+local time the exact www host was refused by the global preflight window.
+Seven background roots had started, including two ocsp2.apple.com addresses.
+A new root needs two credits (own start plus child reservation); limit is eight.
+At13:58:47 a diagnostic CONNECT curl admitted www; direct regional denial plus
+usable owned-Geph response committed its route at13:58:51. That diagnostic
+learned the route and cannot validate a later cold-start fix. Learning retained.
+Evidence: output/aud21-www-weather/{window-route-events,later-route-events}.json.
+
+Candidate fairness patch charges each host at most once per60-second window,
+independent of outcome; exact-IP proof and inflight coalescing remain unchanged.
+Deterministic replay confirms a duplicate second address consumes no extra start
+and a new host fits while preserving child reservation. Expiry permits a fresh
+address probe.96 preflight/bootstrap tests pass (fairness-tests.log). This bounds
+duplicate starvation; saturation by many unique hosts remains possible.

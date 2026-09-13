@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 www Weather recurrence; candidate fairness fix):
+Installed6b8ca7c remains active. User Safari www origin returned regional denial.
+Logs prove window_refused after seven background root starts, including a
+duplicate ocsp host/address variant. Diagnostic at13:58:47 learned www route;
+do not erase learning or claim subsequent warm success proves cold admission.
+Candidate limits each host to one root start per60-second admission window;
+exact-address proof/coalescing and global8/child reservations unchanged.
+96 focused preflight/bootstrap tests PASS, output/aud21-www-weather/fairness-tests.log.
+Next canonical build, NEW unique replacement (39c49075 and predecessors consumed),
+installed verification and actual browser content check. Unique-host saturation
+remains possible; patch is duplicate fairness, not unlimited admission.
+User AGENTS changes preserved. See ROUTING_RESEARCH for measured sequence.
+
 Update 2026-09-13 (AUD-21 managed CONNECT installed and browser-checked):
 Installed source6b8ca7c63a31fedaa4e2fb41c3db2fd488531394 via NEW39c49075
 runner, succeeded08:50:59Z. Both e0e82cc8 and39c49075 runners consumed; NEVER

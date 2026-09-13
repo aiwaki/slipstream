@@ -128,6 +128,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     route_preflight_inflight = dict(tproxy._route_preflight_inflight)
     route_preflight_execution_leases = dict(tproxy._route_preflight_execution_leases)
     route_preflight_window = deque(tproxy._route_preflight_window)
+    route_preflight_host_starts = dict(tproxy._route_preflight_host_starts)
     route_preflight_consumed = OrderedDict(tproxy._route_preflight_consumed)
     pending_navigation_probe_available = (
         tproxy._pending_navigation_probe_available
@@ -290,6 +291,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._route_preflight_inflight.clear()
         tproxy._route_preflight_execution_leases.clear()
         tproxy._route_preflight_window.clear()
+        tproxy._route_preflight_host_starts.clear()
         tproxy._route_preflight_consumed.clear()
         tproxy._pending_navigation_probe_available = False
         tproxy._route_preflight_headless_available = False
@@ -444,6 +446,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._route_preflight_execution_leases.update(route_preflight_execution_leases)
         tproxy._route_preflight_window.clear()
         tproxy._route_preflight_window.extend(route_preflight_window)
+        tproxy._route_preflight_host_starts.clear()
+        tproxy._route_preflight_host_starts.update(route_preflight_host_starts)
         tproxy._route_preflight_consumed.clear()
         tproxy._route_preflight_consumed.update(route_preflight_consumed)
         tproxy._pending_navigation_probe_available = (
@@ -12327,16 +12331,16 @@ def test_route_preflight_does_not_share_local_recovery_across_addresses(
                 direct_probe=lambda *_args: None,
             )
         )
-        await asyncio.wait_for(entered["1.1.1.1"].wait(), timeout=1.0)
+        assert await asyncio.wait_for(waiter, timeout=1.0) is None
         release.set()
         return await asyncio.gather(owner, waiter), calls
 
     (owner_result, waiter_result), calls = asyncio.run(scenario())
 
     assert isinstance(owner_result, tproxy._RoutePreflightLocalRecoveryClaim)
-    assert isinstance(waiter_result, tproxy._RoutePreflightLocalRecoveryClaim)
-    assert owner_result.host == waiter_result.host == host
-    assert set(calls) == {"8.8.8.8", "1.1.1.1"}
+    assert waiter_result is None
+    assert owner_result.host == host
+    assert calls == ["8.8.8.8"]
     assert not any(key[0] == host for key in tproxy._route_preflight_inflight)
 
 
@@ -13240,6 +13244,49 @@ def test_owned_geph_commit_rejects_mismatched_epoch_identity(monkeypatch):
     )
     assert not tproxy._auto_geph_learned_exact_host(host)
     assert not owner_epoch.done()
+
+
+def test_route_preflight_duplicate_host_preserves_new_host_window(monkeypatch):
+    """Replay the observed seven background starts, including a second edge."""
+    _enable_owned_geph_preflight(monkeypatch)
+    calls = []
+    started = time.monotonic()
+
+    def direct(ip, host, _timeout):
+        calls.append((host, ip))
+        return tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+
+    async def run(host, ip="8.8.8.8", now=started):
+        return await tproxy._run_initial_route_preflight(
+            host, ip, direct_probe=direct, now=now,
+            geph_probe=lambda *_args: pytest.fail("scheduler authorized Geph"),
+        )
+
+    async def scenario():
+        for host in ["sink.example", "quota.example", "ocsp.example",
+                     "wps.example"]:
+            assert await run(host) is None
+        assert await run("ocsp.example", "1.1.1.1") is None
+        for host in ["store.example", "settings.example", "new-site.example"]:
+            assert await run(host) is None
+        assert len(calls) == 7
+        assert calls[-1][0] == "new-site.example"
+        assert len(tproxy._route_preflight_window) == 7
+        assert await run("over-budget.example") is None
+        assert len(calls) == 7
+        assert all(entry.outcome == tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR
+                   for entry in tproxy._route_preflight_cache.values())
+        assert "over-budget.example" not in tproxy._route_preflight_cache
+        assert tproxy._route_preflight_cache["ocsp.example"].exact_address == "8.8.8.8"
+        assert not any(tproxy._auto_geph_learned_exact_host(host)
+                       for host, _ip in calls)
+        assert not tproxy._route_preflight_execution_leases
+        assert await run("ocsp.example", "1.1.1.1",
+                         started + tproxy.ROUTE_PREFLIGHT_WINDOW + 1) is None
+        assert calls[-1] == ("ocsp.example", "1.1.1.1")
+        assert len(calls) == 8
+
+    asyncio.run(scenario())
 
 
 def test_route_preflight_healthy_direct_never_probes_geph(monkeypatch):
