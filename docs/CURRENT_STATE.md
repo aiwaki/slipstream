@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 fairness INSTALLED; Safari confirmation pending):
+Installed source3332d27e6495d5e0fd683b5d5061d2c00c7803aa via NEW fdc265fa
+one-shot runner; succeeded09:11:37Z. fdc265fa consumed, NEVER replay.
+Canonical installed verify PASS; daemon48375 active/PF ready/managed PAC.
+App tree467026b27871a8a90e8e10f105713c701b18c4c802646a03b81f3096f7cf33a7.
+Normal Quit restored original proxy dictionary before replacement. Backups and
+learning retained.96 focused preflight/bootstrap tests PASS; build PASS.
+Fresh Chrome www.weather.com redirects to weather.com/?Goto=Redirected; no
+regional denial, document contains site UI. Response2415ms/DOM3030ms; forecast
+values placeholders and load event0 at sample, so not full weather-data proof.
+Evidence output/playwright/aud21-www-weather/result.json; installed artifacts
+output/aud21-www-weather. User asked for one Safari www navigation; pending.
+Do not call warm navigation proof of cold admission: www learned before patch.
+Unique-host saturation remains possible; duplicate admission issue fixed.
+
 Update 2026-09-13 (AUD-21 www Weather recurrence; candidate fairness fix):
 Installed6b8ca7c remains active. User Safari www origin returned regional denial.
 Logs prove window_refused after seven background root starts, including a
@@ -18,8 +33,10 @@ do not erase learning or claim subsequent warm success proves cold admission.
 Candidate limits each host to one root start per60-second admission window;
 exact-address proof/coalescing and global8/child reservations unchanged.
 96 focused preflight/bootstrap tests PASS, output/aud21-www-weather/fairness-tests.log.
-Next canonical build, NEW unique replacement (39c49075 and predecessors consumed),
-installed verification and actual browser content check. Unique-host saturation
+Canonical build PASS. NEW fdc265fa runner ready/incoming tree verified;
+source3332d27, daemon4e39f763d13fbaf5cd99a06663529800a4f55a0ffdbfa3a3d6de438d86f94989.
+Next normal Quit then dispatch output/aud21-fairness-bundle-20260913.fdc265fa/authorize-once.py
+once;39c49075 and predecessors consumed. Installed verification/browser check pending. Unique-host saturation
 remains possible; patch is duplicate fairness, not unlimited admission.
 User AGENTS changes preserved. See ROUTING_RESEARCH for measured sequence.
 
