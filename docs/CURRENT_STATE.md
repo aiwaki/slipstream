@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 OPEN / native diagnostic confirmation pending: installed840c82e via
+b4f166ad succeeded10:32:27Z, canonical installed-observer.log PASS, but fresh
+Chrome /login still blank (HTML466ms, JS pending). All runners throughb4f166ad
+consumed. 19 observer-focused tests PASS; reused117 traffic tests. Native
+timestamp full-asset controls earlier200/90KB, then decayed: later original,
+fixed and alternate-host/IP probes all failed. DO NOT claim timestamp fix
+qualified. Modern runtime fake is1523bytes (MTU concern), but compact190/289/207
+controls also failed; unqualified template removed from source, patch retained
+in output/aud23-discord/unqualified-compact-template.patch.
+Pending exec session14187 is a read-only native SYN capture+single asset TLS
+probe, awaiting macOS confirmation (osascript96928 at last observation). Its
+result should land output/aud23-discord/failure-syn.json; inspect flags/directions
+to rule out two SYN retransmits being mistaken for SYN/SYNACK before more fixes.
+Earlier native collector merely extracted two sequence numbers; validate this.
+Installed packet captures no visible fake; BPF injection visibility/MTU vs
+observer race are NOT causally settled. Chrome aud23-observer closing.
+
+AUD-23 840c82e build/staged PASS, newb4f166ad reviewed. Next normalQuit and
+one dispatch.588e5b3c and all earlier runners consumed. Browser gate OPEN.
+
 AUD-23 installed dfbc8ef/588e5b3c consumed: main Discord response426ms but
 JS asset closed; not fixed yet. Native timestamp control downloaded full90KB
 asset in0.23s. Installed packet capture shows no decoy in failed attempts.
