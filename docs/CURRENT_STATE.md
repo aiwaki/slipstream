@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 candidate READY, awaiting normal user Quit):
+Source128b5002ddfe5a59989226b6ad8ad552c3567727 committed.53 focused tests plus
+27 canonical verifier tests PASS;7 PAC routing cases PASS. Native temporary
+non-network key appeared and vanished after SIGKILL; preferences unchanged.
+Canonical npm build:local PASS: daemon eb8f65f857f4eddc1fa85bb5299f12a34c962a8c1f02a0a0a92c31a24d20795a,
+app tree80b8b6dea25bdc28c3e0841645a090614e2398a7557f06e049693ea35ba449ae.
+New UNUSED one-shot runner:
+output/aud21-connect-bundle-20260913.e0e82cc8/authorize-once.py.
+Incoming /Applications/.Slipstream.incoming-e0e82cc8.app matches canonical tree.
+Exact delta reviewed: new identities/paths, preservepror2xal backup, install
+--managed-https-proxy. Native script snapshots/checks its own root-private copy.
+No authorization-dispatched marker exists; DO NOT run until normal Quit and
+stable stop proof. CUA getApp Slipstream timed out(-10005); user must choose
+tray Quit (AppleEvent Quit is code-less and app intentionally ignores it).
+Installedbebada1 remains live/unchanged. Next user ready -> dispatch NEW runner
+once, verify installed status/PAC/launchd via npm verify:local-install, launch
+tray normally/ownedGeph, then fresh visible Chrome+Safari without flags/reloads.
+All historical runners consumed; never replay. Learning/backups/AGENTS preserved.
+
 Update 2026-09-13 (AUD-21 candidate implementation; NOT installed):
 User explicitly authorized managed proxy mode in this task. Added bounded
 CONNECT admission on the existing loopback listener when no PF entry exists;
