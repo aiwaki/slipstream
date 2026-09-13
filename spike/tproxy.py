@@ -5070,6 +5070,7 @@ def _semantic_plain_preflight_probe_detail(
                 stream_closed=stream_closed,
                 idle_timed_out=idle_timed_out,
                 truncated=truncated,
+                allow_gzip_framing=idle_timed_out,
             )
             return _SemanticPlainPreflightObservation(
                 SEMANTIC_OUTCOME_NAVIGATION_PENDING,
@@ -10216,7 +10217,7 @@ async def _run_initial_route_preflight(
             # ordinary ten-minute usable-root cache.  Any exact child route is
             # still committed only by its independent same-object proof.
             publish_cache = False
-        if direct_retryable_inconclusive:
+        if direct_retryable_inconclusive and not direct_safe_incomplete:
             # One timeout stays unclear.  A production-only consensus is much
             # narrower: every current A edge completed the full same-window
             # probe with zero wire bytes and the identical TLS-handshake stall.

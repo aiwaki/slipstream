@@ -2428,3 +2428,12 @@ pending local stage when no qualified claim is returned. Close held system
 stream before replay-safe local ClientHello attempt; historical partial stall
 must not itself permit Geph. This repairs progression, not a claim that every
 local route or the website origin is healthy. Physical qualification pending.
+
+AUD-24 follow-up: bbee156 installed via da897768, canonical PASS, but fresh
+Chrome remained blank. HTTP/1.1 diagnostic response declares chunked + gzip,
+stalls at17,547 encoded bytes. Root probe requests gzip while legacy unfinished
+body helper deliberately accepts identity only. Also retryable timeout returns
+before safe-incomplete browser verification. Add opt-in gzip framing detection
+only for root idle timeout, not payload semantics; retain legacy helper defaults
+and gzip EOF hard-local recovery. Valid incomplete framing admits only existing
+foreground-provenance/full-browser comparison, never authorizes by itself.

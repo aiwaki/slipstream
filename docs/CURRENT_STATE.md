@@ -10,6 +10,15 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 second candidate: installed bbee156 via da897768 at11:52:11Z,
+canonical install PASS, but fresh Chrome still blank. Runner consumed NEVER replay.
+Root asks for gzip but incomplete detector excludes gzip; timeout path also
+returns before qualified incomplete/browser verification. Candidate recognizes
+strict gzip framing shortfall on idle only, keeps gzip EOF on hard local recovery,
+and retains existing foreground provenance plus complete browser comparison.
+134 completion/traffic tests +44 root/gzip tests PASS. Second build pending.
+Chrome aud24-gauzy-fixed remains open. Discord gateway OPEN.
+
 AUD-24 Gauzy incomplete page reproduced in fresh physical Chrome (aud24-gauzy)
 and reported in Safari. Installed remains a0a1174 until a new transaction.
 Direct/CONNECT/8443 all returned partial content or stalled; no port rule added.
@@ -18,7 +27,10 @@ system, then an inconclusive preflight recommits the same suspect system stream.
 Candidate preserves pending Xbox/local ladder after unqualified recheck, closes
 held exact before local retry, and prohibits Geph from historical stall alone.
 Two regression cases pass; traffic contract run in output/aud24-gauzy.
-Next canonical build/install and real Gauzy browser check. Discord gateway still
+118 traffic contracts PASS; canonical build/staged PASS for bbee156.
+NEW da897768 runner dispatched after normal Quit and confirmed service absence.
+Never replay; inspect authorization-result.json before any further transaction.
+Next installed verification and real Gauzy browser check. Discord gateway still
 OPEN as below. Current Chrome aud24-gauzy owned session open; no active capture.
 
 

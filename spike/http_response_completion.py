@@ -380,12 +380,16 @@ def http_response_body_length(data, *, stream_closed, truncated):
     return None if body is None else len(body)
 
 
-def http_response_incomplete(data, *, stream_closed, idle_timed_out, truncated):
+def http_response_incomplete(
+    data, *, stream_closed, idle_timed_out, truncated, allow_gzip_framing=False
+):
     """Return whether a bounded HTTP/1 body is proven unfinished.
 
     A timeout or EOF is evidence only after a complete successful response
     header declares framing that has not arrived. Connection-delimited,
     malformed, unsuccessful, or locally truncated responses remain unknown.
+    The root preflight may recognize unfinished gzip framing without decoding
+    or classifying its content. Other callers retain identity-only semantics.
     """
 
     if not (stream_closed or idle_timed_out):
@@ -409,7 +413,8 @@ def http_response_incomplete(data, *, stream_closed, idle_timed_out, truncated):
         for token in value.split(b",")
     ]
     if content_encodings and any(token != b"identity" for token in content_encodings):
-        return False
+        if not (allow_gzip_framing and content_encodings == [b"gzip"]):
+            return False
 
     transfer_encodings = headers.get(b"transfer-encoding", ())
     if transfer_encodings:

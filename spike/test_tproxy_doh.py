@@ -13829,6 +13829,14 @@ def test_incomplete_gzip_root_stays_uncached_and_never_uses_geph(monkeypatch):
     declared = complete[:boundary]
     partial = declared + complete[boundary:-1]
     root_requests = []
+    provenance_checks = []
+
+    def no_browser_provenance(*_args):
+        provenance_checks.append(True)
+        return False
+
+    monkeypatch.setattr(tproxy, "_browser_navigation_provenance_accepted",
+                        no_browser_provenance)
 
     class RootTlsSocket:
         def __init__(self):
@@ -13888,6 +13896,7 @@ def test_incomplete_gzip_root_stays_uncached_and_never_uses_geph(monkeypatch):
             )
         )
 
+    assert provenance_checks == [True]
     assert claim is None
     assert len(root_requests) == 1
     assert parent_host not in tproxy._route_preflight_cache

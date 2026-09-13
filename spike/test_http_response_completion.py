@@ -557,3 +557,22 @@ def test_unsuccessful_malformed_or_locally_truncated_response_stays_unknown():
             idle_timed_out=False,
             truncated=truncated,
         )
+
+
+def test_root_gzip_framing_shortfall_is_not_content_or_route_proof():
+    for headers, body in [
+        (b"Content-Encoding: gzip\r\nContent-Length: 100", b"compressed-prefix"),
+        (b"Content-Encoding: gzip\r\nTransfer-Encoding: chunked", b"20\r\nshort"),
+    ]:
+        partial = _response(headers, body)
+        for eof in (False, True):
+            kwargs = dict(stream_closed=eof, idle_timed_out=not eof, truncated=False)
+            assert not http_response_incomplete(partial, **kwargs)
+            assert http_response_incomplete(partial, allow_gzip_framing=True, **kwargs)
+            assert not http_response_incomplete(partial, allow_gzip_framing=True,
+                                                **{**kwargs, "truncated": True})
+            assert _decode(partial).outcome is HttpContentDecodeOutcome.INVALID
+        for unsupported in (b"br", b"gzip, gzip", b"gzip, identity"):
+            assert not http_response_incomplete(
+                partial.replace(b"gzip", unsupported), stream_closed=True,
+                idle_timed_out=False, truncated=False, allow_gzip_framing=True)
