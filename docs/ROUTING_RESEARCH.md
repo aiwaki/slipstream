@@ -2361,3 +2361,16 @@ low-TTL fallback when timestamps are unavailable. New SYN sequence clears old
 per-tuple timestamp evidence. No application bytes, TLS SNI, or DNS are rewritten;
 no Geph permission is added.19 focused tests and117 traffic contracts PASS.
 Installed physical Chrome qualification remains pending canonical build/install.
+
+AUD-23 follow-up: dfbc8ef and840c82e installed browser gates failed despite
+HTML response around0.43/0.47s; required JS asset did not finish. Earlier native
+200/90KB timestamp success did not persist: later identical native controls,
+all five current addresses and alternative cover names failed. Modern Python
+generated1523-byte decoy; compact190/289/207 candidates failed native controls
+and were not installed. Installed packet capture showed no visible fake; do
+not treat this alone as proof of observer miss because BPF injection visibility
+and MTU/send behavior remain unqualified. Final control validated distinct
+SYN/SYNACK directions, ruling out collector retransmission confusion for that
+failure. Tiny TLS records, OOB and low-TTL first-segment disorder also failed.
+All diagnostics preserved under output/aud23-discord; no global DNS/VPN/QUIC
+changes and no Discord Geph route were used. Overall Discord task remains OPEN.

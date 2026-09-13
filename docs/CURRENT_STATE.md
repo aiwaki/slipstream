@@ -10,6 +10,15 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 latest: Discord NOT qualified. Pending14187 completed: actual distinct
+SYN and SYNACK correct, TLS still timed out; no native dialog/task remains.
+Subsequent tiny TLS records1/2/8/16, TCP OOB positions1/5/100, TTL1 disorder
+positions1/5/100 all timed out (output/aud23-discord/*result.json). No more
+candidate was installed. Installed840c82e/b4f166ad remains; sourceHEAD code
+matches it, docs newer. Own Chrome sessions closed. Do not replay any runner.
+Next needs a new evidence-backed local transport strategy, not replaying these
+probes or calling prior timestamp success sufficient. Geph remains forbidden.
+
 AUD-23 OPEN / native diagnostic confirmation pending: installed840c82e via
 b4f166ad succeeded10:32:27Z, canonical installed-observer.log PASS, but fresh
 Chrome /login still blank (HTML466ms, JS pending). All runners throughb4f166ad
