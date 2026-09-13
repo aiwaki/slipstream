@@ -2326,3 +2326,16 @@ Historical missing proof not reproduced; new explicit context/noise/owner refusa
 states distinguish future occurrences. Slow cold loading remains; abs.twimg.com
 also stalled during TLS. Artifacts output/playwright/aud22-queue and
 output/aud21-recurrence. This is not unlimited throughput or latency qualification.
+
+
+AUD-22 follow-up: user Safari X still hung after d0b2fa5. System resolver gave
+one public A address (162.159.140.229), and logs showed local_stage_skips_root
+following partial local TLS. c295501 adds singleton full-window zero-ingress
+consensus only with an additional complete usable same-origin owned-Geph payload,
+then the existing exact-stream hard-timeout/PID/single-use consumer. No learning
+or shared claim. A partial local stall causes a root recheck on the next stream.
+82 focused and117 traffic tests passed; canonical install118f22e4 succeeded
+09:50:47Z. User confirms login appeared in one fresh Safari X navigation; logs
+14:52:24 show geph_response_usable + singleton_payload_usable. Evidence under
+output/aud21-recurrence/singleton-events.json and installed-singleton-verification.log.
+This confirms restored navigation, not unlimited load or optimized cold latency.

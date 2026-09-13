@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-22 Safari X login CONFIRMED):
+User confirms X login appeared on one fresh Safari navigation after c295501
+install118f22e4. Logs14:52:24 show x.com geph_response_usable and
+singleton_payload_usable; evidence output/aud21-recurrence/singleton-events.json.
+Installed sourcec295501, daemon70230, canonical installed verification PASS.
+Minute/start cooldown removed from synchronous navigation; bounded executor
+queues requests instead of immediate quota refusal. Eight socket/two heavy jobs
+remain internal resource bounds; no unlimited-throughput claim.82 focused and
+117 traffic tests PASS; prior queue/admission evidence retained. Capacitor and
+Facebook content previously verified in concurrent Chrome run on d0b2fa5;
+Safari X latest user confirmation closes the reported remaining hang. Cold
+latency remains unqualified/slow; historical Capacitor proof_absent exact cause
+was not reproduced and should not be invented. All runners through118f22e4
+consumed; do not reinstall/retest unchanged code without a new reason.
+
 Update 2026-09-13 (AUD-22 singleton INSTALLED; Safari verification pending):
 c295501 installed via118f22e4 succeeded09:50:47Z; runner consumed NEVER replay.
 Canonical installed verify PASS, daemon70230 active, ownedGeph up after tray launch.
