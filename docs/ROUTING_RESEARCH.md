@@ -2411,3 +2411,20 @@ Apple Events JS disabled); user confirmation remains pending. The initial Safari
 canonical failure and later title success must not be erased by a success claim.
 Artifacts: output/aud23-next, output/playwright/aud23-port. The oversized-decoy
 fix is independently confirmed on wire; the working web path does not need it.
+
+
+## 2026-09-13 AUD-24 incomplete Gauzy recovery
+
+Fresh Chrome showed blank gauzy.co with title loaded, then root and assets
+ERR_CONNECTION_CLOSED. Installed CONNECT curl received HTTP 200, 18,865 bytes,
+then curl 18; same public address on 8443 also stalled. Logs show repeated
+system_plain partial_record_watchdog and root io_timeout_incomplete, with no
+progress to app-owned DNS. Evidence: output/aud24-gauzy and
+output/playwright/aud24-gauzy.
+
+The partial-stall independent recheck overwrote the pending recovery stage.
+A None preflight result then selected the system stream again. Preserve that
+pending local stage when no qualified claim is returned. Close held system
+stream before replay-safe local ClientHello attempt; historical partial stall
+must not itself permit Geph. This repairs progression, not a claim that every
+local route or the website origin is healthy. Physical qualification pending.

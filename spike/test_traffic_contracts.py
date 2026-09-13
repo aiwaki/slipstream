@@ -5604,18 +5604,25 @@ def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypat
     assert registry.cleared is True
 
 
-def test_failed_local_strategy_reenters_independent_preflight(monkeypatch):
+@pytest.mark.parametrize("stage", [
+    tproxy.UNKNOWN_RECOVERY_XBOX_DNS,
+    tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER,
+])
+def test_failed_local_strategy_reenters_independent_preflight(monkeypatch, stage):
     isolate_runtime_state(monkeypatch)
     host = "regional-denial-contract.example"
     response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     preflights = []
+    local_attempts = []
+    recovered = b"recovered local response"
+    exact_writer = CaptureWriter()
 
     async def short_system(_ip, _port, _first_flight, **_kwargs):
         return (
             tproxy.SYSTEM_PROBE_PAYLOAD,
-            probed_upstream_response(response),
+            (ScriptedReader(stream=()), exact_writer, response),
         )
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
@@ -5634,11 +5641,29 @@ def test_failed_local_strategy_reenters_independent_preflight(monkeypatch):
     )
 
     monkeypatch.setattr(tproxy, "_unknown_recovery_stage_for_attempt",
-                        lambda *_args: tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER)
+                        lambda *_args: stage)
     tproxy._local_partial_stalls[host] = {"local:tlsrec": time.monotonic()}
+    async def local_xbox(*_args, **_kwargs):
+        assert stage == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+        local_attempts.append("xbox")
+        return "1.1.1.2", probed_upstream_response(recovered)
+
+    async def local_strategy(*_args, **_kwargs):
+        assert stage == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
+        local_attempts.append("strategy")
+        return probed_upstream_response(recovered)
+
+    async def addresses(*_args):
+        return ["1.1.1.2"]
+
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", local_xbox)
+    monkeypatch.setattr(tproxy, "dial_strategy", local_strategy)
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", addresses)
     asyncio.run(run_handler(client, writer))
 
-    assert bytes(writer.payload) == response
+    assert bytes(writer.payload) == recovered
+    assert exact_writer.closed
+    assert len(local_attempts) == 1
     assert preflights == [(host, "1.1.1.1")]
     assert not tproxy._auto_geph_learned_exact_host(host)
 

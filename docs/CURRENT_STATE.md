@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 Gauzy incomplete page reproduced in fresh physical Chrome (aud24-gauzy)
+and reported in Safari. Installed remains a0a1174 until a new transaction.
+Direct/CONNECT/8443 all returned partial content or stalled; no port rule added.
+Found recovery regression: partial-stall recheck resets local recovery stage to
+system, then an inconclusive preflight recommits the same suspect system stream.
+Candidate preserves pending Xbox/local ladder after unqualified recheck, closes
+held exact before local retry, and prohibits Geph from historical stall alone.
+Two regression cases pass; traffic contract run in output/aud24-gauzy.
+Next canonical build/install and real Gauzy browser check. Discord gateway still
+OPEN as below. Current Chrome aud24-gauzy owned session open; no active capture.
+
+
 AUD-23 web loading fixed in fresh Chrome; overall Discord qualification OPEN.
 Installed source a0a11747890bb0296458f6481e190f109dd644a2 via a592d138 succeeded
 2026-09-13T11:20:16Z. Canonical installed-port.log PASS; daemon62be7c6856aa5a34ed9d90f0398c7adda8e877c9b9a9144056e6f67beef6827a.

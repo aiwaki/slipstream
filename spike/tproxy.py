@@ -20188,6 +20188,7 @@ async def _handle_impl(reader, writer):
     via_xbox_dns = False
     qualified_local_claim = None
     allow_unknown_geph_this_request = True
+    partial_retry_stage = None
     if is_tls and host and dst_port == 443 and route_class == ROUTE_UNKNOWN:
         qualified_local_claim = _bootstrap_local_route_claim(
             host, dst_ip, time.monotonic() + UNKNOWN_RECOVERY_GEPH_RESERVE,
@@ -20211,6 +20212,7 @@ async def _handle_impl(reader, writer):
             # A remembered local strategy that stalled is not a healthy route.
             # Re-run independent preflight; retained failure evidence is never
             # itself permission to use Geph or to learn a route.
+            partial_retry_stage = unknown_stage
             unknown_stage = UNKNOWN_RECOVERY_SYSTEM
     if (result is None and is_tls and host and route_class == ROUTE_UNKNOWN
             and unknown_stage != UNKNOWN_RECOVERY_SYSTEM):
@@ -20356,6 +20358,16 @@ async def _handle_impl(reader, writer):
             # normal retry use the learned exact-host route.
             writer.close()
             return
+        elif partial_retry_stage is not None:
+            # Independent preflight supplied no qualified replacement. Preserve
+            # the pending local recovery step instead of recommitting a stream
+            # from the path whose partial stall caused this recheck. Historical
+            # truncation alone cannot authorize a foreign exit on this request.
+            if exact is not None:
+                await _close_stream_writer(exact[1])
+                exact = None
+            unknown_stage = partial_retry_stage
+            allow_unknown_geph_this_request = False
         elif exact and system_probe != SYSTEM_PROBE_TIMEOUT:
             result = exact
             chosen_name = "plain"
