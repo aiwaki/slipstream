@@ -11634,6 +11634,9 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
     HEAD request and read decrypted response bytes, catching stalled paths where
     the handshake succeeds but application data does not move.
     """
+    upstream_port = _local_strategy_port(host, 443, strat)
+    if upstream_port is None:
+        return 0
     ctx = _local_payload_ssl_context()
     inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
     obj = ctx.wrap_bio(inbio, outbio, server_hostname=host)
@@ -11647,7 +11650,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
     min_bytes = _local_payload_min_bytes(spec)
     observed = bytearray()
     try:
-        sock = socket.create_connection((ip, 443), timeout=timeout)
+        sock = socket.create_connection((ip, upstream_port), timeout=timeout)
         sock.settimeout(timeout)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
@@ -11915,7 +11918,8 @@ async def _run_local_bypass_canary(spec):
     min_payload_bytes = _local_payload_min_bytes(spec)
     for strat in strategy_order(host):
         strat_ok = False
-        if expected_route == ROUTE_LOCAL_BYPASS and not strat.get("fake"):
+        if (expected_route == ROUTE_LOCAL_BYPASS and not strat.get("fake")
+                and _local_strategy_port(host, 443, strat) != 8443):
             continue
         for ip in ips[:ip_attempt_limit(host)]:
             # Do not preflight with build_fake_clienthello(): its TLS 1.2
@@ -11980,7 +11984,7 @@ async def _resweep_local_bypass_host(host):
     head, body = _canary_client_hello(h)
     attempts = 0
     for strat in strategy_order(h):
-        if not strat.get("fake"):
+        if not strat.get("fake") and _local_strategy_port(h, 443, strat) != 8443:
             continue
         strat_ok = False
         for ip in ips[:ip_attempt_limit(h)]:
@@ -14296,6 +14300,7 @@ def make_blob(head: bytes, body: bytes, host, cap):
 # climb the ladder to the next working strategy and re-cache it. Self-tuning,
 # no manual re-tuning, survives strategy decay.
 STRATEGIES = [
+    {"name": "discord_https8443", "cap": None, "fake": False},
     {"name": "split64",      "cap": 64,   "fake": False},
     {"name": "split64+fake", "cap": 64,   "fake": True},
     {"name": "split16",      "cap": 16,   "fake": False},
@@ -14469,6 +14474,12 @@ GENERAL_STRATS = [
 ]
 
 
+def _local_strategy_port(host, port, strat):
+    if strat["name"] != "discord_https8443":
+        return port
+    return 8443 if normalize_host(host) == "discord.com" and port == 443 else None
+
+
 def strategy_order(host):
     policy = route_policy(host)
     strategy_set = policy["strategy_set"]
@@ -14491,14 +14502,18 @@ def strategy_order(host):
             STRAT_BY_NAME[name] for name in fallback_names
         ]
     if strategy_set == STRATEGY_FAKE_ONLY:
-        # Protected local-bypass routes never fall through to a non-fake TLS
-        # strategy, regardless of any stale cached winner.
+        # Protected 443 fallbacks remain fake-only. The reviewed Discord
+        # alternative port is scoped separately from cached strategy winners.
         names = (
             DISCORD_STRATS
             if policy["service_group"] == SERVICE_DISCORD
             else YOUTUBE_CONTROL_STRATS
         )
         names = _rank_strategy_names(h, names)
+        if h == "discord.com":
+            # Same endpoint and end-to-end TLS, via its supported HTTPS port.
+            # 443 can return a ServerHello and still blackhole the asset stream.
+            names = ["discord_https8443"] + names
         return [STRAT_BY_NAME[n] for n in names]
     win = _strat_cache.get(h)
     if win in STRAT_BY_NAME:
@@ -18400,6 +18415,12 @@ async def dial_strategy(ip, port, head, body, host, strat):
     )
     if endpoint is not None:
         return await dial_and_probe(endpoint[0], endpoint[1], blob)
+    if strat["name"] == "discord_https8443":
+        upstream_port = _local_strategy_port(host, port, strat)
+        if upstream_port is None:
+            _publish_route_probe_outcome(ROUTE_PROBE_FAILED)
+            return None
+        return await dial_and_probe(ip, upstream_port, blob)
     if strat["fake"]:
         return await dial_and_probe_fake(ip, port, blob, host=host)
     return await dial_and_probe(ip, port, blob)

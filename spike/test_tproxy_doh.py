@@ -7585,7 +7585,7 @@ def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
     ]
 
 
-def test_discord_api_canary_stays_local_bypass_and_fake_only():
+def test_discord_api_canary_stays_local_with_reviewed_https_port():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_api")
 
     assert tproxy.route_policy(spec["host"]) == {
@@ -7596,6 +7596,7 @@ def test_discord_api_canary_stays_local_bypass_and_fake_only():
     }
     assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
+        "discord_https8443",
         "split64+fake",
         "split16+fake",
         "fake5",
@@ -23761,3 +23762,22 @@ def test_discord_syn_lookup_waits_for_server_observer(monkeypatch):
     assert len(sleeps) == 1
     assert entry["server_ts"] == 2000
     assert entry["sisn"] == 200
+
+
+@pytest.mark.parametrize('host,port,allowed', [
+    ('discord.com', 443, True), ('DISCORD.COM.', 443, True),
+    ('discord.com', 8443, False), ('gateway.discord.gg', 443, False),
+    ('discord.com.example', 443, False), ('youtube.com', 443, False),
+])
+def test_discord_https_port_preserves_flight_and_endpoint_scope(monkeypatch, host, port, allowed):
+    calls = []
+    sentinel = object()
+    async def dial(ip, target_port, flight):
+        calls.append((ip, target_port, flight))
+        return sentinel
+    monkeypatch.setattr(tproxy, 'dial_and_probe', dial)
+    result = asyncio.run(tproxy.dial_strategy(
+        '203.0.113.1', port, b'header', b'opaque-browser-tls', host,
+        tproxy.STRAT_BY_NAME['discord_https8443']))
+    assert calls == ([('203.0.113.1', 8443, b'headeropaque-browser-tls')] if allowed else [])
+    assert result is (sentinel if allowed else None)

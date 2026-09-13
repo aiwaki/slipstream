@@ -3,6 +3,21 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## AUD-23 Discord same-endpoint HTTPS port
+
+For exactly discord.com requested on443, the local ladder first connects to the
+same resolved public IP on8443, forwarding the original TLS bytes unchanged.
+Independent full-object probes (certificate verification enabled) completed the
+required89381-byte asset on8443/2053/2083 in0.21–0.23s while443 failed. Cloudflare
+supports these HTTPS ports: https://developers.cloudflare.com/fundamentals/reference/network-ports/.
+
+This is a narrow exception to the fake-only *strategy* for this hostname, not to
+the local-only route. It adds no intermediary or Geph, does not decrypt browser
+TLS, does not rewrite the URL/SNI/HTTP authority, and does not modify DNS/PAC.
+Other hosts and requested ports cannot select this strategy. Existing443 fake
+strategies remain fallbacks. Payload canaries and resweeps use the same endpoint
+selection. Gateway/voice/CDN hosts are not covered by this exact-host exception.
+
 ## AUD-21 managed HTTPS proxy — authorized 2026-09-13
 
 The user explicitly authorized a Slipstream-managed proxy after confirmation

@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 breakthrough: same-IP alternate HTTPS ports8443/2053/2083 return required
+89381-byte JS with certificate verification in0.21–0.23s. Candidate exact
+Discord.com:443 -> same resolved IP:8443, unchanged TLS, no intermediary/Geph.
+Canary/resweep share port selection; original443 fake ladder remains fallback.
+Evidence output/aud23-next/alternate-ports.json. Next focused checks/build/new
+install/browser. Current installedd22c60c/1c1a6b99 still fails443 navigation.
+
+AUD-23 installedd22c60c via1c1a6b99 at11:04:04Z, canonical installed PASS.
+536bd10b consumed before mutation;1c1a6b99 consumed success. Fresh Chrome still
+ERR_CONNECTION_CLOSED. Capture compact-wire.json NOW shows six517-byte decoys
+and server ACKs rejecting their stale TS, then ACK of real331-byte CH but no TLS
+response. BPF size defect fixed on wire; Discord still OPEN. Independent MD5
+fooling probe in progress (output/aud23-next/probe-md5.py), no further install.
+
+536bd10b consumed before mutation: stop was not yet complete. Normal Quit
+subsequently completed; service absent. Fresh1c1a6b99 identical except unique
+paths, ready for one dispatch. Installed still840c82e.
+
+AUD-23 d22c60c canonical build/staged PASS; new transaction536bd10b reviewed.
+Next normal Quit and one dispatch, then canonical installed/browser checks.
+21 focused tests PASS. b4f166ad and all previous transactions consumed.
+
 AUD-23 next: confirmed Darwin BPF EMSGSIZE for the installed 1523-byte decoy
 (frame1577), while compact frame343 writes successfully. Evidence
 output/aud23-next/bpf-size.json. Candidate restricts only decoy key share to
