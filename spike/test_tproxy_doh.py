@@ -12790,6 +12790,10 @@ def test_root_diagnostic_enqueue_follows_authority_and_coalescing_release(
     enqueue_state = []
 
     def capture_enqueue(record):
+        if not isinstance(record, str) or not record.startswith(
+            ">> route-preflight-root "
+        ):
+            return
         lock_available = tproxy._route_preflight_lock.acquire(blocking=False)
         if lock_available:
             tproxy._route_preflight_lock.release()
@@ -23807,3 +23811,88 @@ def test_browser_input_window_is_anchored_before_network_wait(monkeypatch):
         assert not tproxy._browser_navigation_provenance_accepted(
             ("127.0.0.1", 49152), assessor, invalid)
     assert observed == [15.0]
+
+
+def test_slow_root_captures_browser_admission_before_network_finishes(monkeypatch):
+    import threading
+    observed = threading.Event()
+    frontmost = [True]
+    monkeypatch.setattr(tproxy, 'ROUTE_PREFLIGHT_HEALTHY_BUDGET', 0.01)
+
+    def assess(*args):
+        result = frontmost[0]
+        observed.set()
+        return result
+
+    monkeypatch.setattr(tproxy, '_browser_navigation_provenance_accepted', assess)
+
+    async def exercise():
+        async def root():
+            for _ in range(100):
+                if observed.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert observed.is_set(), 'admission must overlap the pending root'
+            frontmost[0] = False
+            return 'incomplete'
+        result, admission = await tproxy._observe_root_with_early_browser_admission(
+            root(), ('127.0.0.1', 49152), None, time.monotonic(),
+        )
+        assert result == 'incomplete'
+        assert await admission is True
+        await asyncio.sleep(0)
+        assert admission not in tproxy._ROUTE_PREFLIGHT_PROVENANCE_TASKS
+    asyncio.run(exercise())
+
+
+def test_fast_root_does_not_start_speculative_browser_admission(monkeypatch):
+    monkeypatch.setattr(tproxy, '_browser_navigation_provenance_accepted',
+                        lambda *args: pytest.fail('fast root must stay UI-free'))
+    async def exercise():
+        async def root():
+            return 'usable'
+        result, admission = await tproxy._observe_root_with_early_browser_admission(
+            root(), None, None, time.monotonic(),
+        )
+        assert result == 'usable' and admission is None
+    asyncio.run(exercise())
+
+
+def test_cancelled_root_retains_admission_slot_until_observer_drains(monkeypatch):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(tproxy, 'ROUTE_PREFLIGHT_HEALTHY_BUDGET', 0.01)
+    def assess(*args):
+        entered.set()
+        assert release.wait(1)
+        return True
+    monkeypatch.setattr(tproxy, '_browser_navigation_provenance_accepted', assess)
+    async def exercise():
+        root_cancelled = asyncio.Event()
+        async def root():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                root_cancelled.set()
+        task = asyncio.create_task(tproxy._observe_root_with_early_browser_admission(
+            root(), ('127.0.0.1', 49152), None, time.monotonic(),
+        ))
+        try:
+            for _ in range(100):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert entered.is_set()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert root_cancelled.is_set()
+            observers = tuple(tproxy._ROUTE_PREFLIGHT_PROVENANCE_TASKS)
+            assert len(observers) == 1
+            assert not observers[0].cancelled()
+        finally:
+            release.set()
+        await asyncio.gather(*observers)
+        await asyncio.sleep(0)
+        assert not tproxy._ROUTE_PREFLIGHT_PROVENANCE_TASKS
+    asyncio.run(exercise())

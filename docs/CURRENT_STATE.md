@@ -10,21 +10,17 @@ file.
 
 ## Current Checkpoint
 
-AUD-24 installed42fb035bb37127cfa68892a84eea094ec72542d3 via31210126 at
-2026-09-13T14:29:39Z. Runner consumed NEVER replay. Canonical installed-remainder
-PASS, PID72390 active, daemon5ae8807869cc5f1e64c2f4e066b5046afd5e461df70ac2e8f6272c83efc3de40.
-Rust RoutePreflight no longer silently skips a live <2s remainder; all actual
-verification/navigation/submission keep same absolute8s deadline. No routing
-proof guard weakened. Fixed browser-proof reason logging added to actual daemon.
-33 Rust browser-probe tests +4 headless Python tests PASS. Build/staged/installed
-canonical verification PASS. User asked once to open Gauzy in fresh activeChrome
-for15s; answer pending. Next: read output/aud24-gauzy/read-remainder.py after
-attempt; includes browser-proof reasons since current installation. Previous
-reason-events/worker-events proved provenance accepted then proof_absent, but did
-not prove precise inner failure. Signature timing .03s helper/.351s bundle.
-Gauzy visible success NOT established. Discord gateway remains OPEN, local-only.
-No captures/native authorization or automated browser sessions pending. User
-AGENTS.md unchanged by us. Source42fb035, docs newer. All previous runners consumed.
+AUD-24 installed31210126 still fails Gauzy (user). remainder-events.json shows
+19:30:33 root then19:30:39 NOT_FRONTMOST, later input_not_recent; this attempt
+never exercised browser-proof path. No proof of remainder patch success.
+Candidate captures admission concurrently after root remains pending0.5s,
+consumes only for incomplete branch and only same request/deadline. Fast roots
+remain UI-free. Observer registry bounded8, cancellation retains slot to drain.
+Focused root/provenance/headless tests pending21470 (78 selected). Existing root
+log-order test filtered to root record; preexisting state log already preceded it.
+Source uninstalled; prior installed31210126 consumed NEVER replay. No prompt or
+collector pending. Gauzy and Discord gateway remain OPEN. Next build candidate
+only after affected tests; canonical verification before any replacement.
 
 Historical investigation notes:
 

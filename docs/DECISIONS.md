@@ -523,3 +523,13 @@ threshold, which silently discarded jobs after root/provenance/launcher latency.
 Runtime verification, navigation, observation and submission retain the same
 absolute deadline; an expired job never starts and only complete usable proof
 can authorize an exact eligible host. Background PendingNavigation is unchanged.
+
+AUD-24 initiating-browser timing: when the same held root remains pending after
+the ordinary0.5s healthy budget, capture signed socket-owner, foreground and
+recent-input provenance concurrently with root I/O. Fast roots do no UI work.
+The observation is private to that request, never cached or route authority,
+and is consumed only if the eventual root needs browser comparison. Full
+independent owned-Geph proof and the existing absolute deadline remain required.
+At most eight provenance observations remain live; cancellation retains each
+slot until its bounded OS observer drains. Capturing admission early avoids
+requiring the user to keep the browser foreground throughout network latency.

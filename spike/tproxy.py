@@ -2207,6 +2207,7 @@ ROUTE_PREFLIGHT_RETRY_TTL = 2 * 60.0
 ROUTE_PREFLIGHT_CACHE_MAX = 4096
 ROUTE_PREFLIGHT_CONCURRENT_MAX = 8
 _ROUTE_PREFLIGHT_BROWSER_TASKS = set()
+_ROUTE_PREFLIGHT_PROVENANCE_TASKS = set()
 ROUTE_PREFLIGHT_WINDOW = 60.0
 ROUTE_PREFLIGHT_WINDOW_MAX = 8
 ROUTE_PREFLIGHT_HEALTHY_BUDGET = 0.5
@@ -7761,6 +7762,43 @@ def _browser_navigation_provenance_accepted(
     return finish(accepted, reason)
 
 
+async def _observe_root_with_early_browser_admission(root, peer, assessor, started):
+    """Observe slow roots and their initiating browser concurrently.
+
+    Fast roots do no UI work. A captured admission belongs only to this held
+    request; it is never cached and cannot itself authorize another route.
+    """
+    root_task = asyncio.create_task(root)
+    admission = None
+    try:
+        done, _ = await asyncio.wait(
+            (root_task,), timeout=ROUTE_PREFLIGHT_HEALTHY_BUDGET,
+        )
+        valid_peer = (
+            isinstance(peer, (tuple, list)) and len(peer) >= 2
+            and isinstance(peer[0], str) and type(peer[1]) is int
+        )
+        if (not done and valid_peer
+                and len(_ROUTE_PREFLIGHT_PROVENANCE_TASKS) < ROUTE_PREFLIGHT_CONCURRENT_MAX):
+            admission = asyncio.create_task(asyncio.to_thread(
+                _browser_navigation_provenance_accepted, peer, assessor, started,
+            ))
+            _ROUTE_PREFLIGHT_PROVENANCE_TASKS.add(admission)
+            def finished(task):
+                _ROUTE_PREFLIGHT_PROVENANCE_TASKS.discard(task)
+                if not task.cancelled():
+                    task.exception()
+            admission.add_done_callback(finished)
+        return await root_task, admission
+    finally:
+        if not root_task.done():
+            root_task.cancel()
+            await asyncio.gather(root_task, return_exceptions=True)
+        # The independent, bounded OS observation owns no network or routing
+        # authority. Retain it in the bounded registry until its thread drains;
+        # cancelling the root must not release its slot prematurely.
+
+
 async def _run_headless_owned_geph_preflight(*args, **kwargs):
     # Heavy workers queue separately from socket-only root checks.
     deadline = kwargs.get("deadline_monotonic", args[2] if len(args) > 2
@@ -10219,16 +10257,19 @@ async def _run_initial_route_preflight(
             publish_cache = False
             return None
         root_probe_started = time.monotonic()
-        observation = await _run_bounded_direct_route_preflight_candidates(
-            direct_probe,
-            str(address),
-            h,
-            direct_timeout,
-            resolver=(
-                system_resolve_async
-                if direct_probe is _semantic_plain_preflight_probe_detail
-                else None
+        observation, early_admission = await _observe_root_with_early_browser_admission(
+            _run_bounded_direct_route_preflight_candidates(
+                direct_probe,
+                str(address),
+                h,
+                direct_timeout,
+                resolver=(
+                    system_resolve_async
+                    if direct_probe is _semantic_plain_preflight_probe_detail
+                    else None
+                ),
             ),
+            peer_endpoint, provenance_assessor, preflight_started,
         )
         root_diagnostic_record = _format_route_preflight_root_observation(
             h,
@@ -10348,7 +10389,8 @@ async def _run_initial_route_preflight(
                 provenance_ok = bool(
                     remaining > 0
                     and await asyncio.wait_for(
-                        asyncio.to_thread(
+                        asyncio.shield(early_admission)
+                        if early_admission is not None else asyncio.to_thread(
                             _browser_navigation_provenance_accepted,
                             peer_endpoint,
                             provenance_assessor,
