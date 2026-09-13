@@ -10,21 +10,21 @@ file.
 
 ## Current Checkpoint
 
-AUD-24 user reports Gauzy still blank. Installed b02747c via cac10760 unchanged.
-Live logs reason-events.json / worker-events.json now prove browser provenance
-ACCEPTED at19:14:02,19:16:14,19:16:27, followed by proof_absent. No worker launch
-error in collected matching log. Raw log read17113 completed; no prompt pending.
-Source mismatch found: Rust silently refuses RoutePreflight with <2s remaining,
-though root consumes5s and provenance/launcher consume further budget. Actual
-signature checks0.03s helper +0.351s bundle; this supports but does NOT prove the
-precise live failure. Candidate removes premature2s start threshold while every
-actual operation/submission retains same8s absolute deadline; adds fixed reason
-logging for missing proof in service.33 Rust browser-probe tests PASS including
-live1300ms remainder/expired boundary; 4 focused headless Python checks PASS.
-Canonical build-remainder PASS. New transaction31210126 prepared from consumed
-cac10760, source42fb035; staging verification pending29658. Not dispatched.
-Normal Quit and verified service absence required before authorize-once.py. Current installed cac10760 consumed NEVER replay.
-Gauzy and Discord gateway remain OPEN. User AGENTS.md remains untouched.
+AUD-24 installed42fb035bb37127cfa68892a84eea094ec72542d3 via31210126 at
+2026-09-13T14:29:39Z. Runner consumed NEVER replay. Canonical installed-remainder
+PASS, PID72390 active, daemon5ae8807869cc5f1e64c2f4e066b5046afd5e461df70ac2e8f6272c83efc3de40.
+Rust RoutePreflight no longer silently skips a live <2s remainder; all actual
+verification/navigation/submission keep same absolute8s deadline. No routing
+proof guard weakened. Fixed browser-proof reason logging added to actual daemon.
+33 Rust browser-probe tests +4 headless Python tests PASS. Build/staged/installed
+canonical verification PASS. User asked once to open Gauzy in fresh activeChrome
+for15s; answer pending. Next: read output/aud24-gauzy/read-remainder.py after
+attempt; includes browser-proof reasons since current installation. Previous
+reason-events/worker-events proved provenance accepted then proof_absent, but did
+not prove precise inner failure. Signature timing .03s helper/.351s bundle.
+Gauzy visible success NOT established. Discord gateway remains OPEN, local-only.
+No captures/native authorization or automated browser sessions pending. User
+AGENTS.md unchanged by us. Source42fb035, docs newer. All previous runners consumed.
 
 Historical investigation notes:
 
