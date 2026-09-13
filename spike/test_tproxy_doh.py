@@ -23790,3 +23790,20 @@ def test_discord_https_port_preserves_flight_and_endpoint_scope(monkeypatch, hos
         tproxy.STRAT_BY_NAME['discord_https8443']))
     assert calls == ([('203.0.113.1', 8443, b'headeropaque-browser-tls')] if allowed else [])
     assert result is (sentinel if allowed else None)
+
+
+def test_browser_input_window_is_anchored_before_network_wait(monkeypatch):
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 110.0)
+    observed = []
+    def assessor(_address, _port, *, policy):
+        observed.append(policy.recent_input_seconds)
+        return tproxy.macos_browser_provenance.BrowserNavigationProvenance(
+            True, tproxy.macos_browser_provenance.BrowserFamily.CHROME, 123,
+            tproxy.macos_browser_provenance.AdmissionReason.ACCEPTED)
+    assert tproxy._browser_navigation_provenance_accepted(
+        ("127.0.0.1", 49152), assessor, 100.0)
+    assert observed == [15.0]
+    for invalid in (111.0, 80.0, float("nan"), "100", True):
+        assert not tproxy._browser_navigation_provenance_accepted(
+            ("127.0.0.1", 49152), assessor, invalid)
+    assert observed == [15.0]

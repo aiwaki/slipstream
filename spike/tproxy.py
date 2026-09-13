@@ -7689,6 +7689,7 @@ def _headless_preflight_breaker_allows(now=None):
 def _browser_navigation_provenance_accepted(
     peer_endpoint,
     assessor=None,
+    navigation_started=None,
 ):
     if (
         not isinstance(peer_endpoint, (tuple, list))
@@ -7697,6 +7698,16 @@ def _browser_navigation_provenance_accepted(
         or type(peer_endpoint[1]) is not int
     ):
         return False
+    recent_input_seconds = 5.0
+    if navigation_started is not None:
+        if type(navigation_started) not in (int, float):
+            return False
+        elapsed = time.monotonic() - navigation_started
+        if not math.isfinite(elapsed) or not 0.0 <= elapsed <= 25.0:
+            return False
+        # Judge input against admission time, not after network probe latency.
+        # Socket ownership, signatures and frontmost identity remain fresh.
+        recent_input_seconds += elapsed
     assessor = (
         macos_browser_provenance.assess_browser_navigation_provenance
         if assessor is None
@@ -7713,7 +7724,7 @@ def _browser_navigation_provenance_accepted(
                 command_timeout_seconds=(
                     ROUTE_PREFLIGHT_BROWSER_COMMAND_TIMEOUT
                 ),
-                recent_input_seconds=5.0,
+                recent_input_seconds=recent_input_seconds,
                 allow_shared_signed_webkit_with_frontmost_safari=True,
             ),
         )
@@ -10315,6 +10326,7 @@ async def _run_initial_route_preflight(
                             _browser_navigation_provenance_accepted,
                             peer_endpoint,
                             provenance_assessor,
+                            preflight_started,
                         ),
                         timeout=min(
                             ROUTE_PREFLIGHT_BROWSER_PROVENANCE_BUDGET

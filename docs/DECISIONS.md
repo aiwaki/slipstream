@@ -3,6 +3,16 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## AUD-24 browser admission input timing
+
+For an incomplete-root comparison, input recency is anchored to the same
+preflight's monotonic start, before DNS/root probe latency. At assessment time
+allow the original five seconds plus elapsed preflight time, within the existing
+30-second absolute input bound. Future, nonfinite or older-than25s start stamps
+fail closed. Peer ownership, code signature and frontmost browser are freshly
+assessed. This is admission only, never route proof; complete comparison and
+all existing route exclusions remain required.
+
 ## AUD-23 Discord same-endpoint HTTPS port
 
 For exactly discord.com requested on443, the local ladder first connects to the

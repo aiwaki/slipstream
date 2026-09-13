@@ -10,6 +10,15 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 input timing candidate: gzip-events.json confirms safe_incomplete=1
+but no subsequent comparison. Independent code defect: recent input checked
+against fixed5s AFTER >=5s network probe. Anchor window to preflight admission,
+keep fresh owner/signature/frontmost checks; reject future/nonfinite/>25s starts.
+45 root/gzip/input checks PASS; new build pending. This timing defect is real,
+but exact provenance rejection category was not logged, so do not claim it was
+proven as the sole cause of the last failed navigation. Native log read33965
+completed; no prompt pending. Installed remains9e76e89, Chrome aud24-gzip open.
+
 AUD-24 installed 9e76e899abdd301dfe022662303703b43fd480a3 via5366612e
 at2026-09-13T12:06:31Z. Canonical installed-gzip.log PASS, daemon
 60bc79016a83f0a0a19346fc1eb40374e2078eda1e48ff78303a5e0fca39dd42.
