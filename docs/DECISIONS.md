@@ -482,3 +482,12 @@ successor authority. Failed payload/ownership/deadline proof stays local. Multip
 address consensus retains its existing requirements. A local partial-TLS stall
 also invalidates the assumption that skipping root preflight is safe on the next
 connection; preserve observations while retrying independent preflight.
+
+## AUD-23 Discord TCP timestamp decoy — 2026-09-13
+
+Discord remains local-only. Its fake ClientHello is bound to observed TCP sequence
+and acknowledgement numbers. When both negotiated timestamps are observed, use a
+stale client timestamp (modulo32-bit) with the observed server timestamp echo so
+PAWS can reject the decoy at the server. Missing evidence retains low-TTL handling;
+missing sequence/ack evidence sends no decoy. A new SYN sequence resets stale
+per-tuple evidence. This changes neither browser TLS bytes nor other service policy.

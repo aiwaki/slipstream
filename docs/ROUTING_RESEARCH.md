@@ -2339,3 +2339,25 @@ or shared claim. A partial local stall causes a root recheck on the next stream.
 14:52:24 show geph_response_usable + singleton_payload_usable. Evidence under
 output/aud21-recurrence/singleton-events.json and installed-singleton-verification.log.
 This confirms restored navigation, not unlimited load or optimized cold latency.
+
+## AUD-23 Discord SNI filtering and timestamp decoy — 2026-09-13
+
+Fresh Chrome reproduced ERR_CONNECTION_CLOSED through successful loopback CONNECT.
+The first correction (08fcc49 installed via 4c7f2ba3) replaced constant seq/ack=1
+with observed handshake numbers, but Chrome still failed; this is not a proven fix
+by itself. System and independent Cloudflare DNS returned the same five addresses.
+Native exact-IP controls on 162.159.138.232: Discord SNI timed out; cloudflare-ech.com
+SNI completed TLS and returned403 in0.19s. This isolates an SNI-dependent path failure.
+Low-TTL poison (3,4,5,6,8,10), split TLS, other current addresses, raw disorder and
+overlap did not complete these controls. One raw packet was independently witnessed
+on en0; these diagnostics do not change system routing or DNS.
+
+A valid cover ClientHello at the observed sequence/ack, carrying a timestamp60000
+behind the negotiated client timestamp and the observed server echo, returned
+Discord /login HTTP200 in0.19s. Two additional controls with split TLS returned200
+in0.29/0.27s. Evidence in output/aud23-discord/*result*. Production candidate dfbc8ef
+captures negotiated timestamps, uses this decoy for Discord only, and retains the
+low-TTL fallback when timestamps are unavailable. New SYN sequence clears old
+per-tuple timestamp evidence. No application bytes, TLS SNI, or DNS are rewritten;
+no Geph permission is added.19 focused tests and117 traffic contracts PASS.
+Installed physical Chrome qualification remains pending canonical build/install.
