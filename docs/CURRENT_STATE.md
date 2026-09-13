@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 current diagnostic candidate: actual foreground peer accepted in0.735s
+(provenance-foreground-result.json); user navigation still failed, logs show
+local strategy then delayed root safe_incomplete=1 with no comparison.
+IMPORTANT: bsexec48233 lsappinfo yieldedNULL/asuser141, but a real temporary
+system LaunchDaemon saw SAME front ASN as authorization/asuser contexts.
+The bsexec simulation was misleading; no bootstrap/asuser routing fix justified.
+Temporary diagnostic job/files removed. Evidence launchd-context-result.json.
+Add drop-only fixed enum provenance reasons inside actual service plus per-host
+accepted/refused state; no routing behavior change.47 focused tests PASS.
+Next build/install diagnostic candidate via NEW runner based on82e0d6a5,
+then capture reason in actual service. No admin/capture process pending.
+
 AUD-24 user confirms latest61bcb2a STILL blank. Logs input-rotated-events.json
 and input-events.json show safe_incomplete=1, no comparison, then Xbox-local
 partial-record stall: local progression fixed but transport still fails.

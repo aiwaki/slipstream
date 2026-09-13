@@ -7691,20 +7691,29 @@ def _browser_navigation_provenance_accepted(
     assessor=None,
     navigation_started=None,
 ):
+    def finish(accepted, reason):
+        try:
+            _enqueue_route_preflight_root_diagnostic_record(
+                f">> browser-provenance reason={reason} accepted={int(accepted)}"
+            )
+        except Exception:
+            pass
+        return accepted
+
     if (
         not isinstance(peer_endpoint, (tuple, list))
         or len(peer_endpoint) < 2
         or not isinstance(peer_endpoint[0], str)
         or type(peer_endpoint[1]) is not int
     ):
-        return False
+        return finish(False, "invalid_peer")
     recent_input_seconds = 5.0
     if navigation_started is not None:
         if type(navigation_started) not in (int, float):
-            return False
+            return finish(False, "invalid_navigation_start")
         elapsed = time.monotonic() - navigation_started
         if not math.isfinite(elapsed) or not 0.0 <= elapsed <= 25.0:
-            return False
+            return finish(False, "invalid_navigation_start")
         # Judge input against admission time, not after network probe latency.
         # Socket ownership, signatures and frontmost identity remain fresh.
         recent_input_seconds += elapsed
@@ -7729,8 +7738,8 @@ def _browser_navigation_provenance_accepted(
             ),
         )
     except Exception:
-        return False
-    return bool(
+        return finish(False, "assessor_exception")
+    accepted = bool(
         isinstance(
             observation,
             macos_browser_provenance.BrowserNavigationProvenance,
@@ -7744,6 +7753,12 @@ def _browser_navigation_provenance_accepted(
         and type(observation.pid) is int
         and observation.pid > 0
     )
+
+    reason = "invalid_observation"
+    if (isinstance(observation, macos_browser_provenance.BrowserNavigationProvenance)
+            and isinstance(observation.reason, macos_browser_provenance.AdmissionReason)):
+        reason = observation.reason.value
+    return finish(accepted, reason)
 
 
 async def _run_headless_owned_geph_preflight(*args, **kwargs):
@@ -9470,6 +9485,7 @@ def _enqueue_route_preflight_root_diagnostic_record(record):
 
 
 _PREFLIGHT_STATE_DECISIONS = frozenset({
+    "provenance_accepted", "provenance_refused",
     "host_ineligible", "local_claim_reuse", "root_cache_reuse",
     "concurrent_refused", "window_refused", "host_window_refused", "root_admitted",
     "root_cancelled", "root_exception", "backend_unready", "proof_no_budget",
@@ -10338,8 +10354,10 @@ async def _run_initial_route_preflight(
             except (asyncio.TimeoutError, RuntimeError):
                 provenance_ok = False
             if not provenance_ok:
+                _log_route_preflight_state(h, "provenance_refused")
                 publish_cache = False
                 return None
+            _log_route_preflight_state(h, "provenance_accepted")
         if (
             direct_hard_transport_failure
             and not direct_retryable_inconclusive

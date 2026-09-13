@@ -2437,3 +2437,11 @@ before safe-incomplete browser verification. Add opt-in gzip framing detection
 only for root idle timeout, not payload semantics; retain legacy helper defaults
 and gzip EOF hard-local recovery. Valid incomplete framing admits only existing
 foreground-provenance/full-browser comparison, never authorizes by itself.
+
+AUD-24 foreground diagnostic accepted real Chrome peer in0.735s with production
+budgets. bsexec-based context simulation returnedNULL and nested asuser141;
+a genuine temporary system LaunchDaemon returned the same valid front ASN as
+GUI authorization, including asuser. Thus the simulation does NOT establish a
+service GUI-context defect. Temporary job and root-owned files were removed.
+No asuser/source policy change. Actual service needs fixed admission reasons;
+logging-only candidate retains every acceptance/rejection condition.
