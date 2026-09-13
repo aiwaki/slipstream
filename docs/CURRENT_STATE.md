@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 installed b02747c99ca38851bc07b907aa5cc06ce431bc89 via cac10760
+at2026-09-13T14:11:15Z. Runner consumed NEVER replay. Canonical
+installed-reasons.log PASS, PID62453 active; daemon
+1e84e8b5a1289eddebc97b3490cffa0896efa08d8dfdb1caed344d10b4c76b28.
+Logging-only change records fixed browser-provenance enum reason and per-host
+provenance_accepted/refused.47 affected tests PASS; routing unchanged.
+User asked once to open Gauzy in fresh active Chrome tab. Await result, then run
+output/aud24-gauzy/read-reasons.py (reads current root log since install, includes
+gauzy + browser-provenance records) once. If rotated, read log.1 separately.
+No admin prompt, standalone collector, or automation browser session pending.
+Gauzy and Discord gateway remain OPEN. Source b02747c, docs newer.
+
+Historical investigation notes:
+
 AUD-24 current diagnostic candidate: actual foreground peer accepted in0.735s
 (provenance-foreground-result.json); user navigation still failed, logs show
 local strategy then delayed root safe_incomplete=1 with no comparison.
@@ -19,8 +33,10 @@ The bsexec simulation was misleading; no bootstrap/asuser routing fix justified.
 Temporary diagnostic job/files removed. Evidence launchd-context-result.json.
 Add drop-only fixed enum provenance reasons inside actual service plus per-host
 accepted/refused state; no routing behavior change.47 focused tests PASS.
-Next build/install diagnostic candidate via NEW runner based on82e0d6a5,
-then capture reason in actual service. No admin/capture process pending.
+Canonical build-reasons/staged-reasons PASS for b02747c.
+NEW cac10760 dispatched after normal Quit/service absence; NEVER replay.
+Await authorization-result.json (exec21217), then canonical installed verify
+and capture actual-service reason. No standalone diagnostic collector running.
 
 AUD-24 user confirms latest61bcb2a STILL blank. Logs input-rotated-events.json
 and input-events.json show safe_incomplete=1, no comparison, then Xbox-local
