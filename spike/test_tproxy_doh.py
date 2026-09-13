@@ -11266,8 +11266,9 @@ def test_root_candidate_race_does_not_promote_alternate_failures(monkeypatch):
     assert observation.root_tls_stall_consensus is None
 
 
+@pytest.mark.parametrize("count", [1, 2, 3])
 def test_root_candidate_full_window_mints_typed_tls_stall_consensus(
-    monkeypatch,
+    monkeypatch, count,
 ):
     calls = []
     release = asyncio.Event()
@@ -11282,7 +11283,7 @@ def test_root_candidate_full_window_mints_typed_tls_stall_consensus(
 
     async def bounded(_probe, address, _host, timeout):
         calls.append((address, timeout))
-        if len(calls) == 3:
+        if len(calls) == count:
             clock.current += tproxy.ROUTE_PREFLIGHT_ROOT_IO_MAX_TIMEOUT
             release.set()
         await release.wait()
@@ -11299,7 +11300,7 @@ def test_root_candidate_full_window_mints_typed_tls_stall_consensus(
         )
 
     async def resolver(_host):
-        return ["8.8.8.8", "1.1.1.1", "9.9.9.9"]
+        return ["8.8.8.8", "1.1.1.1", "9.9.9.9"][:count]
 
     monkeypatch.setattr(
         tproxy,
@@ -11322,14 +11323,10 @@ def test_root_candidate_full_window_mints_typed_tls_stall_consensus(
     assert consensus.marker is tproxy._ROOT_TLS_STALL_CONSENSUS
     assert consensus.host == "homogeneous-tls-stall.example"
     assert consensus.exact_address == "8.8.8.8"
-    assert consensus.resolved_address_count == 3
-    assert consensus.candidate_count == 3
-    assert consensus.completed_count == 3
-    assert {address for address, _timeout in calls} == {
-        "8.8.8.8",
-        "1.1.1.1",
-        "9.9.9.9",
-    }
+    assert consensus.resolved_address_count == count
+    assert consensus.candidate_count == count
+    assert consensus.completed_count == count
+    assert {address for address, _timeout in calls} == set(["8.8.8.8", "1.1.1.1", "9.9.9.9"][:count])
     minimum_window = (
         tproxy.ROUTE_PREFLIGHT_ROOT_IO_MAX_TIMEOUT
         - tproxy.ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE
@@ -23669,3 +23666,35 @@ def test_semantic_geph_requests_complete_document_above_old_prefix(monkeypatch):
     monkeypatch.setattr(tproxy, "_local_payload_ssl_context", lambda: SimpleNamespace(
         wrap_socket=lambda *args, **kwargs: sock))
     assert tproxy._semantic_geph_payload_probe("full-root.example") == len(body)
+
+
+@pytest.mark.parametrize("usable", [True, False])
+def test_singleton_stall_requires_usable_owned_payload_without_learning(monkeypatch, usable):
+    _enable_owned_geph_preflight(monkeypatch)
+    host = "singleton-stall.example"
+    now = time.monotonic()
+    observation = tproxy._SemanticPlainPreflightObservation(
+        tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+        retryable_inconclusive=True,
+        root_boundary=tproxy._RootPreflightBoundary.TLS_HANDSHAKE_TIMEOUT,
+        root_tls_stall_consensus=tproxy._RootTlsStallConsensus(
+            tproxy._ROOT_TLS_STALL_CONSENSUS, host, "8.8.8.8", 1, 1, 1, now + 5,
+        ),
+    )
+    async def direct(*_args, **_kwargs):
+        return observation
+    monkeypatch.setattr(tproxy, "_run_bounded_direct_route_preflight_candidates", direct)
+    result = asyncio.run(tproxy._run_initial_route_preflight(
+        host, "8.8.8.8",
+        geph_probe=lambda *_args, **_kwargs: 65536 if usable else 0,
+        local_recovery_deadline_monotonic=now + 10,
+        deadline_monotonic=now + 15,
+    ))
+    if usable:
+        assert isinstance(result, tproxy._RoutePreflightRequestOnlyGephClaim)
+        assert result.exact_address == "8.8.8.8"
+        assert result.confirmed_geph_pid == 41
+    else:
+        assert result is None
+    assert host not in tproxy._route_preflight_cache
+    assert not tproxy._auto_geph_learned_exact_host(host)

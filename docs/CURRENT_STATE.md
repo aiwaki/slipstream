@@ -10,6 +10,16 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-22 Safari X still stalled; singleton candidate):
+User confirms Safari X hangs after installed d0b2fa5. Its current system DNS has
+one public A address; logs show local_stage_skips_root after partial local TLS.
+Candidate accepts typed singleton measured full-window stall only with extra
+complete usable same-origin owned-Geph payload proof, then existing exact-stream
+hard-timeout/PID/single-use consumer. No persistent learning or shared claim.
+Local partial-stall evidence triggers independent root recheck on next request.
+81 focused root/preflight/request-only tests and117 full traffic tests PASS.
+Next build, NEW transaction based on consumed dc793e87. Safari X remains OPEN.
+
 Update 2026-09-13 (AUD-22 queued admission INSTALLED, three Chrome sites PASS):
 Installed d0b2fa5 via dc793e87 runner succeeded09:36:10Z; consumed NEVER replay.
 Canonical installed verification PASS, daemon62189/PF active/ownedGeph up/PAC.

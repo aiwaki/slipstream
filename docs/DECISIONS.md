@@ -470,3 +470,15 @@ deadline is not a usable route when that probe reports TIMEOUT. Without a
 qualified request-only claim, close that silent socket and enter the existing
 app-owned DNS/local ladder. Timeout alone still cannot authorize Geph or learning.
 Payload-positive and qualified request-only late-payload paths remain unchanged.
+
+
+AUD-22 singleton TLS-stall refinement: a complete current system DNS set may
+contain one public IPv4 address. Its full-window, measured zero-ingress TLS stall
+may support only the existing request-only handoff when additionally paired with
+a complete usable same-origin response through a pinned owned-Geph process.
+The independent original browser stream must still exhaust its hard deadline;
+any direct bytes retain precedence. This does not cache, learn, share or mint
+successor authority. Failed payload/ownership/deadline proof stays local. Multiple
+address consensus retains its existing requirements. A local partial-TLS stall
+also invalidates the assumption that skipping root preflight is safe on the next
+connection; preserve observations while retrying independent preflight.

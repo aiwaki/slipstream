@@ -5602,3 +5602,43 @@ def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypat
         now_ms=0,
     ) is True
     assert registry.cleared is True
+
+
+def test_failed_local_strategy_reenters_independent_preflight(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "regional-denial-contract.example"
+    response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    preflights = []
+
+    async def short_system(_ip, _port, _first_flight, **_kwargs):
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            probed_upstream_response(response),
+        )
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
+    async def healthy_direct_preflight(actual_host, ip, **_kwargs):
+        preflights.append((actual_host, ip))
+        return None
+
+    monkeypatch.setattr(tproxy, "_run_initial_route_preflight", healthy_direct_preflight)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_semantic_plain_denial_probe",
+        lambda *_args, **_kwargs: pytest.fail(
+            "held preflight replaced the post-commit semantic probe"
+        ),
+    )
+
+    monkeypatch.setattr(tproxy, "_unknown_recovery_stage_for_attempt",
+                        lambda *_args: tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER)
+    tproxy._local_partial_stalls[host] = {"local:tlsrec": time.monotonic()}
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert preflights == [(host, "1.1.1.1")]
+    assert not tproxy._auto_geph_learned_exact_host(host)
+

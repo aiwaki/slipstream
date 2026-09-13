@@ -2556,11 +2556,11 @@ class _RootTlsStallConsensus:
         if not isinstance(address, ipaddress.IPv4Address) or not address.is_global:
             raise ValueError("TLS-stall consensus address must be global IPv4")
         if not (
-            2
+            1
             <= self.resolved_address_count
             <= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT
         ):
-            raise ValueError("TLS-stall consensus requires two or three current A records")
+            raise ValueError("TLS-stall consensus requires current A records")
         if not (
             self.resolved_address_count
             <= self.candidate_count
@@ -9140,7 +9140,7 @@ async def _run_bounded_direct_route_preflight_candidates(
                             ipaddress.ip_address(primary_address),
                             ipaddress.IPv4Address,
                         )
-                        and 2
+                        and 1
                         <= len(resolved_candidates)
                         <= ROUTE_PREFLIGHT_ROOT_ADDRESS_LIMIT
                         and len(combined_candidates)
@@ -9244,7 +9244,7 @@ async def _run_bounded_direct_route_preflight_candidates(
                 resolver_verified
                 and not candidate_failed
                 and float(timeout) >= minimum_candidate_window
-                and len(admitted_candidates) >= 2
+                and len(admitted_candidates) >= 1
                 and started_candidates == admitted_candidates
                 and set(completed_candidates) == admitted_candidates
                 and set(candidate_allocations) == admitted_candidates
@@ -9461,6 +9461,7 @@ _PREFLIGHT_STATE_DECISIONS = frozenset({
     "host_ineligible", "local_claim_reuse", "root_cache_reuse",
     "concurrent_refused", "window_refused", "host_window_refused", "root_admitted",
     "root_cancelled", "root_exception", "backend_unready", "proof_no_budget",
+    "singleton_payload_usable", "singleton_payload_refused",
     "capacity_deadline", "proof_context_refused", "proof_learning_noise_refused", "proof_owner_refused",
     "proof_absent", "commit_refused", "committed", "local_stage_skips_root",
     "geph_no_complete_response", "geph_response_usable", "geph_response_refused",
@@ -10246,8 +10247,32 @@ async def _run_initial_route_preflight(
                 and consensus.exact_address == str(address)
             ):
                 confirmed_pid = _owned_geph_confirmation_pid()
+                singleton_usable = True
+                if consensus.resolved_address_count == 1:
+                    # One DNS edge alone cannot grant even request-only use.
+                    # Require a complete usable same-origin response through
+                    # the owned exit as an additional independent observation.
+                    remaining = deadline - time.monotonic()
+                    singleton_usable = False
+                    if (confirmed_pid and remaining > 0
+                            and _owned_geph_ready_for_semantic_confirmation()):
+                        payload_worker = asyncio.create_task(asyncio.to_thread(
+                            _semantic_geph_payload_probe if geph_probe is None else geph_probe,
+                            h, timeout=remaining,
+                        ))
+                        payload_bytes = await _await_owned_preflight_worker(
+                            payload_worker, timeout=remaining + 0.1,
+                        )
+                        singleton_usable = (
+                            type(payload_bytes) is int
+                            and payload_bytes >= AUTO_GEPH_CONFIRM_MIN_BYTES
+                            and time.monotonic() < deadline
+                        )
+                    _log_route_preflight_state(h, "singleton_payload_usable"
+                                              if singleton_usable else "singleton_payload_refused")
                 if (
-                    confirmed_pid
+                    singleton_usable
+                    and confirmed_pid
                     and _owned_geph_ready_for_semantic_confirmation()
                     and _owned_geph_confirmation_pid_matches(confirmed_pid)
                 ):
@@ -18834,7 +18859,7 @@ async def _run_unknown_initial_route_race(
 
     The exact stream remains replay-safe until this function returns.  A
     normal actionable semantic claim wins immediately and closes that stream.
-    A provisional multi-A TLS-stall claim never does: the independent exact
+    A provisional TLS-stall claim never does: the independent exact
     stream keeps its full hard direct window, and any payload on it wins.  At
     exact timeout the provisional claim is usable only if it already completed.
     An unfinished ordinary semantic or critical-child proof keeps its historical
@@ -20119,6 +20144,16 @@ async def _handle_impl(reader, writer):
             chosen = qualified_local_claim.address
             chosen_name = qualified_local_claim.strategy_name
             via_xbox_dns = qualified_local_claim.via_xbox_dns
+    if (result is None and is_tls and host and route_class == ROUTE_UNKNOWN
+            and unknown_stage != UNKNOWN_RECOVERY_SYSTEM):
+        with _auto_geph_lock:
+            _prune_local_partial_stalls(time.monotonic())
+            retry_partial_route = bool(_local_partial_stalls.get(normalize_host(host)))
+        if retry_partial_route:
+            # A remembered local strategy that stalled is not a healthy route.
+            # Re-run independent preflight; retained failure evidence is never
+            # itself permission to use Geph or to learn a route.
+            unknown_stage = UNKNOWN_RECOVERY_SYSTEM
     if (result is None and is_tls and host and route_class == ROUTE_UNKNOWN
             and unknown_stage != UNKNOWN_RECOVERY_SYSTEM):
         _log_route_preflight_state(host, "local_stage_skips_root")
