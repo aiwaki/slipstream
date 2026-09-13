@@ -10,19 +10,21 @@ file.
 
 ## Current Checkpoint
 
-AUD-24 installed31210126 still fails Gauzy (user). remainder-events.json shows
-19:30:33 root then19:30:39 NOT_FRONTMOST, later input_not_recent; this attempt
-never exercised browser-proof path. No proof of remainder patch success.
-Candidate captures admission concurrently after root remains pending0.5s,
-consumes only for incomplete branch and only same request/deadline. Fast roots
-remain UI-free. Observer registry bounded8, cancellation retains slot to drain.
-78 focused root/provenance/headless and118 traffic tests PASS.
-Source ef2550c committed; canonical build-early running exec39472. Existing root
-log-order test filtered to root record; preexisting state log already preceded it.
-Canonical build-early PASS. New transactiona8543617 staged, not dispatched.
-Normal Quit/service absence required, then authorize-once.py exactly once.
-Source uninstalled; prior installed31210126 consumed NEVER replay. No collector pending. Gauzy and Discord gateway remain OPEN. Next build candidate
-only after affected tests; canonical verification before any replacement.
+AUD-24 installedef2550ca83696cff250784c0e682de947e45f07d viaa8543617 at
+2026-09-13T14:41:08Z. Consumed NEVER replay. Canonical installed-early PASS,
+PID78768 active; daemon a8d62007e58be38c8b7e21e3d1031e179f45574823cc8b8421cd4fa38abccb68.
+Captures signed/browser/input provenance concurrently once root remains pending
+0.5s; early result belongs only to held request, no cache or route authority.
+Fast roots do no UI work. Fixed8s proof deadline/full payload guards unchanged.
+78 root/provenance/headless and118 traffic tests PASS, build/staged/install PASS.
+User asked once to open Gauzy freshChrome and keep active first3s. Await result;
+then read output/aud24-gauzy/read-early.py for current attempt's provenance and
+browser-proof reasons. No native prompt, collector or automation browser pending.
+Previous31210126 failed: remainder-events showed not_frontmost/input_not_recent,
+so that attempt never reached browser proof. Older accepted attempts proof_absent
+remain unresolved; no claim that deadline remainder or early admission alone fixes
+Gauzy. Discord gateway remains OPEN, local-only. User AGENTS.md preserved.
+Sourceef2550c, docs newer. All replacement runners througha8543617 consumed.
 
 Historical investigation notes:
 
