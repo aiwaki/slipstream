@@ -20263,7 +20263,7 @@ async def _handle_impl(reader, writer):
             # normal retry use the learned exact-host route.
             writer.close()
             return
-        elif exact and system_probe == SYSTEM_PROBE_PAYLOAD:
+        elif exact and system_probe != SYSTEM_PROBE_TIMEOUT:
             result = exact
             chosen_name = "plain"
             via_system_exact = True
