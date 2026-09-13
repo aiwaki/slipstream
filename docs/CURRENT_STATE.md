@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 PAUSED at native Quit authorization, not installation. Candidate61bcb2a
+canonical build-input.log and staged-input.log PASS; NEW82e0d6a5 prepared,
+reviewed, NOT DISPATCHED. Incoming /Applications/.Slipstream.incoming-82e0d6a5.app.
+Normal Quit clicked; service stillrunning39477, app39679, native osascript
+waiting SecurityAgent with prompt to stop background daemon. Do NOT dispatch
+replacement until normal Quit finishes and launchctl service is absent.
+Then run ONLY output/aud23-discord-bundle-20260913.82e0d6a5/authorize-once.py
+once, open app, canonical verify:local-install, ask one user-initiated navigation
+Gauzy (automatic Playwright navigation has no physical-input provenance).
+Installed remains9e76e89; Gauzy last physical automated test FAILED. All owned
+Chrome aud24 sessions closed. No capture running. No Discord gateway fix claim.
+Source fixes134 completion/traffic +45 root/gzip/input checks; no unchanged reruns.
+Current source61bcb2a, docs newer; user AGENTS.md untouched/uncommitted.
+
 AUD-24 input timing candidate: gzip-events.json confirms safe_incomplete=1
 but no subsequent comparison. Independent code defect: recent input checked
 against fixed5s AFTER >=5s network probe. Anchor window to preflight admission,
