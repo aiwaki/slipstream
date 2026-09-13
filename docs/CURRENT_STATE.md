@@ -10,6 +10,15 @@ file.
 
 ## Current Checkpoint
 
+AUD-23 next: confirmed Darwin BPF EMSGSIZE for the installed 1523-byte decoy
+(frame1577), while compact frame343 writes successfully. Evidence
+output/aud23-next/bpf-size.json. Candidate restricts only decoy key share to
+X25519 (517 TLS bytes, <=576 including timestamp/IP/TCP); browser TLS unchanged.
+NetLog session103 shows HTML and assets sharing successful h2 socket93, then
+no asset response and close after56s. This is not proof of full causal closure.
+Next focused tests, canonical build and fresh transaction, then real Chrome
+full-content qualification. Installed remains840c82e/b4f166ad; never replay.
+
 AUD-23 latest: Discord NOT qualified. Pending14187 completed: actual distinct
 SYN and SYNACK correct, TLS still timed out; no native dialog/task remains.
 Subsequent tiny TLS records1/2/8/16, TCP OOB positions1/5/100, TTL1 disorder

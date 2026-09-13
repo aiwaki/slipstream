@@ -2374,3 +2374,20 @@ SYN/SYNACK directions, ruling out collector retransmission confusion for that
 failure. Tiny TLS records, OOB and low-TTL first-segment disorder also failed.
 All diagnostics preserved under output/aud23-discord; no global DNS/VPN/QUIC
 changes and no Discord Geph route were used. Overall Discord task remains OPEN.
+
+
+### AUD-23 BPF size failure confirmed
+
+The aud23-observer NetLog has a successful h2 session103 over socket93: HTML
+stream1 completes (12136 payload bytes), all asset streams use that same
+connection, but receive no response before connection close after56 seconds.
+This rules out treating every missing asset as a separate TLS-handshake failure.
+
+A native BPF write on en0 (MTU1500), using the same Ethernet write boundary as
+Scapy, rejects frame1577 / payload1523 with errno40 EMSGSIZE; frame343 is
+accepted. See output/aud23-next/bpf-size.json. The installed OpenSSL default
+hybrid key share produces1523 bytes, and _l3send suppresses this error. Restricting
+the decoy's key share to X25519 produces517 bytes and fits even576 bytes including
+IP/TCP timestamp overhead. This only changes the fake; browser TLS is untouched.
+Earlier compact native probes were inconsistent, so this fixes a confirmed
+injection defect but does not by itself qualify Discord navigation.

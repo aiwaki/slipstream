@@ -23734,6 +23734,8 @@ def test_discord_decoy_uses_stale_negotiated_timestamp(monkeypatch):
     assert packets[0][IP].ttl == 64
     assert dict(packets[0][TCP].options)["Timestamp"] == ((1234 - 60000) & 0xffffffff, 5678)
     assert b"cloudflare-ech.com" in bytes(packets[0][Raw])
+    # Include IP/TCP timestamp overhead: BPF does not fragment oversized frames.
+    assert len(bytes(packets[0])) <= 576
 
 
 def test_new_syn_discards_previous_connection_timestamp(monkeypatch):

@@ -14535,6 +14535,10 @@ _FAKE_CH = build_fake_clienthello(FAKE_DECOY_SNI)
 def _build_discord_decoy():
     incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # This is an injected single packet, not the browser's TLS configuration.
+    # OpenSSL's default hybrid key share makes it exceed the Ethernet MTU;
+    # Darwin BPF rejects the write with EMSGSIZE rather than fragmenting it.
+    context.set_ecdh_curve("X25519")
     client = context.wrap_bio(incoming, outgoing, server_side=False,
                               server_hostname="cloudflare-ech.com")
     try:
