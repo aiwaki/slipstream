@@ -10,13 +10,28 @@ file.
 
 ## Current Checkpoint
 
+AUD-24 installed 9e76e899abdd301dfe022662303703b43fd480a3 via5366612e
+at2026-09-13T12:06:31Z. Canonical installed-gzip.log PASS, daemon
+60bc79016a83f0a0a19346fc1eb40374e2078eda1e48ff78303a5e0fca39dd42.
+Runner5366612e consumed NEVER replay. Fresh physical Chrome aud24-gzip STILL
+BLANK after60s,33 errors,title only. Both source fixes are tested but user-visible
+qualification FAILED. Do not call Gauzy or Discord gateway fixed.
+Read-only root log command output/aud24-gauzy/read-gzip.py currently waits on
+native administrator prompt (exec session33965); resume this once, do not spam
+another capture. Latest snapshot .playwright-cli/console-2026-09-13T12-07-17-579Z.log.
+Next correlate gzip-events.json with fresh attempt once native prompt returns:
+was safe_incomplete recognized, provenance accepted, comparison attempted?
+No more source change/reinstall without this evidence. Chrome aud24-gzip open.
+
 AUD-24 second candidate: installed bbee156 via da897768 at11:52:11Z,
 canonical install PASS, but fresh Chrome still blank. Runner consumed NEVER replay.
 Root asks for gzip but incomplete detector excludes gzip; timeout path also
 returns before qualified incomplete/browser verification. Candidate recognizes
 strict gzip framing shortfall on idle only, keeps gzip EOF on hard local recovery,
 and retains existing foreground provenance plus complete browser comparison.
-134 completion/traffic tests +44 root/gzip tests PASS. Second build pending.
+134 completion/traffic tests +44 root/gzip tests PASS. Canonical build/staged
+PASS. NEW 5366612e dispatched after normal Quit/service absence; NEVER replay.
+Inspect authorization-result.json before proceeding.
 Chrome aud24-gauzy-fixed remains open. Discord gateway OPEN.
 
 AUD-24 Gauzy incomplete page reproduced in fresh physical Chrome (aud24-gauzy)
