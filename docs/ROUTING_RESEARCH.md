@@ -2391,3 +2391,23 @@ the decoy's key share to X25519 produces517 bytes and fits even576 bytes includi
 IP/TCP timestamp overhead. This only changes the fake; browser TLS is untouched.
 Earlier compact native probes were inconsistent, so this fixes a confirmed
 injection defect but does not by itself qualify Discord navigation.
+
+
+### AUD-23 installed alternate HTTPS endpoint result
+
+Installed a0a1174/a592d138: same resolved discord.com IP on8443 passes full
+89381-byte asset probes and fresh physical Chrome /login. Original URL retained;
+HTML466ms, load1768ms,207 scripts, complete document and login fields/button.
+42 focused and117 traffic checks passed. Canonical installed verification passed.
+Port support is documented at
+https://developers.cloudflare.com/fundamentals/reference/network-ports/.
+
+This is web-loading qualification, not all Discord functionality. The remote
+authentication WebSocket still fails; gateway alternate-port probes across all
+five system addresses and native TLS record/IP-fragment controls did not produce
+an upgrade. A provider shared-edge probe was rejected1034 and was not installed.
+Safari canonical new-tab title becameDiscord but form could not be read (CUA3811,
+Apple Events JS disabled); user confirmation remains pending. The initial Safari
+canonical failure and later title success must not be erased by a success claim.
+Artifacts: output/aud23-next, output/playwright/aud23-port. The oversized-decoy
+fix is independently confirmed on wire; the working web path does not need it.

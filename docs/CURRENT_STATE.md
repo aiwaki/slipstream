@@ -10,95 +10,34 @@ file.
 
 ## Current Checkpoint
 
-AUD-23 breakthrough: same-IP alternate HTTPS ports8443/2053/2083 return required
-89381-byte JS with certificate verification in0.21–0.23s. Candidate exact
-Discord.com:443 -> same resolved IP:8443, unchanged TLS, no intermediary/Geph.
-Canary/resweep share port selection; original443 fake ladder remains fallback.
-Evidence output/aud23-next/alternate-ports.json. Next focused checks/build/new
-install/browser. Current installedd22c60c/1c1a6b99 still fails443 navigation.
+AUD-23 web loading fixed in fresh Chrome; overall Discord qualification OPEN.
+Installed source a0a11747890bb0296458f6481e190f109dd644a2 via a592d138 succeeded
+2026-09-13T11:20:16Z. Canonical installed-port.log PASS; daemon62be7c6856aa5a34ed9d90f0398c7adda8e877c9b9a9144056e6f67beef6827a.
 
-AUD-23 installedd22c60c via1c1a6b99 at11:04:04Z, canonical installed PASS.
-536bd10b consumed before mutation;1c1a6b99 consumed success. Fresh Chrome still
-ERR_CONNECTION_CLOSED. Capture compact-wire.json NOW shows six517-byte decoys
-and server ACKs rejecting their stale TS, then ACK of real331-byte CH but no TLS
-response. BPF size defect fixed on wire; Discord still OPEN. Independent MD5
-fooling probe in progress (output/aud23-next/probe-md5.py), no further install.
-
-536bd10b consumed before mutation: stop was not yet complete. Normal Quit
-subsequently completed; service absent. Fresh1c1a6b99 identical except unique
-paths, ready for one dispatch. Installed still840c82e.
-
-AUD-23 d22c60c canonical build/staged PASS; new transaction536bd10b reviewed.
-Next normal Quit and one dispatch, then canonical installed/browser checks.
-21 focused tests PASS. b4f166ad and all previous transactions consumed.
-
-AUD-23 next: confirmed Darwin BPF EMSGSIZE for the installed 1523-byte decoy
-(frame1577), while compact frame343 writes successfully. Evidence
-output/aud23-next/bpf-size.json. Candidate restricts only decoy key share to
-X25519 (517 TLS bytes, <=576 including timestamp/IP/TCP); browser TLS unchanged.
-NetLog session103 shows HTML and assets sharing successful h2 socket93, then
-no asset response and close after56s. This is not proof of full causal closure.
-Next focused tests, canonical build and fresh transaction, then real Chrome
-full-content qualification. Installed remains840c82e/b4f166ad; never replay.
-
-AUD-23 latest: Discord NOT qualified. Pending14187 completed: actual distinct
-SYN and SYNACK correct, TLS still timed out; no native dialog/task remains.
-Subsequent tiny TLS records1/2/8/16, TCP OOB positions1/5/100, TTL1 disorder
-positions1/5/100 all timed out (output/aud23-discord/*result.json). No more
-candidate was installed. Installed840c82e/b4f166ad remains; sourceHEAD code
-matches it, docs newer. Own Chrome sessions closed. Do not replay any runner.
-Next needs a new evidence-backed local transport strategy, not replaying these
-probes or calling prior timestamp success sufficient. Geph remains forbidden.
-
-AUD-23 OPEN / native diagnostic confirmation pending: installed840c82e via
-b4f166ad succeeded10:32:27Z, canonical installed-observer.log PASS, but fresh
-Chrome /login still blank (HTML466ms, JS pending). All runners throughb4f166ad
-consumed. 19 observer-focused tests PASS; reused117 traffic tests. Native
-timestamp full-asset controls earlier200/90KB, then decayed: later original,
-fixed and alternate-host/IP probes all failed. DO NOT claim timestamp fix
-qualified. Modern runtime fake is1523bytes (MTU concern), but compact190/289/207
-controls also failed; unqualified template removed from source, patch retained
-in output/aud23-discord/unqualified-compact-template.patch.
-Pending exec session14187 is a read-only native SYN capture+single asset TLS
-probe, awaiting macOS confirmation (osascript96928 at last observation). Its
-result should land output/aud23-discord/failure-syn.json; inspect flags/directions
-to rule out two SYN retransmits being mistaken for SYN/SYNACK before more fixes.
-Earlier native collector merely extracted two sequence numbers; validate this.
-Installed packet captures no visible fake; BPF injection visibility/MTU vs
-observer race are NOT causally settled. Chrome aud23-observer closing.
-
-AUD-23 840c82e build/staged PASS, newb4f166ad reviewed. Next normalQuit and
-one dispatch.588e5b3c and all earlier runners consumed. Browser gate OPEN.
-
-AUD-23 installed dfbc8ef/588e5b3c consumed: main Discord response426ms but
-JS asset closed; not fixed yet. Native timestamp control downloaded full90KB
-asset in0.23s. Installed packet capture shows no decoy in failed attempts.
-Found syn_lookup returns on ISN while Discord requires SISN; candidate waits
-for peer evidence (100ms bounded) and snapshots complete record.19 focused
-observer tests PASS. Next canonical build/fresh install and browser content.
-
-AUD-23 dfbc8ef canonical build/staged PASS; fresh588e5b3c prepared and reviewed.
-Next normal Quit and one dispatch.4c7f2ba3 consumed, do not replay.
-
-AUD-23 timestamp candidate: installed08fcc49/4c7f2ba3 (consumed) still failed
-Chrome. Independent exact-IP native probes: Discord SNI timeout, cover SNI
-HTTP403 in0.19s; low-TTL poison/disorder/overlap failed; stale timestamp + valid
-cover ClientHello returned Discord /login HTTP200 in0.19s. Candidate captures
-negotiated TCP timestamps, uses stale PAWS timestamp for Discord decoy, retaining
-lowTTL fallback without evidence.19 focused tests PASS; canonical build next.
-No Geph for Discord. output/aud23-discord/timestamp-result.json contains proof.
-
-AUD-23 08fcc49 canonical build and staged verifier PASS. Fresh4c7f2ba3
-transaction prepared/reviewed; next normal Quit and dispatch once. Installed
-remains c295501 until transaction succeeds. All previous runners consumed.
-
-AUD-23 Discord OPEN: reproduced fresh Chrome ERR_CONNECTION_CLOSED and explicit
-CONNECT curl TLS close on installed c295501/118f22e4. CONNECT200 is confirmed.
-Found Discord decoy injects seq=ack=1 rather than observed handshake; candidate
-uses observed ISN/SISN with wraparound and skips incomplete evidence.17 focused
-Discord/traffic tests PASS. Next canonical build, fresh transaction, real browser
-qualification; do not claim causal closure until content passes. Evidence
-output/aud23-discord and output/playwright/aud23-discord.118f22e4 consumed.
+- Confirmed BPF EMSGSIZE for1523-byte decoy, fixed to517 bytes in d22c60c.
+  Six decoys now visible on wire; this alone did not restore Discord.
+- Exact discord.com:443 now tries SAME resolved IP:8443, unchanged TLS and URL,
+  no Geph/intermediary. Other hosts/ports cannot select it. 443 fake fallbacks
+  remain. Canary/resweep use the same port choice. See DECISIONS.md.
+- Fresh Chrome /login fully rendered fields/button: HTML466ms, load1768ms,
+  207 scripts; readyState complete. Evidence output/playwright/aud23-port.
+  Installed explicit CONNECT curl still returns200/65689 bytes later.
+- Safari initially failed on canonical URL, then a new canonical tab title was
+  Discord after direct8443 diagnostic. CUA still fails3811; JavaScript Apple
+  Events disabled. FORM NOT VERIFIED. Async user question pending; own temporary
+  8443 tab closed. Canonical Safari tab left for user inspection.
+- QR login remains broken: remote-auth-gateway.discord.gg WebSocket closes.
+  Do not claim authenticated messaging/voice/gateway qualification. Tests of
+  gateway alternative ports/addresses, splitTLS and native IP fragments failed;
+  provider shared edge returned1034. No gateway override was installed.
+-42 focused tests +117 traffic tests pass (port-tests.log,port-traffic.log);
+ 6 exact-boundary tests rerun after fixture-order preservation. All in
+ output/aud23-next. Source code matches installed; docs newer.
+-Consumed runners: all throughb4f166ad,536bd10b(failed before mutation because
+ Quit was still completing),1c1a6b99(success),a592d138(success). NEVER replay.
+ Own Chrome sessions closed, native probes complete; no pending admin process.
+ Next: user Safari form result; further evidence-backed LOCAL gateway transport
+ work if continuing full Discord qualification. Preserve local-only invariant.
 
 Update 2026-09-13 (AUD-22 Safari X login CONFIRMED):
 User confirms X login appeared on one fresh Safari navigation after c295501
