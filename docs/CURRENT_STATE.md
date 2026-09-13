@@ -10,21 +10,22 @@ file.
 
 ## Current Checkpoint
 
-AUD-24 installedef2550ca83696cff250784c0e682de947e45f07d viaa8543617 at
-2026-09-13T14:41:08Z. Consumed NEVER replay. Canonical installed-early PASS,
-PID78768 active; daemon a8d62007e58be38c8b7e21e3d1031e179f45574823cc8b8421cd4fa38abccb68.
-Captures signed/browser/input provenance concurrently once root remains pending
-0.5s; early result belongs only to held request, no cache or route authority.
-Fast roots do no UI work. Fixed8s proof deadline/full payload guards unchanged.
-78 root/provenance/headless and118 traffic tests PASS, build/staged/install PASS.
-User asked once to open Gauzy freshChrome and keep active first3s. Await result;
-then read output/aud24-gauzy/read-early.py for current attempt's provenance and
-browser-proof reasons. No native prompt, collector or automation browser pending.
-Previous31210126 failed: remainder-events showed not_frontmost/input_not_recent,
-so that attempt never reached browser proof. Older accepted attempts proof_absent
-remain unresolved; no claim that deadline remainder or early admission alone fixes
-Gauzy. Discord gateway remains OPEN, local-only. User AGENTS.md preserved.
-Sourceef2550c, docs newer. All replacement runners througha8543617 consumed.
+AUD-24 ef2550c/a8543617 installed still blank, user screenshot. early-events.json
+now proves accepted provenance -> browser-proof wait_failed at8s. Isolated actual
+helper8s returned navigation_pending. Same bundled Chromium/ownedSOCKS full load
+12.383s (root2.422s); cold DCL3.099/load11.678s and3s screenshot Loading overlay.
+Therefore keep full-frame readiness; don't weaken to DOM/body bytes.
+V2 candidate adds separately admitted fixed20s owned-only browser comparison
+only after safe-incomplete+provenance; V1 eight-second protocol unchanged.
+Same-owner continuation uses existing bounded metadata; full proof retains exact
+host/capability/PID/expiry/cancellation and4s handoff. No Geph for Discord/YouTube.
+34 Rust and288 affected Python/traffic/runtime tests PASS. Isolated debug candidate
+with production pinned Chromium/ownedSOCKS submitted usable at10.076s, exit0 at
+10.790s (isolated-worker-v2.json); no production learning from diagnostic broker.
+Candidate NOT installed/built canonically yet. Next canonical build, stagedverify,
+new replacement from consumed a8543617, normal Quit. No native prompt/collector.
+One diagnostic Playwright session aud24-owned remains OPEN and must close before
+installation. User AGENTS.md untouched. Discord gateway remains OPEN.
 
 Historical investigation notes:
 

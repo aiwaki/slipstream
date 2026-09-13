@@ -13154,6 +13154,10 @@ def test_safe_incomplete_root_can_use_bound_headless_owned_geph_proof(
     host = "safe-incomplete-root.example"
 
     async def headless(job, _peer, deadline, **_kwargs):
+        assert job.schema_version == 2
+        assert job.candidate_routes == ("owned_geph",)
+        assert job.deadline_unix_ms - job.issued_at_unix_ms == 20_000
+        assert 19.0 < deadline - time.monotonic() <= 20.0
         return tproxy._RoutePreflightOwnedGephProof(
             marker=tproxy._ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
             capability=job.capability,
@@ -13164,6 +13168,7 @@ def test_safe_incomplete_root_can_use_bound_headless_owned_geph_proof(
             deadline_unix_ms=job.deadline_unix_ms,
             confirmed_pid=41,
             reason="fixture headless proof",
+            schema_version=job.schema_version,
             bytes_read=1,
         )
 

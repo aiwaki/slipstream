@@ -2484,6 +2484,7 @@ class _RoutePreflightOwnedGephProof:
     reason: str
     bytes_read: int = 0
     bounded_ownership: bool = False
+    schema_version: int = 1
 
     def __post_init__(self):
         if type(self.bounded_ownership) is not bool:
@@ -4268,6 +4269,7 @@ def _get_pending_navigation_probe_worker(*, allow_production_headless=False):
                     pending_navigation_probe_runtime
                     .DirectHeadlessBrowserWorkerLauncher(
                         geph_port=GEPH_OWNED_PORT,
+                        timeout=30.0,
                     )
                 )
             _pending_navigation_probe_worker = (
@@ -7303,6 +7305,7 @@ def _validated_route_preflight_outcome(
         candidate_route=candidate_route,
         outcome=outcome,
         observed_at_unix_ms=now_unix_ms,
+        schema_version=job.schema_version,
     )
     decision = route_preflight.validate_route_preflight_result_v1(
         job,
@@ -7927,6 +7930,7 @@ async def _run_admitted_headless_owned_geph_preflight(
             deadline_unix_ms=job.deadline_unix_ms,
             confirmed_pid=confirmed_pid,
             reason="browser-complete response verified through owned Geph",
+            schema_version=job.schema_version,
             bytes_read=0,
         )
     except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
@@ -8083,10 +8087,19 @@ def _commit_preflight_owned_geph_proof(
     job = route_preflight.RoutePreflightJobV1(
         capability=proof.capability,
         host=proof.host,
-        candidate_routes=("system", "owned_geph"),
+        candidate_routes=(("owned_geph",) if proof.schema_version == 2
+                          else ("system", "owned_geph")),
+        schema_version=proof.schema_version,
         issued_at_unix_ms=proof.issued_at_unix_ms,
         deadline_unix_ms=proof.deadline_unix_ms,
     )
+    try:
+        parser = (route_preflight.parse_route_preflight_job_v2
+                  if proof.schema_version == 2
+                  else route_preflight.parse_route_preflight_job_v1)
+        job = parser(json.dumps(_route_preflight_job_payload(job)))
+    except (ValueError, TypeError):
+        return False
     if (
         _validated_route_preflight_outcome(
             job,
@@ -10476,6 +10489,29 @@ async def _run_initial_route_preflight(
                         timeout=remaining + 0.1,
                     )
                 else:
+                    comparison_started = time.monotonic()
+                    deadline = comparison_started + (
+                        route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS / 1000.0
+                    )
+                    comparison_issued = int(time.time() * 1000)
+                    job = route_preflight.RoutePreflightJobV2(
+                        capability=secrets.token_hex(16), host=h,
+                        candidate_routes=("owned_geph",),
+                        issued_at_unix_ms=comparison_issued,
+                        deadline_unix_ms=comparison_issued
+                        + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS,
+                    )
+                    handoff_deadline = deadline + UNKNOWN_RECOVERY_GEPH_RESERVE
+                    with _route_preflight_lock:
+                        execution_lease.child_ready = True
+                        future._slipstream_bootstrap_wait = _PendingBootstrapChildWait(
+                            future, h, str(address), deadline,
+                        )
+                    comparison_task = asyncio.current_task()
+                    comparison_join = _PendingBootstrapChildJoin(
+                        comparison_task, h, str(address), deadline,
+                    )
+                    comparison_task._slipstream_bootstrap_join = comparison_join
                     proof = await _run_headless_owned_geph_preflight(
                         job,
                         peer_endpoint,
@@ -10576,6 +10612,13 @@ async def _run_initial_route_preflight(
         _log_route_preflight_state(h, "root_exception")
         selected = False
     finally:
+        comparison_task = asyncio.current_task()
+        comparison_join = getattr(comparison_task, "_slipstream_bootstrap_join", None)
+        if (type(comparison_join) is _PendingBootstrapChildJoin
+                and comparison_join.task is comparison_task
+                and comparison_join.host == h
+                and comparison_join.exact_address == str(address)):
+            del comparison_task._slipstream_bootstrap_join
         for asset in bootstrap_assets:
             try:
                 asset.forget()
@@ -16660,7 +16703,10 @@ def _submit_route_preflight_browser_result(
     if not isinstance(payload, dict):
         return False
     try:
-        result = route_preflight.parse_route_preflight_result_v1(
+        parser = (route_preflight.parse_route_preflight_result_v2
+                  if payload.get("schema_version") == 2
+                  else route_preflight.parse_route_preflight_result_v1)
+        result = parser(
             json.dumps(payload, separators=(",", ":"), sort_keys=True)
         )
     except (TypeError, ValueError, route_preflight.RoutePreflightError):

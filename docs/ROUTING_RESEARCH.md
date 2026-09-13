@@ -2445,3 +2445,17 @@ GUI authorization, including asuser. Thus the simulation does NOT establish a
 service GUI-context defect. Temporary job and root-owned files were removed.
 No asuser/source policy change. Actual service needs fixed admission reasons;
 logging-only candidate retains every acceptance/rejection condition.
+
+### AUD-24 Gauzy full-frame budget, 2026-09-13
+
+Installed ef2550c admission works: early-events.json records accepted then
+browser-proof wait_failed at the original8s boundary. Isolated installed helper
+with a private diagnostic broker (no production route state) and full8s returned
+navigation_pending, exit0. Playwright with the same bundled Chromium and owned
+SOCKS9954 loaded full content in12.383s; root completed2.422s. Cold-cache timings
+DOMContentLoaded3.099s, load11.678s; at3s screenshot still shows Loading overlay,
+so replacing full-frame readiness with HTML/DOMContentLoaded would be unsound.
+V2 candidate isolated helper completed10.790s and submitted usable at10.076s.
+Artifacts output/aud24-gauzy/isolated-worker-{full,v2}.json and
+output/playwright/aud24-owned/{result.txt,milestones.txt,at-three-seconds.png}.
+This establishes candidate browser-proof behavior, not installed user navigation.

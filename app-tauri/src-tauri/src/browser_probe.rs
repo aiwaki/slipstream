@@ -49,6 +49,7 @@ const OUTCOME_CHALLENGE_OR_AUTH: &str = "challenge_or_auth";
 const OUTCOME_USABLE: &str = "usable";
 const OUTCOME_TERMINAL_ERROR: &str = "terminal_error";
 const ROUTE_PREFLIGHT_MAX_DEADLINE_MS: u64 = 8_000;
+const BROWSER_COMPARE_MAX_DEADLINE_MS: u64 = 20_000;
 const OWNED_GEPH_ROUTE: &str = "owned_geph";
 const OWNED_GEPH_PORT_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT";
 const DOM_CLASSIFICATION_COMMAND_ID: u64 = 4;
@@ -359,7 +360,7 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
 }
 
 fn run_probe_worker() -> ProbeResult<()> {
-    let classification_deadline = Instant::now() + CLASSIFICATION_BUDGET;
+    let classification_deadline = Instant::now() + Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS);
     let termination_requested = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(
         signal_hook::consts::SIGTERM,
@@ -418,7 +419,14 @@ fn run_claimed_probe(
 
     let remaining_ms = claimed_job_remaining_budget_ms(&job, now);
     let claimed_deadline = Instant::now() + Duration::from_millis(remaining_ms);
+    let worker_v1_deadline = classification_deadline
+        - (Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS) - CLASSIFICATION_BUDGET);
     let classification_deadline = classification_deadline.min(claimed_deadline);
+    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 2) {
+        classification_deadline
+    } else {
+        classification_deadline.min(worker_v1_deadline)
+    };
 
     let config = ChromeConfig::discover(&job, uid, classification_deadline)?;
     let mut chrome = ChromeSession::launch(uid, config, classification_deadline)?;
@@ -447,7 +455,7 @@ fn run_claimed_probe(
                 }
                 ClaimedProbeJob::RoutePreflight(job) => {
                     serde_json::to_value(RoutePreflightResultPayload {
-                        schema_version: SCHEMA_VERSION,
+                        schema_version: job.schema_version,
                         capability: &job.capability,
                         host: &job.host,
                         candidate_route: OWNED_GEPH_ROUTE,
@@ -621,7 +629,12 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
     let mut routes = job.candidate_routes.clone();
     routes.sort();
     routes.dedup();
-    if job.schema_version != SCHEMA_VERSION
+    let max_deadline = match job.schema_version {
+        1 => ROUTE_PREFLIGHT_MAX_DEADLINE_MS,
+        2 if job.candidate_routes == [OWNED_GEPH_ROUTE] => BROWSER_COMPARE_MAX_DEADLINE_MS,
+        _ => return Err(error("claimed_job_invalid")),
+    };
+    if job.schema_version == 0
         || job.capability.len() != CAPABILITY_HEX_CHARS
         || !job
             .capability
@@ -643,7 +656,7 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
             .any(|route| route == OWNED_GEPH_ROUTE)
         || job.issued_at_unix_ms == 0
         || job.deadline_unix_ms <= job.issued_at_unix_ms
-        || job.deadline_unix_ms - job.issued_at_unix_ms > ROUTE_PREFLIGHT_MAX_DEADLINE_MS
+        || job.deadline_unix_ms - job.issued_at_unix_ms > max_deadline
         || now < job.issued_at_unix_ms
         || now.saturating_sub(job.issued_at_unix_ms) > MAX_CLAIM_AGE_MS
         || job.deadline_unix_ms <= now
@@ -2293,6 +2306,24 @@ mod tests {
         assert!(claimed_job_has_start_budget(&job, 17_999));
         assert!(!claimed_job_has_start_budget(&job, 18_000));
         assert!(!claimed_job_has_start_budget(&job, 18_001));
+    }
+
+    #[test]
+    fn browser_comparison_v2_has_separate_owned_only_deadline() {
+        let now = unix_now_ms().unwrap();
+        let mut job = route_preflight_job(now);
+        job.schema_version = 2;
+        job.candidate_routes = vec![OWNED_GEPH_ROUTE.to_string()];
+        job.deadline_unix_ms = now + BROWSER_COMPARE_MAX_DEADLINE_MS;
+        assert!(validate_route_preflight_job(&job).is_ok());
+        job.schema_version = 1;
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.schema_version = 2;
+        job.deadline_unix_ms += 1;
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.deadline_unix_ms -= 1;
+        job.candidate_routes.push("system".to_string());
+        assert!(validate_route_preflight_job(&job).is_err());
     }
 
     #[test]

@@ -533,3 +533,17 @@ independent owned-Geph proof and the existing absolute deadline remain required.
 At most eight provenance observations remain live; cancellation retains each
 slot until its bounded OS observer drains. Capturing admission early avoids
 requiring the user to keep the browser foreground throughout network latency.
+
+AUD-24 full-browser comparison V2: after the held exact root independently
+reports safe-incomplete and initiating-browser provenance is accepted, create
+one fresh owned-Geph-only V2 capability with a fixed20s deadline. The direct
+RoutePreflightV1 eight-second contract is unchanged. V2 never starts for an
+ordinary timeout or protected local-only host. It retains complete document +
+stopped-main-frame + semantic usable classification, pinned owned process,
+exact host/capability, cancellation and expiry guards; no retries or refresh.
+Same-owner waiters may join this already-active stage through the existing
+bounded continuation metadata, without gaining its authority. Successful proof
+gets the existing4s handoff slice. No static host exception or external setting
+change. The worker launcher allows30s including cleanup; V1/background worker
+classification remains8s. Gauzy empirically needs10-12s for full main-frame load
+through the owned exit and still displays its Loading overlay at3s.

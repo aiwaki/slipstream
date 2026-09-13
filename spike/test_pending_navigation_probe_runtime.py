@@ -1899,3 +1899,15 @@ def test_lazy_worker_retries_after_a_lost_claim_lease():
     assert launches == [_job(), _job()]
     assert runtime.state_size() == 0
     assert worker.close()
+
+
+def test_browser_comparison_v2_queue_validation_is_owned_only():
+    import pending_navigation_probe_runtime as runtime
+    job = dict(schema_version=2, capability='a'*32, host='example.com',
+               candidate_routes=['owned_geph'], issued_at_unix_ms=1000,
+               deadline_unix_ms=21000)
+    assert runtime._validate_job(job, 1001) == job
+    assert runtime._validate_job(dict(job, schema_version=1), 1001) is None
+    assert runtime._validate_job(dict(job, deadline_unix_ms=21001), 1001) is None
+    assert runtime._validate_job(dict(job, candidate_routes=['system','owned_geph']), 1001) is None
+    assert runtime._validate_job(job, 21000) is None

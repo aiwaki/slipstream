@@ -3,6 +3,9 @@
 These versioned JSON vectors are the language-neutral behavior contract for
 Slipstream routing decisions and bounded recovery primitives.
 
+- [route-preflight-v2.json](route-preflight-v2.json) defines the separately
+  admitted full-browser owned-exit comparison; V1 keeps its eight-second bound.
+
 - `routing-policy-v1.json` maps representative hostnames to their normalized
   policy result.
 - `recovery-v1.json` maps normalized connection outcomes and reducer context to

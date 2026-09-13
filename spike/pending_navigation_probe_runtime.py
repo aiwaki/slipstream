@@ -278,7 +278,10 @@ def _validate_job(job, now_unix_ms):
         return None
     if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
         try:
-            parsed = route_preflight.parse_route_preflight_job_v1(
+            parser = (route_preflight.parse_route_preflight_job_v2
+                      if job.get("schema_version") == 2
+                      else route_preflight.parse_route_preflight_job_v1)
+            parsed = parser(
                 json.dumps(job, separators=(",", ":"), sort_keys=True)
             )
         except (TypeError, ValueError, route_preflight.RoutePreflightError):
