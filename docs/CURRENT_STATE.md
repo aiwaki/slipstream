@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-09-13 (AUD-21 recurrence OPEN after fairness install):
+User reports Chrome Capacitor block and Safari Facebook/X navigation stalls.
+Fresh daemon48375/PAC active/ownedGeph up; source3332d27 still installed.
+Logs14:15:37 www.facebook.com root admitted,14:15:42 TLS timeout; second
+at14:15:47 host_window_refused. x.com14:15:50 admitted,14:15:55 TLS timeout.
+Capacitor14:16:05 admitted,14:16:10 edge_access_denied + proof_absent;
+then system_plain partial record watchdog/local_stage_skips_root.
+Facebook14:16:58 also global window_refused, then local strategy.
+Evidence output/aud21-recurrence/window-route-events.json. Thus minute limits
+aggravate recovery but do not explain initial failures; removing them alone
+is not a demonstrated fix. Prior user Safari Weather success was one navigation.
+Next investigate missing Geph proof and TLS-stall recovery; reconsider inherited
+background-probe quota for synchronous navigation. No new runtime changes yet.
+
 Update 2026-09-13 (AUD-21 fairness INSTALLED; Safari forecast confirmed):
 Installed source3332d27e6495d5e0fd683b5d5061d2c00c7803aa via NEW fdc265fa
 one-shot runner; succeeded09:11:37Z. fdc265fa consumed, NEVER replay.
