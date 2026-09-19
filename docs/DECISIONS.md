@@ -572,7 +572,7 @@ Geph policy are unchanged. Both relay and canary pass their actual first flight.
 
 Supersede discord.com HTTPS8443 preference: native REST calls returned522 after
 gateway READY, leaving message history unavailable. Exact discord.com now uses
-a complete matched fake first on443, substituting equal-length example.com only
+a complete matched fake first on443, substituting equal-length www.mail.ru only
 in the decoy. Retain the gateway substitution and stale-timestamp guards.
 HTTPS8443 is restricted to updates.discord.com, whose manifest was independently
 verified. Public API full-response proof does not qualify authenticated history.

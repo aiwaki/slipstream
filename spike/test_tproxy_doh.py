@@ -23966,7 +23966,7 @@ def test_gateway_matched_strategy_scoped_and_local():
 
 def test_discord_rest_matched_decoy_preserves_flight_and_overrides_cached_port(monkeypatch):
     original = tproxy.build_fake_clienthello('discord.com')
-    assert tproxy._discord_matched_decoy(original) == original.replace(b'discord.com', b'example.com')
+    assert tproxy._discord_matched_decoy(original) == original.replace(b'discord.com', b'www.mail.ru')
     monkeypatch.setattr(tproxy, '_strat_cache', {'discord.com': 'discord_https8443'})
     names = [s['name'] for s in tproxy.strategy_order('discord.com')]
     assert names[0] == 'discord_matched_fake'

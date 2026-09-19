@@ -14826,7 +14826,7 @@ def _discord_matched_decoy(first_flight):
     body = b"".join(records)
     host_name = parse_sni(body)
     substitute = {"gateway.discord.gg": b"www.cloudflare.com",
-                  "discord.com": b"example.com"}.get(host_name)
+                  "discord.com": b"www.mail.ru"}.get(host_name)
     if substitute is None:
         return None
     host = host_name.encode("ascii")

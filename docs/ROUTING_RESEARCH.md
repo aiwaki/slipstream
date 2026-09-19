@@ -2507,3 +2507,11 @@ No credentials, channel requests, messages or Geph used. Evidence:
 output/aud25-discord-update/rest-port-comparison.json and rest-matched-full.json.
 65 scoped tests pass (rest-tests.log), including cached8443 cannot displace
 matched443 and updater8443 remains scoped. Native history still requires proof.
+
+REST installation90bc580/d205b205 canonical PASS; managed public API200/0.168s,
+but /app and /channels/@me stalled after12–14KB. Native reload reached internal
+error page. Independent matched example.com probe also stalled; TLS-record
+splitting16/64 did not help. Equal-length www.mail.ru decoy instead delivered
+complete /app HTTP200 through EOF,72227/72224bytes in0.17/0.16s. Root stdlib
+probe retained certificate validation and original flight. Evidence
+app-mail-complete.json. Change only exact discord.com decoy to this verified SNI.
