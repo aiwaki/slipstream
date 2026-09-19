@@ -10,6 +10,39 @@ file.
 
 ## Current Checkpoint
 
+AUD-25 gateway382cbe4 installed via910c2e46 at2026-09-19T20:34:03Z.
+Runner consumed NEVER replay. Canonical build-gateway/staged-gateway/
+installed-gateway PASS; live PID90465. Daemon
+84db84e285acaba890923a7a1efe2d917f6c0b77896cc1b981c79b5a49d6a8d6.
+64 affected tests PASS. Installed proxy HTTP/1.1 websocket probe returned101
+plus132-byte initial heartbeat_interval, TLS0.144s. Curl deadline8s is deliberate
+open-websocket termination, not initial connection failure. Initial defaultcurl
+HTTP/2 returned404; correct websocket probe must force HTTP/1.1.
+REAL NATIVE Discord01:35:06 identify ->01:35:07 CONNECTED/READY/READY_SUPPLEMENTAL.
+CUA AX confirmed main channel window, server/channel list, online status and
+members after former loading splash. No messages sent, no voice joined.
+Gateway/native startup gate PASS; stream/voice and reported YouTube stalls remain
+OPEN; user still owes video URL/browser and sending-vs-viewing stream detail.
+No admin prompt or collector remains. User AGENTS.md untouched. Next reproduce
+actual media failure separately; do not claim gateway fix validates media.
+Evidence output/aud25-discord-update/gateway-hello.json, installed-gateway*,
+native-gateway-qualified.json. CUA Discord works; tray CUA path times out,
+normal System Events Quit used as established fallback.
+
+Previous AUD-25 state:
+
+AUD-25 current user screenshot: Discord remains on loading splash after updater
+check. Fresh renderer01:13–01:14 repeatedly CONNECT gateway.discord.gg then
+WS CLOSED, no chat readiness. Managed proxy TLS fails3.162s. Same current
+gateway IP162.159.134.234:443 TLS timeout,8443 TLS completes but no HTTP upgrade.
+Two diagnostic plain/SNI-segment tests through interception failed. Normal Quit
+then launchctl113 verified; same probes without service both TLS-timeout4s.
+App reopened immediately afterward (exec45014 completed). This proves failure
+also exists without Slipstream, not that the ISP alone is proven. No new source
+changes or alternate gateway route installed. Evidence gateway-current.json,
+gateway-segments.json, gateway-without-slipstream.json. Next compare another
+network for this exact gateway; Discord remains unresolved.
+
 AUD-25 2026-09-20: source21ca4f5 installed viafb6818ab; both187f10ae and
 fb6818ab consumed NEVER replay. First failed before mutation because old /var/tmp
 snapshots absent. Replacement validates surviving snapshots and always creates

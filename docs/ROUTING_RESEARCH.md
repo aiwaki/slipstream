@@ -2486,3 +2486,11 @@ qualification remains required; headless/native TLS fingerprints can differ.
 Reference: https://github.com/bol-van/zapret/blob/master/docs/readme.md documents
 per-request fake random/session parameters and dupsid; observed proof, not the
 reference alone, justifies this exact gateway candidate.
+
+Installed382cbe4 via910c2e46 canonical verified. Real native Discord emitted
+CONNECTED, READY and READY_SUPPLEMENTAL at01:35:07 local; CUA confirmed the
+main channel window with servers/channels/members and online state. No messages
+sent or calls joined. Installed HTTP/1.1 probe returned101 plus gateway Hello
+in0.144s TLS; curl later8s timeout is deliberate closure of the open websocket.
+Defaultcurl HTTP/2 returned404, so upgrade controls must force HTTP/1.1.
+Gateway startup is qualified; voice/streams and YouTube remain separate open work.
