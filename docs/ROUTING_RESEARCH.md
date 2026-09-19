@@ -2515,3 +2515,11 @@ splitting16/64 did not help. Equal-length www.mail.ru decoy instead delivered
 complete /app HTTP200 through EOF,72227/72224bytes in0.17/0.16s. Root stdlib
 probe retained certificate validation and original flight. Evidence
 app-mail-complete.json. Change only exact discord.com decoy to this verified SNI.
+
+Installed8e63eaa via0470694e: canonical PASS. Native original chat history
+populated after restart;70 accessibility descendants, no message error or visible
+image error. Initial parallel batch5/6 immediate TLS EOF; after fully qualified
+normal Quit/restart6/6 full200 in0.226–0.279s. Initial EOF cause remains unproven
+(possible runtime admission/circuit); do not silently erase it or claim load soak.
+CLI --quit live running/absent-instance cases passed; restart attestation passed.
+No authenticated probe outside Discord, no messages sent, no voice joined.

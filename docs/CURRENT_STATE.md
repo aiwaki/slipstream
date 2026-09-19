@@ -10,45 +10,33 @@ file.
 
 ## Current Checkpoint
 
-User explicitly requests automatic Quit. Candidate adds exact --quit single-instance
-command sharing the menu handler; no-instance invocation returns before routing
-startup.13 Quit tests PASS; terminal ownership tests in quit-cli-terminal-tests.log.
-Prepared0d645fb1 NOT dispatched, superseded by combined CLI+REST build; do NOT
-install it. Existing installed90bc580/d205b205 remains live. Need build combined
-source, new transaction based on d205b205, normal stop then native chat qualification.
+AUD-25 installed8e63eaa82935fa6418028504ec10d14612ca7f97 via0470694e at
+2026-09-19T21:00:25Z; transaction consumed NEVER replay. Canonical build/staged/
+installed-rest-quit PASS. Daemon559bb211c6c0d82a46111b891abfc13bfe7b42a0ccc59fe0fbb5e723fe1cfe89.
+Exact discord.com matched decoy uses www.mail.ru on443; gateway substitution
+unchanged;8443 restricted to updates.discord.com.65 scoped baseline tests +3
+changed-decoy tests PASS. Public /app complete; actual original Discord chat
+history now populated (70 AX descendants), no message error or visible image
+error. No messages sent, no voice joined. native-rest-qualified.json records
+sanitized evidence only. Voice/stream and reported YouTube stalls remain OPEN.
 
-AUD-25 REST a5b09b4 build/staged-rest-mail PASS;3 affected tests PASS, reuse
-65-test90bc580 baseline. Installed90bc580 via consumed d205b205 at20:45:01Z,
-canonical installed-rest PASS. PublicAPI200/0.168s but native reload failed:
-/app truncated12–14KB. Independently reproduced outside relay with example.com
-decoy. www.mail.ru matched decoy gave full72227/72224-byte HTTP200 through EOF
-in0.17/0.16s (app-mail-complete.json). Candidate changes only that decoy SNI.
-Prepared transaction0d645fb1 NOT DISPATCHED; exact delta reviewed. Waiting for
-user normal Quit (async question pending), then verify launchctl absent113 and
-run output/aud23-discord-bundle-20260913.0d645fb1/authorize-once.py ONCE.
-Then open app, canonical verify:local-install, full /app and native history.
-Do not replay d205b205 or910c2e46. Full chat/media remain OPEN. User asks reliable
-automatic Quit: CUA getApp tray times out−10005; prior normal Quit done by user.
-Discord normal Quit/relaunch performed through CUA; updater started. No Geph.
+Automatic --quit added, shares menu lifecycle/terminal ownership guards.13 Quit
++2 terminal tests PASS. Live running-instance command stopped tray and service
+(launchctl113); absent-instance command exited0 without starting routing.
+Restart canonical installed-after-cli-quit-ready PASS (first immediate verifier
+was premature, status absent). User no longer needs to operate tray menu for Quit.
 
-AUD-25 gateway382cbe4 installed via910c2e46 at2026-09-19T20:34:03Z.
-Runner consumed NEVER replay. Canonical build-gateway/staged-gateway/
-installed-gateway PASS; live PID90465. Daemon
-84db84e285acaba890923a7a1efe2d917f6c0b77896cc1b981c79b5a49d6a8d6.
-64 affected tests PASS. Installed proxy HTTP/1.1 websocket probe returned101
-plus132-byte initial heartbeat_interval, TLS0.144s. Curl deadline8s is deliberate
-open-websocket termination, not initial connection failure. Initial defaultcurl
-HTTP/2 returned404; correct websocket probe must force HTTP/1.1.
-REAL NATIVE Discord01:35:06 identify ->01:35:07 CONNECTED/READY/READY_SUPPLEMENTAL.
-CUA AX confirmed main channel window, server/channel list, online status and
-members after former loading splash. No messages sent, no voice joined.
-Gateway/native startup gate PASS; stream/voice and reported YouTube stalls remain
-OPEN; user still owes video URL/browser and sending-vs-viewing stream detail.
-No admin prompt or collector remains. User AGENTS.md untouched. Next reproduce
-actual media failure separately; do not claim gateway fix validates media.
-Evidence output/aud25-discord-update/gateway-hello.json, installed-gateway*,
-native-gateway-qualified.json. CUA Discord works; tray CUA path times out,
-normal System Events Quit used as established fallback.
+Initial installed concurrent probes had immediate TLS EOF on5/6 requests, and
+some images were missing. After qualified Quit/restart6/6 concurrent API,/app,
+/channels/@me completed HTTP200 in0.226–0.279s. Cause of initial concurrent EOF
+not proven; inspect local circuit/admission state if it recurs, do not describe
+this one passing batch as unlimited-load qualification. Evidence under
+output/aud25-discord-update/: installed-mail-parallel.json, parallel-after-restart.json,
+quit-cli-qualified.json, native-rest-qualified.json and installed-after-cli-quit-ready.log.
+No pending admin/collector/build. Superseded0d645fb1 NOT consumed and must NOT
+be installed; olderd205b205/910c2e46 consumed. User AGENTS.md preserved.
+Next reproduce actual remaining media failure with a specific user stream/video;
+do not claim native chat qualification validates voice/stream or YouTube media.
 
 Previous AUD-25 state:
 
