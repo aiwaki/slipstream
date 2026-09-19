@@ -2473,3 +2473,16 @@ Evidence output/aud25-discord-update/same-ip-results.json: same162.159.138.232
 port443 SSL_ERROR_SYSCALL;8443 certificate-validating HTTP200,9067 bytes,2.795s.
 Explicit managed proxy1080 still TLS timeout8s before fix. Manifest requests omit
 private install_id. Native updater installation and real media qualification pending.
+
+### AUD-25 gateway matched ClientHello evidence
+
+Static517-byte decoys were visible with correct seq/ack/stale TS; server ACKed
+real hello but no TLS reply (gateway-wire.json). SNI disorder/overlap failed.
+A clone of the actual ClientHello, with only equal-length decoy SNI changed,
+returned HTTP101 in0.32s. Two independent repeats returned HTTP101 plus initial
+heartbeat_interval message in0.35/0.30s (gateway-hello.json). Badseq clone failed.
+Candidate retains opaque real bytes and local-only routing. Native Discord
+qualification remains required; headless/native TLS fingerprints can differ.
+Reference: https://github.com/bol-van/zapret/blob/master/docs/readme.md documents
+per-request fake random/session parameters and dupsid; observed proof, not the
+reference alone, justifies this exact gateway candidate.

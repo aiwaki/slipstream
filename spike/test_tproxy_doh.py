@@ -9241,7 +9241,7 @@ def test_discord_hosts_use_fake_only_local_bypass_strategy():
     try:
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names == ["split64+fake", "split16+fake", "fake5"]
+        assert names == ["gateway_matched_fake", "split64+fake", "split16+fake", "fake5"]
     finally:
         tproxy._strat_cache.clear()
 
@@ -23912,3 +23912,53 @@ def test_discord_updater_uses_reviewed_local_port_without_geo_exit():
     assert [s["name"] for s in tproxy.strategy_order(host)] == [
         "discord_https8443", "split64+fake", "split16+fake", "fake5",
     ]
+
+
+def test_gateway_matched_decoy_preserves_tls_parameters_and_real_flight():
+    original = tproxy.build_fake_clienthello('gateway.discord.gg')
+    head, body = original[:5], original[5:]
+    split = tproxy.make_blob(head, body, 'gateway.discord.gg', 16)
+    fake = tproxy._gateway_matched_decoy(split)
+    assert fake == original.replace(b'gateway.discord.gg', b'www.cloudflare.com')
+    assert original == head + body
+    assert tproxy.parse_sni(fake[5:]) == 'www.cloudflare.com'
+
+
+@pytest.mark.parametrize('flight', [None, b'', b'\x16\x03\x01\x00\x10short',
+    b'\x17\x03\x03\x00\x01x', b'x' * 65536])
+def test_gateway_matched_decoy_rejects_invalid_flight(flight):
+    assert tproxy._gateway_matched_decoy(flight) is None
+
+
+def test_gateway_matched_decoy_rejects_other_host_and_extra_handshake():
+    assert tproxy._gateway_matched_decoy(tproxy.build_fake_clienthello('discord.com')) is None
+    hello = tproxy.build_fake_clienthello('gateway.discord.gg')
+    assert tproxy._gateway_matched_decoy(hello + hello) is None
+
+
+def test_gateway_matched_packets_preserve_sequence_offsets_and_mtu(monkeypatch):
+    from scapy.all import TCP, IP, Raw
+    original = tproxy.build_fake_clienthello('gateway.discord.gg')
+    fake = original.replace(b'gateway.discord.gg', b'www.cloudflare.com') + b'x' * 1000
+    packets = []
+    monkeypatch.setattr(tproxy, '_gateway_matched_decoy', lambda _: fake)
+    monkeypatch.setattr(tproxy, 'syn_lookup', lambda *args, **kwargs: {
+        'isn': 0xfffffffe, 'sisn': 42, 'client_ts': 100000, 'server_ts': 200000})
+    monkeypatch.setattr(tproxy, '_l3send', packets.append)
+    tproxy.inject_fake_decoy('192.0.2.1', 52000, '203.0.113.1', 443,
+                            repeats=1, first_flight=original)
+    assert b''.join(bytes(p[Raw]) for p in packets) == fake
+    for i, p in enumerate(packets):
+        assert p[TCP].seq == (0xffffffff + i * 512) & 0xffffffff
+        assert p[TCP].ack == 43
+        assert ('Timestamp', (40000, 200000)) in p[TCP].options
+        assert len(bytes(p)) <= 576
+        assert p[IP].ttl == 64
+
+
+def test_gateway_matched_strategy_scoped_and_local():
+    assert tproxy.strategy_order('gateway.discord.gg')[0]['name'] == 'gateway_matched_fake'
+    assert tproxy.strategy_order('gateway.discord.gg')[0]['cap'] is None
+    assert all(s['fake'] for s in tproxy.strategy_order('gateway.discord.gg'))
+    for host in ('discord.com', 'updates.discord.com', 'youtube.com', 'example.com'):
+        assert 'gateway_matched_fake' not in [s['name'] for s in tproxy.strategy_order(host)]

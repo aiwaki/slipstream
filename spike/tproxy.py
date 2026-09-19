@@ -11792,7 +11792,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                         if strat.get("fake") and out[:1] == b"\x16":
                             try:
                                 src_ip, src_port = sock.getsockname()
-                                inject_fake_for_host(host, src_ip, src_port, ip, 443)
+                                inject_fake_for_host(host, src_ip, src_port, ip, 443, out)
                             except Exception:
                                 pass
                         if out[:1] == b"\x16":
@@ -14427,6 +14427,7 @@ def make_blob(head: bytes, body: bytes, host, cap):
 # no manual re-tuning, survives strategy decay.
 STRATEGIES = [
     {"name": "discord_https8443", "cap": None, "fake": False},
+    {"name": "gateway_matched_fake", "cap": None, "fake": True},
     {"name": "split64",      "cap": 64,   "fake": False},
     {"name": "split64+fake", "cap": 64,   "fake": True},
     {"name": "split16",      "cap": 16,   "fake": False},
@@ -14639,6 +14640,8 @@ def strategy_order(host):
             else YOUTUBE_CONTROL_STRATS
         )
         names = _rank_strategy_names(h, names)
+        if h == "gateway.discord.gg":
+            names = ["gateway_matched_fake"] + names
         if h in DISCORD_HTTPS8443_HOSTS:
             # Same endpoint and end-to-end TLS, via its supported HTTPS port.
             # 443 can return a ServerHello and still blackhole the asset stream.
@@ -14803,7 +14806,32 @@ def inject_fake_poison(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats
         _l3send(pkt)
 
 
-def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6):
+def _gateway_matched_decoy(first_flight):
+    """Clone only a complete gateway ClientHello; never modify the real flight."""
+    if not isinstance(first_flight, bytes) or not 5 < len(first_flight) <= 65535:
+        return None
+    offset, records = 0, []
+    while offset < len(first_flight):
+        if offset + 5 > len(first_flight) or first_flight[offset:offset + 3] not in (b"\x16\x03\x01", b"\x16\x03\x03"):
+            return None
+        length = int.from_bytes(first_flight[offset + 3:offset + 5], "big")
+        end = offset + 5 + length
+        if not length or end > len(first_flight):
+            return None
+        records.append(first_flight[offset + 5:end])
+        offset = end
+    body = b"".join(records)
+    host = b"gateway.discord.gg"
+    if (len(body) < 4 or body[0] != 1
+            or int.from_bytes(body[1:4], "big") != len(body) - 4
+            or parse_sni(body) != host.decode()
+            or body.count(host) != 1):
+        return None
+    fake = body.replace(host, b"www.cloudflare.com", 1)
+    return first_flight[:3] + len(fake).to_bytes(2, "big") + fake
+
+
+def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6, first_flight=None):
     """Send a Discord decoy bound to this observed TCP handshake.
 
     Negotiated timestamps allow server-side PAWS rejection; without timestamp
@@ -14827,17 +14855,30 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
         options = [("Timestamp", ((ent["client_ts"] - 60000) & 0xffffffff,
                                   ent["server_ts"]))]
         ttl = 64
-    pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
-           / TCP(sport=src_port, dport=dst_port, flags="PA",
-                 seq=seq, ack=ack, window=64240, options=options)
-           / Raw(_DISCORD_FAKE_CH))
+    matched = _gateway_matched_decoy(first_flight) if options else None
+    payload = matched or _DISCORD_FAKE_CH
+    # Each injected packet fits the previously qualified small-MTU boundary.
+    # Sequence offsets preserve reassembly; PAWS rejection applies to every part.
+    chunks = [(0, payload)] if matched is None or len(payload) <= 517 else [
+        (offset, payload[offset:offset + 512])
+        for offset in range(0, len(payload), 512)
+    ]
     for _ in range(repeats):
-        _l3send(pkt)
+        for offset, chunk in chunks:
+            pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
+                   / TCP(sport=src_port, dport=dst_port, flags="PA",
+                         seq=(seq + offset) & 0xffffffff, ack=ack,
+                         window=64240, options=options)
+                   / Raw(chunk))
+            _l3send(pkt)
 
 
-def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port):
+def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port, first_flight=None):
     if is_discord_host(host):
-        inject_fake_decoy(src_ip, src_port, dst_ip, dst_port)
+        if normalize_host(host) == "gateway.discord.gg" and first_flight is not None:
+            inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, first_flight=first_flight)
+        else:
+            inject_fake_decoy(src_ip, src_port, dst_ip, dst_port)
         return
     inject_fake_poison(src_ip, src_port, dst_ip, dst_port)
 
@@ -18510,7 +18551,7 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         src_ip, src_port = s.getsockname()
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            _POOL, inject_fake_for_host, host, src_ip, src_port, real_ip, port
+            _POOL, inject_fake_for_host, host, src_ip, src_port, real_ip, port, first_blob
         )
         up_w.write(first_blob)
         await up_w.drain()

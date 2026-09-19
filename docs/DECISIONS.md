@@ -556,3 +556,14 @@ certificate-validating same-IP curl returned no response on443 and a complete
 200 manifest (9067 bytes) on8443. Preserve destination IP, SNI and opaque client
 TLS bytes. Other Discord hosts and non443 input remain excluded. No Geph edge,
 external resolver/proxy mutation, or media/gateway success is implied.
+
+## AUD-25 exact gateway matched decoy — 2026-09-20
+
+For gateway.discord.gg only, try a whole-flight fake-only strategy before the
+existing fake-only ladder. Clone a bounded complete ClientHello into a separate
+decoy, changing only its SNI to the equal-length www.cloudflare.com. Preserve
+the real TLS bytes. Require observed negotiated timestamps before using this
+matched decoy; all decoy segments carry stale timestamps and correct sequence
+offsets. Preserve the verified small-packet boundary; malformed input and absent
+timestamp evidence retain the previous decoy. Other Discord hosts, YouTube and
+Geph policy are unchanged. Both relay and canary pass their actual first flight.
