@@ -22,9 +22,14 @@ host/capability/PID/expiry/cancellation and4s handoff. No Geph for Discord/YouTu
 34 Rust and288 affected Python/traffic/runtime tests PASS. Isolated debug candidate
 with production pinned Chromium/ownedSOCKS submitted usable at10.076s, exit0 at
 10.790s (isolated-worker-v2.json); no production learning from diagnostic broker.
-Source5fa1d9d canonical build-v2 PASS. New521eff9c staged; not dispatched.
-Canonical stagedverify pending10758; afterPASS normalQuit/serviceabsence before
-authorize-once.py. Base consumed a8543617; never replay. No native prompt/collector.
+Source5fa1d9d installed via521eff9c at2026-09-13T15:13:03Z after normal Quit
+and launchctl absence113; runner consumed NEVER replay. Canonical build-v2,
+staged-v2 and installed-v2 PASS, live PID93063 active/PF applied.
+User confirmed Gauzy works in ordinary Chrome after V2 install; screenshot
+codex-clipboard-d573feba-18f9-4658-9bd3-4498e87e12b5.png shows full landing
+content and cookie panel. Chrome user-visible gate PASS for this navigation;
+Safari V2 verification and Discord gateway remain OPEN. No native
+prompt/collector running. Base consumed a8543617; never replay.
 Diagnostic Playwright aud24-owned closed. User AGENTS.md untouched. Discord gateway remains OPEN.
 
 Historical investigation notes:

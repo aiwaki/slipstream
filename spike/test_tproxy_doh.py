@@ -23784,6 +23784,8 @@ def test_discord_syn_lookup_waits_for_server_observer(monkeypatch):
 
 @pytest.mark.parametrize('host,port,allowed', [
     ('discord.com', 443, True), ('DISCORD.COM.', 443, True),
+    ('updates.discord.com', 443, True), ('UPDATES.DISCORD.COM.', 443, True),
+    ('updates.discord.com', 8443, False), ('updates.discord.com.example', 443, False),
     ('discord.com', 8443, False), ('gateway.discord.gg', 443, False),
     ('discord.com.example', 443, False), ('youtube.com', 443, False),
 ])
@@ -23901,3 +23903,12 @@ def test_cancelled_root_retains_admission_slot_until_observer_drains(monkeypatch
         await asyncio.sleep(0)
         assert not tproxy._ROUTE_PREFLIGHT_PROVENANCE_TASKS
     asyncio.run(exercise())
+
+
+def test_discord_updater_uses_reviewed_local_port_without_geo_exit():
+    host = "updates.discord.com"
+    assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_LOCAL_BYPASS
+    assert not tproxy.is_geo_exit_route(host)
+    assert [s["name"] for s in tproxy.strategy_order(host)] == [
+        "discord_https8443", "split64+fake", "split16+fake", "fake5",
+    ]

@@ -547,3 +547,12 @@ gets the existing4s handoff slice. No static host exception or external setting
 change. The worker launcher allows30s including cleanup; V1/background worker
 classification remains8s. Gauzy empirically needs10-12s for full main-frame load
 through the owned exit and still displays its Loading overlay at3s.
+
+## AUD-25 Discord updater local HTTPS port — 2026-09-20
+
+Extend the existing exact-host local HTTPS8443 strategy from discord.com to
+updates.discord.com only. Native updater requests failed at TLS (-9806);
+certificate-validating same-IP curl returned no response on443 and a complete
+200 manifest (9067 bytes) on8443. Preserve destination IP, SNI and opaque client
+TLS bytes. Other Discord hosts and non443 input remain excluded. No Geph edge,
+external resolver/proxy mutation, or media/gateway success is implied.

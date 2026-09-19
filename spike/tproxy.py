@@ -14600,10 +14600,13 @@ GENERAL_STRATS = [
 ]
 
 
+DISCORD_HTTPS8443_HOSTS = frozenset({"discord.com", "updates.discord.com"})
+
+
 def _local_strategy_port(host, port, strat):
     if strat["name"] != "discord_https8443":
         return port
-    return 8443 if normalize_host(host) == "discord.com" and port == 443 else None
+    return 8443 if normalize_host(host) in DISCORD_HTTPS8443_HOSTS and port == 443 else None
 
 
 def strategy_order(host):
@@ -14636,7 +14639,7 @@ def strategy_order(host):
             else YOUTUBE_CONTROL_STRATS
         )
         names = _rank_strategy_names(h, names)
-        if h == "discord.com":
+        if h in DISCORD_HTTPS8443_HOSTS:
             # Same endpoint and end-to-end TLS, via its supported HTTPS port.
             # 443 can return a ServerHello and still blackhole the asset stream.
             names = ["discord_https8443"] + names

@@ -510,7 +510,9 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
             443,
             contract.tls_host,
         )
-        if contract.route_class == tproxy.ROUTE_LOCAL_BYPASS:
+        if contract.name == "discord-updater-local":
+            assert backend_calls[0][5] is False
+        elif contract.route_class == tproxy.ROUTE_LOCAL_BYPASS:
             assert backend_calls[0][5] is True
     elif contract.backend == "direct":
         assert [call[:3] for call in calls if call[0] == "direct"] == [

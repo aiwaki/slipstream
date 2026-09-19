@@ -2459,3 +2459,17 @@ V2 candidate isolated helper completed10.790s and submitted usable at10.076s.
 Artifacts output/aud24-gauzy/isolated-worker-{full,v2}.json and
 output/playwright/aud24-owned/{result.txt,milestones.txt,at-three-seconds.png}.
 This establishes candidate browser-proof behavior, not installed user navigation.
+
+## AUD-25 updater failure and media reports — 2026-09-20
+
+User reports intermittent Gauzy recovery, Discord stream failure, some YouTube
+videos stalling, and now Discord updater failure. Fresh native updater log has
+five failures on updates.discord.com manifest TLS, error -9806 at00:59–01:00
+local. Slipstream active PID19490; owned Geph off (do not conflate account change
+with local-only failures). Current daemon log contains YouTube client_read_error
+ends, insufficient alone to diagnose media stalls.
+
+Evidence output/aud25-discord-update/same-ip-results.json: same162.159.138.232
+port443 SSL_ERROR_SYSCALL;8443 certificate-validating HTTP200,9067 bytes,2.795s.
+Explicit managed proxy1080 still TLS timeout8s before fix. Manifest requests omit
+private install_id. Native updater installation and real media qualification pending.
