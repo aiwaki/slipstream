@@ -10,12 +10,25 @@ file.
 
 ## Current Checkpoint
 
-Latest user confirms images/stickers still broken. Candidate extends matched
-CDN/media exact hosts (full public PNG,Lottie293KB,APNG985KB proven), and removes
-shared local-engine circuit suppression: reproduced two CDN failures denying API
-and allowing1/6 concurrent requests.73 scoped tests PASS. Next canonical build,
-automatic --quit, fresh replacement based on0470694e and native media validation.
-Do not claim earlier chat-history check qualified images.
+AUD-25 media fix0f661fdd3f9e5b3effb6f5b03d5cc9268390733d installed via
+transactione69daa65 at2026-09-19T21:21:00Z. Consumed NEVER replay.
+Canonical build/staged/installed-media PASS; daemon6dfdf793142ca0aaadea4481af86f43e1da22863cb7df2708fc5f5fafb96880c.
+Automatic --quit stopped tray and service (launchctl113), replacement completed
+without manual tray-menu action.73 scoped tests PASS. User AGENTS.md preserved.
+Native Discord original broken attachment now visibly rendered; missing avatar
+and all three activity game icons rendered. Sticker picker visibly shows frequent
+and server stickers plus pack icons. Closed picker afterward; sent nothing.
+Installed ten concurrent public avatar/Lottie/APNG/API/app requests all completed
+HTTP200, valid PNG/JSON and full curl success,0.235–0.524s. Initial startup batch
+had one localhost-connect timeout; preserved separately, repeated after canonical
+readiness, all10 passed. This is not an unlimited-load qualification.
+Evidence: output/aud25-discord-update/{installed-media.log,
+installed-media-parallel.json,installed-media-parallel-startup.json,
+native-media-qualified.json}. Voice/stream and YouTube stalls remain OPEN and
+are not qualified by these media tests. Need specific failing media flow for
+next reproduction. Discord/YouTube remain local-only; no Geph fallback.
+
+Historical prior installation (superseded):
 
 AUD-25 installed8e63eaa82935fa6418028504ec10d14612ca7f97 via0470694e at
 2026-09-19T21:00:25Z; transaction consumed NEVER replay. Canonical build/staged/

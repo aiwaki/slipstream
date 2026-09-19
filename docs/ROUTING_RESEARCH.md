@@ -2540,3 +2540,12 @@ failures deny healthy discord.com, then permit exactly1/6 concurrent requests
 after cooldown. Disable shared local-engine circuit suppression; retain bounded
 independent ladders and geo-exit circuits.73 scoped tests PASS(media-tests.log),
 including multiple full failing ladders cannot suppress unrelated local requests.
+
+Installed media qualification (0f661fd / e69daa65): canonical installed verifier
+passed. Native original broken attachment, previously missing avatar and activity
+icons rendered, as did frequent/server stickers in the picker. No message sent.
+Ten concurrent public avatar/Lottie/APNG/API/app requests completed HTTP200 with
+full curl success and PNG/JSON validation in0.235–0.524s. One earlier startup
+batch localhost-connect timeout retained separately; all ten repeated only after
+readiness. Evidence output/aud25-discord-update/installed-media-parallel.json and
+native-media-qualified.json. Voice/stream/YouTube remain unqualified.
