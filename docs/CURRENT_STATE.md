@@ -10,6 +10,13 @@ file.
 
 ## Current Checkpoint
 
+User explicitly requests automatic Quit. Candidate adds exact --quit single-instance
+command sharing the menu handler; no-instance invocation returns before routing
+startup.13 Quit tests PASS; terminal ownership tests in quit-cli-terminal-tests.log.
+Prepared0d645fb1 NOT dispatched, superseded by combined CLI+REST build; do NOT
+install it. Existing installed90bc580/d205b205 remains live. Need build combined
+source, new transaction based on d205b205, normal stop then native chat qualification.
+
 AUD-25 REST a5b09b4 build/staged-rest-mail PASS;3 affected tests PASS, reuse
 65-test90bc580 baseline. Installed90bc580 via consumed d205b205 at20:45:01Z,
 canonical installed-rest PASS. PublicAPI200/0.168s but native reload failed:

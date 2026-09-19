@@ -4168,11 +4168,63 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     Ok(true)
 }
 
+#[derive(Clone)]
+struct QuitCommandState {
+    daemon_lifecycle: DaemonLifecycleCoordinator,
+    quit_in_progress: Arc<AtomicBool>,
+    terminal_operation: Arc<AtomicU8>,
+}
+
+fn is_quit_command(args: &[String]) -> bool {
+    args.len() == 2 && args[1] == "--quit"
+}
+
+fn request_application_quit(app: &AppHandle) {
+    let Some(state) = app.try_state::<QuitCommandState>() else {
+        eprintln!("Slipstream quit unavailable: lifecycle is not ready");
+        return;
+    };
+    if !claim_terminal_operation(&state.terminal_operation, TerminalOperation::Quitting) {
+        notify(app, "Another Slipstream terminal operation is in progress");
+        return;
+    }
+    state.quit_in_progress.store(true, Ordering::Release);
+    match quit_application_with(
+        || stop_slipstream_for_quit(app, &state.daemon_lifecycle),
+        || {
+            if !exit_if_terminal_owner(
+                &state.terminal_operation,
+                TerminalOperation::Quitting,
+                || app.exit(0),
+            ) {
+                eprintln!("quit exit suppressed: quit no longer owns terminal operation");
+            }
+        },
+    ) {
+        Ok(()) => {}
+        Err(error) => {
+            eprintln!("Slipstream quit incomplete: {error}");
+            notify(app, "Unable to stop Slipstream; it remains open");
+            state.quit_in_progress.store(false, Ordering::Release);
+            if !release_terminal_operation(&state.terminal_operation, TerminalOperation::Quitting) {
+                eprintln!("quit failure could not release terminal operation ownership");
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         // single-instance MUST be the first plugin: a second launch just exits.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if is_quit_command(&argv) {
+                let target = app.clone();
+                if let Err(error) = app.run_on_main_thread(move || request_application_quit(&target)) {
+                    eprintln!("Slipstream quit dispatch unavailable: {error}");
+                }
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -4181,6 +4233,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // A quit request with no existing instance must not start routing.
+            if is_quit_command(&std::env::args().collect::<Vec<_>>()) {
+                app.handle().exit(0);
+                return Ok(());
+            }
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -4410,6 +4467,11 @@ pub fn run() {
             let tg_offer_reset = Arc::new(AtomicU64::new(0));
             let quit_in_progress = Arc::new(AtomicBool::new(false));
             let terminal_operation = Arc::new(AtomicU8::new(TerminalOperation::Idle as u8));
+            app.manage(QuitCommandState {
+                daemon_lifecycle: daemon_lifecycle.clone(),
+                quit_in_progress: quit_in_progress.clone(),
+                terminal_operation: terminal_operation.clone(),
+            });
             let daemon_resume_pending = Arc::new(AtomicBool::new(
                 quit_resume_intent_on_start == QuitResumeIntentState::Valid
                     || daemon_install_requested_on_start,
@@ -4719,43 +4781,7 @@ pub fn run() {
                             }
                         }
                         ID_QUIT => {
-                            if !claim_terminal_operation(
-                                &terminal_operation_menu,
-                                TerminalOperation::Quitting,
-                            ) {
-                                notify(app, "Another Slipstream terminal operation is in progress");
-                                return;
-                            }
-                            quit_in_progress_menu.store(true, Ordering::Release);
-                            match quit_application_with(
-                                || stop_slipstream_for_quit(app, &daemon_lifecycle_menu),
-                                || {
-                                    if !exit_if_terminal_owner(
-                                        &terminal_operation_menu,
-                                        TerminalOperation::Quitting,
-                                        || app.exit(0),
-                                    ) {
-                                        eprintln!(
-                                            "quit exit suppressed: quit no longer owns terminal operation"
-                                        );
-                                    }
-                                },
-                            ) {
-                                Ok(()) => {}
-                                Err(error) => {
-                                    eprintln!("Slipstream quit incomplete: {error}");
-                                    notify(app, "Unable to stop Slipstream; it remains open");
-                                    quit_in_progress_menu.store(false, Ordering::Release);
-                                    if !release_terminal_operation(
-                                        &terminal_operation_menu,
-                                        TerminalOperation::Quitting,
-                                    ) {
-                                        eprintln!(
-                                            "quit failure could not release terminal operation ownership"
-                                        );
-                                    }
-                                }
-                            }
+                            request_application_quit(app);
                         }
                         _ => {}
                     }
@@ -5155,7 +5181,7 @@ mod tests {
 
         let source = include_str!("lib.rs");
         assert!(source.contains("ID_QUIT => {"));
-        assert!(source.contains("stop_slipstream_for_quit(app, &daemon_lifecycle_menu)"));
+        assert!(source.contains("stop_slipstream_for_quit(app, &state.daemon_lifecycle)"));
         let direct_exit = ["ID_QUIT => ", "app.exit(0)"].concat();
         assert!(!source.contains(&direct_exit));
         let quit = source
@@ -8316,5 +8342,33 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
         });
 
         assert_eq!(routing_health_summary(Some(&status), "up", false), None);
+    }
+}
+
+#[cfg(test)]
+mod quit_command_tests {
+    #[test]
+    fn quit_command_is_exact_and_has_no_extra_arguments() {
+        for args in [
+            vec!["slipstream", "--quit"],
+            vec![
+                "/Applications/Slipstream.app/Contents/MacOS/slipstream",
+                "--quit",
+            ],
+        ] {
+            assert!(super::is_quit_command(
+                &args.into_iter().map(String::from).collect::<Vec<_>>()
+            ));
+        }
+        for args in [
+            vec![],
+            vec!["slipstream"],
+            vec!["slipstream", "--quit", "anything"],
+            vec!["slipstream", "--uninstall"],
+        ] {
+            assert!(!super::is_quit_command(
+                &args.into_iter().map(String::from).collect::<Vec<_>>()
+            ));
+        }
     }
 }

@@ -1506,3 +1506,13 @@ Do not substitute a manual list of `shasum` commands: it misses non-daemon app
 drift and cannot safely traverse the root-only installed runtime. The verifier
 uses the production attestation plus hard-link witness for that boundary, then
 binds its PID to the fresh StatusV2 publisher and live launchd service.
+
+## Automatic normal Quit
+
+Run `/Applications/Slipstream.app/Contents/MacOS/slipstream --quit` to request
+normal Quit from an existing tray instance. This shares the menu's lifecycle
+transaction and administrator prompt, preserves resume intent and refuses to
+exit after a failed stop. The requesting second process exiting is not evidence
+that shutdown completed: verify the tray process and launchd service disappear.
+With no existing instance, --quit exits without starting routing. Extra arguments
+are not treated as a quit request.
