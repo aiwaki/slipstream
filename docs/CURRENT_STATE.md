@@ -10,6 +10,27 @@ file.
 
 ## Current Checkpoint
 
+AUD-25 2026-09-20: source21ca4f5 installed viafb6818ab; both187f10ae and
+fb6818ab consumed NEVER replay. First failed before mutation because old /var/tmp
+snapshots absent. Replacement validates surviving snapshots and always creates
+a fresh verified runtime backup; existing app backups retained. Canonical build,
+staged-retained, installed PASS; live PID78076. Daemon4ffa15354f68f408c6d600bc9cb4c00c52ebe2b2b5fda95d336a368cfc7edd4a.
+Exact updates.discord.com local8443 added (no Geph);52 affected tests PASS.
+Same-IP443 failed TLS,8443 returned complete9067-byte manifest. Installed managed
+proxy returned HTTP200/9067 bytes in3.361s. Native Discord opened by agent,
+01:09:46 manifest request ->01:09:51 optional-update decision, QueryCurrentVersions
+and SetManifests Running, no TLS error. This unblocks startup manifest check;
+no claim a new optional package was downloaded/installed.
+Evidence output/aud25-discord-update; no capture/admin prompt running.
+User reports Discord stream and intermittent YouTube stalls, Gauzy delayed
+recovery, changed Geph account last week. Current ownedGeph off. Media/gateway
+remain OPEN/local-only. Asked user for failing video URL/browser and whether
+Discord stream is viewing or sending; awaiting details for exact reproduction.
+Next investigate those actual media flows, not repeat old exhausted gateway
+probe matrices. Preserve AGENTS.md changes. No open PR for this branch.
+
+Previous AUD-24 checkpoint:
+
 AUD-24 ef2550c/a8543617 installed still blank, user screenshot. early-events.json
 now proves accepted provenance -> browser-proof wait_failed at8s. Isolated actual
 helper8s returned navigation_pending. Same bundled Chromium/ownedSOCKS full load
