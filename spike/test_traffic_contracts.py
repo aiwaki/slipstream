@@ -5279,8 +5279,8 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
     assert tproxy._geph_backend_hold_reason == "early close"
 
 
-def test_local_circuit_counts_one_full_strategy_ladder_as_one_failure(monkeypatch):
-    """Individual desync misses must not open the protected backend circuit."""
+def test_local_destination_failures_do_not_suppress_independent_requests(monkeypatch):
+    """Destination failures cannot close the entire local service group."""
     isolate_runtime_state(monkeypatch)
     host = "updates.discord.com"
     calls = []
@@ -5321,21 +5321,20 @@ def test_local_circuit_counts_one_full_strategy_ladder_as_one_failure(monkeypatc
         writers.append(writer)
         asyncio.run(run_handler(client, writer))
 
-    assert len([call for call in calls if call[0] == "dns"]) == 2
+    assert len([call for call in calls if call[0] == "dns"]) == 3
     assert [call[2] for call in calls if call[0] == "local"] == [
+        "fake-a",
+        "fake-b",
         "fake-a",
         "fake-b",
         "fake-a",
         "fake-b",
     ]
     assert all(writer.closed for writer in writers)
-    snapshot = tproxy.runtime_route_circuit_snapshot()
-    assert len(snapshot) == 1
-    assert snapshot[0].key.service_group == tproxy.SERVICE_DISCORD
-    assert snapshot[0].key.route_class == tproxy.ROUTE_LOCAL_BYPASS
-    assert snapshot[0].key.backend_id == tproxy.BACKEND_LOCAL_ENGINE
-    assert snapshot[0].state.phase == tproxy.route_circuit.PHASE_OPEN
-    assert snapshot[0].state.consecutive_failures == 2
+    assert tproxy.runtime_route_circuit_snapshot() == ()
+    for host in ('discord.com', 'cdn.discordapp.com', 'gateway.discord.gg'):
+        policy = tproxy.route_policy(host)
+        assert all(tproxy.runtime_route_circuit_allows(policy, tproxy.BACKEND_LOCAL_ENGINE, now_ms=1002) for _ in range(6))
 
 
 def test_smart_dns_circuit_suppresses_only_smart_dns_then_uses_owned_geph(
@@ -5596,11 +5595,11 @@ def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypat
 
     registry = BrokenRegistry()
     monkeypatch.setattr(tproxy, "_runtime_route_circuits", registry)
-    policy = tproxy.route_policy("updates.discord.com")
+    policy = tproxy.route_policy("ws.chatgpt.com")
 
     assert tproxy.runtime_route_circuit_allows(
         policy,
-        tproxy.BACKEND_LOCAL_ENGINE,
+        tproxy.GEO_BACKEND_GEPH,
         now_ms=0,
     ) is True
     assert registry.cleared is True

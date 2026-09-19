@@ -10,6 +10,13 @@ file.
 
 ## Current Checkpoint
 
+Latest user confirms images/stickers still broken. Candidate extends matched
+CDN/media exact hosts (full public PNG,Lottie293KB,APNG985KB proven), and removes
+shared local-engine circuit suppression: reproduced two CDN failures denying API
+and allowing1/6 concurrent requests.73 scoped tests PASS. Next canonical build,
+automatic --quit, fresh replacement based on0470694e and native media validation.
+Do not claim earlier chat-history check qualified images.
+
 AUD-25 installed8e63eaa82935fa6418028504ec10d14612ca7f97 via0470694e at
 2026-09-19T21:00:25Z; transaction consumed NEVER replay. Canonical build/staged/
 installed-rest-quit PASS. Daemon559bb211c6c0d82a46111b891abfc13bfe7b42a0ccc59fe0fbb5e723fe1cfe89.

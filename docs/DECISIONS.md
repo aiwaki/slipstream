@@ -576,3 +576,14 @@ a complete matched fake first on443, substituting equal-length www.mail.ru only
 in the decoy. Retain the gateway substitution and stale-timestamp guards.
 HTTPS8443 is restricted to updates.discord.com, whose manifest was independently
 verified. Public API full-response proof does not qualify authenticated history.
+
+## AUD-25 media and independent local connections — 2026-09-20
+
+Extend matched decoys only to independently proven cdn.discordapp.com
+(www.wildberries.ru) and media.discordapp.net (media.wildberries.ru), retaining
+equal lengths, original TLS, stale-timestamp requirement and local-only routing.
+Public avatar,293KB Lottie and985KB APNG responses completed in independent probes.
+Supersede runtime service-wide local-engine circuit suppression: failure at one
+Discord/CDN or YouTube destination is not an engine-wide outage. Protected local
+requests do not enter this shared circuit. Keep per-request bounded ladders and
+negative host cache; geo-exit circuit behavior and protected no-Geph rules stay.

@@ -2523,3 +2523,20 @@ normal Quit/restart6/6 full200 in0.226–0.279s. Initial EOF cause remains unpro
 (possible runtime admission/circuit); do not silently erase it or claim load soak.
 CLI --quit live running/absent-instance cases passed; restart attestation passed.
 No authenticated probe outside Discord, no messages sent, no voice joined.
+
+## AUD-25 missing images/stickers — 2026-09-20
+
+User confirms image/sticker failures after chat history recovery. Managed public
+avatar/CDN/media probes fail TLS. Exact matched CDN decoy www.wildberries.ru
+returns full PNG twice0.16/0.15s and public Lottie293355/293350bytes0.25/0.26s.
+Media server avatar path401 and Lottie.png404 are endpoint errors, not payload
+proof. Valid APNG from public sticker-packs list stalls with sport-express decoy;
+equal-length media.wildberries.ru completes985643bytes twice0.27/0.26s. No
+private attachment URLs or tokens used. Evidence media-baseline.json,
+cdn-matched-complete.json, cdn-sticker.json, media-apng-wb.json.
+
+Deterministic old runtime reproduced cross-host suppression: two CDN ladder
+failures deny healthy discord.com, then permit exactly1/6 concurrent requests
+after cooldown. Disable shared local-engine circuit suppression; retain bounded
+independent ladders and geo-exit circuits.73 scoped tests PASS(media-tests.log),
+including multiple full failing ladders cannot suppress unrelated local requests.

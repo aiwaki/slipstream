@@ -1830,7 +1830,9 @@ def _runtime_route_circuit_key(policy, backend, *, owned=True):
     route_class = policy.get("route_class") or ROUTE_UNKNOWN
     service_group = policy.get("service_group") or SERVICE_GENERIC
     if route_class == ROUTE_LOCAL_BYPASS and backend == BACKEND_LOCAL_ENGINE:
-        pass
+        # Destination failures do not prove a shared local engine outage.
+        # Keep independent protected connections parallel and local-only.
+        return None
     elif route_class == ROUTE_GEO_EXIT and backend == GEO_BACKEND_SMART_DNS:
         pass
     elif (
@@ -14603,6 +14605,13 @@ GENERAL_STRATS = [
 
 
 DISCORD_HTTPS8443_HOSTS = frozenset({"updates.discord.com"})
+DISCORD_MATCHED_DECOYS = {
+    "gateway.discord.gg": b"www.cloudflare.com",
+    "discord.com": b"www.mail.ru",
+    "cdn.discordapp.com": b"www.wildberries.ru",
+    "media.discordapp.net": b"media.wildberries.ru",
+}
+
 
 
 def _local_strategy_port(host, port, strat):
@@ -14643,7 +14652,7 @@ def strategy_order(host):
         names = _rank_strategy_names(h, names)
         if h == "gateway.discord.gg":
             names = ["gateway_matched_fake"] + names
-        if h == "discord.com":
+        if h in DISCORD_MATCHED_DECOYS and h != "gateway.discord.gg":
             names = ["discord_matched_fake"] + names
         if h in DISCORD_HTTPS8443_HOSTS:
             # Same endpoint and end-to-end TLS, via its supported HTTPS port.
@@ -14825,8 +14834,7 @@ def _discord_matched_decoy(first_flight):
         offset = end
     body = b"".join(records)
     host_name = parse_sni(body)
-    substitute = {"gateway.discord.gg": b"www.cloudflare.com",
-                  "discord.com": b"www.mail.ru"}.get(host_name)
+    substitute = DISCORD_MATCHED_DECOYS.get(host_name)
     if substitute is None:
         return None
     host = host_name.encode("ascii")
@@ -14883,7 +14891,7 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
 
 def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port, first_flight=None):
     if is_discord_host(host):
-        if normalize_host(host) in {"gateway.discord.gg", "discord.com"} and first_flight is not None:
+        if normalize_host(host) in DISCORD_MATCHED_DECOYS and first_flight is not None:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, first_flight=first_flight)
         else:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port)

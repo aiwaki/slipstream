@@ -7579,6 +7579,7 @@ def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
     }
     assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
+        "discord_matched_fake",
         "split64+fake",
         "split16+fake",
         "fake5",
@@ -23975,3 +23976,14 @@ def test_discord_rest_matched_decoy_preserves_flight_and_overrides_cached_port(m
     monkeypatch.setattr(tproxy, 'inject_fake_decoy', lambda *a, **kw: calls.append(kw))
     tproxy.inject_fake_for_host('discord.com', '192.0.2.1', 52000, '203.0.113.1', 443, first_flight=original)
     assert calls == [{'first_flight': original}]
+
+@pytest.mark.parametrize('host,decoy', [('cdn.discordapp.com', b'www.wildberries.ru'), ('media.discordapp.net', b'media.wildberries.ru')])
+def test_discord_media_matched_decoy_is_exact_and_preserves_original(host, decoy):
+    original = tproxy.build_fake_clienthello(host)
+    fake = tproxy._discord_matched_decoy(original)
+    assert fake == original.replace(host.encode(), decoy)
+    assert len(fake) == len(original)
+    assert tproxy.strategy_order(host)[0]['name'] == 'discord_matched_fake'
+    assert tproxy.route_policy(host)['route_class'] == tproxy.ROUTE_LOCAL_BYPASS
+    assert not tproxy.is_geo_exit_route(host)
+    assert tproxy._discord_matched_decoy(tproxy.build_fake_clienthello('unreviewed.' + host)) is None
