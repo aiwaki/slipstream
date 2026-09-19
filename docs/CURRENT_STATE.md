@@ -10,16 +10,19 @@ file.
 
 ## Current Checkpoint
 
-AUD-25 REST candidate90bc580:65 scoped tests + canonical build/staged PASS.
-Transaction output/aud23-discord-bundle-20260913.d205b205 dispatched ONCE after
-normal Quit, launchctl absent113. NEVER replay; inspect authorization-result.json
-and authorization-execution.log first. If successful open app and run canonical
-verify:local-install; then public REST and native chat history qualification.
-Candidate daemon4c6db312c671621ded9fcf1ab7c24b6e3617bb8b22e5c9fe7f41ed238524c74b.
-User screenshot shows failed message history despite gateway READY; renderer522.
-Public443/8443 stalled, matched443 complete JSON200 twice0.19/0.13s.
-Candidate restricts8443 to updates and adds exact discord.com matched decoy.
-Full chat/media remain OPEN; no Geph for Discord.
+AUD-25 REST a5b09b4 build/staged-rest-mail PASS;3 affected tests PASS, reuse
+65-test90bc580 baseline. Installed90bc580 via consumed d205b205 at20:45:01Z,
+canonical installed-rest PASS. PublicAPI200/0.168s but native reload failed:
+/app truncated12–14KB. Independently reproduced outside relay with example.com
+decoy. www.mail.ru matched decoy gave full72227/72224-byte HTTP200 through EOF
+in0.17/0.16s (app-mail-complete.json). Candidate changes only that decoy SNI.
+Prepared transaction0d645fb1 NOT DISPATCHED; exact delta reviewed. Waiting for
+user normal Quit (async question pending), then verify launchctl absent113 and
+run output/aud23-discord-bundle-20260913.0d645fb1/authorize-once.py ONCE.
+Then open app, canonical verify:local-install, full /app and native history.
+Do not replay d205b205 or910c2e46. Full chat/media remain OPEN. User asks reliable
+automatic Quit: CUA getApp tray times out−10005; prior normal Quit done by user.
+Discord normal Quit/relaunch performed through CUA; updater started. No Geph.
 
 AUD-25 gateway382cbe4 installed via910c2e46 at2026-09-19T20:34:03Z.
 Runner consumed NEVER replay. Canonical build-gateway/staged-gateway/
