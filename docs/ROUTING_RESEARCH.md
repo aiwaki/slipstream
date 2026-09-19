@@ -2558,3 +2558,10 @@ finland1402.wildberries.ru decoy. No credentials, voice authentication or audio
 are sent. Files voice-matched.json/voice-derived.json under aud25-discord-update.
 82 scoped tests PASS; installed and native voice qualification pending. Graph
 search transport returned Transport closed; used bounded source reads instead.
+
+After installation2ad62192, user retried the call and confirmed it now works.
+This closes the reported voice-connection failure, based on user observation;
+it does not qualify Discord streaming or YouTube. Recurrence prevention already
+includes numbered regional voice names and local circuit isolation. Remaining
+risk: static decoy choices and unqualified additional endpoints/transport flows;
+do not attribute prior failures to a proven external policy change without evidence.

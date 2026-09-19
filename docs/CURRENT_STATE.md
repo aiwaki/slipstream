@@ -15,8 +15,9 @@ at2026-09-19T21:31:36Z; consumed NEVER replay. Build/staged/installed-voice
 canonical PASS. Daemon187c480aff2689e2f0d7bcb71f52b900392514accc7bfadc61ad5fac2f2c5f5e.
 82 scoped tests PASS. Automatic Quit verified tray absent +launchctl113.
 Native prior RTC stuck CONNECTING to finland14023.discord.media, before UDP.
-Installed no-auth voice WebSocket probes now101 in0.438/0.270s. Asked user to
-retry same call; awaiting native voice readiness. Do not claim audio/stream fixed.
+Installed no-auth voice WebSocket probes now101 in0.438/0.270s. User retried
+and confirmed call works ("теперь всё гуд"). Native call qualified by user report;
+streaming and YouTube stalls remain separately unverified.
 No voice joined or audio sent by agent. Media baseline below stays green.
 Evidence output/aud25-discord-update/{voice-derived.json,voice-tests.log,
 installed-voice.log,installed-voice-control.json}.
