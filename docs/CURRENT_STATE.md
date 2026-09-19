@@ -10,6 +10,13 @@ file.
 
 ## Current Checkpoint
 
+Voice follow-up: native RTC stuck CONNECTING to finland14023.discord.media,
+WebSocket error before UDP stage. Four no-auth direct matched probes returned101
+in0.22–0.23s. Candidate adds strictly numbered regional voice endpoints to matched
+fake logic, preserves original TLS/UDP/local-only.82 scoped tests PASS. Building;
+next automatic Quit/fresh transaction and native user retry of existing call.
+No voice joined or audio sent by agent. Media baseline below stays green.
+
 AUD-25 media fix0f661fdd3f9e5b3effb6f5b03d5cc9268390733d installed via
 transactione69daa65 at2026-09-19T21:21:00Z. Consumed NEVER replay.
 Canonical build/staged/installed-media PASS; daemon6dfdf793142ca0aaadea4481af86f43e1da22863cb7df2708fc5f5fafb96880c.

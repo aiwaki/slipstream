@@ -2549,3 +2549,12 @@ full curl success and PNG/JSON validation in0.235–0.524s. One earlier startup
 batch localhost-connect timeout retained separately; all ten repeated only after
 readiness. Evidence output/aud25-discord-update/installed-media-parallel.json and
 native-media-qualified.json. Voice/stream/YouTube remain unqualified.
+
+AUD-25 voice control: native logs at02:24 show endpoint assigned, then CONNECTING
+to finland14023.discord.media:443, WebSocket error16s later, no UDP-ready stage.
+Current proxy probe times out. Four independent direct timestamp-matched fake
+probes complete101 Switching Protocols in0.22–0.23s; two use the derived
+finland1402.wildberries.ru decoy. No credentials, voice authentication or audio
+are sent. Files voice-matched.json/voice-derived.json under aud25-discord-update.
+82 scoped tests PASS; installed and native voice qualification pending. Graph
+search transport returned Transport closed; used bounded source reads instead.

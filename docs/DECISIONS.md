@@ -587,3 +587,12 @@ Supersede runtime service-wide local-engine circuit suppression: failure at one
 Discord/CDN or YouTube destination is not an engine-wide outage. Protected local
 requests do not enter this shared circuit. Keep per-request bounded ladders and
 negative host cache; geo-exit circuit behavior and protected no-Geph rules stay.
+
+## AUD-25 numbered Discord voice control endpoints
+
+One-label regional voice endpoints matching `[a-z]{1,32}[0-9]{1,8}.discord.media`
+use the existing actual-ClientHello matched stale-timestamp fake before static
+fakes. The fake substitutes the label minus its last digit plus `.wildberries.ru`,
+preserving byte length. This name is never resolved or contacted; real TLS and
+certificate validation are unchanged. Other names are excluded. UDP voice
+policy is unchanged, and Discord remains local-only without Geph.

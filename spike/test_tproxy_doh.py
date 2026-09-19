@@ -23987,3 +23987,26 @@ def test_discord_media_matched_decoy_is_exact_and_preserves_original(host, decoy
     assert tproxy.route_policy(host)['route_class'] == tproxy.ROUTE_LOCAL_BYPASS
     assert not tproxy.is_geo_exit_route(host)
     assert tproxy._discord_matched_decoy(tproxy.build_fake_clienthello('unreviewed.' + host)) is None
+
+
+@pytest.mark.parametrize('host', ['finland14023.discord.media', 'rotterdam123.discord.media', 'a1.discord.media'])
+def test_discord_voice_matched_decoy_preserves_real_tls_and_local_policy(host, monkeypatch):
+    original = tproxy.build_fake_clienthello(host)
+    fake = tproxy._discord_matched_decoy(original)
+    decoy = (host.split('.')[0][:-1] + '.wildberries.ru').encode()
+    assert fake == original.replace(host.encode(), decoy)
+    assert len(fake) == len(original)
+    assert tproxy.strategy_order(host)[0]['name'] == 'discord_matched_fake'
+    assert all(s['fake'] for s in tproxy.strategy_order(host))
+    assert tproxy.route_policy(host)['route_class'] == tproxy.ROUTE_LOCAL_BYPASS
+    assert not tproxy.is_geo_exit_route(host)
+    calls = []
+    monkeypatch.setattr(tproxy, 'inject_fake_decoy', lambda *a, **kw: calls.append(kw))
+    tproxy.inject_fake_for_host(host, '192.0.2.1', 52000, '203.0.113.1', 443, first_flight=original)
+    assert calls == [{'first_flight': original}]
+
+
+@pytest.mark.parametrize('host', ['discord.media', 'x.finland14023.discord.media', 'finland14023.discord.media.example.com', 'finland.discord.media', '123.discord.media', 'a'*64 + '1.discord.media'])
+def test_discord_voice_matched_decoy_rejects_non_endpoint_names(host):
+    assert tproxy._discord_matched_substitute(host) is None
+    assert tproxy._discord_matched_decoy(tproxy.build_fake_clienthello(host)) is None

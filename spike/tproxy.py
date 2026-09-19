@@ -14614,6 +14614,18 @@ DISCORD_MATCHED_DECOYS = {
 
 
 
+def _discord_matched_substitute(host):
+    substitute = DISCORD_MATCHED_DECOYS.get(host)
+    if substitute is not None:
+        return substitute
+    # Numbered regional voice control endpoints. Match only one DNS label;
+    # the decoy is injected, never resolved or used as the real TLS authority.
+    match = re.fullmatch(r"([a-z]{1,32}[0-9]{1,8})\.discord\.media", host or "")
+    if match:
+        return (match.group(1)[:-1] + ".wildberries.ru").encode("ascii")
+    return None
+
+
 def _local_strategy_port(host, port, strat):
     if strat["name"] != "discord_https8443":
         return port
@@ -14652,7 +14664,7 @@ def strategy_order(host):
         names = _rank_strategy_names(h, names)
         if h == "gateway.discord.gg":
             names = ["gateway_matched_fake"] + names
-        if h in DISCORD_MATCHED_DECOYS and h != "gateway.discord.gg":
+        if _discord_matched_substitute(h) is not None and h != "gateway.discord.gg":
             names = ["discord_matched_fake"] + names
         if h in DISCORD_HTTPS8443_HOSTS:
             # Same endpoint and end-to-end TLS, via its supported HTTPS port.
@@ -14834,7 +14846,7 @@ def _discord_matched_decoy(first_flight):
         offset = end
     body = b"".join(records)
     host_name = parse_sni(body)
-    substitute = DISCORD_MATCHED_DECOYS.get(host_name)
+    substitute = _discord_matched_substitute(host_name)
     if substitute is None:
         return None
     host = host_name.encode("ascii")
@@ -14891,7 +14903,7 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
 
 def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port, first_flight=None):
     if is_discord_host(host):
-        if normalize_host(host) in DISCORD_MATCHED_DECOYS and first_flight is not None:
+        if _discord_matched_substitute(normalize_host(host)) is not None and first_flight is not None:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, first_flight=first_flight)
         else:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port)
