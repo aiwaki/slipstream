@@ -14427,6 +14427,7 @@ def make_blob(head: bytes, body: bytes, host, cap):
 # no manual re-tuning, survives strategy decay.
 STRATEGIES = [
     {"name": "discord_https8443", "cap": None, "fake": False},
+    {"name": "discord_matched_fake", "cap": None, "fake": True},
     {"name": "gateway_matched_fake", "cap": None, "fake": True},
     {"name": "split64",      "cap": 64,   "fake": False},
     {"name": "split64+fake", "cap": 64,   "fake": True},
@@ -14601,7 +14602,7 @@ GENERAL_STRATS = [
 ]
 
 
-DISCORD_HTTPS8443_HOSTS = frozenset({"discord.com", "updates.discord.com"})
+DISCORD_HTTPS8443_HOSTS = frozenset({"updates.discord.com"})
 
 
 def _local_strategy_port(host, port, strat):
@@ -14642,6 +14643,8 @@ def strategy_order(host):
         names = _rank_strategy_names(h, names)
         if h == "gateway.discord.gg":
             names = ["gateway_matched_fake"] + names
+        if h == "discord.com":
+            names = ["discord_matched_fake"] + names
         if h in DISCORD_HTTPS8443_HOSTS:
             # Same endpoint and end-to-end TLS, via its supported HTTPS port.
             # 443 can return a ServerHello and still blackhole the asset stream.
@@ -14806,8 +14809,8 @@ def inject_fake_poison(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats
         _l3send(pkt)
 
 
-def _gateway_matched_decoy(first_flight):
-    """Clone only a complete gateway ClientHello; never modify the real flight."""
+def _discord_matched_decoy(first_flight):
+    """Clone only a complete reviewed Discord ClientHello; never modify the real flight."""
     if not isinstance(first_flight, bytes) or not 5 < len(first_flight) <= 65535:
         return None
     offset, records = 0, []
@@ -14821,13 +14824,18 @@ def _gateway_matched_decoy(first_flight):
         records.append(first_flight[offset + 5:end])
         offset = end
     body = b"".join(records)
-    host = b"gateway.discord.gg"
+    host_name = parse_sni(body)
+    substitute = {"gateway.discord.gg": b"www.cloudflare.com",
+                  "discord.com": b"example.com"}.get(host_name)
+    if substitute is None:
+        return None
+    host = host_name.encode("ascii")
     if (len(body) < 4 or body[0] != 1
             or int.from_bytes(body[1:4], "big") != len(body) - 4
             or parse_sni(body) != host.decode()
             or body.count(host) != 1):
         return None
-    fake = body.replace(host, b"www.cloudflare.com", 1)
+    fake = body.replace(host, substitute, 1)
     return first_flight[:3] + len(fake).to_bytes(2, "big") + fake
 
 
@@ -14855,7 +14863,7 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
         options = [("Timestamp", ((ent["client_ts"] - 60000) & 0xffffffff,
                                   ent["server_ts"]))]
         ttl = 64
-    matched = _gateway_matched_decoy(first_flight) if options else None
+    matched = _discord_matched_decoy(first_flight) if options else None
     payload = matched or _DISCORD_FAKE_CH
     # Each injected packet fits the previously qualified small-MTU boundary.
     # Sequence offsets preserve reassembly; PAWS rejection applies to every part.
@@ -14875,7 +14883,7 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
 
 def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port, first_flight=None):
     if is_discord_host(host):
-        if normalize_host(host) == "gateway.discord.gg" and first_flight is not None:
+        if normalize_host(host) in {"gateway.discord.gg", "discord.com"} and first_flight is not None:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, first_flight=first_flight)
         else:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port)

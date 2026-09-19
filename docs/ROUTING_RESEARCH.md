@@ -2494,3 +2494,16 @@ sent or calls joined. Installed HTTP/1.1 probe returned101 plus gateway Hello
 in0.144s TLS; curl later8s timeout is deliberate closure of the open websocket.
 Defaultcurl HTTP/2 returned404, so upgrade controls must force HTTP/1.1.
 Gateway startup is qualified; voice/streams and YouTube remain separate open work.
+
+## AUD-25 REST after gateway READY — 2026-09-20
+
+User screenshot confirms main Discord shell but failed message history. Renderer
+reports522 for public application/profile/ack requests and message fetch failures.
+Public /api/v9/gateway comparison: local443 and8443 completed TLS but no HTTP
+within18s; managed proxy closed TLS. A matched real-ClientHello decoy with
+discord.com replaced by equal-length example.com and stale negotiated TCP TS
+returned full HTTP200 gateway JSON twice in0.19/0.13s on162.159.138.232:443.
+No credentials, channel requests, messages or Geph used. Evidence:
+output/aud25-discord-update/rest-port-comparison.json and rest-matched-full.json.
+65 scoped tests pass (rest-tests.log), including cached8443 cannot displace
+matched443 and updater8443 remains scoped. Native history still requires proof.

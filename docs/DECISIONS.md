@@ -567,3 +567,12 @@ matched decoy; all decoy segments carry stale timestamps and correct sequence
 offsets. Preserve the verified small-packet boundary; malformed input and absent
 timestamp evidence retain the previous decoy. Other Discord hosts, YouTube and
 Geph policy are unchanged. Both relay and canary pass their actual first flight.
+
+## AUD-25 Discord REST matched decoy — 2026-09-20
+
+Supersede discord.com HTTPS8443 preference: native REST calls returned522 after
+gateway READY, leaving message history unavailable. Exact discord.com now uses
+a complete matched fake first on443, substituting equal-length example.com only
+in the decoy. Retain the gateway substitution and stale-timestamp guards.
+HTTPS8443 is restricted to updates.discord.com, whose manifest was independently
+verified. Public API full-response proof does not qualify authenticated history.

@@ -10,6 +10,13 @@ file.
 
 ## Current Checkpoint
 
+AUD-25 REST follow-up: latest user screenshot has failed message history despite
+gateway READY. Renderer REST522; public API443/8443 stalls, matched443 returns
+complete200 JSON twice in0.19/0.13s. Candidate restricts8443 to updates and adds
+exact discord.com matched decoy (example.com);65 scoped tests PASS. Next canonical
+build/install then native message-history qualification. Installed gateway build
+below remains current until new transaction completes. No Geph for Discord.
+
 AUD-25 gateway382cbe4 installed via910c2e46 at2026-09-19T20:34:03Z.
 Runner consumed NEVER replay. Canonical build-gateway/staged-gateway/
 installed-gateway PASS; live PID90465. Daemon
