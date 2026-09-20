@@ -52,6 +52,12 @@ file.
   7b023e11439b1730ec2a038677f69c608b4834ccb29aae136230fae1faf660f7,
   daemon4cc2e8d, main817cce69. NOT installed. No build active.
   Earlier build1217/d5afa50/tree16b14290 is superseded by deadline fix.
+- Recovery installation transaction1ab5b2b9 prepared and staged, NOT DISPATCHED.
+  output/aud30-recovery-install-1ab5b2b9/; pending-install.json points here.
+  Staged canonical PASS tree7b023e11; installed old tree1794a453 reverified.
+  Exact script delta reviewed: nonce/source/trees/new daemon plus prior5f5ec434
+  backup. bash -n PASS. Await recovery CI before normal Quit/authorization.
+  No build/installation process or administrator prompt pending.
 - Recovery pushed: PR376 head1eb658c298044443c73414b19c09be38ca1e0758.
   CI35510044024, audit35510043940, Windows35510043933 verified in_progress.
   Next poll these exact runs before a fresh workstation replacement. Qualify candidate before a NEW
