@@ -11,6 +11,12 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Added real-thread overlap regression: old private worker held in DNS while
+  replacement completes; releasing old worker must not republish or alter winner.
+ 13 focused tests PASS (resweep-threaded-tests.log), complementing101 neighboring
+  recovery tests. Runtime remainsd5afa50; test-only follow-up needs no rebuild.
+  Local build1217 still live compiling Tauri after daemon freezebcd17a92.
+  Remote CI35509303661 still live packaged-app-build, no failures at last poll.
 - Recovery local build session1217 started for exact runtimed5afa50; log
   output/aud30-traffic-gate/recovery-local-build.log. Poll this handle, do not
   duplicate build. Installed2fb0270/5f5ec434 unchanged. Provenance CI35509303661

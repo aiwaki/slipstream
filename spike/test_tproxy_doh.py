@@ -8391,6 +8391,58 @@ def test_superseded_resweep_cannot_publish_strategy_results(monkeypatch, superse
     assert len(queued) == 2
 
 
+def test_overlapping_recovery_workers_publish_only_new_owner(monkeypatch):
+    host = "updates.discord.com"
+    old_in_dns, release_old = threading.Event(), threading.Event()
+    threads, recorded = [], []
+    real_thread = threading.Thread
+    call_lock = threading.Lock()
+    calls = [0]
+
+    def thread_factory(**kwargs):
+        worker = real_thread(**kwargs)
+        threads.append(worker)
+        return worker
+
+    async def resolve(*args):
+        with call_lock:
+            calls[0] += 1
+            first = calls[0] == 1
+        if first:
+            old_in_dns.set()
+            if not release_old.wait(timeout=3):
+                raise TimeoutError("test did not release old DNS")
+        return ["203.0.113.10"]
+
+    async def payload(*args):
+        return 1000000
+
+    monkeypatch.setattr(tproxy.threading, "Thread", thread_factory)
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", resolve)
+    monkeypatch.setattr(tproxy, "_run_local_payload_probe", payload)
+    monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *a, **k: recorded.append(a))
+    monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
+    try:
+        assert tproxy.schedule_local_bypass_resweep(host, now=100.0)
+        assert old_in_dns.wait(timeout=1)
+        assert tproxy.schedule_local_bypass_resweep(
+            host, now=101.0 + tproxy.LOCAL_BYPASS_RESWEEP_STALE_AFTER)
+        threads[1].join(timeout=1)
+        assert not threads[1].is_alive(), "replacement waits on stale DNS worker"
+        assert len(recorded) == 1
+        winner = tproxy._strat_cache[host]
+        release_old.set()
+        threads[0].join(timeout=1)
+        assert not threads[0].is_alive()
+        assert len(recorded) == 1
+        assert tproxy._strat_cache[host] == winner
+        assert host not in tproxy._local_bypass_resweep_active
+    finally:
+        release_old.set()
+        for worker in threads:
+            worker.join(timeout=4)
+
+
 def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
     host = "updates.discord.com"
     attempts = []
