@@ -11,6 +11,13 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Stage2 scheduler race reproduced read-only from exact source AST with queued
+  threads: start100, replacement221, old completion removes replacement marker,
+  third start282 incorrectly admitted while replacement age61 < stale120.
+  Evidence output/aud30-traffic-gate/resweep-race-reproduction.json. No runtime
+  patch yet; not established as cause of historical Discord hangs. After stage1
+  gates, add regression and ownership-aware cleanup; also investigate stale
+  result publication separately. Installed baseline unchanged.
 - Follow-ups pushed: remote PR376 head326d25ef2121eded146e4b13229531904d20fbb4.
   New four-case CI35508641621 queued; audit35508641655 and Windows35508641618
   queued, verified via GitHub. Next inspect these exact runs; do not cancel
