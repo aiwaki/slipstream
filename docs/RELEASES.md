@@ -109,18 +109,25 @@ installation, runs the transaction as the original console user, then removes
 only qualification-owned processes/runtime and requires the PF snapshot restored.
 
 A third isolated case, `--case traffic_failure`, first proves complete traffic
-on all three qualification paths, then stalls resolution of the exact control
-host only on the disposable runner. The successor remains unsignalled and alive;
+for both public objects on all three qualification paths, then stalls resolution
+of both reviewed delivery hosts only on the disposable runner. The successor remains unsignalled and alive;
 the daemon must stay active with advancing heartbeat through the ACK deadline.
 The real watchdog must still restore the old tree and a surviving tray. Cleanup
-restores the scoped resolver fixture as well as the qualification-owned runtime.
+restores both scoped resolver fixtures in reverse order as well as the
+qualification-owned runtime.
+
+A fourth isolated case, `--case primary_unavailable`, stalls only the primary
+media.discordapp.net host after the same six-transfer baseline. The independent
+cdn.discordapp.com object must allow the real successor to acknowledge and
+survive with the exact candidate tree. Every injected resolver must observe a
+query; acceptance without exercising the fault is not a qualifying pass.
 
 These are packaged replacement/acceptance/timeout-rollback checks, not signed
 feed discovery, notification delivery, actual media sessions or a public version
 transition. The driver uses the current production preparer; a published old
 application initiating an update through its own shipped preparer remains a
 separate compatibility gate. The driver compile and harness unit tests do not
-constitute a passed packaged run. AUD-30 requires all three real cases before
+constitute a passed packaged run. AUD-30 requires all four real cases before
 that gate is complete.
 
 The accept runner additionally executes `qualify_watchdog_startup_failure.py`
@@ -130,7 +137,7 @@ must restore the old fixture bytes, launch that fixture exactly once, preserve
 terminal failure evidence and remove active transaction residue. This gate
 uses neither a fake ACK nor a mocked helper. Its fixture processes are not the
 real tray and it does not load a LaunchAgent or qualify signed-feed migration.
-It complements rather than replaces the three packaged application cases.
+It complements rather than replaces the four packaged application cases.
 
 ## Legacy App Releases
 
