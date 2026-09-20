@@ -11,6 +11,17 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Recovery build1217 completed exit0 canonical PASS for runtimed5afa50:
+  tree16b142905d84f5efe1dad7ea7cf0f35aae67ca5173e80901a662d41ee755fb48,
+  daemonbcd17a9216906e964696936e8d0bf784f126db1895df1db3c0a96a5632412a3d.
+  NOT installed; subsequent deadline fix invalidates this candidate for final use.
+- Found unbounded sweep wait on shared-executor system DNS. Worker now wraps
+  sweep in wait_for(STALE_AFTER=120s), releasing private event-loop thread on
+  expiry; stale publication guards remain.14 focused tests PASS including
+  cancellation/finally slot cleanup. An already-running libc DNS call cannot be
+  cancelled; shared executor occupancy is a remaining separate concern, not
+  claimed fixed. Need new canonical build after this runtime diff.
+  Remote35509303661 now running four packaged cases/browser, no failures.
 - Added real-thread overlap regression: old private worker held in DNS while
   replacement completes; releasing old worker must not republish or alter winner.
  13 focused tests PASS (resweep-threaded-tests.log), complementing101 neighboring

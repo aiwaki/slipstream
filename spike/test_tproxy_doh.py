@@ -8497,6 +8497,31 @@ def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
         tproxy._dead.pop(host, None)
 
 
+def test_recovery_worker_deadline_cancels_probe_and_releases_slot(monkeypatch):
+    cancelled, queued = [], []
+
+    class QueuedThread:
+        def __init__(self, *, target, **kwargs):
+            queued.append(target)
+        def start(self):
+            pass
+
+    async def stuck(host, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.append(True)
+
+    monkeypatch.setattr(tproxy.threading, "Thread", QueuedThread)
+    monkeypatch.setattr(tproxy, "_resweep_local_bypass_host", stuck)
+    monkeypatch.setattr(tproxy, "LOCAL_BYPASS_RESWEEP_STALE_AFTER", 0.01)
+    host = "updates.discord.com"
+    assert tproxy.schedule_local_bypass_resweep(host, now=100.0)
+    queued[0]()
+    assert cancelled == [True]
+    assert host not in tproxy._local_bypass_resweep_active
+
+
 def test_local_bypass_resweep_contains_background_probe_errors(monkeypatch):
     async def broken(_host, **kwargs):
         raise OSError("probe unavailable")

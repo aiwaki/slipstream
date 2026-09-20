@@ -12255,7 +12255,12 @@ async def _resweep_local_bypass_host(host, expected_start=None):
 
 def _run_local_bypass_resweep(host, expected_start=None):
     try:
-        return asyncio.run(_resweep_local_bypass_host(host, expected_start=expected_start))
+        # Use the shared executor inside the sweep, not asyncio's default pool:
+        # timing out can release this worker without joining a stuck resolver.
+        return asyncio.run(asyncio.wait_for(
+            _resweep_local_bypass_host(host, expected_start=expected_start),
+            timeout=LOCAL_BYPASS_RESWEEP_STALE_AFTER,
+        ))
     except Exception as exc:
         if VERBOSE:
             group = route_policy(host)["service_group"]
