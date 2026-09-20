@@ -3,7 +3,12 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-const URL: &str = "https://media.discordapp.net/stickers/1228092333061443654.png";
+// Two delivery hosts for the same large public object. This survives a host
+// outage; deletion of the object or a Discord-wide outage must still fail.
+const URLS: [&str; 2] = [
+    "https://media.discordapp.net/stickers/1228092333061443654.png",
+    "https://cdn.discordapp.com/stickers/1228092333061443654.png",
+];
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,7 +122,7 @@ fn complete_png(body: &[u8]) -> bool {
     false
 }
 
-async fn probe(proxy: Option<&str>) -> Result<bool, reqwest::Error> {
+async fn probe(proxy: Option<&str>, url: &str) -> Result<bool, reqwest::Error> {
     let mut builder = reqwest::Client::builder()
         .no_proxy()
         .https_only(true)
@@ -127,7 +132,7 @@ async fn probe(proxy: Option<&str>) -> Result<bool, reqwest::Error> {
     if let Some(proxy) = proxy {
         builder = builder.proxy(reqwest::Proxy::https(proxy)?);
     }
-    let mut response = builder.build()?.get(URL).send().await?.error_for_status()?;
+    let mut response = builder.build()?.get(url).send().await?.error_for_status()?;
     // The boolean result is handled below; non-200, oversized or incomplete
     // objects are not accepted even if HTTPS established successfully.
     if response.status() != reqwest::StatusCode::OK {
@@ -143,13 +148,34 @@ async fn probe(proxy: Option<&str>) -> Result<bool, reqwest::Error> {
     Ok(complete_png(&body))
 }
 
+// Return on the first complete payload; a fast failure must not cancel the
+// other delivery host. Dropping the remaining future cancels its HTTP work.
+async fn first_valid(
+    first: impl std::future::Future<Output = bool>,
+    second: impl std::future::Future<Output = bool>,
+) -> bool {
+    tokio::pin!(first, second);
+    tokio::select! {
+        ok = &mut first => if ok { true } else { second.await },
+        ok = &mut second => if ok { true } else { first.await },
+    }
+}
+
+async fn probe_route(proxy: Option<&str>) -> bool {
+    first_valid(
+        async { probe(proxy, URLS[0]).await.unwrap_or(false) },
+        async { probe(proxy, URLS[1]).await.unwrap_or(false) },
+    )
+    .await
+}
+
 async fn qualify() -> bool {
     let (v4, v6, direct) = tokio::join!(
-        probe(Some("http://127.0.0.1:1080")),
-        probe(Some("http://[::1]:1080")),
-        probe(None)
+        probe_route(Some("http://127.0.0.1:1080")),
+        probe_route(Some("http://[::1]:1080")),
+        probe_route(None)
     );
-    v4.unwrap_or(false) && v6.unwrap_or(false) && direct.unwrap_or(false)
+    v4 && v6 && direct
 }
 
 #[cfg(test)]
@@ -290,6 +316,36 @@ mod tests {
         );
         assert!(run_bounded(async { true }, Duration::from_secs(1)));
     }
+    #[test]
+    fn a_failed_host_does_not_cancel_a_valid_alternative() {
+        for first in [false, true] {
+            assert!(run_bounded(
+                first_valid(async move { first }, async move { !first }),
+                Duration::from_secs(1)
+            ));
+        }
+        assert!(!run_bounded(
+            first_valid(async { false }, async { false }),
+            Duration::from_secs(1)
+        ));
+    }
+
+    #[test]
+    fn a_valid_host_does_not_wait_for_a_stalled_alternative() {
+        assert!(run_bounded(
+            first_valid(async { true }, std::future::pending()),
+            Duration::from_millis(100)
+        ));
+        assert!(run_bounded(
+            first_valid(std::future::pending(), async { true }),
+            Duration::from_millis(100)
+        ));
+        assert!(!run_bounded(
+            first_valid(async { false }, std::future::pending()),
+            Duration::from_millis(20)
+        ));
+    }
+
     #[test]
     #[ignore = "explicit live public transfer qualification only"]
     fn live_complete_payload_all_paths() {

@@ -11,6 +11,15 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Follow-up source changes (not yet installed): successor traffic gate races two
+  reviewed Discord delivery hosts per route, cancelling pending HTTP work after
+  a valid full payload. Installed verifier reports all six attempts and keeps
+  three mandatory route results. Same object/service remains a known shared
+  dependency; independent control-object coverage and legacy migration remain
+  OPEN, not replaced by this improvement.
+  Focused Rust9PASS/1ignored; Python6PASS; live installed six transfers each
+  completed984455bytes. Evidence output/aud30-traffic-gate/redundant-host-*.
+
 - Runtime source4442098 / CI35506810015: build, product/common checks, packaged
   browser and accept/rollback/traffic_failure jobs PASS. Lifecycle-heavy PASS; full CI terminal SUCCESS. Audit35506809983 PASS.
 - Downloaded accept artifact for merge2511299a to

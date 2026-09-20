@@ -9,6 +9,7 @@ import zlib
 
 
 URL = "https://media.discordapp.net/stickers/1228092333061443654.png"
+URLS = (URL, "https://cdn.discordapp.com/stickers/1228092333061443654.png")
 MAX_BYTES = 2 * 1024 * 1024
 
 
@@ -36,7 +37,7 @@ def complete_png(body):
     return False
 
 
-def probe(path, runner=subprocess.run):
+def probe(path, runner=subprocess.run, url=URL):
     routes = {
         "proxy_ipv4": ["--noproxy", "", "--proxy", "http://127.0.0.1:1080"],
         "proxy_ipv6": ["--noproxy", "", "--proxy", "http://[::1]:1080"],
@@ -48,21 +49,29 @@ def probe(path, runner=subprocess.run):
                    "--connect-timeout", "3", "--max-time", "10",
                    "--max-filesize", str(MAX_BYTES), "--proto", "=https",
                    *routes[path], "--output", str(body_path),
-                   "--write-out", "%{http_code}", URL]
+                   "--write-out", "%{http_code}", url]
         try:
             result = runner(command, capture_output=True, text=True, timeout=12)
             body = body_path.read_bytes() if body_path.exists() else b""
             valid = result.returncode == 0 and result.stdout.strip() == "200" and complete_png(body)
-            return {"path": path, "pass": valid, "exit_code": result.returncode,
+            return {"path": path, "url": url, "pass": valid, "exit_code": result.returncode,
                     "http_status": result.stdout.strip(), "bytes": len(body)}
         except (OSError, subprocess.TimeoutExpired):
-            return {"path": path, "pass": False, "error": "probe_unavailable_or_timed_out"}
+            return {"path": path, "url": url, "pass": False, "error": "probe_unavailable_or_timed_out"}
 
 
 def qualify(runner=subprocess.run):
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(lambda path: probe(path, runner),
-                                ("proxy_ipv4", "proxy_ipv6", "transparent")))
+    paths = ("proxy_ipv4", "proxy_ipv6", "transparent")
+    # One bounded request per delivery host and route; no retry loop and no
+    # unrelated neutral host that could hide a broken Discord media route.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        attempts = list(pool.map(lambda pair: probe(pair[0], runner, pair[1]),
+                                 ((path, url) for path in paths for url in URLS)))
+    results = []
+    for path in paths:
+        route = [item for item in attempts if item["path"] == path]
+        chosen = next((item for item in route if item["pass"]), route[0])
+        results.append({**chosen, "attempts": route})
     return {"status": "pass" if all(item["pass"] for item in results) else "fail",
             "scope": "public_complete_png_tcp", "results": results}
 

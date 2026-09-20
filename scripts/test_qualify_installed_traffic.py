@@ -42,6 +42,18 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual(report['status'], 'fail')
         self.assertEqual(sum(item['pass'] for item in report['results']), 2)
 
+    def test_alternate_host_requires_its_own_complete_payload_on_every_route(self):
+        def runner(command, **kwargs):
+            primary = command[-1] == traffic.URL
+            Path(command[command.index('--output') + 1]).write_bytes(png()[:-12] if primary else png())
+            return subprocess.CompletedProcess(command, 0, '200', '')
+        report = traffic.qualify(runner)
+        self.assertEqual(report['status'], 'pass')
+        for result in report['results']:
+            self.assertEqual(result['url'], traffic.URLS[1])
+            self.assertEqual(len(result['attempts']), 2)
+            self.assertFalse(result['attempts'][0]['pass'])
+
     def test_green_identity_cannot_hide_failed_payload(self):
         output = io.StringIO()
         with patch.object(verifier, 'verify_app_bundle', return_value={}), \
