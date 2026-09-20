@@ -11,6 +11,16 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- NEW INSTALLED baseline: transaction5f5ec434 CONSUMED exit0 at11:58:32Z.
+  Never replay. Source2fb0270 tree1794a453, main49f8cf39, daemon919d3cf8.
+  Normal open followed; app-tauri npm run verify:local-install exit0 PASS
+  (first invocation from repo root had ENOENT before checks; corrected cwd).
+  Full build-chain/artifact/installed/attestation/live-service and all six payload
+  transfers PASS:984455+471047 bytes on IPv4/IPv6/transparent paths. Logs under
+  output/aud30-install-5f5ec434/. All old backups and learning preserved.
+  CUA observed Discord messages and attachment image elements, no forced reload,
+  no cold-cache/call/stream qualification claimed. No pending authorization.
+  PR376 remote0a1fa88 carries provenance follow-up; reconcile its CI next.
 - CI35508641621 terminal SUCCESS including lifecycle-heavy; all four transaction
   cases and browser passed. Fresh one-shot5f5ec434 DISPATCHED via native
   authorization, shell session92977 still live with empty authorization log.
