@@ -5667,4 +5667,3 @@ def test_failed_local_strategy_reenters_independent_preflight(monkeypatch, stage
     assert len(local_attempts) == 1
     assert preflights == [(host, "1.1.1.1")]
     assert not tproxy._auto_geph_learned_exact_host(host)
-
