@@ -11,6 +11,13 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Recovery lock review found synchronous cache persistence inside global resweep
+  lock. Split memory mutation from persistence: ownership+memory commit remains
+  atomic, disk save occurs after release. Test acquires lock from another real
+  thread during persistence.12 targeted tests PASS;101 neighboring recovery,
+  Discord adaptive and autonomous bootstrap tests PASS. Evidence resweep-lock-
+  tests.log and recovery-neighbors-tests.log. No network/await under lock.
+  Next canonical local build/install plus actual runtime verification.
 - Stage2 second race confirmed/fixed: superseded DNS/payload success/failure
   previously published strategy outcomes after replacement (3 regression failures).
   Scheduled attempts now carry expected_start; ownership checks before/after

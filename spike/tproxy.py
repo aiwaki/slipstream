@@ -12231,10 +12231,16 @@ async def _resweep_local_bypass_host(host, expected_start=None):
                 if result:
                     strat_ok = True
                     _record_strategy_result(h, strat["name"], True, payload=policy["service_group"] == SERVICE_DISCORD)
-                    if _strat_cache.get(h) != strat["name"]:
-                        remember_strategy(h, strat["name"])
+                    changed = _strat_cache.get(h) != strat["name"]
+                    if changed:
+                        _remember_strategy_in_memory(h, strat["name"])
                     _dead.pop(h, None)
-                    return True
+            if result:
+                # Persist the current cache outside the scheduler lock: slow
+                # storage must not serialize unrelated hosts' recovery.
+                if changed:
+                    save_strat_cache()
+                return True
             if attempts >= 7:
                 break
         if not strat_ok:
@@ -14635,11 +14641,15 @@ def load_strat_cache():
         _strat_cache = OrderedDict()
 
 
-def remember_strategy(host, name):
+def _remember_strategy_in_memory(host, name):
     _strat_cache[host] = name
     _strat_cache.move_to_end(host)
     while len(_strat_cache) > STRAT_CACHE_MAX:
         _strat_cache.popitem(last=False)
+
+
+def remember_strategy(host, name):
+    _remember_strategy_in_memory(host, name)
     save_strat_cache()
 
 

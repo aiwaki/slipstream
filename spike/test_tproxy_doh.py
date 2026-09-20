@@ -8373,7 +8373,8 @@ def test_superseded_resweep_cannot_publish_strategy_results(monkeypatch, superse
     monkeypatch.setattr(tproxy, "resolve_connection_ips", resolve)
     monkeypatch.setattr(tproxy, "_run_local_payload_probe", probe)
     monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *a, **k: recorded.append(a))
-    monkeypatch.setattr(tproxy, "remember_strategy", lambda *a: remembered.append(a))
+    monkeypatch.setattr(tproxy, "_remember_strategy_in_memory", lambda *a: remembered.append(a))
+    monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
     tproxy._dead[host] = 999.0
     assert tproxy.schedule_local_bypass_resweep(host, now=100.0)
     queued[0]()
@@ -8406,7 +8407,19 @@ def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
     monkeypatch.setattr(tproxy, "resolve_connection_ips", resolve)
     monkeypatch.setattr(tproxy, "_run_local_payload_probe", dial)
     monkeypatch.setattr(tproxy, "_close_probe_result", lambda result: None)
-    monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
+    def persist():
+        acquired = []
+        def other_host():
+            locked = tproxy._local_bypass_resweep_lock.acquire(timeout=0.2)
+            acquired.append(locked)
+            if locked:
+                tproxy._local_bypass_resweep_lock.release()
+        worker = threading.Thread(target=other_host)
+        worker.start()
+        worker.join(timeout=1)
+        assert acquired == [True], "disk persistence holds the global recovery lock"
+
+    monkeypatch.setattr(tproxy, "save_strat_cache", persist)
     tproxy._strat_cache.clear()
     tproxy._strat_scores.clear()
     tproxy._dead[host] = 999.0
