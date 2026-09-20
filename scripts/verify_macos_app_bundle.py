@@ -32,6 +32,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from release_candidate import deterministic_tree_sha256  # noqa: E402
+from qualify_installed_traffic import qualify as qualify_traffic  # noqa: E402
 
 
 BUNDLE_IDENTIFIER = "dev.slipstream.tray"
@@ -880,6 +881,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--fresh-daemon", type=Path)
     parser.add_argument("--staged-daemon", type=Path)
     parser.add_argument("--installed-app", type=Path)
+    parser.add_argument("--qualify-traffic", action="store_true",
+                        help="Require complete public payloads through IPv4/IPv6 proxy and transparent TCP")
     parser.add_argument(
         "--install-attestation",
         type=Path,
@@ -898,6 +901,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = parse_args(argv)
+    require(not arguments.qualify_traffic or arguments.installed_app is not None,
+            "--qualify-traffic requires --installed-app")
     if (arguments.fresh_daemon is None) != (arguments.staged_daemon is None):
         raise VerificationError("--fresh-daemon and --staged-daemon must be supplied together")
 
@@ -945,6 +950,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         }
         report["coverage"].append("installed-unprivileged")
+
+    if arguments.qualify_traffic:
+        traffic = qualify_traffic()
+        report["traffic"] = traffic
+        report["coverage"].append("installed-public-payload")
+        # Rebind proof to the same daemon after the requests; a restart during
+        # qualification cannot inherit the previous process's successful probes.
+        verify_status_v2(status_path=arguments.status_path,
+                         expected_pid=report["installed"]["attestation"]["launchd_pid"])
+        if traffic["status"] != "pass":
+            report["overall"] = "fail"
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+            return 1
 
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     return 0

@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+Active goal: address remaining reliability weaknesses in the accepted order:
+1) real traffic qualification before accepting updates, 2) safe runtime recovery
+without restart, 3) long Discord/YouTube media flows, 4) independent fallback
+mechanisms, 5) sustained mixed load and sleep/wake qualification. All remain in
+scope; none is considered complete from a short probe or a status heartbeat.
+
+AUD-30 in progress: standard npm verify:local-install now requires full public
+PNG through explicit IPv4/IPv6 proxies and transparent TCP. Bounded curl checks
+HTTP200, full PNG chunk CRC/framing/IEND, transport exit; verifier rechecks same
+PID afterward. 32 tests +19subtests PASS including truncation/corruption, failed
+IPv6, green identity with failed payload, and daemon-change rejection. Live all
+three paths200/984455bytes; canonical installed verification with payload PASS.
+Evidence output/aud30-traffic-gate/{tests.log,live.json,installed.log}.
+Runtime/app binary unchanged (AUD-29 below). No pending tool/admin.
+Next necessary step: production successor ACK still only checks owned daemon+
+advanced heartbeat in lib.rs ~4970. Integrate bounded traffic proof before ACK,
+bind proof to exact installed candidate/PID, preserve lifecycle coordination and
+60s watchdog budget, account for offline/dormant state without false healthy
+claims. Watchdog ACK API in updater_transaction.rs ~1641. Do not declare step1
+complete until real update/negative-path qualification. Graph Transport closed;
+using bounded direct reads. User AGENTS.md changes preserved.
+
 AUD-29 CORRECTED installed e1bdc3e3ca69af9cf248af7040cb9ffc30557426 via
 3f81f9ad at2026-09-20T08:52:31Z; transaction CONSUMED NEVER replay.
 Daemon919d3cf86db662b9942e281958088d9993f88a7ec6d97dddebb83d8cb32ce7bf;

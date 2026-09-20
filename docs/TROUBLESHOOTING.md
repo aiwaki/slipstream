@@ -1527,3 +1527,15 @@ reply-to and performs narrowly scoped startup cleanup only when lsof proves no
 live socket on the service port. Never use a global PF state flush. Empty or
 unrecognized socket inspection must retain states; an artifact/status pass alone
 does not prove connectivity. Qualify the formerly failing tuple and full payload.
+
+## Installation identity versus traffic qualification (AUD-30)
+
+`npm --prefix app-tauri run verify:local-install` now includes public full-payload
+qualification on explicit IPv4/IPv6 proxy and transparent TCP paths. A public
+984455-byte Discord sticker was complete on all three during initial validation.
+Checks require successful transport, HTTP200, complete PNG framing and CRCs,
+terminal IEND, and unchanged fresh daemon PID after transfer. Failures exit1 and
+must not be presented as a healthy installation. A remote failure may also
+cause this gate to fail; it does not alone prove a local regression. This gate
+does not establish voice/stream reliability. Artifact-only verification retains
+its existing scope. Production updater ACK integration remains pending.
