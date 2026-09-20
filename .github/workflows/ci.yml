@@ -1582,7 +1582,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-          mkdir -p "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/previous" "$RUNNER_TEMP/update-driver"
+          mkdir -p "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/update-driver"
           ditto -x -k dist-build/Slipstream-build-bundle.zip "$RUNNER_TEMP/candidate"
           python3 scripts/download_github_release_assets.py \
             --tag v0.1.9-preview.23 --repo aiwaki/slipstream \

@@ -10,6 +10,29 @@ file.
 
 ## Current Checkpoint
 
+2026-09-20 follow-up: CI35502811564 is terminal FAILURE. Packaged build,
+packaged lifecycle-heavy and browser qualification passed; both new updater
+matrix jobs failed before provisioning because the release downloader requires
+a nonexistent output directory. Removed premature mkdir(previous); actionlint
+PASS and 56 affected downloader/build-config tests +5subtests PASS. No real
+successor ACK/rollback case has run yet. Test-double/report fixes are d4cd690.
+App Cargo.lock now rustls0.23.45 +rustls-webpki0.103.15; eight updater traffic
+tests including real three-path full payload PASS. Prior canonical app builds
+are superseded by this lock change; fresh build/CI remains required.
+Separate source-contract branch codex/geph-rustls-02345 at9654c6c in
+/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905
+bumps only Geph lock rustls0.23.43->0.23.45 and SOURCE revision1->2. Verified
+revision transition with unchanged audit policy; 35source/release tests and
+35subtests PASS. Locked metadata for both macOS targets and full483dependency
+SBOM generated. Fresh OSV scan session54330 is running; see geph-fixed-* in
+output/aud30-traffic-gate. No Geph binary published or installed. Narrow source
+PR must retain bootstrap eligibility; app audit on main may still fail until
+its independent lock fix lands. No exceptions or gate weakening authorized.
+Next push repaired app CI candidate, collect actual packaged transaction
+results, finish dependency audit/reviewed Geph source-contract publication.
+Workstation remains AUD-29; all five objective stages remain open.
+
+
 Active goal: address remaining reliability weaknesses in the accepted order:
 1) real traffic qualification before accepting updates, 2) safe runtime recovery
 without restart, 3) long Discord/YouTube media flows, 4) independent fallback
