@@ -11,6 +11,10 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Follow-ups pushed: remote PR376 head326d25ef2121eded146e4b13229531904d20fbb4.
+  New four-case CI35508641621 queued; audit35508641655 and Windows35508641618
+  queued, verified via GitHub. Next inspect these exact runs; do not cancel
+  to push checkpoint-only changes. Candidate1794a453 remains NOT installed.
 - CI35507770642 terminal failure collected: lifecycle-heavy and packaged browser
   PASS; aggregate lifecycle failed only because obsolete traffic_failure failed.
   Full failed log: output/aud30-traffic-gate/90318cd-failed.log. Prepared four-case
