@@ -11,6 +11,18 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Current remote4442098 startup-failure candidate: CI35506810015 and audit
+  35506809983 started; audit PASS. PR376 unresolved-review query returned none.
+- Local npm build:local started (exec session88544), log
+  output/aud30-traffic-gate/local-startup-candidate-build.log. Daemon freeze
+  finished and Rust compile is live. Do not duplicate/restart this build.
+  Initial Geph copy used the wrong cwd and failed before any copy; corrected
+  absolute-path copy completed before packaging. Exact downloaded/verified r2
+  binary staged; prior binary backed up at geph-local-backup-vdvvb1cn/ under
+  output/aud30-traffic-gate. Require final bundled Geph SHA442e982e...84748
+  in addition to canonical verifier before treating local build as qualified.
+  No installed runtime changes. GitHub API has intermittent TCP timeouts;
+  observation failure alone is not a terminal CI result.
 - Local audit branch includes3e11ea9 plus checkpoint cleanup; remote PR376 head69647ce. User-owned AGENTS.md
   edits and untracked output/.playwright-cli remain untouched. No active admin.
 - Combined CI35506125919 for69647ce is terminal SUCCESS, including lifecycle-heavy
