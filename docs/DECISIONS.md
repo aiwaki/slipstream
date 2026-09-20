@@ -9,12 +9,11 @@ Advancing daemon heartbeat alone must not acknowledge an app replacement.
 The successor asynchronously requires complete CRC-checked public PNG transfer
 through IPv4/IPv6 explicit local proxy and transparent HTTPS, within12s overall.
 Each path races the reviewed media.discordapp.net and cdn.discordapp.com
-addresses of the same large public sticker. The first complete valid payload
+addresses of two distinct large public stickers. The first complete valid payload
 wins; a failed address leaves its peer running, and success cancels pending HTTP
 work. Up to six requests share the unchanged twelve-second overall deadline and
-three resolver workers. This is delivery-host redundancy, not independent
-service/object redundancy: object deletion and Discord-wide failure still veto
-acceptance. A tiny avatar or unrelated reachable site cannot replace the large
+three resolver workers. This tolerates one missing object or delivery host. A Discord-wide failure
+still vetoes acceptance; unrelated service success must not hide broken media. A tiny avatar or unrelated reachable site cannot replace the large
 Discord media proof.
 No credentials, environment proxy inheritance, redirect or certificate override.
 The accepted payload must be at least64KiB and is capped at2MiB; a valid tiny

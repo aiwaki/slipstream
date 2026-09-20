@@ -11,6 +11,14 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Local follow-up now uses two DISTINCT public objects as well as hosts:
+  existing media sticker984455bytes and official Cheerful Choco Wave
+  cdn.discordapp.com/stickers/781291131828699156.png471047bytes. Public catalogue
+  discovery recorded in ROUTING_RESEARCH.md; no credentials/runtime catalogue
+  dependency. Rust11PASS including live test, Python7PASS, all six live transfers
+  complete. Evidence output/aud30-traffic-gate/independent-object-*.
+  Object deletion no longer shares a single point of failure. Discord-wide
+  outage still correctly prevents acceptance; neutral success cannot mask it.
 - Local follow-up adds minimum64KiB to updater and installed payload admission:
   a syntactically valid tiny PNG must not hide a large-response cutoff. CRC,
   full terminal framing,2MiB maximum, route isolation and twelve-second budget
@@ -21,9 +29,9 @@ file.
 - Follow-up90318cd pushed to PR376 (not yet installed): successor traffic gate races two
   reviewed Discord delivery hosts per route, cancelling pending HTTP work after
   a valid full payload. Installed verifier reports all six attempts and keeps
-  three mandatory route results. Same object/service remains a known shared
-  dependency; independent control-object coverage and legacy migration remain
-  OPEN, not replaced by this improvement.
+  three mandatory route results. This remote version still uses one object;
+  local follow-up above removes that shared dependency. Legacy migration remains
+  OPEN; neither installed replacement nor current-preparer CI proves it.
   CI35507770642 and audit35507770702 confirmed live for90318cd.
   Focused Rust9PASS plus explicit live Rust1PASS; Python6+27PASS; six transfers each
   completed984455bytes. Evidence output/aud30-traffic-gate/redundant-host-*.

@@ -3,11 +3,11 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-// Two delivery hosts for the same large public object. This survives a host
-// outage; deletion of the object or a Discord-wide outage must still fail.
+// Distinct large public objects on two delivery hosts. One missing object or
+// host may fail independently; a Discord-wide outage must still fail.
 const URLS: [&str; 2] = [
     "https://media.discordapp.net/stickers/1228092333061443654.png",
-    "https://cdn.discordapp.com/stickers/1228092333061443654.png",
+    "https://cdn.discordapp.com/stickers/781291131828699156.png",
 ];
 const MIN_BYTES: usize = 64 * 1024;
 const MAX_BYTES: usize = 2 * 1024 * 1024;

@@ -2816,3 +2816,20 @@ shell executable that exits1 before qualifying its identity, exact old content
 at relaunch and transaction/stage cleanup. The existing real packaged harness
 still invokes the published old bundle's helper: new helper startup-failure
 behavior needs its own real packaged coverage before acceptance.
+
+
+## AUD-30 independent public payload objects — 2026-09-20
+
+The updater admission gate now uses distinct public sticker objects:
+media.discordapp.net/stickers/1228092333061443654.png (984455 bytes) and
+cdn.discordapp.com/stickers/781291131828699156.png (471047 bytes).
+The second object is the official Cheerful Choco pack's Wave sticker, discovered
+without credentials via Discord API v10 `/sticker-packs`, format_type2/APNG.
+The documented catalogue is https://docs.discord.com/developers/resources/sticker#list-sticker-packs.
+Both passed full PNG CRC/framing/IEND checks; evidence is
+output/aud30-traffic-gate/independent-object-discovery.json. This is distinct
+object and host coverage, not independent-provider coverage. A whole Discord
+outage must not be masked by a successful neutral website. Tiny built-in avatars
+(1268/1274 bytes measured) are unsuitable for the large-response check; admission
+requires64KiB minimum and2MiB maximum. Runtime does not query the catalogue or
+fetch private attachments; only the two fixed public URLs are used.

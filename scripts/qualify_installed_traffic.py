@@ -9,7 +9,7 @@ import zlib
 
 
 URL = "https://media.discordapp.net/stickers/1228092333061443654.png"
-URLS = (URL, "https://cdn.discordapp.com/stickers/1228092333061443654.png")
+URLS = (URL, "https://cdn.discordapp.com/stickers/781291131828699156.png")
 MIN_BYTES = 64 * 1024
 MAX_BYTES = 2 * 1024 * 1024
 

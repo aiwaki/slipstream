@@ -51,7 +51,7 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual(report['status'], 'fail')
         self.assertEqual(sum(item['pass'] for item in report['results']), 2)
 
-    def test_alternate_host_requires_its_own_complete_payload_on_every_route(self):
+    def test_alternate_object_requires_its_own_complete_payload_on_every_route(self):
         def runner(command, **kwargs):
             primary = command[-1] == traffic.URL
             Path(command[command.index('--output') + 1]).write_bytes(png()[:-12] if primary else png())
