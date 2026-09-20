@@ -13,11 +13,10 @@ file.
 2026-09-20 authoritative continuation:
 - Local audit branch includes3e11ea9 plus checkpoint cleanup; remote PR376 head69647ce. User-owned AGENTS.md
   edits and untracked output/.playwright-cli remain untouched. No active admin.
-- Combined CI35506125919 for69647ce is IN_PROGRESS, freshly confirmed building
-  lifecycle-heavy after all three real transaction cases and packaged browser PASS;
-  audit35506125912 PASS. A transient API
-  timeout was followed by successful observation of this same live run.
-  Do not restart/cancel. Push local follow-ups only after this run is terminal.
+- Combined CI35506125919 for69647ce is terminal SUCCESS, including lifecycle-heavy
+  and all three real transactions; audit35506125912 PASS. This is the reusable
+  combined Geph-r2 baseline. Push prepared startup-failure/helper-fixture changes
+  now, then require their exact new CI before installation.
 - Previous candidate653649e CI35505371770 PASS, including all three real update
   cases, packaged browser and lifecycle-heavy. Its audit failed only old Geph
   rustls; the combined candidate contains the reviewed repair.
