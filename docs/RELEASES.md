@@ -88,10 +88,20 @@ includes the matrix outcome. Provisioning validates clean global state before
 installation, runs the transaction as the original console user, then removes
 only qualification-owned processes/runtime and requires the PF snapshot restored.
 
+A third isolated case, `--case traffic_failure`, first proves complete traffic
+on all three qualification paths, then stalls resolution of the exact control
+host only on the disposable runner. The successor remains unsignalled and alive;
+the daemon must stay active with advancing heartbeat through the ACK deadline.
+The real watchdog must still restore the old tree and a surviving tray. Cleanup
+restores the scoped resolver fixture as well as the qualification-owned runtime.
+
 These are packaged replacement/acceptance/timeout-rollback checks, not signed
 feed discovery, notification delivery, actual media sessions or a public version
-transition. The driver compile and harness unit tests do not constitute a passed
-packaged run. AUD-30 still requires both real cases before that gate is complete.
+transition. The driver uses the current production preparer; a published old
+application initiating an update through its own shipped preparer remains a
+separate compatibility gate. The driver compile and harness unit tests do not
+constitute a passed packaged run. AUD-30 requires all three real cases before
+that gate is complete.
 
 ## Legacy App Releases
 
