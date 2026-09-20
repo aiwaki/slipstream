@@ -10,6 +10,52 @@ file.
 
 ## Current Checkpoint
 
+2026-09-20 compact authoritative handoff (reconcile live state before acting):
+
+- Full goal remains ordered: traffic-qualified updates, runtime recovery,
+  long media flows, independent fallbacks, mixed load plus sleep/wake. Not done.
+- Physical checkout is this AUD-17 repo, branch codex/codebase-audit-20260905.
+  PR376 draft remains open. Preserve user-owned AGENTS.md and untracked output/.
+- INSTALLED: source2fb0270, consumed transaction5f5ec434 exit0 at11:58:32Z.
+  Tree1794a4534a25df1c5eb70e4f86e97daa5bcb51b4c8207f00d7ff33d96f23f69f,
+  daemon919d3cf8, live PID23123 at qualification. Normal CLI Quit/open worked.
+  Canonical build-chain/artifact/install/attestation/live-service and all six
+  complete public transfers PASS. Evidence output/aud30-install-5f5ec434/.
+  Never replay consumed scripts. All backups/learning preserved. No admin prompt.
+  CUA observed messages/attachment elements, not fresh calls/streams or cold cache.
+- Green baseline CI35508641621 on326d25e: all four real packaged cases,
+  browser, lifecycle PASS; audit35508641655 PASS. Single-host fault accepted
+  candidate; both-host fault left successor alive until deadline then restored
+  exact previous tree/tray; both injected DNS fixtures observed and cleaned up.
+- Remote PR376 head0a1fa88 provenance follow-up: CI35509303661 STILL LIVE;
+  audit35509303665 PASS. Do not cancel it merely to push recovery changes.
+  Accept artifact downloaded to output/aud30-traffic-gate/accept-provenance-0a1fa88/:
+  previous-helper1614e68a verified against journal/runtime copy, candidate-helper
+  83797af8 distinct. New helper startup-failure fixtures PASS separately. This is
+  CURRENT preparer plus PREVIOUS helper, not shipped .23 initiating an update.
+- Public legacy .23 migration remains OPEN: old preparer selects its installed
+  helper and lacks AbandonProcessGroup. Candidate-only changes cannot prove
+  both acceptance and early-failure rollback. RELEASES.md records exact boundary.
+- Local recovery commits a71c2a9/5b98384/d5afa50/aeb51c4 fix old-worker cleanup,
+  stale DNS/probe result publication, disk I/O under scheduler lock, and bound
+  private worker lifetime at120s. Guards bind to attempt start; current-owner
+  in-memory publication is atomic, persistence outside lock. No Geph/route changes.
+- 15 focused tests PASS, including real overlapping threads and running shared
+  executor cancellation;101 neighboring recovery tests PASS reused. Evidence
+  output/aud30-traffic-gate/resweep-{regression,publication,lock,threaded,deadline,final}*
+  and recovery-neighbors-tests.log. Running libc DNS itself cannot be cancelled;
+  shared64-worker occupancy remains a separate concern, not claimed solved.
+- CURRENT BUILD session60609, source4a500a9 (runtimeaeb51c4), still live.
+  output/aud30-traffic-gate/recovery-deadline-build.log. Frozen daemon4cc2e8d;
+  Tauri compiling at latest poll. Do not start another build. NOT installed.
+  Earlier build1217/d5afa50/tree16b14290 passed but is superseded by deadline fix.
+- Next: poll60609 and35509303661, inspect canonical result and all remote outcomes.
+  When remote run terminal, push recovery changes. Qualify candidate before a NEW
+  one-shot install, then canonical installed evidence and actual application.
+  Do not treat these recovery fixes as proof of long streams or sleep/wake.
+
+## Superseded working notes (historical evidence, not current instructions)
+
 2026-09-20 authoritative continuation:
 - Real shared-executor timeout test PASS: running resolver survives cancellation
   while the private recovery loop returns, then controlled release joins executor.
