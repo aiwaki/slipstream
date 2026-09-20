@@ -3,6 +3,17 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Runtime recovery attempt ownership
+
+An exact-host local recovery sweep owns its monotonic start token. A replacement
+attempt invalidates old DNS/probe results: ownership is rechecked after awaits,
+and strategy publication is atomic with replacement scheduling. Final cleanup
+must release only the originating attempt's slot. Cache persistence runs outside
+the scheduler lock so slow disk writes do not serialize unrelated recovery.
+The private sweep loop has the existing120-second stale-attempt budget. Expiry
+cancels its await, not an already-running libc resolver in the shared executor.
+This diagnostic budget does not limit client connections or change route policy.
+
 ## AUD-30 successor traffic qualification (candidate)
 
 Advancing daemon heartbeat alone must not acknowledge an app replacement.

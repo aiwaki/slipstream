@@ -29,7 +29,8 @@ file.
   exact previous tree/tray; both injected DNS fixtures observed and cleaned up.
 - Remote PR376 head0a1fa88 provenance follow-up: CI35509303661 STILL LIVE;
   audit35509303665 PASS. Do not cancel it merely to push recovery changes.
-  Accept artifact downloaded to output/aud30-traffic-gate/accept-provenance-0a1fa88/:
+  Accept and rollback artifacts downloaded to output/aud30-traffic-gate/accept-provenance-0a1fa88/:
+  rollback-provenance-0a1fa88/ additionally proves old tray survives; cleanup=[].
   previous-helper1614e68a verified against journal/runtime copy, candidate-helper
   83797af8 distinct. New helper startup-failure fixtures PASS separately. This is
   CURRENT preparer plus PREVIOUS helper, not shipped .23 initiating an update.
@@ -45,11 +46,13 @@ file.
   output/aud30-traffic-gate/resweep-{regression,publication,lock,threaded,deadline,final}*
   and recovery-neighbors-tests.log. Running libc DNS itself cannot be cancelled;
   shared64-worker occupancy remains a separate concern, not claimed solved.
-- CURRENT BUILD session60609, source4a500a9 (runtimeaeb51c4), still live.
-  output/aud30-traffic-gate/recovery-deadline-build.log. Frozen daemon4cc2e8d;
-  Tauri compiling at latest poll. Do not start another build. NOT installed.
-  Earlier build1217/d5afa50/tree16b14290 passed but is superseded by deadline fix.
-- Next: poll60609 and35509303661, inspect canonical result and all remote outcomes.
+- Recovery build60609 completed exit0, canonical artifact/build-chain PASS.
+  Source4a500a9 (runtimeaeb51c4). Report:
+  output/aud30-traffic-gate/recovery-candidate-canonical.json; tree
+  7b023e11439b1730ec2a038677f69c608b4834ccb29aae136230fae1faf660f7,
+  daemon4cc2e8d, main817cce69. NOT installed. No build active.
+  Earlier build1217/d5afa50/tree16b14290 is superseded by deadline fix.
+- Next: poll35509303661 (only lifecycle-heavy remains), inspect terminal outcome.
   When remote run terminal, push recovery changes. Qualify candidate before a NEW
   one-shot install, then canonical installed evidence and actual application.
   Do not treat these recovery fixes as proof of long streams or sleep/wake.
