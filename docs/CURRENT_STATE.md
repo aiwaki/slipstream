@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+Latest: CI35505371770 for653649e is terminal SUCCESS including lifecycle-heavy,
+all three real transactions, packaged browser and common checks. Its separate
+audit35505371764 failed only old Geph rustls RUSTSEC-2026-0285; repaired source
+and verified r2 artifact are now integrated locally. Push combined branch next;
+require exact combined build/audits before workstation replacement. No repeated
+baseline is needed for unchanged unit areas; new vendor changes packaged inputs.
+Legacy migration analysis confirms old helper spawn_bundle inherits its process
+group for BOTH successor and rollback tray. A successor-only detach cannot prove
+legacy rollback. RELEASES now separates actual .23 heartbeat guarantees from
+candidate payload guarantees and preserves the explicit legacy-transition gate.
+
+
 Latest publication evidence: Geph run35505388093 SUCCESS; geph-vendor-0.3.9-r2
 published. Downloaded all8assets and verified exact reviewed source/lock/version,
 SHA256SUMS, GitHub provenance bound to main6c5895fc and SPDX binary/SBOM binding.
