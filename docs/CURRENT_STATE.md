@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Latest local follow-up: spawn_successor_or_rollback now covers a successfully
+spawned child that exits before identity capture. It first confirms child exit
+using the owned Child handle; unobservable identity with a live child remains
+an error, never permission to move its executable.26 updater transaction tests
+PASS (output/aud30-traffic-gate/early-exit-tests.log), including real exiting
+shell child and old bytes restored before exactly one relaunch. No installation.
+Important qualification boundary: existing packaged harness copies published
+.23 as the old bundle and uses its bundled watchdog with the current preparer.
+Thus the new helper's spawn-failure/early-exit corrections need a real test with
+that new helper, not only reuse of the existing three-case success reports.
+Preserve legacy-helper/preparer coverage separately; do not silently substitute
+candidate helper and claim a published .23 transition passed.
+
+
 Latest local candidate follow-up: OS refusal of successor spawn previously
 escaped run_locked_watchdog with an error while retaining SuccessorLaunchPlanned,
 so KeepAlive could repeat activation instead of restoring the previous bundle.

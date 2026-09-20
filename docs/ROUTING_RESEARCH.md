@@ -2803,3 +2803,16 @@ single injected relaunch, failed transaction evidence, no active journal and no
 stage/backup.25 transaction tests PASS. Real packaged startup-refusal testing is
 still required. This does not cover a spawned process dying before its identity
 is captured, or repair the already-published old helper.
+
+
+### 2026-09-20: successor exits before identity capture
+
+The same startup failure path also returned immediately when the spawned child
+exited before process identity was observed. spawn_successor_or_rollback now
+requires child_has_exited on the owned Child handle before restoring the old
+bundle in this branch. Missing process metadata alone cannot authorize rollback
+of a still-live process.26 transaction tests pass, including a real short-lived
+shell executable that exits1 before qualifying its identity, exact old content
+at relaunch and transaction/stage cleanup. The existing real packaged harness
+still invokes the published old bundle's helper: new helper startup-failure
+behavior needs its own real packaged coverage before acceptance.

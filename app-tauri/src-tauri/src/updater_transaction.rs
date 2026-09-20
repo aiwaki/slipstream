@@ -1535,24 +1535,31 @@ fn advance_prelaunch_phase(
     Ok(false)
 }
 
-// A failed spawn creates no successor process. Restore the verified old bundle
-// immediately rather than letting launchd repeat an impossible activation.
+// Roll back only when no successor exists: spawn failed or the owned child
+// is confirmed exited. Unobservable identity alone is not proof of termination.
 fn spawn_successor_or_rollback<R>(
     journal_path: &Path,
     journal: &mut UpdateJournalV1,
     relaunch: &mut R,
-) -> Result<Option<Child>, String>
+) -> Result<Option<(Child, ProcessSnapshot)>, String>
 where
     R: FnMut(&Path, &Path) -> Result<(), String>,
 {
-    match spawn_bundle(&journal.target, journal_path) {
-        Ok(child) => Ok(Some(child)),
-        Err(spawn_error) => {
-            rollback_impl_with_child_and_relaunch(journal_path, journal, None, true, relaunch)
-                .map_err(|error| format!("{spawn_error}; rollback failed: {error}"))?;
-            Ok(None)
-        }
-    }
+    let failure = match spawn_bundle(&journal.target, journal_path) {
+        Ok(mut child) => match wait_for_spawned_successor(&mut child, journal) {
+            Ok(snapshot) => return Ok(Some((child, snapshot))),
+            Err(error) => {
+                if !child_has_exited(&mut child)? {
+                    return Err(error);
+                }
+                error
+            }
+        },
+        Err(error) => error,
+    };
+    rollback_impl_with_child_and_relaunch(journal_path, journal, None, true, relaunch)
+        .map_err(|error| format!("{failure}; rollback failed: {error}"))?;
+    Ok(None)
 }
 
 fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Result<(), String> {
@@ -1573,12 +1580,11 @@ fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Re
         let snapshot = match find_exact_successor(journal)? {
             Some(snapshot) => snapshot,
             None => {
-                let Some(mut child) =
+                let Some((child, snapshot)) =
                     spawn_successor_or_rollback(journal_path, journal, &mut direct_relaunch)?
                 else {
                     return Ok(());
                 };
-                let snapshot = wait_for_spawned_successor(&mut child, journal)?;
                 spawned_successor = Some(child);
                 snapshot
             }
@@ -1915,6 +1921,34 @@ mod tests {
             value.nonce
         ));
         assert!(failed.exists());
+    }
+
+    #[test]
+    fn successor_exit_before_identity_capture_restores_old_bundle() {
+        let root = TempDir::new().unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.target, b"#!/bin/sh\nexit 1\n");
+        fs::set_permissions(
+            bundle_executable(&value.target),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        value.old_executable_sha256 = executable(&value.backup, b"old");
+        value.phase = TransactionPhase::SuccessorLaunchPlanned;
+        write_journal(&path, &value).unwrap();
+        let mut relaunches = 0;
+        let result = spawn_successor_or_rollback(&path, &mut value, &mut |bundle, _| {
+            assert_eq!(fs::read(bundle_executable(bundle)).unwrap(), b"old");
+            relaunches += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(result.is_none());
+        assert_eq!(relaunches, 1);
+        assert_eq!(value.phase, TransactionPhase::OldRelaunched);
+        assert!(!path.exists());
+        assert!(!value.backup.exists());
+        assert!(!value.stage.exists());
     }
 
     #[test]
