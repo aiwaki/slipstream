@@ -48,7 +48,14 @@ file.
   three mandatory route results. This remote version still uses one object;
   local follow-up above removes that shared dependency. Legacy migration remains
   OPEN; neither installed replacement nor current-preparer CI proves it.
-  CI35507770642 and audit35507770702 confirmed live for90318cd.
+  CI35507770642 still live; audit35507770702 terminal PASS for90318cd.
+  Completed traffic_failure job106071408287 failed at "expected injected timeout
+  rollback" with cleanup_errors=[]; downloaded artifact under
+  output/aud30-traffic-gate/traffic-failure-90318cd/. Its fixture stalls only
+  primary, so it no longer represents total failure after host redundancy.
+  Prepared0d50b4a corrects this and adds explicit primary_unavailable acceptance.
+  Do not count the old negative case as a valid rollback pass or cancel remaining
+  live jobs; after terminal collect them and push local2fb0270/0d50b4a follow-ups.
   Focused Rust9PASS plus explicit live Rust1PASS; Python6+27PASS; six transfers each
   completed984455bytes. Evidence output/aud30-traffic-gate/redundant-host-*.
 
