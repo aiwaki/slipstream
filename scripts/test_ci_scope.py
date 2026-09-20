@@ -8,6 +8,28 @@ import ci_scope
 
 
 class CiScopeTests(unittest.TestCase):
+    def app_lock_delta(self):
+        before, after = ["version = 4"], ["version = 4"]
+        for name, old, old_hash, new, new_hash in ci_scope.APP_LOCK_REPAIRS:
+            for rows, version, checksum in ((before, old, old_hash), (after, new, new_hash)):
+                rows.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\nchecksum = "{checksum}"\n'
+                            'source = "registry+https://github.com/rust-lang/crates.io-index"\ndependencies = ["ring"]')
+        return "\n".join(before), "\n".join(after)
+
+    def test_app_lock_exception_rejects_unrelated_or_unverified_changes(self):
+        before, after = self.app_lock_delta()
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock", ci_scope.APP_LOCK]
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        for changed in (after.replace('"ring"', '"unrelated"', 1),
+                        after.replace('version = 4', 'version = 3'),
+                        after + '\n[[package]]\nname="extra"\nversion="1.0.0"',
+                        after.replace('0.23.45', '0.23.46'), before, 'malformed'):
+            with self.subTest(changed=changed):
+                self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request",
+                    app_lock_delta=(before, changed)).geph_bootstrap)
+        self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request",
+            app_lock_delta=(before, after)).geph_bootstrap)
+
     def test_exact_geph_contract_sets_bootstrap_only_on_pull_request(self) -> None:
         required = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock"]
         for paths in (
@@ -56,22 +78,22 @@ class CiScopeTests(unittest.TestCase):
                  "scripts/test_ci_scope.py", "docs/RELEASES.md",
                  "docs/DECISIONS.md", "docs/CURRENT_STATE.md",
                  ".github/workflows/build-geph.yml", "scripts/test_build_config.py"]
-        scope = ci_scope.classify_paths(paths, event_name="pull_request")
+        scope = ci_scope.classify_paths(paths, event_name="pull_request", app_lock_delta=self.app_lock_delta())
         self.assertTrue(scope.geph_bootstrap)
         self.assertTrue(scope.product)  # Both independent audit jobs use this.
         self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)
         self.assertFalse(ci_scope.classify_paths(
             [p for p in paths if p != "scripts/test_ci_scope.py"],
-            event_name="pull_request").geph_bootstrap)
+            event_name="pull_request", app_lock_delta=self.app_lock_delta()).geph_bootstrap)
         self.assertFalse(ci_scope.classify_paths(
             [p for p in paths if p != "scripts/test_build_config.py"],
-            event_name="pull_request").geph_bootstrap)
+            event_name="pull_request", app_lock_delta=self.app_lock_delta()).geph_bootstrap)
         for extra in ("app-tauri/src-tauri/Cargo.toml", "app-tauri/src-tauri/src/lib.rs",
                       ".github/workflows/ci.yml", "scripts/build_macos.sh", "spike/tproxy.py",
                       "security/dependency-audit-policy.json"):
             with self.subTest(extra=extra):
                 self.assertFalse(ci_scope.classify_paths(
-                    [*paths, extra], event_name="pull_request").geph_bootstrap)
+                    [*paths, extra], event_name="pull_request", app_lock_delta=self.app_lock_delta()).geph_bootstrap)
 
     def test_existing_product_docs_and_windows_scope_is_preserved(self) -> None:
         self.assertEqual(

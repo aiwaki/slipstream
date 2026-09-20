@@ -10,6 +10,14 @@ file.
 
 ## Current Checkpoint
 
+PR377 review PRRT_kwDOTLueX86kIhE8 correctly rejected path-only app-lock admission.
+Merge was blocked by unresolved review, not bypassed. Fix now compares exact
+base/head lock contents and admits only pinned rustls/webpki transitions while
+requiring every other parsed graph field unchanged. Missing evidence fails back
+to normal packaged checks.59focused tests+22subtests PASS and actual Git lock
+transition verified. Fresh CI required after this follow-up before merge.
+
+
 PR377 publication repair: crates.io latest0.4.0 would make the old upstream-only
 resolver skip reviewed0.3.9-r2. Main push now resolves verified committed source;
 manual build_reviewed=true requires main. Schedule/default discovery unchanged.

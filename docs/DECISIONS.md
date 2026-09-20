@@ -265,3 +265,10 @@ which previously made the pending0.3.9-r2 repair unreachable. Scheduled discover
 still proposes new upstream source; explicit build_reviewed dispatch requires
 main and verifies the committed source/lock before emitting any build identity.
 Locked builds, fresh audit and immutable release verification remain unchanged.
+
+PR377 review correction: admitting the app lock by path alone was too broad.
+Only the exact rustls0.23.41->0.23.45 and webpki0.103.13->0.103.15 version/checksum
+transitions may use bootstrap. Both lockfiles must be read from exact base/head
+Git SHAs; all other parsed packages, edges and metadata must remain identical.
+Missing refs/read evidence or any other lock change disables bootstrap. The
+application audit policy and all required audits remain unchanged.

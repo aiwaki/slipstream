@@ -165,9 +165,12 @@ opens a source-contract PR; only the reviewed and merged contract may trigger a
 locked build.
 
 That source-contract PR requires Geph `SOURCE.json` and `Cargo.lock`. It may
-also repair the application `Cargo.lock` when an advisory affects both graphs:
-requiring separate merges creates a cycle where each audit rejects the other's
-unfixed lock. Optional paths are Geph `VERSION` and its audit policy, the exact
+also apply the exact reviewed RUSTSEC-2026-0285 application lock transition:
+rustls0.23.41->0.23.45 and rustls-webpki0.103.13->0.103.15 with their pinned
+checksums. The classifier reads both lockfiles from exact base/head Git SHAs and
+requires the parsed graph and metadata to remain otherwise identical. Missing
+proof or any other lock change requires ordinary packaged checks. Separate
+merges would each fail the audit of the other unfixed graph. Optional paths are Geph `VERSION` and its audit policy, the exact
 release/decision/checkpoint documents, and the scope classifier with its test
 file (classifier changes without the test file are rejected). The Geph publisher
 workflow may accompany its build-contract tests when repairing source publication
