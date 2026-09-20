@@ -1,5 +1,6 @@
 //! An advancing heartbeat is not proof that the successor can carry traffic.
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 const URL: &str = "https://media.discordapp.net/stickers/1228092333061443654.png";
@@ -67,18 +68,21 @@ impl Gate {
     }
 }
 
+// Keep one bounded resolver pool for the entire successor lifetime. Dropping a
+// runtime waits for uncancellable system DNS; detaching a new runtime on each
+// timeout instead leaks another pool whenever DNS never returns.
+static PROBE_RUNTIME: OnceLock<Result<tokio::runtime::Runtime, std::io::Error>> = OnceLock::new();
+
 fn run_bounded(work: impl std::future::Future<Output = bool>, timeout: Duration) -> bool {
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    else {
+    let Ok(runtime) = PROBE_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(3)
+            .build()
+    }) else {
         return false;
     };
-    let ok = runtime.block_on(async { tokio::time::timeout(timeout, work).await.unwrap_or(false) });
-    // A system DNS lookup can outlive cancellation. Runtime Drop must not
-    // wait indefinitely for that blocking resolver before publishing failure.
-    runtime.shutdown_background();
-    ok
+    runtime.block_on(async { tokio::time::timeout(timeout, work).await.unwrap_or(false) })
 }
 
 fn complete_png(body: &[u8]) -> bool {
@@ -254,16 +258,41 @@ mod tests {
         assert!(elapsed < Duration::from_secs(1));
     }
     #[test]
+    fn repeated_timeouts_share_one_bounded_resolver_pool() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let release = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicUsize::new(0));
+        let before = Instant::now();
+        for _ in 0..8 {
+            let release = release.clone();
+            let started = started.clone();
+            assert!(!run_bounded(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        started.fetch_add(1, Ordering::SeqCst);
+                        let deadline = Instant::now() + Duration::from_secs(2);
+                        while !release.load(Ordering::SeqCst) && Instant::now() < deadline {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                    });
+                    std::future::pending::<bool>().await
+                },
+                Duration::from_millis(20)
+            ));
+        }
+        let count = started.load(Ordering::SeqCst);
+        release.store(true, Ordering::SeqCst);
+        assert!(before.elapsed() < Duration::from_secs(1));
+        assert!(
+            count <= 3,
+            "each timed-out attempt created a new resolver pool: {count}"
+        );
+        assert!(run_bounded(async { true }, Duration::from_secs(1)));
+    }
+    #[test]
     #[ignore = "explicit live public transfer qualification only"]
     fn live_complete_payload_all_paths() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        assert!(runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(12), qualify())
-                .await
-                .unwrap_or(false)
-        }));
+        assert!(run_bounded(qualify(), Duration::from_secs(12)));
     }
 }

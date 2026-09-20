@@ -11,6 +11,9 @@ through IPv4/IPv6 explicit local proxy and transparent HTTPS, within12s overall.
 No credentials, environment proxy inheritance, redirect or certificate override.
 The payload is capped at2MiB. Only one attempt is in flight; failed attempts cool
 for3s. A successful completion expires after5s and is consumed once.
+The process reuses one probe runtime with three blocking resolver workers:
+uncancellable system DNS cannot block timeout delivery or create a fresh detached
+pool per retry. This bounds qualification resources only, not client traffic.
 
 Before ACK, the existing lifecycle lock protects a fresh active status and exact
 bundle attestation/PID comparison, with Quit/resume intents vetoing acceptance.
