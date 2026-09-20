@@ -11,6 +11,11 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- CI35507770642 terminal failure collected: lifecycle-heavy and packaged browser
+  PASS; aggregate lifecycle failed only because obsolete traffic_failure failed.
+  Full failed log: output/aud30-traffic-gate/90318cd-failed.log. Prepared four-case
+  follow-ups are now ready to push; no live jobs cancelled. Correct-project graph
+  transport returned Transport closed; bounded direct source reads used instead.
 - Local build25244 for runtime2fb0270 completed exit0, canonical build-chain and
   artifact PASS. Log output/aud30-traffic-gate/local-independent-payload-build.log.
   Tree1794a4534a25df1c5eb70e4f86e97daa5bcb51b4c8207f00d7ff33d96f23f69f;
