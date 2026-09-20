@@ -2753,3 +2753,23 @@ and its already-shipped preparer are not covered by this local driver.
 terminal tray retains its identity for two seconds after journal removal, since
 a single snapshot can race asynchronous launchd cleanup. Twelve harness tests
 plus12subtests pass, including immediate-alive then exited rejection.
+
+
+### 2026-09-20: real rollback success and archive permission mismatch
+
+Run35504245450/source476af9e confirmed both rollback cases: forced stopped
+successor and unsignalled live successor with broken traffic restored the exact
+old bundle and a surviving tray. Scoped cleanup passed. The accept successor
+also survived watchdog retirement, confirming the process-group correction,
+but canonical tree comparison failed. The extractor created its root0700 and
+skipped the archive root entry; directory modes were never restored and file
+creation remained subject to umask. Canonical tree hashing includes these modes.
+
+The repair records root and directory modes, restores exact ordinary file bits
+before sync, then restores directories deepest-first and root last. Extraction
+remains private while payload is written. Canonical hash/signature checks and
+special-bit stripping remain unchanged.24 transaction tests pass, including
+root privacy during extraction and final root755/directory750/file640 fidelity.
+New real packaged acceptance is still required; this is not installed evidence.
+Artifacts: output/aud30-traffic-gate/archive-mode-tests.log and
+{accept,rollback,traffic-failure}-476af9e/.

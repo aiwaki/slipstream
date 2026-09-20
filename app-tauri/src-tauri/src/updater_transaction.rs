@@ -574,6 +574,7 @@ where
     let decoder = GzDecoder::new(archive);
     let mut tar = tar::Archive::new(decoder);
     let result = (|| {
+        let mut directory_modes = Vec::new();
         for entry in tar
             .entries()
             .map_err(|_| "update archive is unreadable".to_string())?
@@ -584,6 +585,17 @@ where
                 .map_err(|_| "update archive path is invalid".to_string())?
                 .into_owned();
             let Some(relative) = relative_archive_path(&archive_path)? else {
+                if !entry.header().entry_type().is_dir() {
+                    return Err("archive bundle root is not a directory".into());
+                }
+                directory_modes.push((
+                    stage.to_path_buf(),
+                    entry
+                        .header()
+                        .mode()
+                        .map_err(|_| "staged directory mode is invalid".to_string())?
+                        & 0o777,
+                ));
                 continue;
             };
             let destination = stage.join(&relative);
@@ -595,6 +607,14 @@ where
             if entry_type.is_dir() {
                 fs::create_dir_all(&destination)
                     .map_err(|error| format!("cannot create staged directory: {error}"))?;
+                directory_modes.push((
+                    destination,
+                    entry
+                        .header()
+                        .mode()
+                        .map_err(|_| "staged directory mode is invalid".to_string())?
+                        & 0o777,
+                ));
             } else if entry_type.is_file() {
                 let mode = entry
                     .header()
@@ -609,6 +629,11 @@ where
                     .map_err(|error| format!("cannot create staged file: {error}"))?;
                 io::copy(&mut entry, &mut output)
                     .map_err(|error| format!("cannot extract staged file: {error}"))?;
+                // Creation respects umask; restore the signed archive's exact
+                // ordinary permission bits before syncing the completed file.
+                output
+                    .set_permissions(fs::Permissions::from_mode(mode))
+                    .map_err(|error| format!("cannot restore staged file mode: {error}"))?;
                 sync_file(&output).map_err(|error| format!("cannot sync staged file: {error}"))?;
             } else if entry_type.is_symlink() {
                 let target = entry
@@ -624,6 +649,13 @@ where
             } else {
                 return Err("update archive entry type is unsupported".into());
             }
+        }
+        // Keep the root private while writing, then restore directory metadata
+        // from the inside out so read-only ancestors cannot obstruct extraction.
+        directory_modes.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+        for (path, mode) in directory_modes {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))
+                .map_err(|error| format!("cannot restore staged directory mode: {error}"))?;
         }
         sync_staged_directories_with(stage, sync_directory_entry)
     })();
@@ -2079,6 +2111,58 @@ mod tests {
             synced.iter().position(|path| path == &contents).unwrap()
                 < synced.iter().position(|path| path == &stage).unwrap()
         );
+    }
+
+    #[test]
+    fn archive_modes_are_restored_after_private_extraction() {
+        let root = TempDir::new().unwrap();
+        let stage = root.path().join("Slipstream.app");
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (name, mode, directory) in [
+            ("Slipstream.app", 0o755, true),
+            ("Slipstream.app/Contents", 0o750, true),
+            ("Slipstream.app/Contents/payload", 0o640, false),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(name).unwrap();
+            header.set_mode(mode);
+            header.set_entry_type(if directory {
+                tar::EntryType::Directory
+            } else {
+                tar::EntryType::Regular
+            });
+            header.set_size(if directory { 0 } else { 3 });
+            header.set_cksum();
+            builder
+                .append(&header, if directory { &b""[..] } else { &b"abc"[..] })
+                .unwrap();
+        }
+        let bytes = builder.into_inner().unwrap().finish().unwrap();
+        extract_archive_with_sync(
+            &bytes,
+            &stage,
+            &|_| {
+                assert_eq!(
+                    fs::metadata(&stage).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+                Ok(())
+            },
+            &|_| Ok(()),
+        )
+        .unwrap();
+        for (path, expected) in [
+            (&stage, 0o755),
+            (&stage.join("Contents"), 0o750),
+            (&stage.join("Contents/payload"), 0o640),
+        ] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                expected
+            );
+        }
+        assert_eq!(fs::read(stage.join("Contents/payload")).unwrap(), b"abc");
     }
 
     #[test]

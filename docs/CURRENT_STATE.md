@@ -10,122 +10,32 @@ file.
 
 ## Current Checkpoint
 
-Latest continuation: PR377 b2f22f8 both source CI35504333339 and combined audit
-35504333296 PASS. Downloaded and independently verified both CI audit reports
-bound to merge a2147018: app361packages/0exceptions/5informational; Geph484packages/
-9unchanged exceptions/3informational. No blockers. Artifacts joint-ci-{app,geph}.
-New causal publication blocker found: crates.io latest is0.4.0 (2026-09-14), so
-old workflow's upstream-only identity would never build reviewed0.3.9-r2.
-PR377 follow-up8fae4d4 fixes main-push resolution to verified committed source;
-manual build_reviewed=true requires main, schedules retain upstream discovery.
-Only exact Geph workflow+paired build tests additionally admitted to bootstrap;
-other workflows/app source/manifests/policy remain excluded.58tests+16subtests
-and actionlint PASS, including executing workflow shell with upstream forbidden,
-non-main ref and tampered lock. Pushed after prior source CI finished. Fresh
-CI35504649908 and audit35504649865 verified live. Source still unmerged; no new
-vendor binary. PR376 CI35504245450 remains live building qualification driver;
-real three-case jobs not yet listed. Next collect those exact runs, review and
-promote dependency source only after green checks, then require published/attested
-Geph and application verification. No workstation changes.
+2026-09-20 continuation: PR376 source476af9e CI35504245450 is terminal FAILURE.
+Real rollback and live-traffic-failure rollback both PASS, including exact old
+bundle tree, live restored tray, journal removal and clean scoped cleanup.
+Accept now retains its successor but fails canonical bundle tree comparison:
+extractor kept stage root0700 and omitted archive directory modes. Candidate
+restores ordinary archive file/directory modes after private extraction; root
+stays0700 during writes.24 updater transaction tests PASS; evidence under
+output/aud30-traffic-gate/{archive-mode-tests.log,accept-476af9e,
+rollback-476af9e,traffic-failure-476af9e}. Canonical hash is not weakened.
+Next push this repair and require the real three-case candidate qualification.
 
+Dependency PR377 head7430e456 is open; fresh CI35505121491 is IN_PROGRESS,
+audit35505121493 PASS. Previous source8fae4d4 checks were green. Latest revision
+addresses review by admitting ONLY exact rustls0.23.41->0.23.45 and
+webpki0.103.13->0.103.15 lock transitions, including checksums and whole parsed
+lock comparison; any unrelated package/edge/metadata change disables bootstrap.
+59 tests+22subtests PASS. Review thread PRRT_kwDOTLueX86kIhE8 resolved after fix.
+Reviewed-source Geph publisher repair remains included: main source builds
+reviewed0.3.9-r2 instead of substituting upstream0.4.0. No new vendor binary yet.
+Next verify current checks/reviews, normal protected merge, then audited and
+attested immutable vendor publication before integration/application build.
 
-Latest 2026-09-20: prior CI35503555564 is terminal FAILURE; all results collected.
-476af9e pushed to PR376: CI35504245450 verified live, includes accept/rollback/
-traffic_failure and watchdog process-group policy. No installation yet.
-Dependency source PR377 now b2f22f8: coordinated app+Geph lock fixes plus narrowly
-expanded source-bootstrap classifier and paired tests/release docs. Existing
-strict branch checks and both audits retained, no advisory exceptions. The
-8-file source-only diff admits PR bootstrap and rejects main/push bootstrap;
-production code, manifests, app audit policy and workflow edits are excluded.
-72focused tests+33subtests PASS. Separate worktree remains geph-rustls-02345.
-PR377 CI35504333339 and dependency35504333296 verified live. Next collect both
-combined audits and review source transition before vendor publication; collect
-real three-case transaction evidence on PR376. Do not restart either live run.
-This proposal resolves the source integration cycle without pretending r2 is
-already built, attested or installed. All five reliability stages remain open.
-
-
-Latest evidence: e5cdf8d real accept106060428416 and rollback106060428412 FAIL,
-both with cleanup_errors=[]; journals show transaction completion, but terminal
-trays disappear. Published helper spawns trays in its process group; generated
-LaunchAgent omitted AbandonProcessGroup. Local macOS man page confirms launchd
-kills remaining group members on watchdog exit. Candidate now sets that key to
-true without changing KeepAlive or exact-identity kill/rollback. 23updater Rust
-tests PASS, changed-file rustfmt check PASS. Full cargo fmt check still reports
-pre-existing browser_probe/lib formatting; no unrelated formatting edits made.
-Harness requires two-second exact-identity survival after completion;12tests
-+12subtests PASS. Detailed evidence in ROUTING_RESEARCH.md and output/aud30-traffic-gate.
-CI35503555564 still live only on packaged-app-lifecycle-heavy (physical browser
-sentinel step); do not interrupt it. Next push accumulated fixes after it ends
-and require all three real transaction cases, including new traffic_failure.
-No claim of fixed installed updater or public old-version feed migration.
-
-
-Current continuation: 09318f5 removes the one trailing EOF blank line in
-spike/test_traffic_contracts.py that failed common checks on e5cdf8d. Whole PR
-whitespace comparison now passes. CI35503555564 packaged build finished PASS;
-real accept job106060428416 and rollback106060428412 are live, currently unpacking
-the pinned previous app. Product/adapter checks PASS. Do not cancel this run.
-Pending fault-case enhancement now requires a successful complete three-path
-payload on the same runner before DNS injection (original non-root UID), retains
-traffic-baseline.log, and rejects missing/failed paths. Eleven targeted tests
-+12subtests PASS; actionlint PASS. Existing 63-test baseline from bab19e3 reused.
-These qualification-only changes are not yet pushed; no installed app changes.
-Next inspect actual matrix results, then push the accumulated focused fixes and
-third-case qualification after the live run ends.
-
-
-Local pending qualification improvement: new traffic_failure matrix case uses
-only disposable-CI StalledSystemResolver for media.discordapp.net after active
-runtime installation. Real successor stays unsignalled; harness requires the
-same live successor near its journal ACK deadline, advancing fresh active
-same-PID daemon heartbeat, deadline expiry, matching rollback record, exact old
-bundle and restored tray. Resolver must receive a query and is restored during
-cleanup. This catches heartbeat-only acceptance that SIGSTOP cannot test.
-63focused tests +13subtests PASS; actionlint PASS. Includes watchdog *.log upload.
-Not yet pushed: preserve live CI35503555564 at e5cdf8d until its real matrix
-outcome. Latest poll product-checks/Chromium/Windows adapter PASS; packaged build
-still uploading, aggregate checks running. No workstation changes.
-Verified branch protection requires checks, packaged-app-lifecycle, and Required
-dependency audit. PR377 vendor audit PASS but app audit FAIL; PR376 is inverse.
-Current exact Geph-bootstrap scope prohibits mixed app locks. This is a real
-source-promotion ordering constraint, not permission to waive checks; resolve
-reviewably before merging either dependency correction. Stage1 still open.
-
-
-Latest continuation: e5cdf8d pushed to PR376. CI35503555564 verified live
-(packaged-app-build/product/adapter jobs in progress). Dependency35503555539
-terminal: app audit PASS after rustls fix; Geph audit FAIL on unchanged r1.
-Geph r2 full audit and verification PASS:484packages,0blockers,9existing
-exceptions,3informational. Source PR377 draft created/attached at9654c6c:
-https://github.com/aiwaki/slipstream/pull/377. No binary published/installed.
-Prior scan54330 and push/create sessions completed. Next watch CI35503555564
-for real updater matrix outcomes; reconcile cross-PR audit/bootstrap ordering
-before any merge. Do not re-run an unchanged broad suite or bypass audit policy.
-
-
-2026-09-20 follow-up: CI35502811564 is terminal FAILURE. Packaged build,
-packaged lifecycle-heavy and browser qualification passed; both new updater
-matrix jobs failed before provisioning because the release downloader requires
-a nonexistent output directory. Removed premature mkdir(previous); actionlint
-PASS and 56 affected downloader/build-config tests +5subtests PASS. No real
-successor ACK/rollback case has run yet. Test-double/report fixes are d4cd690.
-App Cargo.lock now rustls0.23.45 +rustls-webpki0.103.15; eight updater traffic
-tests including real three-path full payload PASS. Prior canonical app builds
-are superseded by this lock change; fresh build/CI remains required.
-Separate source-contract branch codex/geph-rustls-02345 at9654c6c in
-/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905
-bumps only Geph lock rustls0.23.43->0.23.45 and SOURCE revision1->2. Verified
-revision transition with unchanged audit policy; 35source/release tests and
-35subtests PASS. Locked metadata for both macOS targets and full483dependency
-SBOM generated. Fresh OSV scan session54330 is running; see geph-fixed-* in
-output/aud30-traffic-gate. No Geph binary published or installed. Narrow source
-PR must retain bootstrap eligibility; app audit on main may still fail until
-its independent lock fix lands. No exceptions or gate weakening authorized.
-Next push repaired app CI candidate, collect actual packaged transaction
-results, finish dependency audit/reviewed Geph source-contract publication.
-Workstation remains AUD-29; all five objective stages remain open.
-
+Installed workstation remains AUD29 e1bdc3e3, unchanged. No pending admin prompt.
+User-owned AGENTS.md edits and untracked output/.playwright-cli are preserved.
+Public old-version signed update migration, new workstation install, long media,
+runtime recovery and sleep/wake/load qualification remain open.
 
 Active goal: address remaining reliability weaknesses in the accepted order:
 1) real traffic qualification before accepting updates, 2) safe runtime recovery
