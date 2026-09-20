@@ -101,3 +101,14 @@ def test_strategy_choice_reaches_wire_injector(monkeypatch):
     hello = tproxy.build_fake_clienthello('cdn.discordapp.com')
     asyncio.run(tproxy.dial_strategy('203.0.113.10',443,hello[:5],hello[5:],'cdn.discordapp.com',tproxy.STRAT_BY_NAME['discord_decoy_mail']))
     assert seen == [{'host': 'cdn.discordapp.com', 'decoy_family': 'mail'}]
+
+
+def test_tls_prefix_cannot_erase_recent_full_payload_failure():
+    host, name = 'cdn.discordapp.com', 'discord_matched_fake'
+    tproxy.remember_strategy(host, name)
+    tproxy._record_strategy_result(host, name, False, payload=True)
+    for _ in range(100):
+        tproxy._record_strategy_result(host, name, True)
+    assert tproxy.strategy_order(host)[0]['name'] != name
+    tproxy._record_strategy_result(host, name, True, payload=True)
+    assert tproxy.strategy_order(host)[0]['name'] == name

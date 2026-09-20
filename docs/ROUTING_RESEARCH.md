@@ -2573,7 +2573,7 @@ preferred matched strategy bypassed ranking, Discord runtime cache invalidation
 affected other hosts, CDN checks accepted byte prefixes, and resweep used legacy
 TLS-only proof. Fixed those boundaries; added independent family strategies,
 full-object/API and voice upgrade qualification, exact-host recovery.
-102 focused tests PASS, including controlled incomplete PNG -> distinct strategy
+103 focused tests PASS, including controlled incomplete PNG -> distinct strategy
 -> full object -> cached winner, and unchanged neighboring host. Expanded two
 suites:959 passed/7 failed;3 changed assertions subsequently corrected and passed.
 Other4 failures (two geo-exit relay mocks and two semantic-probe mocks) reproduced

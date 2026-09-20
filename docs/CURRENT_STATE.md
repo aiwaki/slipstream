@@ -13,7 +13,7 @@ file.
 AUD-26 recurrence prevention candidate: independent Discord matched decoy families,
 ranked preferred candidates, recent-failure demotion without admission blocking,
 exact-host invalidation, full public API/PNG and validated WebSocket canaries,
-modern TLS payload-qualified Discord resweep.102 focused tests PASS;4 unrelated
+modern TLS payload-qualified Discord resweep.103 focused tests PASS;4 unrelated
 failures confirmed on pre-change baseline (details ROUTING_RESEARCH). Live mail/
 ozon voice alternatives101 in0.2s. Build next; preserve user AGENTS.md. Current
 installed source remains eeff76c/transaction2ad62192 below until new replacement.

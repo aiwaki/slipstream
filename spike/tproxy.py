@@ -12138,13 +12138,13 @@ async def _run_local_bypass_canary(spec):
                     payload_short = True
                 continue
             strat_ok = True
-            _record_strategy_result(host, strat["name"], True)
+            _record_strategy_result(host, strat["name"], True, payload=True)
             if _strat_cache.get(host) != strat["name"]:
                 remember_strategy(host, strat["name"])
             canary_health_event(spec, expected_route, host, True)
             return True
         if not strat_ok:
-            _record_strategy_result(host, strat["name"], False)
+            _record_strategy_result(host, strat["name"], False, payload=True)
     clear_route_strategy_cache(host=host)
     if payload_failed:
         reason = "payload throughput below threshold" if payload_short else "payload probe failed"
@@ -12203,7 +12203,7 @@ async def _resweep_local_bypass_host(host):
                     _close_probe_result(result)
             if result:
                 strat_ok = True
-                _record_strategy_result(h, strat["name"], True)
+                _record_strategy_result(h, strat["name"], True, payload=policy["service_group"] == SERVICE_DISCORD)
                 if _strat_cache.get(h) != strat["name"]:
                     remember_strategy(h, strat["name"])
                 _dead.pop(h, None)
@@ -12211,7 +12211,7 @@ async def _resweep_local_bypass_host(host):
             if attempts >= 7:
                 break
         if not strat_ok:
-            _record_strategy_result(h, strat["name"], False)
+            _record_strategy_result(h, strat["name"], False, payload=policy["service_group"] == SERVICE_DISCORD)
         if attempts >= 7:
             break
     return False
@@ -14580,7 +14580,7 @@ def _strategy_wilson_score(ok, total):
     return max(0.0, min(1.0, (center - margin) / denom))
 
 
-def _record_strategy_result(host, name, ok, now=None):
+def _record_strategy_result(host, name, ok, now=None, *, payload=False):
     host = normalize_host(host)
     if not host or name not in STRAT_BY_NAME:
         return
@@ -14590,6 +14590,11 @@ def _record_strategy_result(host, name, ok, now=None):
     item["ok" if ok else "fail"] += 1
     item["last"] = now
     item["last_ok"] = bool(ok)
+    if payload:
+        if ok:
+            item.pop("payload_failed_at", None)
+        else:
+            item["payload_failed_at"] = now
     _strat_scores.move_to_end(host)
     while len(_strat_scores) > STRAT_SCORE_MAX_HOSTS:
         _strat_scores.popitem(last=False)
@@ -14653,7 +14658,11 @@ def _strategy_rank(host, name, base_index, cached, now):
         age = max(0.0, now - item.get("last", now))
         age_ratio = age / STRAT_SCORE_AGE_BONUS_AFTER
         score += min(STRAT_SCORE_AGE_BONUS_MAX, age_ratio * STRAT_SCORE_AGE_BONUS_MAX)
-        if is_discord_host(host) and item.get("last_ok") is False and age < 60:
+        payload_failed_at = item.get("payload_failed_at")
+        payload_failed_recently = (payload_failed_at is not None
+                                   and 0 <= now - payload_failed_at < 60)
+        if is_discord_host(host) and (payload_failed_recently or
+                                     (item.get("last_ok") is False and age < 60)):
             score -= 1.0
     else:
         score = 0.5

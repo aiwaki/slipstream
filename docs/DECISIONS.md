@@ -604,7 +604,9 @@ Discord receives independently selectable equal-length matched fake SNI families
 Discord subdomains. Only the fake is changed; these names are never resolved or
 contacted. Existing preferred exact substitutions stay first without evidence,
 but ranking includes them, cached winners and recent failures. A recent failure
-demotes a candidate for ranking only (60s), never denies a connection. All existing
+demotes a candidate for ranking only (60s), never denies a connection. A recent
+full-payload failure cannot be erased by a TLS-prefix success; a complete payload
+success clears that evidence. All existing
 per-request attempt bounds remain; no new global connection throttle is added.
 Protected transport close/timeouts teach failures; exact-host failures no longer
 erase other Discord winners. Unknown/YouTube/Geph policy is unchanged.
