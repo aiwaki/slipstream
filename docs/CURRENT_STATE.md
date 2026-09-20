@@ -11,6 +11,14 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- New workstation transaction5f5ec434 prepared and STAGED, NOT DISPATCHED:
+  output/aud30-install-5f5ec434/ and pending-install.json. Canonical candidate and
+  staged artifact PASS tree1794a453; verified installed previous tree3e6c8181.
+  Runtime source2fb0270; diff to HEAD contains no app/spike changes. Exact script
+  delta reviewed (nonce/source/tree plus retaining b4bb66a0 backup); bash -n PASS.
+  CI35508641621 lifecycle-heavy still live. Do not Quit/authorize until terminal
+  green; then normal --quit, fresh one-shot authorize-once.py, normal open,
+  npm run verify:local-install and real-app observation. No admin prompt pending.
 - CI35508641621 / remote326d25e: all FOUR packaged transaction cases PASS,
   browser PASS. Lifecycle-heavy still live; do not cancel. Primary-unavailable
   artifact confirms media query_received, exact candidate tree844faa92 accepted,
