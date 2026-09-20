@@ -1516,3 +1516,14 @@ exit after a failed stop. The requesting second process exiting is not evidence
 that shutdown completed: verify the tray process and launchd service disappear.
 With no existing instance, --quit exits without starting routing. Extra arguments
 are not treated as a quit request.
+
+## Local proxy connect timeout before TLS (AUD-29)
+
+If a localhost:1080 connection times out before CONNECT/TLS while other source
+ports succeed, compare the exact TCP tuple with PF state and kernel sockets.
+AUD-28 found a socketless day-long ESTABLISHED PF entry that survived anchor
+rule removal. AUD-29 separates ordinary loopback TCP state from transparent
+reply-to and performs narrowly scoped startup cleanup only when lsof proves no
+live socket on the service port. Never use a global PF state flush. Empty or
+unrecognized socket inspection must retain states; an artifact/status pass alone
+does not prove connectivity. Qualify the formerly failing tuple and full payload.

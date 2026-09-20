@@ -2709,3 +2709,23 @@ state without reply-to success0.217ms, original reply-to success0.166ms. Correct
 candidate therefore retains TCP state and removes only inappropriate reply-to
 from direct loopback traffic. Transparent remote traffic keeps reply-to.
 Evidence rule-comparison.json, rejected-stateless-*.json, pf-after-failure.json.
+
+### AUD-29 corrected installed result
+
+Sourcee1bdc3e installed via3f81f9ad2026-09-20T08:52:31Z (consumed). Canonical
+build/staged/installed pass;73 affected tests pass. Exact failed source49893 now
+connects in0.153ms, neighboring49894 in0.075ms, IPv6 in0.077ms. Ten concurrent
+full public media/API/app objects all200 and complete0.314–0.563s;40 original
+APNG trials all pass, maxTCPconnect3.511ms and maxcomplete1.333s. A no-explicit-
+proxy API request completed200/35bytes0.352s, retaining transparent behavior.
+Native Discord reload showed loaded history without message/image error and no
+active call. Audio, streams and YouTube are not newly qualified.
+
+PF inspection shows four plain-loopback keep-state rules and two retained
+transparent reply-to rules. Original day-long ESTABLISHED state is absent; the
+new49893 tuple closed to TIME_WAIT with46sremaining at inspection. This proves
+normal closure for the tested connection, not all future disconnect scenarios.
+An independent local TCP connection on58393 remained alive throughout corrected
+installation/qualification. No global state flush, foreign configuration change,
+or message/call action. All evidence in output/aud29-pf-loopback; rejected first
+candidate evidence is retained separately, not overwritten by successful probes.

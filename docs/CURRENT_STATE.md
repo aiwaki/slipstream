@@ -10,13 +10,29 @@ file.
 
 ## Current Checkpoint
 
-AUD-29 first candidate5b1b938 installed via3313895c (CONSUMED NEVER replay),
-but rejected live: stateless proxy connections all timed out. Normal Quit requested.
-Correction uses normal TCP state without reply-to for direct loopback; native
-comparison0.217ms vs stateless timeout. lsof replaces empty netstat snapshot.
-Corrected tests/build/install pending. Evidence output/aud29-pf-loopback.
-Current installed binary50845f5bbd409503ed47e1d4e94a83f20d21ddce0583a25312370d4011ffc137.
-User AGENTS preserved. Do not claim first candidate fixed the problem.
+AUD-29 CORRECTED installed e1bdc3e3ca69af9cf248af7040cb9ffc30557426 via
+3f81f9ad at2026-09-20T08:52:31Z; transaction CONSUMED NEVER replay.
+Daemon919d3cf86db662b9942e281958088d9993f88a7ec6d97dddebb83d8cb32ce7bf;
+app tree b975dd5b79f504e40e5819f576c377a1706e6b555deb0d3f07acd475b1f210b9.
+73 focused tests, native scoped ioctl, canonical build/staged/installed PASS.
+Direct loopback gets ordinary TCP state without reply-to; transparent rules remain.
+Startup lsof-gated exact-loopback/service-port migration, no global state flush.
+Exact formerly failing49893 now0.153ms; neighbor0.075ms; IPv6 0.077ms.
+10/10 concurrent full public Discord objects valid0.314–0.563s; repeated original
+40-request APNG batch40/40, maxconnect3.511ms, maxcomplete1.333s. Transparent
+no-proxy API200/35bytes0.352s. Native Discord reload: history loaded, no message/
+image error, no active call. No fresh audio/stream/YouTube qualification.
+PF old day-long ESTABLISHED id absent; new exact tuple TIME_WAIT with46sremaining.
+Unrelated persistent local TCP control survived replacement with no interruption.
+Evidence output/aud29-pf-loopback/{tests-corrected.log,installed-corrected.log,
+fixed-port.json,installed-media-parallel.json,curl-results.json,pf-corrected.json,
+transparent.json,native-check.json,control-corrected.json}. All diagnostics ended.
+First candidate3313895c/5b1b938 REJECTED after stateless regression; consumed,
+never replay. Corrected candidate above supersedes it. No pending authorization.
+User AGENTS.md preserved. Next investigate a specific fresh failing stream/video
+if reported; current fix qualifies this localhost failure, not universal immunity.
+
+Historical diagnosis before the repair:
 
 AUD-28 diagnosis complete, no code/network mutation. Exact localhost timeout
 reproduces by binding source127.0.0.1:49893 toproxy1080; same source tocontrol and
