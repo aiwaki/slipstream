@@ -63,7 +63,7 @@ def main() -> int:
     parser.add_argument("--previous-bundle", required=True, type=Path)
     parser.add_argument("--candidate-bundle", required=True, type=Path)
     parser.add_argument("--driver", required=True, type=Path)
-    parser.add_argument("--case", required=True, choices=("accept", "rollback"))
+    parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure"))
     args = parser.parse_args()
     lifecycle._require_disposable_ci()
     runner = lifecycle.pf.PfctlRunner()
@@ -82,12 +82,18 @@ def main() -> int:
     target = lifecycle.packaged_app_target(args.candidate_bundle)
     system = lifecycle.SystemRunner(target)
     failure = None
+    resolver = None
     cleanup_errors = []
     try:
         system.run(target.install_command)
         lifecycle._wait_for_status("active", timeout=90)
         lifecycle._assert_installed_payload(target)
         lifecycle._assert_local_routing_without_geph()
+        if args.case == "traffic_failure":
+            # Disposable runner only: keep status/heartbeat healthy while the
+            # real successor cannot resolve its public traffic-proof endpoint.
+            resolver = lifecycle.StalledSystemResolver(domain="media.discordapp.net")
+            resolver.start()
         result = subprocess.run([
             sys.executable, str(Path(__file__).with_name("packaged_update_transaction_smoke.py")),
             "--previous-bundle", str(args.previous_bundle.resolve()),
@@ -99,6 +105,8 @@ def main() -> int:
         (root / "harness.log").write_text(result.stdout + result.stderr)
         print(result.stdout, flush=True)
         transaction.require(result.returncode == 0, "packaged transaction failed; inspect harness.log")
+        if resolver is not None:
+            transaction.require(resolver.query_event.is_set(), "traffic fault never received a DNS query")
     except Exception as exc:
         failure = exc
     finally:
@@ -107,6 +115,11 @@ def main() -> int:
                        lambda: stop_owned_trays(root, uid)):
             try:
                 action()
+            except Exception as exc:
+                cleanup_errors.append(str(exc))
+        if resolver is not None:
+            try:
+                resolver.stop()
             except Exception as exc:
                 cleanup_errors.append(str(exc))
         cleanup_errors.extend(lifecycle._fallback_uninstall(system, runner, target))

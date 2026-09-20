@@ -58,21 +58,28 @@ def stop_successor(journal: dict, executable: Path) -> None:
 
 
 def observe(journal_path: Path, executable: Path, case: str,
-            *, timeout: float = 90) -> dict:
+            *, timeout: float = 90, traffic_health=None) -> dict:
     deadline = time.monotonic() + timeout
     phases: list[str] = []
     stopped = False
     successor_pid = None
     nonce = None
     expected_successor = None
+    first_heartbeat = None
+    successor_deadline = None
+    live_traffic_failure = False
     while time.monotonic() < deadline:
         try:
             journal = json.loads(journal_path.read_text())
         except FileNotFoundError:
             require(bool(phases), "transaction disappeared before any phase was observed")
             failures = list(journal_path.parent.glob("app-update-transaction-failed-*.json"))
-            if case == "rollback":
-                require(stopped and len(failures) == 1, "expected injected timeout rollback")
+            if case in ("rollback", "traffic_failure"):
+                require((stopped if case == "rollback" else live_traffic_failure)
+                        and len(failures) == 1, "expected injected timeout rollback")
+                if case == "traffic_failure":
+                    require(successor_deadline is not None and time.time() >= successor_deadline,
+                            "traffic rollback occurred before the ACK deadline")
                 failed = json.loads(failures[0].read_text())
                 require(failed["phase"] == "old_relaunched" and failed["nonce"] == nonce,
                         "rollback did not relaunch the exact transaction's old app")
@@ -83,7 +90,8 @@ def observe(journal_path: Path, executable: Path, case: str,
                         and snapshot(successor_pid) == expected_successor,
                         "accepted successor exited or changed identity")
             return {"case": case, "phases": phases, "stopped": stopped,
-                    "successor_pid": successor_pid, "transaction_removed": True}
+                    "successor_pid": successor_pid, "transaction_removed": True,
+                    "live_traffic_failure": live_traffic_failure}
         phase = journal["phase"]
         if not phases or phases[-1] != phase:
             phases.append(phase)
@@ -94,6 +102,17 @@ def observe(journal_path: Path, executable: Path, case: str,
             if case == "rollback" and not stopped:
                 stop_successor(journal, executable)
                 stopped = True
+            if case == "traffic_failure":
+                require(traffic_health is not None, "traffic failure requires live daemon evidence")
+                heartbeat = traffic_health()
+                if snapshot(successor_pid) == expected_successor:
+                    successor_deadline = journal["successor_deadline_unix"]
+                    if first_heartbeat is None:
+                        first_heartbeat = heartbeat
+                    elif time.time() >= successor_deadline - 1 and heartbeat > first_heartbeat:
+                        # Observe a live successor and advancing daemon up to the
+                        # deadline, not an early crash that also triggers rollback.
+                        live_traffic_failure = True
         time.sleep(.02)
     raise RuntimeError(f"transaction did not terminate: {phases}")
 
@@ -118,7 +137,7 @@ def main() -> int:
     parser.add_argument("--previous-bundle", type=Path, required=True)
     parser.add_argument("--candidate-bundle", type=Path, required=True)
     parser.add_argument("--driver", type=Path, required=True)
-    parser.add_argument("--case", choices=("accept", "rollback"), required=True)
+    parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure"), required=True)
     args = parser.parse_args()
     root = guard()  # Must precede every filesystem/process mutation.
     require(subprocess.run(["/usr/bin/pgrep", "-x", "slipstream"],
@@ -149,10 +168,16 @@ def main() -> int:
                              str(archive), str(state)], capture_output=True, text=True, timeout=45)
     (work / "prepare.log").write_text(result.stdout + result.stderr)
     require(result.returncode == 0, "production transaction preparation failed; inspect prepare.log")
-    report = observe(state / "app-update-transaction-v1.json", executable, args.case)
-    if args.case == "rollback":
+    def traffic_health():
+        current = verify_status_v2(status_path=status_path, expected_pid=status["pid"])
+        require(current["state"] == "active", "daemon lost active state during traffic fault")
+        return current["heartbeat_seq"]
+
+    report = observe(state / "app-update-transaction-v1.json", executable, args.case,
+                     traffic_health=traffic_health)
+    if args.case in ("rollback", "traffic_failure"):
         report["restored_pid"] = restored_app_pid(executable, report["successor_pid"])
-    expected = old_tree if args.case == "rollback" else new_tree
+    expected = old_tree if args.case in ("rollback", "traffic_failure") else new_tree
     require(deterministic_tree_sha256(target) == expected, "terminal bundle tree mismatch")
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
     report.update(bundle_tree=expected, previous_tree=old_tree, candidate_tree=new_tree,

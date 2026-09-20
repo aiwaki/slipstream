@@ -62,6 +62,43 @@ class TransactionGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "exact transaction"):
             self.observe("rollback", failure_nonce="old-unrelated-transaction")
 
+    def test_traffic_fault_requires_live_successor_and_advancing_heartbeat(self):
+        for duration, advances, alive, accepted in (
+            (60, True, True, True), (20, True, True, False),
+            (60, False, True, False), (60, True, False, False),
+        ):
+            with self.subTest(duration=duration, advances=advances, alive=alive), \
+                    tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "app-update-transaction-v1.json"
+                exe = Path(tmp) / "Slipstream.app/Contents/MacOS/slipstream"
+                journal = {"phase": "successor_launched", "nonce": "a",
+                           "successor_pid": 123, "successor_started": "birth",
+                           "successor_deadline_unix": 60}
+                path.write_text(json.dumps(journal))
+                clock = [0]
+                def step(_):
+                    if clock[0] == 0:
+                        clock[0] = duration
+                    else:
+                        path.unlink()
+                        (Path(tmp) / "app-update-transaction-failed-a.json").write_text(
+                            json.dumps({"phase": "old_relaunched", "nonce": "a"}))
+                identity = (os.getuid(), "birth", str(exe))
+                with patch.object(gate.time, "monotonic", side_effect=lambda: clock[0]), \
+                        patch.object(gate.time, "time", side_effect=lambda: clock[0]), \
+                        patch.object(gate.time, "sleep", side_effect=step), \
+                        patch.object(gate, "snapshot", return_value=identity if alive else None), \
+                        patch.object(gate, "stop_successor") as stop:
+                    check = lambda: 1 + int(advances and clock[0] > 0)
+                    if accepted:
+                        report = gate.observe(path, exe, "traffic_failure", traffic_health=check)
+                        self.assertTrue(report["live_traffic_failure"])
+                        self.assertFalse(report["stopped"])
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "expected injected"):
+                            gate.observe(path, exe, "traffic_failure", traffic_health=check)
+                    stop.assert_not_called()
+
     def test_restored_tray_must_be_distinct_and_owned(self):
         import subprocess
         exe = Path("/private/test/Slipstream.app/Contents/MacOS/slipstream")

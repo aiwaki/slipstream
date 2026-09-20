@@ -10,6 +10,24 @@ file.
 
 ## Current Checkpoint
 
+Local pending qualification improvement: new traffic_failure matrix case uses
+only disposable-CI StalledSystemResolver for media.discordapp.net after active
+runtime installation. Real successor stays unsignalled; harness requires the
+same live successor near its journal ACK deadline, advancing fresh active
+same-PID daemon heartbeat, deadline expiry, matching rollback record, exact old
+bundle and restored tray. Resolver must receive a query and is restored during
+cleanup. This catches heartbeat-only acceptance that SIGSTOP cannot test.
+63focused tests +13subtests PASS; actionlint PASS. Includes watchdog *.log upload.
+Not yet pushed: preserve live CI35503555564 at e5cdf8d until its real matrix
+outcome. Latest poll product-checks/Chromium/Windows adapter PASS; packaged build
+still uploading, aggregate checks running. No workstation changes.
+Verified branch protection requires checks, packaged-app-lifecycle, and Required
+dependency audit. PR377 vendor audit PASS but app audit FAIL; PR376 is inverse.
+Current exact Geph-bootstrap scope prohibits mixed app locks. This is a real
+source-promotion ordering constraint, not permission to waive checks; resolve
+reviewably before merging either dependency correction. Stage1 still open.
+
+
 Latest continuation: e5cdf8d pushed to PR376. CI35503555564 verified live
 (packaged-app-build/product/adapter jobs in progress). Dependency35503555539
 terminal: app audit PASS after rustls fix; Geph audit FAIL on unchanged r1.

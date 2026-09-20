@@ -1562,7 +1562,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        case: [accept, rollback]
+        case: [accept, rollback, traffic_failure]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -1610,6 +1610,7 @@ jobs:
             ${{ runner.temp }}/update-case-*/slipstream-update-*/result.json
             ${{ runner.temp }}/update-case-*/slipstream-update-*/prepare.log
             ${{ runner.temp }}/update-case-*/slipstream-update-*/state/*.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/state/*.log
           if-no-files-found: warn
           retention-days: 7
 
