@@ -11,6 +11,14 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- CI35508641621 terminal SUCCESS including lifecycle-heavy; all four transaction
+  cases and browser passed. Fresh one-shot5f5ec434 DISPATCHED via native
+  authorization, shell session92977 still live with empty authorization log.
+  Normal CLI --quit succeeded and tray disappearance verified before dispatch.
+  Outcome pending: never replay authorize-once.py. Poll session92977 and read
+  output/aud30-install-5f5ec434/authorization-result.json/log. After exit0 normal
+  open then canonical installed verification and real app; do not claim installed
+  until recorded authorization outcome. Old source4442098 stopped for replacement.
 - New workstation transaction5f5ec434 prepared and STAGED, NOT DISPATCHED:
   output/aud30-install-5f5ec434/ and pending-install.json. Canonical candidate and
   staged artifact PASS tree1794a453; verified installed previous tree3e6c8181.
