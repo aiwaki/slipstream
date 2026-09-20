@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+Latest continuation: e5cdf8d pushed to PR376. CI35503555564 verified live
+(packaged-app-build/product/adapter jobs in progress). Dependency35503555539
+terminal: app audit PASS after rustls fix; Geph audit FAIL on unchanged r1.
+Geph r2 full audit and verification PASS:484packages,0blockers,9existing
+exceptions,3informational. Source PR377 draft created/attached at9654c6c:
+https://github.com/aiwaki/slipstream/pull/377. No binary published/installed.
+Prior scan54330 and push/create sessions completed. Next watch CI35503555564
+for real updater matrix outcomes; reconcile cross-PR audit/bootstrap ordering
+before any merge. Do not re-run an unchanged broad suite or bypass audit policy.
+
+
 2026-09-20 follow-up: CI35502811564 is terminal FAILURE. Packaged build,
 packaged lifecycle-heavy and browser qualification passed; both new updater
 matrix jobs failed before provisioning because the release downloader requires
