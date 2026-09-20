@@ -58,6 +58,15 @@ def cleanup_watchdog(root: Path, home: Path, uid: int) -> None:
     plist.unlink()
 
 
+def require_traffic_baseline(result: subprocess.CompletedProcess) -> None:
+    transaction.require(result.returncode == 0, "traffic was already broken before fault injection")
+    report = json.loads(result.stdout)
+    paths = {item["path"]: item["pass"] for item in report["results"]}
+    transaction.require(report["status"] == "pass" and paths == {
+        "proxy_ipv4": True, "proxy_ipv6": True, "transparent": True,
+    }, "baseline does not prove all three traffic paths")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-bundle", required=True, type=Path)
@@ -90,6 +99,13 @@ def main() -> int:
         lifecycle._assert_installed_payload(target)
         lifecycle._assert_local_routing_without_geph()
         if args.case == "traffic_failure":
+            baseline = subprocess.run([
+                sys.executable, str(Path(__file__).with_name("qualify_installed_traffic.py")),
+            ], env=environment, user=uid, group=gid,
+                extra_groups=lifecycle._user_supplementary_groups(uid, gid),
+                capture_output=True, text=True, timeout=30)
+            (root / "traffic-baseline.log").write_text(baseline.stdout + baseline.stderr)
+            require_traffic_baseline(baseline)
             # Disposable runner only: keep status/heartbeat healthy while the
             # real successor cannot resolve its public traffic-proof endpoint.
             resolver = lifecycle.StalledSystemResolver(domain="media.discordapp.net")

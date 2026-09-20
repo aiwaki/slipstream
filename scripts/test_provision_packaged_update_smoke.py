@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import plistlib
 import subprocess
@@ -10,6 +11,20 @@ import provision_packaged_update_smoke as provision
 
 
 class ProvisionTests(unittest.TestCase):
+    def test_fault_requires_complete_three_path_baseline(self):
+        good = {"status": "pass", "results": [
+            {"path": name, "pass": True}
+            for name in ("proxy_ipv4", "proxy_ipv6", "transparent")
+        ]}
+        provision.require_traffic_baseline(subprocess.CompletedProcess([], 0, json.dumps(good), ""))
+        for code, report in ((1, good), (0, {**good, "results": good["results"][:2]}),
+                             (0, {**good, "status": "fail"}),
+                             (0, {**good, "results": [*good["results"][:2],
+                                  {"path": "transparent", "pass": False}]})):
+            with self.subTest(code=code, report=report), self.assertRaises(RuntimeError):
+                provision.require_traffic_baseline(
+                    subprocess.CompletedProcess([], code, json.dumps(report), ""))
+
     def test_cleanup_never_signals_reused_pid(self):
         root = Path("/private/owned-case")
         identity = (os.getuid(), "old birth", str(root / "Slipstream.app/Contents/MacOS/slipstream"))

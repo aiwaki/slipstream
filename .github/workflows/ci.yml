@@ -1606,6 +1606,7 @@ jobs:
           name: packaged-update-${{ matrix.case }}-${{ github.sha }}
           path: |
             ${{ runner.temp }}/update-case-*/harness.log
+            ${{ runner.temp }}/update-case-*/traffic-baseline.log
             ${{ runner.temp }}/update-case-*/provision-result.json
             ${{ runner.temp }}/update-case-*/slipstream-update-*/result.json
             ${{ runner.temp }}/update-case-*/slipstream-update-*/prepare.log

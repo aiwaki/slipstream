@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Current continuation: 09318f5 removes the one trailing EOF blank line in
+spike/test_traffic_contracts.py that failed common checks on e5cdf8d. Whole PR
+whitespace comparison now passes. CI35503555564 packaged build finished PASS;
+real accept job106060428416 and rollback106060428412 are live, currently unpacking
+the pinned previous app. Product/adapter checks PASS. Do not cancel this run.
+Pending fault-case enhancement now requires a successful complete three-path
+payload on the same runner before DNS injection (original non-root UID), retains
+traffic-baseline.log, and rejects missing/failed paths. Eleven targeted tests
++12subtests PASS; actionlint PASS. Existing 63-test baseline from bab19e3 reused.
+These qualification-only changes are not yet pushed; no installed app changes.
+Next inspect actual matrix results, then push the accumulated focused fixes and
+third-case qualification after the live run ends.
+
+
 Local pending qualification improvement: new traffic_failure matrix case uses
 only disposable-CI StalledSystemResolver for media.discordapp.net after active
 runtime installation. Real successor stays unsignalled; harness requires the
