@@ -8,8 +8,8 @@
   "features": [
     "aws_lambda"
   ],
-  "lock_sha256": "31458e3754c4353c43aabd6813e77a523fd10451942f930811260eff9101bd3a",
-  "release_revision": 1,
+  "lock_sha256": "d5a0e6f58cfdd7fea7db79c1322a486cc2d7ba47609c6d92c0edefe7a7e67b81",
+  "release_revision": 2,
   "schema_version": 1,
   "targets": [
     "aarch64-apple-darwin",

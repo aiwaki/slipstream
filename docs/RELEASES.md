@@ -164,17 +164,34 @@ A new upstream Geph crate cannot publish a binary immediately. Automation first
 opens a source-contract PR; only the reviewed and merged contract may trigger a
 locked build.
 
-That source-contract PR has one exact bootstrap scope: `SOURCE.json` and
-`Cargo.lock` are required, while `VERSION` and the exact Geph audit policy are
-the only additional paths allowed. Common product and Chromium checks still
-run, and the separately required `Required dependency audit` context must
-materialize and scan the full new graph. Only packaged app jobs stay skipped,
-because the new immutable binary cannot exist yet. A mixed PR cannot use this
-scope, and a push to `main` never uses it. After merge, `build-geph` builds and
-attests the new internal release; the first main app run may fail closed while
-that artifact is absent and is rerun only after publication. The rerun then
-builds and qualifies one candidate from the same source SHA and the new exact
-Geph artifact.
+That source-contract PR requires Geph `SOURCE.json` and `Cargo.lock`. It may
+also apply the exact reviewed RUSTSEC-2026-0285 application lock transition:
+rustls0.23.41->0.23.45 and rustls-webpki0.103.13->0.103.15 with their pinned
+checksums. The classifier reads both lockfiles from exact base/head Git SHAs and
+requires the parsed graph and metadata to remain otherwise identical. Missing
+proof or any other lock change requires ordinary packaged checks. Separate
+merges would each fail the audit of the other unfixed graph. Optional paths are Geph `VERSION` and its audit policy, the exact
+release/decision/checkpoint documents, and the scope classifier with its test
+file (classifier changes without the test file are rejected). The Geph publisher
+workflow may accompany its build-contract tests when repairing source publication
+ordering. Application source, Cargo manifests, application audit policy,
+packaging scripts, and all other workflows are not allowed in this scope.
+
+Common product and Chromium checks still run. The separately required
+`Required dependency audit` context must freshly scan **both** dependency graphs;
+no advisory is waived. Only packaged app jobs stay skipped because the new
+immutable Geph binary cannot exist yet. A production-code PR cannot use this
+scope, and a push to `main` never uses it. After reviewed merge, `build-geph`
+builds and attests the new internal release; the first main app run may fail
+closed while that artifact is absent and is rerun only after publication. The
+rerun then builds and qualifies one candidate from the same source SHA and new
+exact Geph artifact before any application release.
+
+On a main push, the Geph publisher builds the verified committed source contract,
+including maintenance revisions older than the latest upstream crate. Scheduled
+discovery still proposes the latest upstream version for separate review. A manual
+`build_reviewed=true` dispatch uses the same reviewed-main path and refuses other
+refs. It does not bypass lock, archive, audit, attestation, or immutable-tag checks.
 
 ## Candidate and publication pipeline
 
