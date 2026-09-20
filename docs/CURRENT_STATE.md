@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Latest publication evidence: Geph run35505388093 SUCCESS; geph-vendor-0.3.9-r2
+published. Downloaded all8assets and verified exact reviewed source/lock/version,
+SHA256SUMS, GitHub provenance bound to main6c5895fc and SPDX binary/SBOM binding.
+Audit verification:484packages,9unchanged exceptions,3informational,0blockers.
+BinarySHA442e982e51d7837b158cdb5efaff4adee754db4270780568bcf1683a4fe84748.
+Artifacts output/aud30-traffic-gate/geph-r2-{release,metadata.json,
+provenance.json,spdx-attestation.json}. GitHub isImmutable=false: publication
+policy is no-overwrite plus signed exact-content verification, not platform lock.
+CI35505371770 still IN_PROGRESS on lifecycle-heavy; do not cancel. After terminal,
+push integrated local branch and require exact combined source/vendor CI.
+Published .23 source6ba71ef7 updater inspected: LaunchAgent lacks
+AbandonProcessGroup and root extraction remains0700. Current-driver successes
+cannot prove legacy preparer migration. Next compatibility work must reproduce
+that shipped preparation path and qualify survivor/rollback without fake ACK.
+
+
 2026-09-20 verified real transaction evidence: source653649e / merge5d0c31e0,
 CI35505371770 accept, rollback and traffic_failure all PASS. Downloaded reports
 under output/aud30-traffic-gate/{accept,rollback,traffic_failure}-653649e confirm
