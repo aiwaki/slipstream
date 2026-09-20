@@ -2640,3 +2640,43 @@ HTTP1010.501/0.307s. Native reload shows history and no message loading error;
 no active call, no messages sent. Sticker-picker AX click did not visibly open,
 so no new native sticker-picker proof. Public sticker payloads fully qualified.
 Evidence output/aud27-reserves/installed*.json, installed.log, native-check.json.
+
+## AUD-28 localhost timeout diagnosis — 2026-09-20
+
+Read-only follow-up to AUD-27 transient reproduced one curl failure among40
+parallel public APNG requests. curl -q verbose proves TCP connect from
+127.0.0.1:49893 to127.0.0.1:1080 timed out7.788s before CONNECT/TLS; neighboring
+requests connected within2.5ms. Basic Python80 IPv4 +80 IPv6 proxy connects and
+80 independent listener controls initially all passed (<2.5ms). Subsequent40+80
+curl requests passed; randomness is consistent with source-port selection.
+
+Deterministic isolated reproduction: binding Python's source to49893 times out
+against1080; neighboring49894 connects0.21ms. The same49893 connects to an
+independent local listener51693 in0.06ms. Captured lo0 metadata shows repeated
+SYNs from49893 (seq2177822337) without SYN-ACK, while49894/49895 receive SYN-ACK.
+No HTTP contents/authentication captured.
+
+Read-only pfctl -ss -vv finds exact stale tuple:
+ALL tcp127.0.0.1:1080 <-127.0.0.1:49893 ESTABLISHED:ESTABLISHED;
+age47m17s, expires23h32m46s, sequence windows322158630/1709271798;
+id4a00000070190100 creator56410126. netstat finds no kernel TCP socket for49893.
+This is strong evidence of stale PF state rejecting reuse of an expired kernel
+connection tuple, not listener overload/DNS/Discord/Geph or curl-specific behavior.
+No targeted state deletion/A-B removal performed: local pfctl manual documents
+host/network kills only; avoid broad deletion of unrelated active state.
+
+Source explains persistence: pf_adapter.flush_private_anchor deliberately flushes
+rules/NAT only (macOS -F all also flushes global state). PF_RULES applies stateful
+reply-to to any lo0 inbound connection targeting1080, including explicit managed
+proxy clients. Stale entries survive rule replacement and app restart. Exact
+original missed-close event not captured; do not claim every past hang has this
+cause. Need isolate explicit loopback proxy tuples from transparent reply-to,
+plus safely reconcile pre-existing stale entries; do not globally clear states,
+change global TCP timeouts, or disable PF. Future fix needs targeted PF qualification.
+
+Evidence output/aud28-loopback/{connect.json,curl-first.json,fixed-port.json,
+loopback-syn2.txt,pf-state.json,captured/curl-results.json}. First35s collector
+failed to terminate cleanly and lost stdout; second45s collector killed its own
+child and returned119 metadata lines. Both collectors ended; no pending admin.
+Graph transport still closed; bounded source reads used. No source/runtime/routing
+changes made during this diagnosis. Installed AUD-27 remains current.

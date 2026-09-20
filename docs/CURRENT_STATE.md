@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+AUD-28 diagnosis complete, no code/network mutation. Exact localhost timeout
+reproduces by binding source127.0.0.1:49893 toproxy1080; same source tocontrol and
+neighboring port toproxy succeed. lo0 repeated SYN/no SYN-ACK; PF retains exact
+ESTABLISHED tuple47min old with23h expiry, no matching kernel socket. Cause strongly
+localized to stale PF state, not daemon overload/curl/upstream. Current stateful
+lo0 reply-to rule includes direct proxy clients; rules/NAT cleanup leaves states.
+No state deleted; no global flush. Original missed-close event not captured.
+Next fix separate explicit-loopback proxy from transparent reply-to and safely
+handle pre-existing stale state, with targeted PF qualification. Evidence and
+limitations in ROUTING_RESEARCH AUD-28/output/aud28-loopback. All capture/admin
+processes ended. Installed AUD-27 below unchanged.
+
+
 AUD-27 installeda5a675d63f9e9e53eaf9081d1000e024d1748ae3 viace65fe95 at
 2026-09-20T08:22:26Z; consumed NEVER replay. Build/staged/installed canonical PASS.
 Daemon718ce3657dd70b0d7b6282df56b06c2c0fc82f24a827053716bc928ead314bb0.
