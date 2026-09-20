@@ -13,16 +13,22 @@ file.
 2026-09-20 authoritative continuation:
 - Current remote4442098 startup-failure candidate: CI35506810015 and audit
   35506809983 started; audit PASS. PR376 unresolved-review query returned none.
-- Local npm build:local started (exec session88544), log
-  output/aud30-traffic-gate/local-startup-candidate-build.log. Daemon freeze
-  finished and Rust compile is live. Do not duplicate/restart this build.
-  Initial Geph copy used the wrong cwd and failed before any copy; corrected
-  absolute-path copy completed before packaging. Exact downloaded/verified r2
-  binary staged; prior binary backed up at geph-local-backup-vdvvb1cn/ under
-  output/aud30-traffic-gate. Require final bundled Geph SHA442e982e...84748
-  in addition to canonical verifier before treating local build as qualified.
-  No installed runtime changes. GitHub API has intermittent TCP timeouts;
-  observation failure alone is not a terminal CI result.
+- Local build session88544 completed exit0; canonical build-chain/artifact PASS.
+  Log output/aud30-traffic-gate/local-startup-candidate-build.log; build contains
+  runtime source4442098 (later commits are checkpoint only).
+  App tree3e6c818117aa98381a1a5cd9a0a809fec749390581b6cb155f87c7771ee636e3;
+  mainbc9a0141af52b06130dd7c9a8453071d2213aafecc1d732acfac7433183ffec9;
+  watchdogcf0161ea077324f3cfeb0ae4414f3b895bbb99d0ba78b8898f7167fa133b4e9b.
+  Daemon remains919d3cf8. Staged Geph equals verified r2 SHA442e982e...84748.
+  Bundled Geph85e7f58d...a5b660 differs only by renewed signature and two
+  LC_SEGMENT_64 __LINKEDIT vmsize fields: signature removal on COPIES and exact
+  byte comparison after normalizing only these sizes match both architectures.
+  Evidence geph-signature-compare-*/{result,mach-o-comparison}.json. Original
+  artifact unchanged. Prior staged binary retained in geph-local-backup-vdvvb1cn.
+  No install initiated. Last consumed installation template is
+  output/aud23-discord-bundle-20260913.3f81f9ad/; read-only reference, NEVER replay.
+  New one-shot replacement must pin fresh build + current installed identities
+  and preserve all prior backups. Require exact runtime CI before dispatch.
 - Local audit branch includes3e11ea9 plus checkpoint cleanup; remote PR376 head69647ce. User-owned AGENTS.md
   edits and untracked output/.playwright-cli remain untouched. No active admin.
 - Combined CI35506125919 for69647ce is terminal SUCCESS, including lifecycle-heavy
