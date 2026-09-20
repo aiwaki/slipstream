@@ -53,6 +53,18 @@ and real successor acceptance. Workstation /Applications/Slipstream.app is root-
 bundles. Do not bypass that ownership contract or treat another privileged manual
 replacement as watchdog qualification. Use a user-owned packaged installation on
 disposable CI for the real transaction and injected failure.
+Disposable qualification harness added: scripts/packaged_update_transaction_smoke.py
+and non-shipping Rust example prepare_packaged_update. Production preparer,
+bundled watchdog and real tray; no synthesized ACK. Accept binds surviving
+successor identity and full candidate tree; rollback injects exact-identity SIGSTOP,
+waits unchanged60s deadline, requires prior tree and distinct live restored tray.
+Driver built; actual workstation invocation correctly refused before mutation.
+Six harness tests +4subtests PASS (identity drift, reused PID, unrelated rollback,
+missing journal, workstation guard). Evidence output/aud30-traffic-gate/transaction-*.
+Not yet wired to disposable CI or run with real bundles; these tests are only
+harness mechanics. Next wire/provision two separate disposable cases using distinct
+verified bundles and active daemon, then inspect their terminal evidence. See
+RELEASES disposable qualification section. No workstation app/runtime changed.
 Manual install alone is not an updater-transaction test; stage1 still open. Later
 stages remain in original scope. Installed AUD-29 unchanged. No pending admin.
 Prior evidence output/aud30-traffic-gate/{build.log,build-deadline.log,

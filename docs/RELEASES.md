@@ -54,6 +54,37 @@ it then retries the archival finalizer without rebuilding or replacing files.
 Drafts, tag-only collisions and mismatched publications remain fail-closed. The
 previous tag and verified artifacts remain unchanged.
 
+## Disposable packaged transaction qualification
+
+`scripts/packaged_update_transaction_smoke.py` exercises the actual bundled
+watchdog and tray using the non-shipping Rust example `prepare_packaged_update`.
+It must run as the console user on disposable macOS GitHub Actions with
+`SLIPSTREAM_DISPOSABLE_CI=1`, a freshly qualified active daemon, no running tray,
+and no existing update watchdog. Never set those flags on a workstation.
+Build the driver with `cargo build --locked --example prepare_packaged_update`
+from `app-tauri/src-tauri`. Supply distinct, canonically verified previous and
+candidate `.app` bundles; the candidate version must match the driver's build.
+
+Run the Python harness with `--previous-bundle`, `--candidate-bundle`, `--driver`
+and `--case accept`. The harness copies the previous bundle into `RUNNER_TEMP`,
+archives the candidate, and calls the production transaction preparer. Only the
+real successor can ACK; the harness never fabricates a receipt. The terminal tree
+must equal the exact candidate, and the accepted PID/birth/UID/path must survive.
+
+In a separate freshly provisioned case, use `--case rollback`. After observing
+`successor_launched`, the harness sends SIGSTOP only after revalidating the exact
+successor PID, birth time, UID and executable. The unmodified sixty-second
+watchdog deadline must restore the full previous tree, remove stage/backup,
+persist the matching rollback record and leave a distinct restored tray alive.
+The runner teardown owns final tray/daemon cleanup; evidence stays in the printed
+private work directory even on failure. Do not run another case over the tray
+left by the first one.
+
+These are packaged replacement/acceptance/timeout-rollback checks, not signed
+feed discovery, notification delivery, actual media sessions or a public version
+transition. The driver compile and harness unit tests do not constitute a passed
+packaged run. AUD-30 still requires both real cases before that gate is complete.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
