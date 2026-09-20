@@ -75,6 +75,29 @@ verifier instead of assuming top-level state. 67 affected tests +19subtests PASS
 actionlint clean. Evidence transaction-ci-tests.log, transaction-provision-*.log,
 transaction-workflow-lint.log. Next push draft PR and observe real macOS matrix;
 no live packaged case passed yet. Workstation app/runtime unchanged.
+Draft PR376 created and attached: https://github.com/aiwaki/slipstream/pull/376
+Remote head53ffbfed6d1692b5a0b3a9bafbf1fd4c47c58f67. Fresh runs verified active:
+CI35502811564, dependency audit35502811545, Windows35502811546.
+Packaged-app-build is in progress; accept/rollback matrix awaits that immutable
+artifact. Do not restart or push checkpoint-only changes over this live run.
+CI watcher live exec9676 writes output/aud30-traffic-gate/ci-watch-35502811564.log.
+Product checks finished:1803passed/4failed. All four stale test doubles repaired
+locally (new relay diagnostic kwargs, BIO TLS boundary); focused4/4PASS. Runtime
+unchanged by these repairs. Chromium/Windows adapter jobs passed; packaged build
+still running at last live poll. Do not restart it just because other jobs failed.
+Dependency run35502811545 finished failure: app1blocker, Geph1blocker. Original
+reports were not uploaded on failure; fix now preserves them with if:always.
+Pinned OSV scanner on prior SBOMs identifies newly published2026-09-14 advisory
+RUSTSEC-2026-0285: app rustls0.23.41 and Geph0.23.43; patched>=0.23.45 confirmed
+from rustsec.org/advisories/RUSTSEC-2026-0285.html. These diagnostic prior-SBOM scans
+are not fresh current-source qualification. No exception/policy weakening or
+runtime dependency changes yet. App lock update and reviewed bundled-Geph rebuild
+remain required before promotion. Evidence product-ci-failed.log,
+ci-regression-tests.log,dependency-ci-failed.log,osv-current-{app,geph}.json in
+output/aud30-traffic-gate. Scanner sessions37620/55458 finished (exit1=findings).
+Next collect packaged matrix result for current remote53ffbfe, then fix concrete
+runtime/dependency failures and push the pending test/report corrections together
+with necessary fixes. PR is draft; no merge or installation claimed.
 Manual install alone is not an updater-transaction test; stage1 still open. Later
 stages remain in original scope. Installed AUD-29 unchanged. No pending admin.
 Prior evidence output/aud30-traffic-gate/{build.log,build-deadline.log,

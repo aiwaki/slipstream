@@ -5177,7 +5177,8 @@ def test_geo_exit_commits_geph_only_after_first_target_payload(monkeypatch):
 
     relay_activity = []
 
-    async def relay(*_args):
+    async def relay(*_args, diagnostic_host, diagnostic_stage):
+        assert (diagnostic_host, diagnostic_stage) == ("chatgpt.com", "geph")
         relay_activity.append(_args[4])
         return 0, 0
 
@@ -5712,7 +5713,11 @@ def test_reviewed_geo_exit_replays_once_after_payload_proven_owned_recovery(
         "_geph_session_finished",
         lambda: session_events.append("finish"),
     )
-    monkeypatch.setattr(tproxy, "relay_local_stream", lambda *_args: asyncio.sleep(0, result=(0, 0)))
+    async def relay(*_args, diagnostic_host, diagnostic_stage):
+        assert (diagnostic_host, diagnostic_stage) == ("chatgpt.com", "geph")
+        return (0, 0)
+
+    monkeypatch.setattr(tproxy, "relay_local_stream", relay)
     monkeypatch.setattr(tproxy, "geo_exit_backend_ready", lambda now=None: True)
     monkeypatch.setattr(tproxy, "runtime_route_circuit_allows", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
@@ -15490,9 +15495,13 @@ def test_plain_semantic_probe_requires_complete_exact_ip_response(
             self.chunks = deque((response, b""))
             self.request = b""
             self.closed = False
+            self.handshaken = False
 
         def settimeout(self, _timeout):
             return None
+
+        def do_handshake(self):
+            self.handshaken = True
 
         def sendall(self, payload):
             self.request += payload
@@ -15514,15 +15523,13 @@ def test_plain_semantic_probe_requires_complete_exact_ip_response(
             connections.append((address, timeout)) or tls_socket
         ),
     )
-    monkeypatch.setattr(
-        tproxy,
-        "_local_payload_ssl_context",
-        lambda: SimpleNamespace(
-            wrap_socket=lambda _sock, server_hostname: (
-                server_names.append(server_hostname) or tls_socket
-            )
-        ),
-    )
+    def open_tls(sock, host, deadline):
+        assert sock is tls_socket
+        assert deadline == 6.0
+        server_names.append(host)
+        return tls_socket
+
+    monkeypatch.setattr(tproxy, "_open_root_preflight_tls_stream", open_tls)
 
     assert tproxy._semantic_plain_denial_probe(
         "1.1.1.1",
@@ -15535,6 +15542,7 @@ def test_plain_semantic_probe_requires_complete_exact_ip_response(
         f"Range: bytes=0-{tproxy.SEMANTIC_PLAIN_PROBE_RANGE_END}\r\n".encode()
         in tls_socket.request
     )
+    assert tls_socket.handshaken
     assert tls_socket.closed
 
 
