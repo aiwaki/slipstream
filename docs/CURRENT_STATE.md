@@ -24,13 +24,20 @@ IPv6, green identity with failed payload, and daemon-change rejection. Live all
 three paths200/984455bytes; canonical installed verification with payload PASS.
 Evidence output/aud30-traffic-gate/{tests.log,live.json,installed.log}.
 Runtime/app binary unchanged (AUD-29 below). No pending tool/admin.
-Next necessary step: production successor ACK still only checks owned daemon+
-advanced heartbeat in lib.rs ~4970. Integrate bounded traffic proof before ACK,
-bind proof to exact installed candidate/PID, preserve lifecycle coordination and
-60s watchdog budget, account for offline/dormant state without false healthy
-claims. Watchdog ACK API in updater_transaction.rs ~1641. Do not declare step1
-complete until real update/negative-path qualification. Graph Transport closed;
-using bounded direct reads. User AGENTS.md changes preserved.
+AUD-30 successor ACK candidate now implemented in update_traffic.rs +lib.rs:
+background 12s total proof, three parallel reqwest full PNG/CRC requests, no
+ambient proxy inheritance, exact attested bundled-daemon SHA/PID binding,
+5s completion freshness, one in-flight probe, 3s retry cooldown. ACK rechecks
+fresh status/identity under existing lifecycle coordinator and refuses pending
+Quit/resume. Offline/dormant/unproven traffic does not acknowledge; unchanged
+60s watchdog rollback remains. No claim that a remote failure is a local defect.
+16 affected updater tests +23 transaction/rollback tests PASS; explicit live Rust
+three-path full-payload test PASS0.75s. No new dependencies. Graph fallback remains.
+Next: canonical build, review exact candidate/update lifecycle qualification,
+negative packaged ACK/rollback path and real successor acceptance. Manual install
+alone is not an updater-transaction test; stage1 still open. Later stages remain
+in original scope. Current installed AUD-29 unchanged. No pending admin.
+User AGENTS.md changes preserved.
 
 AUD-29 CORRECTED installed e1bdc3e3ca69af9cf248af7040cb9ffc30557426 via
 3f81f9ad at2026-09-20T08:52:31Z; transaction CONSUMED NEVER replay.

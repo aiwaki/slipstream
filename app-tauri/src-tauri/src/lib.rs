@@ -17,6 +17,7 @@ mod native_update_notification;
 mod notification_qualification;
 mod status_client;
 mod updater_transaction;
+mod update_traffic;
 
 pub use native_messaging::run_native_messaging_if_requested;
 pub use slipstream_core::{
@@ -4306,7 +4307,8 @@ pub fn run() {
             // A replacement may acknowledge only from the exact directly
             // launched successor.  Merely reaching setup is insufficient:
             // the status loop below waits until the tray exists and an owned
-            // daemon has published a fresh independent heartbeat.
+            // daemon has published a fresh independent heartbeat and carried full
+            // public payloads through all required paths.
             let pending_update_ack = match std::env::current_exe().map_err(|error| error.to_string()) {
                 Ok(current_exe) => updater_transaction::pending_successor_ack(
                     &current_exe,
@@ -4836,6 +4838,7 @@ pub fn run() {
                 let mut tray_liveness = TrayLiveness::default();
                 let mut pending_update_ack = pending_update_ack;
                 let mut pending_update_heartbeat_baseline = None;
+                let mut pending_update_traffic = update_traffic::Gate::new();
                 let mut next_resume_reconcile = Instant::now();
                 let mut geph_resume_pending = false;
                 let mut next_geph_resume = Instant::now();
@@ -4990,17 +4993,42 @@ pub fn run() {
                             }
                         };
                         if owned_daemon && advanced {
-                            match updater_transaction::acknowledge_successor(
-                                context,
-                                heartbeat_seq,
-                            ) {
-                                Ok(()) => pending_update_ack = None,
-                                Err(error) => eprintln!(
-                                    "update successor acknowledgement failed: {error}"
-                                ),
+                            let accepted = daemon_lifecycle_watch.reconcile(|| {
+                                if quit_in_progress_watch.load(Ordering::Acquire)
+                                    || daemon_resume_pending_watch.load(Ordering::Acquire)
+                                    || quit_resume_intent_state(&quit_resume_intent_watch)
+                                        != QuitResumeIntentState::Absent
+                                {
+                                    return Ok(false);
+                                }
+                                let current = read_status();
+                                let identity = current.as_ref()
+                                    .filter(|v| v.get("state").and_then(Value::as_str) == Some("active"))
+                                    .and_then(|v| v.get("pid")).and_then(Value::as_i64)
+                                    .filter(|pid| daemon_pid_owned(*pid))
+                                    .and_then(|pid| bundled_daemon_path(&app_handle)
+                                        .and_then(|path| daemon_install_attestation(&path))
+                                        .filter(|evidence| evidence.launchd.pid == pid)
+                                        .map(|evidence| update_traffic::Identity {
+                                            pid,
+                                            daemon_sha256: evidence.daemon.sha256,
+                                        }));
+                                if !pending_update_traffic.poll(identity) { return Ok(false); }
+                                let current_heartbeat = current.as_ref()
+                                    .and_then(|v| v.get("heartbeat_seq")).and_then(Value::as_u64)
+                                    .filter(|value| *value >= heartbeat_seq)
+                                    .ok_or_else(|| "successor heartbeat changed during qualification".to_string())?;
+                                updater_transaction::acknowledge_successor(context, current_heartbeat)?;
+                                Ok(true)
+                            });
+                            match accepted {
+                                Ok(Some(true)) => pending_update_ack = None,
+                                Ok(Some(false)) | Ok(None) => {},
+                                Err(error) => eprintln!("update successor qualification failed: {error}"),
                             }
                         }
                     }
+
                     let now = Instant::now();
                     if status.is_some() {
                         has_seen_daemon_status = true;

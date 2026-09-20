@@ -3,6 +3,22 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## AUD-30 successor traffic qualification (candidate)
+
+Advancing daemon heartbeat alone must not acknowledge an app replacement.
+The successor asynchronously requires complete CRC-checked public PNG transfer
+through IPv4/IPv6 explicit local proxy and transparent HTTPS, within12s overall.
+No credentials, environment proxy inheritance, redirect or certificate override.
+The payload is capped at2MiB. Only one attempt is in flight; failed attempts cool
+for3s. A successful completion expires after5s and is consumed once.
+
+Before ACK, the existing lifecycle lock protects a fresh active status and exact
+bundle attestation/PID comparison, with Quit/resume intents vetoing acceptance.
+A different daemon identity cannot inherit the probe. Unproven/offline/dormant
+traffic remains unacknowledged and the existing60s rollback policy applies;
+probe failure by itself does not attribute the defect to the candidate. Real
+packaged successor acceptance and negative rollback qualification remain open.
+
 ## AUD-29 explicit loopback proxy PF lifecycle
 
 Direct TCP connections between 127.0.0.1 endpoints or between ::1 endpoints,
