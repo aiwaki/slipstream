@@ -10,6 +10,12 @@ file.
 
 ## Current Checkpoint
 
+AUD-29 candidate: direct-loopback proxy traffic stateless before reply-to;
+startup exact-loopback TCP/service-port stale-state migration only without live
+kernel sockets. 73 scoped tests PASS; native unused-port ioctl and PF syntax PASS.
+Evidence output/aud29-pf-loopback. Build/install/exact49893 regression pending.
+Installed AUD-27 ce65fe95 unchanged; never replay transaction. User AGENTS preserved.
+
 AUD-28 diagnosis complete, no code/network mutation. Exact localhost timeout
 reproduces by binding source127.0.0.1:49893 toproxy1080; same source tocontrol and
 neighboring port toproxy succeed. lo0 repeated SYN/no SYN-ACK; PF retains exact

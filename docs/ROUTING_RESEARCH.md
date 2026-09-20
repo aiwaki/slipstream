@@ -2680,3 +2680,21 @@ failed to terminate cleanly and lost stdout; second45s collector killed its own
 child and returned119 metadata lines. Both collectors ended; no pending admin.
 Graph transport still closed; bounded source reads used. No source/runtime/routing
 changes made during this diagnosis. Installed AUD-27 remains current.
+
+## AUD-29 localhost stale-state repair — 2026-09-20
+
+AUD-28 isolated source 127.0.0.1:49893 to proxy1080: repeated SYN without SYN-ACK,
+no kernel socket, stale PF ESTABLISHED entry; adjacent port and independent local
+listener worked. Separate direct proxy traffic from transparent reply-to with
+four bidirectional exact-loopback stateless rules. Startup binds both addresses
+before scoped stale-state migration and accepting clients. Live/unproven kernel
+socket snapshots veto deletion. Cancellation waits for cleanup before unbinding.
+
+Darwin selector ABI verified against Apple XNU pfvar.h/pf_ioctl.c:
+https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/pfvar.h
+https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/pf_ioctl.c
+Native kernel accepted exact-port ioctl on an unused temporary bound port;
+`pfctl -n` accepted rules (no rules loaded by that diagnostic).
+73 affected tests passed, including selector masks/ports, live-socket veto,
+ordering, cancellation and existing PF contracts. Evidence output/aud29-pf-loopback.
+Installed and exact previously failing tuple qualification remain pending.

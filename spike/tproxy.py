@@ -181,6 +181,10 @@ DISPOSABLE_WAKE_MARKER_PREFIX = "slipstream-lifecycle-wake-"
 PF_RULES = """\
 rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 port 443 -> 127.0.0.1 port {port}
 rdr on lo0 inet6 proto tcp from any to ! ::1/128 port 443 -> ::1 port {port}
+pass quick on lo0 inet proto tcp from 127.0.0.1 to 127.0.0.1 port {port} flags any no state
+pass quick on lo0 inet proto tcp from 127.0.0.1 port {port} to 127.0.0.1 flags any no state
+pass quick on lo0 inet6 proto tcp from ::1 to ::1 port {port} flags any no state
+pass quick on lo0 inet6 proto tcp from ::1 port {port} to ::1 flags any no state
 pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
 pass out quick on lo0 inet proto tcp from any to any port 443 no state
 pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp from any to 127.0.0.1 port {port}
@@ -22504,6 +22508,7 @@ async def _start_transparent_loopback_server(port):
         ("127.0.0.1", "::1"),
         port,
         reuse_address=True,
+        start_serving=False,
     )
     families = {
         item.family
@@ -22522,7 +22527,27 @@ async def _start_transparent_loopback_server(port):
             errno.EADDRNOTAVAIL,
             f"transparent loopback listener missing {missing}",
         )
-    return server
+    try:
+        if sys.platform == "darwin" and os.geteuid() == 0:
+            try:
+                cleanup = asyncio.create_task(asyncio.to_thread(
+                    pf_adapter.clear_inactive_loopback_proxy_states, _run, port))
+                try:
+                    cleared = await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    # Keep exclusive bindings until the kernel operation finishes.
+                    await cleanup
+                    raise
+                if not cleared:
+                    print(">> retained PF loopback states: live sockets or unproven snapshot", file=sys.stderr)
+            except (OSError, ValueError, RuntimeError) as error:
+                print(f">> PF loopback state cleanup unavailable: {type(error).__name__}", file=sys.stderr)
+        await server.start_serving()
+        return server
+    except BaseException:
+        server.close()
+        await server.wait_closed()
+        raise
 
 
 async def _monitor_managed_https_proxy(lease, shutdown):

@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import struct
 import tempfile
 
 
@@ -318,6 +319,77 @@ def flush_private_anchor(runner, anchor):
     rules = runner("pfctl", "-a", anchor, "-F", "rules")
     nat = runner("pfctl", "-a", anchor, "-F", "nat")
     return rules if rules.returncode != 0 else nat
+
+
+# Darwin PF ABI address families: AF_INET=2, AF_INET6=30.
+class PfAddrWrap(ctypes.Structure):
+    # Darwin pfvar.h: 32-byte address/mask union, aligned pointer union, type.
+    _fields_ = [("address_mask", ctypes.c_ubyte * 32),
+                ("pointer", ctypes.c_uint64), ("type", ctypes.c_uint8),
+                ("iflags", ctypes.c_uint8)]
+
+
+class PfStateAddrKill(ctypes.Structure):
+    _fields_ = [("address", PfAddrWrap), ("reserved", ctypes.c_uint8 * 3),
+                ("neg", ctypes.c_uint8), ("ports", ctypes.c_uint16 * 2),
+                ("op", ctypes.c_uint8), ("xport_padding", ctypes.c_uint8 * 3)]
+
+
+class PfiocStateKill(ctypes.Structure):
+    _fields_ = [("af", ctypes.c_uint8), ("proto", ctypes.c_uint8),
+                ("variant", ctypes.c_uint8), ("pad", ctypes.c_uint8),
+                ("src", PfStateAddrKill), ("dst", PfStateAddrKill),
+                ("ifname", ctypes.c_char * 16), ("owner", ctypes.c_char * 64)]
+
+
+def _loopback_state_kill_request(family, port, reverse=False):
+    """Darwin exact loopback endpoints + TCP + one exact service port only."""
+    if family not in (2, 30) or type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("invalid loopback state selector")
+    if (ctypes.sizeof(PfAddrWrap), ctypes.sizeof(PfStateAddrKill),
+            ctypes.sizeof(PfiocStateKill)) != (48, 64, 216):
+        raise RuntimeError("unsupported Darwin PF state-kill ABI")
+    request = PfiocStateKill()
+    request.af, request.proto = family, 6
+    address = (b"\x7f\x00\x00\x01" if family == 2 else b"\x00" * 15 + b"\x01")
+    for endpoint in (request.src, request.dst):
+        endpoint.address.address_mask[:len(address)] = address
+        endpoint.address.address_mask[16:16 + len(address)] = b"\xff" * len(address)
+    endpoint = request.src if reverse else request.dst
+    endpoint.ports[0] = endpoint.ports[1] = struct.unpack("=H", struct.pack("!H", port))[0]
+    endpoint.op = 2  # PF_OP_EQ
+    return bytearray(ctypes.string_at(ctypes.addressof(request), ctypes.sizeof(request)))
+
+
+def clear_inactive_loopback_proxy_states(runner, port, *, opener=None, ioctl_fn=None):
+    """Call only while both exclusive listener sockets are bound, not listening.
+
+    Refuse if any old kernel connection/listener is alive or the snapshot cannot
+    be understood. A bound non-listening socket prevents new successful accepts
+    during the check. Never clear remote/translated tuples or another port.
+    """
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("invalid proxy port")
+    result = runner("netstat", "-an", "-p", "tcp")
+    if result.returncode or "Local Address" not in result.stdout or "Foreign Address" not in result.stdout:
+        return False
+    endpoints = {f"127.0.0.1.{port}", f"::1.{port}"}
+    for line in result.stdout.splitlines():
+        columns = line.split()
+        if columns and columns[0] in ("tcp4", "tcp6"):
+            if len(columns) < 6:
+                return False
+            if endpoints.intersection(columns[3:5]) and columns[5] not in ("TIME_WAIT", "CLOSED"):
+                return False
+    opener = open if opener is None else opener
+    ioctl_fn = fcntl.ioctl if ioctl_fn is None else ioctl_fn
+    with opener("/dev/pf", "r+b", buffering=0) as device:
+        for family in (2, 30):
+            for reverse in (False, True):
+                payload = _loopback_state_kill_request(family, port, reverse)
+                command = 0xC0000000 | (len(payload) << 16) | (ord("D") << 8) | 41
+                ioctl_fn(device.fileno(), command, payload, True)
+    return True
 
 
 def load_private_anchor(runner, anchor, rules_template, port):

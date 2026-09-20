@@ -3,6 +3,19 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## AUD-29 explicit loopback proxy PF lifecycle
+
+Direct TCP connections between 127.0.0.1 endpoints or between ::1 endpoints,
+with one endpoint the Slipstream proxy port, use bidirectional stateless rules
+before transparent reply-to. Remote translated HTTPS keeps its existing stateful
+return path. No global PF state flush, timeout change or UDP rule is allowed.
+
+Before listening, bind both local addresses and inspect kernel TCP sockets. If
+any live connection exists on the proxy port, or inspection is unproven, preserve
+states. Otherwise Darwin DIOCKILLSTATES may remove only exact loopback-to-loopback
+TCP states involving this service port. Other ports and remote addresses cannot
+match. Startup cancellation retains bindings until this cleanup finishes.
+
 ## AUD-24 browser admission input timing
 
 For an incomplete-root comparison, input recency is anchored to the same

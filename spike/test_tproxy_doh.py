@@ -4166,6 +4166,9 @@ def test_transparent_listener_requires_ipv4_and_ipv6_loopback(monkeypatch):
     class Server:
         sockets = [BoundSocket(socket.AF_INET), BoundSocket(socket.AF_INET6)]
 
+        async def start_serving(self):
+            calls.append("serving")
+
     async def start_server(*args, **kwargs):
         calls.append((args, kwargs))
         return Server()
@@ -4175,7 +4178,8 @@ def test_transparent_listener_requires_ipv4_and_ipv6_loopback(monkeypatch):
     assert asyncio.run(tproxy._start_transparent_loopback_server(1080)).sockets
     args, kwargs = calls[0]
     assert args[1:] == (("127.0.0.1", "::1"), 1080)
-    assert kwargs == {"reuse_address": True}
+    assert kwargs == {"reuse_address": True, "start_serving": False}
+    assert calls[-1] == "serving"
 
 
 def test_transparent_listener_closes_partial_family_bind(monkeypatch):
