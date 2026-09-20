@@ -11,6 +11,13 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Local follow-up adds minimum64KiB to updater and installed payload admission:
+  a syntactically valid tiny PNG must not hide a large-response cutoff. CRC,
+  full terminal framing,2MiB maximum, route isolation and twelve-second budget
+  remain. Rust10PASS/1ignored plus explicit live1PASS, Python7PASS. Live six
+  transfers each984455bytes. Evidence output/aud30-traffic-gate/payload-size-*.
+  Not installed. Do not cancel live90318cd CI merely to push this focused change.
+
 - Follow-up90318cd pushed to PR376 (not yet installed): successor traffic gate races two
   reviewed Discord delivery hosts per route, cancelling pending HTTP work after
   a valid full payload. Installed verifier reports all six attempts and keeps

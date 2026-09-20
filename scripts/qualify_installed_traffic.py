@@ -10,6 +10,7 @@ import zlib
 
 URL = "https://media.discordapp.net/stickers/1228092333061443654.png"
 URLS = (URL, "https://cdn.discordapp.com/stickers/1228092333061443654.png")
+MIN_BYTES = 64 * 1024
 MAX_BYTES = 2 * 1024 * 1024
 
 
@@ -53,7 +54,7 @@ def probe(path, runner=subprocess.run, url=URL):
         try:
             result = runner(command, capture_output=True, text=True, timeout=12)
             body = body_path.read_bytes() if body_path.exists() else b""
-            valid = result.returncode == 0 and result.stdout.strip() == "200" and complete_png(body)
+            valid = result.returncode == 0 and result.stdout.strip() == "200" and len(body) >= MIN_BYTES and complete_png(body)
             return {"path": path, "url": url, "pass": valid, "exit_code": result.returncode,
                     "http_status": result.stdout.strip(), "bytes": len(body)}
         except (OSError, subprocess.TimeoutExpired):

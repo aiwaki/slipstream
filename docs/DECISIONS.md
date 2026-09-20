@@ -17,7 +17,8 @@ service/object redundancy: object deletion and Discord-wide failure still veto
 acceptance. A tiny avatar or unrelated reachable site cannot replace the large
 Discord media proof.
 No credentials, environment proxy inheritance, redirect or certificate override.
-The payload is capped at2MiB. Only one attempt is in flight; failed attempts cool
+The accepted payload must be at least64KiB and is capped at2MiB; a valid tiny
+PNG placeholder cannot prove recovery from the observed large-response cutoff. Only one attempt is in flight; failed attempts cool
 for3s. A successful completion expires after5s and is consumed once.
 The process reuses one probe runtime with three blocking resolver workers:
 uncancellable system DNS cannot block timeout delivery or create a fresh detached

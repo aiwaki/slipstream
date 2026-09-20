@@ -9,6 +9,7 @@ const URLS: [&str; 2] = [
     "https://media.discordapp.net/stickers/1228092333061443654.png",
     "https://cdn.discordapp.com/stickers/1228092333061443654.png",
 ];
+const MIN_BYTES: usize = 64 * 1024;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +123,12 @@ fn complete_png(body: &[u8]) -> bool {
     false
 }
 
+// A valid tiny placeholder is not evidence against the observed large-response
+// stalls. Keep framing validation reusable, but enforce size at admission.
+fn complete_payload(body: &[u8]) -> bool {
+    body.len() >= MIN_BYTES && complete_png(body)
+}
+
 async fn probe(proxy: Option<&str>, url: &str) -> Result<bool, reqwest::Error> {
     let mut builder = reqwest::Client::builder()
         .no_proxy()
@@ -145,7 +152,7 @@ async fn probe(proxy: Option<&str>, url: &str) -> Result<bool, reqwest::Error> {
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(complete_png(&body))
+    Ok(complete_payload(&body))
 }
 
 // Return on the first complete payload; a fast failure must not cancel the
@@ -316,6 +323,18 @@ mod tests {
         );
         assert!(run_bounded(async { true }, Duration::from_secs(1)));
     }
+    #[test]
+    fn a_complete_small_image_cannot_qualify_large_payload_transport() {
+        assert!(complete_png(&png()));
+        assert!(!complete_payload(&png()));
+        let mut body = b"\x89PNG\r\n\x1a\n".to_vec();
+        body.extend(chunk(b"IHDR", &[0; 13]));
+        body.extend(chunk(b"IDAT", &vec![1; MIN_BYTES]));
+        body.extend(chunk(b"IEND", &[]));
+        assert!(complete_payload(&body));
+        assert!(!complete_payload(&body[..body.len() - 12]));
+    }
+
     #[test]
     fn a_failed_host_does_not_cancel_a_valid_alternative() {
         for first in [false, true] {

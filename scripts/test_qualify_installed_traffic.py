@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import random
 import struct
 import subprocess
 import unittest
@@ -12,11 +13,11 @@ import qualify_installed_traffic as traffic
 import verify_macos_app_bundle as verifier
 
 
-def png():
+def png(large=True):
     def chunk(kind, data):
         return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('!IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
-            + chunk(b'IDAT', zlib.compress(b'\x00\x00\x00\x00\xff')) + chunk(b'IEND', b''))
+            + chunk(b'IDAT', zlib.compress(random.Random(0).randbytes(traffic.MIN_BYTES) if large else b'\x00\x00\x00\x00\xff')) + chunk(b'IEND', b''))
 
 
 class TrafficTests(unittest.TestCase):
@@ -25,6 +26,14 @@ class TrafficTests(unittest.TestCase):
         self.assertTrue(traffic.complete_png(body))
         for bad in (body[:12], body[:-1], body[:-12], body + b'x', body[:40] + b'x' + body[41:]):
             self.assertFalse(traffic.complete_png(bad))
+
+    def test_valid_small_placeholder_does_not_qualify_large_response(self):
+        body = png(large=False)
+        self.assertTrue(traffic.complete_png(body))
+        def runner(command, **kwargs):
+            Path(command[command.index('--output') + 1]).write_bytes(body)
+            return subprocess.CompletedProcess(command, 0, '200', '')
+        self.assertEqual(traffic.qualify(runner)['status'], 'fail')
 
     def test_full_body_does_not_override_failed_transport(self):
         def runner(command, **kwargs):
