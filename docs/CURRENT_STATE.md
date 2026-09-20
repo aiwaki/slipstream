@@ -12,8 +12,7 @@ file.
 
 2026-09-20 authoritative continuation:
 - Runtime source4442098 / CI35506810015: build, product/common checks, packaged
-  browser and accept/rollback/traffic_failure jobs PASS. Lifecycle-heavy remains
-  live; audit35506809983 PASS. Do not dispatch installation before its outcome.
+  browser and accept/rollback/traffic_failure jobs PASS. Lifecycle-heavy PASS; full CI terminal SUCCESS. Audit35506809983 PASS.
 - Downloaded accept artifact for merge2511299a to
   output/aud30-traffic-gate/accept-4442098/. Candidate watchdog spawn_refused and
   early_exit fixtures PASS with helper83797af8d8918453f7b501b6dd70df23efdbde22bfceeb44f5129bc6fa692865.
@@ -32,8 +31,15 @@ file.
   copies, originals unchanged); geph-signature-compare-*/mach-o-comparison.json.
 - NEW replacement b4bb66a0 reviewed against prior transaction and staged at
   /Applications/.Slipstream.incoming-b4bb66a0.app; canonical verifier PASS in
-  output/aud30-install-b4bb66a0/staged-artifact.json. Running app NOT replaced,
-  no Quit or authorization dispatched. Pending manifest:
+  output/aud30-install-b4bb66a0/staged-artifact.json. Normal CLI Quit completed; authorization session39529 finished exit0 at
+  11:18:45Z. Transaction CONSUMED, NEVER redispatch. Normal app launch followed.
+  npm verify:local-install PASS: exact tree, live PID5028, active fresh StatusV2,
+  three complete984455-byte PNGs (IPv4/IPv6 proxy and transparent). Evidence
+  output/aud30-install-b4bb66a0/installed-verification.log.
+  CUA observed real Discord messages and rendered attachment/avatars after
+  install. User changed channel during attempted refresh; no fresh reload or
+  cache-bypass claim. Calls/streams/long media remain unqualified.
+  Pending manifest:
   output/aud30-traffic-gate/pending-install.json. Script and native authorization
   runner in output/aud30-install-b4bb66a0/; hashes pinned in manifest/runner.
   Old treeb975dd5b (AUD29e1bdc3e3). Preserve learning and all previous backups.
@@ -86,17 +92,18 @@ Geph dependency repair complete at source/publication boundary:
   exception rejects unrelated graph/metadata changes; main never bootstraps.
 
 Remaining first-stage gates and next action:
-1. Collect terminal lifecycle-heavy result from live CI35506810015, then normal
-   CLI Quit and dispatch prepared b4bb66a0 replacement once; verify installed
-   artifact/attestation/traffic and real app behavior. No manual Quit needed.
+1. Installed candidate4442098 is qualified at artifact/daemon/full public PNG
+   boundary; next address shipped .23 preparer migration below and independent
+   control-resource coverage. Do not repeat unchanged install or broad CI.
 2. Existing three-case harness uses current preparer with published .23 helper;
    new-helper tests complement it, never silently relabel it as a public migration.
 3. Published .23 source6ba71ef7 lacks AbandonProcessGroup; helper spawns BOTH new
    and restored old tray in its group. Candidate-only startup changes cannot
    cover old-tray rollback or a successor that never starts. Qualify a safe
    migration through the shipped preparer; signed .23->.24 gate remains open.
-4. Canonical build/install/real app qualification remains required. Workstation
-   still AUD29 e1bdc3e3; no new runtime installed. Never replay consumed3f81f9ad.
+4. Workstation now source4442098, transactionb4bb66a0, canonical installed and
+   full public payload PASS; Discord visible media observed. Never replay
+   consumed b4bb66a0 or3f81f9ad. This does not prove public signed-feed migration.
 
 Active goal: address remaining reliability weaknesses in the accepted order:
 1) real traffic qualification before accepting updates, 2) safe runtime recovery
