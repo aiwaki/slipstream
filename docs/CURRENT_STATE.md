@@ -52,8 +52,9 @@ file.
   7b023e11439b1730ec2a038677f69c608b4834ccb29aae136230fae1faf660f7,
   daemon4cc2e8d, main817cce69. NOT installed. No build active.
   Earlier build1217/d5afa50/tree16b14290 is superseded by deadline fix.
-- Next: recovery changes ready to push after terminal provenance baseline.
-  Inspect new exact-head CI before a fresh workstation replacement. Qualify candidate before a NEW
+- Recovery pushed: PR376 head1eb658c298044443c73414b19c09be38ca1e0758.
+  CI35510044024, audit35510043940, Windows35510043933 verified in_progress.
+  Next poll these exact runs before a fresh workstation replacement. Qualify candidate before a NEW
   one-shot install, then canonical installed evidence and actual application.
   Do not treat these recovery fixes as proof of long streams or sleep/wake.
 
