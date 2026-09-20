@@ -2585,3 +2585,12 @@ Live voice alternative decoys mail and ozon each returned101 in0.2s, no auth/aud
 Initial collector falsely missed SYN due ECN flags SEW/S.E; fixing diagnostic-only
 parser produced evidence voice-alternatives-ecn.json. Runtime uses packet fields,
 not that diagnostic regex. Installation and actual client checks pending.
+
+Installed5c39283 viac7a059b4 (consumed), canonical build/staged/install PASS.
+Ten concurrent public PNG/Lottie/APNG/API/app objects fully loaded HTTP200
+0.353–0.628s, voice control1010.479/0.234s. Native Discord reload displayed
+current chat and avatars. Picker did not open, later CUA noWindowsAvailable;
+no fresh picker UI claim, public sticker objects passed. No messages/audio sent.
+The final103-test regression set additionally proves a TLS-only success cannot
+erase recent full-payload failure evidence. No assertion of arbitrary future
+DPI compatibility or of fixed streaming/YouTube.

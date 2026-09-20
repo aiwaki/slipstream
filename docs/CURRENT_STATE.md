@@ -10,13 +10,28 @@ file.
 
 ## Current Checkpoint
 
-AUD-26 recurrence prevention candidate: independent Discord matched decoy families,
-ranked preferred candidates, recent-failure demotion without admission blocking,
-exact-host invalidation, full public API/PNG and validated WebSocket canaries,
-modern TLS payload-qualified Discord resweep.103 focused tests PASS;4 unrelated
-failures confirmed on pre-change baseline (details ROUTING_RESEARCH). Live mail/
-ozon voice alternatives101 in0.2s. Build next; preserve user AGENTS.md. Current
-installed source remains eeff76c/transaction2ad62192 below until new replacement.
+AUD-26 installed5c39283dbed3da0fb5e14779f34f975c498e6795 viac7a059b4 at
+2026-09-20T08:03:24Z; transaction consumed NEVER replay. Canonical build/staged/
+installed PASS. Daemon271011dba4dff9ee0a0c848b44167caf7ae7729c73dd9fb388a5dafd383a3e07.
+Independent Discord fake families; preferred/cached failures demoted, full payload
+failure survives TLS-prefix success; exact-host recovery preserves neighbors.
+Full API/PNG and request-bound WebSocket qualification, observed voice canary,
+modern TLS Discord resweep.103 focused tests PASS. Expanded suite959 passed;
+4 unrelated failures reproduced on old HEAD,3 changed expectations then fixed.
+No claim of green entire suite; see ROUTING_RESEARCH for baseline details.
+Installed10 concurrent avatar/Lottie/APNG/API/app requests HTTP200 complete and
+valid in0.353–0.628s; voice WebSocket101 in0.479/0.234s. Actual Discord reload
+showed current DM history and avatars loaded; no active call. Sticker picker UI
+attempt did not open, second attempt CUA noWindowsAvailable; not qualified anew.
+Public full sticker objects passed; previous native sticker gate remains prior
+version evidence. No message sent, call joined, media file downloaded from chat.
+Evidence output/aud26-local-recovery/{tests-final.log,installed.log,
+installed-media-parallel.json,installed-voice-control.json,native-check.json}.
+No pending build/admin. User AGENTS.md preserved. Streaming/YouTube original
+reports remain unqualified; do not claim universal blocking immunity. Next
+investigate specific failing stream/video if reported, not repeat green matrices.
+
+Historical prior installed state:
 
 Voice follow-up installedeeff76c1a2515f9bcd5e99ed9b4afe0d58b5a563 via2ad62192
 at2026-09-19T21:31:36Z; consumed NEVER replay. Build/staged/installed-voice
