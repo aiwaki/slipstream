@@ -169,9 +169,10 @@ also repair the application `Cargo.lock` when an advisory affects both graphs:
 requiring separate merges creates a cycle where each audit rejects the other's
 unfixed lock. Optional paths are Geph `VERSION` and its audit policy, the exact
 release/decision/checkpoint documents, and the scope classifier with its test
-file (classifier changes without the test file are rejected). Application source,
-Cargo manifests, application audit policy, packaging scripts, and workflows are
-not allowed in this scope.
+file (classifier changes without the test file are rejected). The Geph publisher
+workflow may accompany its build-contract tests when repairing source publication
+ordering. Application source, Cargo manifests, application audit policy,
+packaging scripts, and all other workflows are not allowed in this scope.
 
 Common product and Chromium checks still run. The separately required
 `Required dependency audit` context must freshly scan **both** dependency graphs;
@@ -182,6 +183,12 @@ builds and attests the new internal release; the first main app run may fail
 closed while that artifact is absent and is rerun only after publication. The
 rerun then builds and qualifies one candidate from the same source SHA and new
 exact Geph artifact before any application release.
+
+On a main push, the Geph publisher builds the verified committed source contract,
+including maintenance revisions older than the latest upstream crate. Scheduled
+discovery still proposes the latest upstream version for separate review. A manual
+`build_reviewed=true` dispatch uses the same reviewed-main path and refuses other
+refs. It does not bypass lock, archive, audit, attestation, or immutable-tag checks.
 
 ## Candidate and publication pipeline
 

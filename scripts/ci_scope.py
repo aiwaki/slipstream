@@ -24,6 +24,8 @@ GEPH_BOOTSTRAP_ALLOWED = frozenset(
         "docs/CURRENT_STATE.md",
         "scripts/ci_scope.py",
         "scripts/test_ci_scope.py",
+        ".github/workflows/build-geph.yml",
+        "scripts/test_build_config.py",
     }
 )
 GEPH_BOOTSTRAP_REQUIRED = frozenset(
@@ -92,6 +94,7 @@ def classify_paths(paths: list[str], *, event_name: str) -> CiScope:
         and GEPH_BOOTSTRAP_REQUIRED.issubset(changed)
         and changed.issubset(GEPH_BOOTSTRAP_ALLOWED)
         and ("scripts/ci_scope.py" not in changed or "scripts/test_ci_scope.py" in changed)
+        and (".github/workflows/build-geph.yml" not in changed or "scripts/test_build_config.py" in changed)
     )
     return CiScope(
         geph_bootstrap=geph_bootstrap,

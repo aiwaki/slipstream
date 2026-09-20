@@ -1175,6 +1175,48 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("gh pr merge", workflow)
         self.assertNotIn("--auto", workflow)
 
+    def test_reviewed_geph_revision_does_not_follow_newer_upstream(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()
+        section = workflow.split("      - id: upstream", 1)[1].split("      - id: state", 1)[0]
+        shell = section.split("        run: |\n", 1)[1]
+        shell = "\n".join(line[10:] for line in shell.splitlines())
+        self.assertIn("github.event_name == 'push'", section)
+        self.assertIn("inputs.build_reviewed", section)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            import shutil
+            for relative in ("scripts/geph_vendor_source.py", "vendor/geph/SOURCE.json",
+                             "vendor/geph/VERSION", "vendor/geph/Cargo.lock"):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / relative, target)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            curl = bin_dir / "curl"
+            curl.write_text("#!/bin/sh\necho unexpected-upstream-request >&2\nexit 71\n")
+            curl.chmod(0o755)
+            output = root / "output"
+            env = dict(os.environ, BUILD_REVIEWED="true", GITHUB_REF="refs/heads/main",
+                       GITHUB_OUTPUT=str(output), PATH=f"{bin_dir}:{os.environ['PATH']}")
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("version=" + (ROOT / "vendor/geph/VERSION").read_text().strip(), output.read_text())
+            self.assertNotIn("unexpected-upstream-request", result.stderr)
+            output.unlink()
+            env["GITHUB_REF"] = "refs/heads/unreviewed"
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(output.exists())
+            env["GITHUB_REF"] = "refs/heads/main"
+            with (root / "vendor/geph/Cargo.lock").open("a") as handle:
+                handle.write("\n# invalid lock identity\n")
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(output.exists())
+
     def test_geph_vendor_workflow_reviews_source_before_building(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
             encoding="utf-8"

@@ -251,9 +251,17 @@ PRs each fail the mandatory audit of the other graph (PR376 app passes/Geph
 fails; PR377 reverses that). Source bootstrap may therefore include the app
 Cargo.lock alongside required Geph source and lock, exact release/decision/
 checkpoint docs, and paired scope-classifier/test maintenance. Application
-source, manifests, app audit policy, workflows and packaging scripts remain
-excluded. Both fresh audits and common product checks remain mandatory. Only
+source, manifests, app audit policy, application workflows and packaging scripts
+remain excluded. The Geph publication workflow may accompany its build-contract
+tests for source-publication repairs. Both fresh audits and common product checks remain mandatory. Only
 packaged jobs wait for the post-merge immutable vendor build, as before; main
 never uses bootstrap and must pass exact packaged qualification before release.
 This changes source integration ordering, not advisory acceptance or publication
 gates. No new vulnerability exception is added.
+
+The publisher's main-push path must build the committed reviewed contract, not
+replace its identity with the latest upstream crate. crates.io now reports0.4.0,
+which previously made the pending0.3.9-r2 repair unreachable. Scheduled discovery
+still proposes new upstream source; explicit build_reviewed dispatch requires
+main and verifies the committed source/lock before emitting any build identity.
+Locked builds, fresh audit and immutable release verification remain unchanged.

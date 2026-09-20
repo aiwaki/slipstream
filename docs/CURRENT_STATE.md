@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+PR377 publication repair: crates.io latest0.4.0 would make the old upstream-only
+resolver skip reviewed0.3.9-r2. Main push now resolves verified committed source;
+manual build_reviewed=true requires main. Schedule/default discovery unchanged.
+Exact vendor workflow +build-contract test paths admitted to source bootstrap;
+application workflow/source/manifest edits remain rejected.58focused tests plus
+16subtests PASS, including execution of the actual workflow shell with upstream
+network forbidden, non-main refusal and tampered-lock refusal. Actionlint PASS.
+Prior combined audit35504333296 PASS for both graphs; source CI35504333339 still
+running on b2f22f8. Do not cancel; push this follow-up after completion. No binary
+published and no source merge yet.
+
+
 Dependency repair PR377: coordinate app rustls0.23.45/webpki0.103.15 with Geph
 rustls0.23.45 source revision2. Classifier permits only lock/source/doc and paired
 classifier-test maintenance, retaining both audits and product checks. Source
