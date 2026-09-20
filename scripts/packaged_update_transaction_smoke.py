@@ -148,7 +148,7 @@ def main() -> int:
     parser.add_argument("--previous-bundle", type=Path, required=True)
     parser.add_argument("--candidate-bundle", type=Path, required=True)
     parser.add_argument("--driver", type=Path, required=True)
-    parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure"), required=True)
+    parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure", "primary_unavailable"), required=True)
     args = parser.parse_args()
     root = guard()  # Must precede every filesystem/process mutation.
     require(subprocess.run(["/usr/bin/pgrep", "-x", "slipstream"],

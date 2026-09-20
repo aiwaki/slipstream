@@ -54,6 +54,15 @@ corrected LaunchAgent and therefore cannot prove either terminal tray survives
 an update initiated by the shipped `.23` preparer. Fixing only successor startup
 would not cover restoration of the unchanged old tray. The public transition
 must qualify both outcomes through the legacy preparation path before shipping.
+The exact published source also selects its helper from the old installed target
+(`target/Contents/MacOS/slipstream-update-watchdog`), copies it into runtime, and
+records that old helper's hash. A helper placed only inside a new archive cannot
+replace the transaction owner. Qualification/repair must therefore include an
+external migration entry point or a demonstrated compatible legacy transition;
+new-successor-only detachment cannot prove early-launch-failure rollback.
+Exact-source analysis is recorded in output/aud30-traffic-gate/legacy23-causal-boundary.json
+(source6ba71ef7, SHAab48e76d); it is not a live migration pass.
+
 
 After a preview is published and its remote tag, state, identity, asset set and
 digests are verified, the immediately preceding preview is marked as archival
@@ -403,3 +412,17 @@ gh attestation verify Slipstream-macos-arm64.zip \
 
 Do not repurpose or move an existing release tag. A corrected artifact requires
 a new preview tag or a new patch version.
+
+
+### AUD-30 redundant payload fault coverage
+
+`primary_unavailable` retains active daemon/heartbeat and stalls only
+media.discordapp.net resolution; the actual successor must ACK and survive
+watchdog cleanup using the independent cdn.discordapp.com object where needed.
+`traffic_failure` stalls both reviewed hostnames and requires an unsignalled live
+successor to reach the ACK deadline, then verifies old-tray restoration and
+survival. Both cases require all six baseline transfers (both objects on all
+three routes) to pass before injecting the fault. Each resolver must receive a
+query. Partial fixture startup and cleanup failures restore all registered
+resolvers in reverse order, retaining cleanup errors. These mutations are only
+permitted by the existing disposable macOS CI guard; never on the workstation.

@@ -54,6 +54,7 @@ class TransactionGateTests(unittest.TestCase):
 
     def test_accept_requires_surviving_exact_successor(self):
         self.assertTrue(self.observe("accept")["transaction_removed"])
+        self.assertTrue(self.observe("primary_unavailable")["transaction_removed"])
         with self.assertRaisesRegex(RuntimeError, "changed identity"):
             self.observe("accept", changed_process=True)
 

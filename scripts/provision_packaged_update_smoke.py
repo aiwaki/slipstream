@@ -15,6 +15,7 @@ import time
 
 import packaged_update_transaction_smoke as transaction
 import pf_installed_lifecycle_smoke as lifecycle
+from qualify_installed_traffic import URLS
 
 
 def stop_owned_trays(root: Path, uid: int) -> None:
@@ -65,6 +66,34 @@ def require_traffic_baseline(result: subprocess.CompletedProcess) -> None:
     transaction.require(report["status"] == "pass" and paths == {
         "proxy_ipv4": True, "proxy_ipv6": True, "transparent": True,
     }, "baseline does not prove all three traffic paths")
+    for item in report["results"]:
+        attempts = item.get("attempts", [])
+        transaction.require(len(attempts) == len(URLS)
+                            and {attempt.get("url") for attempt in attempts} == set(URLS)
+                            and all(attempt.get("pass") is True for attempt in attempts),
+                            "baseline does not prove both independent payload objects")
+
+
+def start_payload_faults(case: str, resolvers: list) -> None:
+    domains = {
+        "primary_unavailable": ("media.discordapp.net",),
+        "traffic_failure": ("media.discordapp.net", "cdn.discordapp.com"),
+    }[case]
+    for domain in domains:
+        resolver = lifecycle.StalledSystemResolver(domain=domain)
+        # Register before start so partial startup failure is also cleaned up.
+        resolvers.append(resolver)
+        resolver.start()
+
+
+def stop_payload_faults(resolvers: list) -> list[str]:
+    errors = []
+    for resolver in reversed(resolvers):
+        try:
+            resolver.stop()
+        except Exception as exc:
+            errors.append(str(exc))
+    return errors
 
 
 def main() -> int:
@@ -72,7 +101,7 @@ def main() -> int:
     parser.add_argument("--previous-bundle", required=True, type=Path)
     parser.add_argument("--candidate-bundle", required=True, type=Path)
     parser.add_argument("--driver", required=True, type=Path)
-    parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure"))
+    parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure", "primary_unavailable"))
     args = parser.parse_args()
     lifecycle._require_disposable_ci()
     runner = lifecycle.pf.PfctlRunner()
@@ -91,14 +120,14 @@ def main() -> int:
     target = lifecycle.packaged_app_target(args.candidate_bundle)
     system = lifecycle.SystemRunner(target)
     failure = None
-    resolver = None
+    resolvers = []
     cleanup_errors = []
     try:
         system.run(target.install_command)
         lifecycle._wait_for_status("active", timeout=90)
         lifecycle._assert_installed_payload(target)
         lifecycle._assert_local_routing_without_geph()
-        if args.case == "traffic_failure":
+        if args.case in ("traffic_failure", "primary_unavailable"):
             baseline = subprocess.run([
                 sys.executable, str(Path(__file__).with_name("qualify_installed_traffic.py")),
             ], env=environment, user=uid, group=gid,
@@ -106,10 +135,9 @@ def main() -> int:
                 capture_output=True, text=True, timeout=30)
             (root / "traffic-baseline.log").write_text(baseline.stdout + baseline.stderr)
             require_traffic_baseline(baseline)
-            # Disposable runner only: keep status/heartbeat healthy while the
-            # real successor cannot resolve its public traffic-proof endpoint.
-            resolver = lifecycle.StalledSystemResolver(domain="media.discordapp.net")
-            resolver.start()
+            # Disposable runner only. One failed host must permit fallback;
+            # both failed hosts must prevent ACK despite a healthy heartbeat.
+            start_payload_faults(args.case, resolvers)
         result = subprocess.run([
             sys.executable, str(Path(__file__).with_name("packaged_update_transaction_smoke.py")),
             "--previous-bundle", str(args.previous_bundle.resolve()),
@@ -121,8 +149,9 @@ def main() -> int:
         (root / "harness.log").write_text(result.stdout + result.stderr)
         print(result.stdout, flush=True)
         transaction.require(result.returncode == 0, "packaged transaction failed; inspect harness.log")
-        if resolver is not None:
-            transaction.require(resolver.query_event.is_set(), "traffic fault never received a DNS query")
+        for resolver in resolvers:
+            transaction.require(resolver.query_event.is_set(),
+                                f"traffic fault never received a DNS query: {resolver.domain}")
     except Exception as exc:
         failure = exc
     finally:
@@ -133,16 +162,14 @@ def main() -> int:
                 action()
             except Exception as exc:
                 cleanup_errors.append(str(exc))
-        if resolver is not None:
-            try:
-                resolver.stop()
-            except Exception as exc:
-                cleanup_errors.append(str(exc))
+        cleanup_errors.extend(stop_payload_faults(resolvers))
         cleanup_errors.extend(lifecycle._fallback_uninstall(system, runner, target))
     lifecycle.pf._assert_same_snapshot(before, lifecycle.pf._pf_snapshot(runner))
     lifecycle._assert_clean_install_state(runner)
     report = {"case": args.case, "result": "fail" if failure or cleanup_errors else "pass",
-              "error": str(failure) if failure else None, "cleanup_errors": cleanup_errors}
+              "error": str(failure) if failure else None, "cleanup_errors": cleanup_errors,
+              "faults": [{"domain": r.domain, "query_received": r.query_event.is_set()}
+                         for r in resolvers]}
     (root / "provision-result.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)
     return int(bool(failure or cleanup_errors))

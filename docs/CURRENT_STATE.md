@@ -11,6 +11,22 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Local build25244 for runtime2fb0270 completed exit0, canonical build-chain and
+  artifact PASS. Log output/aud30-traffic-gate/local-independent-payload-build.log.
+  Tree1794a4534a25df1c5eb70e4f86e97daa5bcb51b4c8207f00d7ff33d96f23f69f;
+  main49f8cf396ae31a9f667eb8de33ad10991c2268e8d551e0f34c8ee1a351d0a1eb.
+  NOT installed. Existing installed4442098/b4bb66a0 remains verified baseline.
+- Found and repaired follow-up qualification gap: traffic_failure previously
+  stalled only primary host, invalid after redundancy. Prepared four-case matrix
+  adds primary_unavailable acceptance and stalls BOTH reviewed domains for
+  traffic_failure rollback. Baseline requires both objects on every route;
+  query observation and reverse/partial-start cleanup enforced.16 harness tests,
+  54 config tests and actionlint PASS. Actual four-case CI remains pending push.
+- Exact published .23 source comparison confirms helper comes from old installed
+  target, not candidate archive; legacy23-causal-boundary.json records hash and
+  evidence. Candidate-only fixes cannot replace its transaction owner. External
+  migration or proven legacy-compatible transition remains a release gate.
+
 - Local follow-up now uses two DISTINCT public objects as well as hosts:
   existing media sticker984455bytes and official Cheerful Choco Wave
   cdn.discordapp.com/stickers/781291131828699156.png471047bytes. Public catalogue
