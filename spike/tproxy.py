@@ -22088,8 +22088,10 @@ def _remove_daemon_status_artifacts(*, remove_install_attestation=True):
             os.remove(path)
         except FileNotFoundError:
             pass
-        except OSError:
-            return False
+        except OSError as error:
+            return _cleanup_install_incomplete(
+                f"status artifact removal failed: errno={error.errno}"
+            )
     attestation_clean = (
         _remove_install_attestation_artifacts()
         if remove_install_attestation
@@ -22112,12 +22114,18 @@ def _remove_daemon_status_artifacts(*, remove_install_attestation=True):
             executable=_installed_browser_worker_from_launchd(),
         )
     )
-    return all((
-        attestation_clean,
-        semantic_socket_clean,
-        pending_socket_clean,
-        pending_worker_clean,
-    ))
+    components = {
+        "install attestation": attestation_clean,
+        "semantic socket": semantic_socket_clean,
+        "pending-navigation socket": pending_socket_clean,
+        "browser-worker runtime": pending_worker_clean,
+    }
+    failed = [name for name, clean in components.items() if not clean]
+    if failed:
+        return _cleanup_install_incomplete(
+            "daemon artifacts: " + ", ".join(failed)
+        )
+    return True
 
 
 def _disable_and_cleanup_install(

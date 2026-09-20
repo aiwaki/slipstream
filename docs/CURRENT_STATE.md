@@ -58,11 +58,20 @@ file.
   Exact script delta reviewed: nonce/source/trees/new daemon plus prior5f5ec434
   backup. bash -n PASS. Await recovery CI before normal Quit/authorization.
   No build/installation process or administrator prompt pending.
-- Recovery pushed: PR376 head1eb658c298044443c73414b19c09be38ca1e0758.
-  CI35510044024, audit35510043940, Windows35510043933 verified in_progress.
-  Next poll these exact runs before a fresh workstation replacement. Qualify candidate before a NEW
-  one-shot install, then canonical installed evidence and actual application.
-  Do not treat these recovery fixes as proof of long streams or sleep/wake.
+- Recovery CI35510044024 on1eb658c is terminal FAILURE. All four transaction
+  cases and browser qualification PASS; lifecycle-heavy fails at
+  active-worker-uninstall:active with "daemon status could not be removed".
+  This message aggregates status file, attestation, semantic/pending sockets and
+  browser-worker cleanup; exact failed component is not yet identified.
+  Log: output/aud30-traffic-gate/recovery-ci-failed.log. No blind rerun.
+  Diagnostic follow-up separates attestation/socket/worker cleanup failures and
+  reports bounded worker error codes/errno without paths or environment values.
+  Ten scoped lifecycle/cleanup tests PASS. This is instrumentation, not a
+  claimed root-cause fix. Next CI reproduction must identify the exact boundary.
+  Transaction1ab5b2b9 remains NOT DISPATCHED; installed baseline unchanged.
+  Next: diagnose _remove_daemon_status_artifacts and active browser-worker
+  shutdown, add precise evidence/regression before replacement. Recovery/media,
+  legacy migration, independent fallback and sleep/wake gates remain open.
 
 ## Superseded working notes (historical evidence, not current instructions)
 

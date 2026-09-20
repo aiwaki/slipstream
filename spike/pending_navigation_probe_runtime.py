@@ -16,6 +16,7 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import threading
 import time
 
@@ -1703,7 +1704,17 @@ class PendingNavigationBrowserWorkerLauncher:
                 ValueError,
                 plistlib.InvalidFileException,
                 PendingNavigationProbeRuntimeError,
-            ):
+            ) as error:
+                # Keep diagnostics bounded: never include plist contents, paths,
+                # environment values or arbitrary exception messages.
+                reason = type(error).__name__
+                if isinstance(error, OSError):
+                    reason += f":errno={error.errno}"
+                elif isinstance(error, PendingNavigationProbeRuntimeError):
+                    code = str(error)
+                    if re.fullmatch(r"[a-z_]{1,80}", code):
+                        reason += ":" + code
+                print("browser-worker stale cleanup failed: " + reason, file=sys.stderr)
                 return False
         if remove_root:
             try:

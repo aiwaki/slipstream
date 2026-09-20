@@ -1557,7 +1557,7 @@ def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
             launcher.launch()
 
 
-def test_console_worker_launcher_cleans_only_exact_stale_runtime():
+def test_console_worker_launcher_cleans_only_exact_stale_runtime(capsys):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-",
         dir="/tmp",
@@ -1632,6 +1632,8 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime():
             str(executable),
             probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
         ]
+        assert "browser_worker_runtime_unowned" in capsys.readouterr().err
+
         payload["EnvironmentVariables"]["CI"] = "true"
         paths.plist.write_bytes(plistlib.dumps(payload))
         paths.plist.chmod(0o600)
