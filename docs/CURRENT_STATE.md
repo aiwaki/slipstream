@@ -11,6 +11,15 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- CI35508641621 / remote326d25e: all FOUR packaged transaction cases PASS,
+  browser PASS. Lifecycle-heavy still live; do not cancel. Primary-unavailable
+  artifact confirms media query_received, exact candidate tree844faa92 accepted,
+  cleanup_errors=[]; two-host failure confirms both queries, unsignalled live
+  successor/advancing daemon, deadline rollback to exact old treed2423806 and
+  surviving restored PID5467, cleanup_errors=[]. Downloaded evidence:
+  output/aud30-traffic-gate/{primary-unavailable,traffic-failure}-326d25e/.
+  Current-preparer/previous-helper proof, not published .23 initiation.
+  Audit35508641655 PASS. Installed source4442098 unchanged.
 - Prepared explicit helper-provenance gate in packaged transaction harness:
   first observed journal helper path/hash and runtime bytes must match previous
   bundle helper; report separately includes candidate helper digest. This prevents
