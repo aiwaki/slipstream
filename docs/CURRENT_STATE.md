@@ -68,6 +68,13 @@ file.
   reports bounded worker error codes/errno without paths or environment values.
   Ten scoped lifecycle/cleanup tests PASS. This is instrumentation, not a
   claimed root-cause fix. Next CI reproduction must identify the exact boundary.
+  Diagnostic CI35510971356 on6f654c5 is live; do not cancel for another push.
+  Independently reproduced natural-worker-exit race: exact validated worker can
+  exit0 before SIGTERM arrives; cleanup incorrectly required worker_terminated.
+  Regression red1/green40 module tests. Accept exit0 (worker guarantees cleanup),
+  retain termination proof for nonzero. Evidence natural-exit-cleanup-before/after
+  in output/aud30-traffic-gate/. Not yet linked to observed CI failure; not pushed
+  while diagnostic CI runs. Runtime diff requires a fresh build/install candidate.
   Transaction1ab5b2b9 remains NOT DISPATCHED; installed baseline unchanged.
   Next: diagnose _remove_daemon_status_artifacts and active browser-worker
   shutdown, add precise evidence/regression before replacement. Recovery/media,

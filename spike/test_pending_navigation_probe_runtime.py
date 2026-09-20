@@ -1646,7 +1646,8 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime(capsys):
         assert paths.directory.exists()
 
 
-def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
+@pytest.mark.parametrize("natural_exit", [False, True])
+def test_console_worker_launcher_stops_one_exact_stale_loaded_job(natural_exit):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-loaded-",
         dir="/tmp",
@@ -1693,7 +1694,7 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                     )
                 if state["running"]:
                     return completed(command, stdout="pid = 4242\n")
-                return completed(command, stdout="last exit code = 1\n")
+                return completed(command, stdout=f"last exit code = {0 if natural_exit else 1}\n")
             if command[:2] == ("/bin/ps", "-p"):
                 return completed(
                     command,
@@ -1704,7 +1705,10 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                 )
             if command[:2] == ("/bin/launchctl", "kill"):
                 state["running"] = False
+                # A validated worker can finish its own successful cleanup
+                # between the process check and delivery of SIGTERM.
                 state["paths"].stderr.write_text(
+                    "" if natural_exit else
                     "slipstream browser probe failed: worker_terminated\n"
                 )
                 state["paths"].stderr.chmod(0o600)

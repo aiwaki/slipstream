@@ -1873,13 +1873,15 @@ class PendingNavigationBrowserWorkerLauncher:
                 # already-validated Chrome process tree and private profile.
                 # Keep the job loaded until that bounded cleanup has exited;
                 # bootout first would bypass the worker's owned cleanup.
-                self._wait_for_exit(
+                exit_code = self._wait_for_exit(
                     target,
                     pid,
                     identity,
                     timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
                 )
-                if self._read_worker_error(
+                # Successful natural exit already proves worker-owned cleanup.
+                # It may race SIGTERM after the exact PID/UID validation above.
+                if exit_code != 0 and self._read_worker_error(
                     paths.stderr,
                     identity,
                 ) != _BROWSER_WORKER_TERMINATION_ERROR:
