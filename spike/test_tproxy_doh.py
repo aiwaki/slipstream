@@ -8522,6 +8522,38 @@ def test_recovery_worker_deadline_cancels_probe_and_releases_slot(monkeypatch):
     assert host not in tproxy._local_bypass_resweep_active
 
 
+def test_recovery_deadline_does_not_join_running_shared_resolver(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    entered, release = threading.Event(), threading.Event()
+    cancelled = []
+
+    def resolver():
+        entered.set()
+        release.wait(timeout=3)
+        return ["203.0.113.10"]
+
+    with ThreadPoolExecutor(max_workers=1) as shared:
+        future = shared.submit(resolver)
+        assert entered.wait(timeout=1)
+
+        async def sweep(host, **kwargs):
+            try:
+                return await asyncio.wrap_future(future)
+            finally:
+                cancelled.append(True)
+
+        monkeypatch.setattr(tproxy, "_resweep_local_bypass_host", sweep)
+        monkeypatch.setattr(tproxy, "LOCAL_BYPASS_RESWEEP_STALE_AFTER", 0.01)
+        try:
+            assert not tproxy._run_local_bypass_resweep("updates.discord.com")
+            assert cancelled == [True]
+            assert future.running(), "worker waited for DNS instead of releasing its loop"
+            assert not future.cancelled()
+        finally:
+            release.set()
+        assert future.result(timeout=1) == ["203.0.113.10"]
+
+
 def test_local_bypass_resweep_contains_background_probe_errors(monkeypatch):
     async def broken(_host, **kwargs):
         raise OSError("probe unavailable")
