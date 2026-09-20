@@ -11,6 +11,11 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Prepared explicit helper-provenance gate in packaged transaction harness:
+  first observed journal helper path/hash and runtime bytes must match previous
+  bundle helper; report separately includes candidate helper digest. This prevents
+  treating current-preparer/old-helper matrix as new-helper coverage.17 focused
+  harness tests PASS; not pushed while CI35508641621 remains live.
 - Stage2 scheduler race reproduced read-only from exact source AST with queued
   threads: start100, replacement221, old completion removes replacement marker,
   third start282 incorrectly admitted while replacement age61 < stale120.

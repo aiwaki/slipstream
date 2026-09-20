@@ -9,6 +9,7 @@ retained under RUNNER_TEMP for diagnosis, including on failure.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -57,8 +58,19 @@ def stop_successor(journal: dict, executable: Path) -> None:
     os.kill(pid, signal.SIGSTOP)
 
 
+def watchdog_payload_evidence(journal: dict, helper: Path, expected_sha256: str) -> dict:
+    """Bind journal provenance to the previous bundle's actual runtime copy."""
+    require(journal.get("helper") == str(helper), "unexpected transaction watchdog path")
+    require(journal.get("watchdog_sha256") == expected_sha256,
+            "transaction watchdog differs from previous bundle")
+    require(not helper.is_symlink() and helper.is_file(), "unsafe runtime watchdog file")
+    actual = hashlib.sha256(helper.read_bytes()).hexdigest()
+    require(actual == expected_sha256, "runtime watchdog bytes differ from journal")
+    return {"source": "previous-bundle", "sha256": actual, "runtime_path": str(helper)}
+
+
 def observe(journal_path: Path, executable: Path, case: str,
-            *, timeout: float = 90, traffic_health=None) -> dict:
+            *, timeout: float = 90, traffic_health=None, expected_watchdog=None) -> dict:
     deadline = time.monotonic() + timeout
     phases: list[str] = []
     stopped = False
@@ -68,6 +80,7 @@ def observe(journal_path: Path, executable: Path, case: str,
     first_heartbeat = None
     successor_deadline = None
     live_traffic_failure = False
+    watchdog = None
     while time.monotonic() < deadline:
         try:
             journal = json.loads(journal_path.read_text())
@@ -91,7 +104,9 @@ def observe(journal_path: Path, executable: Path, case: str,
                         f"accepted successor exited or changed identity: expected={expected_successor}, actual={actual}")
             return {"case": case, "phases": phases, "stopped": stopped,
                     "successor_pid": successor_pid, "transaction_removed": True,
-                    "live_traffic_failure": live_traffic_failure}
+                    "live_traffic_failure": live_traffic_failure, "watchdog_payload": watchdog}
+        if expected_watchdog is not None and watchdog is None:
+            watchdog = watchdog_payload_evidence(journal, *expected_watchdog)
         phase = journal["phase"]
         if not phases or phases[-1] != phase:
             phases.append(phase)
@@ -165,6 +180,10 @@ def main() -> int:
     target = work / "Slipstream.app"
     shutil.copytree(args.previous_bundle, target, symlinks=True)
     old_tree = deterministic_tree_sha256(target)
+    helper_name = "Contents/MacOS/slipstream-update-watchdog"
+    previous_helper_sha256 = hashlib.sha256((target / helper_name).read_bytes()).hexdigest()
+    candidate_helper_sha256 = hashlib.sha256(
+        (args.candidate_bundle / helper_name).read_bytes()).hexdigest()
     new_tree = deterministic_tree_sha256(args.candidate_bundle)
     require(old_tree != new_tree, "previous and candidate bundles must be distinct")
     state = work / "state"
@@ -185,7 +204,9 @@ def main() -> int:
         return current["heartbeat_seq"]
 
     report = observe(state / "app-update-transaction-v1.json", executable, args.case,
-                     traffic_health=traffic_health)
+                     traffic_health=traffic_health,
+                     expected_watchdog=(state / "runtime/slipstream-update-watchdog",
+                                        previous_helper_sha256))
     if args.case in ("rollback", "traffic_failure"):
         report["restored_pid"] = restored_app_pid(executable, report["successor_pid"])
     survivor_pid = report.get("restored_pid", report["successor_pid"])
@@ -196,7 +217,8 @@ def main() -> int:
     require(deterministic_tree_sha256(target) == expected, "terminal bundle tree mismatch")
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
     report.update(bundle_tree=expected, previous_tree=old_tree, candidate_tree=new_tree,
-                  coverage="packaged-transaction-not-signed-feed")
+                  candidate_watchdog_sha256=candidate_helper_sha256,
+                  coverage="current-preparer-previous-watchdog-not-signed-feed")
     (work / "result.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)
     return 0

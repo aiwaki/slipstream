@@ -9,6 +9,29 @@ import packaged_update_transaction_smoke as gate
 
 
 class TransactionGateTests(unittest.TestCase):
+    def test_watchdog_provenance_requires_journal_and_actual_previous_bytes(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            helper = Path(tmp) / "helper"
+            helper.write_bytes(b"previous helper")
+            digest = hashlib.sha256(helper.read_bytes()).hexdigest()
+            journal = {"helper": str(helper), "watchdog_sha256": digest}
+            self.assertEqual(gate.watchdog_payload_evidence(journal, helper, digest)["source"],
+                             "previous-bundle")
+            helper.write_bytes(b"different candidate helper")
+            with self.assertRaisesRegex(RuntimeError, "bytes differ"):
+                gate.watchdog_payload_evidence(journal, helper, digest)
+            helper.unlink()
+            other = Path(tmp) / "other"
+            other.write_bytes(b"previous helper")
+            helper.symlink_to(other)
+            with self.assertRaisesRegex(RuntimeError, "unsafe"):
+                gate.watchdog_payload_evidence(journal, helper, digest)
+            with self.assertRaisesRegex(RuntimeError, "unexpected"):
+                gate.watchdog_payload_evidence(dict(journal, helper=str(other)), helper, digest)
+            with self.assertRaisesRegex(RuntimeError, "previous bundle"):
+                gate.watchdog_payload_evidence(dict(journal, watchdog_sha256="0" * 64), helper, digest)
+
     def test_workstation_refused_before_any_process_call(self):
         with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), patch.object(
             gate.subprocess, "run"
@@ -36,6 +59,10 @@ class TransactionGateTests(unittest.TestCase):
             exe = Path(tmp) / "Slipstream.app/Contents/MacOS/slipstream"
             journal = {"phase": "successor_launched", "nonce": "a",
                        "successor_pid": 123, "successor_started": "Sun Sep 20 12:00:00 2026"}
+            helper = Path(tmp) / "helper"
+            helper.write_bytes(b"previous helper")
+            digest = gate.hashlib.sha256(helper.read_bytes()).hexdigest()
+            journal.update(helper=str(helper), watchdog_sha256=digest)
             path.write_text(json.dumps(journal))
 
             def terminal(_):
@@ -48,7 +75,8 @@ class TransactionGateTests(unittest.TestCase):
             with patch.object(gate.time, "sleep", side_effect=terminal), \
                     patch.object(gate, "stop_successor") as stop, \
                     patch.object(gate, "snapshot", return_value=None if changed_process else identity):
-                result = gate.observe(path, exe, case)
+                result = gate.observe(path, exe, case, expected_watchdog=(helper, digest))
+                self.assertEqual(result["watchdog_payload"]["sha256"], digest)
                 self.assertEqual(stop.call_count, int(case == "rollback"))
                 return result
 
