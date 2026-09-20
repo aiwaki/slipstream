@@ -11,13 +11,14 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
-- Follow-up source changes (not yet installed): successor traffic gate races two
+- Follow-up90318cd pushed to PR376 (not yet installed): successor traffic gate races two
   reviewed Discord delivery hosts per route, cancelling pending HTTP work after
   a valid full payload. Installed verifier reports all six attempts and keeps
   three mandatory route results. Same object/service remains a known shared
   dependency; independent control-object coverage and legacy migration remain
   OPEN, not replaced by this improvement.
-  Focused Rust9PASS/1ignored; Python6PASS; live installed six transfers each
+  CI35507770642 and audit35507770702 confirmed live for90318cd.
+  Focused Rust9PASS plus explicit live Rust1PASS; Python6+27PASS; six transfers each
   completed984455bytes. Evidence output/aud30-traffic-gate/redundant-host-*.
 
 - Runtime source4442098 / CI35506810015: build, product/common checks, packaged
@@ -53,7 +54,7 @@ file.
   runner in output/aud30-install-b4bb66a0/; hashes pinned in manifest/runner.
   Old treeb975dd5b (AUD29e1bdc3e3). Preserve learning and all previous backups.
   Consumed transaction3f81f9ad is read-only reference, NEVER replay it.
-- Remote PR376 head4442098; last unresolved-review query empty. User-owned
+- Remote PR376 head90318cd; prior unresolved-review query was empty. User-owned
   AGENTS.md edits and untracked output/.playwright-cli remain untouched.
 - Combined69647ce CI35506125919 and audit35506125912 terminal PASS form reusable
   baseline. Current source adds startup-failure rollback and helper fixtures.
