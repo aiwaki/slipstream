@@ -11,10 +11,11 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
-- Local audit branch HEAD3e11ea9, remote PR376 head69647ce. User-owned AGENTS.md
+- Local audit branch includes3e11ea9 plus checkpoint cleanup; remote PR376 head69647ce. User-owned AGENTS.md
   edits and untracked output/.playwright-cli remain untouched. No active admin.
 - Combined CI35506125919 for69647ce is IN_PROGRESS, freshly confirmed building
-  the non-shipping transaction driver; audit35506125912 PASS. A transient API
+  lifecycle-heavy after all three real transaction cases and packaged browser PASS;
+  audit35506125912 PASS. A transient API
   timeout was followed by successful observation of this same live run.
   Do not restart/cancel. Push local follow-ups only after this run is terminal.
 - Previous candidate653649e CI35505371770 PASS, including all three real update
@@ -22,6 +23,11 @@ file.
   rustls; the combined candidate contains the reviewed repair.
 
 Verified update evidence:
+- Combined69647ce / merge ddb10d73 accept, rollback and traffic_failure PASS;
+  downloaded output/aud30-traffic-gate/*-69647ce reports independently checked.
+  Accepted candidate tree5fbb25b3ead6a3b8315a2931ec55d7b08efcc3e0d3309e6eb12328cad68bfc59;
+  both exact previous trees restored, journals removed, cleanup_errors=[];
+  traffic_failure successor unsignalled and live_traffic_failure=true.
 - Watchdog LaunchAgent AbandonProcessGroup preserves accepted/restored trays.
 - Archive extraction now restores ordinary file/directory modes after private
   extraction. Real accept tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9
