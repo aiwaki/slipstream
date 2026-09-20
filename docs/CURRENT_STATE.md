@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-20 verified real transaction evidence: source653649e / merge5d0c31e0,
+CI35505371770 accept, rollback and traffic_failure all PASS. Downloaded reports
+under output/aud30-traffic-gate/{accept,rollback,traffic_failure}-653649e confirm
+accepted candidate tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9;
+both restored old tree d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea.
+All transaction journals removed, live survivor enforced, all cleanup_errors=[].
+Traffic failure kept successor unsignalled and recorded live_traffic_failure=true.
+Product, Windows, Chromium and packaged-browser PASS; lifecycle-heavy still live
+building Safari companion. Geph35505388093 now verifying stored attestations.
+Next finish these live runs, verify immutable r2 release, then push integrated
+local head (c466766 merge plus release coverage docs) for exact combined gates.
+Installed runtime unchanged; signed old-version feed/preparer transition and
+remaining four reliability stages are not covered by these three successful cases.
+
+
 Local integration: merged origin/main6c5895f into the audit branch; only
 CURRENT_STATE/DECISIONS append conflicts, resolved preserving current audit
 checkpoint and both decision sets.61 integrated ci_scope/build-config unittest

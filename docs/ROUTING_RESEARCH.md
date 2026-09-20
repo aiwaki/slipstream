@@ -2773,3 +2773,18 @@ root privacy during extraction and final root755/directory750/file640 fidelity.
 New real packaged acceptance is still required; this is not installed evidence.
 Artifacts: output/aud30-traffic-gate/archive-mode-tests.log and
 {accept,rollback,traffic-failure}-476af9e/.
+
+
+### 2026-09-20: archive repair passes all real transaction cases
+
+CI35505371770/source653649e (merge5d0c31e0) passed accept, rollback and
+traffic_failure. Downloaded provision reports all say pass with no cleanup errors.
+Accepted tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9
+matches the exact candidate; both rollback trees match previous
+ d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea.
+The real accepted successor ACKed; each case removed its transaction, preserved
+the required terminal process identity through the survival check, and left no
+stage/backup. Traffic-failure report confirms stopped=false and
+live_traffic_failure=true. This closes the observed archive-mode mismatch and
+qualifies these production transaction paths, not a shipped old preparer or
+signed-feed migration. Evidence: output/aud30-traffic-gate/*-653649e/.
