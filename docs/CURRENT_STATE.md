@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+Latest continuation: PR377 b2f22f8 both source CI35504333339 and combined audit
+35504333296 PASS. Downloaded and independently verified both CI audit reports
+bound to merge a2147018: app361packages/0exceptions/5informational; Geph484packages/
+9unchanged exceptions/3informational. No blockers. Artifacts joint-ci-{app,geph}.
+New causal publication blocker found: crates.io latest is0.4.0 (2026-09-14), so
+old workflow's upstream-only identity would never build reviewed0.3.9-r2.
+PR377 follow-up8fae4d4 fixes main-push resolution to verified committed source;
+manual build_reviewed=true requires main, schedules retain upstream discovery.
+Only exact Geph workflow+paired build tests additionally admitted to bootstrap;
+other workflows/app source/manifests/policy remain excluded.58tests+16subtests
+and actionlint PASS, including executing workflow shell with upstream forbidden,
+non-main ref and tampered lock. Pushed after prior source CI finished. Fresh
+CI35504649908 and audit35504649865 verified live. Source still unmerged; no new
+vendor binary. PR376 CI35504245450 remains live building qualification driver;
+real three-case jobs not yet listed. Next collect those exact runs, review and
+promote dependency source only after green checks, then require published/attested
+Geph and application verification. No workstation changes.
+
+
 Latest 2026-09-20: prior CI35503555564 is terminal FAILURE; all results collected.
 476af9e pushed to PR376: CI35504245450 verified live, includes accept/rollback/
 traffic_failure and watchdog process-group policy. No installation yet.
