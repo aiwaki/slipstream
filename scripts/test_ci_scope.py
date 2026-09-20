@@ -50,6 +50,25 @@ class CiScopeTests(unittest.TestCase):
                     ).geph_bootstrap
                 )
 
+    def test_joint_lock_repair_keeps_both_audits_and_rejects_product_edits(self) -> None:
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock",
+                 "app-tauri/src-tauri/Cargo.lock", "scripts/ci_scope.py",
+                 "scripts/test_ci_scope.py", "docs/RELEASES.md",
+                 "docs/DECISIONS.md", "docs/CURRENT_STATE.md"]
+        scope = ci_scope.classify_paths(paths, event_name="pull_request")
+        self.assertTrue(scope.geph_bootstrap)
+        self.assertTrue(scope.product)  # Both independent audit jobs use this.
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(
+            [p for p in paths if p != "scripts/test_ci_scope.py"],
+            event_name="pull_request").geph_bootstrap)
+        for extra in ("app-tauri/src-tauri/Cargo.toml", "app-tauri/src-tauri/src/lib.rs",
+                      ".github/workflows/ci.yml", "scripts/build_macos.sh", "spike/tproxy.py",
+                      "security/dependency-audit-policy.json"):
+            with self.subTest(extra=extra):
+                self.assertFalse(ci_scope.classify_paths(
+                    [*paths, extra], event_name="pull_request").geph_bootstrap)
+
     def test_existing_product_docs_and_windows_scope_is_preserved(self) -> None:
         self.assertEqual(
             ci_scope.classify_paths(["docs/RELEASES.md"], event_name="pull_request"),

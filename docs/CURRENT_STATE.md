@@ -10,6 +10,14 @@ file.
 
 ## Current Checkpoint
 
+Dependency repair PR377: coordinate app rustls0.23.45/webpki0.103.15 with Geph
+rustls0.23.45 source revision2. Classifier permits only lock/source/doc and paired
+classifier-test maintenance, retaining both audits and product checks. Source
+review, green CI, merged-source vendor build and exact-main packaged verification
+remain required. No binary published or workstation mutation. This checkout is
+only the dependency source repair; AUD-30 updater work remains in PR376.
+
+
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
 is published as prerelease ID `375747998`. The lightweight tag and release

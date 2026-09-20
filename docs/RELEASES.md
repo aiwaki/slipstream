@@ -164,17 +164,24 @@ A new upstream Geph crate cannot publish a binary immediately. Automation first
 opens a source-contract PR; only the reviewed and merged contract may trigger a
 locked build.
 
-That source-contract PR has one exact bootstrap scope: `SOURCE.json` and
-`Cargo.lock` are required, while `VERSION` and the exact Geph audit policy are
-the only additional paths allowed. Common product and Chromium checks still
-run, and the separately required `Required dependency audit` context must
-materialize and scan the full new graph. Only packaged app jobs stay skipped,
-because the new immutable binary cannot exist yet. A mixed PR cannot use this
-scope, and a push to `main` never uses it. After merge, `build-geph` builds and
-attests the new internal release; the first main app run may fail closed while
-that artifact is absent and is rerun only after publication. The rerun then
-builds and qualifies one candidate from the same source SHA and the new exact
-Geph artifact.
+That source-contract PR requires Geph `SOURCE.json` and `Cargo.lock`. It may
+also repair the application `Cargo.lock` when an advisory affects both graphs:
+requiring separate merges creates a cycle where each audit rejects the other's
+unfixed lock. Optional paths are Geph `VERSION` and its audit policy, the exact
+release/decision/checkpoint documents, and the scope classifier with its test
+file (classifier changes without the test file are rejected). Application source,
+Cargo manifests, application audit policy, packaging scripts, and workflows are
+not allowed in this scope.
+
+Common product and Chromium checks still run. The separately required
+`Required dependency audit` context must freshly scan **both** dependency graphs;
+no advisory is waived. Only packaged app jobs stay skipped because the new
+immutable Geph binary cannot exist yet. A production-code PR cannot use this
+scope, and a push to `main` never uses it. After reviewed merge, `build-geph`
+builds and attests the new internal release; the first main app run may fail
+closed while that artifact is absent and is rerun only after publication. The
+rerun then builds and qualifies one candidate from the same source SHA and new
+exact Geph artifact before any application release.
 
 ## Candidate and publication pipeline
 

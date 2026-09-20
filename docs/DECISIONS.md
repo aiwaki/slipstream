@@ -243,3 +243,17 @@ survive across sessions and agents.
 - `docs/ROUTING_RESEARCH.md` records supporting investigations and references.
 - `docs/TROUBLESHOOTING.md` records operational checks for repeated symptoms.
 - Root README files should stay short and user-facing.
+
+### 2026-09-20: coordinated dependency source bootstrap
+
+RUSTSEC-2026-0285 affects both the app and vendored Geph rustls locks. Separate
+PRs each fail the mandatory audit of the other graph (PR376 app passes/Geph
+fails; PR377 reverses that). Source bootstrap may therefore include the app
+Cargo.lock alongside required Geph source and lock, exact release/decision/
+checkpoint docs, and paired scope-classifier/test maintenance. Application
+source, manifests, app audit policy, workflows and packaging scripts remain
+excluded. Both fresh audits and common product checks remain mandatory. Only
+packaged jobs wait for the post-merge immutable vendor build, as before; main
+never uses bootstrap and must pass exact packaged qualification before release.
+This changes source integration ordering, not advisory acceptance or publication
+gates. No new vulnerability exception is added.
