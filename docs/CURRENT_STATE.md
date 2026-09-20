@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+Latest verified action: updater permission repair committed/pushed653649e2.
+Candidate CI35505371770, dependency35505371764 and Windows35505371774 started
+for that exact SHA. PR377 required CI35505121491 and audit35505121493 PASS;
+its only review thread is resolved. Normal protected merge succeeded at
+6c5895fcbad0b382067a54c7387208e27de46df5 (2026-09-20T10:33:01Z).
+Geph publisher35505388093 is freshly QUEUED for that merge. Next collect the
+publisher's audited/attested immutable r2 artifact and candidate real transaction
+results. Do not restart these live runs or install an unqualified candidate.
+The earlier PR377-open snapshot below is superseded by this verified merge.
+
+
 2026-09-20 continuation: PR376 source476af9e CI35504245450 is terminal FAILURE.
 Real rollback and live-traffic-failure rollback both PASS, including exact old
 bundle tree, live restored tray, journal removal and clean scoped cleanup.
