@@ -12262,7 +12262,10 @@ def schedule_local_bypass_resweep(host, now=None, runner=None):
             (runner or _run_local_bypass_resweep)(h)
         finally:
             with _local_bypass_resweep_lock:
-                _local_bypass_resweep_active.pop(h, None)
+                # A stale worker can finish after its replacement has started.
+                # Release only this attempt's slot, never its successor's.
+                if _local_bypass_resweep_active.get(h) == now:
+                    _local_bypass_resweep_active.pop(h, None)
 
     if runner is not None:
         run()

@@ -8306,6 +8306,43 @@ def test_local_bypass_resweep_scheduler_starts_group_named_thread(monkeypatch):
     assert threads[0]["started"] is True
 
 
+@pytest.mark.parametrize("old_raises", [False, True])
+def test_stale_resweep_completion_preserves_replacement_owner(monkeypatch, old_raises):
+    queued = []
+
+    class QueuedThread:
+        def __init__(self, *, target, daemon, name):
+            queued.append(target)
+
+        def start(self):
+            pass
+
+    def probe(host):
+        if old_raises:
+            raise RuntimeError("old worker failed")
+
+    monkeypatch.setattr(tproxy.threading, "Thread", QueuedThread)
+    monkeypatch.setattr(tproxy, "_run_local_bypass_resweep", probe)
+    host = "updates.discord.com"
+    initial = 100.0
+    replacement = initial + tproxy.LOCAL_BYPASS_RESWEEP_STALE_AFTER + 1
+    assert tproxy.schedule_local_bypass_resweep(host, now=initial)
+    assert tproxy.schedule_local_bypass_resweep(host, now=replacement)
+    if old_raises:
+        with pytest.raises(RuntimeError, match="old worker failed"):
+            queued[0]()
+    else:
+        queued[0]()
+    # Past the rate cooldown, but the replacement is still within its active lease.
+    assert not tproxy.schedule_local_bypass_resweep(
+        host, now=replacement + tproxy.LOCAL_BYPASS_RESWEEP_COOLDOWN + 1)
+    monkeypatch.setattr(tproxy, "_run_local_bypass_resweep", lambda host: None)
+    queued[1]()
+    assert host not in tproxy._local_bypass_resweep_active
+    assert tproxy.schedule_local_bypass_resweep(
+        host, now=replacement + tproxy.LOCAL_BYPASS_RESWEEP_COOLDOWN + 2)
+
+
 def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
     host = "updates.discord.com"
     attempts = []

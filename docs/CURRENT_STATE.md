@@ -11,6 +11,15 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Stage2 recovery patch prepared: stale resweep finally releases only its own
+  monotonic-start slot, preserving a replacement worker. Regression covers both
+  success and exception of old worker:2 failures before,8 focused tests PASS after
+  (.audit-venv/bin/python pytest test_tproxy_doh -k local_bypass_resweep /
+  stale_resweep_completion / runtime_failure). Evidence resweep-regression-*
+  under output/aud30-traffic-gate/. No build/install yet. Next investigate stale
+  result publication before packaging; cleanup ownership alone does not prevent
+  an obsolete probe overwriting newer strategy state. New remote provenance CI
+  35509303661 confirmed live, audit35509303665 PASS; do not cancel.
 - NEW INSTALLED baseline: transaction5f5ec434 CONSUMED exit0 at11:58:32Z.
   Never replay. Source2fb0270 tree1794a453, main49f8cf39, daemon919d3cf8.
   Normal open followed; app-tauri npm run verify:local-install exit0 PASS
