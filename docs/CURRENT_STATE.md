@@ -11,6 +11,12 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Real shared-executor timeout test PASS: running resolver survives cancellation
+  while the private recovery loop returns, then controlled release joins executor.
+ 15 final focused tests PASS (resweep-final-tests.log),101 neighbor baseline reused.
+  New canonical build session60609 for source4a500a9 (runtimeaeb51c4) is live; log
+  output/aud30-traffic-gate/recovery-deadline-build.log. Do not restart. Earlier
+  d5afa50 candidate is superseded, not installed. Installed2fb0270 remains active.
 - Recovery build1217 completed exit0 canonical PASS for runtimed5afa50:
   tree16b142905d84f5efe1dad7ea7cf0f35aae67ca5173e80901a662d41ee755fb48,
   daemonbcd17a9216906e964696936e8d0bf784f126db1895df1db3c0a96a5632412a3d.
