@@ -647,6 +647,9 @@ fn xml_escape(value: &str) -> String {
 }
 
 fn launch_agent_bytes(helper: &Path, journal: &Path, state_dir: &Path) -> Vec<u8> {
+    // The accepted successor (or restored old tray) must outlive this job.
+    // launchd otherwise kills the remaining process group when the watchdog
+    // exits/boots out. Failed successors are still stopped by exact identity.
     format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -655,6 +658,7 @@ fn launch_agent_bytes(helper: &Path, journal: &Path, state_dir: &Path) -> Vec<u8
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ProcessType</key><string>Background</string>
+<key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>{}</string>
 <key>StandardErrorPath</key><string>{}</string>
 </dict></plist>
@@ -1786,6 +1790,11 @@ mod tests {
             Path::new("/private/helper"),
             Path::new("/private/journal"),
             Path::new("/private/state"),
+        );
+        let policy = plist::Value::from_reader_xml(bytes.as_slice()).unwrap();
+        assert_eq!(
+            policy.as_dictionary().unwrap().get("AbandonProcessGroup"),
+            Some(&plist::Value::Boolean(true))
         );
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("<string>Background</string>"));

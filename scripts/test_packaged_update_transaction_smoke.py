@@ -110,6 +110,13 @@ class TransactionGateTests(unittest.TestCase):
                 gate.restored_app_pid(exe, 123)
             self.assertEqual(gate.restored_app_pid(exe, 122), 123)
 
+    def test_instant_live_snapshot_does_not_prove_cleanup_survival(self):
+        identity = (os.getuid(), "birth", "/owned/tray")
+        with patch.object(gate, "snapshot", side_effect=[identity, None]), \
+                patch.object(gate.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "survive watchdog cleanup"):
+                gate.require_surviving_process(123, identity)
+
     def test_missing_transaction_is_not_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(RuntimeError, "before any phase"):

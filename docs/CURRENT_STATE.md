@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Latest evidence: e5cdf8d real accept106060428416 and rollback106060428412 FAIL,
+both with cleanup_errors=[]; journals show transaction completion, but terminal
+trays disappear. Published helper spawns trays in its process group; generated
+LaunchAgent omitted AbandonProcessGroup. Local macOS man page confirms launchd
+kills remaining group members on watchdog exit. Candidate now sets that key to
+true without changing KeepAlive or exact-identity kill/rollback. 23updater Rust
+tests PASS, changed-file rustfmt check PASS. Full cargo fmt check still reports
+pre-existing browser_probe/lib formatting; no unrelated formatting edits made.
+Harness requires two-second exact-identity survival after completion;12tests
++12subtests PASS. Detailed evidence in ROUTING_RESEARCH.md and output/aud30-traffic-gate.
+CI35503555564 still live only on packaged-app-lifecycle-heavy (physical browser
+sentinel step); do not interrupt it. Next push accumulated fixes after it ends
+and require all three real transaction cases, including new traffic_failure.
+No claim of fixed installed updater or public old-version feed migration.
+
+
 Current continuation: 09318f5 removes the one trailing EOF blank line in
 spike/test_traffic_contracts.py that failed common checks on e5cdf8d. Whole PR
 whitespace comparison now passes. CI35503555564 packaged build finished PASS;

@@ -2729,3 +2729,27 @@ An independent local TCP connection on58393 remained alive throughout corrected
 installation/qualification. No global state flush, foreign configuration change,
 or message/call action. All evidence in output/aud29-pf-loopback; rejected first
 candidate evidence is retained separately, not overwritten by successful probes.
+
+### 2026-09-20: updater tray lifetime after watchdog cleanup
+
+Disposable run35503555564 (source e5cdf8d, merge cc971dd5) built successfully.
+The real accept case removed its journal with no failure record but immediately
+lost the exact successor. The rollback case reached `old_relaunched` with the
+matching nonce, then failed to find a live restored tray. Both cleanups passed.
+Artifacts are under output/aud30-traffic-gate/{accept,rollback}-e5cdf8d.
+
+The watchdog launches both trays as ordinary child processes. Its LaunchAgent
+omitted AbandonProcessGroup, and transaction completion asynchronously boots out
+the job. The local macOS launchd.plist manual states that launchd kills remaining
+processes in the job's process group when the job dies unless that key is true.
+The candidate therefore explicitly sets AbandonProcessGroup=true, preserving
+SuccessfulExit=false and exact-identity termination of rejected successors.
+This also covers the published helper used by the qualification driver because
+the production preparer writes the LaunchAgent policy. Real macOS confirmation
+of the corrected candidate remains required; the signed public old-version feed
+and its already-shipped preparer are not covered by this local driver.
+
+23 updater transaction tests pass. The harness additionally checks that the
+terminal tray retains its identity for two seconds after journal removal, since
+a single snapshot can race asynchronous launchd cleanup. Twelve harness tests
+plus12subtests pass, including immediate-alive then exited rejection.

@@ -86,9 +86,9 @@ def observe(journal_path: Path, executable: Path, case: str,
             else:
                 require(not failures, "successor was rejected and rolled back")
                 require("successor_launched" in phases, "successor launch was not observed")
-                require(successor_pid is not None and expected_successor is not None
-                        and snapshot(successor_pid) == expected_successor,
-                        "accepted successor exited or changed identity")
+                actual = snapshot(successor_pid) if successor_pid is not None else None
+                require(expected_successor is not None and actual == expected_successor,
+                        f"accepted successor exited or changed identity: expected={expected_successor}, actual={actual}")
             return {"case": case, "phases": phases, "stopped": stopped,
                     "successor_pid": successor_pid, "transaction_removed": True,
                     "live_traffic_failure": live_traffic_failure}
@@ -130,6 +130,17 @@ def restored_app_pid(executable: Path, rejected_pid: int) -> int:
     require(len(matches) == 1 and matches[0] != rejected_pid,
             "rollback did not leave one distinct live restored tray")
     return matches[0]
+
+
+def require_surviving_process(pid: int, identity: tuple, duration: float = 2) -> None:
+    # Journal removal precedes asynchronous launchd bootout. An instant snapshot
+    # can pass immediately before launchd kills the watchdog's process group.
+    deadline = time.monotonic() + duration
+    while True:
+        require(snapshot(pid) == identity, "terminal tray did not survive watchdog cleanup")
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(.05)
 
 
 def main() -> int:
@@ -177,6 +188,10 @@ def main() -> int:
                      traffic_health=traffic_health)
     if args.case in ("rollback", "traffic_failure"):
         report["restored_pid"] = restored_app_pid(executable, report["successor_pid"])
+    survivor_pid = report.get("restored_pid", report["successor_pid"])
+    survivor_identity = snapshot(survivor_pid)
+    require(survivor_identity is not None, "terminal tray already exited")
+    require_surviving_process(survivor_pid, survivor_identity)
     expected = old_tree if args.case in ("rollback", "traffic_failure") else new_tree
     require(deterministic_tree_sha256(target) == expected, "terminal bundle tree mismatch")
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
