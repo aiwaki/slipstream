@@ -1535,6 +1535,26 @@ fn advance_prelaunch_phase(
     Ok(false)
 }
 
+// A failed spawn creates no successor process. Restore the verified old bundle
+// immediately rather than letting launchd repeat an impossible activation.
+fn spawn_successor_or_rollback<R>(
+    journal_path: &Path,
+    journal: &mut UpdateJournalV1,
+    relaunch: &mut R,
+) -> Result<Option<Child>, String>
+where
+    R: FnMut(&Path, &Path) -> Result<(), String>,
+{
+    match spawn_bundle(&journal.target, journal_path) {
+        Ok(child) => Ok(Some(child)),
+        Err(spawn_error) => {
+            rollback_impl_with_child_and_relaunch(journal_path, journal, None, true, relaunch)
+                .map_err(|error| format!("{spawn_error}; rollback failed: {error}"))?;
+            Ok(None)
+        }
+    }
+}
+
 fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Result<(), String> {
     let initiator_executable = bundle_executable(&journal.target).display().to_string();
     while process_exists(journal.initiator_pid)
@@ -1553,7 +1573,11 @@ fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Re
         let snapshot = match find_exact_successor(journal)? {
             Some(snapshot) => snapshot,
             None => {
-                let mut child = spawn_bundle(&journal.target, journal_path)?;
+                let Some(mut child) =
+                    spawn_successor_or_rollback(journal_path, journal, &mut direct_relaunch)?
+                else {
+                    return Ok(());
+                };
                 let snapshot = wait_for_spawned_successor(&mut child, journal)?;
                 spawned_successor = Some(child);
                 snapshot
@@ -1858,6 +1882,39 @@ mod tests {
                 .unwrap()
                 .is_zombie()
         );
+    }
+
+    #[test]
+    fn refused_successor_spawn_restores_old_bundle_without_retrying_activation() {
+        let root = TempDir::new().unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.target, b"not executable");
+        fs::set_permissions(
+            bundle_executable(&value.target),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        value.old_executable_sha256 = executable(&value.backup, b"old");
+        value.phase = TransactionPhase::SuccessorLaunchPlanned;
+        write_journal(&path, &value).unwrap();
+        let mut relaunches = 0;
+        let result = spawn_successor_or_rollback(&path, &mut value, &mut |bundle, _| {
+            assert_eq!(fs::read(bundle_executable(bundle)).unwrap(), b"old");
+            relaunches += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(result.is_none());
+        assert_eq!(relaunches, 1);
+        assert_eq!(value.phase, TransactionPhase::OldRelaunched);
+        assert!(!path.exists());
+        assert!(!value.backup.exists());
+        assert!(!value.stage.exists());
+        let failed = path.with_file_name(format!(
+            "app-update-transaction-failed-{}.json",
+            value.nonce
+        ));
+        assert!(failed.exists());
     }
 
     #[test]

@@ -2788,3 +2788,18 @@ stage/backup. Traffic-failure report confirms stopped=false and
 live_traffic_failure=true. This closes the observed archive-mode mismatch and
 qualifies these production transaction paths, not a shipped old preparer or
 signed-feed migration. Evidence: output/aud30-traffic-gate/*-653649e/.
+
+
+### 2026-09-20: failed successor spawn must restore the old bundle
+
+Inspection of run_locked_watchdog found spawn_bundle(...)? in the persisted
+SuccessorLaunchPlanned phase. An OS-level spawn refusal therefore escaped to
+launchd's unsuccessful-exit restart policy without entering rollback. The
+candidate now dispatches that specific no-child failure into the existing
+hash-checked rollback and relaunch path. Successful spawn behavior is unchanged;
+rollback errors remain errors with the original spawn context. The regression
+uses a real non-executable candidate and confirms old bytes restored before a
+single injected relaunch, failed transaction evidence, no active journal and no
+stage/backup.25 transaction tests PASS. Real packaged startup-refusal testing is
+still required. This does not cover a spawned process dying before its identity
+is captured, or repair the already-published old helper.

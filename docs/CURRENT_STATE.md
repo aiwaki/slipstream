@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+Latest local candidate follow-up: OS refusal of successor spawn previously
+escaped run_locked_watchdog with an error while retaining SuccessorLaunchPlanned,
+so KeepAlive could repeat activation instead of restoring the previous bundle.
+spawn_successor_or_rollback now runs existing verified rollback when spawn fails
+(no child created), returning success only after old relaunch/cleanup succeeds.
+25 updater transaction tests PASS, including actual permission-denied executable
+and restored old bytes, one relaunch, failed record and removed transaction/stage.
+Evidence output/aud30-traffic-gate/spawn-failure-tests.log. This fixes current
+preparer/helper only; it does not rewrite the shipped .23 helper. Early exit
+before identity capture still returns an error and needs separate examination.
+Combined source69647ce CI35506125919 still live; audit35506125912 PASS. Do not
+interrupt. Hold this runtime follow-up until current qualification is terminal,
+then require focused real startup-failure qualification as well as existing gates.
+
+
 Latest: CI35505371770 for653649e is terminal SUCCESS including lifecycle-heavy,
 all three real transactions, packaged browser and common checks. Its separate
 audit35505371764 failed only old Geph rustls RUSTSEC-2026-0285; repaired source
