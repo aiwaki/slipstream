@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Prepared candidate-helper coverage: qualify_watchdog_startup_failure.py runs
+only on an unprivileged disposable macOS runner with no loaded/existing update
+LaunchAgent. It copies the codesign-verified candidate helper byte-for-byte,
+uses isolated explicit startup-phase fixtures and real helper subprocesses for
+spawn refusal and early exit, requires restored old bytes, one actual fixture
+relaunch, terminal failed record and no journal/stage/backup. Coverage is
+explicitly helper-fixture, NOT launchd/tray/feed. CI runs this once before the
+accept case, uploads logs/journals/results; old packaged three-case coverage
+remains unchanged.3 verifier tests (+3 negative subcases),54 build-config tests,
+actionlint and Python compile PASS.26 Rust transaction tests reused unchanged.
+Not yet executed on disposable CI; wait for live69647ce qualification before
+pushing accumulated startup fixes and this new fixture gate.
+
+
 Latest local follow-up: spawn_successor_or_rollback now covers a successfully
 spawned child that exits before identity capture. It first confirms child exit
 using the owned Child handle; unobservable identity with a live child remains

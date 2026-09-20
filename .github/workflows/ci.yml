@@ -1591,6 +1591,13 @@ jobs:
           echo 'b2accee8c068f454d4952174c9e5088d473e9dd5673d59b8466463ee882cce63  Slipstream-macos-arm64.zip' | shasum -a 256 -c -
           ditto -x -k Slipstream-macos-arm64.zip .
           tar -xzf "$GITHUB_WORKSPACE/dist-update-driver/driver.tar.gz" -C "$RUNNER_TEMP/update-driver"
+      - name: Candidate watchdog startup failure qualification
+        if: matrix.case == 'accept'
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/qualify_watchdog_startup_failure.py \
+            --helper "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app/Contents/MacOS/slipstream-update-watchdog"
       - name: Real packaged successor and rollback qualification
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
@@ -1605,6 +1612,9 @@ jobs:
         with:
           name: packaged-update-${{ matrix.case }}-${{ github.sha }}
           path: |
+            ${{ runner.temp }}/watchdog-*/result.json
+            ${{ runner.temp }}/watchdog-*/helper.log
+            ${{ runner.temp }}/watchdog-*/state/*.json
             ${{ runner.temp }}/update-case-*/harness.log
             ${{ runner.temp }}/update-case-*/traffic-baseline.log
             ${{ runner.temp }}/update-case-*/provision-result.json

@@ -114,6 +114,15 @@ separate compatibility gate. The driver compile and harness unit tests do not
 constitute a passed packaged run. AUD-30 requires all three real cases before
 that gate is complete.
 
+The accept runner additionally executes `qualify_watchdog_startup_failure.py`
+against the exact candidate's packaged helper. Isolated journal fixtures cover
+OS spawn refusal and child exit before identity capture. A real helper process
+must restore the old fixture bytes, launch that fixture exactly once, preserve
+terminal failure evidence and remove active transaction residue. This gate
+uses neither a fake ACK nor a mocked helper. Its fixture processes are not the
+real tray and it does not load a LaunchAgent or qualify signed-feed migration.
+It complements rather than replaces the three packaged application cases.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
