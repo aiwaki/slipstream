@@ -11,6 +11,10 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Recovery local build session1217 started for exact runtimed5afa50; log
+  output/aud30-traffic-gate/recovery-local-build.log. Poll this handle, do not
+  duplicate build. Installed2fb0270/5f5ec434 unchanged. Provenance CI35509303661
+  remains live; recovery changes not yet pushed to avoid cancelling it.
 - Recovery lock review found synchronous cache persistence inside global resweep
   lock. Split memory mutation from persistence: ownership+memory commit remains
   atomic, disk save occurs after release. Test acquires lock from another real
