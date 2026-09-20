@@ -2620,3 +2620,23 @@ status only, not a new actual voice call. Excluded every record-layout candidate
 from the runtime strategy registry/ladder; retained as experimental test cases.
 129 focused tests now PASS, including exclusion of unqualified candidates.
 Evidence live-reserves.json and tests-final.log. Full public-media trials pending.
+
+All eight TCP profiles subsequently completed both public avatar and985KB APNG
+objects (16/16, content length satisfied and PNG signature checked,0.21–0.44s).
+Read-only public probes used no user tokens or messages. Diagnostic commands
+were embedded immutable stdlib literals in native authorization, not root imports
+from the user-writable repository. Local tests preserve1MiB payload byte-for-byte.
+Native baseline before install: Discord history loaded and no active call control.
+
+Installed sourcea5a675d via freshce65fe95 at2026-09-20T08:22:26Z, transaction consumed
+NEVER replay. Canonical build/staged/installed PASS; automatic normal Quit proved
+tray absent and launchctl113. Daemon718ce3657dd70b0d7b6282df56b06c2c0fc82f24a827053716bc928ead314bb0.
+Installed concurrent checks9/10 successful; one APNG request failed connecting to
+localhost1080 after7.78s, before any upstream strategy. Preserve that failure;
+subsequent two APNG-only checks both complete984455bytes HTTP2000.718/0.719s.
+This resembles historical AUD-25 startup-localhost symptom but cause unproven.
+No claim of unlimited concurrency or resolution of that transient. Voice-control
+HTTP1010.501/0.307s. Native reload shows history and no message loading error;
+no active call, no messages sent. Sticker-picker AX click did not visibly open,
+so no new native sticker-picker proof. Public sticker payloads fully qualified.
+Evidence output/aud27-reserves/installed*.json, installed.log, native-check.json.

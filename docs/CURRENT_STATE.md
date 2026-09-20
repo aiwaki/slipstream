@@ -10,13 +10,26 @@ file.
 
 ## Current Checkpoint
 
-AUD-27 in progress: sixteen Discord reserve family/layout profiles implemented;
-128 focused tests PASS. Four layouts (TLS handshake/SNI records, TCP header/SNI
-writes), unchanged local-only policy and original TLS transcript. Current installed
-AUD-26 below remains unchanged. Live no-auth voice reserve probe awaiting/completing
-native authorization: output/aud27-reserves/probe-reserves.py; never repeat while
-running. Build/install not started. Preserve user AGENTS.md.
+AUD-27 installeda5a675d63f9e9e53eaf9081d1000e024d1748ae3 viace65fe95 at
+2026-09-20T08:22:26Z; consumed NEVER replay. Build/staged/installed canonical PASS.
+Daemon718ce3657dd70b0d7b6282df56b06c2c0fc82f24a827053716bc928ead314bb0.
+Eight new Discord TCP reserve profiles (two write layouts x four fake families).
+Eight TLS-record candidates timed out live and are excluded from runtime ladder.
+129 scoped tests PASS; eight reserve voice-control trials HTTP1010.24–0.27s;
+16/16 reserve public avatar/APNG trials complete0.21–0.44s. No actual new call,
+stream or YouTube qualification. Native post-install reload showed message history,
+no message-load error/no active call; sticker-picker AX action had no visible effect.
+Installed concurrent probes9/10 passed: one localhost1080 connect timeout before
+upstream use. Two targeted APNG repeats full HTTP200/984455bytes0.718/0.719s.
+This transient resembles earlier AUD-25 startup symptom; cause remains unproven,
+not fixed or attributed to reserve strategies. Installed voice WS1010.501/0.307s.
+Evidence output/aud27-reserves/{tests-final.log,live-reserves.json,live-media.json,
+installed.log,installed-media-parallel.json,installed-apng-recheck.json,
+installed-voice-control.json,native-check.json}. No pending build/admin/probe.
+User AGENTS.md preserved. Next if continuing reliability: investigate localhost
+listener/connect transient separately; expand other mechanisms only with live proof.
 
+Historical prior installed state:
 
 AUD-26 installed5c39283dbed3da0fb5e14779f34f975c498e6795 viac7a059b4 at
 2026-09-20T08:03:24Z; transaction consumed NEVER replay. Canonical build/staged/
