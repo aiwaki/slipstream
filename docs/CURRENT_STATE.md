@@ -43,8 +43,10 @@ and passes on corrected code. All eight tests PASS including live three-path
 full payload (0.73s total). See rust-resolver-pool-*
 logs in output/aud30-traffic-gate. This is updater-only, not a traffic concurrency
 limit. No installed daemon or network settings changed.
-Resolver-pool source committed1e44571. Canonical build running in exec session35601;
-do not restart while live. Next: collect canonical artifact evidence, exact
+Resolver-pool source committed1e44571. Canonical build session35601 finished PASS,
+artifact tree efa0789d80d85e543c43ee95ad0ce1c8ffb58e82f52a0d06ea54522fb7f714c1;
+not installed. Summary output/aud30-traffic-gate/build-resolver-pool-summary.json.
+No running build/admin. Next: exact
 candidate/update lifecycle qualification, negative packaged ACK/rollback path
 and real successor acceptance. Workstation /Applications/Slipstream.app is root-owned
 (stat verified); derive_target intentionally refuses in-app updates to non-user-owned
