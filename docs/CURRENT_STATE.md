@@ -27,8 +27,8 @@ file.
   browser, lifecycle PASS; audit35508641655 PASS. Single-host fault accepted
   candidate; both-host fault left successor alive until deadline then restored
   exact previous tree/tray; both injected DNS fixtures observed and cleaned up.
-- Remote PR376 head0a1fa88 provenance follow-up: CI35509303661 STILL LIVE;
-  audit35509303665 PASS. Do not cancel it merely to push recovery changes.
+- Remote PR376 head0a1fa88 provenance follow-up: CI35509303661 terminal SUCCESS;
+  audit35509303665 PASS. All four packaged cases/browser/lifecycle green.
   Accept and rollback artifacts downloaded to output/aud30-traffic-gate/accept-provenance-0a1fa88/:
   rollback-provenance-0a1fa88/ additionally proves old tray survives; cleanup=[].
   previous-helper1614e68a verified against journal/runtime copy, candidate-helper
@@ -52,8 +52,8 @@ file.
   7b023e11439b1730ec2a038677f69c608b4834ccb29aae136230fae1faf660f7,
   daemon4cc2e8d, main817cce69. NOT installed. No build active.
   Earlier build1217/d5afa50/tree16b14290 is superseded by deadline fix.
-- Next: poll35509303661 (only lifecycle-heavy remains), inspect terminal outcome.
-  When remote run terminal, push recovery changes. Qualify candidate before a NEW
+- Next: recovery changes ready to push after terminal provenance baseline.
+  Inspect new exact-head CI before a fresh workstation replacement. Qualify candidate before a NEW
   one-shot install, then canonical installed evidence and actual application.
   Do not treat these recovery fixes as proof of long streams or sleep/wake.
 
