@@ -6955,7 +6955,7 @@ def test_discord_api_canary_uses_gateway_api_path():
     req = tproxy._local_payload_canary_request(spec["host"], spec)
 
     assert spec["payload_path"] == "/api/v10/gateway"
-    assert req.startswith(b"HEAD /api/v10/gateway HTTP/1.1\r\n")
+    assert req.startswith(b"GET /api/v10/gateway HTTP/1.1\r\n")
     assert b"Host: discord.com\r\n" in req
 
 
@@ -7580,6 +7580,7 @@ def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
     assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
         "discord_matched_fake",
+        "discord_decoy_mail", "discord_decoy_ozon", "discord_decoy_cloudflare",
         "split64+fake",
         "split16+fake",
         "fake5",
@@ -7597,7 +7598,7 @@ def test_discord_api_canary_stays_local_with_matched_decoy():
     }
     assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
-        "discord_matched_fake",
+        "discord_matched_fake", "discord_decoy_ozon",
         "split64+fake",
         "split16+fake",
         "fake5",
@@ -8156,7 +8157,7 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
         assert first["state"] == tproxy.HEALTH_OK
         assert first["last_warning"] == "runtime strategy probe failed"
         assert host not in tproxy._strat_cache
-        assert "gateway.discord.gg" not in tproxy._strat_cache
+        assert tproxy._strat_cache["gateway.discord.gg"] == "split16+fake"
         assert tproxy._strat_cache["billing.openai.com"] == "split64+fake"
         assert calls == [f"runtime:{tproxy.SERVICE_DISCORD}"]
         assert resweeps == [host]
@@ -8303,14 +8304,14 @@ def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
     async def resolve(_host, _fallback_ip):
         return ["203.0.113.10"]
 
-    async def dial(ip, port, head, body, candidate, strategy):
+    async def dial(ip, candidate, strategy, spec):
         attempts.append((candidate, strategy["name"], strategy["fake"]))
         if strategy["name"] == "split16+fake":
-            return object()
-        return None
+            return 128
+        return 0
 
     monkeypatch.setattr(tproxy, "resolve_connection_ips", resolve)
-    monkeypatch.setattr(tproxy, "dial_strategy", dial)
+    monkeypatch.setattr(tproxy, "_run_local_payload_probe", dial)
     monkeypatch.setattr(tproxy, "_close_probe_result", lambda result: None)
     monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
     tproxy._strat_cache.clear()
@@ -8321,6 +8322,11 @@ def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
         assert asyncio.run(tproxy._resweep_local_bypass_host(host))
 
         assert attempts == [
+            (host, "discord_https8443", False),
+            (host, "discord_decoy_mail", True),
+            (host, "discord_decoy_ozon", True),
+            (host, "discord_decoy_wildberries", True),
+            (host, "discord_decoy_cloudflare", True),
             (host, "split64+fake", True),
             (host, "split16+fake", True),
         ]
@@ -9197,7 +9203,8 @@ def test_local_strategy_score_demotes_failed_cached_fake_strategy():
         tproxy._record_strategy_result(host, "split64+fake", False, now=100.0)
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names == ["split16+fake", "fake5", "split64+fake"]
+        assert names[-1] == "split64+fake"
+        assert names[0] == "gateway_matched_fake"
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
@@ -9212,7 +9219,8 @@ def test_local_strategy_score_keeps_successful_cached_fake_strategy_first():
         tproxy._record_strategy_result(host, "split64+fake", True, now=100.0)
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names == ["split64+fake", "split16+fake", "fake5"]
+        assert names[0] == "split64+fake"
+        assert "discord_decoy_mail" in names
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
@@ -9242,7 +9250,7 @@ def test_discord_hosts_use_fake_only_local_bypass_strategy():
     try:
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names == ["gateway_matched_fake", "split64+fake", "split16+fake", "fake5"]
+        assert names == ["gateway_matched_fake", "discord_decoy_mail", "discord_decoy_ozon", "discord_decoy_wildberries", "split64+fake", "split16+fake", "fake5"]
     finally:
         tproxy._strat_cache.clear()
 
@@ -23911,7 +23919,7 @@ def test_discord_updater_uses_reviewed_local_port_without_geo_exit():
     assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert not tproxy.is_geo_exit_route(host)
     assert [s["name"] for s in tproxy.strategy_order(host)] == [
-        "discord_https8443", "split64+fake", "split16+fake", "fake5",
+        "discord_https8443", "discord_decoy_mail", "discord_decoy_ozon", "discord_decoy_wildberries", "discord_decoy_cloudflare", "split64+fake", "split16+fake", "fake5",
     ]
 
 

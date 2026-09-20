@@ -10,6 +10,14 @@ file.
 
 ## Current Checkpoint
 
+AUD-26 recurrence prevention candidate: independent Discord matched decoy families,
+ranked preferred candidates, recent-failure demotion without admission blocking,
+exact-host invalidation, full public API/PNG and validated WebSocket canaries,
+modern TLS payload-qualified Discord resweep.102 focused tests PASS;4 unrelated
+failures confirmed on pre-change baseline (details ROUTING_RESEARCH). Live mail/
+ozon voice alternatives101 in0.2s. Build next; preserve user AGENTS.md. Current
+installed source remains eeff76c/transaction2ad62192 below until new replacement.
+
 Voice follow-up installedeeff76c1a2515f9bcd5e99ed9b4afe0d58b5a563 via2ad62192
 at2026-09-19T21:31:36Z; consumed NEVER replay. Build/staged/installed-voice
 canonical PASS. Daemon187c480aff2689e2f0d7bcb71f52b900392514accc7bfadc61ad5fac2f2c5f5e.

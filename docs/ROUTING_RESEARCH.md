@@ -2565,3 +2565,23 @@ it does not qualify Discord streaming or YouTube. Recurrence prevention already
 includes numbered regional voice names and local circuit isolation. Remaining
 risk: static decoy choices and unqualified additional endpoints/transport flows;
 do not attribute prior failures to a proven external policy change without evidence.
+
+## AUD-26 recurrence prevention
+
+Source inspection found fallback fake strategies all reused the same host fake,
+preferred matched strategy bypassed ranking, Discord runtime cache invalidation
+affected other hosts, CDN checks accepted byte prefixes, and resweep used legacy
+TLS-only proof. Fixed those boundaries; added independent family strategies,
+full-object/API and voice upgrade qualification, exact-host recovery.
+102 focused tests PASS, including controlled incomplete PNG -> distinct strategy
+-> full object -> cached winner, and unchanged neighboring host. Expanded two
+suites:959 passed/7 failed;3 changed assertions subsequently corrected and passed.
+Other4 failures (two geo-exit relay mocks and two semantic-probe mocks) reproduced
+against unmodified HEAD in isolated in-memory baseline; not regressions or claimed
+green. Logs output/aud26-local-recovery/tests-{scoped,final}.log and
+baseline-known-failures.log. Graph transport unavailable, bounded reads used.
+
+Live voice alternative decoys mail and ozon each returned101 in0.2s, no auth/audio.
+Initial collector falsely missed SYN due ECN flags SEW/S.E; fixing diagnostic-only
+parser produced evidence voice-alternatives-ecn.json. Runtime uses packet fields,
+not that diagnostic regex. Installation and actual client checks pending.

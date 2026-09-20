@@ -596,3 +596,23 @@ fakes. The fake substitutes the label minus its last digit plus `.wildberries.ru
 preserving byte length. This name is never resolved or contacted; real TLS and
 certificate validation are unchanged. Other names are excluded. UDP voice
 policy is unchanged, and Discord remains local-only without Geph.
+
+## AUD-26 adaptive Discord local recovery
+
+Discord receives independently selectable equal-length matched fake SNI families
+(mail.ru, ozon.ru, wildberries.ru, cloudflare.com), including previously unseen
+Discord subdomains. Only the fake is changed; these names are never resolved or
+contacted. Existing preferred exact substitutions stay first without evidence,
+but ranking includes them, cached winners and recent failures. A recent failure
+demotes a candidate for ranking only (60s), never denies a connection. All existing
+per-request attempt bounds remain; no new global connection throttle is added.
+Protected transport close/timeouts teach failures; exact-host failures no longer
+erase other Discord winners. Unknown/YouTube/Geph policy is unchanged.
+
+Public API/CDN/media canaries require complete successful HTTP objects (JSON or
+PNG), capped at2MiB and the existing8s deadline. Gateway and observed voice
+canaries validate full101 headers and the request-specific WebSocket accept.
+Discord resweep uses modern TLS plus application proof rather than synthetic
+TLS1.2 hello bytes. No user credentials, messages, voice authentication or audio
+are generated. Recovery changes later connections; already delivered encrypted
+application data cannot safely be replayed transparently.

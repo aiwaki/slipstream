@@ -3016,7 +3016,10 @@ def note_local_bypass_runtime_result(
     actions = reduce_connection_outcome(outcome)
     for action in actions:
         if action.kind == RECOVERY_INVALIDATE_STRATEGY:
-            clear_route_strategy_cache(group=action.target)
+            if group == SERVICE_DISCORD:
+                clear_route_strategy_cache(host=outcome.host)
+            else:
+                clear_route_strategy_cache(group=action.target)
 
     if failed_strategy:
         _record_strategy_result(outcome.host, failed_strategy, False)
@@ -11084,6 +11087,7 @@ CANARY_SPECS = (
         "group": SERVICE_DISCORD,
         "host": "discord.com",
         "payload_path": "/api/v10/gateway",
+        "payload_method": "GET", "payload_complete": "json",
     },
     {
         "name": "discord_gateway",
@@ -11098,6 +11102,18 @@ CANARY_SPECS = (
         "payload_method": "GET",
         "payload_path": "/embed/avatars/0.png",
         "payload_min_bytes": 512,
+        "payload_complete": "png",
+    },
+    {
+        "name": "discord_media", "group": SERVICE_DISCORD,
+        "host": "media.discordapp.net", "payload_method": "GET",
+        "payload_path": "/stickers/1228092333061443654.png",
+        "payload_complete": "png",
+    },
+    {
+        "name": "discord_voice_control", "group": SERVICE_DISCORD,
+        "host": "", "observed_domains": ("discord.media",),
+        "payload_probe": "websocket_upgrade", "websocket_version": 8,
     },
     {
         "name": "youtube_web",
@@ -11169,7 +11185,7 @@ def _local_payload_canary_request(host, spec=None):
     if spec and spec.get("payload_probe") == "websocket_upgrade":
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         return (
-            "GET /?v=10&encoding=json HTTP/1.1\r\n"
+            f"GET /?v={8 if spec.get('websocket_version') == 8 else 10}&encoding=json HTTP/1.1\r\n"
             f"Host: {host}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
@@ -11189,6 +11205,7 @@ def _local_payload_canary_request(host, spec=None):
         f"Host: {host}\r\n"
         f"User-Agent: SlipstreamRouteCanary/1\r\n"
         f"Accept: */*\r\n"
+        f"Accept-Encoding: identity\r\n"
         f"Cache-Control: no-cache\r\n"
         f"Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
@@ -11754,6 +11771,59 @@ def _local_payload_ssl_context():
         return ssl.create_default_context()
 
 
+def _validated_local_canary_payload(data, spec, request, *, closed=False):
+    """Qualify a full public object or the exact WebSocket upgrade, never a prefix."""
+    if len(data) > 2 * 1024 * 1024 or b"\r\n\r\n" not in data:
+        return 0
+    header = data.split(b"\r\n\r\n", 1)[0]
+    status = header.split(b"\r\n", 1)[0].split()
+    if len(status) < 2:
+        return 0
+    if spec.get("payload_probe") == "websocket_upgrade":
+        if status[1] != b"101" or len(header) > 4096:
+            return 0
+        headers = {}
+        for line in header.split(b"\r\n")[1:]:
+            name, separator, value = line.partition(b":")
+            if not separator or name.lower() in headers:
+                return 0
+            headers[name.lower()] = value.strip()
+        key = re.search(rb"Sec-WebSocket-Key: ([^\r]+)", request)
+        if key is None:
+            return 0
+        accept = base64.b64encode(hashlib.sha1(
+            key.group(1) + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
+        if (headers.get(b"sec-websocket-accept") != accept
+                or headers.get(b"upgrade", b"").lower() != b"websocket"
+                or b"upgrade" not in [v.strip().lower() for v in
+                                       headers.get(b"connection", b"").split(b",")]):
+            return 0
+        return LOCAL_PAYLOAD_CANARY_MIN_BYTES
+    if not status[1].isdigit() or not 200 <= int(status[1]) < 300:
+        return 0
+    body = http_response_body(data, stream_closed=closed, truncated=False)
+    if body is None:
+        return 0
+    kind = spec.get("payload_complete")
+    if kind == "png" and not body.startswith(b"\x89PNG\r\n\x1a\n"):
+        return 0
+    if kind == "json":
+        try:
+            json.loads(body)
+        except (ValueError, UnicodeError):
+            return 0
+    return max(len(body), LOCAL_PAYLOAD_CANARY_MIN_BYTES)
+
+
+def _discord_canary_spec(host):
+    for spec in CANARY_SPECS:
+        if spec.get("host") == host and spec["group"] == SERVICE_DISCORD:
+            return spec
+    if host.endswith(".discord.media") or (host.startswith("gateway-") and host.endswith(".discord.gg")):
+        return {"payload_probe": "websocket_upgrade", "websocket_version": 8 if host.endswith(".discord.media") else 10}
+    return {"payload_method": "GET", "payload_complete": "body"}
+
+
 def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
     """Complete a real TLS request over the candidate local-bypass strategy.
 
@@ -11777,6 +11847,8 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
     )
     min_bytes = _local_payload_min_bytes(spec)
     observed = bytearray()
+    strict = expect_websocket_upgrade or bool((spec or {}).get("payload_complete"))
+    request = _local_payload_canary_request(host, spec)
     try:
         sock = socket.create_connection((ip, upstream_port), timeout=timeout)
         sock.settimeout(timeout)
@@ -11794,7 +11866,9 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                         if strat.get("fake") and out[:1] == b"\x16":
                             try:
                                 src_ip, src_port = sock.getsockname()
-                                inject_fake_for_host(host, src_ip, src_port, ip, 443, out)
+                                options = ({"decoy_family": strat["decoy_family"]}
+                                           if strat.get("decoy_family") else {})
+                                inject_fake_for_host(host, src_ip, src_port, ip, 443, out, **options)
                             except Exception:
                                 pass
                         if out[:1] == b"\x16":
@@ -11809,7 +11883,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                     raise IOError("eof in handshake")
                 inbio.write(data)
 
-        obj.write(_local_payload_canary_request(host, spec))
+        obj.write(request)
         while True:
             out = outbio.read()
             if not out:
@@ -11823,6 +11897,8 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
             except socket.timeout:
                 break
             if not data:
+                if strict:
+                    return _validated_local_canary_payload(bytes(observed), spec, request, closed=True)
                 break
             inbio.write(data)
             while True:
@@ -11831,17 +11907,17 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                 except ssl.SSLWantReadError:
                     break
                 except ssl.SSLError:
-                    return total
+                    return 0 if strict else total
                 if not dec:
                     break
                 total += len(dec)
-                if expect_websocket_upgrade:
+                if strict:
                     observed.extend(dec)
-                    if len(observed) > 4096:
-                        del observed[:-4096]
-                    first_line = bytes(observed).split(b"\r\n", 1)[0]
-                    if first_line.startswith(b"HTTP/1.1 101 "):
-                        return max(total, LOCAL_PAYLOAD_CANARY_MIN_BYTES)
+                    if len(observed) > 2 * 1024 * 1024:
+                        return 0
+                    valid = _validated_local_canary_payload(bytes(observed), spec, request)
+                    if valid:
+                        return valid
                     continue
                 if total >= min_bytes:
                     return total
@@ -11853,7 +11929,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                 sock.close()
             except Exception:
                 pass
-    if expect_websocket_upgrade:
+    if strict:
         return 0
     return total
 
@@ -12021,7 +12097,7 @@ async def _run_local_bypass_canary(spec):
             "dns failed",
             soft=bool(spec.get("soft")),
         )
-        clear_route_strategy_cache(group=spec["group"])
+        clear_route_strategy_cache(host=host)
         if spec.get("soft"):
             return "warning"
         return False
@@ -12069,7 +12145,7 @@ async def _run_local_bypass_canary(spec):
             return True
         if not strat_ok:
             _record_strategy_result(host, strat["name"], False)
-    clear_route_strategy_cache(group=spec["group"])
+    clear_route_strategy_cache(host=host)
     if payload_failed:
         reason = "payload throughput below threshold" if payload_short else "payload probe failed"
         canary_health_event(
@@ -12117,9 +12193,15 @@ async def _resweep_local_bypass_host(host):
         strat_ok = False
         for ip in ips[:ip_attempt_limit(h)]:
             attempts += 1
-            result = await dial_strategy(ip, 443, head, body, h, strat)
+            if policy["service_group"] == SERVICE_DISCORD:
+                spec = _discord_canary_spec(h)
+                payload = await _run_local_payload_probe(ip, h, strat, spec)
+                result = payload >= _local_payload_min_bytes(spec)
+            else:
+                result = await dial_strategy(ip, 443, head, body, h, strat)
+                if result:
+                    _close_probe_result(result)
             if result:
-                _close_probe_result(result)
                 strat_ok = True
                 _record_strategy_result(h, strat["name"], True)
                 if _strat_cache.get(h) != strat["name"]:
@@ -14431,6 +14513,10 @@ STRATEGIES = [
     {"name": "discord_https8443", "cap": None, "fake": False},
     {"name": "discord_matched_fake", "cap": None, "fake": True},
     {"name": "gateway_matched_fake", "cap": None, "fake": True},
+    {"name": "discord_decoy_ozon", "cap": None, "fake": True, "decoy_family": "ozon"},
+    {"name": "discord_decoy_mail", "cap": None, "fake": True, "decoy_family": "mail"},
+    {"name": "discord_decoy_wildberries", "cap": None, "fake": True, "decoy_family": "wildberries"},
+    {"name": "discord_decoy_cloudflare", "cap": None, "fake": True, "decoy_family": "cloudflare"},
     {"name": "split64",      "cap": 64,   "fake": False},
     {"name": "split64+fake", "cap": 64,   "fake": True},
     {"name": "split16",      "cap": 16,   "fake": False},
@@ -14503,6 +14589,7 @@ def _record_strategy_result(host, name, ok, now=None):
     item = per_host.setdefault(name, {"ok": 0, "fail": 0, "last": 0.0})
     item["ok" if ok else "fail"] += 1
     item["last"] = now
+    item["last_ok"] = bool(ok)
     _strat_scores.move_to_end(host)
     while len(_strat_scores) > STRAT_SCORE_MAX_HOSTS:
         _strat_scores.popitem(last=False)
@@ -14566,6 +14653,8 @@ def _strategy_rank(host, name, base_index, cached, now):
         age = max(0.0, now - item.get("last", now))
         age_ratio = age / STRAT_SCORE_AGE_BONUS_AFTER
         score += min(STRAT_SCORE_AGE_BONUS_MAX, age_ratio * STRAT_SCORE_AGE_BONUS_MAX)
+        if is_discord_host(host) and item.get("last_ok") is False and age < 60:
+            score -= 1.0
     else:
         score = 0.5
     if name == cached:
@@ -14614,7 +14703,16 @@ DISCORD_MATCHED_DECOYS = {
 
 
 
-def _discord_matched_substitute(host):
+def _discord_matched_substitute(host, family=None):
+    if family is not None:
+        suffix = {"mail": ".mail.ru", "ozon": ".ozon.ru", "wildberries": ".wildberries.ru",
+                  "cloudflare": ".cloudflare.com"}.get(family)
+        if suffix is None or not is_discord_host(host):
+            return None
+        width = len(host) - len(suffix)
+        if not 1 <= width <= 63:
+            return None
+        return ("w" * width + suffix).encode("ascii")
     substitute = DISCORD_MATCHED_DECOYS.get(host)
     if substitute is not None:
         return substitute
@@ -14661,16 +14759,18 @@ def strategy_order(host):
             if policy["service_group"] == SERVICE_DISCORD
             else YOUTUBE_CONTROL_STRATS
         )
-        names = _rank_strategy_names(h, names)
-        if h == "gateway.discord.gg":
-            names = ["gateway_matched_fake"] + names
-        if _discord_matched_substitute(h) is not None and h != "gateway.discord.gg":
-            names = ["discord_matched_fake"] + names
-        if h in DISCORD_HTTPS8443_HOSTS:
-            # Same endpoint and end-to-end TLS, via its supported HTTPS port.
-            # 443 can return a ServerHello and still blackhole the asset stream.
-            names = ["discord_https8443"] + names
-        return [STRAT_BY_NAME[n] for n in names]
+        if policy["service_group"] == SERVICE_DISCORD:
+            preferred = (["gateway_matched_fake"] if h == "gateway.discord.gg"
+                         else ["discord_matched_fake"] if _discord_matched_substitute(h)
+                         else [])
+            primary = _discord_matched_substitute(h)
+            alternatives = ["discord_decoy_" + family
+                            for family in ("mail", "ozon", "wildberries", "cloudflare")
+                            if _discord_matched_substitute(h, family) not in (None, primary)]
+            names = preferred + alternatives + names
+            if h in DISCORD_HTTPS8443_HOSTS:
+                names = ["discord_https8443"] + names
+        return [STRAT_BY_NAME[n] for n in _rank_strategy_names(h, names)]
     win = _strat_cache.get(h)
     if win in STRAT_BY_NAME:
         names = [win] + [n for n in GENERAL_STRATS if n != win]
@@ -14830,7 +14930,7 @@ def inject_fake_poison(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats
         _l3send(pkt)
 
 
-def _discord_matched_decoy(first_flight):
+def _discord_matched_decoy(first_flight, family=None):
     """Clone only a complete reviewed Discord ClientHello; never modify the real flight."""
     if not isinstance(first_flight, bytes) or not 5 < len(first_flight) <= 65535:
         return None
@@ -14846,7 +14946,7 @@ def _discord_matched_decoy(first_flight):
         offset = end
     body = b"".join(records)
     host_name = parse_sni(body)
-    substitute = _discord_matched_substitute(host_name)
+    substitute = _discord_matched_substitute(host_name, family)
     if substitute is None:
         return None
     host = host_name.encode("ascii")
@@ -14859,7 +14959,7 @@ def _discord_matched_decoy(first_flight):
     return first_flight[:3] + len(fake).to_bytes(2, "big") + fake
 
 
-def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6, first_flight=None):
+def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6, first_flight=None, decoy_family=None):
     """Send a Discord decoy bound to this observed TCP handshake.
 
     Negotiated timestamps allow server-side PAWS rejection; without timestamp
@@ -14883,7 +14983,8 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
         options = [("Timestamp", ((ent["client_ts"] - 60000) & 0xffffffff,
                                   ent["server_ts"]))]
         ttl = 64
-    matched = _discord_matched_decoy(first_flight) if options else None
+    matched = (_discord_matched_decoy(first_flight, decoy_family) if decoy_family else
+               _discord_matched_decoy(first_flight)) if options else None
     payload = matched or _DISCORD_FAKE_CH
     # Each injected packet fits the previously qualified small-MTU boundary.
     # Sequence offsets preserve reassembly; PAWS rejection applies to every part.
@@ -14901,8 +15002,12 @@ def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=
             _l3send(pkt)
 
 
-def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port, first_flight=None):
+def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port, first_flight=None, decoy_family=None):
     if is_discord_host(host):
+        if decoy_family is not None:
+            inject_fake_decoy(src_ip, src_port, dst_ip, dst_port,
+                             first_flight=first_flight, decoy_family=decoy_family)
+            return
         if _discord_matched_substitute(normalize_host(host)) is not None and first_flight is not None:
             inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, first_flight=first_flight)
         else:
@@ -18560,7 +18665,7 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     return None
 
 
-async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0):
+async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0, decoy_family=None):
     """Like dial_and_probe but injects a low-TTL decoy ClientHello on the real
     4-tuple BEFORE the real flight (zapret 'fake' — for deep-reassembly SNIs)."""
     connected = False
@@ -18578,9 +18683,10 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         s = up_w.get_extra_info("socket")
         src_ip, src_port = s.getsockname()
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            _POOL, inject_fake_for_host, host, src_ip, src_port, real_ip, port, first_blob
-        )
+        args = (host, src_ip, src_port, real_ip, port, first_blob)
+        if decoy_family is not None:
+            args += (decoy_family,)
+        await loop.run_in_executor(_POOL, inject_fake_for_host, *args)
         up_w.write(first_blob)
         await up_w.drain()
         flight_sent = True
@@ -18623,7 +18729,8 @@ async def dial_strategy(ip, port, head, body, host, strat):
             return None
         return await dial_and_probe(ip, upstream_port, blob)
     if strat["fake"]:
-        return await dial_and_probe_fake(ip, port, blob, host=host)
+        options = {"decoy_family": strat["decoy_family"]} if strat.get("decoy_family") else {}
+        return await dial_and_probe_fake(ip, port, blob, host=host, **options)
     return await dial_and_probe(ip, port, blob)
 
 
@@ -20724,6 +20831,13 @@ async def _handle_impl(reader, writer):
                 strat_ok = True
                 _record_strategy_result(host, strat["name"], True)
             if not strat_ok:
+                if route_class == ROUTE_LOCAL_BYPASS and strategy_outcomes and all(
+                    outcome in {ROUTE_PROBE_CLOSED, ROUTE_PROBE_TIMEOUT}
+                    for outcome in strategy_outcomes.values()
+                ):
+                    _record_strategy_result(host, strat["name"], False)
+                    if _strat_cache.get(host) == strat["name"]:
+                        _strat_cache.pop(host, None)
                 strategy_closed = bool(
                     route_class == ROUTE_UNKNOWN
                     and _probe_attempts_confirm_zero_payload(
