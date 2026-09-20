@@ -11,6 +11,15 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
+- Stage2 second race confirmed/fixed: superseded DNS/payload success/failure
+  previously published strategy outcomes after replacement (3 regression failures).
+  Scheduled attempts now carry expected_start; ownership checks before/after
+  awaits and atomic check+publication under resweep RLock suppress stale writes.
+  Positive current-owner case still records winner/removes dead mark.12 focused
+  tests PASS, evidence resweep-publication-{before,after}.log. Not built/installed.
+  Next review lock ordering/publication side effects, then scoped runtime tests
+  and build/install qualification. Remote provenance CI35509303661 still live
+  without failures; do not cancel to push recovery changes.
 - Stage2 recovery patch prepared: stale resweep finally releases only its own
   monotonic-start slot, preserving a replacement worker. Regression covers both
   success and exception of old worker:2 failures before,8 focused tests PASS after

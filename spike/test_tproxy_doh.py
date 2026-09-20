@@ -8317,7 +8317,7 @@ def test_stale_resweep_completion_preserves_replacement_owner(monkeypatch, old_r
         def start(self):
             pass
 
-    def probe(host):
+    def probe(host, **kwargs):
         if old_raises:
             raise RuntimeError("old worker failed")
 
@@ -8336,11 +8336,58 @@ def test_stale_resweep_completion_preserves_replacement_owner(monkeypatch, old_r
     # Past the rate cooldown, but the replacement is still within its active lease.
     assert not tproxy.schedule_local_bypass_resweep(
         host, now=replacement + tproxy.LOCAL_BYPASS_RESWEEP_COOLDOWN + 1)
-    monkeypatch.setattr(tproxy, "_run_local_bypass_resweep", lambda host: None)
+    monkeypatch.setattr(tproxy, "_run_local_bypass_resweep", lambda host, **kwargs: None)
     queued[1]()
     assert host not in tproxy._local_bypass_resweep_active
     assert tproxy.schedule_local_bypass_resweep(
         host, now=replacement + tproxy.LOCAL_BYPASS_RESWEEP_COOLDOWN + 2)
+
+
+@pytest.mark.parametrize("superseded_at", ["dns", "payload_success", "payload_failure", "none"])
+def test_superseded_resweep_cannot_publish_strategy_results(monkeypatch, superseded_at):
+    host = "updates.discord.com"
+    queued, recorded, remembered, probes = [], [], [], []
+
+    class QueuedThread:
+        def __init__(self, *, target, **kwargs):
+            queued.append(target)
+        def start(self):
+            pass
+
+    def replace():
+        assert tproxy.schedule_local_bypass_resweep(
+            host, now=101.0 + tproxy.LOCAL_BYPASS_RESWEEP_STALE_AFTER)
+
+    async def resolve(*args):
+        if superseded_at == "dns":
+            replace()
+        return ["203.0.113.10"]
+
+    async def probe(*args):
+        probes.append(True)
+        if superseded_at in ("payload_success", "payload_failure") and len(probes) == 1:
+            replace()
+        return 0 if superseded_at == "payload_failure" else 1000000
+
+    monkeypatch.setattr(tproxy.threading, "Thread", QueuedThread)
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", resolve)
+    monkeypatch.setattr(tproxy, "_run_local_payload_probe", probe)
+    monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *a, **k: recorded.append(a))
+    monkeypatch.setattr(tproxy, "remember_strategy", lambda *a: remembered.append(a))
+    tproxy._dead[host] = 999.0
+    assert tproxy.schedule_local_bypass_resweep(host, now=100.0)
+    queued[0]()
+    if superseded_at == "none":
+        assert len(recorded) == len(remembered) == len(probes) == 1
+        assert host not in tproxy._dead
+        assert host not in tproxy._local_bypass_resweep_active
+        assert len(queued) == 1
+        return
+    assert recorded == []
+    assert remembered == []
+    assert tproxy._dead[host] == 999.0
+    assert len(probes) == (0 if superseded_at == "dns" else 1)
+    assert len(queued) == 2
 
 
 def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
@@ -8386,7 +8433,7 @@ def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
 
 
 def test_local_bypass_resweep_contains_background_probe_errors(monkeypatch):
-    async def broken(_host):
+    async def broken(_host, **kwargs):
         raise OSError("probe unavailable")
 
     monkeypatch.setattr(tproxy, "_resweep_local_bypass_host", broken)

@@ -12186,12 +12186,21 @@ async def _run_local_bypass_canary(spec):
     return False
 
 
-async def _resweep_local_bypass_host(host):
+async def _resweep_local_bypass_host(host, expected_start=None):
     h = normalize_host(host)
     policy = route_policy(h)
     if not h or not _protected_local_runtime_policy(policy):
         return False
+    def owns_attempt():
+        return expected_start is None or _local_bypass_resweep_active.get(h) == expected_start
+
+    with _local_bypass_resweep_lock:
+        if not owns_attempt():
+            return False
     ips = await resolve_connection_ips(h, None)
+    with _local_bypass_resweep_lock:
+        if not owns_attempt():
+            return False
     if not ips:
         return False
 
@@ -12202,6 +12211,9 @@ async def _resweep_local_bypass_host(host):
             continue
         strat_ok = False
         for ip in ips[:ip_attempt_limit(h)]:
+            with _local_bypass_resweep_lock:
+                if not owns_attempt():
+                    return False
             attempts += 1
             if policy["service_group"] == SERVICE_DISCORD:
                 spec = _discord_canary_spec(h)
@@ -12211,25 +12223,33 @@ async def _resweep_local_bypass_host(host):
                 result = await dial_strategy(ip, 443, head, body, h, strat)
                 if result:
                     _close_probe_result(result)
-            if result:
-                strat_ok = True
-                _record_strategy_result(h, strat["name"], True, payload=policy["service_group"] == SERVICE_DISCORD)
-                if _strat_cache.get(h) != strat["name"]:
-                    remember_strategy(h, strat["name"])
-                _dead.pop(h, None)
-                return True
+            # DNS and probes can outlive this attempt. Check ownership and
+            # publish atomically with respect to scheduling its replacement.
+            with _local_bypass_resweep_lock:
+                if not owns_attempt():
+                    return False
+                if result:
+                    strat_ok = True
+                    _record_strategy_result(h, strat["name"], True, payload=policy["service_group"] == SERVICE_DISCORD)
+                    if _strat_cache.get(h) != strat["name"]:
+                        remember_strategy(h, strat["name"])
+                    _dead.pop(h, None)
+                    return True
             if attempts >= 7:
                 break
         if not strat_ok:
-            _record_strategy_result(h, strat["name"], False, payload=policy["service_group"] == SERVICE_DISCORD)
+            with _local_bypass_resweep_lock:
+                if not owns_attempt():
+                    return False
+                _record_strategy_result(h, strat["name"], False, payload=policy["service_group"] == SERVICE_DISCORD)
         if attempts >= 7:
             break
     return False
 
 
-def _run_local_bypass_resweep(host):
+def _run_local_bypass_resweep(host, expected_start=None):
     try:
-        return asyncio.run(_resweep_local_bypass_host(host))
+        return asyncio.run(_resweep_local_bypass_host(host, expected_start=expected_start))
     except Exception as exc:
         if VERBOSE:
             group = route_policy(host)["service_group"]
@@ -12259,7 +12279,10 @@ def schedule_local_bypass_resweep(host, now=None, runner=None):
 
     def run():
         try:
-            (runner or _run_local_bypass_resweep)(h)
+            if runner is not None:
+                runner(h)
+            else:
+                _run_local_bypass_resweep(h, expected_start=now)
         finally:
             with _local_bypass_resweep_lock:
                 # A stale worker can finish after its replacement has started.
