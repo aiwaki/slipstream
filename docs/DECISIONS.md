@@ -6,7 +6,7 @@ survive across sessions and agents.
 ## AUD-29 explicit loopback proxy PF lifecycle
 
 Direct TCP connections between 127.0.0.1 endpoints or between ::1 endpoints,
-with one endpoint the Slipstream proxy port, use bidirectional stateless rules
+with one endpoint the Slipstream proxy port, use ordinary bidirectional TCP state rules without reply-to
 before transparent reply-to. Remote translated HTTPS keeps its existing stateful
 return path. No global PF state flush, timeout change or UDP rule is allowed.
 

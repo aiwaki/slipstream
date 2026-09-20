@@ -2698,3 +2698,14 @@ Native kernel accepted exact-port ioctl on an unused temporary bound port;
 73 affected tests passed, including selector masks/ports, live-socket veto,
 ordering, cancellation and existing PF contracts. Evidence output/aud29-pf-loopback.
 Installed and exact previously failing tuple qualification remain pending.
+
+First installed candidate3313895c/5b1b938 was REJECTED: stateless loopback
+connections timed out, all10 proxy media probes failed before TCP connection.
+Canonical artifact pass was not behavior proof. Normal Quit removed those rules.
+The netstat subprocess also returned empty output, causing the intended fail-closed
+cleanup veto; lsof correctly returns bound CLOSED and live socket states.
+Native rule comparison after readiness: stateless timeout1001ms, ordinary keep
+state without reply-to success0.217ms, original reply-to success0.166ms. Corrected
+candidate therefore retains TCP state and removes only inappropriate reply-to
+from direct loopback traffic. Transparent remote traffic keeps reply-to.
+Evidence rule-comparison.json, rejected-stateless-*.json, pf-after-failure.json.

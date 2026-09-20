@@ -370,16 +370,23 @@ def clear_inactive_loopback_proxy_states(runner, port, *, opener=None, ioctl_fn=
     """
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("invalid proxy port")
-    result = runner("netstat", "-an", "-p", "tcp")
-    if result.returncode or "Local Address" not in result.stdout or "Foreign Address" not in result.stdout:
+    result = runner("/usr/sbin/lsof", "-nP", f"-iTCP:{port}", "-FpnT")
+    if result.stderr or result.returncode not in (0, 1):
         return False
-    endpoints = {f"127.0.0.1.{port}", f"::1.{port}"}
-    for line in result.stdout.splitlines():
-        columns = line.split()
-        if columns and columns[0] in ("tcp4", "tcp6"):
-            if len(columns) < 6:
+    if result.returncode == 1:
+        if result.stdout.strip():
+            return False
+    else:
+        # lsof emits one f/n/TST record per socket, including our bound CLOSED
+        # sockets. Missing state or unfamiliar output is never absence proof.
+        records = re.split(r"(?m)^f[^\n]*\n", result.stdout)[1:]
+        if not records:
+            return False
+        for record in records:
+            states = re.findall(r"(?m)^TST=(\S+)$", record)
+            if not re.search(r"(?m)^n.+$", record) or len(states) != 1:
                 return False
-            if endpoints.intersection(columns[3:5]) and columns[5] not in ("TIME_WAIT", "CLOSED"):
+            if states[0] not in ("TIME_WAIT", "CLOSED"):
                 return False
     opener = open if opener is None else opener
     ioctl_fn = fcntl.ioctl if ioctl_fn is None else ioctl_fn

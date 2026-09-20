@@ -181,10 +181,10 @@ DISPOSABLE_WAKE_MARKER_PREFIX = "slipstream-lifecycle-wake-"
 PF_RULES = """\
 rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 port 443 -> 127.0.0.1 port {port}
 rdr on lo0 inet6 proto tcp from any to ! ::1/128 port 443 -> ::1 port {port}
-pass quick on lo0 inet proto tcp from 127.0.0.1 to 127.0.0.1 port {port} flags any no state
-pass quick on lo0 inet proto tcp from 127.0.0.1 port {port} to 127.0.0.1 flags any no state
-pass quick on lo0 inet6 proto tcp from ::1 to ::1 port {port} flags any no state
-pass quick on lo0 inet6 proto tcp from ::1 port {port} to ::1 flags any no state
+pass quick on lo0 inet proto tcp from 127.0.0.1 to 127.0.0.1 port {port} flags S/SA keep state
+pass quick on lo0 inet proto tcp from 127.0.0.1 port {port} to 127.0.0.1 flags S/SA keep state
+pass quick on lo0 inet6 proto tcp from ::1 to ::1 port {port} flags S/SA keep state
+pass quick on lo0 inet6 proto tcp from ::1 port {port} to ::1 flags S/SA keep state
 pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
 pass out quick on lo0 inet proto tcp from any to any port 443 no state
 pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp from any to 127.0.0.1 port {port}

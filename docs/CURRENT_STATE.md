@@ -10,11 +10,13 @@ file.
 
 ## Current Checkpoint
 
-AUD-29 candidate: direct-loopback proxy traffic stateless before reply-to;
-startup exact-loopback TCP/service-port stale-state migration only without live
-kernel sockets. 73 scoped tests PASS; native unused-port ioctl and PF syntax PASS.
-Evidence output/aud29-pf-loopback. Build/install/exact49893 regression pending.
-Installed AUD-27 ce65fe95 unchanged; never replay transaction. User AGENTS preserved.
+AUD-29 first candidate5b1b938 installed via3313895c (CONSUMED NEVER replay),
+but rejected live: stateless proxy connections all timed out. Normal Quit requested.
+Correction uses normal TCP state without reply-to for direct loopback; native
+comparison0.217ms vs stateless timeout. lsof replaces empty netstat snapshot.
+Corrected tests/build/install pending. Evidence output/aud29-pf-loopback.
+Current installed binary50845f5bbd409503ed47e1d4e94a83f20d21ddce0583a25312370d4011ffc137.
+User AGENTS preserved. Do not claim first candidate fixed the problem.
 
 AUD-28 diagnosis complete, no code/network mutation. Exact localhost timeout
 reproduces by binding source127.0.0.1:49893 toproxy1080; same source tocontrol and
