@@ -30,19 +30,30 @@ they do not describe the currently downloadable `.22` as carrying `.23` code.
 
 The `.23` installer itself is transactional. After signature and bundle
 validation, a separately signed non-AppKit watchdog durably records a
-same-volume staged app and verified sibling backup before replacement. It
-accepts the successor only when exact path, version, process identity, tray
-startup, owned daemon, and advancing heartbeat agree, and fresh complete public
-payloads pass through explicit IPv4/IPv6 local proxy and transparent HTTPS. The
-payload proof is bound to the attested daemon PID and digest, expires after five
-seconds, and is consumed under the lifecycle lock. A probe has a twelve-second
-budget; failed or unavailable traffic leaves the successor unacknowledged within
-the existing sixty-second watchdog window. Otherwise it restores the exact
-previous bundle. The traffic gate is a source candidate until packaged acceptance
-and negative rollback qualification pass; a remote outage can cause a conservative
-rollback and is not itself proof of a defective update. The journal and user LaunchAgent are owner-private,
-restart-safe, and removed only after a terminal acknowledgement or recorded
-rollback; neither path uses `open` or activates the app.
+same-volume staged app and verified sibling backup before replacement. The
+published successor checks exact path, version, process identity, tray startup,
+owned daemon and advancing heartbeat. It does not contain the AUD-30 payload
+gate described below.
+
+The AUD-30 candidate additionally requires fresh complete public payloads
+through explicit IPv4/IPv6 local proxy and transparent HTTPS. The proof is bound
+to the attested daemon PID and digest, expires after five seconds, and is
+consumed under the lifecycle lock. A probe has a twelve-second budget; failed
+or unavailable traffic leaves the successor unacknowledged within the existing
+sixty-second watchdog window. A remote outage can cause a conservative rollback
+and is not itself proof of a defective update. The journal and user LaunchAgent
+are owner-private, restart-safe, and removed only after a terminal
+acknowledgement or recorded rollback; neither path uses `open` or activates the
+app. Real current-preparer acceptance and both rollback cases passed in
+CI35505371770; this is not installed or signed-feed transition evidence.
+
+Legacy migration remains a release gate: the published `.23` preparer omits
+`AbandonProcessGroup`, and its watchdog launches both successor and restored
+tray into its own process group. Candidate-preparer qualification uses the
+corrected LaunchAgent and therefore cannot prove either terminal tray survives
+an update initiated by the shipped `.23` preparer. Fixing only successor startup
+would not cover restoration of the unchanged old tray. The public transition
+must qualify both outcomes through the legacy preparation path before shipping.
 
 After a preview is published and its remote tag, state, identity, asset set and
 digests are verified, the immediately preceding preview is marked as archival
