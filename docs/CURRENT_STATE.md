@@ -10,139 +10,65 @@ file.
 
 ## Current Checkpoint
 
-Prepared candidate-helper coverage: qualify_watchdog_startup_failure.py runs
-only on an unprivileged disposable macOS runner with no loaded/existing update
-LaunchAgent. It copies the codesign-verified candidate helper byte-for-byte,
-uses isolated explicit startup-phase fixtures and real helper subprocesses for
-spawn refusal and early exit, requires restored old bytes, one actual fixture
-relaunch, terminal failed record and no journal/stage/backup. Coverage is
-explicitly helper-fixture, NOT launchd/tray/feed. CI runs this once before the
-accept case, uploads logs/journals/results; old packaged three-case coverage
-remains unchanged.3 verifier tests (+3 negative subcases),54 build-config tests,
-actionlint and Python compile PASS.26 Rust transaction tests reused unchanged.
-Not yet executed on disposable CI; wait for live69647ce qualification before
-pushing accumulated startup fixes and this new fixture gate.
+2026-09-20 authoritative continuation:
+- Local audit branch HEAD3e11ea9, remote PR376 head69647ce. User-owned AGENTS.md
+  edits and untracked output/.playwright-cli remain untouched. No active admin.
+- Combined CI35506125919 for69647ce is IN_PROGRESS, freshly confirmed building
+  the non-shipping transaction driver; audit35506125912 PASS. A transient API
+  timeout was followed by successful observation of this same live run.
+  Do not restart/cancel. Push local follow-ups only after this run is terminal.
+- Previous candidate653649e CI35505371770 PASS, including all three real update
+  cases, packaged browser and lifecycle-heavy. Its audit failed only old Geph
+  rustls; the combined candidate contains the reviewed repair.
 
+Verified update evidence:
+- Watchdog LaunchAgent AbandonProcessGroup preserves accepted/restored trays.
+- Archive extraction now restores ordinary file/directory modes after private
+  extraction. Real accept tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9
+  matched candidate; both rollback trees matched old
+  d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea.
+- Real stopped-successor and unsignalled-live-traffic-failure rollback PASS.
+  Journals removed, surviving process identity checked, cleanup_errors=[] in
+  all reports. Artifacts output/aud30-traffic-gate/*-653649e/.
 
-Latest local follow-up: spawn_successor_or_rollback now covers a successfully
-spawned child that exits before identity capture. It first confirms child exit
-using the owned Child handle; unobservable identity with a live child remains
-an error, never permission to move its executable.26 updater transaction tests
-PASS (output/aud30-traffic-gate/early-exit-tests.log), including real exiting
-shell child and old bytes restored before exactly one relaunch. No installation.
-Important qualification boundary: existing packaged harness copies published
-.23 as the old bundle and uses its bundled watchdog with the current preparer.
-Thus the new helper's spawn-failure/early-exit corrections need a real test with
-that new helper, not only reuse of the existing three-case success reports.
-Preserve legacy-helper/preparer coverage separately; do not silently substitute
-candidate helper and claim a published .23 transition passed.
+Local follow-ups awaiting CI:
+- f9356cc/7de2b6c restore old bundle when OS refuses spawn or the owned child
+  exits before identity capture. Missing metadata alone is not exit evidence.
+  26 transaction tests PASS (early-exit-tests.log), including real failed spawn
+  and exiting child; existing rollback identity/hash boundaries unchanged.
+- 3e11ea9 adds qualify_watchdog_startup_failure.py once on the accept CI runner.
+  Uses exact signed candidate helper in owner-private disposable fixtures,
+  actual helper and old-fixture processes, no synthetic ACK. Verifies old bytes,
+  exactly one relaunch, terminal failed record and no journal/stage/backup.
+  3 fixture-verifier tests (+3 negative subcases),54 build-config tests,
+  actionlint and py_compile PASS. Actual disposable helper run still pending.
+  Coverage is helper fixture, not real tray/launchd/feed.
 
+Geph dependency repair complete at source/publication boundary:
+- PR377 merged normally at6c5895fcbad0b382067a54c7387208e27de46df5 after required
+  CI/audits and resolved review; integrated into audit branch atc466766.
+- Reviewed source0.3.9-r2 published by successful run35505388093. All8downloaded
+  assets verified against source/lock/version and SHA256SUMS; GitHub provenance
+  bound to exact main6c5895fc and SPDX binary/SBOM binding verified.
+  BinarySHA442e982e51d7837b158cdb5efaff4adee754db4270780568bcf1683a4fe84748.
+  Audit484packages/9unchanged exceptions/3informational/0blockers.
+  Artifacts output/aud30-traffic-gate/geph-r2-*.
+- GitHub isImmutable=false: no-overwrite policy and exact signed-content
+  verification are present, not a platform-enforced release lock.
+- Integrated ci_scope/build-config61tests PASS. Narrow exact rustls/webpki lock
+  exception rejects unrelated graph/metadata changes; main never bootstraps.
 
-Latest local candidate follow-up: OS refusal of successor spawn previously
-escaped run_locked_watchdog with an error while retaining SuccessorLaunchPlanned,
-so KeepAlive could repeat activation instead of restoring the previous bundle.
-spawn_successor_or_rollback now runs existing verified rollback when spawn fails
-(no child created), returning success only after old relaunch/cleanup succeeds.
-25 updater transaction tests PASS, including actual permission-denied executable
-and restored old bytes, one relaunch, failed record and removed transaction/stage.
-Evidence output/aud30-traffic-gate/spawn-failure-tests.log. This fixes current
-preparer/helper only; it does not rewrite the shipped .23 helper. Early exit
-before identity capture still returns an error and needs separate examination.
-Combined source69647ce CI35506125919 still live; audit35506125912 PASS. Do not
-interrupt. Hold this runtime follow-up until current qualification is terminal,
-then require focused real startup-failure qualification as well as existing gates.
-
-
-Latest: CI35505371770 for653649e is terminal SUCCESS including lifecycle-heavy,
-all three real transactions, packaged browser and common checks. Its separate
-audit35505371764 failed only old Geph rustls RUSTSEC-2026-0285; repaired source
-and verified r2 artifact are now integrated locally. Push combined branch next;
-require exact combined build/audits before workstation replacement. No repeated
-baseline is needed for unchanged unit areas; new vendor changes packaged inputs.
-Legacy migration analysis confirms old helper spawn_bundle inherits its process
-group for BOTH successor and rollback tray. A successor-only detach cannot prove
-legacy rollback. RELEASES now separates actual .23 heartbeat guarantees from
-candidate payload guarantees and preserves the explicit legacy-transition gate.
-
-
-Latest publication evidence: Geph run35505388093 SUCCESS; geph-vendor-0.3.9-r2
-published. Downloaded all8assets and verified exact reviewed source/lock/version,
-SHA256SUMS, GitHub provenance bound to main6c5895fc and SPDX binary/SBOM binding.
-Audit verification:484packages,9unchanged exceptions,3informational,0blockers.
-BinarySHA442e982e51d7837b158cdb5efaff4adee754db4270780568bcf1683a4fe84748.
-Artifacts output/aud30-traffic-gate/geph-r2-{release,metadata.json,
-provenance.json,spdx-attestation.json}. GitHub isImmutable=false: publication
-policy is no-overwrite plus signed exact-content verification, not platform lock.
-CI35505371770 still IN_PROGRESS on lifecycle-heavy; do not cancel. After terminal,
-push integrated local branch and require exact combined source/vendor CI.
-Published .23 source6ba71ef7 updater inspected: LaunchAgent lacks
-AbandonProcessGroup and root extraction remains0700. Current-driver successes
-cannot prove legacy preparer migration. Next compatibility work must reproduce
-that shipped preparation path and qualify survivor/rollback without fake ACK.
-
-
-2026-09-20 verified real transaction evidence: source653649e / merge5d0c31e0,
-CI35505371770 accept, rollback and traffic_failure all PASS. Downloaded reports
-under output/aud30-traffic-gate/{accept,rollback,traffic_failure}-653649e confirm
-accepted candidate tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9;
-both restored old tree d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea.
-All transaction journals removed, live survivor enforced, all cleanup_errors=[].
-Traffic failure kept successor unsignalled and recorded live_traffic_failure=true.
-Product, Windows, Chromium and packaged-browser PASS; lifecycle-heavy still live
-building Safari companion. Geph35505388093 now verifying stored attestations.
-Next finish these live runs, verify immutable r2 release, then push integrated
-local head (c466766 merge plus release coverage docs) for exact combined gates.
-Installed runtime unchanged; signed old-version feed/preparer transition and
-remaining four reliability stages are not covered by these three successful cases.
-
-
-Local integration: merged origin/main6c5895f into the audit branch; only
-CURRENT_STATE/DECISIONS append conflicts, resolved preserving current audit
-checkpoint and both decision sets.61 integrated ci_scope/build-config unittest
-checks PASS (output/aud30-traffic-gate/integrated-source-tests.log). App lock
-already contains the identical reviewed repair. No production routing changes.
-Hold push until candidate653649e CI35505371770 is terminal; its packaged build
-is freshly running. Geph35505388093 build is IN_PROGRESS. Next verify publisher
-and three real candidate cases, then push integrated source for exact new checks.
-
-
-Latest verified action: updater permission repair committed/pushed653649e2.
-Candidate CI35505371770, dependency35505371764 and Windows35505371774 started
-for that exact SHA. PR377 required CI35505121491 and audit35505121493 PASS;
-its only review thread is resolved. Normal protected merge succeeded at
-6c5895fcbad0b382067a54c7387208e27de46df5 (2026-09-20T10:33:01Z).
-Geph publisher35505388093 is freshly QUEUED for that merge. Next collect the
-publisher's audited/attested immutable r2 artifact and candidate real transaction
-results. Do not restart these live runs or install an unqualified candidate.
-The earlier PR377-open snapshot below is superseded by this verified merge.
-
-
-2026-09-20 continuation: PR376 source476af9e CI35504245450 is terminal FAILURE.
-Real rollback and live-traffic-failure rollback both PASS, including exact old
-bundle tree, live restored tray, journal removal and clean scoped cleanup.
-Accept now retains its successor but fails canonical bundle tree comparison:
-extractor kept stage root0700 and omitted archive directory modes. Candidate
-restores ordinary archive file/directory modes after private extraction; root
-stays0700 during writes.24 updater transaction tests PASS; evidence under
-output/aud30-traffic-gate/{archive-mode-tests.log,accept-476af9e,
-rollback-476af9e,traffic-failure-476af9e}. Canonical hash is not weakened.
-Next push this repair and require the real three-case candidate qualification.
-
-Dependency PR377 head7430e456 is open; fresh CI35505121491 is IN_PROGRESS,
-audit35505121493 PASS. Previous source8fae4d4 checks were green. Latest revision
-addresses review by admitting ONLY exact rustls0.23.41->0.23.45 and
-webpki0.103.13->0.103.15 lock transitions, including checksums and whole parsed
-lock comparison; any unrelated package/edge/metadata change disables bootstrap.
-59 tests+22subtests PASS. Review thread PRRT_kwDOTLueX86kIhE8 resolved after fix.
-Reviewed-source Geph publisher repair remains included: main source builds
-reviewed0.3.9-r2 instead of substituting upstream0.4.0. No new vendor binary yet.
-Next verify current checks/reviews, normal protected merge, then audited and
-attested immutable vendor publication before integration/application build.
-
-Installed workstation remains AUD29 e1bdc3e3, unchanged. No pending admin prompt.
-User-owned AGENTS.md edits and untracked output/.playwright-cli are preserved.
-Public old-version signed update migration, new workstation install, long media,
-runtime recovery and sleep/wake/load qualification remain open.
+Remaining first-stage gates and next action:
+1. Collect live combined CI35506125919, then push local startup fixes and require
+   exact candidate-helper fixture outcomes plus affected packaged qualification.
+2. Existing three-case harness uses current preparer with published .23 helper;
+   new-helper tests complement it, never silently relabel it as a public migration.
+3. Published .23 source6ba71ef7 lacks AbandonProcessGroup; helper spawns BOTH new
+   and restored old tray in its group. Candidate-only startup changes cannot
+   cover old-tray rollback or a successor that never starts. Qualify a safe
+   migration through the shipped preparer; signed .23->.24 gate remains open.
+4. Canonical build/install/real app qualification remains required. Workstation
+   still AUD29 e1bdc3e3; no new runtime installed. Never replay consumed3f81f9ad.
 
 Active goal: address remaining reliability weaknesses in the accepted order:
 1) real traffic qualification before accepting updates, 2) safe runtime recovery
