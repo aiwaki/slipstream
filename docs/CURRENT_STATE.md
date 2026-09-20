@@ -11,33 +11,37 @@ file.
 ## Current Checkpoint
 
 2026-09-20 authoritative continuation:
-- Current remote4442098 startup-failure candidate: CI35506810015 and audit
-  35506809983 started; audit PASS. PR376 unresolved-review query returned none.
-- Local build session88544 completed exit0; canonical build-chain/artifact PASS.
-  Log output/aud30-traffic-gate/local-startup-candidate-build.log; build contains
-  runtime source4442098 (later commits are checkpoint only).
+- Runtime source4442098 / CI35506810015: build, product/common checks, packaged
+  browser and accept/rollback/traffic_failure jobs PASS. Lifecycle-heavy remains
+  live; audit35506809983 PASS. Do not dispatch installation before its outcome.
+- Downloaded accept artifact for merge2511299a to
+  output/aud30-traffic-gate/accept-4442098/. Candidate watchdog spawn_refused and
+  early_exit fixtures PASS with helper83797af8d8918453f7b501b6dd70df23efdbde22bfceeb44f5129bc6fa692865.
+  Fixture checks old executable restoration, exactly one old relaunch, terminal
+  old_relaunched record and no active journal/stage/backup. This is packaged
+  helper coverage, not launchd/tray/signed-feed migration.
+  Real accept matched candidate treeea3450e0f5d8094631f30086a8a25e4d30a477079a154ffed7ec6f75736a65fd,
+  acknowledged and removed transaction. Current-preparer coverage only.
+- Local build88544 completed exit0; canonical build-chain/artifact PASS.
+  Runtime source4442098; later local commits change only checkpoint docs.
   App tree3e6c818117aa98381a1a5cd9a0a809fec749390581b6cb155f87c7771ee636e3;
   mainbc9a0141af52b06130dd7c9a8453071d2213aafecc1d732acfac7433183ffec9;
   watchdogcf0161ea077324f3cfeb0ae4414f3b895bbb99d0ba78b8898f7167fa133b4e9b.
-  Daemon remains919d3cf8. Staged Geph equals verified r2 SHA442e982e...84748.
-  Bundled Geph85e7f58d...a5b660 differs only by renewed signature and two
-  LC_SEGMENT_64 __LINKEDIT vmsize fields: signature removal on COPIES and exact
-  byte comparison after normalizing only these sizes match both architectures.
-  Evidence geph-signature-compare-*/{result,mach-o-comparison}.json. Original
-  artifact unchanged. Prior staged binary retained in geph-local-backup-vdvvb1cn.
-  No install initiated. Last consumed installation template is
-  output/aud23-discord-bundle-20260913.3f81f9ad/; read-only reference, NEVER replay.
-  New one-shot replacement must pin fresh build + current installed identities
-  and preserve all prior backups. Require exact runtime CI before dispatch.
-- Local audit branch includes3e11ea9 plus checkpoint cleanup; remote PR376 head69647ce. User-owned AGENTS.md
-  edits and untracked output/.playwright-cli remain untouched. No active admin.
-- Combined CI35506125919 for69647ce is terminal SUCCESS, including lifecycle-heavy
-  and all three real transactions; audit35506125912 PASS. This is the reusable
-  combined Geph-r2 baseline. Push prepared startup-failure/helper-fixture changes
-  now, then require their exact new CI before installation.
-- Previous candidate653649e CI35505371770 PASS, including all three real update
-  cases, packaged browser and lifecycle-heavy. Its audit failed only old Geph
-  rustls; the combined candidate contains the reviewed repair.
+  Daemon919d3cf8 unchanged. Geph verified r2 source442e982e; bundled85e7f58d
+  differs only in signature and two __LINKEDIT vmsize fields (comparison on
+  copies, originals unchanged); geph-signature-compare-*/mach-o-comparison.json.
+- NEW replacement b4bb66a0 reviewed against prior transaction and staged at
+  /Applications/.Slipstream.incoming-b4bb66a0.app; canonical verifier PASS in
+  output/aud30-install-b4bb66a0/staged-artifact.json. Running app NOT replaced,
+  no Quit or authorization dispatched. Pending manifest:
+  output/aud30-traffic-gate/pending-install.json. Script and native authorization
+  runner in output/aud30-install-b4bb66a0/; hashes pinned in manifest/runner.
+  Old treeb975dd5b (AUD29e1bdc3e3). Preserve learning and all previous backups.
+  Consumed transaction3f81f9ad is read-only reference, NEVER replay it.
+- Remote PR376 head4442098; last unresolved-review query empty. User-owned
+  AGENTS.md edits and untracked output/.playwright-cli remain untouched.
+- Combined69647ce CI35506125919 and audit35506125912 terminal PASS form reusable
+  baseline. Current source adds startup-failure rollback and helper fixtures.
 
 Verified update evidence:
 - Combined69647ce / merge ddb10d73 accept, rollback and traffic_failure PASS;
@@ -54,7 +58,7 @@ Verified update evidence:
   Journals removed, surviving process identity checked, cleanup_errors=[] in
   all reports. Artifacts output/aud30-traffic-gate/*-653649e/.
 
-Local follow-ups awaiting CI:
+Startup-failure changes qualified in candidate CI:
 - f9356cc/7de2b6c restore old bundle when OS refuses spawn or the owned child
   exits before identity capture. Missing metadata alone is not exit evidence.
   26 transaction tests PASS (early-exit-tests.log), including real failed spawn
@@ -64,7 +68,7 @@ Local follow-ups awaiting CI:
   actual helper and old-fixture processes, no synthetic ACK. Verifies old bytes,
   exactly one relaunch, terminal failed record and no journal/stage/backup.
   3 fixture-verifier tests (+3 negative subcases),54 build-config tests,
-  actionlint and py_compile PASS. Actual disposable helper run still pending.
+  actionlint and py_compile PASS. Actual disposable helper run PASS in CI35506810015.
   Coverage is helper fixture, not real tray/launchd/feed.
 
 Geph dependency repair complete at source/publication boundary:
@@ -82,8 +86,9 @@ Geph dependency repair complete at source/publication boundary:
   exception rejects unrelated graph/metadata changes; main never bootstraps.
 
 Remaining first-stage gates and next action:
-1. Collect live combined CI35506125919, then push local startup fixes and require
-   exact candidate-helper fixture outcomes plus affected packaged qualification.
+1. Collect terminal lifecycle-heavy result from live CI35506810015, then normal
+   CLI Quit and dispatch prepared b4bb66a0 replacement once; verify installed
+   artifact/attestation/traffic and real app behavior. No manual Quit needed.
 2. Existing three-case harness uses current preparer with published .23 helper;
    new-helper tests complement it, never silently relabel it as a public migration.
 3. Published .23 source6ba71ef7 lacks AbandonProcessGroup; helper spawns BOTH new
