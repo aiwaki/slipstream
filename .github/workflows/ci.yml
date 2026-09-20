@@ -779,6 +779,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Build non-shipping transaction qualification driver
+        working-directory: app-tauri/src-tauri
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target "$SLIPSTREAM_TAURI_TARGET" \
+            --example prepare_packaged_update
+          mkdir -p ../../dist-update-driver
+          tar -czf ../../dist-update-driver/driver.tar.gz \
+            -C "target/$SLIPSTREAM_TAURI_TARGET/release/examples" prepare_packaged_update
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-update-driver-${{ github.sha }}
+          path: dist-update-driver/driver.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   sign-updater-archive:
     needs: [changes, packaged-app-build]
     if: >-
@@ -1539,6 +1555,64 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  packaged-update-transaction:
+    needs: packaged-app-build
+    runs-on: macos-14
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [accept, rollback]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-app-build-${{ github.sha }}
+          path: dist-build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-update-driver-${{ github.sha }}
+          path: dist-update-driver
+      - name: Unpack candidate and pinned published previous app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          mkdir -p "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/previous" "$RUNNER_TEMP/update-driver"
+          ditto -x -k dist-build/Slipstream-build-bundle.zip "$RUNNER_TEMP/candidate"
+          python3 scripts/download_github_release_assets.py \
+            --tag v0.1.9-preview.23 --repo aiwaki/slipstream \
+            --pattern Slipstream-macos-arm64.zip --output "$RUNNER_TEMP/previous"
+          cd "$RUNNER_TEMP/previous"
+          echo 'b2accee8c068f454d4952174c9e5088d473e9dd5673d59b8466463ee882cce63  Slipstream-macos-arm64.zip' | shasum -a 256 -c -
+          ditto -x -k Slipstream-macos-arm64.zip .
+          tar -xzf "$GITHUB_WORKSPACE/dist-update-driver/driver.tar.gz" -C "$RUNNER_TEMP/update-driver"
+      - name: Real packaged successor and rollback qualification
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          sudo -E "$(command -v python3)" scripts/provision_packaged_update_smoke.py \
+            --candidate-bundle "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app" \
+            --previous-bundle "$RUNNER_TEMP/previous/Slipstream.app" \
+            --driver "$RUNNER_TEMP/update-driver/prepare_packaged_update" \
+            --case '${{ matrix.case }}'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: packaged-update-${{ matrix.case }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/update-case-*/harness.log
+            ${{ runner.temp }}/update-case-*/provision-result.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/result.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/prepare.log
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/state/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
   checks:
     name: checks
     if: always()
@@ -1623,6 +1697,7 @@ jobs:
       - packaged-browser-qualification
       - packaged-update-notification-qualification
       - packaged-app-lifecycle-heavy
+      - packaged-update-transaction
     runs-on: ubuntu-24.04
     steps:
       - name: Preserve the required packaged lifecycle context
@@ -1636,6 +1711,7 @@ jobs:
           BROWSER: ${{ needs.packaged-browser-qualification.result }}
           UPDATE_NOTIFICATION: ${{ needs.packaged-update-notification-qualification.result }}
           LIFECYCLE: ${{ needs.packaged-app-lifecycle-heavy.result }}
+          UPDATE_TRANSACTION: ${{ needs.packaged-update-transaction.result }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_REF: ${{ github.ref }}
         run: |
@@ -1654,7 +1730,7 @@ jobs:
               exit 1
             }
             for result in "$BUILD" "$SIGNER" "$ASSEMBLY" "$ATTESTATION" \
-              "$BROWSER" "$UPDATE_NOTIFICATION" "$LIFECYCLE"; do
+              "$BROWSER" "$UPDATE_NOTIFICATION" "$LIFECYCLE" "$UPDATE_TRANSACTION"; do
               [ "$result" = skipped ] || {
                 echo "a packaged gate ran before the reviewed Geph binary existed: $result"
                 exit 1
@@ -1666,7 +1742,7 @@ jobs:
             echo "unknown Geph bootstrap classification: $GEPH_BOOTSTRAP"
             exit 1
           fi
-          for result in "$BUILD" "$BROWSER" "$LIFECYCLE"; do
+          for result in "$BUILD" "$BROWSER" "$LIFECYCLE" "$UPDATE_TRANSACTION"; do
             [ "$result" = success ] || {
               echo "an applicable packaged qualification did not succeed: $result"
               exit 1

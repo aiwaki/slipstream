@@ -179,7 +179,7 @@ class BuildConfigTests(unittest.TestCase):
             )
         self.assertEqual(
             scripts["verify:local-install"],
-            "npm run verify:bundle:local -- --installed-app /Applications/Slipstream.app",
+            "npm run verify:bundle:local -- --installed-app /Applications/Slipstream.app --qualify-traffic",
         )
         self.assertEqual(scripts["build"], "npm run build:release")
 

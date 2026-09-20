@@ -80,6 +80,14 @@ The runner teardown owns final tray/daemon cleanup; evidence stays in the printe
 private work directory even on failure. Do not run another case over the tray
 left by the first one.
 
+The CI `packaged-update-transaction` matrix provisions separate clean macOS
+runners through `provision_packaged_update_smoke.py`. The previous published
+preview.23 archive is pinned by SHA-256; the candidate and non-shipping driver
+come from the same current-run build. The required packaged lifecycle context
+includes the matrix outcome. Provisioning validates clean global state before
+installation, runs the transaction as the original console user, then removes
+only qualification-owned processes/runtime and requires the PF snapshot restored.
+
 These are packaged replacement/acceptance/timeout-rollback checks, not signed
 feed discovery, notification delivery, actual media sessions or a public version
 transition. The driver compile and harness unit tests do not constitute a passed

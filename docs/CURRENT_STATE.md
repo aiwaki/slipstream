@@ -61,10 +61,20 @@ waits unchanged60s deadline, requires prior tree and distinct live restored tray
 Driver built; actual workstation invocation correctly refused before mutation.
 Six harness tests +4subtests PASS (identity drift, reused PID, unrelated rollback,
 missing journal, workstation guard). Evidence output/aud30-traffic-gate/transaction-*.
-Not yet wired to disposable CI or run with real bundles; these tests are only
-harness mechanics. Next wire/provision two separate disposable cases using distinct
-verified bundles and active daemon, then inspect their terminal evidence. See
-RELEASES disposable qualification section. No workstation app/runtime changed.
+CI now provisions isolated accept/rollback matrix jobs from the same immutable
+packaged build plus publishedpreview.23 ZIP pinned toSHA256
+b2accee8c068f454d4952174c9e5088d473e9dd5673d59b8466463ee882cce63
+(verified live GitHub release metadata). Non-shipping driver gets a separate
+artifact. Required packaged lifecycle aggregate includes both matrix results.
+Root provisioner reuses existing clean-runner preflight, canonical installed
+identity and local-only state checks, runs harness as original console user,
+cleans only private-root watchdog/trays, uninstalls owned daemon and checks PF
+snapshot restoration. Workstation invocation refused; PID-reuse and unrelated
+watchdog cleanup tests pass. Harness now reads nested StatusV2 through canonical
+verifier instead of assuming top-level state. 67 affected tests +19subtests PASS;
+actionlint clean. Evidence transaction-ci-tests.log, transaction-provision-*.log,
+transaction-workflow-lint.log. Next push draft PR and observe real macOS matrix;
+no live packaged case passed yet. Workstation app/runtime unchanged.
 Manual install alone is not an updater-transaction test; stage1 still open. Later
 stages remain in original scope. Installed AUD-29 unchanged. No pending admin.
 Prior evidence output/aud30-traffic-gate/{build.log,build-deadline.log,

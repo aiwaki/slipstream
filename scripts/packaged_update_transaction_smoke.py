@@ -20,7 +20,7 @@ import tarfile
 import tempfile
 import time
 
-from verify_macos_app_bundle import deterministic_tree_sha256, verify_codesign
+from verify_macos_app_bundle import deterministic_tree_sha256, verify_codesign, verify_status_v2
 
 
 def require(condition: bool, message: str) -> None:
@@ -125,7 +125,8 @@ def main() -> int:
                            capture_output=True).returncode == 1, "a tray already exists")
     status_path = Path("/var/run/slipstream.status")
     status = json.loads(status_path.read_text())
-    require(time.time() - status_path.stat().st_mtime < 6 and status.get("state") == "active",
+    status = verify_status_v2(status_path=status_path, expected_pid=status["daemon"]["pid"])
+    require(status["state"] == "active",
             "a freshly qualified active runtime is required before transaction injection")
     for bundle in (args.previous_bundle, args.candidate_bundle):
         verify_codesign(bundle.resolve(strict=True), deep=True)
