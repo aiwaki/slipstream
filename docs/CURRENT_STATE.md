@@ -10,6 +10,16 @@ file.
 
 ## Current Checkpoint
 
+Local integration: merged origin/main6c5895f into the audit branch; only
+CURRENT_STATE/DECISIONS append conflicts, resolved preserving current audit
+checkpoint and both decision sets.61 integrated ci_scope/build-config unittest
+checks PASS (output/aud30-traffic-gate/integrated-source-tests.log). App lock
+already contains the identical reviewed repair. No production routing changes.
+Hold push until candidate653649e CI35505371770 is terminal; its packaged build
+is freshly running. Geph35505388093 build is IN_PROGRESS. Next verify publisher
+and three real candidate cases, then push integrated source for exact new checks.
+
+
 Latest verified action: updater permission repair committed/pushed653649e2.
 Candidate CI35505371770, dependency35505371764 and Windows35505371774 started
 for that exact SHA. PR377 required CI35505121491 and audit35505121493 PASS;

@@ -10,6 +10,11 @@ concurrency:
 
 on:
   workflow_dispatch:
+    inputs:
+      build_reviewed:
+        description: Build the reviewed main contract instead of discovering upstream
+        type: boolean
+        default: false
   schedule:
     - cron: "17 6 * * *"
   push:
@@ -44,9 +49,27 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - id: upstream
-        name: Resolve the latest crates.io source identity
+        name: Resolve reviewed or upstream source identity
+        env:
+          BUILD_REVIEWED: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_reviewed) }}
         run: |
           set -euo pipefail
+          if [ "$BUILD_REVIEWED" = true ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || {
+              echo "reviewed dependency builds require main"; exit 1;
+            }
+            source_summary="$(python3 scripts/geph_vendor_source.py verify \
+              --source vendor/geph/SOURCE.json --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock)"
+            version="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' <<< "$source_summary")"
+            checksum="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])' <<< "$source_summary")"
+            {
+              echo "version=$version"
+              echo "crate_sha256=$checksum"
+              echo "crate_url=https://static.crates.io/crates/geph5-client/geph5-client-$version.crate"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           user_agent="slipstream-ci (+https://github.com/${{ github.repository }})"
           version="$(curl -fsSL -A "$user_agent" \
             https://crates.io/api/v1/crates/geph5-client \
