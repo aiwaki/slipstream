@@ -1646,8 +1646,14 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime(capsys):
         assert paths.directory.exists()
 
 
-@pytest.mark.parametrize("natural_exit", [False, True])
-def test_console_worker_launcher_stops_one_exact_stale_loaded_job(natural_exit):
+@pytest.mark.parametrize("exit_code,worker_error,expected_clean", [
+    (1, "worker_terminated", True),
+    (0, "", True),
+    (1, "", False),
+    (1, "chrome_cleanup_failed", False),
+    (1, "profile_cleanup_failed", False),
+])
+def test_console_worker_launcher_stops_one_exact_stale_loaded_job(exit_code, worker_error, expected_clean):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-loaded-",
         dir="/tmp",
@@ -1694,7 +1700,7 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job(natural_exit):
                     )
                 if state["running"]:
                     return completed(command, stdout="pid = 4242\n")
-                return completed(command, stdout=f"last exit code = {0 if natural_exit else 1}\n")
+                return completed(command, stdout=f"last exit code = {exit_code}\n")
             if command[:2] == ("/bin/ps", "-p"):
                 return completed(
                     command,
@@ -1708,8 +1714,8 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job(natural_exit):
                 # A validated worker can finish its own successful cleanup
                 # between the process check and delivery of SIGTERM.
                 state["paths"].stderr.write_text(
-                    "" if natural_exit else
-                    "slipstream browser probe failed: worker_terminated\n"
+                    f"slipstream browser probe failed: {worker_error}\n"
+                    if worker_error else ""
                 )
                 state["paths"].stderr.chmod(0o600)
                 return completed(command)
@@ -1726,7 +1732,12 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job(natural_exit):
             sleep=lambda _seconds: None,
         )
         state["paths"] = launcher._prepare_launch(identity, label)
-        assert launcher.cleanup_stale(remove_root=True)
+        assert launcher.cleanup_stale(remove_root=True) is expected_clean
+        if not expected_clean:
+            assert runtime_root.exists()
+            assert not any(command[:2] == ("/bin/launchctl", "bootout")
+                           for command in state["commands"])
+            return
         assert not runtime_root.exists()
         assert not state["running"]
         assert any(
