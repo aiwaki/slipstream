@@ -28,17 +28,7 @@ impl Gate {
         self.poll_with(identity, || {
             let (sender, receiver) = mpsc::channel();
             std::thread::spawn(move || {
-                let ok = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map(|runtime| {
-                        runtime.block_on(async {
-                            tokio::time::timeout(Duration::from_secs(12), qualify())
-                                .await
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false);
+                let ok = run_bounded(qualify(), Duration::from_secs(12));
                 let _ = sender.send((ok, Instant::now()));
             });
             receiver
@@ -75,6 +65,20 @@ impl Gate {
         }
         false
     }
+}
+
+fn run_bounded(work: impl std::future::Future<Output = bool>, timeout: Duration) -> bool {
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return false;
+    };
+    let ok = runtime.block_on(async { tokio::time::timeout(timeout, work).await.unwrap_or(false) });
+    // A system DNS lookup can outlive cancellation. Runtime Drop must not
+    // wait indefinitely for that blocking resolver before publishing failure.
+    runtime.shutdown_background();
+    ok
 }
 
 fn complete_png(body: &[u8]) -> bool {
@@ -225,6 +229,29 @@ mod tests {
             }
             assert!(!gate.poll_with(Some(current), || panic!("must reject stale proof")));
         }
+    }
+    #[test]
+    fn blocking_resolver_cannot_delay_timeout_result() {
+        let (release, wait) = mpsc::channel();
+        let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = started.clone();
+        let before = Instant::now();
+        assert!(!run_bounded(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    flag.store(true, std::sync::atomic::Ordering::Release);
+                    let _ = wait.recv_timeout(Duration::from_secs(2));
+                });
+                while !started.load(std::sync::atomic::Ordering::Acquire) {
+                    tokio::task::yield_now().await;
+                }
+                std::future::pending::<bool>().await
+            },
+            Duration::from_millis(30)
+        ));
+        let elapsed = before.elapsed();
+        let _ = release.send(());
+        assert!(elapsed < Duration::from_secs(1));
     }
     #[test]
     #[ignore = "explicit live public transfer qualification only"]

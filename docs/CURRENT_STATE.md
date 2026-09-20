@@ -33,10 +33,16 @@ Quit/resume. Offline/dormant/unproven traffic does not acknowledge; unchanged
 60s watchdog rollback remains. No claim that a remote failure is a local defect.
 16 affected updater tests +23 transaction/rollback tests PASS; explicit live Rust
 three-path full-payload test PASS0.75s. No new dependencies. Graph fallback remains.
-Next: canonical build, review exact candidate/update lifecycle qualification,
+Canonical build6c56055 PASS, NOT installed. Follow-up fixes runtime Drop waiting
+for uncancellable system DNS: publish bounded result via shutdown_background;
+6 focused tests PASS including deliberately blocked resolver returning in0.03s.
+Old6c56055 artifact predates this correction and must not be installed.
+Next: rebuild corrected HEAD, review exact candidate/update lifecycle qualification,
 negative packaged ACK/rollback path and real successor acceptance. Manual install
 alone is not an updater-transaction test; stage1 still open. Later stages remain
-in original scope. Current installed AUD-29 unchanged. No pending admin.
+in original scope. Current installed AUD-29 unchanged. No pending admin. Build/negative-path
+evidence in output/aud30-traffic-gate/{build.log,rust-deadline-tests.log,
+rust-update-tests.log,rust-transaction-tests.log,rust-live.log}.
 User AGENTS.md changes preserved.
 
 AUD-29 CORRECTED installed e1bdc3e3ca69af9cf248af7040cb9ffc30557426 via
