@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+Latest 2026-09-20: prior CI35503555564 is terminal FAILURE; all results collected.
+476af9e pushed to PR376: CI35504245450 verified live, includes accept/rollback/
+traffic_failure and watchdog process-group policy. No installation yet.
+Dependency source PR377 now b2f22f8: coordinated app+Geph lock fixes plus narrowly
+expanded source-bootstrap classifier and paired tests/release docs. Existing
+strict branch checks and both audits retained, no advisory exceptions. The
+8-file source-only diff admits PR bootstrap and rejects main/push bootstrap;
+production code, manifests, app audit policy and workflow edits are excluded.
+72focused tests+33subtests PASS. Separate worktree remains geph-rustls-02345.
+PR377 CI35504333339 and dependency35504333296 verified live. Next collect both
+combined audits and review source transition before vendor publication; collect
+real three-case transaction evidence on PR376. Do not restart either live run.
+This proposal resolves the source integration cycle without pretending r2 is
+already built, attested or installed. All five reliability stages remain open.
+
+
 Latest evidence: e5cdf8d real accept106060428416 and rollback106060428412 FAIL,
 both with cleanup_errors=[]; journals show transaction completion, but terminal
 trays disappear. Published helper spawns trays in its process group; generated
