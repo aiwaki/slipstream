@@ -65,7 +65,7 @@ def tls_contexts(tmp_path_factory):
     return client, server
 
 
-@pytest.mark.parametrize('strategy', tproxy.DISCORD_RESERVES, ids=lambda s: s['name'])
+@pytest.mark.parametrize('strategy', tproxy.DISCORD_RESERVE_CANDIDATES, ids=lambda s: s['name'])
 def test_real_tls_handshake_and_complete_application_payload(strategy, tls_contexts):
     client_ctx, server_ctx = tls_contexts
     ci, co, si, so = [ssl.MemoryBIO() for _ in range(4)]
@@ -131,3 +131,10 @@ def test_cancellation_between_tcp_parts_closes_connection(monkeypatch):
         asyncio.run(tproxy.dial_and_probe_fake('127.0.0.1', 443, hello,
                     host='cdn.discordapp.com', decoy_family='mail', flight_mode='tcp_header'))
     assert writes == [hello[:1]] and len(closed) == 1
+
+
+def test_unqualified_record_profiles_never_enter_runtime_ladder():
+    assert len(tproxy.DISCORD_RESERVES) == 8
+    assert all(s['flight_mode'].startswith('tcp_') for s in tproxy.DISCORD_RESERVES)
+    assert not any(s.get('flight_mode', '').startswith('record_')
+                   for s in tproxy.strategy_order('cdn.discordapp.com'))

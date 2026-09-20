@@ -14567,12 +14567,16 @@ STRATEGIES = [
     {"name": "plain",        "cap": None, "fake": False},
 ]
 DISCORD_RESERVE_MODES = ("record_header", "record_sni", "tcp_header", "tcp_sni")
-DISCORD_RESERVES = [
+DISCORD_RESERVE_CANDIDATES = [
     {"name": f"discord_{mode}_{family}", "cap": None, "fake": True,
      "decoy_family": family, "flight_mode": mode}
     for mode in DISCORD_RESERVE_MODES
     for family in ("mail", "ozon", "wildberries", "cloudflare")
 ]
+# Record layouts preserve TLS locally but timed out in live AUD-27 trials.
+# Keep them outside automatic routing until independently qualified.
+DISCORD_RESERVES = [s for s in DISCORD_RESERVE_CANDIDATES
+                    if s["flight_mode"].startswith("tcp_")]
 STRATEGIES.extend(DISCORD_RESERVES)
 STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"

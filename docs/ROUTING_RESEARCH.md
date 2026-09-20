@@ -2613,3 +2613,10 @@ malformed pass-through, cancellation cleanup, reachability after failures, polic
 isolation and existing adaptive/canary/injector checks. Prior unrelated suite
 failures remain as recorded in AUD-26; no full-suite rerun claimed.
 Evidence output/aud27-reserves/tests.log. Live reserve and install gates pending.
+
+Live voice control trials: all eight record-layout candidates timed out; all eight
+TCP-layout candidates returned HTTP101 in0.24–0.27s. This diagnostic observed
+status only, not a new actual voice call. Excluded every record-layout candidate
+from the runtime strategy registry/ladder; retained as experimental test cases.
+129 focused tests now PASS, including exclusion of unqualified candidates.
+Evidence live-reserves.json and tests-final.log. Full public-media trials pending.

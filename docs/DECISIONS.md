@@ -634,3 +634,7 @@ records. Malformed, incomplete or already-fragmented hellos pass through unchang
 TCP modes use 10ms between writes (at most20ms per first flight); they do not
 promise wire packet boundaries. Probe and production use the same partitioner.
 Existing per-request attempt limits remain, with no new global admission cap.
+
+Qualification amendment: only the eight TCP-layout profiles enter STRATEGIES
+and automatic routing. Eight record-layout candidates timed out live despite
+valid local TLS; retained for research/tests only, not user connection attempts.
