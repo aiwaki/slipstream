@@ -10,6 +10,14 @@ file.
 
 ## Current Checkpoint
 
+AUD-27 in progress: sixteen Discord reserve family/layout profiles implemented;
+128 focused tests PASS. Four layouts (TLS handshake/SNI records, TCP header/SNI
+writes), unchanged local-only policy and original TLS transcript. Current installed
+AUD-26 below remains unchanged. Live no-auth voice reserve probe awaiting/completing
+native authorization: output/aud27-reserves/probe-reserves.py; never repeat while
+running. Build/install not started. Preserve user AGENTS.md.
+
+
 AUD-26 installed5c39283dbed3da0fb5e14779f34f975c498e6795 viac7a059b4 at
 2026-09-20T08:03:24Z; transaction consumed NEVER replay. Canonical build/staged/
 installed PASS. Daemon271011dba4dff9ee0a0c848b44167caf7ae7729c73dd9fb388a5dafd383a3e07.

@@ -11861,8 +11861,10 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
             except ssl.SSLWantReadError:
                 out = outbio.read()
                 if out:
+                    flight_mode = None
                     if not first_flight_sent:
                         first_flight_sent = True
+                        flight_mode = strat.get("flight_mode")
                         if strat.get("fake") and out[:1] == b"\x16":
                             try:
                                 src_ip, src_port = sock.getsockname()
@@ -11873,7 +11875,11 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                                 pass
                         if out[:1] == b"\x16":
                             out = make_blob(out[:5], out[5:], host, strat.get("cap"))
-                    sock.sendall(out)
+                    parts = _reserve_flight_parts(out, host, flight_mode)
+                    for index, part in enumerate(parts):
+                        sock.sendall(part)
+                        if index + 1 < len(parts):
+                            time.sleep(0.01)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise socket.timeout("payload canary handshake timeout")
@@ -14504,6 +14510,42 @@ def make_blob(head: bytes, body: bytes, host, cap):
     return b"".join(mk(p) for p in parts)
 
 
+def _reserve_flight_parts(flight, host, mode):
+    """Partition a complete ClientHello without changing its handshake transcript.
+
+    Unknown/fragmented input passes through. Never reframe a CCS, early data or
+    a second handshake: bytes after the first complete record remain untouched.
+    TCP modes request separate writes, not guaranteed packet boundaries.
+    """
+    if mode not in DISCORD_RESERVE_MODES or not is_discord_host(host):
+        return (flight,)
+    if len(flight) < 9 or flight[:3] not in (b"\x16\x03\x01", b"\x16\x03\x03"):
+        return (flight,)
+    length = int.from_bytes(flight[3:5], "big")
+    body, tail = flight[5:5 + length], flight[5 + length:]
+    if (length > 16384 or len(body) != length or len(body) < 4 or body[0] != 1
+            or int.from_bytes(body[1:4], "big") != length - 4
+            or parse_sni(body) != host):
+        return (flight,)
+    name = host.encode("ascii")
+    if body.count(name) != 1:
+        return (flight,)
+    start = body.index(name)
+    if mode == "tcp_header":
+        return (flight[:1], flight[1:5], flight[5:])
+    if mode == "tcp_sni":
+        cut = 5 + start + max(1, len(name) // 2)
+        return (flight[:cut], flight[cut:])
+    cuts = [1, 4] if mode == "record_header" else [start + 1, start + len(name) - 1]
+    cuts = sorted({c for c in cuts if 0 < c < length})
+    parts, previous = [], 0
+    for end in cuts + [length]:
+        fragment = body[previous:end]
+        parts.append(flight[:3] + len(fragment).to_bytes(2, "big") + fragment)
+        previous = end
+    return (b"".join(parts) + tail,)
+
+
 # --------------------------------------------------- adaptive strategy ladder
 # Tried in order, cached winner first. The first that completes TLS is cached
 # per host; when the TSPU changes and the cached one stops working, connections
@@ -14524,6 +14566,14 @@ STRATEGIES = [
     {"name": "fake5",        "cap": 5,    "fake": True},
     {"name": "plain",        "cap": None, "fake": False},
 ]
+DISCORD_RESERVE_MODES = ("record_header", "record_sni", "tcp_header", "tcp_sni")
+DISCORD_RESERVES = [
+    {"name": f"discord_{mode}_{family}", "cap": None, "fake": True,
+     "decoy_family": family, "flight_mode": mode}
+    for mode in DISCORD_RESERVE_MODES
+    for family in ("mail", "ozon", "wildberries", "cloudflare")
+]
+STRATEGIES.extend(DISCORD_RESERVES)
 STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"
 STRAT_CACHE_MAX = 2048
@@ -14776,7 +14826,9 @@ def strategy_order(host):
             alternatives = ["discord_decoy_" + family
                             for family in ("mail", "ozon", "wildberries", "cloudflare")
                             if _discord_matched_substitute(h, family) not in (None, primary)]
-            names = preferred + alternatives + names
+            reserves = [s["name"] for s in DISCORD_RESERVES
+                        if _discord_matched_substitute(h, s["decoy_family"]) is not None]
+            names = preferred + alternatives + names + reserves
             if h in DISCORD_HTTPS8443_HOSTS:
                 names = ["discord_https8443"] + names
         return [STRAT_BY_NAME[n] for n in _rank_strategy_names(h, names)]
@@ -18674,7 +18726,7 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     return None
 
 
-async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0, decoy_family=None):
+async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0, decoy_family=None, flight_mode=None):
     """Like dial_and_probe but injects a low-TTL decoy ClientHello on the real
     4-tuple BEFORE the real flight (zapret 'fake' — for deep-reassembly SNIs)."""
     connected = False
@@ -18696,8 +18748,12 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         if decoy_family is not None:
             args += (decoy_family,)
         await loop.run_in_executor(_POOL, inject_fake_for_host, *args)
-        up_w.write(first_blob)
-        await up_w.drain()
+        parts = _reserve_flight_parts(first_blob, host, flight_mode)
+        for index, part in enumerate(parts):
+            up_w.write(part)
+            await up_w.drain()
+            if index + 1 < len(parts):
+                await asyncio.sleep(0.01)
         flight_sent = True
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
@@ -18739,6 +18795,8 @@ async def dial_strategy(ip, port, head, body, host, strat):
         return await dial_and_probe(ip, upstream_port, blob)
     if strat["fake"]:
         options = {"decoy_family": strat["decoy_family"]} if strat.get("decoy_family") else {}
+        if strat.get("flight_mode"):
+            options["flight_mode"] = strat["flight_mode"]
         return await dial_and_probe_fake(ip, port, blob, host=host, **options)
     return await dial_and_probe(ip, port, blob)
 

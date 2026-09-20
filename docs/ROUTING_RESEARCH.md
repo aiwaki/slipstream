@@ -2594,3 +2594,22 @@ no fresh picker UI claim, public sticker objects passed. No messages/audio sent.
 The final103-test regression set additionally proves a TLS-only success cannot
 erase recent full-payload failure evidence. No assertion of arbitrary future
 DPI compatibility or of fixed streaming/YouTube.
+
+## AUD-27 reserve flight layouts — 2026-09-20
+
+User requested more fallback strategies. Current AUD-26 has four fake-name
+families but shares a single flight layout. Added four orthogonal partition
+layouts and sixteen family/layout profiles as lower-priority Discord reserves.
+TLS records use RFC8446 section5.1 handshake fragmentation without changing the
+transcript: https://www.rfc-editor.org/rfc/rfc8446#section-5.1 . TCP writes are
+separated by10ms, without claiming the kernel guarantees packet boundaries.
+Fake bytes still use the established timestamp/TTL rejection mechanism.
+No new packet rejection mechanism or universal future-blocking guarantee.
+
+Graph discovery again failed Transport closed; bounded source reads used.
+128 focused tests passed (743 deselected): real client/server TLS with certificate
+verification and complete1MiB transfer for each profile; transcript/tail preservation,
+malformed pass-through, cancellation cleanup, reachability after failures, policy
+isolation and existing adaptive/canary/injector checks. Prior unrelated suite
+failures remain as recorded in AUD-26; no full-suite rerun claimed.
+Evidence output/aud27-reserves/tests.log. Live reserve and install gates pending.

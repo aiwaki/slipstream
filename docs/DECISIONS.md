@@ -618,3 +618,19 @@ Discord resweep uses modern TLS plus application proof rather than synthetic
 TLS1.2 hello bytes. No user credentials, messages, voice authentication or audio
 are generated. Recovery changes later connections; already delivered encrypted
 application data cannot safely be replayed transparently.
+
+## AUD-27 Discord reserve flight profiles
+
+Add sixteen reserve profiles combining four existing fake-name families with
+four real-flight partitions: handshake header across TLS records, SNI edges
+across TLS records, separate TCP writes across the record header, and separate
+TCP writes inside SNI. This is four layouts, not sixteen independent inventions.
+Existing candidates retain initial priority; exact-host learning ranks reserves.
+Only supported Discord names receive them. All remain fake-based and local-only;
+YouTube, unknown hosts, Geph, UDP and external settings are unchanged.
+
+Record fragmentation preserves the exact ClientHello transcript and all trailing
+records. Malformed, incomplete or already-fragmented hellos pass through unchanged.
+TCP modes use 10ms between writes (at most20ms per first flight); they do not
+promise wire packet boundaries. Probe and production use the same partitioner.
+Existing per-request attempt limits remain, with no new global admission cap.

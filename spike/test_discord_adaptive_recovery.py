@@ -25,7 +25,7 @@ def test_distinct_wire_decoys_and_no_foreign_route(host):
             assert len(fake) == len(hello)
             assert fake != hello
             assert tproxy.parse_sni(fake[5:]) != host
-            copies.append(fake)
+            copies.append((fake, tproxy._reserve_flight_parts(hello, host, strategy.get('flight_mode'))))
     assert copies and len(copies) == len(set(copies))
     assert tproxy.parse_sni(hello[5:]) == host
     assert not tproxy.is_geo_exit_route(host)
