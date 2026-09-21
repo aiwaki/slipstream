@@ -23,6 +23,16 @@ file.
 - Previous diagnostic CI35510971356 terminalSUCCESS. Local47594cd/5470945
   additionally fix/test successful natural browser-worker exit race;40 module
   tests plus five positive/negative shutdown cases passed before pause.
+- Source5cd45e8 pushed.36 Rust Geph tests and29 Python routing tests PASS.
+  Local build18298 finished exit0, canonical PASS. Candidate tree2ddafd74,
+  daemon d86e88bb. New transaction d43f85ea staged canonical PASS; old installed
+  tree1794a453 reverified. Pending manifest output/rode-diagnostic/pending-install.json.
+  NOT DISPATCHED. CI35576147139 terminalSUCCESS, all packaged gates passed.
+  Normal CLI --quit sent; native admin authorization pending (osascript9957,
+  SecurityAgent9962 observed; tray23290/root daemon23123 still running).
+  Wait for this existing Quit outcome; do not dispatch replacement until stopped.
+  Replacement authorization runner has NOT been executed.
+  Diagnostic prior CI35510971356 SUCCESS does not include this account/route diff.
 - Old staged1ab5b2b9 superseded by new runtime/source changes; NEVER dispatch it.
   Next commit/build canonical candidate, qualify CI, then fresh one-shot install
   and real Safari RODE. Broad resilience goal still not complete. Account cache
