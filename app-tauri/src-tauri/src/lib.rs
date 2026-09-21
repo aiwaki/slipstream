@@ -3167,6 +3167,17 @@ fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     )
 }
 
+/// Never reuse auth/connection tokens from the legacy shared cache or another
+/// account. The digest stays inside the owner-private config directory; the
+/// account secret itself is never a filename or diagnostic value.
+fn geph_account_cache_path(config_dir: &Path, secret: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"slipstream-geph-account-cache-v1\0");
+    hash.update(secret.as_bytes());
+    config_dir.join(format!("geph-account-{:x}.db", hash.finalize()))
+}
+
 /// Absolute path to the bundled geph5-client, which sits next to our own
 /// executable (Slipstream.app/Contents/MacOS/geph5-client).
 fn geph_bin_path() -> Option<std::path::PathBuf> {
@@ -4118,7 +4129,8 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
         // Keep an already-configured job alive if Keychain is temporarily locked.
         return Ok(false);
     };
-    let paths = geph_launch_agent_paths_for_app(app)?;
+    let mut paths = geph_launch_agent_paths_for_app(app)?;
+    paths.cache = geph_account_cache_path(&paths.config_dir, &secret);
     harden_geph_dir(&paths.config_dir)
         .map_err(|error| format!("geph config permissions unavailable: {error}"))?;
     for log_path in [&paths.stdout_log, &paths.stderr_log] {
@@ -4134,6 +4146,8 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     let binary_changed = sync_private_executable(&source, &paths.executable)
         .map_err(|error| format!("geph runtime sync unavailable: {error}"))?;
     let exit = geph_field(app, "exit").unwrap_or_else(|| "auto".into());
+    ensure_private_append_file(&paths.cache)
+        .map_err(|error| format!("geph account cache setup unavailable: {error}"))?;
     let desired = geph_config_yaml(&secret, &exit, &paths.cache.to_string_lossy());
     let config_changed = write_private_if_changed(&paths.config, desired.as_bytes())
         .map_err(|error| format!("geph config write unavailable: {error}"))?;
@@ -6875,6 +6889,20 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
         assert_eq!(std::fs::read(&ready).unwrap(), b"foreign\n");
 
         let _ = std::fs::remove_file(ready);
+    }
+
+    #[test]
+    fn geph_auth_cache_isolated_by_account_and_excludes_legacy_cache() {
+        let root = Path::new("/private/example/slipstream");
+        let first = super::geph_account_cache_path(root, "account-one");
+        let second = super::geph_account_cache_path(root, "account-two");
+        assert_ne!(first, second);
+        assert_eq!(first, super::geph_account_cache_path(root, "account-one"));
+        assert_eq!(first.parent(), Some(root));
+        assert_ne!(first, root.join("geph-cache.db"));
+        assert!(!first.to_string_lossy().contains("account-one"));
+        let config = super::geph_config_yaml("account-one", "auto", &first.to_string_lossy());
+        assert!(config.contains(&format!("cache: {}", first.display())));
     }
 
     #[test]

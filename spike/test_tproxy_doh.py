@@ -24249,3 +24249,11 @@ def test_daemon_artifact_cleanup_identifies_failed_component(monkeypatch, tmp_pa
     assert not tproxy._remove_daemon_status_artifacts()
     expected = {"attestation": "install attestation", "semantic": "semantic socket", "pending": "pending-navigation socket", "worker": "browser-worker runtime"}
     assert "daemon artifacts: " + expected[failed_component] in capsys.readouterr().err
+
+
+def test_rode_reviewed_exit_does_not_match_unrelated_hosts():
+    for host in ("rode.com", "www.rode.com"):
+        assert tproxy.route_policy(host)["route_class"] == "geo_exit"
+    assert tproxy.route_policy("notrode.com")["route_class"] != "geo_exit"
+    for host in ("discord.com", "gateway.discord.gg", "youtube.com", "video.googlevideo.com"):
+        assert tproxy.route_policy(host)["route_class"] != "geo_exit"

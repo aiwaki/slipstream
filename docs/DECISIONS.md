@@ -718,3 +718,20 @@ transitions may use bootstrap. Both lockfiles must be read from exact base/head
 Git SHAs; all other parsed packages, edges and metadata must remain identical.
 Missing refs/read evidence or any other lock change disables bootstrap. The
 application audit policy and all required audits remain unchanged.
+
+## 2026-09-21 RODE access and Geph account cache
+
+RODE is a reviewed geo-exit suffix: ordinary Safari and direct HTTPS returned
+403/118 bytes for rode.com, www.rode.com and /en; owned Geph after auth-cache
+repair returned complete200/228756 bytes at /en-ca, and ordinary Chrome through
+that exit displayed RODE Canada. This does not generalize arbitrary403 responses
+into automatic route authority. Discord/YouTube exclusions remain unchanged.
+
+Geph's bundled0.3.9 reads a global auth_token from its SQLite cache and holds it
+across refresh failures. Changing credentials while retaining that cache can
+therefore keep authenticating the old account. Slipstream selects an account-
+specific cache inside its private configuration directory, derived with a
+domain-separated SHA256 digest; legacy shared tokens are never migrated. The
+secret is never a filename or log value. Exit changes retain the same cache.
+This prevents cross-account reuse; same-account token revocation still requires
+a separately verified recovery mechanism.

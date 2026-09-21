@@ -10,6 +10,24 @@ file.
 
 ## Current Checkpoint
 
+2026-09-21 RODE/Geph repair in progress (user resumed this specific/global repair):
+- Installed baseline remains2fb0270; no candidate replacement since pause.
+- RODE direct/Safari403; ownedGeph initially stale auth_token/no such user with
+  correct saved secret. Isolated fresh-cache auth removed that error. Backed up
+  private cache, cleared auth/conn tokens, restarted exact owned LaunchAgent;
+  RODE then200/228756 bytes en-ca. Temporary isolated Chrome opened RODE.
+  Ordinary Safari not yet fixed. Never print/store supplied account secret in docs.
+- Source fix: account-specific private cache excludes legacy shared tokens;
+  reviewed rode.com geo-exit suffix.29 focused Python route checks PASS;
+  Rust Geph checks in output/rode-diagnostic/geph-tests.log.
+- Previous diagnostic CI35510971356 terminalSUCCESS. Local47594cd/5470945
+  additionally fix/test successful natural browser-worker exit race;40 module
+  tests plus five positive/negative shutdown cases passed before pause.
+- Old staged1ab5b2b9 superseded by new runtime/source changes; NEVER dispatch it.
+  Next commit/build canonical candidate, qualify CI, then fresh one-shot install
+  and real Safari RODE. Broad resilience goal still not complete. Account cache
+  isolation does not yet solve same-account revocation automatically.
+
 2026-09-20 compact authoritative handoff (reconcile live state before acting):
 
 - Full goal remains ordered: traffic-qualified updates, runtime recovery,

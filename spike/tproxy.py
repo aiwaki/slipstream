@@ -356,6 +356,7 @@ STEAM_STORE_HOSTS = (
     "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
 )
 GEPH_MISC_HOSTS = (
+    "rode.com",                   # direct 403; complete RODE page via owned Geph
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
     "xpersonatoy.com",            # repeatedly truncates locally; completes via Geph
 )
