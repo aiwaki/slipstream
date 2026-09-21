@@ -10,33 +10,28 @@ file.
 
 ## Current Checkpoint
 
-2026-09-21 RODE/Geph repair in progress (user resumed this specific/global repair):
-- Installed baseline remains2fb0270; no candidate replacement since pause.
-- RODE direct/Safari403; ownedGeph initially stale auth_token/no such user with
-  correct saved secret. Isolated fresh-cache auth removed that error. Backed up
-  private cache, cleared auth/conn tokens, restarted exact owned LaunchAgent;
-  RODE then200/228756 bytes en-ca. Temporary isolated Chrome opened RODE.
-  Ordinary Safari not yet fixed. Never print/store supplied account secret in docs.
-- Source fix: account-specific private cache excludes legacy shared tokens;
-  reviewed rode.com geo-exit suffix.29 focused Python route checks PASS;
-  Rust Geph checks in output/rode-diagnostic/geph-tests.log.
-- Previous diagnostic CI35510971356 terminalSUCCESS. Local47594cd/5470945
-  additionally fix/test successful natural browser-worker exit race;40 module
-  tests plus five positive/negative shutdown cases passed before pause.
-- Source5cd45e8 pushed.36 Rust Geph tests and29 Python routing tests PASS.
-  Local build18298 finished exit0, canonical PASS. Candidate tree2ddafd74,
-  daemon d86e88bb. New transaction d43f85ea staged canonical PASS; old installed
-  tree1794a453 reverified. Pending manifest output/rode-diagnostic/pending-install.json.
-  NOT DISPATCHED. CI35576147139 terminalSUCCESS, all packaged gates passed.
-  Normal CLI --quit sent; native admin authorization pending (osascript9957,
-  SecurityAgent9962 observed; tray23290/root daemon23123 still running).
-  Wait for this existing Quit outcome; do not dispatch replacement until stopped.
-  Replacement authorization runner has NOT been executed.
-  Diagnostic prior CI35510971356 SUCCESS does not include this account/route diff.
-- Old staged1ab5b2b9 superseded by new runtime/source changes; NEVER dispatch it.
-  Next commit/build canonical candidate, qualify CI, then fresh one-shot install
-  and real Safari RODE. Broad resilience goal still not complete. Account cache
-  isolation does not yet solve same-account revocation automatically.
+2026-09-21 RODE/Geph repair INSTALLED AND VERIFIED:
+- Source5cd45e8 installed by consumed one-shot d43f85ea exit0 at08:23:49Z.
+  Never replay. Previous app preserved at /Applications/.Slipstream.before-d43f85ea.app.
+- Candidate tree2ddafd74d457e6803444c214f52cb8e8ca3fdd8dfc0d7bb138de894367ee3d89;
+  daemon d86e88bb37ad2ed00911da94b377b210220bab14b4439ca75ecd683714a84a09.
+  Canonical installed verification PASS; active StatusV2/live launchd PID11475;
+  all6 complete public PNG probes PASS. output/rode-install-d43f85ea/.
+  Privileged direct kernel checks not_run; do not overclaim that coverage.
+- Normal Safari new navigation to https://rode.com/ loaded RODE Canada en-ca:
+  navigation, product descriptions/images and footer observed with CUA. First
+  CUA typeText mangled URL; clipboard paste timed out but AX confirmed exact
+  address, then Return completed navigation. No user browser profile/proxy edits.
+- Confirmed cause: old shared Geph SQLite auth_token ignored changed account
+  secret. Account key correct. Private cache backup retained; temporary auth
+  token reset restored owned exit before source fix. New source selects private
+  account-specific cache and reviewed rode.com geo-exit suffix. No secrets in docs.
+-36 Rust Geph checks,29 Python route checks PASS; CI35576147139 terminalSUCCESS.
+  Includes earlier natural browser-worker-exit race fix47594cd and negative tests.
+- Broad resilience goal remains paused/incomplete: same-account token revocation,
+  long media, independent fallbacks, pool occupancy, sleep/wake and legacy .23
+  migration remain unqualified. This turn handled RODE and cross-account cache.
+- Old pending1ab5b2b9 superseded; NEVER dispatch. No pending authorization/build.
 
 2026-09-20 compact authoritative handoff (reconcile live state before acting):
 
