@@ -2833,3 +2833,19 @@ outage must not be masked by a successful neutral website. Tiny built-in avatars
 (1268/1274 bytes measured) are unsuitable for the large-response check; admission
 requires64KiB minimum and2MiB maximum. Runtime does not query the catalogue or
 fetch private attachments; only the two fixed public URLs are used.
+
+## 2026-09-23 Safari OAuth loopback navigation
+
+User screenshot shows WebKitErrorDomain:305 for an HTTP127.0.0.1 browser-session
+callback. User reports success after normal Slipstream Quit. Do not retain or
+replay the callback query (contains authentication state and account data).
+A synthetic file-page link to HTTP127.0.0.1:50661/callback produced Safari's
+HTTPS-only warning with Slipstream already OFF: no active PAC in scutil,
+no1080 listener and no slipstream process. No warning bypass was performed.
+The temporary loopback server was stopped; browser returned with GoBack.
+Earlier curl and PAC DIRECT checks do not cover this browser navigation policy.
+This independently reproduces the warning class, not the complete OAuth flow
+or the reason the user's later attempt succeeded.
+Primary source: https://bugs.webkit.org/show_bug.cgi?id=284559 documents305
+on localhost link navigation and distinctions from explicit typed HTTP URLs.
+No Safari security settings, certificates, DNS or proxy preferences changed.

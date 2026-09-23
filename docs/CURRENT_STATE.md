@@ -57,6 +57,15 @@ file.
   Correct HTTP CONNECT probes to auth.openai.com/chatgpt.com finish with valid
   TLS and HTTP403 in1.25s; not OAuth proof. Initial mistaken SOCKS probe against
   HTTP1080 is invalid diagnostic evidence. auth-connect-recheck.json is current.
+- OAuth follow-up: user reproduced failure then succeeded after Quit Slipstream.
+  Screenshot gives exact HTTP loopback callback WebKitErrorDomain305 HTTPS-Only,
+  not an auth.openai.com TLS error. No sensitive callback query retained here.
+  Synthetic file-page link to HTTP127.0.0.1:50661/callback reproduced Safari
+  "This Connection Is Not Secure" with Slipstream OFF (scutil noPAC, no1080
+  listener, no slipstream process). No warning bypass/settings change; GoBack.
+  Temporary server stopped. This establishes independent Safari HTTP-navigation
+  gating, not complete causality for user's on/off OAuth difference. WebKit284559
+  documents same305. Actual app sign-out/re-login cannot run during this task.
 - Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
