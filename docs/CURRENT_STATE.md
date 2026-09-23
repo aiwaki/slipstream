@@ -19,7 +19,8 @@ file.
   Three focused materializer tests PASS. `cargo build --locked --example
   prepare_legacy23_update` PASS; the actual executable refuses workstation
   execution before input handling (disposable-runner guard). Build log:
-  /tmp/slipstream-legacy23-driver-build.log. No workstation updater transaction
+  output/legacy23-driver-20260923/build.log; result.json binds the binary digest
+  and observed refusal exit1. No workstation updater transaction
   or installed-app change performed.
 - Next: qualify the actual legacy process-group failure on disposable CI, then
   implement/qualify an external migration entry point covering acceptance AND
