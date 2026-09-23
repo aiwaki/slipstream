@@ -21,3 +21,7 @@ app-tauri/src-tauri/chromium-headless-shell/*
 
 .DS_Store
 **/.DS_Store
+
+# Digest-pinned historical updater inputs, materialized for disposable CI only.
+app-tauri/src-tauri/examples/legacy23_generated/
+app-tauri/src-tauri/examples/prepare_legacy23_update.rs

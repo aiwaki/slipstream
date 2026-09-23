@@ -63,6 +63,19 @@ new-successor-only detachment cannot prove early-launch-failure rollback.
 Exact-source analysis is recorded in output/aud30-traffic-gate/legacy23-causal-boundary.json
 (source6ba71ef7, SHAab48e76d); it is not a live migration pass.
 
+To build a diagnostic driver with that exact historical preparer, run
+`python3 scripts/materialize_legacy_update_driver.py`, then
+`cargo build --locked --example prepare_legacy23_update` in `app-tauri/src-tauri`.
+The source commit must exist locally; materialization verifies its full SHA-256
+before writing and refuses existing generated inputs. The generated entry point
+retains all current disposable-runner guards. Its provenance manifest is at
+`app-tauri/src-tauri/examples/legacy23_generated/provenance.json`.
+Use this driver only on disposable CI, with the pinned published previous
+bundle and the existing transaction harness. A compilation pass does not qualify
+legacy migration. The harness's default coverage label describes the current
+preparer; historical-driver evidence must identify the actual driver separately
+and must not be published as a current-preparer or migration pass.
+
 
 After a preview is published and its remote tag, state, identity, asset set and
 digests are verified, the immediately preceding preview is marked as archival

@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-23 user explicitly resumed broad work after the requested pause.
+- Physical checkout and HEAD6dee0e9 reconciled; user AGENTS.md edits preserved.
+  PR376 remains open at5cd45e8 with terminal green checks, not proof for local
+  photo-site changes. First open gate remains published .23 updater migration.
+- Added digest-pinned historical-preparer driver materialization. It preserves
+  the existing disposable-runner guards and refuses source drift/stale inputs.
+  Three focused materializer tests PASS. `cargo build --locked --example
+  prepare_legacy23_update` PASS; the actual executable refuses workstation
+  execution before input handling (disposable-runner guard). Build log:
+  /tmp/slipstream-legacy23-driver-build.log. No workstation updater transaction
+  or installed-app change performed.
+- Next: qualify the actual legacy process-group failure on disposable CI, then
+  implement/qualify an external migration entry point covering acceptance AND
+  early-launch-failure rollback. Candidate-only detachment remains insufficient.
+
 2026-09-23 photo-site investigation INCOMPLETE (user requested repair):
 - Active daemon68062/PAC/PF confirmed. Candidate source06d693c now installed, replacing5cd45e8.
 - Explorecams Safari visibly malformed/broken images; Explorecams/Sampleshots
