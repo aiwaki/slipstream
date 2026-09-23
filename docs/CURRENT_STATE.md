@@ -78,7 +78,17 @@ file.
   navigation /entry -> HTTP127.0.0.1:50661/callback now renders Local callback OK
   without interstitial. Temporary synthetic server stopped. Real OAuth and
   active-Slipstream comparison remain unqualified; do not claim full login pass.
-- Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
+- User confirmed real authorization works after the authorized Safari HTTP-warning
+  change. Close the reported OAuth-blocker incident on user acceptance plus the
+  synthetic browser callback pass; active-Slipstream A/B was not independently
+  observed. Photo galleries have visible access evidence; full lazy-load and
+  long-term reliability remain outside that incident acceptance.
+- Broad resilience work remains paused at the user's explicit earlier request
+  to stop because of the weekly limit. Do not treat an automatic goal wakeup as
+  permission to resume the broad release/resilience program. On explicit resume,
+  first open gate is legacy .23 updater migration (RELEASES.md); current PR376
+  head5cd45e8 has terminal green checks, but local photo changes are not its head.
+
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
 zero buffer/network with prior47.6Mbps estimate; daemon12279 stillactive.
