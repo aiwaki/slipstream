@@ -44,6 +44,19 @@ file.
   4.8min contentdownload. Flushdidnotfix; preliminary stalled-before-send
   interpretation notconfirmed. DevToolsclosed. ChatGPT fullOAuth
   remainsunqualified. Evidence output/sites-install-e69dcd10/.
+- Later browser continuation (same installed c8622ec, no further runtime change):
+  clean Onfotolife URL now renders actual photo grids in Chrome AND Safari.
+  Chrome Network showed 61 requests, 1.1MB transferred, DOMContentLoaded4s,
+  finish5s and successful JPEG responses. Safari previously displayed server526
+  (Cloudflare could not validate origin certificate); fresh navigation recovered.
+  This qualifies current visible gallery access, not a permanent CF/server fix.
+  Sampleshots Chrome AX now shows33of36 photos; product image still unqualified.
+  User deferred real ChatGPT login reproduction. /Applications/ChatGPT.app has
+  CFBundleIdentifier com.openai.codex; CUA denies access to that app. Do not
+  bypass tool denial or claim OAuth fixed from loopback/probe success.
+  Correct HTTP CONNECT probes to auth.openai.com/chatgpt.com finish with valid
+  TLS and HTTP403 in1.25s; not OAuth proof. Initial mistaken SOCKS probe against
+  HTTP1080 is invalid diagnostic evidence. auth-connect-recheck.json is current.
 - Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
