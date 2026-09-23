@@ -357,6 +357,7 @@ STEAM_STORE_HOSTS = (
 )
 GEPH_MISC_HOSTS = (
     "rode.com",                   # direct 403; complete RODE page via owned Geph
+    "cdn.explorecams.com",        # local full-object stalls; owned exit completes JS/photos
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
     "xpersonatoy.com",            # repeatedly truncates locally; completes via Geph
 )
@@ -9745,29 +9746,37 @@ def _decode_direct_route_preflight_observation(job, observation):
 
 
 def _select_route_preflight_bootstrap_asset(assets, parent_host):
-    """Select one allowed asset, preferring an exact cross-origin child."""
+    """Prefer the site's own child host before unrelated third-party scripts.
+
+    This only ranks the bounded discovery set; every selected exact host still
+    needs independent same-object route proof. A subdomain relationship never
+    grants route authority to either the parent or its other children.
+    """
     parent = normalize_host(parent_host)
     selected = None
     selected_is_cross_origin = False
+    selected_rank = -1
     for candidate in assets:
         candidate_host = normalize_host(candidate.exact_host)
         candidate_is_cross_origin = bool(
             candidate_host and candidate_host != parent
         )
+        rank = (
+            2 if parent and candidate_host.endswith("." + parent)
+            else 1 if candidate_is_cross_origin else 0
+        )
         if (
             _auto_geph_base_host_allowed(candidate_host)
             and (
                 selected is None
-                or (
-                    candidate_is_cross_origin
-                    and not selected_is_cross_origin
-                )
+                or rank > selected_rank
             )
         ):
             if selected is not None:
                 selected.forget()
             selected = candidate
             selected_is_cross_origin = candidate_is_cross_origin
+            selected_rank = rank
         else:
             candidate.forget()
     return selected, selected_is_cross_origin

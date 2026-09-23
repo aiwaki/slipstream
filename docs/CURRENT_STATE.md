@@ -10,6 +10,30 @@ file.
 
 ## Current Checkpoint
 
+2026-09-23 photo-site investigation INCOMPLETE (user requested repair):
+- Active daemon68062/PAC/PF confirmed. Source remains92525cf, installed5cd45e8.
+- Explorecams Safari visibly malformed/broken images; Explorecams/Sampleshots
+  HTML truncated over HTTP1.1 andHTTP2. Earlier inactive baseline also truncated.
+- Fresh owned9954 Geph now completes public image53670bytes in1.4s; local1080
+  receives200 headers but zero body/30s. Root pages viaGeph returnCF challenge,
+  not usable-content proof. Do not add a blanket geo route from that result.
+- Alternate8443 fails (521/challenge/timeout). Local callback smoke succeeds on
+  localhost and127.0.0.1; PAC returnsDIRECT for HTTP/HTTPS loopback. RealChatGPT
+  OAuth still unqualified; no credential/profile/DNS changes made.
+- Native log reads completed exit0, including rotated site-history.log.
+  Root-run plain/split64/split16 complete-body tests all fail for three targets.
+  Own-CDN bootstrap ranking fix plus reviewed cdn.explorecams.com exit prepared.
+  Eight new checks and230 related bootstrap checks PASS; build/install pending.
+  RootHTML and Onfotolife/auth challenges remain unqualified. Evidence in
+  output/sites-20260923/. No native prompt pending.
+- Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
+
+2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
+zero buffer/network with prior47.6Mbps estimate; daemon12279 stillactive.
+Private evidence output/youtube-stall-20260921/. Existing googlevideo relay
+errors do not establish this stall cause. No routing changes; long-media
+recovery remains unresolved. Broad resilience work remains paused.
+
 2026-09-21 RODE/Geph repair INSTALLED AND VERIFIED:
 - Source5cd45e8 installed by consumed one-shot d43f85ea exit0 at08:23:49Z.
   Never replay. Previous app preserved at /Applications/.Slipstream.before-d43f85ea.app.

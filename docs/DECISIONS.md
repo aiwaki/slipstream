@@ -735,3 +735,20 @@ domain-separated SHA256 digest; legacy shared tokens are never migrated. The
 secret is never a filename or log value. Exit changes retain the same cache.
 This prevents cross-account reuse; same-account token revocation still requires
 a separately verified recovery mechanism.
+
+## 2026-09-23 Explorecams CDN and bootstrap candidate ranking
+
+Reviewed `cdn.explorecams.com` exit: the same public JPEG stalls locally
+after HTTP200 headers, but completes53670bytes through ownedGeph in1.4s;
+a public productionJS object completes357317bytes through that exit.
+Root-run full-object plain/split64/split16 probes all fail within10s for the
+JPEG. This reviewed CDN suffix does not route the parent Explorecams site,
+Sampleshots, Onfotolife, Discord or YouTube. Installed Safari qualification
+is pending; root HTML truncation and Cloudflare challenges remain separate.
+
+Within the existing bounded root-discoveredJS candidates, a child beneath the
+exact parent hostname now ranks before unrelated cross-origin scripts. Logs
+showed an advertising script consuming Explorecams' sole child probe while its
+own CDN remained untested. Ranking changes no proof requirements or route
+authority; excluded hosts remain excluded, ties retain document order and
+unselected transient targets are forgotten.
