@@ -72,6 +72,12 @@ file.
   OFF state via normal --quit; temporary HTTP server stopped. No code changes.
   User choice pending: use Chrome for login (keep Safari security) or explicitly
   authorize Safari HTTP-warning setting change. Do not change security silently.
+- User explicitly chose disabling Safari HTTP warning after scope disclosure.
+  CUA Security checkbox "Warn before connecting to a website over HTTP" changed
+  from1to0. Fraudulent-site warning and JavaScript remained1. Actual Safari link
+  navigation /entry -> HTTP127.0.0.1:50661/callback now renders Local callback OK
+  without interstitial. Temporary synthetic server stopped. Real OAuth and
+  active-Slipstream comparison remain unqualified; do not claim full login pass.
 - Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
