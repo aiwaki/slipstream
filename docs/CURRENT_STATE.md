@@ -66,6 +66,12 @@ file.
   Temporary server stopped. This establishes independent Safari HTTP-navigation
   gating, not complete causality for user's on/off OAuth difference. WebKit284559
   documents same305. Actual app sign-out/re-login cannot run during this task.
+- Synthetic callback continuation: same file-page HTTP link renders Local callback
+  OK in normal Chrome. Attempt to launch exact installed Slipstream starts tray
+  but not1080/PAC, so active-proxy comparison NOT qualified. Restored original
+  OFF state via normal --quit; temporary HTTP server stopped. No code changes.
+  User choice pending: use Chrome for login (keep Safari security) or explicitly
+  authorize Safari HTTP-warning setting change. Do not change security silently.
 - Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
