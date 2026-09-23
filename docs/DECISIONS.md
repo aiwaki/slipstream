@@ -761,5 +761,6 @@ Reviewed candidate suffixes `onfotolife.com` and `www.sampleshots.com` route tho
 same-origin bootstrap flows consistently. This is a reviewed per-site exception
 based on transfer evidence, not automatic authority from403 or a blanket route
 for Cloudflare. Browser challenge completion remains a required open gate;
-these follow-up routes have not yet been installed. No CAPTCHA/security warning
+these follow-up routes were installed by transactione69dcd10. Safari Sampleshots
+loads its camera page, while Onfotolife still fails browser challenge completion. No CAPTCHA/security warning
 is bypassed. Apex sampleshots.com and challenges.cloudflare.com remain unchanged.

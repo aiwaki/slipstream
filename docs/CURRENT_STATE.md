@@ -30,12 +30,20 @@ file.
   reload visibly restores styling and image grid; fullHTML completeness unqualified.
   RootHTML and Onfotolife/auth challenges remain unqualified. Evidence in
   output/sites-20260923/ and output/sites-install-4930787e/. No native prompt pending.
-- Follow-up CANDIDATE ONLY: onfotolife.com / www.sampleshots.com reviewed routes.
-  Their same-origin publicCF JS truncates locally20508/10689bytes but ownedexit
-  completes237445/230024bytes. Safari Onfoto blankCF; Sampleshots HTTPS navigation
-  reaches security warning (not bypassed). Browser verification blocked by locked
-  Mac; user asked to unlock. Follow-up build/install notstarted; currentinstalled
-  06d693c fixesCDN only. ChatGPT fullOAuth remainsunqualified.
+- Follow-up sourcec8622ec INSTALLED by consumed transactione69dcd10 exit0.
+  Canonical build/install verificationPASS, six completePNG transfersPASS.
+  Previousapp /Applications/.Slipstream.before-e69dcd10.app preserved.
+  Nine focused route/ranking checksPASS. No nativepromptpending.
+  Safari Sampleshots HTTPS now reaches PanasonicTZ80 page with36sample captions;
+  Chrome screenshot confirmsfour realphotos rendered (camera productimage remains
+  broken, notinvestigated). Full36photo lazyload remainsunqualified;
+  Onfotolife remainsblankCF inSafari/Chrome. Same publicscript throughinstalled
+  1080 completes237684bytes/2.56s; compressed transfer completes87513wirebytes.
+  TurnstileAPI completes86732bytes locally, so no broadCloudflare route added.
+  Chrome DevTools initially showsStalled; aftersocketflush, finaltiming shows
+  4.8min contentdownload. Flushdidnotfix; preliminary stalled-before-send
+  interpretation notconfirmed. DevToolsclosed. ChatGPT fullOAuth
+  remainsunqualified. Evidence output/sites-install-e69dcd10/.
 - Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
