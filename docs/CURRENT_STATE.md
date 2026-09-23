@@ -11,7 +11,7 @@ file.
 ## Current Checkpoint
 
 2026-09-23 photo-site investigation INCOMPLETE (user requested repair):
-- Active daemon68062/PAC/PF confirmed. Source remains92525cf, installed5cd45e8.
+- Active daemon68062/PAC/PF confirmed. Candidate source06d693c now installed, replacing5cd45e8.
 - Explorecams Safari visibly malformed/broken images; Explorecams/Sampleshots
   HTML truncated over HTTP1.1 andHTTP2. Earlier inactive baseline also truncated.
 - Fresh owned9954 Geph now completes public image53670bytes in1.4s; local1080
@@ -23,9 +23,19 @@ file.
 - Native log reads completed exit0, including rotated site-history.log.
   Root-run plain/split64/split16 complete-body tests all fail for three targets.
   Own-CDN bootstrap ranking fix plus reviewed cdn.explorecams.com exit prepared.
-  Eight new checks and230 related bootstrap checks PASS; build/install pending.
+  Eight new checks and230 related bootstrap checks PASS. Canonical build/install
+  verification PASS (livePID82500; all6 public completePNG transfers PASS).
+  Consumed transaction4930787e exit0; NEVER replay. Previousapp
+  /Applications/.Slipstream.before-4930787e.app retained. Safari Explorecams
+  reload visibly restores styling and image grid; fullHTML completeness unqualified.
   RootHTML and Onfotolife/auth challenges remain unqualified. Evidence in
-  output/sites-20260923/. No native prompt pending.
+  output/sites-20260923/ and output/sites-install-4930787e/. No native prompt pending.
+- Follow-up CANDIDATE ONLY: onfotolife.com / www.sampleshots.com reviewed routes.
+  Their same-origin publicCF JS truncates locally20508/10689bytes but ownedexit
+  completes237445/230024bytes. Safari Onfoto blankCF; Sampleshots HTTPS navigation
+  reaches security warning (not bypassed). Browser verification blocked by locked
+  Mac; user asked to unlock. Follow-up build/install notstarted; currentinstalled
+  06d693c fixesCDN only. ChatGPT fullOAuth remainsunqualified.
 - Broad prior resilience goal remainspaused; this scoped repair isnotfinished.
 
 2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,

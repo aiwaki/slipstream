@@ -752,3 +752,14 @@ showed an advertising script consuming Explorecams' sole child probe while its
 own CDN remained untested. Ranking changes no proof requirements or route
 authority; excluded hosts remain excluded, ties retain document order and
 unselected transient targets are forgotten.
+
+
+The subsequent Onfotolife/Sampleshots comparison isolates another incomplete
+bootstrap object: public same-origin Cloudflare JS returns HTTP200 but truncates
+locally at20508/10689bytes; ownedGeph completes237445/230024bytes respectively.
+Reviewed candidate suffixes `onfotolife.com` and `www.sampleshots.com` route those
+same-origin bootstrap flows consistently. This is a reviewed per-site exception
+based on transfer evidence, not automatic authority from403 or a blanket route
+for Cloudflare. Browser challenge completion remains a required open gate;
+these follow-up routes have not yet been installed. No CAPTCHA/security warning
+is bypassed. Apex sampleshots.com and challenges.cloudflare.com remain unchanged.

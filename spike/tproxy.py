@@ -358,6 +358,8 @@ STEAM_STORE_HOSTS = (
 GEPH_MISC_HOSTS = (
     "rode.com",                   # direct 403; complete RODE page via owned Geph
     "cdn.explorecams.com",        # local full-object stalls; owned exit completes JS/photos
+    "onfotolife.com",             # local challenge JS truncates; owned exit completes same object
+    "www.sampleshots.com",        # local HTML/challenge JS truncates; owned exit completes challenge JS
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
     "xpersonatoy.com",            # repeatedly truncates locally; completes via Geph
 )

@@ -42,7 +42,15 @@ def test_owned_child_preference_cannot_override_policy_exclusion(monkeypatch):
 def test_reviewed_explorecams_cdn_does_not_route_parent_or_unrelated_hosts():
     assert tproxy.route_policy('cdn.explorecams.com')['route_class'] == 'geo_exit'
     for host in ('explorecams.com', 'notcdn.explorecams.com',
-                 'cdn.explorecams.com.attacker.example', 'www.sampleshots.com',
-                 'onfotolife.com', 'discord.com', 'gateway.discord.gg',
+                 'cdn.explorecams.com.attacker.example', 'sampleshots.com',
+                 'onfotolife.com.attacker.example', 'discord.com', 'gateway.discord.gg',
                  'youtube.com', 'video.googlevideo.com'):
+        assert tproxy.route_policy(host)['route_class'] != 'geo_exit'
+
+
+def test_reviewed_photo_challenge_hosts_are_narrow():
+    for host in ('onfotolife.com', 'www.sampleshots.com'):
+        assert tproxy.route_policy(host)['route_class'] == 'geo_exit'
+    for host in ('sampleshots.com', 'notsampleshots.com', 'notonfotolife.com',
+                 'www.sampleshots.com.attacker.example', 'challenges.cloudflare.com'):
         assert tproxy.route_policy(host)['route_class'] != 'geo_exit'
