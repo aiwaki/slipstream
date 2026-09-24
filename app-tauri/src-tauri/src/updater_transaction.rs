@@ -925,6 +925,68 @@ pub fn prepare_transaction(
     current_version: &str,
     expected_version: &str,
 ) -> Result<PreparedTransaction, String> {
+    prepare_transaction_with_helper(
+        current_exe,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        current_version,
+        expected_version,
+        HelperOrigin::Installed,
+    )
+}
+
+/// External migration preparation only: the caller must authenticate the archive
+/// and stop the old tray before calling. This is not a public CLI or a substitute
+/// for signed-feed admission. The staged helper survives target replacement in
+/// owner-private runtime storage and handles both acceptance and rollback.
+pub fn prepare_legacy_migration_transaction(
+    current_exe: &Path,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    current_version: &str,
+    expected_version: &str,
+) -> Result<PreparedTransaction, String> {
+    if current_version != "0.1.9-preview.23" {
+        return Err("external legacy migration supports only published preview.23".into());
+    }
+    prepare_transaction_with_helper(
+        current_exe,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        current_version,
+        expected_version,
+        HelperOrigin::VerifiedStage,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum HelperOrigin {
+    Installed,
+    VerifiedStage,
+}
+
+fn packaged_helper(origin: HelperOrigin, target: &Path, stage: &Path) -> PathBuf {
+    match origin {
+        HelperOrigin::Installed => target,
+        HelperOrigin::VerifiedStage => stage,
+    }
+    .join("Contents/MacOS")
+    .join(WATCHDOG_BINARY)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_transaction_with_helper(
+    current_exe: &Path,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    current_version: &str,
+    expected_version: &str,
+    helper_origin: HelperOrigin,
+) -> Result<PreparedTransaction, String> {
     let uid = current_uid();
     if uid == 0 {
         return Err("the tray updater must not run as root".into());
@@ -968,7 +1030,7 @@ pub fn prepare_transaction(
     }
     let old_executable_sha256 = sha256_file(&bundle_executable(&target))?;
     let new_executable_sha256 = sha256_file(&bundle_executable(&stage))?;
-    let packaged_helper = target.join("Contents/MacOS").join(WATCHDOG_BINARY);
+    let packaged_helper = packaged_helper(helper_origin, &target, &stage);
     let helper = state_dir.join("runtime").join(WATCHDOG_BINARY);
     let watchdog_sha256 = match install_runtime_helper(&packaged_helper, &helper) {
         Ok(digest) => digest,
@@ -1743,6 +1805,47 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
+
+    #[test]
+    fn migration_copies_staged_helper_and_preserves_installed_helper() {
+        let root = TempDir::new().unwrap();
+        let target = root.path().join("old/Slipstream.app");
+        let stage = root.path().join("new/Slipstream.app");
+        let old = packaged_helper(HelperOrigin::Installed, &target, &stage);
+        let new = packaged_helper(HelperOrigin::VerifiedStage, &target, &stage);
+        for (path, bytes) in [
+            (&old, b"old helper".as_slice()),
+            (&new, b"fixed helper".as_slice()),
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let destination = root.path().join("runtime").join(WATCHDOG_BINARY);
+        let digest = install_runtime_helper(&new, &destination).unwrap();
+        assert_eq!(digest, sha256_file(&new).unwrap());
+        assert_eq!(fs::read(&destination).unwrap(), b"fixed helper");
+        assert_eq!(fs::read(&old).unwrap(), b"old helper");
+        fs::remove_dir_all(&stage).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"fixed helper");
+    }
+
+    #[test]
+    fn migration_rejects_other_versions_before_filesystem_mutation() {
+        let root = TempDir::new().unwrap();
+        let error = prepare_legacy_migration_transaction(
+            &root.path().join("absent"),
+            &root.path().join("state"),
+            &root.path().join("agents"),
+            b"unverified",
+            "0.1.9-preview.22",
+            "0.1.9-preview.24",
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("only published preview.23"));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
 
     fn journal(root: &Path) -> (PathBuf, UpdateJournalV1) {
         let state = root.join("state");

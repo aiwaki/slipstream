@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 external migration core prepared, NOT exposed or installed.
+- prepare_legacy_migration_transaction supports preview.23 only and selects
+  the staged helper for owner-private runtime copying/hash binding. Ordinary
+  prepare_transaction still selects the installed helper. Shared journal,
+  replacement and rollback logic remains in use. All28 watchdog tests PASS,
+  including2 new migration helper/version tests. Logs:
+  output/legacy23-ci-36016073363/{migration-core-tests,watchdog-tests}.log.
+- This API requires an authenticated archive and stopped old tray from its
+  future caller; it is NOT a signed public migration entry point. Next wire
+  disposable migration acceptance/rollback/early-startup-failure qualification,
+  then the authenticated external launcher with exact old-tray stop ownership.
+- Existing run36016073363 remains live (lifecycle-heavy). Both legacy cases
+  failed as recorded below; all current-preparer transaction cases now PASS.
+  Do not push follow-ups merely to cancel this evidence-producing run.
+
 2026-09-24 published .23 preparer failure reproduced on disposable macOS.
 - CI36016073363, PR head a49f224, tested merge c12814ea5b065333b42c655792f7ae586f76967f.
   Packaged build and product checks PASS. Current-preparer accept PASS.
