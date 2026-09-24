@@ -10,6 +10,23 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36022169923 terminal review and lifecycle evidence inspected.
+- Lifecycle-heavy SUCCESS: composed navigation worker cleanup clean, active
+  worker uninstall clean, installed_state absent, sentinel preserved, global PF
+  unchanged. Read output/running-migration-ci-36022169923/lifecycle/packaged-lifecycle.log.
+  Prior cleanup failure was NOT reproduced; diagnostics-only diff does not
+  prove its intermittent underlying cause is fixed. No speculative cleanup edit.
+- All current-preparer and migration cases PASS. Overall CI FAILURE solely from
+  exact pinned legacy accept/rollback. Downloaded both reports/harness logs in
+  output/running-migration-ci-36022169923/legacy-{accept,rollback}/; clean teardown
+  both. Accept terminal error actual=None after accepted successor; rollback
+  terminal error no distinct live restored tray. These match known old defects.
+- Next give the historical diagnostic cases explicit structural expected-defect
+  assertions (not blanket continue-on-error), while corrected migration/current
+  paths still require live terminal trays. Then qualify public signed CLI.
+  Local CLI commits are not in this completed CI and still require affected
+  coverage before release. Workstation remains unchanged.
+
 2026-09-24 running-.23 migration3-case boundary PASSED and artifacts inspected.
 - CI36022169923 head4cad0fd / merge98871aaf27ab47cd90644e26ede140a6a622c5ff.
   accept: old PID9604 exit-15, acknowledged live successor9960, exact new tree.
