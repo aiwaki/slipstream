@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 migration CI58c576d dispatched and live: run36018610119.
+- changes and Chromium checks PASS; package build, product tests and Windows
+  adapter still in_progress. Preserve this run; migration cases await package.
+- Older lifecycle failure has no standalone artifact; full failed log retained
+  under output/legacy23-ci-36016073363/. Existing generic cleanup error cannot
+  distinguish unexpected worker exit from launchd job-removal timeout.
+- Local diagnostic follow-up separates those error codes and logs only numeric
+  exit status plus bounded parsed worker enum (no raw stderr/request/path data).
+  Lifecycle workflow now preserves its console evidence with always-upload and
+  pipefail. actionlint and43 affected probe-runtime tests PASS. Not pushed while
+  migration run is live; this improves evidence, does NOT claim cleanup fixed.
+
 2026-09-24 migration spawn-refusal case prepared for next CI.
 - New migration-only startup_failure modifies only the private archive's main
   executable permission bits. Original packaged inputs/helper stay intact.

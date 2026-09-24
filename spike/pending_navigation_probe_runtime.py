@@ -1853,7 +1853,7 @@ class PendingNavigationBrowserWorkerLauncher:
                 return
             self._sleep(0.05)
         raise PendingNavigationProbeRuntimeError(
-            "browser_worker_cleanup_failed"
+            "browser_worker_cleanup_failed_job_still_loaded"
         )
 
     def _cleanup_launch(self, target, paths, pid, identity):
@@ -1881,12 +1881,16 @@ class PendingNavigationBrowserWorkerLauncher:
                 )
                 # Successful natural exit already proves worker-owned cleanup.
                 # It may race SIGTERM after the exact PID/UID validation above.
-                if exit_code != 0 and self._read_worker_error(
-                    paths.stderr,
-                    identity,
-                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                worker_error = self._read_worker_error(paths.stderr, identity)
+                if exit_code != 0 and worker_error != _BROWSER_WORKER_TERMINATION_ERROR:
+                    # Only the bounded enum parsed by _read_worker_error is
+                    # exposed; never raw stderr, paths or worker request data.
+                    print(
+                        f"browser-worker cleanup exit: code={exit_code} "
+                        f"reason={worker_error}", file=sys.stderr,
+                    )
                     raise PendingNavigationProbeRuntimeError(
-                        "browser_worker_cleanup_failed"
+                        "browser_worker_cleanup_failed_exit"
                     )
         self._run(("/bin/launchctl", "bootout", target))
         try:

@@ -1543,9 +1543,18 @@ jobs:
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
+          set -o pipefail
           bash scripts/run_packaged_lifecycle_smoke.sh \
             "$RUNNER_TEMP/qualified-app/Slipstream.app" \
-            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}"
+            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}" \
+            2>&1 | tee "$RUNNER_TEMP/packaged-lifecycle.log"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: packaged-lifecycle-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/packaged-lifecycle.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Package the qualified app
         if: github.event_name == 'pull_request'
         run: |
