@@ -3,6 +3,20 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Googlevideo large ClientHello local reserve (candidate)
+
+The size-sensitive Safari CDN failure admits one additional local fallback for
+`googlevideo.com` and its subdomains only. Direct-first selection remains intact.
+`youtube_record256_fake` preserves a complete single-record ClientHello transcript,
+including key shares, but reframes bodies larger than1024 bytes into256-byte TLS
+records and sends at most512 bytes per paced30ms write after the existing low-TTL
+poison. It never changes SNI, certificate verification, key exchange, system DNS,
+UDP, or Geph routing. Incomplete/multiple records and unreviewed hosts are unchanged.
+The reserve is outside GENERAL_STRATS and Discord's ladder. Existing scoped
+connection deadlines still apply; the pacing is per connection, not a shared lock.
+Live same-endpoint verified TLS1.2/1.3 probes pass; actual installed Safari playback
+remains a required gate before claiming recovery.
+
 ## Runtime recovery attempt ownership
 
 An exact-host local recovery sweep owns its monotonic start token. A replacement

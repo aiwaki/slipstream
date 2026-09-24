@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 Googlevideo large-flight local reserve implemented, NOT installed.
+- Same-endpoint classic large ClientHello fails while google.com large control
+  succeeds. Hybrid fails on rr18/rr9 n8v7znse, succeeds on rr2 ug5onuxaxjvh-n8v6;
+  endpoint/path-sensitive, not a universal Safari/hybrid incompatibility.
+- Paced TCP512 alone and matched mail/vk decoys fail. TLS records256 + paced
+  TCP512 succeeds on failing rr18: verified TLS1.2 CH1444, TLS1.3 CH2760.
+  Re-tested extracted production helper on exact host: TLS1.3 verified in0.25s.
+  Native authorization exit0, probe processes terminal. No PF/DNS changes.
+- Added scoped youtube_record256_fake to Googlevideo direct-first local fallbacks.
+  Transcript bytes preserved; no cipher downgrade or Geph. Existing ladders retained.
+- Focused tests:7 new transcript/scope/input-boundary tests plus15 existing strategy
+  tests PASS. Previous green remote94ed6dc CI baseline reused; no unchanged suite.
+- Next build canonical candidate, then qualify real Safari when replacement can
+  avoid disrupting user work. Current installed df59aae still has the defect.
+  Evidence output/local-qualification-a8248cfe/flight-probe-*.json and matrices.
+
 2026-09-24 live Safari YouTube stall CONFIRMED; higher-priority open defect.
 - User requested non-disruptive checks only; do not sleep/reboot or start calls.
 - M1mUuyV67Sg froze at291.67s, buffer0, frames1798/dropped0,2880x2160@24,

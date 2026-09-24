@@ -14571,6 +14571,24 @@ def _reserve_flight_parts(flight, host, mode):
     a second handshake: bytes after the first complete record remain untouched.
     TCP modes request separate writes, not guaranteed packet boundaries.
     """
+    if mode == "youtube_record256":
+        if not is_google_video_host(host) or len(flight) < 9:
+            return (flight,)
+        length = int.from_bytes(flight[3:5], "big")
+        body = flight[5:]
+        if (flight[:3] not in (b"\x16\x03\x01", b"\x16\x03\x03")
+                or not 1024 < length <= 16384 or len(body) != length
+                or body[0] != 1 or int.from_bytes(body[1:4], "big") != length - 4
+                or parse_sni(body) != host):
+            return (flight,)
+        # Preserve the complete handshake transcript, including hybrid key shares.
+        # Smaller records plus paced writes qualified on a size-sensitive CDN path;
+        # TCP segmentation alone did not. Never rewrite the negotiated algorithms.
+        reframed = b"".join(
+            flight[:3] + len(body[i:i + 256]).to_bytes(2, "big") + body[i:i + 256]
+            for i in range(0, length, 256)
+        )
+        return tuple(reframed[i:i + 512] for i in range(0, len(reframed), 512))
     if mode not in DISCORD_RESERVE_MODES or not is_discord_host(host):
         return (flight,)
     if len(flight) < 9 or flight[:3] not in (b"\x16\x03\x01", b"\x16\x03\x03"):
@@ -14606,6 +14624,8 @@ def _reserve_flight_parts(flight, host, mode):
 # climb the ladder to the next working strategy and re-cache it. Self-tuning,
 # no manual re-tuning, survives strategy decay.
 STRATEGIES = [
+    {"name": "youtube_record256_fake", "cap": None, "fake": True,
+     "flight_mode": "youtube_record256"},
     {"name": "discord_https8443", "cap": None, "fake": False},
     {"name": "discord_matched_fake", "cap": None, "fake": True},
     {"name": "gateway_matched_fake", "cap": None, "fake": True},
@@ -14860,6 +14880,8 @@ def strategy_order(host):
     if strategy_set == STRATEGY_DIRECT_FIRST:
         cached = _strat_cache.get(h)
         fallback_names = [name for name in GENERAL_STRATS if name != "plain"]
+        if is_google_video_host(h):
+            fallback_names.insert(0, "youtube_record256_fake")
         if cached in fallback_names:
             fallback_names = [cached] + [
                 name for name in fallback_names if name != cached
@@ -18815,7 +18837,7 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
             up_w.write(part)
             await up_w.drain()
             if index + 1 < len(parts):
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.03 if flight_mode == "youtube_record256" else 0.01)
         flight_sent = True
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
