@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 durable watchdog-owned legacy tray stop implemented, not installed.
+- VerifiedLegacyMigration.prepare_running_tray binds the installed .23 tray by
+  PID/UID/birth/command and kernel proc_pidpath, then stages a candidate-owned
+  helper and persists optional legacy_tray identity. Preparation leaves old tray
+  running; only the durable watchdog sends exact SIGTERM in Prepared phase,
+  after checking old executable hash and live identity again. It waits up to5s
+  for exit and refuses replacement on identity mismatch or timeout.
+- This corrects the external-launcher sequencing: existing initiator wait is
+  tray-path-specific and cannot protect an unrelated launcher. No stop-first
+  preparation failure/relaunch gap is introduced. Existing journals without
+  legacy_tray keep their previous semantics (field omitted when None).
+-31 watchdog tests PASS (3 new identity/kernel-path/digest-before-signal checks),
+  output/migration-tray-stop-tests.log. Compilation includes the lib consumer.
+  No actual live tray was signalled, and no packaged stop qualification claimed.
+- Next wire an isolated CI driver to a real running published .23 tray, prove
+  failed preflight leaves it alive and candidate watchdog stop/replacement works;
+  then complete authenticated public launcher entry. The earlier3 migration
+  core passes do not cover this new running-tray boundary. Workstation unchanged.
+
 2026-09-24 authenticated migration admission implemented locally, not exposed.
 - VerifiedLegacyMigration in app_update.rs downloads only the exact official
   version-bound archive, verifies with the compile-time packaged updater key,

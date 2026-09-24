@@ -483,3 +483,14 @@ filesystem or process mutation. The constructor is not yet wired to a public
 launcher. Unit rejection checks and the shared downloader are not evidence of a
 successful live signed-feed migration; exact legacy tray ownership/stop and
 preparation-failure recovery remain required before public exposure.
+
+The admitted archive can now prepare a running legacy tray by its exact PID.
+Preparation records PID/UID/birth identity and verifies the kernel executable
+path. It leaves the tray running until the candidate watchdog owns the durable
+journal. In Prepared phase that watchdog rechecks executable hash and live
+identity, sends only SIGTERM to the bound PID and verifies exit before renames.
+Timeout or unverifiable identity defers replacement. This avoids stopping the
+tray before potentially failing preparation, and does not rely on the external
+launcher's path matching the normal tray initiator wait. This path still needs
+an isolated packaged running-tray qualification and a public CLI; unit checks
+are not evidence of a successful live .23 migration.

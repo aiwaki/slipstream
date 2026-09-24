@@ -56,6 +56,8 @@ pub struct UpdateJournalV1 {
     pub nonce: String,
     pub uid: u32,
     pub initiator_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legacy_tray: Option<LegacyTrayIdentity>,
     pub target: PathBuf,
     pub backup: PathBuf,
     pub stage: PathBuf,
@@ -333,6 +335,15 @@ fn is_safe_process_start(value: &str) -> bool {
 }
 
 fn validate_journal(path: &Path, journal: &UpdateJournalV1) -> Result<(), String> {
+    if let Some(tray) = &journal.legacy_tray {
+        if journal.current_version != "0.1.9-preview.23"
+            || !(2..=i32::MAX as u32).contains(&tray.pid)
+            || tray.uid != journal.uid
+            || !is_safe_process_start(&tray.started)
+        {
+            return Err("legacy tray journal identity is invalid".into());
+        }
+    }
     if journal.schema_version != JOURNAL_VERSION
         || journal.uid != current_uid()
         || !(2..=i32::MAX as u32).contains(&journal.initiator_pid)
@@ -933,6 +944,7 @@ pub fn prepare_transaction(
         current_version,
         expected_version,
         HelperOrigin::Installed,
+        None,
     )
 }
 
@@ -959,7 +971,135 @@ pub fn prepare_legacy_migration_transaction(
         current_version,
         expected_version,
         HelperOrigin::VerifiedStage,
+        None,
     )
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyTrayIdentity {
+    pid: u32,
+    uid: u32,
+    started: String,
+}
+
+/// Called only after authenticated archive admission. Preparation leaves the
+/// old tray running; the durable candidate watchdog owns its exact stop and all
+/// subsequent replacement/recovery. An external launcher must not stop it first.
+pub fn prepare_running_legacy_migration(
+    executable: &Path,
+    pid: u32,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    expected_version: &str,
+) -> Result<PreparedTransaction, String> {
+    let target = derive_target(executable)?;
+    if bundle_version(&target)? != "0.1.9-preview.23" {
+        return Err("external legacy migration supports only published preview.23".into());
+    }
+    if pid < 2 || pid > i32::MAX as u32 || pid == std::process::id() {
+        return Err("legacy tray PID is invalid".into());
+    }
+    let snapshot =
+        process_snapshot(pid).ok_or_else(|| "cannot inspect legacy tray identity".to_string())?;
+    if snapshot.uid != current_uid()
+        || snapshot.is_zombie()
+        || !command_matches_target(&snapshot.command, &target)
+        || kernel_process_path(pid)? != bundle_executable(&target)
+    {
+        return Err("legacy tray process does not match the installed bundle".into());
+    }
+    let identity = LegacyTrayIdentity {
+        pid,
+        uid: snapshot.uid,
+        started: snapshot.started,
+    };
+    prepare_transaction_with_helper(
+        executable,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        "0.1.9-preview.23",
+        expected_version,
+        HelperOrigin::VerifiedStage,
+        Some(identity),
+    )
+}
+
+fn kernel_process_path(pid: u32) -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut buffer = vec![0u8; 4096];
+        // SAFETY: writable buffer of the supplied size; valid positive PID.
+        let size = unsafe {
+            libc::proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32)
+        };
+        if size <= 0 {
+            return Err("cannot inspect kernel executable path for legacy tray".into());
+        }
+        let end = buffer
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(buffer.len());
+        use std::os::unix::ffi::OsStrExt;
+        Ok(PathBuf::from(std::ffi::OsStr::from_bytes(&buffer[..end])))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pid;
+        Err("legacy tray migration requires macOS".into())
+    }
+}
+
+fn matches_legacy_tray(
+    snapshot: &ProcessSnapshot,
+    identity: &LegacyTrayIdentity,
+    target: &Path,
+) -> bool {
+    snapshot.pid == identity.pid
+        && snapshot.uid == identity.uid
+        && snapshot.started == identity.started
+        && !snapshot.is_zombie()
+        && command_matches_target(&snapshot.command, target)
+}
+
+fn stop_legacy_tray(journal: &UpdateJournalV1) -> Result<(), String> {
+    let Some(identity) = &journal.legacy_tray else {
+        return Ok(());
+    };
+    if sha256_file(&bundle_executable(&journal.target))? != journal.old_executable_sha256 {
+        return Err("legacy tray executable changed before stop".into());
+    }
+    for attempt in 0..50 {
+        if !process_exists(identity.pid) {
+            return Ok(());
+        }
+        let snapshot = process_snapshot(identity.pid)
+            .ok_or_else(|| "cannot revalidate live legacy tray identity".to_string())?;
+        if snapshot.is_zombie()
+            && snapshot.uid == identity.uid
+            && snapshot.started == identity.started
+        {
+            return Ok(());
+        }
+        if !matches_legacy_tray(&snapshot, identity, &journal.target)
+            || kernel_process_path(identity.pid)? != bundle_executable(&journal.target)
+        {
+            return Err("legacy tray identity changed; refusing signal or replacement".into());
+        }
+        if attempt == 0 {
+            // SAFETY: exact PID, UID, birth time and kernel executable path were
+            // checked immediately above. No name-wide or process-group signal.
+            if unsafe { libc::kill(identity.pid as i32, libc::SIGTERM) } != 0
+                && io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+            {
+                return Err("cannot terminate the verified legacy tray".into());
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Err("legacy tray did not exit; replacement is deferred".into())
 }
 
 #[derive(Clone, Copy)]
@@ -986,6 +1126,7 @@ fn prepare_transaction_with_helper(
     current_version: &str,
     expected_version: &str,
     helper_origin: HelperOrigin,
+    legacy_tray: Option<LegacyTrayIdentity>,
 ) -> Result<PreparedTransaction, String> {
     let uid = current_uid();
     if uid == 0 {
@@ -1044,6 +1185,7 @@ fn prepare_transaction_with_helper(
         nonce,
         uid,
         initiator_pid: std::process::id(),
+        legacy_tray,
         target,
         backup,
         stage: stage.clone(),
@@ -1625,6 +1767,9 @@ where
 }
 
 fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Result<(), String> {
+    if journal.phase == TransactionPhase::Prepared {
+        stop_legacy_tray(journal)?;
+    }
     let initiator_executable = bundle_executable(&journal.target).display().to_string();
     while process_exists(journal.initiator_pid)
         && process_command(journal.initiator_pid).is_some_and(|command| {
@@ -1807,6 +1952,74 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn legacy_stop_identity_rejects_reuse_foreign_owner_and_other_executable() {
+        let target = Path::new("/Applications/Slipstream.app");
+        let identity = LegacyTrayIdentity {
+            pid: 42,
+            uid: 501,
+            started: "Thu Sep 24 12:00:00 2026".into(),
+        };
+        let good = ProcessSnapshot {
+            pid: 42,
+            uid: 501,
+            state: 'S',
+            started: identity.started.clone(),
+            command: bundle_executable(target).display().to_string(),
+        };
+        assert!(matches_legacy_tray(&good, &identity, target));
+        let mut changed = good.clone();
+        changed.pid += 1;
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good.clone();
+        changed.uid = 0;
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good.clone();
+        changed.started = "Thu Sep 24 12:00:01 2026".into();
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good.clone();
+        changed.command.push_str("-other");
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good;
+        changed.state = 'Z';
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+    }
+
+    #[test]
+    fn legacy_stop_rejects_changed_bundle_before_any_signal() {
+        let root = TempDir::new().unwrap();
+        let (_, mut record) = journal(root.path());
+        fs::create_dir_all(record.target.join("Contents/MacOS")).unwrap();
+        fs::write(bundle_executable(&record.target), b"changed").unwrap();
+        // Deliberately use this test process: digest rejection must happen first.
+        record.legacy_tray = Some(LegacyTrayIdentity {
+            pid: std::process::id(),
+            uid: current_uid(),
+            started: "Thu Sep 24 12:00:00 2026".into(),
+        });
+        assert_eq!(
+            stop_legacy_tray(&record).unwrap_err(),
+            "legacy tray executable changed before stop"
+        );
+        let mut serialized = serde_json::to_value(&record).unwrap();
+        serialized.as_object_mut().unwrap().remove("legacy_tray");
+        let old: UpdateJournalV1 = serde_json::from_value(serialized).unwrap();
+        assert!(old.legacy_tray.is_none());
+        assert!(stop_legacy_tray(&old).is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn kernel_path_identifies_test_process_without_using_argv() {
+        assert_eq!(
+            kernel_process_path(std::process::id())
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            std::env::current_exe().unwrap().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
     fn migration_copies_staged_helper_and_preserves_installed_helper() {
         let root = TempDir::new().unwrap();
         let target = root.path().join("old/Slipstream.app");
@@ -1858,6 +2071,7 @@ mod tests {
             nonce: nonce.clone(),
             uid: current_uid(),
             initiator_pid: std::process::id(),
+            legacy_tray: None,
             target: target.clone(),
             backup: target
                 .parent()

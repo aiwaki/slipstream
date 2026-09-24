@@ -375,6 +375,24 @@ impl VerifiedLegacyMigration {
         Ok(Self { archive, version })
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn prepare_running_tray(
+        &self,
+        executable: &Path,
+        pid: u32,
+        state_dir: &Path,
+        launch_agents_dir: &Path,
+    ) -> Result<crate::updater_transaction::PreparedTransaction, String> {
+        crate::updater_transaction::prepare_running_legacy_migration(
+            executable,
+            pid,
+            state_dir,
+            launch_agents_dir,
+            &self.archive,
+            &self.version.to_string(),
+        )
+    }
+
     pub fn archive(&self) -> &[u8] {
         &self.archive
     }
