@@ -118,6 +118,7 @@ jobs:
             --target "$SLIPSTREAM_TAURI_TARGET"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: dependency-audit-${{ github.sha }}
           path: dist-audit/
@@ -199,6 +200,7 @@ jobs:
             --vendored-transitive-dependencies full
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: geph-vendor-dependency-audit-${{ github.sha }}
           path: dist-geph-audit/

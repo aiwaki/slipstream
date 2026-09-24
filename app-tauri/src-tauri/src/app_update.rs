@@ -7,7 +7,7 @@
 
 use base64::Engine;
 use flate2::read::GzDecoder;
-use minisign_verify::{PublicKey, Signature};
+use minisign_verify::{PublicKey, Signature, StreamVerifier};
 use reqwest::{redirect::Policy, Client, StatusCode};
 use semver::Version;
 use serde::Deserialize;
@@ -279,6 +279,40 @@ fn allowed_update_redirect(next: &reqwest::Url, previous: &[reqwest::Url]) -> bo
         && !previous.iter().any(|url| url == next)
 }
 
+// Byte collection and authentication share one boundary for HTTP downloads and
+// deterministic signed fixtures. Unauthenticated bytes are never returned.
+struct SignedArchiveCollector<'a> {
+    verifier: StreamVerifier<'a>,
+    body: Vec<u8>,
+}
+
+impl<'a> SignedArchiveCollector<'a> {
+    fn new(key: &'a PublicKey, signature: &'a Signature) -> Result<Self, String> {
+        Ok(Self {
+            verifier: key
+                .verify_stream(signature)
+                .map_err(|_| "updater signature algorithm or key is unsupported".to_string())?,
+            body: Vec::new(),
+        })
+    }
+
+    fn append(&mut self, chunk: &[u8]) -> Result<(), String> {
+        if self.body.len().saturating_add(chunk.len()) > MAX_UPDATE_ARCHIVE_BYTES {
+            return Err("update archive exceeds the byte limit".into());
+        }
+        self.verifier.update(chunk);
+        self.body.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<Vec<u8>, String> {
+        self.verifier
+            .finalize()
+            .map_err(|_| "update archive signature verification failed".to_string())?;
+        Ok(self.body)
+    }
+}
+
 pub async fn download_verified_archive(
     url: &str,
     encoded_signature: &str,
@@ -291,9 +325,7 @@ pub async fn download_verified_archive(
     }
     let public_key = decode_public_key(encoded_public_key)?;
     let signature = decode_signature(encoded_signature)?;
-    let mut verifier = public_key
-        .verify_stream(&signature)
-        .map_err(|_| "updater signature algorithm is unsupported".to_string())?;
+    let mut collector = SignedArchiveCollector::new(&public_key, &signature)?;
     let redirect_policy = Policy::custom(|attempt| {
         if !allowed_update_redirect(attempt.url(), attempt.previous()) {
             attempt.error("unsafe update redirect")
@@ -325,27 +357,67 @@ pub async fn download_verified_archive(
     {
         return Err("update archive exceeds the byte limit".into());
     }
-    let mut body = Vec::with_capacity(
-        response
-            .content_length()
-            .map(|length| length.min(MAX_UPDATE_ARCHIVE_BYTES as u64) as usize)
-            .unwrap_or_default(),
-    );
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|error| format!("update download body failed: {error}"))?
     {
-        if body.len().saturating_add(chunk.len()) > MAX_UPDATE_ARCHIVE_BYTES {
-            return Err("update archive exceeds the byte limit".into());
-        }
-        verifier.update(&chunk);
-        body.extend_from_slice(&chunk);
+        collector.append(&chunk)?;
     }
-    verifier
-        .finalize()
-        .map_err(|_| "update archive signature verification failed".to_string())?;
-    Ok(body)
+    collector.finish()
+}
+
+/// Authenticated in-memory input for the external .23 migration launcher.
+/// Fields stay private so unverified bytes cannot be substituted after admission.
+/// This admission has no filesystem or process side effects.
+pub struct VerifiedLegacyMigration {
+    archive: Vec<u8>,
+    version: Version,
+}
+
+impl VerifiedLegacyMigration {
+    pub async fn download(expected_version: &str, signature: &str) -> Result<Self, String> {
+        let version = legacy_migration_version(expected_version)?;
+        // Trust comes from this launcher's packaged configuration, never a feed,
+        // command-line option, or the old installation's mutable state.
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .map_err(|_| "packaged updater configuration is invalid".to_string())?;
+        let key = config
+            .pointer("/plugins/updater/pubkey")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "packaged updater public key is missing".to_string())?;
+        let url = release_asset_url(&format!("v{version}"), "Slipstream.app.tar.gz");
+        let archive = download_verified_archive(&url, signature, key).await?;
+        validate_macos_archive_inner(&archive, &version, true)?;
+        Ok(Self { archive, version })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn prepare_running_tray(
+        &self,
+        executable: &Path,
+        pid: u32,
+        state_dir: &Path,
+        launch_agents_dir: &Path,
+    ) -> Result<crate::updater_transaction::PreparedTransaction, String> {
+        crate::updater_transaction::prepare_running_legacy_migration(
+            executable,
+            pid,
+            state_dir,
+            launch_agents_dir,
+            &self.archive,
+            &self.version.to_string(),
+        )
+    }
+}
+
+fn legacy_migration_version(raw: &str) -> Result<Version, String> {
+    let version = Version::parse(raw).map_err(|_| "migration version is invalid".to_string())?;
+    let previous = Version::parse("0.1.9-preview.23").expect("fixed legacy version");
+    if version <= previous || !is_preview_version(&version) || version.to_string() != raw {
+        return Err("migration requires a newer canonical preview version".into());
+    }
+    Ok(version)
 }
 
 fn safe_archive_path(path: &Path) -> bool {
@@ -363,6 +435,14 @@ fn plist_string<'a>(dictionary: &'a plist::Dictionary, key: &str) -> Result<&'a 
 }
 
 pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Result<(), String> {
+    validate_macos_archive_inner(archive, expected_version, false)
+}
+
+fn validate_macos_archive_inner(
+    archive: &[u8],
+    expected_version: &Version,
+    require_watchdog: bool,
+) -> Result<(), String> {
     if archive.len() > MAX_UPDATE_ARCHIVE_BYTES {
         return Err("update archive exceeds the byte limit".into());
     }
@@ -371,6 +451,7 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
     let mut seen = HashSet::new();
     let mut info_plist = None;
     let mut executable_seen = false;
+    let mut watchdog_seen = false;
     let mut entries = 0usize;
     let mut total_uncompressed = 0u64;
     for entry in tar
@@ -424,6 +505,12 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
                 .mode()
                 .map_err(|_| "update executable mode is invalid".to_string())?;
             executable_seen = entry_type.is_file() && mode & 0o111 != 0;
+        } else if path == Path::new("Slipstream.app/Contents/MacOS/slipstream-update-watchdog") {
+            let mode = entry
+                .header()
+                .mode()
+                .map_err(|_| "update watchdog mode is invalid".to_string())?;
+            watchdog_seen = entry_type.is_file() && mode & 0o111 != 0 && entry.size() > 0;
         } else if path
             .components()
             .next()
@@ -438,6 +525,9 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
     }
     if !executable_seen {
         return Err("update archive is missing the Slipstream executable".into());
+    }
+    if require_watchdog && !watchdog_seen {
+        return Err("migration archive is missing the executable watchdog".into());
     }
     let plist = info_plist.ok_or_else(|| "update archive is missing Info.plist".to_string())?;
     let value = plist::Value::from_reader(Cursor::new(plist))
@@ -514,6 +604,14 @@ mod tests {
     }
 
     fn update_archive(version: &str, executable_mode: u32) -> Vec<u8> {
+        update_archive_with_watchdog(version, executable_mode, None)
+    }
+
+    fn update_archive_with_watchdog(
+        version: &str,
+        executable_mode: u32,
+        watchdog: Option<u32>,
+    ) -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::fast());
         let mut builder = Builder::new(encoder);
         let plist = format!(
@@ -539,8 +637,129 @@ mod tests {
             b"fixture",
             executable_mode,
         );
+        if let Some(mode) = watchdog {
+            append_file(
+                &mut builder,
+                "Slipstream.app/Contents/MacOS/slipstream-update-watchdog",
+                b"helper",
+                mode,
+            );
+        }
         builder.finish().unwrap();
         builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn authentic_migration_archive_passes_but_changed_bytes_and_version_fail() {
+        use base64::Engine;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/legacy-migration-signed.json"
+        ))
+        .unwrap();
+        let key = super::decode_public_key(fixture["public_key"].as_str().unwrap()).unwrap();
+        let signature = super::decode_signature(fixture["signature"].as_str().unwrap()).unwrap();
+        let archive = base64::engine::general_purpose::STANDARD
+            .decode(fixture["archive_base64"].as_str().unwrap())
+            .unwrap();
+        let version =
+            super::legacy_migration_version(fixture["version"].as_str().unwrap()).unwrap();
+        for chunk_size in [1, 7, archive.len()] {
+            let mut verifier = super::SignedArchiveCollector::new(&key, &signature).unwrap();
+            for chunk in archive.chunks(chunk_size) {
+                verifier.append(chunk).unwrap();
+            }
+            let authenticated = verifier.finish().unwrap();
+            assert_eq!(authenticated, archive);
+            super::validate_macos_archive_inner(&authenticated, &version, true).unwrap();
+            assert!(super::validate_macos_archive_inner(
+                &authenticated,
+                &Version::parse("0.1.9-preview.25").unwrap(),
+                true
+            )
+            .is_err());
+        }
+        for payload in [
+            archive[..archive.len() - 1].to_vec(),
+            {
+                let mut changed = archive.clone();
+                changed[20] ^= 1;
+                changed
+            },
+            {
+                let mut extra = archive.clone();
+                extra.push(0);
+                extra
+            },
+        ] {
+            let mut verifier = super::SignedArchiveCollector::new(&key, &signature).unwrap();
+            verifier.append(&payload).unwrap();
+            assert_eq!(
+                verifier.finish().unwrap_err(),
+                "update archive signature verification failed"
+            );
+        }
+        // The public fixture key is deliberately NOT the production trust key.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_ne!(
+            fixture["public_key"],
+            config["plugins"]["updater"]["pubkey"]
+        );
+        let packaged_key =
+            super::decode_public_key(config["plugins"]["updater"]["pubkey"].as_str().unwrap())
+                .unwrap();
+        if let Ok(mut verifier) = super::SignedArchiveCollector::new(&packaged_key, &signature) {
+            verifier.append(&archive).unwrap();
+            assert!(
+                verifier.finish().is_err(),
+                "fixture must never authenticate with the packaged trust key"
+            );
+        };
+    }
+
+    #[test]
+    fn migration_requires_newer_preview() {
+        for rejected in [
+            "0.1.9-preview.23",
+            "0.1.9-preview.22",
+            "0.1.9",
+            "0.2.0-beta.1",
+            "0.1.9-preview.24+local",
+            "v0.1.9-preview.24",
+        ] {
+            assert!(
+                super::legacy_migration_version(rejected).is_err(),
+                "{rejected}"
+            );
+        }
+        assert!(super::legacy_migration_version("0.1.9-preview.24").is_ok());
+    }
+
+    #[test]
+    fn migration_requires_candidate_executable_helper() {
+        let version = Version::parse("0.1.9-preview.24").unwrap();
+        for mode in [None, Some(0o644)] {
+            let archive = update_archive_with_watchdog(&version.to_string(), 0o755, mode);
+            assert!(super::validate_macos_archive_inner(&archive, &version, true).is_err());
+            assert!(validate_macos_archive(&archive, &version).is_ok());
+        }
+        let archive = update_archive_with_watchdog(&version.to_string(), 0o755, Some(0o755));
+        assert!(super::validate_macos_archive_inner(&archive, &version, true).is_ok());
+        assert!(super::validate_macos_archive_inner(
+            &archive,
+            &Version::parse("0.1.9-preview.25").unwrap(),
+            true
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn migration_rejects_invalid_signature_before_network() {
+        let error = super::VerifiedLegacyMigration::download("0.1.9-preview.24", "invalid!")
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error, "updater signature is not valid base64");
     }
 
     #[test]

@@ -18,6 +18,43 @@ unknown-host promotion.
 Use Geph only for services that need a foreign exit because the service rejects
 Russian IP addresses. Do not route Discord or YouTube through Geph as a fix.
 
+### A site shell opens but scripts, styles, or content stay blank
+
+Do not treat an active daemon, ready PF, green canaries, HTTP `200` root, or
+partially rendered page as success. Identify one critical failed object and
+compare the exact bounded range directly and through Slipstream's verified
+owned Geph listener. Explicit EOF/reset with valid incomplete range framing on
+direct plus a complete same-object owned-Geph range is actionable exact-child
+evidence. An idle timeout or slow progressive delivery is `unclear` and must
+not teach a route. Following the 2026-09-08 diagnostic-only authorization,
+an admitted critical-child idle observation may compare that same transient
+range once through verified internal Geph, within the remaining envelope and
+a three-second cap. `geph=diagnostic_same_object_complete` means this comparison
+completed, NOT that the browser switched route or the host was learned.
+
+Inspect the bounded parent/root response before concluding that no critical
+asset exists. Status `206` does not by itself mean failure: when one valid
+`Content-Range` begins at zero, covers the entire declared identity HTML
+representation, and agrees with framing and observed bytes, the root is
+complete and must be scanned exactly like a complete `200`. A true prefix-only
+response, malformed/out-of-bound range, inconsistent framing, or an exhausted
+inspection deadline is `unclear`. The root keeps one exact-IP connection for
+its whole bounded observation; it does not discard a 400-ms socket and open a
+fresh retry. An unclear result must not publish a healthy-root cache, consult
+provenance, expose or probe a child, contact Geph, enter local recovery, or
+teach a route.
+
+The critical-object comparison is network-only. It must work for background
+tabs, Safari, Chrome, and non-browser clients without a frontmost/recent-input
+condition. Foreground browser provenance is relevant only if an ambiguous final
+document may launch the privacy-bounded browser worker. Never work around this
+symptom with a CDN hostname rule, repeated reloads, or by asking the user to
+keep a browser frontmost. After a correction, require genuinely fresh Chrome
+and Safari connections and verify the complete page, not only the root request.
+Capture the starting learned count: a helper-only child proof or a browser
+reload that consumes an already learned overlay is diagnostic evidence, not a
+cold first-navigation success.
+
 ### Slipstream briefly opens Chrome or takes focus while idle
 
 This is a defect in `v0.1.9-preview.22`, not expected background activity. Its
@@ -35,11 +72,13 @@ fails closed.
 Its fresh owner-private temporary profile must disappear with the single owned
 process tree and never touches a user's Safari or Chrome profile.
 The legacy transport-idle broker is disabled permanently. Its replacement is
-an exact-host pre-routing path that additionally requires signed foreground
-Safari/Chrome provenance and recent input. That replacement is implemented in
-the `.23` candidate source but is not a claim about the installed `.22`; it
-must still pass packaged visibility, live-site, transport, and idle-soak gates
-before publication.
+an exact-host pre-routing path. Signed foreground Safari/Chrome provenance and
+recent input are required only before an ambiguous incomplete final document
+may admit the privacy-bounded browser worker; independently verified strict
+denials and critical-object range comparisons are network-authoritative and do
+not depend on UI focus. That replacement is implemented in the `.23` source
+but must still pass every applicable packaged visibility, live-site, transport,
+and release gate before a later publication claim.
 
 The installed `.22` also lacks `LSUIElement`, so setting the Tauri runtime to
 `Accessory` can happen after macOS has already classified the process as an
@@ -115,18 +154,20 @@ packaged OS-observed notification gate with no activation. A real released
 future `.24` gate. Until the applicable packaged gate passes, treat the feature
 as implemented but not end-to-end released.
 
-For a packaged candidate, verify the runtime without starting it:
+For a locally built and installed candidate, run the canonical verifier without
+starting or opening the root-only daemon:
 
 ```bash
-test -x /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell
-test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' \
-  /Applications/Slipstream.app/Contents/Info.plist)" = true
-test -x /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
-/usr/bin/codesign --verify --strict \
-  /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
-python3 -m json.tool \
-  /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/manifest.json
+cd app-tauri
+npm run verify:local-install
 ```
+
+It verifies the exact fresh/staged/bundled/installed app chain, app identity,
+architectures, helper isolation, ad-hoc signature integrity, schema-3 install
+attestation, hard-link witness, exact LaunchDaemon contract, fresh StatusV2
+heartbeat, and live launchd PID/program/arguments. Direct hashing of the
+root-only installed daemon, listener ownership, and kernel PF checks require
+privilege and remain explicitly `not_run` in this read-only command.
 
 ### The menu flips to Off and then recovers by itself
 
@@ -146,6 +187,58 @@ usable content. Edge denial alone never learns a route: a fresh owned-Geph
 connection must independently return a complete non-denial response for the
 same exact host. Ordinary login pages, CAPTCHA, HTTP 403/429, truncated bodies,
 or the same denial on both routes remain non-actionable.
+
+### A blocked or unstyled page recovers only after many retries
+
+Do not classify this from elapsed time alone. The semantic root uses one owned
+exact-IP socket continuously through TCP connect, TLS, request send, receive,
+framing, decode, classification, and root inspection. Its bounded I/O allowance
+is derived from the unchanged route job after preserving only classification
+and scheduling capacity, capped at five seconds; browser or Geph time is not
+reserved until the root outcome needs that branch. A fast complete response
+still returns immediately, while every downstream proof must fit inside the
+same remaining job deadline. An idle/deadline timeout is
+`retryable_inconclusive` and returns without cache, provenance, a child probe,
+Geph, local recovery, or learning. This protects a slow connection that is
+still making useful progress without paying for a second fresh handshake.
+
+Use the private root diagnostic to locate the exact non-authorizing boundary:
+TCP connect, TLS handshake, send, incomplete read/framing, selected-
+representation/decode, classification/inspection, or outer cancellation. The
+stage is diagnostic only; it never becomes route evidence and is not exposed
+through StatusV2. An explicit socket/TLS error or EOF without admissible HTTP
+framing is different: while the original first flight is still held and no
+server bytes reached the client, that hard result may enter the existing
+guarded local-recovery ladder. A complete ordinary `403` is not such a hard
+failure. The ladder still needs its normal independent local-failure and
+complete exact-host owned-Geph proof before it can learn a foreign exit.
+
+If one reload works only after another address or another resource was tried,
+inspect evidence scope before changing timeouts. Direct root cache and in-flight
+ownership must match the normalized host and exact PF destination IP; a usable
+alternate A record cannot mark the PF-primary address healthy. QUIC may suppress
+TCP fallback only for that same destination IP. A critical child must prove its
+own request object and must neither consume nor publish direct root/other-object
+cache. Two scripts, stylesheets, or bootstrap objects on the same CDN host and
+IP are not interchangeable evidence. Only a still-live committed learned
+owned-Geph exact host is deliberately host-wide.
+
+If the owned route returns only a bodyless redirect, it is not payload evidence
+by itself. Production may follow exactly one absolute HTTPS root redirect only
+between one apex and its single `www.` form, under the same deadline, and must
+receive a complete usable final response. Any other redirect or a second
+redirect fails closed. This creates no rule for either hostname.
+
+A rendered shell with permanent forecast/content placeholders is also not a
+successful navigation. Check the exact critical resource rather than the root
+alone. One reviewed minimal edge shape is actionable only when the complete
+response is exactly `403`, body `Bad Request - Blocked`, HTML content type, CSP
+`default-src 'none'`, and `nosniff`; changing or omitting any field reduces it
+to an ordinary inert error. A complete usable result for that same exact host
+through owned Geph is still mandatory. The proof may make one retry connection
+only from the unused part of its original six-second deadline, so a transient
+first connect does not require repeated page reloads and does not turn a slow
+direct connection into route evidence.
 
 ### Historical `.22`: a clean Chrome profile stays at `about:blank`
 
@@ -580,14 +673,50 @@ explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 
-`Quit Slipstream` closes the tray UI but intentionally leaves its background
-routing service and owned Geph LaunchAgent running. This preserves routing if
-the menu process exits or crashes.
+`Quit Slipstream` now stops the complete owned runtime before the tray exits.
+It asks for administrator access, records an exact private relaunch marker, and
+then runs the bundled daemon's non-destructive `--stop`: disable the root label,
+clear only Slipstream's PF anchor/lease, boot out the launchd `KeepAlive` job,
+stop only exact owned survivors, remove transient status, and prove listener
+absence without deleting the installed daemon, plist, install attestation, or
+persistent routing state. Only after root/PF cleanup succeeds does Quit boot out
+and stop the exact owned Geph LaunchAgent. A launchctl failure is never treated
+as an unloaded job: only the exact service-not-found result proves absence.
+Geph signalling requires the private ownership record, current UID, exact
+runtime/config command, stable process birth, and initial listener to agree.
+When that record is missing or stale, Slipstream does not guess or signal; it
+scans for the exact private runtime and fails closed while one remains. A
+listener owned by another process is external and is left untouched. If either
+owned layer cannot prove absence, the tray remains open and reports an
+incomplete Quit instead of hiding a live background process.
 
-`Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
-daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does
-not claim an active PF redirect; it identifies the remaining user-side job so it
-is not mistaken for an external VPN or proxy.
+Signed Update installation, Quit, and Uninstall are mutually exclusive terminal
+operations. Ownership is claimed synchronously before the updater task, the
+uninstall confirmation, or any Quit mutation. Cancellation and failure release
+only that operation's claim; success retains it through an owner-checked exit.
+Consequently, an updater that finishes late cannot exit or relaunch Slipstream
+in the middle of Quit/Uninstall. If ownership or Tauri exit handling ever becomes
+uncertain, Slipstream stays open and blocks another terminal action rather than
+running two destructive lifecycle paths concurrently.
+
+Do not use Activity Monitor or repeated process termination as the normal Quit
+path. Killing one tray, daemon, or Geph process is not a coordinated stop and a
+still-loaded launchd `KeepAlive` job may correctly recreate it. Use the tray
+action and complete its administrator prompt. On a later explicit app launch,
+only the exact valid marker authorizes restoration of the previously enabled
+root service; Slipstream clears it after fresh owned daemon/listener/heartbeat/PF
+proof, then resumes Geph independently. A manually disabled root label remains
+disabled, and an unreadable or malformed marker blocks automatic recovery.
+The one-time relaunch cleanup runs before status reconciliation, so a stale
+Geph sidecar cannot be disabled after reconciliation has already recorded it as
+resumed. Watchdog repair also rechecks the exact installed attestation, enabled
+label, missing status, and absent owned listener under the same lifecycle lock;
+a queued repair cannot revive a later manual disable or partial uninstall.
+
+`Copy Diagnostics` may report `summary.geph_lifecycle: sidecar_only` only as an
+incomplete/legacy lifecycle fact when the root daemon is absent but Slipstream's
+own Geph LaunchAgent remains loaded. It does not claim an active PF redirect and
+is not a successful Quit outcome.
 
 To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
 native dialog. It first disables tray autostart, stops new transparent accepts,
@@ -1142,6 +1271,34 @@ For a repeated exact-host local stall, Slipstream may make one local retry via a
 Slipstream-issued Xbox DNS query, then continue through distinct local
 strategies. It never changes the system resolver.
 
+### The route learns but the initiating request still fails
+
+An increase in `learned` does not prove same-request recovery. If the first
+clean curl or browser connection ends in `SSL_ERROR_SYSCALL`, EOF, or a reset
+while the exact-host counter increases, treat it as a late handoff: the
+classifier and alternate-route proof worked, but the original ClientHello did
+not receive usable Geph payload before its client deadline.
+
+Check the complete current-attempt evidence rather than retrying until the
+learned route hides the defect:
+
+1. The absolute recovery deadline begins when the client connection is
+   accepted and remains the same through preflight, app-owned DNS, local
+   strategies, Geph readiness, first payload, and downstream drain.
+2. After a hard system transport failure, app-owned Xbox DNS and exactly two
+   distinct local strategies run in parallel. A local payload wins; Geph is
+   admissible only if every stage explicitly reports `closed` for this request.
+3. `timeout`, `pending`, `failed`, cancellation, connect ambiguity, or a
+   missing stage is `unclear`. It must not create observations, a dead cache,
+   learning, or a successor request.
+4. Route confirmation is not scheduled until at least 64 owned-Geph server
+   bytes are written and drained to the initiating client before its deadline.
+
+Do not call a later retry a first-request pass, and do not compensate with a
+hostname rule, a broader `403` rule, foreground state, or a longer sequence of
+timeouts. Validate from clean product state and require the first fresh request
+to converge.
+
 If a browser visibly remains on `about:blank` but copying the address produces
 the requested site, the target navigation is pending and has not committed its
 first document. This is not evidence that the browser opened the wrong URL.
@@ -1167,6 +1324,132 @@ unavailable or unowned backend, an explicit policy, or a different failure
 shape cannot authorize this overlay. This avoids per-site rules while keeping
 local bypass and direct routes out of Geph.
 
+### The root loads but a critical resource closes early
+
+If a physical Safari/Chrome failure leaves the public auto-geo-exit counters at
+`learned=0`, `pending=0`, and `last_state=idle`, first distinguish a complete
+usable parent plus an incomplete critical object from an ambiguous incomplete
+final document; do not add a parent or CDN hostname rule. The critical-object
+path is network-authoritative and must not consult foreground/recent-input
+provenance. Only the ambiguous final-document path may use a closed loopback
+TLS listener to identify the exact socket-owning PID without visiting the
+affected site. The expected verifier boundary for that latter path is:
+
+- official Chrome root/helpers: `codesign --verify --strict=symlinks`; Finder
+  metadata on the root bundle must not be converted into an unrelated resource
+  failure by bare `--strict`;
+- exact Safari/WebKit executables under canonical `/System/Applications`,
+  `/System/Library`, or sealed Cryptex roots only:
+  `codesign --verify --ignore-resources --strict=symlinks`, followed by the
+  exact Apple designated-requirement check.
+
+Never apply `--ignore-resources` to Chrome, a user path, or an arbitrary binary.
+Passing the verifier is not sufficient for an ambiguous final document: exact
+canonical path, identifier,
+designated requirement/team, UID/start time, process ancestry, socket owner,
+frontmost application, and recent physical input must all still agree. Browser
+automation is useful for reproducing socket/signature attribution, but it must
+remain `not_frontmost` or `recent_input_failed` and is not product evidence.
+
+If a real foreground socket still reports `not_frontmost`, inspect the bounded
+`lsappinfo info -only bundleID -only pid` result before changing any route.
+Older macOS output may contain the complete quoted
+`"CFBundleIdentifier"`/`"pid"` pair; current output contains the complete
+indented `bundleID`/`pid = N` pair and bounded PID metadata. Production accepts
+one complete dialect only. Mixed, duplicate, partial, unindented-current, or
+non-numeric fields fail closed. Parsing either layout does not replace the
+subsequent exact bundle/PID, signed ancestry, socket stability, repeated
+frontmost snapshot, or recent-input checks.
+
+If that admission succeeds and `learned` increases but the same visible page
+still uses its direct denial or incomplete asset, check the QUIC boundary before
+changing semantic rules. A learned unknown exact host is a TCP-only Geph route;
+letting a browser reuse HTTP/3 bypasses it. Conversely, a QUIC-first unknown
+root never reaches the TCP semantic preflight at all. Version Negotiation alone
+is not sufficient when a real server packet wins the race: RFC 9000 requires a
+client to ignore a later VN after it has successfully processed any packet. The
+allowed correction is one exact-SNI flow with bounded Version Negotiation plus
+a matching ICMPv4/ICMPv6 port-unreachable while classification is due:
+
+- reviewed geo-exit and learned exact hosts continue on TCP;
+- a fresh unknown exact host uses TCP once for the existing bounded direct
+  classification; neither transport signal authorizes a Geph route;
+- fresh `usable` or `challenge_or_auth` cache restores QUIC for that exact host;
+- slow/inconclusive direct evidence remains unlearned and direct;
+- explicit direct/local routes, Discord, YouTube, Googlevideo, ECH/no-SNI,
+  unsupported QUIC, shared destination IPs, and every other UDP flow remain
+  untouched.
+
+The ICMP message quotes only the observed client/server addresses, UDP ports,
+and first eight QUIC payload bytes so the kernel can bind the error to that
+connected UDP socket. It creates no persistent PF rule and cannot affect a
+second flow, a hostname suffix, or UDP/443 generally.
+
+Do not replace this with a CDN/IP rule or a global UDP/443 block. When validating
+a newly installed correction, restart the browser first so an already-open QUIC
+connection cannot bypass a new Initial-flow policy.
+
+A `200` root document is not a pass when the page stays blank or spinning and a
+required JavaScript, CSS, or image reports `ERR_CONNECTION_CLOSED`,
+`ERR_CONTENT_LENGTH_MISMATCH`, or an incomplete transfer. Diagnose this without
+adding a site rule:
+
+1. Start from a fresh daemon/preflight cache and do not prime the host through
+   PF with curl, Playwright, or a background browser before the real foreground
+   attempt. The semantic root uses one exact-IP socket, not a 400-ms socket plus
+   a fresh retry. Its I/O allowance is capped at 5.0 seconds and uses only the
+   remainder of the unchanged eight-second job after reserving 1.5 seconds for
+   cold signed-browser provenance, 50 ms provenance wait grace, 2.0 seconds for
+   proof, 50 ms classification, and 25 ms scheduling. Complete responses return
+   early; results explicitly typed retryable-inconclusive, including timeout or
+   bounded framing/decode/classification/inspection/parser deadlines, remain
+   `unclear` and do not admit provenance, child work, Geph, local recovery,
+   cache, or learning. An identity-body shortfall that reaches EOF and meets
+   the existing safe-incomplete contract is different: it retains the guarded
+   provenance/headless-owned-Geph path.
+2. In normal Safari or Chrome, require the original navigation to recover
+   without a second manual reload. Browser focus and recent input do not
+   authorize or reject a critical-child route. A headless/CDP reproduction is
+   diagnostic rather than physical product evidence; foreground provenance
+   remains relevant only if the separate ambiguous final-document worker is
+   admitted.
+3. Inspect only a bounded critical resource discovered from the usable root.
+   Compare the same URL and bounded range direct and through the verified owned
+   Geph. For an enumerated cross-origin child, start its bounded envelope only
+   after the complete usable parent exposes it: its direct observation receives
+   at most eight seconds, a separate Geph slice receives at most three seconds,
+   and a fresh
+   RoutePreflightV1 authority is minted for Geph only after direct EOF/reset
+   validates. Do not subtract parent latency from either child observation; a
+   parent-relative cutoff previously turned the measured 6.8-second EOF back
+   into idle. An idle timeout remains inconclusive even after a length-framed
+   partial root response or partial critical range: publish no cache and do not
+   authorize a Geph route. Only the valid incomplete critical-range case may now
+   run one diagnostic-only owned-Geph comparison under the 2026-09-08 decision;
+   an unclear root still cannot start it. The private child record keeps
+   `decision=direct_idle_timeout` and reports the Geph observation as a
+   `diagnostic_*` category (completion, unconfirmed object, incomplete, deadline,
+   ownership/readiness refusal, cancellation or exception). Such a record has
+   no route authority. Reaching the local read-size cap
+   (`truncated=True`) is also `UNKNOWN`. Only stable explicit EOF or reset
+   (normalized as EOF) with valid incomplete framing can make the direct result
+   actionable, and learning that exact child hostname still requires a
+   complete same-object Geph result using the identical transient request.
+4. Keep status-only `403`/`429`, login, CAPTCHA, and generic security pages
+   inert unless the strict bounded semantic classifier identifies its reviewed
+   denial shape and the independent Geph response is complete and usable.
+
+The live gate must check bounded critical-resource completion, not only the root
+status or DOM. This workflow never authorizes a parent-host exception, a CDN
+suffix rule, or a general `403` fallback.
+
+Learning affects new connections only; it cannot migrate an already-open
+direct HTTP/2, TCP, or QUIC session. A validation that reuses an old browser
+connection can therefore keep showing the old denial after the route is learned.
+Use a genuinely fresh connection for diagnosis and require the first request
+from a clean product state to converge, so this fact cannot hide a first-request
+product defect.
+
 If that complete exact-host proof coincides with a brief owned-Geph recovery,
 the replay-safe request waits for at most five seconds and actively probes the
 exact owned listener instead of relying on the periodic monitor. Listener
@@ -1180,14 +1463,79 @@ Google and Spotify use `direct_first`: the next connection always starts with
 plain TLS, then can use bounded local desync only if direct did not work. They
 never fall through to Geph.
 
+### Every current system edge stalls in TLS, but owned Geph has payload
+
+A single TLS timeout is still ambiguous and must remain direct/`unclear`. Do
+not add a hostname, CDN, IP, `403`, or larger-timeout rule. The exceptional
+first-request path is admitted only by the production continuous-root probe
+when the complete bounded set of two or three current public system IPv4
+addresses all actually spend the full five-second I/O window at
+`tls_handshake_timeout`, with zero wire and payload bytes, no asset, no hard
+error, and no mixed/usable result. Synthetic or injected probes cannot mint
+this authority.
+
+Even then, the result is not learned. The original exact PF connection stays
+open through its full eight-second hard deadline and then keeps racing one
+same-PID owned-Geph qualifier inside the twelve-second semantic handoff window.
+The direct stream wins every byte observed before commit, including bytes that
+arrive while listener/PID ownership is being checked; Geph needs at least 64
+server bytes. The single-use capability is bound to exact host, PF IP, port
+443, owned PID, not-before time, deadline, and its random owner token, and is
+spent before runtime waits. A mismatch, restart/drain, unavailable listener,
+expired deadline, short response, or failed qualifier returns the held exact
+stream when it remains usable. It never creates a route/cache/status event,
+confirmation, successor, or retry.
+
+This is an explicit bounded liveness tradeoff: no finite timeout can prove that
+an arbitrary direct server would never answer later. Timing therefore remains
+forbidden as persistent route authority. Validate the mechanism from a cold
+daemon and fresh ordinary browser connection; a warm learned overlay is not
+evidence for this path.
+
 ## Installed Daemon
 
-After rebuilding the daemon, keep all copies in sync:
+After rebuilding and installing the daemon, verify every copy and its install
+evidence with the same canonical command used by the build and CI:
 
 ```bash
-shasum -a 256 \
-  spike/dist/slipstreamd/slipstreamd \
-  app-tauri/src-tauri/slipstreamd/slipstreamd \
-  /Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd \
-  /usr/local/slipstream/slipstreamd
+cd app-tauri
+npm run verify:local-install
 ```
+
+Do not substitute a manual list of `shasum` commands: it misses non-daemon app
+drift and cannot safely traverse the root-only installed runtime. The verifier
+uses the production attestation plus hard-link witness for that boundary, then
+binds its PID to the fresh StatusV2 publisher and live launchd service.
+
+## Automatic normal Quit
+
+Run `/Applications/Slipstream.app/Contents/MacOS/slipstream --quit` to request
+normal Quit from an existing tray instance. This shares the menu's lifecycle
+transaction and administrator prompt, preserves resume intent and refuses to
+exit after a failed stop. The requesting second process exiting is not evidence
+that shutdown completed: verify the tray process and launchd service disappear.
+With no existing instance, --quit exits without starting routing. Extra arguments
+are not treated as a quit request.
+
+## Local proxy connect timeout before TLS (AUD-29)
+
+If a localhost:1080 connection times out before CONNECT/TLS while other source
+ports succeed, compare the exact TCP tuple with PF state and kernel sockets.
+AUD-28 found a socketless day-long ESTABLISHED PF entry that survived anchor
+rule removal. AUD-29 separates ordinary loopback TCP state from transparent
+reply-to and performs narrowly scoped startup cleanup only when lsof proves no
+live socket on the service port. Never use a global PF state flush. Empty or
+unrecognized socket inspection must retain states; an artifact/status pass alone
+does not prove connectivity. Qualify the formerly failing tuple and full payload.
+
+## Installation identity versus traffic qualification (AUD-30)
+
+`npm --prefix app-tauri run verify:local-install` now includes public full-payload
+qualification on explicit IPv4/IPv6 proxy and transparent TCP paths. A public
+984455-byte Discord sticker was complete on all three during initial validation.
+Checks require successful transport, HTTP200, complete PNG framing and CRCs,
+terminal IEND, and unchanged fresh daemon PID after transfer. Failures exit1 and
+must not be presented as a healthy installation. A remote failure may also
+cause this gate to fail; it does not alone prove a local regression. This gate
+does not establish voice/stream reliability. Artifact-only verification retains
+its existing scope. Production updater ACK integration remains pending.

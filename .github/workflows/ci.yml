@@ -234,7 +234,7 @@ jobs:
           python3 -m pytest -q \
             spike/test_tproxy_doh.py::test_quic_v1_v2_observation_and_exact_host_fallback_cover_ipv4_ipv6 \
             spike/test_tproxy_doh.py::test_packaged_transport_mechanics_selftest_covers_fixed_matrix_without_network \
-            spike/test_tproxy_doh.py::test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped \
+            spike/test_tproxy_doh.py::test_quic_tcp_fallback_is_exactly_active_owned_route_or_unknown_first_contact \
             spike/test_tproxy_doh.py::test_quic_initial_sni_reassembles_publicly_decryptable_crypto_frames \
             spike/test_tproxy_doh.py::test_quic_v2_initial_sni_uses_rfc9369_keys_and_packet_type \
             spike/test_tproxy_doh.py::test_ipv6_quic_v2_fallback_is_exact_host_and_flow_scoped
@@ -471,8 +471,11 @@ jobs:
       updater-signing-artifact-digest: ${{ steps.upload-updater-signing-input.outputs.artifact-digest }}
     env:
       SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
+      SLIPSTREAM_EPHEMERAL_ROUTE_POLICY_KEY_ID: ci-packaged-lifecycle
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
         with:
@@ -505,28 +508,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-
-      - name: Build the frozen daemon
-        run: |
-          set -euo pipefail
-          python3 -m venv spike/.buildvenv
-          spike/.buildvenv/bin/python -m pip install \
-            --quiet \
-            --disable-pip-version-check \
-            --only-binary=:all: \
-            --require-hashes \
-            -r spike/requirements-build.txt
-          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
-            --generate-keypair \
-            --key-id ci-packaged-lifecycle \
-            --private-key-output /tmp/slipstream-route-policy.key \
-            --public-keys-output spike/route-policy-keys.json
-          ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
-          rm -rf app-tauri/src-tauri/slipstreamd
-          cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
-          test -x app-tauri/src-tauri/slipstreamd/slipstreamd
-          /usr/bin/lipo app-tauri/src-tauri/slipstreamd/slipstreamd \
-            -verify_arch arm64
 
       - name: Fetch and verify the recorded Geph build
         env:
@@ -711,45 +692,10 @@ jobs:
         run: |
           set -euo pipefail
           app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
-          test -d "$app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
-            = slipstream
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
-            = "$(tr -d '[:space:]' < VERSION)"
-          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
-          /usr/bin/lipo "$app/Contents/Resources/slipstreamd/slipstreamd" \
-            -verify_arch arm64
-          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
-          helper="$app/Contents/MacOS/slipstream-browser-probe"
-          test -x "$helper"
-          /usr/bin/lipo "$helper" -verify_arch arm64
-          /usr/bin/codesign --verify --strict "$helper"
-          if /usr/bin/otool -L "$helper" | /usr/bin/grep -E \
-            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-            echo "browser-probe helper links a GUI framework" >&2
-            exit 1
-          fi
-          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
-          test -x "$watchdog"
-          /usr/bin/lipo "$watchdog" -verify_arch arm64
-          /usr/bin/codesign --verify --strict "$watchdog"
-          if /usr/bin/otool -L "$watchdog" | /usr/bin/grep -E \
-            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-            echo "update watchdog links a GUI framework" >&2
-            exit 1
-          fi
-          test -x "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell"
-          test -f "$app/Contents/Resources/chromium-headless-shell/LICENSE.headless_shell"
-          test -f "$app/Contents/Resources/chromium-headless-shell/manifest.json"
-          /usr/bin/lipo \
-            "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell" \
-            -verify_arch arm64
-          /usr/bin/codesign --verify --deep --strict "$app"
-          daemon="$app/Contents/Resources/slipstreamd/slipstreamd"
-          test "$("$daemon" --classify-host rr1---sn-test.googlevideo.com)" = \
-            '{"host": "rr1---sn-test.googlevideo.com", "route_class": "direct_first", "service_group": "youtube_video", "strategy_set": "direct_first"}'
-          test "$("$daemon" --classify-host www.youtube.com)" = \
-            '{"host": "www.youtube.com", "route_class": "local_bypass", "service_group": "youtube_video", "strategy_set": "fake_only"}'
+          python3 scripts/verify_macos_app_bundle.py \
+            --app-bundle "$app" \
+            --fresh-daemon spike/dist/slipstreamd/slipstreamd \
+            --staged-daemon app-tauri/src-tauri/slipstreamd/slipstreamd
 
       - name: Freeze the updater archive and its exact-run signing identity
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -832,6 +778,27 @@ jobs:
         with:
           name: packaged-app-build-${{ github.sha }}
           path: dist-build/Slipstream-build-bundle.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Build current and pinned legacy non-shipping transaction drivers
+        working-directory: app-tauri/src-tauri
+        run: |
+          set -euo pipefail
+          python3 ../../scripts/materialize_legacy_update_driver.py
+          cargo build --locked --release --target "$SLIPSTREAM_TAURI_TARGET" \
+            --example prepare_packaged_update --example prepare_legacy23_update
+          mkdir -p ../../dist-update-driver
+          cp examples/legacy23_generated/provenance.json ../../dist-update-driver/
+          tar -czf ../../dist-update-driver/driver.tar.gz \
+            -C "target/$SLIPSTREAM_TAURI_TARGET/release/examples" \
+            prepare_packaged_update prepare_legacy23_update
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-update-driver-${{ github.sha }}
+          path: |
+            dist-update-driver/driver.tar.gz
+            dist-update-driver/provenance.json
           if-no-files-found: error
           retention-days: 7
 
@@ -1576,9 +1543,18 @@ jobs:
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
+          set -o pipefail
           bash scripts/run_packaged_lifecycle_smoke.sh \
             "$RUNNER_TEMP/qualified-app/Slipstream.app" \
-            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}"
+            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}" \
+            2>&1 | tee "$RUNNER_TEMP/packaged-lifecycle.log"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: packaged-lifecycle-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/packaged-lifecycle.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Package the qualified app
         if: github.event_name == 'pull_request'
         run: |
@@ -1593,6 +1569,103 @@ jobs:
           name: Slipstream-packaged-lifecycle-${{ github.sha }}
           path: dist-ci/Slipstream-packaged-lifecycle.zip
           if-no-files-found: error
+          retention-days: 7
+
+  packaged-update-transaction:
+    needs: packaged-app-build
+    runs-on: macos-14
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [accept, rollback, traffic_failure, primary_unavailable]
+        driver: [prepare_packaged_update]
+        mode: [current]
+        include:
+          - case: accept
+            driver: prepare_legacy23_update
+            mode: legacy
+          - case: rollback
+            driver: prepare_legacy23_update
+            mode: legacy
+          - case: accept
+            driver: prepare_packaged_update
+            mode: migration
+          - case: rollback
+            driver: prepare_packaged_update
+            mode: migration
+          - case: startup_failure
+            driver: prepare_packaged_update
+            mode: migration
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-app-build-${{ github.sha }}
+          path: dist-build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-update-driver-${{ github.sha }}
+          path: dist-update-driver
+      - name: Unpack candidate and pinned published previous app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          mkdir -p "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/update-driver"
+          ditto -x -k dist-build/Slipstream-build-bundle.zip "$RUNNER_TEMP/candidate"
+          python3 scripts/download_github_release_assets.py \
+            --tag v0.1.9-preview.23 --repo aiwaki/slipstream \
+            --pattern Slipstream-macos-arm64.zip --output "$RUNNER_TEMP/previous"
+          cd "$RUNNER_TEMP/previous"
+          echo 'b2accee8c068f454d4952174c9e5088d473e9dd5673d59b8466463ee882cce63  Slipstream-macos-arm64.zip' | shasum -a 256 -c -
+          ditto -x -k Slipstream-macos-arm64.zip .
+          tar -xzf "$GITHUB_WORKSPACE/dist-update-driver/driver.tar.gz" -C "$RUNNER_TEMP/update-driver"
+      - name: Candidate watchdog startup failure qualification
+        if: matrix.case == 'accept' && matrix.mode == 'current'
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/qualify_watchdog_startup_failure.py \
+            --helper "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app/Contents/MacOS/slipstream-update-watchdog"
+      - name: Real packaged successor and rollback qualification
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+          PREPARER_MODE: ${{ matrix.mode }}
+        run: |
+          migration_args=()
+          if [ "$PREPARER_MODE" = migration ]; then
+            migration_args+=(--legacy-migration --running-legacy)
+          elif [ "$PREPARER_MODE" = legacy ]; then
+            migration_args+=(--expect-legacy-defect)
+          fi
+          sudo -E "$(command -v python3)" scripts/provision_packaged_update_smoke.py \
+            --candidate-bundle "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app" \
+            --previous-bundle "$RUNNER_TEMP/previous/Slipstream.app" \
+            --driver "$RUNNER_TEMP/update-driver/${{ matrix.driver }}" \
+            --case '${{ matrix.case }}' "${migration_args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: packaged-update-${{ matrix.mode }}-${{ matrix.driver }}-${{ matrix.case }}-${{ github.sha }}
+          path: |
+            dist-update-driver/provenance.json
+            ${{ runner.temp }}/watchdog-*/result.json
+            ${{ runner.temp }}/watchdog-*/helper.log
+            ${{ runner.temp }}/watchdog-*/state/*.json
+            ${{ runner.temp }}/update-case-*/harness.log
+            ${{ runner.temp }}/update-case-*/traffic-baseline.log
+            ${{ runner.temp }}/update-case-*/provision-result.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/result.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/tree-mismatch.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/prepare.log
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/state/*.json
+            ${{ runner.temp }}/update-case-*/slipstream-update-*/state/*.log
+          if-no-files-found: warn
           retention-days: 7
 
   checks:
@@ -1679,6 +1752,7 @@ jobs:
       - packaged-browser-qualification
       - packaged-update-notification-qualification
       - packaged-app-lifecycle-heavy
+      - packaged-update-transaction
     runs-on: ubuntu-24.04
     steps:
       - name: Preserve the required packaged lifecycle context
@@ -1692,6 +1766,7 @@ jobs:
           BROWSER: ${{ needs.packaged-browser-qualification.result }}
           UPDATE_NOTIFICATION: ${{ needs.packaged-update-notification-qualification.result }}
           LIFECYCLE: ${{ needs.packaged-app-lifecycle-heavy.result }}
+          UPDATE_TRANSACTION: ${{ needs.packaged-update-transaction.result }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_REF: ${{ github.ref }}
         run: |
@@ -1710,7 +1785,7 @@ jobs:
               exit 1
             }
             for result in "$BUILD" "$SIGNER" "$ASSEMBLY" "$ATTESTATION" \
-              "$BROWSER" "$UPDATE_NOTIFICATION" "$LIFECYCLE"; do
+              "$BROWSER" "$UPDATE_NOTIFICATION" "$LIFECYCLE" "$UPDATE_TRANSACTION"; do
               [ "$result" = skipped ] || {
                 echo "a packaged gate ran before the reviewed Geph binary existed: $result"
                 exit 1
@@ -1722,7 +1797,7 @@ jobs:
             echo "unknown Geph bootstrap classification: $GEPH_BOOTSTRAP"
             exit 1
           fi
-          for result in "$BUILD" "$BROWSER" "$LIFECYCLE"; do
+          for result in "$BUILD" "$BROWSER" "$LIFECYCLE" "$UPDATE_TRANSACTION"; do
             [ "$result" = success ] || {
               echo "an applicable packaged qualification did not succeed: $result"
               exit 1

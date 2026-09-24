@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "name": "Admitted full-browser comparison",
+  "max_deadline_ms": 20000,
+  "candidate_routes": ["owned_geph"],
+  "admission": "One fresh capability only after an eligible exact root is safe-incomplete and its initiating browser provenance is accepted. Never issued for Discord, YouTube, googlevideo, ordinary timeout or background traffic alone.",
+  "completion": "Complete document and stopped main frame, semantic usable outcome, same owned Geph process, same capability and host, unexpired observation and commit. No deadline refresh or retries.",
+  "v1": "Unchanged; eight-second direct/semantic RoutePreflightV1 remains supported. V1 parsers reject V2 payloads.",
+  "vectors": [
+    {"version": 2, "duration_ms": 20000, "routes": ["owned_geph"], "valid": true},
+    {"version": 2, "duration_ms": 20001, "routes": ["owned_geph"], "valid": false},
+    {"version": 2, "duration_ms": 8000, "routes": ["system", "owned_geph"], "valid": false},
+    {"version": 1, "duration_ms": 20000, "routes": ["owned_geph"], "valid": false}
+  ]
+}

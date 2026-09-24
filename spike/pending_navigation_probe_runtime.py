@@ -16,6 +16,7 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import threading
 import time
 
@@ -278,7 +279,10 @@ def _validate_job(job, now_unix_ms):
         return None
     if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
         try:
-            parsed = route_preflight.parse_route_preflight_job_v1(
+            parser = (route_preflight.parse_route_preflight_job_v2
+                      if job.get("schema_version") == 2
+                      else route_preflight.parse_route_preflight_job_v1)
+            parsed = parser(
                 json.dumps(job, separators=(",", ":"), sort_keys=True)
             )
         except (TypeError, ValueError, route_preflight.RoutePreflightError):
@@ -1700,7 +1704,17 @@ class PendingNavigationBrowserWorkerLauncher:
                 ValueError,
                 plistlib.InvalidFileException,
                 PendingNavigationProbeRuntimeError,
-            ):
+            ) as error:
+                # Keep diagnostics bounded: never include plist contents, paths,
+                # environment values or arbitrary exception messages.
+                reason = type(error).__name__
+                if isinstance(error, OSError):
+                    reason += f":errno={error.errno}"
+                elif isinstance(error, PendingNavigationProbeRuntimeError):
+                    code = str(error)
+                    if re.fullmatch(r"[a-z_]{1,80}", code):
+                        reason += ":" + code
+                print("browser-worker stale cleanup failed: " + reason, file=sys.stderr)
                 return False
         if remove_root:
             try:
@@ -1839,7 +1853,7 @@ class PendingNavigationBrowserWorkerLauncher:
                 return
             self._sleep(0.05)
         raise PendingNavigationProbeRuntimeError(
-            "browser_worker_cleanup_failed"
+            "browser_worker_cleanup_failed_job_still_loaded"
         )
 
     def _cleanup_launch(self, target, paths, pid, identity):
@@ -1859,18 +1873,24 @@ class PendingNavigationBrowserWorkerLauncher:
                 # already-validated Chrome process tree and private profile.
                 # Keep the job loaded until that bounded cleanup has exited;
                 # bootout first would bypass the worker's owned cleanup.
-                self._wait_for_exit(
+                exit_code = self._wait_for_exit(
                     target,
                     pid,
                     identity,
                     timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
                 )
-                if self._read_worker_error(
-                    paths.stderr,
-                    identity,
-                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                # Successful natural exit already proves worker-owned cleanup.
+                # It may race SIGTERM after the exact PID/UID validation above.
+                worker_error = self._read_worker_error(paths.stderr, identity)
+                if exit_code != 0 and worker_error != _BROWSER_WORKER_TERMINATION_ERROR:
+                    # Only the bounded enum parsed by _read_worker_error is
+                    # exposed; never raw stderr, paths or worker request data.
+                    print(
+                        f"browser-worker cleanup exit: code={exit_code} "
+                        f"reason={worker_error}", file=sys.stderr,
+                    )
                     raise PendingNavigationProbeRuntimeError(
-                        "browser_worker_cleanup_failed"
+                        "browser_worker_cleanup_failed_exit"
                     )
         self._run(("/bin/launchctl", "bootout", target))
         try:

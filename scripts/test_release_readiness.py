@@ -28,6 +28,15 @@ def live_report(result: str = "passed") -> dict:
                         "elapsed_ms": 1_000,
                         "outcome": outcome,
                         "reason": "" if outcome == "usable" else "readiness_timeout",
+                        "required_resource": (
+                            {
+                                "host": "cdn.aikido.dev",
+                                "complete": True,
+                                "byte_bucket": "gte_64k",
+                            }
+                            if host == "app.aikido.dev"
+                            else None
+                        ),
                         "route": "slipstream_selected",
                     }
                     for browser, outcome in zip(("chrome", "safari"), outcomes)
@@ -92,6 +101,48 @@ class ReleaseReadinessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "terminal reason"):
             release_readiness.validate_live_report(report, 2)
 
+    def test_live_matrix_requires_complete_bounded_aikido_cdn_evidence(self) -> None:
+        report = live_report()
+        aikido = report["sites"][1]
+        truncated = aikido["browsers"][0]
+        truncated["outcome"] = "terminal_error"
+        truncated["reason"] = "required_resource_incomplete"
+        truncated["required_resource"] = {
+            "host": "cdn.aikido.dev",
+            "complete": False,
+            "byte_bucket": "16k_to_64k",
+        }
+        aikido["controls"] = {"direct": "usable", "owned_geph": "usable"}
+        aikido["result"] = "terminal_error"
+        report["harness_exit_status"] = 1
+        report["result"] = "failed"
+
+        self.assertEqual(
+            release_readiness.validate_live_report(report, 1),
+            "failed",
+        )
+
+        truncated["outcome"] = "usable"
+        truncated["reason"] = ""
+        with self.assertRaisesRegex(ValueError, "complete CDN resource"):
+            release_readiness.validate_live_report(report, 1)
+
+    def test_live_matrix_rejects_unbounded_required_resource_fields(self) -> None:
+        report = live_report()
+        evidence = report["sites"][1]["browsers"][0]["required_resource"]
+        evidence["path"] = "/private-page-controlled-path.js"
+        with self.assertRaisesRegex(ValueError, "required-resource evidence"):
+            release_readiness.validate_live_report(report, 0)
+
+        report = live_report()
+        report["sites"][0]["browsers"][0]["required_resource"] = {
+            "host": "cdn.aikido.dev",
+            "complete": True,
+            "byte_bucket": "gte_64k",
+        }
+        with self.assertRaisesRegex(ValueError, "required-resource evidence"):
+            release_readiness.validate_live_report(report, 0)
+
     def test_inconclusive_requires_both_control_routes_unavailable(self) -> None:
         report = live_report("inconclusive")
         self.assertEqual(
@@ -113,6 +164,20 @@ class ReleaseReadinessTests(unittest.TestCase):
         visible.update({"harness_exit_status": 0, "result": "passed"})
         with self.assertRaisesRegex(ValueError, "measured evidence"):
             release_readiness.validate_soak_report(visible, 0)
+
+    def test_soak_nonfinite_timings_cannot_authorize_success(self) -> None:
+        for field in (
+            "measured_duration_seconds", "sample_interval_seconds",
+            "max_sample_gap_seconds",
+        ):
+            for value in (float("inf"), float("-inf"), float("nan")):
+                with self.subTest(field=field, value=value):
+                    report = soak_report()
+                    report[field] = value
+                    # Python's JSON reader accepts these non-standard numbers.
+                    report = json.loads(json.dumps(report))
+                    with self.assertRaisesRegex(ValueError, "measured evidence"):
+                        release_readiness.validate_soak_report(report, 0)
 
     def test_soak_cleanup_diagnostics_are_bounded_and_block_success(self) -> None:
         report = soak_report()

@@ -174,25 +174,7 @@ jobs:
             --expected-workflow-run-attempt "${{ steps.candidate.outputs.run_attempt }}" \
             --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"
           app="$RUNNER_TEMP/candidate-app/Slipstream.app"
-          test "$(
-            /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
-              "$app/Contents/Info.plist"
-          )" = slipstream
-          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
-          helper="$app/Contents/MacOS/slipstream-browser-probe"
-          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
-          for binary in "$helper" "$watchdog"; do
-            test -x "$binary"
-            /usr/bin/lipo "$binary" -verify_arch arm64
-            /usr/bin/codesign --verify --strict "$binary"
-            if /usr/bin/otool -L "$binary" | /usr/bin/grep -E \
-              'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-              echo "non-GUI helper links a GUI framework: $binary" >&2
-              exit 1
-            fi
-          done
-          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
-          /usr/bin/codesign --verify --deep --strict "$app"
+          python3 scripts/verify_macos_app_bundle.py --app-bundle "$app"
 
       - name: Qualify exact-candidate dual-stack PF and QUIC mechanics
         env:

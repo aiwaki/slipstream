@@ -36,6 +36,11 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "next_hop_protocol": "h2",
             "preloader_visible": False,
             "ready_state": "complete",
+            "required_resource": {
+                "host": "cdn.aikido.dev",
+                "complete": True,
+                "byte_bucket": "gte_64k",
+            },
             "secure_context": True,
             "title": "Aikido Security",
             "visible_app": True,
@@ -194,6 +199,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             ),
         )
         self.assertTrue(all(site["deadline_ms"] > 0 for site in smoke.SITES.values()))
+        self.assertEqual(smoke.SITES["app.aikido.dev"]["deadline_ms"], 30_000)
 
     def test_release_chrome_is_a_normal_headed_clean_profile(self) -> None:
         command = smoke._chrome_command(
@@ -226,6 +232,78 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertIn("location.hostname.toLowerCase()", host_expression)
         with self.assertRaisesRegex(ValueError, "fixed matrix"):
             smoke._readiness_expression("example.com")
+
+    def test_aikido_required_resource_probe_is_dynamic_streamed_and_bounded(
+        self,
+    ) -> None:
+        expression = smoke._browser_evidence_expression("app.aikido.dev")
+
+        self.assertIn('const requiredResourceHost = "cdn.aikido.dev";', expression)
+        self.assertIn("script[src]", expression)
+        self.assertIn('link[rel~="modulepreload"][href]', expression)
+        self.assertIn("document.querySelectorAll", expression)
+        self.assertIn("candidate.hostname.toLowerCase()", expression)
+        self.assertIn("response.body.getReader()", expression)
+        self.assertIn("const chunk = await reader.read()", expression)
+        self.assertIn("if (chunk.done) break", expression)
+        self.assertIn("state.attempts >= 3", expression)
+        self.assertIn("state.retryAfter", expression)
+        self.assertIn("redirect: 'error'", expression)
+        self.assertNotIn("location.href", expression)
+        self.assertNotIn("required_resource_url", expression)
+        self.assertIn(
+            "const requiredResourceHost = null;",
+            smoke._browser_evidence_expression("weather.com"),
+        )
+
+    def test_aikido_rejects_a_truncated_or_missing_required_resource(self) -> None:
+        truncated = self._signals(
+            required_resource={
+                "host": "cdn.aikido.dev",
+                "complete": False,
+                "byte_bucket": "16k_to_64k",
+            }
+        )
+        missing = self._signals(required_resource=None)
+
+        self.assertEqual(
+            smoke._classify_browser_evidence(
+                "app.aikido.dev", self._browser_evidence(signals=truncated)
+            ),
+            ("terminal_error", "required_resource_incomplete"),
+        )
+        self.assertEqual(
+            smoke._classify_browser_evidence(
+                "app.aikido.dev", self._browser_evidence(signals=missing)
+            ),
+            ("terminal_error", "required_resource_incomplete"),
+        )
+        self.assertEqual(
+            smoke._classify_browser_evidence(
+                "app.aikido.dev", self._browser_evidence()
+            ),
+            ("usable", ""),
+        )
+
+    def test_required_resource_report_evidence_never_leaks_page_fields(self) -> None:
+        raw = self._signals(
+            required_resource={
+                "host": "cdn.aikido.dev",
+                "complete": False,
+                "byte_bucket": "16k_to_64k",
+                "path": "/private-page-controlled-path.js",
+            }
+        )
+
+        self.assertEqual(
+            smoke._bounded_required_resource("app.aikido.dev", raw),
+            {
+                "host": "cdn.aikido.dev",
+                "complete": False,
+                "byte_bucket": "zero",
+            },
+        )
+        self.assertIsNone(smoke._bounded_required_resource("weather.com", raw))
 
     def test_chrome_navigation_error_becomes_bounded_terminal_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -482,6 +560,14 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(result["outcome"], "usable")
         self.assertEqual(result["reason"], "")
+        self.assertEqual(
+            result["required_resource"],
+            {
+                "host": "cdn.aikido.dev",
+                "complete": True,
+                "byte_bucket": "gte_64k",
+            },
+        )
         self.assertEqual(commands.call_count, 3)
         lifecycle.popen.assert_not_called()
         lifecycle.stop.assert_called_once()
@@ -1418,6 +1504,14 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(result["outcome"], "usable")
+        self.assertEqual(
+            result["required_resource"],
+            {
+                "host": "cdn.aikido.dev",
+                "complete": True,
+                "byte_bucket": "gte_64k",
+            },
+        )
         self.assertNotIn(
             ("DELETE", "/session/session-id/cookie"),
             calls,
@@ -2769,6 +2863,15 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             return {
                 **browser_result,
                 "deadline_ms": smoke.SITES[host]["deadline_ms"],
+                "required_resource": (
+                    {
+                        "host": "cdn.aikido.dev",
+                        "complete": True,
+                        "byte_bucket": "gte_64k",
+                    }
+                    if host == "app.aikido.dev"
+                    else None
+                ),
             }
 
         def chrome(
@@ -2778,6 +2881,15 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 **browser_result,
                 "browser": "chrome",
                 "deadline_ms": smoke.SITES[host]["deadline_ms"],
+                "required_resource": (
+                    {
+                        "host": "cdn.aikido.dev",
+                        "complete": True,
+                        "byte_bucket": "gte_64k",
+                    }
+                    if host == "app.aikido.dev"
+                    else None
+                ),
             }
 
         with (
@@ -2821,6 +2933,15 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             return {
                 **browser_result,
                 "deadline_ms": smoke.SITES[host]["deadline_ms"],
+                "required_resource": (
+                    {
+                        "host": "cdn.aikido.dev",
+                        "complete": True,
+                        "byte_bucket": "gte_64k",
+                    }
+                    if host == "app.aikido.dev"
+                    else None
+                ),
             }
 
         def chrome(
@@ -2832,6 +2953,15 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 "deadline_ms": smoke.SITES[host]["deadline_ms"],
                 "outcome": ("terminal_error" if host == "app.aikido.dev" else "usable"),
                 "reason": ("readiness_timeout" if host == "app.aikido.dev" else ""),
+                "required_resource": (
+                    {
+                        "host": "cdn.aikido.dev",
+                        "complete": True,
+                        "byte_bucket": "gte_64k",
+                    }
+                    if host == "app.aikido.dev"
+                    else None
+                ),
             }
 
         with (

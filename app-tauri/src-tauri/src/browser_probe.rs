@@ -49,7 +49,7 @@ const OUTCOME_CHALLENGE_OR_AUTH: &str = "challenge_or_auth";
 const OUTCOME_USABLE: &str = "usable";
 const OUTCOME_TERMINAL_ERROR: &str = "terminal_error";
 const ROUTE_PREFLIGHT_MAX_DEADLINE_MS: u64 = 8_000;
-const ROUTE_PREFLIGHT_MIN_START_BUDGET_MS: u64 = 2_000;
+const BROWSER_COMPARE_MAX_DEADLINE_MS: u64 = 20_000;
 const OWNED_GEPH_ROUTE: &str = "owned_geph";
 const OWNED_GEPH_PORT_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT";
 const DOM_CLASSIFICATION_COMMAND_ID: u64 = 4;
@@ -360,7 +360,7 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
 }
 
 fn run_probe_worker() -> ProbeResult<()> {
-    let classification_deadline = Instant::now() + CLASSIFICATION_BUDGET;
+    let classification_deadline = Instant::now() + Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS);
     let termination_requested = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(
         signal_hook::consts::SIGTERM,
@@ -419,7 +419,14 @@ fn run_claimed_probe(
 
     let remaining_ms = claimed_job_remaining_budget_ms(&job, now);
     let claimed_deadline = Instant::now() + Duration::from_millis(remaining_ms);
+    let worker_v1_deadline = classification_deadline
+        - (Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS) - CLASSIFICATION_BUDGET);
     let classification_deadline = classification_deadline.min(claimed_deadline);
+    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 2) {
+        classification_deadline
+    } else {
+        classification_deadline.min(worker_v1_deadline)
+    };
 
     let config = ChromeConfig::discover(&job, uid, classification_deadline)?;
     let mut chrome = ChromeSession::launch(uid, config, classification_deadline)?;
@@ -448,7 +455,7 @@ fn run_claimed_probe(
                 }
                 ClaimedProbeJob::RoutePreflight(job) => {
                     serde_json::to_value(RoutePreflightResultPayload {
-                        schema_version: SCHEMA_VERSION,
+                        schema_version: job.schema_version,
                         capability: &job.capability,
                         host: &job.host,
                         candidate_route: OWNED_GEPH_ROUTE,
@@ -469,7 +476,11 @@ fn claimed_job_has_start_budget(job: &ClaimedProbeJob, now_unix_ms: u64) -> bool
     match job {
         ClaimedProbeJob::PendingNavigation(job) => job_has_start_budget(job, now_unix_ms),
         ClaimedProbeJob::RoutePreflight(job) => {
-            job.deadline_unix_ms.saturating_sub(now_unix_ms) >= ROUTE_PREFLIGHT_MIN_START_BUDGET_MS
+            // Root I/O and signed-browser admission already consumed part of
+            // this same eight-second job. Do not silently discard its live
+            // remainder before attempting the independently bounded probe.
+            // Discovery, navigation and submission all enforce the deadline.
+            job.deadline_unix_ms > now_unix_ms
         }
     }
 }
@@ -618,7 +629,12 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
     let mut routes = job.candidate_routes.clone();
     routes.sort();
     routes.dedup();
-    if job.schema_version != SCHEMA_VERSION
+    let max_deadline = match job.schema_version {
+        1 => ROUTE_PREFLIGHT_MAX_DEADLINE_MS,
+        2 if job.candidate_routes == [OWNED_GEPH_ROUTE] => BROWSER_COMPARE_MAX_DEADLINE_MS,
+        _ => return Err(error("claimed_job_invalid")),
+    };
+    if job.schema_version == 0
         || job.capability.len() != CAPABILITY_HEX_CHARS
         || !job
             .capability
@@ -640,7 +656,7 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
             .any(|route| route == OWNED_GEPH_ROUTE)
         || job.issued_at_unix_ms == 0
         || job.deadline_unix_ms <= job.issued_at_unix_ms
-        || job.deadline_unix_ms - job.issued_at_unix_ms > ROUTE_PREFLIGHT_MAX_DEADLINE_MS
+        || job.deadline_unix_ms - job.issued_at_unix_ms > max_deadline
         || now < job.issued_at_unix_ms
         || now.saturating_sub(job.issued_at_unix_ms) > MAX_CLAIM_AGE_MS
         || job.deadline_unix_ms <= now
@@ -1815,6 +1831,64 @@ fn remaining_timeout(deadline: Instant, cap: Duration) -> ProbeResult<Duration> 
         .ok_or_else(|| error("classification_deadline_exceeded"))
 }
 
+fn read_before(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    cap: Duration,
+) -> io::Result<usize> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "read deadline expired"))?;
+    stream.set_read_timeout(Some(remaining.min(cap)))?;
+    let received = stream.read(buffer)?;
+    if Instant::now() >= deadline {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "read deadline expired",
+        ));
+    }
+    Ok(received)
+}
+
+fn read_exact_before(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    cap: Duration,
+) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < buffer.len() {
+        match read_before(stream, &mut buffer[offset..], deadline, cap) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "incomplete frame",
+                ))
+            }
+            Ok(received) => offset += received,
+            Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
+            Err(failure)
+                if offset > 0
+                    && matches!(
+                        failure.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+            {
+                // The next poll cannot resume midway through a consumed frame
+                // header. Fail closed instead of treating it as an idle socket.
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "incomplete frame before deadline",
+                ));
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+    Ok(())
+}
+
 fn http_response_extent(response: &[u8]) -> ProbeResult<Option<(usize, usize)>> {
     let Some(body_offset) = response
         .windows(4)
@@ -1867,8 +1941,7 @@ fn http_get(port: u16, path: &str, deadline: Instant) -> ProbeResult<Vec<u8>> {
     let mut response = Vec::new();
     let mut chunk = [0_u8; 4_096];
     let (body_offset, response_length) = loop {
-        let received = stream
-            .read(&mut chunk)
+        let received = read_before(&mut stream, &mut chunk, deadline, CDP_CONNECT_TIMEOUT)
             .map_err(|_| error("devtools_http_invalid"))?;
         if received == 0 {
             return Err(error("devtools_http_invalid"));
@@ -1948,8 +2021,7 @@ fn websocket_connect(
     let mut response = Vec::new();
     let mut byte = [0_u8; 1];
     while response.len() <= 16 * 1024 {
-        stream
-            .read_exact(&mut byte)
+        read_exact_before(&mut stream, &mut byte, deadline, CDP_CONNECT_TIMEOUT)
             .map_err(|_| error("devtools_websocket_invalid"))?;
         response.push(byte[0]);
         if response.ends_with(b"\r\n\r\n") {
@@ -2017,7 +2089,7 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
             return Ok(None);
         }
         let mut first = [0_u8; 2];
-        match stream.read_exact(&mut first) {
+        match read_exact_before(stream, &mut first, deadline, Duration::from_millis(250)) {
             Ok(()) => {}
             Err(failure)
                 if matches!(
@@ -2037,14 +2109,12 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
         let mut length = u64::from(first[1] & 0x7f);
         if length == 126 {
             let mut encoded = [0_u8; 2];
-            stream
-                .read_exact(&mut encoded)
+            read_exact_before(stream, &mut encoded, deadline, Duration::from_millis(250))
                 .map_err(|_| error("devtools_unavailable"))?;
             length = u64::from(u16::from_be_bytes(encoded));
         } else if length == 127 {
             let mut encoded = [0_u8; 8];
-            stream
-                .read_exact(&mut encoded)
+            read_exact_before(stream, &mut encoded, deadline, Duration::from_millis(250))
                 .map_err(|_| error("devtools_unavailable"))?;
             length = u64::from_be_bytes(encoded);
         }
@@ -2055,8 +2125,7 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
             return Err(error("devtools_message_invalid"));
         }
         let mut payload = vec![0_u8; length];
-        stream
-            .read_exact(&mut payload)
+        read_exact_before(stream, &mut payload, deadline, Duration::from_millis(250))
             .map_err(|_| error("devtools_unavailable"))?;
         match opcode {
             0x0 | 0x1 => {
@@ -2079,6 +2148,68 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    fn drip_server(bytes: Vec<u8>) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            for byte in bytes {
+                if connection.write_all(&[byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        });
+        (port, server)
+    }
+
+    #[test]
+    fn http_slow_drip_cannot_extend_the_absolute_deadline() {
+        let (port, server) =
+            drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}".to_vec());
+        let start = Instant::now();
+        assert!(http_get(port, "/json/list", start + Duration::from_millis(150)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(800));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn websocket_payload_slow_drip_cannot_extend_the_absolute_deadline() {
+        let mut bytes = vec![0x81, 32];
+        bytes.extend_from_slice(b"{\"message\":\"slow frame payload!\"}");
+        let (port, server) = drip_server(bytes);
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let start = Instant::now();
+        assert!(websocket_read_json(&mut connection, start + Duration::from_millis(150)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(800));
+        drop(connection);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn partial_websocket_header_timeout_is_not_an_idle_poll() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(&[0x81]).unwrap();
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        ready_rx.recv().unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        release_tx.send(()).unwrap();
+        drop(connection);
+        server.join().unwrap();
+        assert!(result.is_err());
+    }
 
     fn job(now: u64) -> ProbeJob {
         ProbeJob {
@@ -2164,6 +2295,35 @@ mod tests {
         let mut over_budget = valid;
         over_budget.deadline_unix_ms += 1;
         assert!(validate_route_preflight_job(&over_budget).is_err());
+    }
+
+    #[test]
+    fn route_preflight_uses_live_remainder_after_root_and_launcher_latency() {
+        let job = ClaimedProbeJob::RoutePreflight(route_preflight_job(10_000));
+        // Five seconds of root I/O, then provenance and launcher verification.
+        assert!(claimed_job_has_start_budget(&job, 16_700));
+        assert_eq!(claimed_job_remaining_budget_ms(&job, 16_700), 1_300);
+        assert!(claimed_job_has_start_budget(&job, 17_999));
+        assert!(!claimed_job_has_start_budget(&job, 18_000));
+        assert!(!claimed_job_has_start_budget(&job, 18_001));
+    }
+
+    #[test]
+    fn browser_comparison_v2_has_separate_owned_only_deadline() {
+        let now = unix_now_ms().unwrap();
+        let mut job = route_preflight_job(now);
+        job.schema_version = 2;
+        job.candidate_routes = vec![OWNED_GEPH_ROUTE.to_string()];
+        job.deadline_unix_ms = now + BROWSER_COMPARE_MAX_DEADLINE_MS;
+        assert!(validate_route_preflight_job(&job).is_ok());
+        job.schema_version = 1;
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.schema_version = 2;
+        job.deadline_unix_ms += 1;
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.deadline_unix_ms -= 1;
+        job.candidate_routes.push("system".to_string());
+        assert!(validate_route_preflight_job(&job).is_err());
     }
 
     #[test]

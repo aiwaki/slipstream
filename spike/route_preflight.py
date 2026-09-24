@@ -9,6 +9,7 @@ import re
 SCHEMA_VERSION = 1
 MAX_PAYLOAD_BYTES = 2048
 MAX_DEADLINE_MS = 8_000
+BROWSER_COMPARE_MAX_DEADLINE_MS = 20_000
 MAX_CANDIDATE_ROUTES = 4
 
 CANDIDATE_ROUTES = frozenset(("system", "app_doh", "local_strategy", "owned_geph"))
@@ -81,6 +82,16 @@ class RoutePreflightResultV1:
 
 
 @dataclass(frozen=True)
+class RoutePreflightJobV2(RoutePreflightJobV1):
+    schema_version: int = 2
+
+
+@dataclass(frozen=True)
+class RoutePreflightResultV2(RoutePreflightResultV1):
+    schema_version: int = 2
+
+
+@dataclass(frozen=True)
 class RoutePreflightDecision:
     accepted: bool
     reason: str
@@ -89,7 +100,7 @@ class RoutePreflightDecision:
     outcome: str
 
 
-def _object(payload, fields):
+def _object(payload, fields, version=SCHEMA_VERSION):
     if isinstance(payload, str):
         raw = payload.encode("utf-8")
     elif isinstance(payload, bytes):
@@ -106,7 +117,7 @@ def _object(payload, fields):
         raise RoutePreflightError("invalid_json") from error
     if not isinstance(value, dict) or frozenset(value) != fields:
         raise RoutePreflightError("invalid_shape")
-    if type(value["schema_version"]) is not int or value["schema_version"] != SCHEMA_VERSION:
+    if type(value["schema_version"]) is not int or value["schema_version"] != version:
         raise RoutePreflightError("unsupported_version")
     return value
 
@@ -140,8 +151,8 @@ def _host(value):
     return host
 
 
-def parse_route_preflight_job_v1(payload):
-    value = _object(payload, _JOB_FIELDS)
+def _parse_job(payload, version, max_deadline, job_type):
+    value = _object(payload, _JOB_FIELDS, version)
     capability = _capability(value["capability"])
     host = _host(value["host"])
     routes = value["candidate_routes"]
@@ -160,10 +171,12 @@ def parse_route_preflight_job_v1(payload):
     if (
         type(deadline) is not int
         or deadline <= issued_at
-        or deadline - issued_at > MAX_DEADLINE_MS
+        or deadline - issued_at > max_deadline
     ):
         raise RoutePreflightError("invalid_deadline")
-    return RoutePreflightJobV1(
+    if version == 2 and routes != ["owned_geph"]:
+        raise RoutePreflightError("invalid_candidate_routes")
+    return job_type(
         capability=capability,
         host=host,
         candidate_routes=tuple(routes),
@@ -172,8 +185,8 @@ def parse_route_preflight_job_v1(payload):
     )
 
 
-def parse_route_preflight_result_v1(payload):
-    value = _object(payload, _RESULT_FIELDS)
+def _parse_result(payload, version, result_type):
+    value = _object(payload, _RESULT_FIELDS, version)
     capability = _capability(value["capability"])
     host = _host(value["host"])
     route = value["candidate_route"]
@@ -185,7 +198,9 @@ def parse_route_preflight_result_v1(payload):
     observed_at = value["observed_at_unix_ms"]
     if type(observed_at) is not int or observed_at <= 0:
         raise RoutePreflightError("invalid_observed_at")
-    return RoutePreflightResultV1(
+    if version == 2 and route != "owned_geph":
+        raise RoutePreflightError("invalid_candidate_route")
+    return result_type(
         capability=capability,
         host=host,
         candidate_route=route,
@@ -220,3 +235,19 @@ def validate_route_preflight_result_v1(
         candidate_route=result.candidate_route,
         outcome=result.outcome,
     )
+
+
+def parse_route_preflight_job_v1(payload):
+    return _parse_job(payload, 1, MAX_DEADLINE_MS, RoutePreflightJobV1)
+
+
+def parse_route_preflight_job_v2(payload):
+    return _parse_job(payload, 2, BROWSER_COMPARE_MAX_DEADLINE_MS, RoutePreflightJobV2)
+
+
+def parse_route_preflight_result_v1(payload):
+    return _parse_result(payload, 1, RoutePreflightResultV1)
+
+
+def parse_route_preflight_result_v2(payload):
+    return _parse_result(payload, 2, RoutePreflightResultV2)

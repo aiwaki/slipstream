@@ -3,14 +3,327 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Voice flow refresh after established-path state loss (candidate)
+
+The existing IPv4 voice observer keeps its port ranges, initial five-packet
+primer, TTL4 and six-copy decoy. It remembers an exact tuple only after a
+recognized RTP, STUN or Discord discovery packet (excluding its own fixed STUN).
+For such tuples, subsequent nonempty real outbound packets, including listen-only
+keepalives, can emit one existing primer at most every30 monotonic seconds.
+Unknown high-port flows retain initial-only behavior. Captured injected decoys
+cannot identify a flow or trigger renewal. Real packets are never held, rewritten,
+dropped or closed; there is no Geph, DNS, PF, IPv6 or global UDP change.
+The existing idle expiry and bounded LRU remain; insertion also enforces capacity.
+
+This addresses the demonstrated permanent absence of re-priming on continuously
+active tuples. Fault fixtures model a filter losing state while control remains
+alive; they do not prove the user's Discord incident had that cause. Real
+mid-call audio/receive recovery remains a required capability gate. The30s
+cadence bounds additional decoy work, not call duration or traffic capacity.
+
+## Googlevideo large ClientHello local reserve (candidate)
+
+The size-sensitive Safari CDN failure admits one additional local fallback for
+`googlevideo.com` and its subdomains only. Direct-first selection remains intact.
+`youtube_record256_fake` preserves a complete single-record ClientHello transcript,
+including key shares, but reframes bodies larger than1024 bytes into256-byte TLS
+records and sends at most512 bytes per paced30ms write after the existing low-TTL
+poison. It never changes SNI, certificate verification, key exchange, system DNS,
+UDP, or Geph routing. Incomplete/multiple records and unreviewed hosts are unchanged.
+The reserve is outside GENERAL_STRATS and Discord's ladder. Existing scoped
+connection deadlines still apply; the pacing is per connection, not a shared lock.
+Live same-endpoint verified TLS1.2/1.3 probes pass; actual installed Safari playback
+remains a required gate before claiming recovery.
+
+## Runtime recovery attempt ownership
+
+An exact-host local recovery sweep owns its monotonic start token. A replacement
+attempt invalidates old DNS/probe results: ownership is rechecked after awaits,
+and strategy publication is atomic with replacement scheduling. Final cleanup
+must release only the originating attempt's slot. Cache persistence runs outside
+the scheduler lock so slow disk writes do not serialize unrelated recovery.
+The private sweep loop has the existing120-second stale-attempt budget. Expiry
+cancels its await, not an already-running libc resolver in the shared executor.
+This diagnostic budget does not limit client connections or change route policy.
+
+## AUD-30 successor traffic qualification (candidate)
+
+Advancing daemon heartbeat alone must not acknowledge an app replacement.
+The successor asynchronously requires complete CRC-checked public PNG transfer
+through IPv4/IPv6 explicit local proxy and transparent HTTPS, within12s overall.
+Each path races the reviewed media.discordapp.net and cdn.discordapp.com
+addresses of two distinct large public stickers. The first complete valid payload
+wins; a failed address leaves its peer running, and success cancels pending HTTP
+work. Up to six requests share the unchanged twelve-second overall deadline and
+three resolver workers. This tolerates one missing object or delivery host. A Discord-wide failure
+still vetoes acceptance; unrelated service success must not hide broken media. A tiny avatar or unrelated reachable site cannot replace the large
+Discord media proof.
+No credentials, environment proxy inheritance, redirect or certificate override.
+The accepted payload must be at least64KiB and is capped at2MiB; a valid tiny
+PNG placeholder cannot prove recovery from the observed large-response cutoff. Only one attempt is in flight; failed attempts cool
+for3s. A successful completion expires after5s and is consumed once.
+The process reuses one probe runtime with three blocking resolver workers:
+uncancellable system DNS cannot block timeout delivery or create a fresh detached
+pool per retry. This bounds qualification resources only, not client traffic.
+
+Before ACK, the existing lifecycle lock protects a fresh active status and exact
+bundle attestation/PID comparison, with Quit/resume intents vetoing acceptance.
+A different daemon identity cannot inherit the probe. Unproven/offline/dormant
+traffic remains unacknowledged and the existing60s rollback policy applies;
+probe failure by itself does not attribute the defect to the candidate. Real
+packaged successor acceptance and negative rollback qualification remain open.
+
+## AUD-29 explicit loopback proxy PF lifecycle
+
+Direct TCP connections between 127.0.0.1 endpoints or between ::1 endpoints,
+with one endpoint the Slipstream proxy port, use ordinary bidirectional TCP state rules without reply-to
+before transparent reply-to. Remote translated HTTPS keeps its existing stateful
+return path. No global PF state flush, timeout change or UDP rule is allowed.
+
+Before listening, bind both local addresses and inspect kernel TCP sockets. If
+any live connection exists on the proxy port, or inspection is unproven, preserve
+states. Otherwise Darwin DIOCKILLSTATES may remove only exact loopback-to-loopback
+TCP states involving this service port. Other ports and remote addresses cannot
+match. Startup cancellation retains bindings until this cleanup finishes.
+
+## AUD-24 browser admission input timing
+
+For an incomplete-root comparison, input recency is anchored to the same
+preflight's monotonic start, before DNS/root probe latency. At assessment time
+allow the original five seconds plus elapsed preflight time, within the existing
+30-second absolute input bound. Future, nonfinite or older-than25s start stamps
+fail closed. Peer ownership, code signature and frontmost browser are freshly
+assessed. This is admission only, never route proof; complete comparison and
+all existing route exclusions remain required.
+
+## AUD-23 Discord same-endpoint HTTPS port
+
+For exactly discord.com requested on443, the local ladder first connects to the
+same resolved public IP on8443, forwarding the original TLS bytes unchanged.
+Independent full-object probes (certificate verification enabled) completed the
+required89381-byte asset on8443/2053/2083 in0.21–0.23s while443 failed. Cloudflare
+supports these HTTPS ports: https://developers.cloudflare.com/fundamentals/reference/network-ports/.
+
+This is a narrow exception to the fake-only *strategy* for this hostname, not to
+the local-only route. It adds no intermediary or Geph, does not decrypt browser
+TLS, does not rewrite the URL/SNI/HTTP authority, and does not modify DNS/PAC.
+Other hosts and requested ports cannot select this strategy. Existing443 fake
+strategies remain fallbacks. Payload canaries and resweeps use the same endpoint
+selection. Gateway/voice/CDN hosts are not covered by this exact-host exception.
+
+## AUD-21 managed HTTPS proxy — authorized 2026-09-13
+
+The user explicitly authorized a Slipstream-managed proxy after confirmation
+that ECH hides the origin from transparent SNI routing. This supersedes the
+no-proxy-mutation rule only for this opt-in mode. DNS, VPN, foreign proxy
+configuration and persistent macOS preferences remain untouched.
+
+The loopback listener accepts bounded HTTPS CONNECT requests when no PF NAT
+entry exists. The authority is bound to that stream and enters the existing
+routing/proof machinery; it never becomes an IP-to-origin association. TLS
+remains end-to-end. Shared ECH cover names do not acquire Geph authority.
+
+`--managed-https-proxy` publishes only temporary per-service State PAC values
+using SCDynamicStoreAddTemporaryValue. Existing keys and explicit proxy choices
+win. Setup preferences are never overwritten. configd removes the lease on
+process death; normal shutdown closes it before closing the listener. A network
+change replaces only the owned lease. Installation can opt in explicitly and
+preserves that choice on subsequent normal reinstalls. This is candidate code,
+not installed qualification. The local PAC selects CONNECT only for Internet DNS authorities on port 443;
+HTTP, IP literals, local destinations and other ports remain direct. CONNECT
+itself rejects non-public destinations. The mode remains opt-in pending
+physical browser and installed shutdown qualification.
+
+## Audit corrections — 2026-09-05
+
+### AUD-17 bounded autonomous bootstrap recovery — authorized 2026-09-08
+
+The user's explicit authorization permits the critical-object idle path to
+advance independently of future browser retries. This narrowly supersedes
+AUD-16's diagnostic-only restriction, not the generic unknown-host policy.
+
+- A valid incomplete critical range plus at least six seconds of measured
+  encrypted-ingress silence may start three parallel local observations:
+  app-owned Xbox DNS/plain and exact-system-IP split64/split16. They reuse the
+  same transient request, share one eight-second DNS/connect/TLS/read budget,
+  and drain under the already-admitted child lease. No system DNS is changed.
+- Geph authority requires all three observations to be valid incomplete objects
+  terminated by EOF or measured wire silence, plus a complete same-object range
+  through the verified owned listener. Compare object identity against every
+  local result. Ownership, readiness, cancellation, policy and deadlines are
+  rechecked before effect. The owned comparison and identity checks share a
+  three-second slice; the child total is bounded to eight plus eight plus three
+  seconds. Unknown/framing errors, ongoing encrypted progress, absolute expiry,
+  cancellation and network-wide failure do not authorize this recovery.
+- A complete local object vetoes Geph. A matching complete local observation
+  may select only its exact host/original-IP/selected-IP/strategy plan, under
+  the child epoch and capability. This ephemeral plan has a 30-second TTL,
+  at most 512 entries and a fresh browser dial bounded to four seconds. Failure
+  invalidates it; neither raw target nor payload becomes routing state.
+- Parallel exact-host/IP requests may join an already-admitted nonce child
+  within its original bounded deadline. Its result is not authority: only a
+  committed route may be claimed afterward. Do not treat child health as root
+  health, renew its observation budget, replay a delivered TLS stream, or force
+  reloads. Discord/YouTube/googlevideo and other protected exclusions remain.
+
+These are source requirements, not an installed-browser success claim. The
+audit and CURRENT_STATE record the implementation and qualification boundary.
+
+These rules apply to the source correction in `codex/codebase-audit-20260905`;
+they are not a claim about the currently installed bundle. Evidence, regression
+results and qualification limits are in [the audit log](CODEBASE_AUDIT_2026-09-05.md).
+
+- Direct root health and root inflight coalescing belong to the normalized host
+  **and canonical destination IP**. An IPv4 result cannot clear another IPv4
+  or IPv6 endpoint, including its QUIC admission. Only a committed, still-valid
+  learned exact-host route retains host-wide routing authority.
+- A root or another critical object is not health proof for a transient child
+  URL. Child negative/healthy outcomes cannot populate a host-wide health cache;
+  an unresolved critical child cannot populate its parent's retry cache. Existing
+  proof, ownership, concurrency, exclusions and deadline limits remain active.
+- Root coalescing/proof epochs are distinct from execution admission. After
+  all root candidate workers drain, only that root's owning coroutine may
+  transfer its execution lease to its one selected cross-origin critical
+  child. The child keeps a separate opaque exact-address proof epoch and
+  capability; its completion must not resolve root waiters. The execution
+  cap is eight admitted jobs (each retains its existing internal probe bounds).
+  Synchronous navigation checks have no rolling-minute start quota and no
+  per-host start cooldown: completed work must not prevent the next independent
+  attempt. Exact-address inflight coalescing and outcome-specific caches remain.
+  The parent may transfer its execution slot to one child only after its workers
+  drain; standalone children share the same eight-job execution cap. Recent
+  starts are a bounded diagnostic history only, never admission authority.
+  Excess root/standalone-child work waits for an existing proof owner to drain
+  within its absolute deadline; cancelling a waiter never cancels an owner.
+  Heavy headless preflight workers queue separately with two active workers.
+  Existing background-only semantic probing retains its own rate limit. None
+  of these scheduling changes grants routing or persistent learning authority.
+- Relay ingress, downstream delivery and cleanup are different observations.
+  Observe received TLS framing before waiting for browser drain; publish delivered
+  bytes and the first-delivery callback only after successful drain. A partial-TLS
+  watchdog may count silence only while actually waiting for upstream input, not
+  while blocked delivering already-received bytes to the browser. Preserve its
+  existing timeout and framing conditions. Capture peer read EOF/reset and their
+  causal order before asynchronous half-close/cleanup; write errors, cancellation
+  and cleanup timestamps cannot invent an upstream EOF or reorder the peer ends.
+  An orderly client half-close is not, by itself, a terminal reason.
+- Relay diagnostics are bounded, drop-only observations, never route proof or
+  permission to retry/close/learn. Public StatusV2 carries only typed fixed-category
+  aggregate counters; private logs may include a validated normalized DNS host and
+  fixed stage/reason/disposition, never a URL/path/query/body or arbitrary exception.
+  Missing/dropped records cannot prove absence, and an unavailable snapshot must
+  not pretend to be zero observations. Recovery scheduling and ladder advancement
+  are distinct: a false ladder-advanced return cannot be labelled recovery-not-
+  attempted. These corrections do not permit a separate socket's EOF to
+  authorize the critical object's route.
+- Explicit user authorization on 2026-09-08 permits one diagnostic-only Geph
+  comparison after a critical child's valid incomplete range ends in idle timeout.
+  Use the same already-built transient request bytes, the existing admitted child
+  worker/lease and `min(final_deadline, now + 3 seconds)`; no extra retry, task,
+  admission credit, eight-second authority or extended parent/child deadline.
+  The target must still be an allowed exact unknown host; Geph must be enabled,
+  ready and ownership-verified before the probe and the same owned PID verified
+  afterward. Pin its connector to `GEPH_OWNED_PORT`, never the mutable general
+  backend port. Ownership commands use the same shrinking deadline, not their
+  ordinary independent five-second command timeout; recheck readiness before
+  the socket stage and after final ownership checks. Owner cancellation or wait
+  timeout signals the blocking child
+  before draining it so no subsequent diagnostic stage starts; an already-started
+  socket retains its bounded deadline and cleanup before lease release.
+  Only a fixed private diagnostic category may escape, even when the same object
+  completes: the outcome stays retryable-inconclusive, with no proof, route,
+  cache, learned state or success notification. A comparison mismatch means
+  same-object completion was not established, not that a different object was
+  proved. The request target/body never enter the diagnostic record. Ordinary
+  root timeouts, hard-EOF routing proof and all protected-local exclusions remain
+  unchanged. This narrowly supersedes older bans on *starting* Geph for an idle
+  critical-child range; it does not supersede their bans on routing or learning.
+- Explicit **Quit Slipstream** means stopping the owned runtime, not only the
+  tray. It must serialize with privileged mutations, invalidate stale queued
+  requests, complete the installed root-owned daemon's non-destructive `--stop`
+  before stopping owned Geph, and exit only on verified success. `--stop`
+  preserves installation, configuration, learned state and immutable install
+  attestation. Unknown process/launchd state or incomplete cleanup is not success.
+  This supersedes historical wording that an explicit Quit intentionally leaves
+  the tunnel running; crash recovery and updater exits keep their own semantics.
+- Tests after a known-green matching baseline remain change-scoped. A whole-tree
+  audit may establish a new baseline where saved local changes have no matching
+  CI, but passing unit tests never replace fresh ordinary Chrome/Safari, native
+  Windows or exact-bundle lifecycle qualification.
+- Only daemon Quit-resume readiness may supplement an unavailable unprivileged
+  listener-owner observation with a fresh root-authored descriptor witness in
+  the existing StatusV2 file. A visible conflicting owner always vetoes it.
+  Every heartbeat must resample retained dual-stack loopback socket FDs, kernel
+  LISTEN state and disabled reuseport; cached health or asyncio serving flags
+  alone cannot mint authority. Darwin uses TCP_CONNECTION_INFO because its
+  SO_ACCEPTCONN query is unsupported. The tray requires a bounded nofollow
+  root-owned nonwritable file, matching PID/generation, active daemon/PF and
+  nonfuture freshness within six seconds. Exact process/install/label/lifecycle
+  guards remain mandatory; generic Geph ownership and stop checks are unchanged.
+  This is bounded snapshot evidence, not continuous kernel observation.
+
 > **P0 supersession scope (2026-08-13):** every historical row below that
 > describes a production Aqua/LaunchServices worker, installed Google Chrome,
 > extension-driven reload, or transport-idle browser admission is superseded by
 > the first three P0 rows. Its measurements remain historical evidence, not
 > current production behavior or an open implementation requirement.
 
+> **Latency-order supersession (2026-08-25):** the 2026-08-25
+> adaptive-direct-retry row
+> supersedes older wording that makes the adaptive direct retry itself depend
+> on signed foreground provenance. Provenance is consulted only after that
+> network retry and only for final safe-incomplete or critical-resource
+> evidence; repeated timeout remains non-authorizing and returns before it.
+
+> **Critical-child supersession (2026-08-28):** the 2026-08-28
+> critical-bootstrap row
+> supersedes older wording that makes an independently verifiable critical
+> bootstrap object depend on signed foreground/recent-input provenance. That UI
+> gate remains only for an ambiguous final document that may launch the bounded
+> browser worker. It also narrowly supersedes the single absolute eight-second
+> comparison wording for an enumerated cross-origin critical child: each direct
+> or owned-Geph RoutePreflightV1 observation remains bounded to eight seconds.
+> The child's envelope begins only after the complete usable parent has exposed
+> it, so parent latency cannot consume the child's direct-EOF budget; the
+> sequential Geph slice remains separately capped at three seconds.
+
+> **Selected-representation supersession (2026-08-30):** the 2026-08-30
+> selected-representation row below narrowly supersedes the 2026-08-28
+> ranged-root row's identity-only
+> content clause. Its full-representation, framing, prefix-fail-closed, retry,
+> cache, child, proof, and exclusion requirements remain active.
+
+> **Continuous-root supersession (2026-08-31):** the 2026-08-31
+> continuous-root row below
+> narrowly supersedes every older clause that gives the initial semantic root
+> a 400-ms connection followed by a fresh same-IP retry. The semantic,
+> framing, selected-representation, cache, provenance, child, exact-host proof,
+> and exclusion requirements in those rows remain active. The separate
+> remaining-budget retry inside an already-authorized owned-Geph payload proof
+> is unchanged.
+
 | Date | Decision | Status |
 |---|---|---|
+| 2026-08-31 | A TLS-stall first-request capability requires measured transport evidence, not an elapsed label. The production exact-IP root probe must own the raw socket continuously and drive TLS through `MemoryBIO` so `wire_bytes` counts encrypted socket ingress before decryption. Every candidate must prove that its complete initial `ClientHello` flight was successfully sent, at least four seconds of the five-second root I/O allowance remained for receiving, the complete remaining post-send receive budget was actually consumed, and raw ingress stayed exactly zero. TCP-connect delay, a blocked or partial ClientHello send, a short post-send wait, EOF/cancellation, unmeasured state, or any ciphertext byte is `retryable_inconclusive` and cannot contribute to consensus or mint capability/cache/route/status/successor/learning authority. The exact stream's eight-second hard boundary governs only the request-only exception: `timeout` or `unclear` snapshots and rejects any request-only claim that finishes after that boundary, but cannot cancel an already running ordinary semantic or critical-child proof, which retains its own unchanged bounded deadline and may still win; only explicit system `closed` may fast-cancel it. | Implemented locally on `codex/aikido-cdn-recovery`; the affected TLS/preflight selection passes `33` tests, the independently reviewed exact-race/ownership/cancellation selection passes `21`, compilation and `git diff --check` are clean, and two post-patch reviews found no blocker. Supersedes only the ambiguous zero-wire and shared-deadline clauses in the timing-only TLS-stall row below. The previous exact app predates these production edits and must not be installed. The current-tree canonical build and automated fresh/staged/bundled equality verifier now pass with `installed.status=not_run`; installation and physical browser evidence remain open. |
+| 2026-08-31 | Explicit `Quit Slipstream` is a complete, fail-closed runtime stop, not a tray-only exit. Update installation, Quit, and Uninstall share one atomic terminal-operation owner: each claims synchronously before asynchronous work, confirmation, or lifecycle mutation; cancellation/failure releases only its own claim; success retains it through an owner-checked exit, so a late updater cannot exit or relaunch across Quit/Uninstall. Every privileged root lifecycle action is generation-ordered behind one coordinator; a newer Quit invalidates older queued install/recovery work, and an auto-recovery action rechecks the in-process Quit flag, exact durable stop marker, exact installed attestation, enabled root label, missing fresh status, and absent owned listener only after acquiring that same lock. Quit writes an owner-private exact-version resume marker before privileged mutation when the root label was enabled, runs the bundled daemon's non-destructive `--stop` transaction to disable the KeepAlive label, clear only Slipstream PF state, boot out launchd, stop only exact owned survivors, and prove listener absence while preserving the installed daemon, plist, install attestation, and learned/persistent state. Only after root/PF proof does it stop Geph. The Geph launchd probe accepts only success as loaded and the exact service-not-found response as absent; every other probe/spawn failure is an error, and target/plist bootout must end in checked absence. A valid ownership record must match current UID, label, private executable/config, PID, process birth, exact command, and initial listener immediately before TERM. Any bounded KILL is allowed only after that exact TERM boundary and another unchanged PID/UID/birth/command check, even if shutdown released the port or an unrelated process rebound it. Missing, stale, or invalid ownership can never authorize a signal: a bounded all-process scan must instead prove no exact private executable/config remains before the record is cleared. An unrelated listener is external and is neither signalled nor allowed to veto success after exact-private absence. The tray exits only after both layers prove absence; failure leaves the tray open and retains the resume marker. Relaunch first quiesces any old Geph sidecar before status reconciliation starts, may override the disabled root label only for the exact valid marker, clears it only after fresh owned daemon/listener/heartbeat/PF proof, and resumes Geph separately; a manually disabled label or invalid marker never auto-resumes. Uninstall uses the same lifecycle fence so a queued admin action or watchdog cannot reinstall during removal. Force-quitting an individual process is not this transaction and launchd may legitimately recreate a KeepAlive job. | Implemented locally on `codex/aikido-cdn-recovery`; focused Rust coordinator/marker/root-proof/checked-launchctl/Geph identity-and-absence/terminal-operation contracts and Python non-destructive/idempotent `--stop` contracts are green; independent static reviews found no blocker. The canonical local build and automated fresh/staged/bundled daemon equality verifier pass on the exact tree; installation and physical Quit/relaunch evidence remain open. Supersedes only the tray-only Quit meaning in the 2026-07-18 row; that row's uninstall safety clauses remain active. |
+| 2026-08-31 | Timing-only TLS stalls can never create a learned route, healthy cache, shared result, status event, successor, or retry token. A narrower first-request liveness path exists only when the production continuous-root probe obtains a complete bounded set of two or three current public system IPv4 addresses and every one actually spends its full five-second I/O allocation in `tls_handshake_timeout` with zero wire/payload bytes, no asset, no hard error, and no usable or mixed outcome. That consensus may mint one volatile capability bound to the normalized host, exact PF destination IP, port 443, current verified owned-Geph PID, random owner capability, the original exact-system not-before boundary, and the common twelve-second semantic handoff deadline. The separately opened exact PF stream remains live through its full eight-second hard window and keeps racing after it: any direct byte observed before commit wins, including a byte made ready while final PID ownership is checked. Only after the exact not-before boundary may the already-held same-PID Geph session qualify at least 64 server bytes. The capability is burned before runtime awaits and cannot be shared or retried. PID/readiness/session/drain/deadline/mismatch/short-payload failure returns the held exact stream when it remains usable; if both streams end without a byte, the request closes. A held session prevents PID restart between final ownership validation and the no-await close/write commit. Because an arbitrarily slow direct path cannot be mathematically distinguished from a stall, this exception is deliberately request-only and may never persist timing as route authority. Discord, YouTube, Googlevideo, reviewed/direct policies, external Geph, and external DNS/proxy/PAC/VPN/PF remain excluded. | Implemented locally on `codex/aikido-cdn-recovery` after all three current Aikido A records independently exhausted the production TLS window with zero wire bytes, while the same root returned a complete usable payload through the already-owned Geph listener. Deterministic exact/Geph tie, late-byte, PID-check, deadline, mismatch, cancellation, single-use, fragmented-payload, and no-mutation contracts are green; independent ownership/cancellation review is clean. Bundle/install and cold ordinary Chrome/Safari evidence remain open. |
+| 2026-08-31 | Direct evidence is scoped to the normalized host plus exact numeric destination IP, never the hostname alone. Root cache and in-flight ownership use the PF-selected IP; a usable alternate system address may complete one current observation but cannot mark the PF-primary address healthy. QUIC suppresses TCP fallback only for the packet's matching destination IP. A critical child independently resolves one exact address and proves its own request object: it never consumes or publishes direct root/other-object cache, and cross-origin objects do not coalesce merely because host and IP match. Same-origin child work may share only the parent's exact-IP epoch as cancellation authority. The only host-wide cache is a still-live, committed learned owned-Geph exact host. Cancellation or ownership loss prevents every later commit, cache, or learning action. | Implemented locally on `codex/aikido-cdn-recovery` after review found that hostname-scoped direct cache/coalescing could let evidence from one heterogeneous edge or one critical object authorize another. Focused preflight, QUIC, and cache/bootstrap contracts are green. Bundle/install/browser evidence remains open. |
+| 2026-08-31 | The initial system semantic root observation uses one owned exact-numeric-IP socket continuously from TCP connect through TLS handshake, request send, bounded receive, framing, decode, classification, and critical-root inspection. Its I/O allowance is derived from the unchanged eight-second RoutePreflight job after reserving only classification and scheduling capacity; it is capped at five seconds and returns immediately on a complete result. Browser provenance and Geph proof time are not reserved before the root outcome makes either branch relevant; every downstream branch must still fit inside the live common deadline. A result explicitly typed `retryable_inconclusive`, including a connect/TLS/send/read timeout or a bounded framing/decode/classification/inspection deadline or parser failure, may not publish a cache, expose or probe a child, consult provenance, contact Geph, enter local recovery, or learn a route. This decision does not reclassify an identity-body shortfall that reaches EOF and satisfies the existing `safe_incomplete` contract; that evidence retains its guarded provenance/headless-owned-Geph path. An explicit socket/TLS error or EOF without admissible HTTP framing remains separately actionable under the existing guarded local-recovery contract. Cancellation closes the currently owned raw/TLS socket and drains that worker before releasing its exact host/address ownership. The owner may enqueue one fixed allowlisted private diagnostic containing only normalized host, typed boundary, fixed outcome/flags, coarse elapsed/wire buckets, and asset count after route authority and ownership are finalized; a bounded drop-only queue and dedicated daemon sink thread keep diagnostic I/O outside proof and cancellation budgets. Response bytes, headers, endpoint IP, exact timing, and StatusV2 remain unchanged. | Implemented locally on `codex/aikido-cdn-recovery`. The old 400-ms socket plus fresh retry was removed, but current source probes still time out during TLS at five seconds and at the former usable edge with the full eight-second route window. That remains non-authorizing negative evidence. Change-scoped tests are green; exact bundle equality, installation, and fresh Chrome/Safari product evidence remain open. |
+| 2026-08-30 | Direct and owned-Geph semantic root comparison must use byte-identical request bytes, including the same bounded range and gzip negotiation. Raw encoded HTTP framing must be complete, and a `206` must prove the entire selected representation, before semantic classification or critical-asset extraction. The semantic root decoder accepts only identity content or one bounded gzip stream and rejects unsupported, malformed, corrupt, truncated, concatenated, trailing, input/output-cap, framing, range, or inspection-deadline outcomes as retryable-inconclusive. A direct such outcome may use only the existing one direct retry and may not publish a healthy cache, expose/probe a child, contact Geph, or learn a route; an invalid Geph representation is unusable and cannot authorize learning. Critical-child same-object probes remain identity encoded; no timeout, retry count, base-policy exclusion, or Discord/YouTube/googlevideo protection changes. | Active in exact product commit `7d3c871582f1b795e7cf7ac061f718255ab3cdaa` after the cold exact-`9baf111` Aikido result remained empty and history showed that the visible `513484a` result reused an already learned route. A direct identity root request received HTTP `200` with `9.219354` seconds to first byte and `19,688` response-body bytes, while the otherwise equivalent request advertising gzip received HTTP `200` with `1.872561` seconds and `3,561` response-body bytes. The capture retained no response headers, so those measurements do not assert live content-encoding or range headers. |
+| 2026-08-28 | Browser-visible routing work is complete only when the unchanged product restores the full user scenario in fresh ordinary Chrome and Safari connections. A healthy daemon/PF/status snapshot, an isolated curl, a successful root document, one browser, a frontmost-only result, or a manually seeded hostname is diagnostic evidence rather than product success. Corrections must address the generic causal boundary across browsers, transports, foreground/background state, and critical dependencies; site-specific rules, repeated retries, and UI-focus workarounds are not substitutes for a root-cause fix. | Active engineering and qualification rule after repeated Capacitor, Aikido, Weather, RuTracker, LinkedIn, and Yelp physical observations. |
+| 2026-08-28 | A ranged semantic root may expose critical bootstrap assets only when one valid `Content-Range` starts at zero, ends inside the requested bound, proves `end + 1 == total`, and agrees with identity-HTML framing, declared length, observed bytes, and the inspection deadline. A proper prefix, malformed/out-of-bound range, inconsistent framing, or expired inspection is retryable-inconclusive: it may use only the existing one bounded same-IP retry and may not publish a healthy cache, resolve/probe a child, contact Geph, or learn a route. A complete root retains only one-shot non-serializable asset targets; only explicit child EOF/reset plus complete same-object evidence through the ownership-verified Geph listener may learn that exact child. Complete `200` behavior, slow-working direct protection, base-policy exclusions, and Discord/YouTube/googlevideo protections are unchanged. | Active request/parser composition contract after the cold exact-`dfe300e` Aikido run stayed `learned=0` and history showed that the ranged root request and later `200`-only extractor had never been exercised together. The earlier `513484a` browser success reused an already learned overlay and did not qualify this cold branch. |
+| 2026-08-28 | A critical-bootstrap route comparison is network-authoritative and must not depend on which application is frontmost or on recent input. A complete usable parent may expose one bounded critical object; only explicit direct EOF/reset with valid incomplete range framing plus an independently complete same-object range through the verified owned Geph listener can learn that exact child. Slow/idle delivery remains inconclusive. For an enumerated cross-origin child, its envelope begins only after the complete parent has exposed it: the direct observation receives at most one unchanged eight-second RoutePreflightV1 window, followed by a separately capped three-second Geph slice, and a fresh exact-host eight-second authority is minted only after direct EOF/reset has validated. Parent latency is not child evidence and cannot shorten either observation. The same transient request bytes and same-object evidence bind the two observations; no idle timeout may start Geph, cache, or learning. Same-origin and every ordinary route job keep their existing deadline. Signed foreground/recent-input provenance remains mandatory only when an ambiguous incomplete final document may admit the bounded browser worker. Exact-host coalescing, ownership, base-policy exclusions, and the Discord/YouTube/Googlevideo protections are unchanged. | Active PR #373 contract after fresh Chrome plus the exact production probe proved that a usable parent currently consumes roughly 2.3-4.8 seconds before the child begins, causing the former parent-relative cutoff to turn the child's stable 6.8-second EOF back into idle timeout. Supersedes only the critical-child foreground and shared-parent-deadline clauses in the 2026-08-13 exact-host decision; browser-worker provenance and eight seconds per route observation remain active. Fresh Chrome/Safari validation is still required. |
+| 2026-08-26 | A replay-safe unknown-host request that has already produced an independent hard system transport failure receives one absolute eight-second recovery deadline measured from the accepted client connection. The remaining local proof is one parallel current-attempt race: app-owned Xbox DNS plus exactly two distinct reviewed local strategies. Any local payload wins immediately. Owned Geph is admissible only when all three stages explicitly report transmitted-ClientHello `closed` outcomes while the original system hard failure is still bound to that same request; `timeout`, `pending`, `failed`, cancellation, connect ambiguity, or an incomplete stage is `unclear` and publishes no evidence, negative cache, learning, or successor. Four seconds of the client deadline are reserved for the ownership-verified Geph payload and downstream handoff. The exact route/status confirmation is scheduled only after at least 64 server bytes have been written and drained to the original client before its deadline, so learning without first-request recovery is not a success. | Active same-request latency and evidence correction after a clean Capacitor control learned the exact route but the initiating curl still ended in `SSL_ERROR_SYSCALL` after roughly eleven seconds. Source history showed that the hard marker had been inserted into the older sequential ladder while its deadline was discarded before Geph readiness/payload waits; timeout was also accepted as zero-payload proof. Adds no hostname, broad transport-failure, foreground, or status-code rule and preserves every Discord/YouTube/googlevideo exclusion. |
+| 2026-08-25 | A retryable-inconclusive initial 400-ms direct root probe receives exactly one bounded same-IP direct network retry before browser provenance is consulted. The retry remains inside the unchanged absolute eight-second job, is capped at five seconds, and preserves 1.5 seconds for cold signed-browser provenance, 50 ms of provenance wait grace, two seconds for same-attempt proof, and 25 ms of scheduling grace. A final usable direct result stays direct; a second inconclusive result returns without cache, provenance, or Geph; a final complete strict denial may use the existing network-only exact-host owned-Geph proof; and only a final safe-incomplete or critical-resource result continues to signed foreground/recent-input provenance. Entry to an actionable denial/incomplete branch is uncacheable by default, and only a successfully committed owned-Geph proof may restore caching. Existing browser connections are not migrated after learning, so qualification must start with a genuinely fresh connection and require the first request to converge. | Active latency-order correction after exact comparison with the earlier successful candidate showed that classifier and owned-Geph proof were intact, while a real strict denial often completed after the 400-ms slice and was rejected at the provenance gate before the adaptive direct retry could reveal it. Adds no hostname rule, broad status rule, timeout authority, or foreground dependency to the strict-denial decision. |
+| 2026-08-25 | A minimal edge denial may be classified without provider-specific prose only when the complete response is exactly HTTP `403`, the normalized body is exactly `Bad Request - Blocked`, and the single normalized headers include `Content-Type: text/html`, `Content-Security-Policy: default-src 'none'`, and `X-Content-Type-Options: nosniff`. Missing, duplicated, or altered fingerprint fields, the same body under another status, and every ordinary `403` remain non-authorizing. The exact host may use Geph only after the unchanged complete usable payload proof through the verified owned listener. That proof retains one shared six-second deadline but may divide it into an initial attempt of at most three seconds and exactly one remaining-budget retry when at least one second remains; it does not extend the job, hot-loop, or make connection time evidence. | Active generic critical-resource correction after Weather's shell loaded while `dsx.weather.com` returned that exact strict denial directly and complete JSON through owned Geph. The first owned target connection could time out while the next bounded connection succeeded, so one connection was not a reliable use of the existing proof budget. Adds no Weather or CDN hostname rule. |
+| 2026-08-25 | A held unknown-host first flight that independently produces a hard direct transport failure must enter the existing app-owned DNS and multi-strategy recovery ladder in the same request instead of committing an already-suspect exact system stream and waiting for repeated user retries. Hard failure is an explicit socket/TLS exception or EOF without admissible HTTP framing while the browser has received zero server bytes. It is distinct from a complete ordinary HTTP response, including an unclassified `403`, and from every idle/deadline timeout. The latter remains retryable-inconclusive, may use exactly one bounded same-IP direct network retry before any browser provenance check, publishes no failure cache, and cannot by itself start or authorize Geph. The existing ladder retains system, app-owned DNS, multiple distinct local-strategy, network-noise, exact-host, owned-listener, and complete-payload guards before any foreign exit can be learned. | Active convergence correction after physical RuTracker recovery took long enough to appear broken and Safari exposed a hard TLS/EOF failure, while slow LinkedIn responses demonstrated why timeout alone must remain non-authorizing. Adds no hostname, status-code, or broad local-failure rule. |
+| 2026-08-25 | An exact-host owned-Geph service-root proof may follow at most one complete bodyless `301` or `308` only when it is an absolute HTTPS root redirect between one conventional apex and its single `www.` form, uses no userinfo, non-default port, path, query, or fragment, and the final response is complete and semantically usable under the same absolute deadline. A second redirect, duplicate/malformed `Location`, any other hostname transition, or unusable final response fails closed. The proof authorizes only the original exact host and creates no route or policy for the canonical target. | Active generic canonicalization correction after `www.weather.com` returned a bodyless redirect through owned Geph while `weather.com` returned the usable payload. This is not a Weather rule and does not make redirects generally usable. |
+| 2026-08-25 | Exact-host recovery from a complete strict regional or WAF denial is a network decision, not a foreground-window decision. The bounded system probe must first classify the existing strict denial shape and the same exact hostname must then return a complete usable payload through the verified owned Geph listener inside the same eight-second job. That dual-route proof may learn the exact route regardless of which application or browser is frontmost; after learning, it applies to every new eligible connection. Foreground signed-browser provenance and recent input remain mandatory only when the final post-retry evidence is a safe-incomplete navigation or critical-resource comparison. A failed Geph proof publishes no denial retry cache. Ordinary `403`/`429`, login, CAPTCHA, generic security pages, idle timeouts, and slow-but-working direct responses remain non-authorizing; Discord, YouTube, and googlevideo remain excluded. | Active product correction after repeated physical Capacitor attempts stayed direct solely because first-host learning depended on `frontmost`. Narrowly supersedes the foreground requirement in older rows only for complete strict denial plus complete exact-host owned-Geph proof; adds no hostname rule or broad status-code rule. |
+| 2026-08-25 | The signed foreground-browser provenance check remains confined to final safe-incomplete navigation and critical-resource semantic recovery, but its macOS command budget must tolerate a cold official-browser signature verification: that exceptional check receives at most 1.5 seconds total and 0.5 seconds per system command inside the unchanged absolute eight-second route job. The ordinary direct path remains 400 ms/500 ms and no timeout becomes route evidence. If such provenance-gated evidence reaches the owned-Geph proof while that exact backend is temporarily unready, the inability to prove the alternate route is not published as a two-minute denial cache. A complete strict denial does not enter this foreground gate and still needs its independent complete exact-host owned-Geph proof. | Active cold-start and post-wake liveness correction after a valid live Chrome helper first returned `signature_failed` at 0.279 seconds under the 0.25-second command cap, while a warm repeat crossed signature verification, and the same diagnostic snapshot recorded a brief owned-Geph recovery window. |
+| 2026-08-25 | Foreground-browser admission accepts exactly either the older complete `lsappinfo` field pair (`"CFBundleIdentifier"` plus `"pid"`) or the current complete indented pair (`bundleID` plus `pid = N` with bounded trailing process metadata). The two dialects may not be mixed, duplicated, or partially present. Parsing compatibility does not relax authority: the exact frontmost bundle/PID must still equal the signed canonical Chrome or Safari application ancestor, and exact socket ownership, UID/process stability, signature/team/designated requirement, and recent physical input remain mandatory and are rechecked before admission. | Active macOS compatibility correction after a live signed foreground Chrome NetworkService socket passed ownership, signature, and ancestry but was falsely rejected as `not_frontmost` because current macOS no longer emitted the older quoted keys. |
+| 2026-08-24 | QUIC v1/v2 may move one exact SNI flow to TCP when the active private PF route and exact owned Geph are ready and the host is either reviewed `geo_exit`, already learned as an exact unknown host, or a fresh exact unknown first contact without a fresh usable/challenge direct-preflight cache. The daemon emits bounded standardized Version Negotiation plus a matching ICMPv4/ICMPv6 port-unreachable that quotes only the observed address/port tuple and the first eight QUIC payload bytes. VN handles a client before any valid server packet; the exact socket error closes the standards-required race in which a client must ignore a later VN after processing a real packet. These signals are transport selection, not Geph authority: a fresh unknown still needs the unchanged bounded direct semantic result and independent owned-Geph proof before learning or routing; signed browser provenance remains required only for final safe-incomplete or critical-resource evidence, while complete strict denial is network-only. A usable or challenge/auth result caches only direct health and restores QUIC for that exact host; an idle/slow/inconclusive result cannot learn and simply remains on direct TCP. Explicit direct/local policy, Discord, YouTube, Googlevideo, ECH/no-SNI, unsupported QUIC, inactive PF, and unowned/unready Geph remain untouched. No IP/CDN suffix is authority, no persistent PF rule is added, and UDP/443 is not globally blocked. | Active correction after two physical attempts: the first learned the exact Aikido CDN child yet Chrome bypassed that TCP-only route over QUIC, and the second showed Safari continuing the exact CDN UDP flow because the real server packet won the VN race while Capacitor still rendered its direct denial. Narrowly supersedes the older rule that every unknown QUIC host stays untouched before exact-host classification. |
+| 2026-08-24 | Foreground-browser provenance uses the narrowest verifier compatible with each exact macOS browser family. Google Chrome and its helpers retain resource-envelope validation with `codesign --verify --strict=symlinks`; unrelated Finder metadata on the official bundle is not elevated into a signature failure by bare `--strict`. Safari/WebKit under only the exact canonical `/System/Applications`, `/System/Library`, or sealed Cryptex roots may use `--ignore-resources --strict=symlinks` because current Apple WebKit reports an obsolete resource envelope. That Safari compatibility form is never accepted for Chrome, a user path, or an arbitrary executable. Exact canonical path, allowed identifier, Apple/Google designated requirement, Chrome team, executable PID/start/UID, process ancestry, socket ownership, frontmost application, and recent physical input all remain mandatory and fail closed independently. | Active macOS browser-admission contract after current signed Chrome and Cryptex WebKit were both rejected before route learning despite valid designated requirements. |
+| 2026-08-24 | Browser-visible unknown-host recovery remains generic and evidence-gated. An inconclusive 400-ms root preflight may use exactly one bounded same-IP direct network retry before provenance. That retry is capped at 5.0 seconds and drawn from the unchanged absolute eight-second job after reserving 1.5 seconds for cold provenance, 50 ms of provenance wait grace, 2.0 seconds for same-attempt proof, and 25 ms of scheduling grace; the ordinary healthy path remains bounded by the 400-ms direct probe and 500-ms first-contact budget. Every idle timeout remains inconclusive, including one with a length-framed partial root response or partial critical range: a second inconclusive result returns without cache, provenance, or Geph. Reaching the local read-size cap (`truncated=True`) is likewise `UNKNOWN`, not route evidence. For incomplete-response evidence, only stable explicit EOF or reset (normalized as EOF) with valid framing can be actionable, and critical-child learning still requires signed foreground/recent-input provenance plus an independently complete same-object owned-Geph proof. A complete direct `403` is actionable only when the bounded semantic classifier identifies the existing strict regional/edge-denial shape and an independent owned-Geph comparison is complete and usable; that strict-denial decision is network-only. Ordinary `403`/`429`, login, CAPTCHA, and generic security pages remain inert. There are no `app.aikido.dev`, `cdn.aikido.dev`, or `capacitorjs.com` route exceptions and no broad HTTP-status rule. Live qualification must require bounded critical-resource completion instead of accepting the root document alone. | Active slow-link clarification from the 2026-08-24 Aikido/Capacitor controls; preserves the exact-host, privacy, absolute-deadline, and exclusion boundaries while superseding use of either idle timeout or foreground state as strict-denial authority. |
 | 2026-08-24 | The current guarded account-backed workflows permit at most three fresh `main` `workflow_dispatch` runs per UTC day across `release-readiness.yml` and the diagnostic-only `owned-geph-qualification.yml` combined. Every dispatch counts regardless of status, conclusion, input, or whether it reaches broker authentication. A no-environment preflight with only the read-scoped ephemeral GitHub token and no protected account/broker secret must retrieve the complete date-filtered run lists for both exact workflow paths, require the current run exactly once, rank the combined runs by UTC `created_at` and run ID, and admit only positions one through three. Their shared `queue: max` concurrency group retains simultaneous dispatches for serial processing instead of silently replacing an older pending slot. The broker execution day is sampled from the preflight's UTC clock: a run still queued across the day boundary is deliberately absent from the new day's view and fails before protected-secret access, so the next day requires a fresh dispatch rather than spending a token under yesterday's rank. Current-definition workflow reruns (`GITHUB_RUN_ATTEMPT != 1`), incomplete or malformed API evidence, and the fourth or later dispatch fail before candidate download, the protected environment, or account-secret access. GitHub reruns replay the historical workflow source, so a run created before this guard cannot be retroactively protected by repository code and must never be rerun; eliminating that platform escape requires rotating the credential into a new protected environment. The cap is a safety budget, not a promise that the upstream broker will issue three tokens and not authority to blind-retry an unchanged failure, skip deterministic checks, weaken the live-site matrix or cleanup, or shorten/reuse the measured release soak. | Active post-`.23` account-backed workflow contract. |
 | 2026-08-23 | A test of prepared updater recovery may not treat `Ok(true)` as proof that unload/bootstrap effects occurred when a nonblocking transaction lock can also return that value for legitimate deferred recovery. Bootstrap-failure retention/retry and loaded-watchdog unload/rebootstrap use separate fresh journal/lock fixtures; production lock and recovery behavior remain unchanged. A passing rerun of the same conflated fixture is not exact-main evidence. | Active deterministic-evidence contract after exact-main CI `32624011525` intermittently returned deferred recovery before the old test's third back-to-back effect assertion. |
 | 2026-08-23 | A protected packaged soak may report success only after cleanup through the root-owned installed daemon and stable absence of every exact product-owned system resource. Cleanup never depends on the non-root harness traversing the root-owned `0700` installed runtime: it invokes that installed daemon's idempotent uninstall exactly once through `sudo`, without a user-level path probe or a mutable candidate executable at the privilege boundary, and requires three consecutive clean samples for launchd, both loopback listener families, private PF anchors, installed runtime/attestation, tokens, state, and browser sockets/runtime. Persistent residue remains release-blocking rather than being repaired into a pass. Diagnostics expose only allowlisted symbolic residue or probe classes. An always-preserved soak report is bounded diagnostic evidence and cannot replace same-attempt qualification/readiness proofs or attestations. | Active release-cleanup contract after run `32619377051` passed the full matrix and completed 30-minute sampling but skipped uninstall when the non-root installed-path probe raised `PermissionError`. |
@@ -244,6 +557,171 @@ survive across sessions and agents.
 - `docs/TROUBLESHOOTING.md` records operational checks for repeated symptoms.
 - Root README files should stay short and user-facing.
 
+### 2026-09-13: bounded owned semantic redirect confirmation
+
+Owned semantic payload confirmation may follow at most three complete redirects
+under its unchanged absolute deadline, accepting same-origin HTTPS absolute or
+root-relative server-provided targets (maximum2048 ASCII bytes; no whitespace,
+backslash, fragment, userinfo or non-default port). At most one existing strict
+apex/www HTTPS root transition is allowed, only from a root request. Cycles and
+all other cross-host transitions fail closed. No redirect body is usable payload;
+only a complete final non-denial response may confirm the original exact host.
+No cookie, Referer, browser path or canonical target is learned or logged.
+Per-response encoded cap stays128KiB; owned confirmation decoded cap is2MiB.
+Direct-root/critical-resource caps and all eligibility/ownership/time guards stay
+unchanged. This narrowly supersedes the older single canonical-root redirect and
+256KiB owned semantic decode limits. Evidence: AUD-20 and ROUTING_RESEARCH.
+
+
+AUD-22 (2026-09-13): an exact direct socket retained through its full probe
+deadline is not a usable route when that probe reports TIMEOUT. Without a
+qualified request-only claim, close that silent socket and enter the existing
+app-owned DNS/local ladder. Timeout alone still cannot authorize Geph or learning.
+Payload-positive and qualified request-only late-payload paths remain unchanged.
+
+
+AUD-22 singleton TLS-stall refinement: a complete current system DNS set may
+contain one public IPv4 address. Its full-window, measured zero-ingress TLS stall
+may support only the existing request-only handoff when additionally paired with
+a complete usable same-origin response through a pinned owned-Geph process.
+The independent original browser stream must still exhaust its hard deadline;
+any direct bytes retain precedence. This does not cache, learn, share or mint
+successor authority. Failed payload/ownership/deadline proof stays local. Multiple
+address consensus retains its existing requirements. A local partial-TLS stall
+also invalidates the assumption that skipping root preflight is safe on the next
+connection; preserve observations while retrying independent preflight.
+
+## AUD-23 Discord TCP timestamp decoy — 2026-09-13
+
+Discord remains local-only. Its fake ClientHello is bound to observed TCP sequence
+and acknowledgement numbers. When both negotiated timestamps are observed, use a
+stale client timestamp (modulo32-bit) with the observed server timestamp echo so
+PAWS can reject the decoy at the server. Missing evidence retains low-TTL handling;
+missing sequence/ack evidence sends no decoy. A new SYN sequence resets stale
+per-tuple evidence. This changes neither browser TLS bytes nor other service policy.
+
+AUD-24: a RoutePreflight browser worker may attempt any still-live remainder of
+its existing eight-second job. Remove the separate two-second minimum start
+threshold, which silently discarded jobs after root/provenance/launcher latency.
+Runtime verification, navigation, observation and submission retain the same
+absolute deadline; an expired job never starts and only complete usable proof
+can authorize an exact eligible host. Background PendingNavigation is unchanged.
+
+AUD-24 initiating-browser timing: when the same held root remains pending after
+the ordinary0.5s healthy budget, capture signed socket-owner, foreground and
+recent-input provenance concurrently with root I/O. Fast roots do no UI work.
+The observation is private to that request, never cached or route authority,
+and is consumed only if the eventual root needs browser comparison. Full
+independent owned-Geph proof and the existing absolute deadline remain required.
+At most eight provenance observations remain live; cancellation retains each
+slot until its bounded OS observer drains. Capturing admission early avoids
+requiring the user to keep the browser foreground throughout network latency.
+
+AUD-24 full-browser comparison V2: after the held exact root independently
+reports safe-incomplete and initiating-browser provenance is accepted, create
+one fresh owned-Geph-only V2 capability with a fixed20s deadline. The direct
+RoutePreflightV1 eight-second contract is unchanged. V2 never starts for an
+ordinary timeout or protected local-only host. It retains complete document +
+stopped-main-frame + semantic usable classification, pinned owned process,
+exact host/capability, cancellation and expiry guards; no retries or refresh.
+Same-owner waiters may join this already-active stage through the existing
+bounded continuation metadata, without gaining its authority. Successful proof
+gets the existing4s handoff slice. No static host exception or external setting
+change. The worker launcher allows30s including cleanup; V1/background worker
+classification remains8s. Gauzy empirically needs10-12s for full main-frame load
+through the owned exit and still displays its Loading overlay at3s.
+
+## AUD-25 Discord updater local HTTPS port — 2026-09-20
+
+Extend the existing exact-host local HTTPS8443 strategy from discord.com to
+updates.discord.com only. Native updater requests failed at TLS (-9806);
+certificate-validating same-IP curl returned no response on443 and a complete
+200 manifest (9067 bytes) on8443. Preserve destination IP, SNI and opaque client
+TLS bytes. Other Discord hosts and non443 input remain excluded. No Geph edge,
+external resolver/proxy mutation, or media/gateway success is implied.
+
+## AUD-25 exact gateway matched decoy — 2026-09-20
+
+For gateway.discord.gg only, try a whole-flight fake-only strategy before the
+existing fake-only ladder. Clone a bounded complete ClientHello into a separate
+decoy, changing only its SNI to the equal-length www.cloudflare.com. Preserve
+the real TLS bytes. Require observed negotiated timestamps before using this
+matched decoy; all decoy segments carry stale timestamps and correct sequence
+offsets. Preserve the verified small-packet boundary; malformed input and absent
+timestamp evidence retain the previous decoy. Other Discord hosts, YouTube and
+Geph policy are unchanged. Both relay and canary pass their actual first flight.
+
+## AUD-25 Discord REST matched decoy — 2026-09-20
+
+Supersede discord.com HTTPS8443 preference: native REST calls returned522 after
+gateway READY, leaving message history unavailable. Exact discord.com now uses
+a complete matched fake first on443, substituting equal-length www.mail.ru only
+in the decoy. Retain the gateway substitution and stale-timestamp guards.
+HTTPS8443 is restricted to updates.discord.com, whose manifest was independently
+verified. Public API full-response proof does not qualify authenticated history.
+
+## AUD-25 media and independent local connections — 2026-09-20
+
+Extend matched decoys only to independently proven cdn.discordapp.com
+(www.wildberries.ru) and media.discordapp.net (media.wildberries.ru), retaining
+equal lengths, original TLS, stale-timestamp requirement and local-only routing.
+Public avatar,293KB Lottie and985KB APNG responses completed in independent probes.
+Supersede runtime service-wide local-engine circuit suppression: failure at one
+Discord/CDN or YouTube destination is not an engine-wide outage. Protected local
+requests do not enter this shared circuit. Keep per-request bounded ladders and
+negative host cache; geo-exit circuit behavior and protected no-Geph rules stay.
+
+## AUD-25 numbered Discord voice control endpoints
+
+One-label regional voice endpoints matching `[a-z]{1,32}[0-9]{1,8}.discord.media`
+use the existing actual-ClientHello matched stale-timestamp fake before static
+fakes. The fake substitutes the label minus its last digit plus `.wildberries.ru`,
+preserving byte length. This name is never resolved or contacted; real TLS and
+certificate validation are unchanged. Other names are excluded. UDP voice
+policy is unchanged, and Discord remains local-only without Geph.
+
+## AUD-26 adaptive Discord local recovery
+
+Discord receives independently selectable equal-length matched fake SNI families
+(mail.ru, ozon.ru, wildberries.ru, cloudflare.com), including previously unseen
+Discord subdomains. Only the fake is changed; these names are never resolved or
+contacted. Existing preferred exact substitutions stay first without evidence,
+but ranking includes them, cached winners and recent failures. A recent failure
+demotes a candidate for ranking only (60s), never denies a connection. A recent
+full-payload failure cannot be erased by a TLS-prefix success; a complete payload
+success clears that evidence. All existing
+per-request attempt bounds remain; no new global connection throttle is added.
+Protected transport close/timeouts teach failures; exact-host failures no longer
+erase other Discord winners. Unknown/YouTube/Geph policy is unchanged.
+
+Public API/CDN/media canaries require complete successful HTTP objects (JSON or
+PNG), capped at2MiB and the existing8s deadline. Gateway and observed voice
+canaries validate full101 headers and the request-specific WebSocket accept.
+Discord resweep uses modern TLS plus application proof rather than synthetic
+TLS1.2 hello bytes. No user credentials, messages, voice authentication or audio
+are generated. Recovery changes later connections; already delivered encrypted
+application data cannot safely be replayed transparently.
+
+## AUD-27 Discord reserve flight profiles
+
+Add sixteen reserve profiles combining four existing fake-name families with
+four real-flight partitions: handshake header across TLS records, SNI edges
+across TLS records, separate TCP writes across the record header, and separate
+TCP writes inside SNI. This is four layouts, not sixteen independent inventions.
+Existing candidates retain initial priority; exact-host learning ranks reserves.
+Only supported Discord names receive them. All remain fake-based and local-only;
+YouTube, unknown hosts, Geph, UDP and external settings are unchanged.
+
+Record fragmentation preserves the exact ClientHello transcript and all trailing
+records. Malformed, incomplete or already-fragmented hellos pass through unchanged.
+TCP modes use 10ms between writes (at most20ms per first flight); they do not
+promise wire packet boundaries. Probe and production use the same partitioner.
+Existing per-request attempt limits remain, with no new global admission cap.
+
+Qualification amendment: only the eight TCP-layout profiles enter STRATEGIES
+and automatic routing. Eight record-layout candidates timed out live despite
+valid local TLS; retained for research/tests only, not user connection attempts.
+
 ### 2026-09-20: coordinated dependency source bootstrap
 
 RUSTSEC-2026-0285 affects both the app and vendored Geph rustls locks. Separate
@@ -272,3 +750,49 @@ transitions may use bootstrap. Both lockfiles must be read from exact base/head
 Git SHAs; all other parsed packages, edges and metadata must remain identical.
 Missing refs/read evidence or any other lock change disables bootstrap. The
 application audit policy and all required audits remain unchanged.
+
+## 2026-09-21 RODE access and Geph account cache
+
+RODE is a reviewed geo-exit suffix: ordinary Safari and direct HTTPS returned
+403/118 bytes for rode.com, www.rode.com and /en; owned Geph after auth-cache
+repair returned complete200/228756 bytes at /en-ca, and ordinary Chrome through
+that exit displayed RODE Canada. This does not generalize arbitrary403 responses
+into automatic route authority. Discord/YouTube exclusions remain unchanged.
+
+Geph's bundled0.3.9 reads a global auth_token from its SQLite cache and holds it
+across refresh failures. Changing credentials while retaining that cache can
+therefore keep authenticating the old account. Slipstream selects an account-
+specific cache inside its private configuration directory, derived with a
+domain-separated SHA256 digest; legacy shared tokens are never migrated. The
+secret is never a filename or log value. Exit changes retain the same cache.
+This prevents cross-account reuse; same-account token revocation still requires
+a separately verified recovery mechanism.
+
+## 2026-09-23 Explorecams CDN and bootstrap candidate ranking
+
+Reviewed `cdn.explorecams.com` exit: the same public JPEG stalls locally
+after HTTP200 headers, but completes53670bytes through ownedGeph in1.4s;
+a public productionJS object completes357317bytes through that exit.
+Root-run full-object plain/split64/split16 probes all fail within10s for the
+JPEG. This reviewed CDN suffix does not route the parent Explorecams site,
+Sampleshots, Onfotolife, Discord or YouTube. Installed Safari qualification
+is pending; root HTML truncation and Cloudflare challenges remain separate.
+
+Within the existing bounded root-discoveredJS candidates, a child beneath the
+exact parent hostname now ranks before unrelated cross-origin scripts. Logs
+showed an advertising script consuming Explorecams' sole child probe while its
+own CDN remained untested. Ranking changes no proof requirements or route
+authority; excluded hosts remain excluded, ties retain document order and
+unselected transient targets are forgotten.
+
+
+The subsequent Onfotolife/Sampleshots comparison isolates another incomplete
+bootstrap object: public same-origin Cloudflare JS returns HTTP200 but truncates
+locally at20508/10689bytes; ownedGeph completes237445/230024bytes respectively.
+Reviewed candidate suffixes `onfotolife.com` and `www.sampleshots.com` route those
+same-origin bootstrap flows consistently. This is a reviewed per-site exception
+based on transfer evidence, not automatic authority from403 or a blanket route
+for Cloudflare. Browser challenge completion remains a required open gate;
+these follow-up routes were installed by transactione69dcd10. Safari Sampleshots
+loads its camera page, while Onfotolife still fails browser challenge completion. No CAPTCHA/security warning
+is bypassed. Apex sampleshots.com and challenges.cloudflare.com remain unchanged.

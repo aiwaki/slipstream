@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,6 +70,38 @@ def write_executable(path: Path, body: str = "exit 0\n") -> None:
     path.chmod(0o755)
 
 
+def stage_chromium_prerequisite_fixture(repo: Path) -> None:
+    source_path = Path("vendor/chromium-headless-shell/SOURCE.json")
+    (repo / source_path).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / source_path, repo / source_path)
+    helper = Path("scripts/materialize_chromium_headless_shell.py")
+    shutil.copyfile(ROOT / helper, repo / helper)
+    source = json.loads((repo / source_path).read_text())
+    runtime = repo / "app-tauri/src-tauri/chromium-headless-shell"
+    runtime.mkdir(parents=True, exist_ok=True)
+    executable = runtime / "chrome-headless-shell"
+    executable.write_bytes(b"fixture-chromium")
+    executable.chmod(0o755)
+    (runtime / "LICENSE.headless_shell").write_text("fixture-license")
+    (runtime / "ABOUT").write_text("fixture-about")
+    (runtime / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "component": source["component"],
+        "version": source["version"],
+        "platform": source["platform"],
+        "archive_url": source["archive"]["url"],
+        "archive_length": source["archive"]["length"],
+        "archive_sha256": source["archive"]["sha256"],
+        "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "license": source["license_path"],
+    }))
+
+
+def write_build_python_fixture(path: Path) -> None:
+    write_executable(path, 'if [[ "$1" == "-c" ]]; then printf "3.13\\n"; '
+                     f'else exec {shlex.quote(sys.executable)} "$@"; fi\n')
+
+
 class BuildConfigTests(unittest.TestCase):
     def run_build_deps(
         self,
@@ -101,12 +136,211 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_package_scripts_split_local_and_release_builds(self) -> None:
         package = json.loads((ROOT / "app-tauri/package.json").read_text())
+        tauri = json.loads(
+            (ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text()
+        )
         scripts = package["scripts"]
 
+        self.assertEqual(
+            tauri["build"]["beforeBuildCommand"],
+            "../scripts/build_and_stage_daemon.sh",
+        )
+        # Cargo's tauri-build resource copy needs the daemon before compilation.
+        # A beforeBundle hook runs too late on a clean checkout; retaining both
+        # hooks would freeze the daemon twice in the same canonical build.
+        self.assertNotIn("beforeBundleCommand", tauri["build"])
+        self.assertNotIn("beforeDevCommand", tauri["build"])
         self.assertIn("tauri.local.conf.json", scripts["build:local"])
         self.assertIn("tauri build", scripts["build:release"])
         self.assertIn(f"--target {TAURI_RELEASE_TARGET}", scripts["build:release"])
+        self.assertEqual(
+            scripts["build:daemon"],
+            "../scripts/build_and_stage_daemon.sh",
+        )
+        verifier = "python3 ../scripts/verify_macos_app_bundle.py"
+        for name, verifier_name in (
+            ("build:local", "verify:bundle:local"),
+            ("build:release", "verify:bundle:release"),
+        ):
+            self.assertNotIn("npm run build:daemon", scripts[name])
+            self.assertIn(f"npm run {verifier_name}", scripts[name])
+            self.assertLess(
+                scripts[name].index("tauri build"),
+                scripts[name].index(f"npm run {verifier_name}"),
+            )
+            self.assertTrue(scripts[verifier_name].startswith(verifier))
+            self.assertIn(
+                "--fresh-daemon ../spike/dist/slipstreamd/slipstreamd",
+                scripts[verifier_name],
+            )
+            self.assertIn(
+                "--staged-daemon src-tauri/slipstreamd/slipstreamd",
+                scripts[verifier_name],
+            )
+        self.assertEqual(
+            scripts["verify:local-install"],
+            "npm run verify:bundle:local -- --installed-app /Applications/Slipstream.app --qualify-traffic",
+        )
         self.assertEqual(scripts["build"], "npm run build:release")
+
+    def test_app_build_rebuilds_and_hash_checks_the_frozen_daemon(self) -> None:
+        builder = ROOT / "scripts/build_and_stage_daemon.sh"
+        self.assertTrue(os.access(builder, os.X_OK))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            scripts_dir = repo / "scripts"
+            spike_dir = repo / "spike"
+            resources_dir = repo / "app-tauri/src-tauri"
+            scripts_dir.mkdir()
+            spike_dir.mkdir()
+            resources_dir.mkdir(parents=True)
+
+            staged_builder = scripts_dir / builder.name
+            staged_builder.write_bytes(builder.read_bytes())
+            staged_builder.chmod(0o755)
+            fake_python = repo / "python3.13"
+            write_build_python_fixture(fake_python)
+            stage_chromium_prerequisite_fixture(repo)
+            write_executable(
+                spike_dir / "build_daemon.sh",
+                """root="$(cd "$(dirname "$0")/.." && pwd -P)"
+mkdir -p "$root/spike/dist/slipstreamd"
+printf 'fresh-daemon\\n' > "$root/spike/dist/slipstreamd/slipstreamd"
+chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
+printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
+""",
+            )
+
+            target = resources_dir / "slipstreamd"
+            base_env = os.environ.copy()
+            base_env.pop("SLIPSTREAM_BUILD_STAGE_TESTING", None)
+            base_env.pop("SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT", None)
+            base_env["SLIPSTREAM_PYTHON_313"] = str(fake_python)
+
+            def seed_preceding_daemon() -> None:
+                shutil.rmtree(target, ignore_errors=True)
+                target.mkdir()
+                executable = target / "slipstreamd"
+                executable.write_text("preceding-daemon\n", encoding="utf-8")
+                executable.chmod(0o755)
+                (target / "resource.dat").write_text(
+                    "preceding-resource\n", encoding="utf-8"
+                )
+
+            seed_preceding_daemon()
+            # The missing Chromium binary must fail before build_daemon.sh
+            # creates even its stub output, without replacing the old daemon.
+            chromium = resources_dir / "chromium-headless-shell/chrome-headless-shell"
+            chromium.unlink()
+            failed_prerequisite = subprocess.run(
+                [str(staged_builder)], cwd=repo / "app-tauri", env=base_env,
+                check=False, capture_output=True, text=True, timeout=5,
+            )
+            self.assertNotEqual(failed_prerequisite.returncode, 0)
+            self.assertIn("Chromium prerequisite verification failed", failed_prerequisite.stderr)
+            self.assertFalse((spike_dir / "dist").exists(), "freeze ran before prerequisite check")
+            self.assertEqual((target / "slipstreamd").read_text(), "preceding-daemon\n")
+            self.assertEqual(list(resources_dir.glob(".slipstreamd-stage.*")), [])
+            stage_chromium_prerequisite_fixture(repo)
+            completed = subprocess.run(
+                [str(staged_builder)],
+                cwd=repo / "app-tauri",
+                env=base_env,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(
+                (target / "slipstreamd").read_text(encoding="utf-8"),
+                "fresh-daemon\n",
+            )
+            self.assertEqual(
+                (target / "resource.dat").read_text(encoding="utf-8"),
+                "fresh-resource\n",
+            )
+            self.assertEqual(list(resources_dir.glob(".slipstreamd-stage.*")), [])
+
+            expected_status = {"after_backup": 97, "after_swap": 1}
+            for failpoint in expected_status:
+                with self.subTest(failpoint=failpoint):
+                    seed_preceding_daemon()
+                    env = base_env.copy()
+                    env["SLIPSTREAM_BUILD_STAGE_TESTING"] = "1"
+                    env["SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT"] = failpoint
+                    failed = subprocess.run(
+                        [str(staged_builder)],
+                        cwd=repo / "app-tauri",
+                        env=env,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    self.assertEqual(
+                        failed.returncode, expected_status[failpoint], failed.stderr
+                    )
+                    self.assertIn(
+                        f"Forced build-stage test failure: {failpoint}",
+                        failed.stderr,
+                    )
+                    if failpoint == "after_swap":
+                        self.assertIn(
+                            "Staged daemon does not match the freshly built daemon.",
+                            failed.stderr,
+                        )
+                    self.assertEqual(
+                        (target / "slipstreamd").read_text(encoding="utf-8"),
+                        "preceding-daemon\n",
+                    )
+                    self.assertEqual(
+                        (target / "resource.dat").read_text(encoding="utf-8"),
+                        "preceding-resource\n",
+                    )
+                    self.assertEqual(
+                        list(resources_dir.glob(".slipstreamd-stage.*")), []
+                    )
+
+    def test_daemon_staging_preserves_previous_payload_before_swap(self) -> None:
+        """Validation failure is not evidence that this transaction owns target."""
+        builder = ROOT / "scripts/build_and_stage_daemon.sh"
+        for invalid_source in ("missing", "non_executable", "symlink"):
+            with self.subTest(source=invalid_source), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                (repo / "scripts").mkdir()
+                (repo / "spike").mkdir()
+                target = repo / "app-tauri/src-tauri/slipstreamd"
+                target.mkdir(parents=True)
+                (target / "slipstreamd").write_text("previous-daemon")
+                (target / "resource.dat").write_text("previous-resource")
+                staged_builder = repo / "scripts" / builder.name
+                staged_builder.write_bytes(builder.read_bytes())
+                fake_python = repo / "python3.13"
+                write_build_python_fixture(fake_python)
+                stage_chromium_prerequisite_fixture(repo)
+                write_executable(repo / "spike/build_daemon.sh")
+                source = repo / "spike/dist/slipstreamd"
+                if invalid_source != "missing":
+                    source.mkdir(parents=True)
+                    if invalid_source == "symlink":
+                        (source / "slipstreamd").symlink_to(fake_python)
+                    else:
+                        (source / "slipstreamd").write_text("invalid-daemon")
+                env = os.environ.copy()
+                env.pop("SLIPSTREAM_BUILD_STAGE_TESTING", None)
+                env.pop("SLIPSTREAM_BUILD_STAGE_TEST_FAILPOINT", None)
+                env["SLIPSTREAM_PYTHON_313"] = str(fake_python)
+                result = subprocess.run(
+                    ["/bin/bash", str(staged_builder)], cwd=repo, env=env,
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(target.is_dir(), "validation failure deleted previous daemon")
+                self.assertEqual((target / "slipstreamd").read_text(), "previous-daemon")
+                self.assertEqual((target / "resource.dat").read_text(), "previous-resource")
+                self.assertEqual(list(target.parent.glob(".slipstreamd-stage.*")), [])
 
     def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
         config = json.loads((ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text())
@@ -124,6 +358,12 @@ class BuildConfigTests(unittest.TestCase):
         owned_geph = (
             ROOT / ".github/workflows/owned-geph-qualification.yml"
         ).read_text(encoding="utf-8")
+        readiness = (
+            ROOT / ".github/workflows/release-readiness.yml"
+        ).read_text(encoding="utf-8")
+        verifier = (ROOT / "scripts/verify_macos_app_bundle.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertEqual(config["mainBinaryName"], "slipstream")
         self.assertNotIn(
@@ -136,28 +376,19 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('#[path = "../browser_probe.rs"]', helper_main)
         self.assertNotIn("use slipstream_lib", watchdog_main)
         self.assertIn('#[path = "../updater_transaction.rs"]', watchdog_main)
-        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', workflow)
-        self.assertIn('/usr/bin/otool -L "$helper"', workflow)
-        self.assertIn(
-            'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
-            workflow,
-        )
-        self.assertIn('/usr/bin/codesign --verify --strict "$watchdog"', workflow)
-        self.assertIn('/usr/bin/otool -L "$watchdog"', workflow)
-        self.assertIn("Print :CFBundleExecutable", workflow)
-        self.assertIn(
-            'helper="$app/Contents/MacOS/slipstream-browser-probe"',
-            owned_geph,
-        )
-        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', owned_geph)
-        self.assertIn('/usr/bin/otool -L "$helper"', owned_geph)
-        self.assertIn(
-            'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
-            owned_geph,
-        )
-        self.assertIn('/usr/bin/codesign --verify --strict "$watchdog"', owned_geph)
-        self.assertIn('/usr/bin/otool -L "$watchdog"', owned_geph)
-        self.assertIn("Print :CFBundleExecutable", owned_geph)
+        self.assertIn('"slipstream-browser-probe"', verifier)
+        self.assertIn('"slipstream-update-watchdog"', verifier)
+        self.assertIn('/usr/bin/codesign', verifier)
+        self.assertIn('/usr/bin/otool', verifier)
+        self.assertIn("GUI_FRAMEWORKS", verifier)
+        self.assertIn("def verify_status_v2(", verifier)
+        self.assertIn("def parse_launchctl_print(", verifier)
+        self.assertIn('[str(INSTALLED_DAEMON), "--port", str(LISTENER_PORT)]', verifier)
+        for packaged_workflow in (workflow, owned_geph, readiness):
+            self.assertIn(
+                "python3 scripts/verify_macos_app_bundle.py",
+                packaged_workflow,
+            )
         self.assertIn(
             "cargo test --locked --bin slipstream-browser-probe",
             workflow,
@@ -352,19 +583,82 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--source-archive-sha256", ci)
         self.assertIn("--app-tree", ci)
         self.assertIn("actions/attest@", ci)
-        self.assertEqual(ci.count("Build the frozen daemon"), 1)
+        self.assertNotIn("Prepare frozen daemon policy inputs", ci)
+        self.assertIn(
+            "SLIPSTREAM_EPHEMERAL_ROUTE_POLICY_KEY_ID: ci-packaged-lifecycle",
+            ci,
+        )
+        self.assertNotIn("pyinstaller --noconfirm --clean slipstreamd.spec", ci)
         self.assertEqual(ci.count("Build the packaged app"), 1)
         self.assertIn("Seal the single packaged build for parallel qualification", ci)
         self.assertNotIn("--bundles app", ci)
         self.assertIn('test -f "$bundle/macos/Slipstream.app.tar.gz"', ci)
         self.assertIn("needs: [changes, packaged-app-build]", ci)
         self.assertIn("Assemble immutable main release candidate", ci)
+        self.assertIn("python3 scripts/verify_macos_app_bundle.py", ci)
+        self.assertIn("--fresh-daemon spike/dist/slipstreamd/slipstreamd", ci)
+        self.assertIn(
+            "--staged-daemon app-tauri/src-tauri/slipstreamd/slipstreamd",
+            ci,
+        )
         self.assertGreaterEqual(
             ci.count("name: release-candidate-${{ github.sha }}"), 3
         )
 
+        packaged_app = ci[
+            ci.index("  packaged-app-build:") : ci.index(
+                "  sign-updater-archive:",
+            )
+        ]
+        self.assertNotIn("--generate-keypair", packaged_app)
+
+        daemon_builder = (ROOT / "spike/build_daemon.sh").read_text(
+            encoding="utf-8"
+        )
+        dependency_install = daemon_builder.index("-r requirements-build.txt")
+        policy_generation = daemon_builder.index(
+            "../scripts/make_route_policy_bundle.py"
+        )
+        daemon_freeze = daemon_builder.index(
+            ".buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec"
+        )
+        self.assertLess(dependency_install, policy_generation)
+        self.assertLess(policy_generation, daemon_freeze)
+        self.assertIn(
+            ".buildvenv/bin/python ../scripts/make_route_policy_bundle.py",
+            daemon_builder,
+        )
+        self.assertIn(
+            'policy_key_dir="$(mktemp -d ',
+            daemon_builder,
+        )
+        self.assertIn(
+            'policy_private_key="$policy_key_dir/private.key"',
+            daemon_builder,
+        )
+        self.assertIn(
+            'policy_public_keys="$policy_key_dir/public.json"',
+            daemon_builder,
+        )
+        self.assertNotIn('policy_private_key="$(mktemp ', daemon_builder)
+        self.assertIn(
+            '--public-keys-output "$policy_public_keys"',
+            daemon_builder,
+        )
+        self.assertIn(
+            'mv -f "$policy_public_keys" route-policy-keys.json',
+            daemon_builder,
+        )
+        self.assertIn(
+            "trap 'rm -f \"$policy_private_key\" \"$policy_public_keys\"; "
+            'rmdir "$policy_key_dir" 2>/dev/null || true\' EXIT',
+            daemon_builder,
+        )
+
         self.assertIn("release-candidate-${{ github.sha }}", qualification)
         self.assertIn("scripts/release_candidate.py verify", qualification)
+        self.assertIn("python3 scripts/verify_macos_app_bundle.py", qualification)
+        self.assertNotIn("--fresh-daemon", qualification)
         self.assertIn("name: owned-geph-diagnostic", qualification)
         self.assertIn("inputs.diagnostic_only == true", qualification)
         self.assertIn("group: account-backed-geph", qualification)
@@ -377,6 +671,9 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("Build the packaged app", qualification)
 
         self.assertIn("release-candidate-${{ github.sha }}", readiness)
+        self.assertIn("scripts/release_candidate.py verify", readiness)
+        self.assertIn("python3 scripts/verify_macos_app_bundle.py", readiness)
+        self.assertNotIn("--fresh-daemon", readiness)
         self.assertIn("scripts/live_site_release_smoke.py", readiness)
         self.assertIn("scripts/packaged_invisibility_soak.py", readiness)
         self.assertIn("--duration-seconds 1800", readiness)
@@ -1408,9 +1705,13 @@ class BuildConfigTests(unittest.TestCase):
         ]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in build_sources)
 
-        self.assertGreaterEqual(combined.count("requirements-build.txt"), 3)
-        self.assertGreaterEqual(combined.count("--require-hashes"), 3)
-        self.assertGreaterEqual(combined.count("--only-binary=:all:"), 3)
+        # CI has one locked test-dependency install. The only build-dependency
+        # install now lives in build_daemon.sh, reached by Tauri's mandatory
+        # beforeBuildCommand; the removed standalone CI freeze must not be
+        # counted as a second build path.
+        self.assertEqual(combined.count("requirements-build.txt"), 2)
+        self.assertEqual(combined.count("--require-hashes"), 2)
+        self.assertEqual(combined.count("--only-binary=:all:"), 2)
         self.assertNotIn("-r spike/requirements.txt pyinstaller", combined)
         self.assertNotIn("scapy cryptography certifi pyinstaller", combined)
         self.assertNotIn("pip install --quiet --upgrade pip", combined)

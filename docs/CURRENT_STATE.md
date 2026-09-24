@@ -10,33 +10,3575 @@ file.
 
 ## Current Checkpoint
 
-PR377 review PRRT_kwDOTLueX86kIhE8 correctly rejected path-only app-lock admission.
-Merge was blocked by unresolved review, not bypassed. Fix now compares exact
-base/head lock contents and admits only pinned rustls/webpki transitions while
-requiring every other parsed graph field unchanged. Missing evidence fails back
-to normal packaged checks.59focused tests+22subtests PASS and actual Git lock
-transition verified. Fresh CI required after this follow-up before merge.
+2026-09-25 completion-probe redirect candidate, NOT installed.
+- Built-in Geph ownership verified on9954, PID unchanged across comparison.
+  Direct curl through owned listener returned all243860 TestGlider /en bytes
+  in2.65s. No external Geph/settings changes or learned-route injection.
+- Root-only transport-failure and alternate-payload probes also missed /en.
+  Candidate follows up to two same-origin redirects for HTTP/1.1 and HTTP/2,
+  retaining the original exact local IP and shared deadline. Invalid/cyclic/
+  cross-origin redirects cannot grant incomplete/alternate-success evidence.
+- Live candidate: system-IP incomplete=true; owned-Geph complete_bytes243860;
+  owned PID matches. App-owned DNS returned66.33.60.66,76.76.21.142 in0.13s;
+  first-address completion probe also incomplete=true. Multi-strategy full-body
+  canaries plain/split64/split16 each returned0 verified-complete bytes earlier.
+- Tests81 PASS for completion/HTTP2 affected selection; then two deadline
+  regressions added and dedicated file12 PASS. Prior root/shutdown checks reused.
+- Evidence output/testglider-20260925/{redirect-completion-live,app-dns-completion,
+  full-document-strategies}.json. Next exact-source build/canonical verification,
+  packaged shutdown CI and real browser qualification; no user-visible fix yet.
 
 
-PR377 publication repair: crates.io latest0.4.0 would make the old upstream-only
-resolver skip reviewed0.3.9-r2. Main push now resolves verified committed source;
-manual build_reviewed=true requires main. Schedule/default discovery unchanged.
-Exact vendor workflow +build-contract test paths admitted to source bootstrap;
-application workflow/source/manifest edits remain rejected.58focused tests plus
-16subtests PASS, including execution of the actual workflow shell with upstream
-network forbidden, non-main refusal and tampered-lock refusal. Actionlint PASS.
-Prior combined audit35504333296 PASS for both graphs; source CI35504333339 still
-running on b2f22f8. Do not cancel; push this follow-up after completion. No binary
-published and no source merge yet.
+2026-09-25 browser-worker shutdown ordering candidate, NOT installed.
+- CI failure is consistent with a verified source ordering bug: serve_until_shutdown
+  closed the pending-navigation broker in auxiliary_servers before amain finally
+  waited for the worker. A claiming/submitting worker can lose its IPC socket.
+- Candidate disables new worker admission and awaits owned-worker drain before
+  closing auxiliary sockets, on both shutdown and listener-completion paths.
+  Does not accept failed cleanup as successful or weaken PID/profile checks.
+- Targeted shutdown/quiescence tests17 PASS; includes three new ordering cases.
+  Real packaged lifecycle rerun remains required after publishing this candidate.
+- TestGlider diagnostic object helper returned UNKNOWN for HTML/CSS because its
+  contract only accepts206 JavaScript; those files are NOT valid same-object
+  eligibility evidence. Full-document canary run is tracked separately.
+- PR376 b1c001b exact-head build/product checks observed live; do not restart
+  merely because observation times out. User app remains unchanged.
 
 
-Dependency repair PR377: coordinate app rustls0.23.45/webpki0.103.15 with Geph
-rustls0.23.45 source revision2. Classifier permits only lock/source/doc and paired
-classifier-test maintenance, retaining both audits and product checks. Source
-review, green CI, merged-source vendor build and exact-main packaged verification
-remain required. No binary published or workstation mutation. This checkout is
-only the dependency source repair; AUD-30 updater work remains in PR376.
+2026-09-25 TestGlider redirect preflight candidate, NOT installed.
+- Actual /en transfer declares243860 bytes but ends at16384; same-host CSS
+  also truncates. Explicit owned CONNECT reproduces the incomplete document.
+- / root returns a complete15-byte302 to /en; installed preflight logs classify
+  it usable/assets0. Root-only success masks the broken destination.
+- Candidate follows at most two same-origin redirects on the exact original IP,
+  shared deadline/cancellation; cycles remain inconclusive. No Geph authority
+  changes. Final-document URL is the base for ephemeral asset inspection.
+- Seven dedicated regressions PASS; affected preflight/redirect selection27 PASS
+  before the seventh deadline test was added. Live source probe7.45s returns
+  navigation_pending/framing_eof_incomplete, safe_incomplete=false, assets0.
+  This removes false health, NOT proof of browser recovery or Geph eligibility.
+- Evidence output/testglider-20260925; installed daemon not restarted. Root log
+  read through native administrator authorization completed exit0.
+- PR376 exact-head e9646cb CI36052190320 terminal: build/browser and all nine
+  updater transactions PASS; lifecycle-heavy FAIL at active-worker-uninstall
+  (socket_unavailable, browser_worker_cleanup_failed_exit). Log retained there.
+- Next complete TestGlider local recovery/critical-object qualification, then
+  fix the independently failing lifecycle gate before candidate installation.
 
+
+2026-09-25 published README reconciliation and recovery PR continuation.
+- Previous goal turn made progress: PR378 merged as47bf881; both public READMEs
+  verified byte-for-byte through GitHub contents API. Required CI passed.
+- Main47bf881 merged into AUD-17 asf3ec429. README conflicts resolved to exact
+  published main content; user AGENTS.md edits preserved unstaged.
+- Focused post-merge checks: nine documentation tests and24 voice tests PASS;
+  no runtime mutation, restart, or claim of new physical-call evidence.
+- Accumulated recovery branch published to PR376; next inspect exact-head CI
+  and review. Prior green94ed6dc is a baseline, not proof for later runtime changes.
+- Real Discord call/stream and sustained Safari media gates remain open; user
+  will report recurrence. Do not interrupt their work to manufacture those gates.
+
+2026-09-24 voice refresh candidate4564274 INSTALLED; real-call gate open.
+- Exact recognized IPv4 voice tuple refresh on real packets/keepalives, once30s;
+  initial primer unchanged, own decoys/unknown flows excluded, monotonic clock.
+- Focused voice tests24 PASS (output/discord-midcall-20260924/focused-tests.log).
+  Covers model filter reset at8/37/121/307s, silent-listener keepalive, self-decoy
+  exclusion, scope, cadence and bounded state. Not proof of actual Discord cause.
+- Canonical build source4564274 complete exit0, artifact/build-chain PASS; log
+  output/discord-midcall-20260924/build.log. Retained candidate verified at
+  output/voice-replacement-40cc1f1c/Slipstream.app.
+- CLI Quit exit0; transaction40cc1f1c authorization/install exit0, CONSUMED.
+  Never replay. Previous app/private backups and learning preserved.
+  Backup /Applications/.Slipstream.before-40cc1f1c.app contains6eab51c.
+  Current-install initial verifier caught unstable phase; fresh retry PASS.
+  Discord last media state DISCONNECTED23:32:13 before Quit.
+- Canonical npm run verify:local-install PASS including installed-public-payload;
+  StatusV2 active, fresh heartbeat, launchd PID52195, PF applied/enabled/rules loaded.
+  Evidence output/voice-replacement-40cc1f1c/{authorization-result.txt,installed-verification.log}.
+  Build64587, install86948 and verification17382 are terminal exit0; do not poll.
+  CUA launch returned -10005 but subsequent canonical verification proved launch.
+- Includes prior Googlevideo candidate6eab51c. Real Discord incoming audio/stream
+  recovery and sustained Safari playback remain unqualified; no real call joined.
+  Next correlate any recurrence with media/control evidence and qualify real call
+  at non-disruptive timing. Historical entries below describe prior states.
+
+2026-09-24 Discord mid-call investigation underway, no voice fix claimed.
+- User window22:00-00:00; compared Sep23/24 sanitized client log events.
+- Main Gateway HELLO timeouts are present, not proof of voice-channel outage.
+- Existing voice observer primes first5 packets only; extracted-function simulated
+  30min test confirms active tuple never reprimes. No speculative policy mutation.
+- Detailed evidence/next fault-fixture and incident correlation in ROUTING_RESEARCH.md
+  section mid-call Discord silence and output/discord-midcall-20260924/.
+
+2026-09-24 candidate6eab51c INSTALLED via new transactione292da1d.
+- User explicitly authorized restart; CLI --quit exit0, replacement native authorization
+  exit0. Prior app/private backups and learning retained; transaction consumed.
+- Canonical npm run verify:local-install PASS including installed-public-payload;
+  fresh StatusV2 active, launchd PID24436, exact new daemon identity. Evidence
+  output/googlevideo-replacement-e292da1d/{authorization-result.txt,installed-verification.log}.
+- Safari original stale player still at291.67/buffer0 after restart; one reload
+  performed for new connections. Playback now advances25.97->54.24 over29s,
+  buffer44.44->28.83s, frames623->1298/drop0; auto quality1080->1440.
+  This proves short recovery after reload, NOT sustained original2160/CDN coverage.
+  Next sustain playback and verify formerly failing CDN; recovery without reload open.
+- User reports Discord voice can silently stop receiving audio/activity indicators
+  while UI remains connected; rejoining restores it. Separate open recovery defect;
+  Googlevideo-only candidate does not change Discord voice. Do not claim fixed.
+  Code lead: observe_voice_flow primes only first5 datagrams; active flows refresh
+  idle timestamp indefinitely. Investigate need for re-priming on mid-call path
+  changes with traffic evidence; no voice code changed on assumption.
+
+2026-09-24 Googlevideo large-flight local reserve implemented, NOT installed.
+- Same-endpoint classic large ClientHello fails while google.com large control
+  succeeds. Hybrid fails on rr18/rr9 n8v7znse, succeeds on rr2 ug5onuxaxjvh-n8v6;
+  endpoint/path-sensitive, not a universal Safari/hybrid incompatibility.
+- Paced TCP512 alone and matched mail/vk decoys fail. TLS records256 + paced
+  TCP512 succeeds on failing rr18: verified TLS1.2 CH1444, TLS1.3 CH2760.
+  Re-tested extracted production helper on exact host: TLS1.3 verified in0.25s.
+  Native authorization exit0, probe processes terminal. No PF/DNS changes.
+- Added scoped youtube_record256_fake to Googlevideo direct-first local fallbacks.
+  Transcript bytes preserved; no cipher downgrade or Geph. Existing ladders retained.
+- Focused tests:7 new transcript/scope/input-boundary tests plus15 existing strategy
+  tests PASS. Previous green remote94ed6dc CI baseline reused; no unchanged suite.
+- Canonical local build at6eab51c completed exit0; build-chain/artifact PASS.
+  Log output/googlevideo-large-flight-build.log; session98571 is terminal.
+  Candidate bundle tree c682a21aa48b9a5870b527670aba42612905e9fcaaa20e66c328d8c717ac84da;
+  daemon 1efadb6445cd07cc93b30a0120bfc4efce5491499c40041440e9a1e4b4fabcc6.
+  New replacement DRAFT e292da1d prepared; bash syntax PASS, NOT executed.
+  output/googlevideo-replacement-e292da1d pins candidate/current hashes and retains
+  a8248cfe backup. transaction_ready=DRAFT prevents execution until final review.
+  Fresh canonical current-install verification PASS: output/googlevideo-before-install.json.
+  Candidate retained at output/googlevideo-replacement-e292da1d/Slipstream.app;
+  staged-verification.json canonical artifact PASS, exact tree matches built candidate.
+  Draft incoming points to this retained copy; root-private copy verification remains
+  in transaction before execution of installer. Current connections untouched.
+  Next final review and install when brief restart is convenient, then qualify real
+  Safari. Never replay consumed a8248cfe.
+  User requested non-disruption; installation timing pending.
+  Current installed df59aae still has the defect.
+  Evidence output/local-qualification-a8248cfe/flight-probe-*.json and matrices.
+
+2026-09-24 live Safari YouTube stall CONFIRMED; higher-priority open defect.
+- User requested non-disruptive checks only; do not sleep/reboot or start calls.
+- M1mUuyV67Sg froze at291.67s, buffer0, frames1798/dropped0,2880x2160@24,
+  SABR. Same position at22:43:59 and22:47:54; no agent reload/seek/pause.
+- User authorized enabling Safari web developer features; enabled. Web Inspector
+  identified videoplayback fetch to rr18---sn-n8v7znse.googlevideo.com failing
+  with "A TLS error caused the secure connection to fail." No security details.
+- Daemon active PID76105, heartbeat fresh. Fresh curl HEAD / to same public host
+  completed verified TLS andHTTP404 over transparent(2.64s TLS) and owned HTTP
+  proxy(2.84s TLS). This is reachability only, not Safari or media payload recovery.
+  An initial SOCKS probe was invalid:1080 is HTTP proxy; disregard its timeout.
+- Bounded privileged log reads exit0; private logs and sanitized observation in
+  output/local-qualification-a8248cfe/safari-stall.json. No signed media URL stored.
+- Follow-up Safari fresh public-root navigation to the exact CDN host also failed
+  secure connection, unlike curl. Separate agent-created test tab retained; original
+  video not reloaded. This contradicts a player-only stale-request explanation.
+- Exact-endpoint packet metadata capture tls-20260924T225015.tsv: native auth exit0,
+  decoder exit0; bounded tcpdump required forced terminal kill after25s, no process
+  left. Multiple Safari-SNI ClientHello streams sent1567-byte real flight (plus
+  local decoys) with TCP ACKs but zero incoming payload; independent no-SNI-visible
+  connection53665 received4494bytes. No payload/pcap retained, metadata only.
+  Next compare client-flight-sensitive local strategies, not global network settings.
+- Isolated verified OpenSSL matrix on same owned HTTP proxy: X25519 small,
+  +400-byte ALPN and +800-byte ALPN succeed(~2.7s); +1200-byte ALPN and
+  hybridX25519MLKEM768:X25519 failEOF(~17s). Pure hybrid also fails; curl remains
+  healthy. Size-sensitive failure now reproducible without Safari. Evidence
+  tls-size-matrix.json and hybrid-tls-probe.json; no production mutation.
+- Bounded raw TCP segmentation harness initially rejected macOS SYN flags[SEW]
+  (old capture regex onlyS/S.); corrected observer regex. Do not count those
+  invalid captures as network failures. Exact-host tests only, no PF/DNS changes.
+- Isolated root socket+MemoryBIO TLS probes: small238-byteTLS1.2 verifies;
+  +1200-byte ALPN times out,512-byte paced TCP writes also time out. Larger
+  low-TTL poison coverage also times out (both ordinary/paced). These attempted
+  fixes are rejected, not production candidates. TCP_MAXSEG1000 unsupported
+  (EINVAL before connection), not a network failure. All subprocesses terminal.
+  Evidence flight-experiments-summary.json; scripts are experimental, not installer.
+- Inspector closed; stats overlay remains. Playback still stalled. Root cause not
+  established; next compare Safari TLS/request path and recovery with actual flow
+  evidence. Do not claim all-YouTube success from earlier Chrome sample.
+
+2026-09-24 Discord UI and PR evidence reconciliation completed.
+- Current native Discord UI showed loaded messages/member state. Opened an existing
+  image attachment and visually confirmed full image rendering, then dismissed
+  the viewer. No private message text or signed attachment URL stored in artifacts.
+  This proves observed rendering only; cache/network provenance is not established.
+  No call joined or message sent. Voice/stream remains open.
+- Updated PR376 body with current installed, Quit/restart, Juniper and sampled
+  YouTube/mixed-load results; draft retained. No source push or repeated CI.
+- User deferred disruptive checks; physical sleep/wake and Discord stream remain open.
+
+2026-09-24 real Chrome YouTube4K60 five-minute sample completed, no source change.
+- Official Blender aqz-KE-bpKQ video muted, stats show3840x2160@60;
+  observed t158.51->223.03 over65s, buffer12.24->13.94s, frames5424->9295,
+  dropped12->14. No agent reload/seek. Early hidden AX seek control was stale;
+  use player Stats for nerds Mystery t and frames, not hidden slider alone.
+- Final t307.91 at22:36:48, buffer11.13s, frames14388/dropped20; agent paused
+  at322.59s after test. Observed progress matched wall time, no persistent buffering.
+  This is sampled UI evidence, not continuous stall-event instrumentation.
+- Concurrent Discord complete PNG qualifier PASS on all3 paths, both objects.
+  Read-only daemon sampler completed61 samples/181.4s: samePID76105,
+  allactive, max heartbeat age2.06s, max51 concurrent connections.
+- Evidence output/local-qualification-a8248cfe/youtube-*. No long-term/all-CDN,
+  Discord voice/stream, physical sleep/wake, or route-event proof claimed.
+- PR376 fresh query still draft/open at94ed6dc, all required checks green.
+
+2026-09-24 workstation transaction a8248cfe installed source df59aae successfully.
+- Fresh old identity matched922c876 bundle4b0c7db0/daemonb6fadaae. New incoming
+  canonical build-chain/artifact PASS before normal --quit and native authorization.
+- New one-shot replacement completed exit0; all prior backups plus new old-app
+  and runtime/learning snapshots retained. No learning reset. This transaction
+  is CONSUMED; never replay its install.command or replace-exact-bundle.sh.
+- npm run verify:local-install PASS: treee23410b7, daemonc0d9f1ab, live PID64613;
+  both public PNGs984455/471047 bytes fully valid over IPv4/IPv6 proxy and
+  transparent paths. Evidence output/local-qualification-a8248cfe/.
+- Real Chrome fresh navigation to Juniper product9594453754133 rendered image,
+  description, price and controls without reload (CUA screenshot observed).
+  Existing Safari was actively used by user; did not interrupt its browsing.
+- Ordinary installed --quit completed in12.17s: both launchd jobs exit113 with
+  exact missing-service evidence and zero owned processes. Restart via CUA timed
+  out at UI observation, but daemon then reached active PID76105; canonical
+  installed + complete public PNG traffic PASS in restart-active-verification.json.
+  Initial restart-verification.json sampled startup and is correctly FAIL, not hidden.
+- Local install/browser/CLI-Quit/restart gates now PASS. Literal menu-Quit was not
+  clicked; sustained media/mixed-load and physical sleep/wake remain unqualified.
+  Public signed positive migration still needs newer official artifact; no release.
+
+2026-09-24 local candidate build97537 completed exit0, canonical PASS.
+- Source df59aae; output/current-local-build.log and current-local-canonical.json.
+  Bundle treee23410b7f1565bb4a30894fc8f2461bb775fd1b29749364b693f2944a46c78a4;
+  daemonc0d9f1ab65605aa72e202d22ae20bf942c04da24dd7b63bb03df9e7895afa23b.
+  Canonical fresh/staged/bundled payloads agree, valid ad-hoc signature. Local
+  .23 version package, not a newer public signed-feed artifact. Installed not_run.
+- No live build remains. Next prepare a NEW reversible installation transaction
+  against fresh installed identity; do not replay consumed or historic scripts.
+  No workstation app stopped/replaced yet. Preserve learning and all backups.
+
+2026-09-24 next gate: local candidate build started, no installation.
+- npm run build:local at source df59aae, exec session97537; log
+  output/current-local-build.log. Uses canonical bundled verifier automatically.
+- Production diff from installed922c876b comprises updater migration/admission
+  and browser-worker diagnostics; no route-policy change. Green CI36029605888
+  production baseline reused. No existing cargo/build process before start.
+- Next wait same build handle, inspect canonical output, then prepare reviewable
+  workstation qualification. Do not replay consumedf649eb7d or old pending installs.
+
+2026-09-24 CI36029605888 terminal SUCCESS on94ed6dc (merge010024bc).
+- All nine transaction cases, source/build/browser/lifecycle gates PASS. Historical
+  diagnostic reports already inspected. Lifecycle job107738642109 log downloaded;
+  output/lifecycle-36029605888-result.json confirms clean active worker/original
+  capture cleanup, absent installed state, sentinel preserved and global PF unchanged.
+- PR376 body updated to final implemented migration behavior and current evidence;
+  remains draft. No public signed transition/release or workstation install claimed.
+- Next reconcile remaining release gates: positive public signed CLI requires a
+  newer official preview; current candidate workstation/browser/Quit, sustained
+  media/mixed-load and physical sleep/wake qualification remain. Preserve green
+  baseline; do not rerun unchanged packaged matrix for documentation-only changes.
+
+2026-09-24 historical diagnostic cases PASS in CI36029605888; artifacts inspected.
+- Tested merge010024bcdeb91a5b10b5edbc41e7ec9f8bf5ef95 (head94ed6dc).
+  accept: observed live successor and acknowledged, then terminal tray loss;
+  sole bundle delta root0755->0700 explicitly reported. rollback: exact recorded
+  old_relaunched and terminal tray loss. Previous-bundle watchdog both; both
+  provision PASS with cleanup_errors=[]. Coverage explicitly diagnostic, not
+  update success. Evidence output/qualification-36029605888/ downloaded/read.
+- Exact historical-defect assertion now qualified; no additional source fix is
+  indicated by these cases. Remaining corrected cases/browser/lifecycle are live;
+  next inspect overall terminal result, then resume remaining release gates.
+
+2026-09-24 browser baseline scope audited from completed36027438904 logs.
+- Job107730930836 log saved output/browser-36027438904.log: packaged headless
+  Chromium sandbox enabled, hidden launch, no visible windows/frontmost change,
+  outcome navigation_pending. This gate alone does not prove page content loads.
+- Lifecycle composed_original_navigation independently reports CSS/JS/image each1,
+  ready callback1, original->worker->original channels, no manual reload, extension
+  disabled, elapsed28254ms, worker cleanup clean. Chrome/Safari probes survive tray
+  crash/restart. Controlled fixture evidence is not real public site qualification.
+- Current CI36029605888 live, package/source checks running. No duplicate gate.
+
+2026-09-24 pushed94ed6dc0c5bda713476794f40061e4fd642d3a6f.
+- New CI36029605888 queued; Windows36029605790/dependency36029605538 live.
+  Only harness/docs changes since tested productionb830c17. Next inspect exact
+  historical diagnostic acceptance; preserve existing corrected-path baseline.
+
+2026-09-24 CI36027438904 terminal; lifecycle evidence inspected.
+- Only failure is historical accept's now-diagnosed root0755->0700 mismatch.
+  All corrected transactions/browser/lifecycle gates PASS. Read job107730931031
+  log; extracted output/lifecycle-36027438904-result.json: active worker uninstall
+  cleans worker and original capture, installed state absent, sentinel preserved,
+  global PF unchanged. Idle worker process/profile counts zero.
+- Ready to push0abae33 diagnostic contract and docs. Production source unchanged
+  since testedb830c17; retain this run as baseline, no workstation changes.
+
+2026-09-24 CI36027438904 all7 corrected transaction reports inspected.
+- Downloaded current4/migration3 artifacts into output/qualification-36027438904/.
+  Every provision result PASS, cleanup_errors=[], exact terminal tree matches.
+  Current accept4880/primary_unavailable4973 survive; rollback restores3736;
+  traffic failure restores6150 with both resolver faults observed. Migration
+  accept11364 survives, rollback restores5629, startup failure restores3322.
+- Browser qualification PASS. Lifecycle-heavy still running; retain this handle.
+  Next finish lifecycle evidence then push0abae33 historical diagnostic fix.
+
+2026-09-24 CI36027438904 historical root-mode mismatch causally confirmed.
+- Historical accept tree-mismatch.json downloaded/read: only difference is root
+  directory0755 ->0700. All other file contents/types/modes equal candidate.
+  This matches inspected pinned .23 extraction. Successor4336 acknowledged then
+  terminal tray loss observed; evidence output/qualification-36027438904/.
+- Historical accept contract now explicitly requires that exact sole metadata
+  defect plus terminal tray loss, retaining actual canonical tree hash in result.
+  Additional changes, different root mode or surviving tray fail; current and
+  migration canonical tree equality unchanged.16 focused tests PASS in
+  output/legacy-root-mode-tests.log. Local follow-up; do not cancel live CI.
+- Next inspect remaining36027438904 results, then push this evidence-backed
+  diagnostic contract. Public signed migration release gate remains unqualified.
+
+2026-09-24 pushed b830c17c54aa1e3a7761dc567d1f6b529dbdc941; PR376 head verified.
+- New CI36027438904 queued; Windows36027438876 live, dependency36027439093 queued.
+  Includes signed collector fixture coverage and terminal bundle diff diagnostics.
+- Preserve handles; next inspect historical accept diagnostics and affected gates.
+
+2026-09-24 CI36025040811 terminal FAILURE solely historical accept tree mismatch.
+- Lifecycle-heavy PASS; completed log read and JSON extracted into
+  output/lifecycle-36025040811-result.json: uninstall clean, sentinel connection
+  and state preserved, global PF unchanged. Corrected transaction cases and
+  browser gate PASS; no production regression inferred from historical failure.
+- Pinned .23 source independently inspected (output/pinned23-updater-source.rs):
+  extract_archive_with_sync forces stage root0700 and skips archive root mode;
+  directory modes are not restored. Current extractor already restores these.
+  This is a concrete candidate cause, not yet the complete artifact difference.
+- Next push signed collector follow-up plus tree diagnostics, then inspect new
+  historical accept tree-mismatch.json before changing the diagnostic contract.
+  Installed workstation remains unchanged; public signed release gate remains.
+
+2026-09-24 CI36025040811 historical accept exposed a distinct tree mismatch.
+- All corrected current/migration cases and packaged-browser-qualification PASS.
+  Legacy rollback diagnostic PASS; legacy accept FAIL at canonical terminal tree
+  equality, after terminal-process-loss assertion. Provision cleanup_errors=[].
+  Its report lacks file differences; cause is not yet established. Evidence:
+  output/qualification-36025040811/*legacy*accept*/ (harness/provision logs read).
+- Added metadata-only tree-mismatch.json diagnostics with expected/actual hashes,
+  preserved observed transaction phases and per-path mode/type/content differences;
+  artifact upload includes it. Canonical equality requirement remains unchanged.
+-15 focused harness tests PASS (output/tree-diagnostics-tests.log); actionlint
+  .github/workflows/ci.yml PASS. Full actionlint reports pre-existing issues in
+  other unchanged workflows, including unsupported concurrency.queue syntax.
+- Lifecycle-heavy still live at packaged lifecycle/sentinel smoke. Do not cancel
+  it with a push. Once terminal, inspect evidence, then push collector+diagnostics.
+  No workstation install; public signed-flow prerequisite remains open.
+
+2026-09-24 CI36025040811 first packaged artifacts inspected (merge7b6aee08).
+- Running-legacy migration accept/rollback/startup_failure PASS with candidate
+  watchdog: old trays exit-15, all preflight refusals preserve tray; accept live
+  successor6960 exact candidate tree, rollback restored3853 and startup failure
+  restored11029 exact previous tree. All provision cleanup_errors=[].
+- Historical rollback now explicitly reproduces terminal tray loss after a live
+  successor6189 and old_relaunched phase, with previous-bundle watchdog and exact
+  old tree; clean teardown. This is diagnostic success, not old updater success.
+- Evidence downloaded/read under output/qualification-36025040811/. Remaining
+  matrix/browser/lifecycle jobs still live; preserve run and defer local push.
+
+2026-09-24 CI36025040811 package build completed successfully.
+- Verified remote PR376 remains open at1cbee281b03b2643c65f48176671ce5c96e2fbd7.
+  All source checks and packaged-app-build PASS. Nine update transaction cases,
+  packaged browser qualification and lifecycle-heavy are queued on this handle.
+- Preserve this run; local collector follow-up is still unpushed. Next inspect
+  historical expected-defect artifacts and corrected current/migration terminal
+  process evidence after completion. No workstation mutation or new release.
+
+2026-09-24 public signed-flow prerequisite verified against live releases.
+- Bounded GitHub release inventory (100) still has .23 as newest app preview;
+  output/migration-release-inventory.json. No newer published app archive exists
+  for the monotonic public CLI path. Do not weaken version/key/URL guards or
+  describe fixture authentication as a full public transition.
+- Positive published-download/CLI acceptance is a later new-release gate.
+  It remains incomplete; current core real-tray acceptance/rollback evidence and
+  signed fixture rejection/acceptance remain separate. No release was created.
+- CI36025040811 remains live on1cbee28; next inspect its historical-defect
+  assertions and packaged CLI source results, then push the local collector
+  follow-up after terminal evidence. Overall goal still has remaining work.
+
+2026-09-24 positive signature boundary verified locally (not full CLI migration).
+- Shared SignedArchiveCollector now owns bounded chunk collection and signature
+  finalization in the HTTP downloader. Tests feed a deterministic signed inert
+  .24 archive through that same collector with1/7/full-size chunks, then enforce
+  migration archive identity/version/helper checks. Truncation, changed byte,
+  extra byte and wrong expected version fail; fixture cannot authenticate with
+  packaged updater key. Fixture uses documented public test seed, never prod key.
+-12 app_update tests PASS; output/positive-migration-signature-tests.log.
+  Public signed HTTP/CLI end-to-end remains unqualified; no installation done.
+- CI36025040811 still live on1cbee28; Chromium PASS, packaged build/product/
+  Windows checks running. This collector follow-up is local pending that run.
+
+2026-09-24 pushed1cbee281b03b2643c65f48176671ce5c96e2fbd7 to PR376.
+- New CI36025040811 queued; Windows36025040764 and dependency36025040835 queued.
+  Includes local CLI implementation and explicit historical-defect assertions.
+  Preserve handles; old CI36022169923 is terminal and its passing migration/core
+  evidence remains recorded below. No workstation changes.
+
+2026-09-24 pinned legacy diagnostic contract now explicit, awaiting CI.
+- --expect-legacy-defect applies only to named historical driver accept/rollback;
+  requires previous helper provenance, observed live successor, exact terminal
+  phase/nonce and tree, then confirmed absence of successor/restored target tray.
+  Other failures propagate and cleanup remains mandatory. Current/migration
+  branches still require live terminal tray. No continue-on-error introduced.
+-76 harness/provision/build-config tests PASS, actionlint PASS. Tests reject
+  never-live successor, wrong rollback nonce, surviving original/restored tray,
+  and observation failure. Report says defect-reproduction-not-update-success.
+- Next CI also includes the new public CLI source; signed positive CLI flow
+  remains unqualified. Prior run36022169923 terminal, so next push is safe.
+
+2026-09-24 CI36022169923 terminal review and lifecycle evidence inspected.
+- Lifecycle-heavy SUCCESS: composed navigation worker cleanup clean, active
+  worker uninstall clean, installed_state absent, sentinel preserved, global PF
+  unchanged. Read output/running-migration-ci-36022169923/lifecycle/packaged-lifecycle.log.
+  Prior cleanup failure was NOT reproduced; diagnostics-only diff does not
+  prove its intermittent underlying cause is fixed. No speculative cleanup edit.
+- All current-preparer and migration cases PASS. Overall CI FAILURE solely from
+  exact pinned legacy accept/rollback. Downloaded both reports/harness logs in
+  output/running-migration-ci-36022169923/legacy-{accept,rollback}/; clean teardown
+  both. Accept terminal error actual=None after accepted successor; rollback
+  terminal error no distinct live restored tray. These match known old defects.
+- Next give the historical diagnostic cases explicit structural expected-defect
+  assertions (not blanket continue-on-error), while corrected migration/current
+  paths still require live terminal trays. Then qualify public signed CLI.
+  Local CLI commits are not in this completed CI and still require affected
+  coverage before release. Workstation remains unchanged.
+
+2026-09-24 running-.23 migration3-case boundary PASSED and artifacts inspected.
+- CI36022169923 head4cad0fd / merge98871aaf27ab47cd90644e26ede140a6a622c5ff.
+  accept: old PID9604 exit-15, acknowledged live successor9960, exact new tree.
+  rollback: old6143 exit-15, rejected6298, restored8183, exact old tree.
+  startup_failure: old7403 exit-15, successor null, restored7792, exact old tree.
+  All3 preflight refusals preserve the same live old tray; terminal trays survive
+  watchdog cleanup and every provision cleanup_errors=[]. Downloaded/read:
+  output/running-migration-ci-36022169923/{accept,rollback,startup_failure}/.
+- This proves durable candidate-watchdog stop/replacement from a running old
+  bundle, NOT signed-feed/public CLI success. New CLI is local/unpushed.
+- Same CI still live: current rollback and lifecycle-heavy running; pinned
+  legacy accept/rollback fail as before. No reset/restart/new push performed.
+- Next inspect lifecycle diagnostics and complete signed CLI qualification.
+  Reuse these3 passing core cases unless their affected source changes.
+
+2026-09-24 real CLI rejection checks passed without network/preparation.
+- Built debug slipstream binary rejected6 negative cases with exit1 and exact
+  expected errors: old version, malformed base64 signature, invalid minisign,
+  oversized signature file, symlink, FIFO (nonblocking). Each completed within
+ 5s and left the nonexistent target unchanged. Only temporary fixtures created.
+  Evidence output/legacy-cli-negative-6ly4z9rt/report.json. These are refusal
+  checks, not positive signed update/migration or installed app qualification.
+- CI36022169923 live: product-checks/checks/Chromium/Windows adapter PASS;
+  packaged-app-build still packaging, migration jobs await its output. Preserve
+  this run; CLI commits remain local to avoid cancelling packaged qualification.
+
+2026-09-24 external migration CLI implemented locally, not released/installed.
+- --migrate-legacy VERSION SIGNATURE_FILE TARGET_EXE PID is handled before
+  Tauri/single-instance/native startup. Exact argument/path/PID validation;
+  bounded regular nofollow signature input; public key compiled into candidate;
+  official version-bound archive download before any preparation/stop.
+  Current user's home comes from passwd, not caller-supplied state paths.
+- CLI delegates admitted bytes to durable running-tray preparation. A successful
+  CLI exit means prepared, never accepted/completed. Local Rust parser test,
+  actual slipstream binary build and missing-argument execution PASS (exit1,
+  output/legacy-cli-refusal.json), without normal tray startup.
+- This is unqualified source on the PR branch, not a shipped public migration.
+  Positive signed-feed end-to-end and packaged running-tray outcomes remain
+  required. Do not install/release based on argument rejection tests.
+- CI36022169923 remains in_progress after successful same-handle retry of a
+  transient GitHub connection timeout. Chromium and Windows adapter PASS;
+  packaged build/product checks remain live. Do not restart the run.
+
+2026-09-24 independent exact historical driver generation/build verified.
+- Fresh temporary root used current driver entry plus digest-verified pinned
+  legacy module; generated historical driver compiled successfully and refused
+  workstation execution (exit1, disposable-runner guard). Evidence:
+  output/legacy-current-source-d8vw2fkx/report.json and build.log.
+  Existing ignored generated inputs were preserved; they were not mistaken for
+  fresh current-entry evidence. Temporary compilation example was removed.
+- CI36022169923 remains live on4cad0fd: Chromium PASS; packaged build,
+  product checks and Windows adapter still in_progress. No new push/redispatch.
+  Next inspect packaged running-legacy3-case and lifecycle evidence when ready.
+
+2026-09-24 pushed4cad0fd; real running-tray migration CI is live.
+- PR376 head4cad0fd034336aef2d5dcbbf8794e5b430ba1552 verified remotely.
+  CI36022169923 in_progress; dependency36022169945 and Windows36022170165
+  also live. Preserve these run handles; do not redispatch on observation timeout.
+- This push includes authenticated admission, watchdog-owned exact legacy stop,
+  running-tray3-case matrix and earlier heartbeat-race/lifecycle diagnostics.
+ 54 build-config tests also PASS locally. Wait for actual package results;
+  do not describe local unit checks as running-tray migration acceptance.
+
+2026-09-24 running legacy tray qualification wired for next CI.
+- Migration accept/rollback/startup_failure now start the actual published .23
+  tray from the private target bundle. Missing-archive preflight must fail with
+  the same live tray identity, unchanged tree and empty transaction state.
+  Production driver then calls prepare_running_legacy_migration with its PID;
+  terminal evidence requires that child exited via SIGTERM before checking
+  successor/restored tree and surviving tray as before. Coverage explicitly
+  running-legacy-migration-watchdog-stop-not-signed-feed.
+-24 harness/materializer/provision tests PASS and current Rust driver build PASS;
+  actionlint PASS. No workstation transaction run. Published-driver generation
+  strips the new migration-only branch and still refuses migration mode.
+- Next inspect the exact pushed CI run for3 running-tray outcomes and newly
+  retained lifecycle diagnostics. Public signed launcher remains unexposed.
+
+2026-09-24 durable watchdog-owned legacy tray stop implemented, not installed.
+- VerifiedLegacyMigration.prepare_running_tray binds the installed .23 tray by
+  PID/UID/birth/command and kernel proc_pidpath, then stages a candidate-owned
+  helper and persists optional legacy_tray identity. Preparation leaves old tray
+  running; only the durable watchdog sends exact SIGTERM in Prepared phase,
+  after checking old executable hash and live identity again. It waits up to5s
+  for exit and refuses replacement on identity mismatch or timeout.
+- This corrects the external-launcher sequencing: existing initiator wait is
+  tray-path-specific and cannot protect an unrelated launcher. No stop-first
+  preparation failure/relaunch gap is introduced. Existing journals without
+  legacy_tray keep their previous semantics (field omitted when None).
+-31 watchdog tests PASS (3 new identity/kernel-path/digest-before-signal checks),
+  output/migration-tray-stop-tests.log. Compilation includes the lib consumer.
+  No actual live tray was signalled, and no packaged stop qualification claimed.
+- Next wire an isolated CI driver to a real running published .23 tray, prove
+  failed preflight leaves it alive and candidate watchdog stop/replacement works;
+  then complete authenticated public launcher entry. The earlier3 migration
+  core passes do not cover this new running-tray boundary. Workstation unchanged.
+
+2026-09-24 authenticated migration admission implemented locally, not exposed.
+- VerifiedLegacyMigration in app_update.rs downloads only the exact official
+  version-bound archive, verifies with the compile-time packaged updater key,
+  and retains private immutable bytes/version. Requires a canonical preview
+  newer than .23, matching bundle identity/version and regular executable
+  nonempty candidate watchdog before any process or filesystem mutation.
+- All11 app_update tests PASS, including new version/helper/signature rejection
+  tests; log output/migration-admission-tests.log. Shared signature downloader
+  is reused. No positive live signed newer release/launcher test claimed.
+- CI36018610119 is now terminal FAILURE: migration3 cases passed; failures are
+  legacy accept/rollback, current traffic_failure and packaged-app-lifecycle.
+  Local heartbeat-race and cleanup-diagnostic follow-ups remain pending CI.
+- Next wire the admission into the external launcher with exact old tray
+  PID/UID/birth/path ownership, safe stop and preparation-failure recovery.
+  Admission type alone does not qualify the public migration. Workstation
+  remains on922c876b; no install, Quit, learning reset or backup removal.
+
+2026-09-24 migration core qualified on disposable packaged macOS, all3 cases.
+- CI36018610119, head58c576d / merge655dd0d8e8814b99f5996a370d28bf5d2bbd0b94:
+  migration accept, rollback and startup_failure SUCCESS. Downloaded and read
+  detailed result/provision files under output/migration-ci-36018610119/.
+  Runtime helper hash83797af8d8918453f7b501b6dd70df23efdbde22bfceeb44f5129bc6fa692865
+  matches candidate in all3. Acceptance reaches acknowledged and live successor;
+  rollback restores exact old tree/live tray. Startup failure has successor_pid
+  null, reaches old_relaunched and restored PID6337 survives. cleanup_errors=[]
+  in all3. This is NOT signed-feed or public external launcher qualification.
+- Next implement authenticated public migration admission and exact legacy-tray
+  ownership/stop handling (published .23 lacks --quit). Keep these3 case results
+  as reusable core baseline; extend verification to the new launcher boundary.
+- Existing CI also has independent heartbeat-read race (local fix prepared) and
+  still requires overall terminal review. Preserve run36018610119; local
+  diagnostic/report follow-ups remain unpushed. Workstation unchanged.
+
+2026-09-24 live migration CI36018610119 first results:
+- Migration rollback job SUCCESS; accept and startup_failure still in_progress.
+  Detailed success artifacts still need inspection. Preserve current run.
+- Current traffic_failure stopped at canonical StatusV2 changed while read,
+  not a payload/rollback assertion. Exact harness trace downloaded under
+  output/migration-ci-36018610119/traffic_failure/.
+- Local harness fix retries ONLY that exact VerificationError, at most3 full
+  canonical reads with10ms intervals. Ownership/PID/format/other errors still
+  fail immediately;12 affected harness tests PASS. Not pushed during live CI.
+
+2026-09-24 external launcher compatibility check against exact published source.
+- Pinned6ba71ef7 lib.rs has no --quit/is_quit_command entry point. Its run-loop
+  comment explicitly leaves daemon and Geph running on tray exit. Do not assume
+  the modern --quit protocol when implementing public migration from .23.
+- External initiation must authenticate candidate first, bind old bundle and
+  PID/UID/birth/executable identity, then stop only that old tray with verified
+  absence before replacement; no name-wide kill or changes to external services.
+  This remains design work, not an implemented public launcher or a live stop.
+- Migration CI36018610119 still running: Chromium/changes PASS; package build,
+  product checks and Windows adapter live. No redispatch performed.
+
+2026-09-24 migration CI58c576d dispatched and live: run36018610119.
+- changes and Chromium checks PASS; package build, product tests and Windows
+  adapter still in_progress. Preserve this run; migration cases await package.
+- Older lifecycle failure has no standalone artifact; full failed log retained
+  under output/legacy23-ci-36016073363/. Existing generic cleanup error cannot
+  distinguish unexpected worker exit from launchd job-removal timeout.
+- Local diagnostic follow-up separates those error codes and logs only numeric
+  exit status plus bounded parsed worker enum (no raw stderr/request/path data).
+  Lifecycle workflow now preserves its console evidence with always-upload and
+  pipefail. actionlint and43 affected probe-runtime tests PASS. Not pushed while
+  migration run is live; this improves evidence, does NOT claim cleanup fixed.
+
+2026-09-24 migration spawn-refusal case prepared for next CI.
+- New migration-only startup_failure modifies only the private archive's main
+  executable permission bits. Original packaged inputs/helper stay intact.
+  Observer accepts a fast terminal failure only from the fresh state directory,
+  exact target, candidate-helper hash, no successor PID and old_relaunched phase;
+  final old bundle tree and restored tray survival remain mandatory.
+- 11 harness +8 provisioner tests and actionlint PASS. Earlier28 watchdog tests,
+  4 materializer,54 build-config and actual guarded-driver build remain baseline.
+- Previous CI36016073363 is terminal FAILURE. Legacy accept/rollback failures
+  confirmed; additionally lifecycle-heavy failed at active-worker-uninstall:
+  browser_worker_cleanup_failed, retained runtime/status. Exact log:
+  output/legacy23-ci-36016073363/failed-jobs.log. Do not dismiss as infrastructure.
+  Current-preparer transaction cases passed. Next inspect new migration matrix
+  results, then isolate this cleanup failure with retained lifecycle evidence.
+  Signed public external launcher remains open; workstation unchanged.
+
+2026-09-24 migration acceptance/rollback qualification wiring prepared locally.
+- Disposable driver now accepts --legacy-migration and invokes the new core;
+  historical driver materialization explicitly rejects that mode while retaining
+  original preparer source and runner guards. Harness/provisioner forward mode
+  and bind runtime helper digest to candidate rather than previous bundle.
+  CI adds distinct migration accept/rollback cases and unique mode artifact names.
+- actionlint PASS;4 materializer,9 harness,8 provisioner,54 build-config tests PASS.
+  Actual current driver builds and refuses workstation execution in migration
+  mode (exit1). Evidence output/legacy23-ci-36016073363/migration-driver-*.log.
+- NOT pushed while CI36016073363 lifecycle-heavy remains live. Next add the
+  early-startup-failure migration case, then push after this run terminates.
+  Public signed launcher/old-tray ownership gate remains unimplemented.
+
+2026-09-24 external migration core prepared, NOT exposed or installed.
+- prepare_legacy_migration_transaction supports preview.23 only and selects
+  the staged helper for owner-private runtime copying/hash binding. Ordinary
+  prepare_transaction still selects the installed helper. Shared journal,
+  replacement and rollback logic remains in use. All28 watchdog tests PASS,
+  including2 new migration helper/version tests. Logs:
+  output/legacy23-ci-36016073363/{migration-core-tests,watchdog-tests}.log.
+- This API requires an authenticated archive and stopped old tray from its
+  future caller; it is NOT a signed public migration entry point. Next wire
+  disposable migration acceptance/rollback/early-startup-failure qualification,
+  then the authenticated external launcher with exact old-tray stop ownership.
+- Existing run36016073363 remains live (lifecycle-heavy). Both legacy cases
+  failed as recorded below; all current-preparer transaction cases now PASS.
+  Do not push follow-ups merely to cancel this evidence-producing run.
+
+2026-09-24 published .23 preparer failure reproduced on disposable macOS.
+- CI36016073363, PR head a49f224, tested merge c12814ea5b065333b42c655792f7ae586f76967f.
+  Packaged build and product checks PASS. Current-preparer accept PASS.
+  Legacy accept FAIL: accepted successor identity disappears (actual=None).
+  Legacy rollback FAIL: terminal record phase old_relaunched exists but no
+  distinct live restored tray. Both provisioning cleanup_errors=[];
+  source provenance matches6ba71ef7/ab48e76d. Full artifacts retained in
+  output/legacy23-ci-36016073363/{accept,rollback}/.
+- This is real packaged evidence consistent with the missing legacy
+  AbandonProcessGroup policy, not signed-feed qualification. Both terminal
+  outcomes need repair; successor-only detachment remains insufficient.
+- Remaining CI jobs are still live; preserve run36016073363. Next implement
+  and qualify an external migration path with exact ownership/rollback proof.
+  Local report/provenance follow-ups remain unpushed pending current run.
+
+2026-09-24 legacy migration CI wiring prepared after Juniper qualification.
+- Live PR376 remains OPEN at5cd45e8 with green old-head checks; those do not
+  qualify this checkout. Added pinned .23 preparer build/provenance to the
+  packaged driver artifact and separate accept/rollback matrix cases using it.
+  Existing current-driver cases remain intact; legacy failures are not ignored.
+- actionlint PASS; 3 materializer and54 build-config tests PASS. Reused prior
+  actual legacy driver build/workstation-refusal evidence; no live workstation
+  transaction performed. Pushed a49f2246c90f9c42b95ee8a3cca9f74272f1e499;
+  PR376 head confirmed. Exact-head CI run36016073363 is queued, Windows
+  run36016073469 in_progress, dependency audit36016073319 queued.
+  Rechecked run36016073363: in_progress; changes PASS, packaged-app-build,
+  product-checks, Windows adapter and Chromium contract still running.
+  Local report follow-up records selected preparer filename/SHA256 rather than
+  always claiming current-preparer coverage;9 affected harness tests PASS.
+  This follow-up is not pushed while the existing run is live. Current-run
+  legacy reports may retain the old coverage string; matrix driver/provenance
+  identify the actual preparer. Next: inspect existing legacy accept/rollback
+  artifacts before changing migration behavior; do not redispatch on timeout.
+
+2026-09-24 Juniper storefront repair INSTALLED AND BROWSER VERIFIED.
+- Source 922c876b16053ae30640a633b7ce9fd2de21515d adds a narrow
+  cdn.junipercreates.com exit after reproducible incomplete CDN JavaScript.
+  Ten focused tests and canonical build/bundle verification PASS.
+- Transaction f649eb7d is CONSUMED; NEVER replay install.command. User reports
+  exact source installed and root daemon hash matching; learning and all prior
+  app/private backups retained. Initial service-absence preflight rejected before
+  replacement; fixed 3s wait was replaced by bounded job/process stop observation.
+  A stop race was plausible, not captured; root preflight checks were retained.
+- Canonical npm run verify:local-install PASS: build-chain, artifact,
+  installed-unprivileged and installed-public-payload. Live daemon PID5119,
+  fresh StatusV2 active, PF applied/enabled/rules_loaded. Installed daemon SHA256
+  b6fadaae73a934389e1580eab1ab37022724e91603845a0214960590f29b771c.
+- Normal Safari navigation renders the Gorilla Tag product photo, description,
+  $39.99 price and Add to Cart. No purchase interaction performed. Installed
+  HTTP CONNECT main JS returns HTTP200, full146115 wire bytes in1.81s.
+  Evidence: output/juniper-20260924/installed-verification.log and installed-main.js.
+  No external Geph or system settings changed. Independent post-install normal
+  Quit qualification remains open; do not interrupt the working app just to
+  repeat installation. Broader updater migration gate remains below.
+
+2026-09-23 user explicitly resumed broad work after the requested pause.
+- Physical checkout and HEAD6dee0e9 reconciled; user AGENTS.md edits preserved.
+  PR376 remains open at5cd45e8 with terminal green checks, not proof for local
+  photo-site changes. First open gate remains published .23 updater migration.
+- Added digest-pinned historical-preparer driver materialization. It preserves
+  the existing disposable-runner guards and refuses source drift/stale inputs.
+  Three focused materializer tests PASS. `cargo build --locked --example
+  prepare_legacy23_update` PASS; the actual executable refuses workstation
+  execution before input handling (disposable-runner guard). Build log:
+  output/legacy23-driver-20260923/build.log; result.json binds the binary digest
+  and observed refusal exit1. No workstation updater transaction
+  or installed-app change performed.
+- Next: qualify the actual legacy process-group failure on disposable CI, then
+  implement/qualify an external migration entry point covering acceptance AND
+  early-launch-failure rollback. Candidate-only detachment remains insufficient.
+
+2026-09-23 photo-site investigation INCOMPLETE (user requested repair):
+- Active daemon68062/PAC/PF confirmed. Candidate source06d693c now installed, replacing5cd45e8.
+- Explorecams Safari visibly malformed/broken images; Explorecams/Sampleshots
+  HTML truncated over HTTP1.1 andHTTP2. Earlier inactive baseline also truncated.
+- Fresh owned9954 Geph now completes public image53670bytes in1.4s; local1080
+  receives200 headers but zero body/30s. Root pages viaGeph returnCF challenge,
+  not usable-content proof. Do not add a blanket geo route from that result.
+- Alternate8443 fails (521/challenge/timeout). Local callback smoke succeeds on
+  localhost and127.0.0.1; PAC returnsDIRECT for HTTP/HTTPS loopback. RealChatGPT
+  OAuth still unqualified; no credential/profile/DNS changes made.
+- Native log reads completed exit0, including rotated site-history.log.
+  Root-run plain/split64/split16 complete-body tests all fail for three targets.
+  Own-CDN bootstrap ranking fix plus reviewed cdn.explorecams.com exit prepared.
+  Eight new checks and230 related bootstrap checks PASS. Canonical build/install
+  verification PASS (livePID82500; all6 public completePNG transfers PASS).
+  Consumed transaction4930787e exit0; NEVER replay. Previousapp
+  /Applications/.Slipstream.before-4930787e.app retained. Safari Explorecams
+  reload visibly restores styling and image grid; fullHTML completeness unqualified.
+  RootHTML and Onfotolife/auth challenges remain unqualified. Evidence in
+  output/sites-20260923/ and output/sites-install-4930787e/. No native prompt pending.
+- Follow-up sourcec8622ec INSTALLED by consumed transactione69dcd10 exit0.
+  Canonical build/install verificationPASS, six completePNG transfersPASS.
+  Previousapp /Applications/.Slipstream.before-e69dcd10.app preserved.
+  Nine focused route/ranking checksPASS. No nativepromptpending.
+  Safari Sampleshots HTTPS now reaches PanasonicTZ80 page with36sample captions;
+  Chrome screenshot confirmsfour realphotos rendered (camera productimage remains
+  broken, notinvestigated). Full36photo lazyload remainsunqualified;
+  Onfotolife remainsblankCF inSafari/Chrome. Same publicscript throughinstalled
+  1080 completes237684bytes/2.56s; compressed transfer completes87513wirebytes.
+  TurnstileAPI completes86732bytes locally, so no broadCloudflare route added.
+  Chrome DevTools initially showsStalled; aftersocketflush, finaltiming shows
+  4.8min contentdownload. Flushdidnotfix; preliminary stalled-before-send
+  interpretation notconfirmed. DevToolsclosed. ChatGPT fullOAuth
+  remainsunqualified. Evidence output/sites-install-e69dcd10/.
+- Later browser continuation (same installed c8622ec, no further runtime change):
+  clean Onfotolife URL now renders actual photo grids in Chrome AND Safari.
+  Chrome Network showed 61 requests, 1.1MB transferred, DOMContentLoaded4s,
+  finish5s and successful JPEG responses. Safari previously displayed server526
+  (Cloudflare could not validate origin certificate); fresh navigation recovered.
+  This qualifies current visible gallery access, not a permanent CF/server fix.
+  Sampleshots Chrome AX now shows33of36 photos; product image still unqualified.
+  User deferred real ChatGPT login reproduction. /Applications/ChatGPT.app has
+  CFBundleIdentifier com.openai.codex; CUA denies access to that app. Do not
+  bypass tool denial or claim OAuth fixed from loopback/probe success.
+  Correct HTTP CONNECT probes to auth.openai.com/chatgpt.com finish with valid
+  TLS and HTTP403 in1.25s; not OAuth proof. Initial mistaken SOCKS probe against
+  HTTP1080 is invalid diagnostic evidence. auth-connect-recheck.json is current.
+- OAuth follow-up: user reproduced failure then succeeded after Quit Slipstream.
+  Screenshot gives exact HTTP loopback callback WebKitErrorDomain305 HTTPS-Only,
+  not an auth.openai.com TLS error. No sensitive callback query retained here.
+  Synthetic file-page link to HTTP127.0.0.1:50661/callback reproduced Safari
+  "This Connection Is Not Secure" with Slipstream OFF (scutil noPAC, no1080
+  listener, no slipstream process). No warning bypass/settings change; GoBack.
+  Temporary server stopped. This establishes independent Safari HTTP-navigation
+  gating, not complete causality for user's on/off OAuth difference. WebKit284559
+  documents same305. Actual app sign-out/re-login cannot run during this task.
+- Synthetic callback continuation: same file-page HTTP link renders Local callback
+  OK in normal Chrome. Attempt to launch exact installed Slipstream starts tray
+  but not1080/PAC, so active-proxy comparison NOT qualified. Restored original
+  OFF state via normal --quit; temporary HTTP server stopped. No code changes.
+  User choice pending: use Chrome for login (keep Safari security) or explicitly
+  authorize Safari HTTP-warning setting change. Do not change security silently.
+- User explicitly chose disabling Safari HTTP warning after scope disclosure.
+  CUA Security checkbox "Warn before connecting to a website over HTTP" changed
+  from1to0. Fraudulent-site warning and JavaScript remained1. Actual Safari link
+  navigation /entry -> HTTP127.0.0.1:50661/callback now renders Local callback OK
+  without interstitial. Temporary synthetic server stopped. Real OAuth and
+  active-Slipstream comparison remain unqualified; do not claim full login pass.
+- User confirmed real authorization works after the authorized Safari HTTP-warning
+  change. Close the reported OAuth-blocker incident on user acceptance plus the
+  synthetic browser callback pass; active-Slipstream A/B was not independently
+  observed. Photo galleries have visible access evidence; full lazy-load and
+  long-term reliability remain outside that incident acceptance.
+- Broad resilience work remains paused at the user's explicit earlier request
+  to stop because of the weekly limit. Do not treat an automatic goal wakeup as
+  permission to resume the broad release/resilience program. On explicit resume,
+  first open gate is legacy .23 updater migration (RELEASES.md); current PR376
+  head5cd45e8 has terminal green checks, but local photo changes are not its head.
+
+
+2026-09-21 live YouTube stall captured: Safari video at474.67s, 4K AV1,
+zero buffer/network with prior47.6Mbps estimate; daemon12279 stillactive.
+Private evidence output/youtube-stall-20260921/. Existing googlevideo relay
+errors do not establish this stall cause. No routing changes; long-media
+recovery remains unresolved. Broad resilience work remains paused.
+
+2026-09-21 RODE/Geph repair INSTALLED AND VERIFIED:
+- Source5cd45e8 installed by consumed one-shot d43f85ea exit0 at08:23:49Z.
+  Never replay. Previous app preserved at /Applications/.Slipstream.before-d43f85ea.app.
+- Candidate tree2ddafd74d457e6803444c214f52cb8e8ca3fdd8dfc0d7bb138de894367ee3d89;
+  daemon d86e88bb37ad2ed00911da94b377b210220bab14b4439ca75ecd683714a84a09.
+  Canonical installed verification PASS; active StatusV2/live launchd PID11475;
+  all6 complete public PNG probes PASS. output/rode-install-d43f85ea/.
+  Privileged direct kernel checks not_run; do not overclaim that coverage.
+- Normal Safari new navigation to https://rode.com/ loaded RODE Canada en-ca:
+  navigation, product descriptions/images and footer observed with CUA. First
+  CUA typeText mangled URL; clipboard paste timed out but AX confirmed exact
+  address, then Return completed navigation. No user browser profile/proxy edits.
+- Confirmed cause: old shared Geph SQLite auth_token ignored changed account
+  secret. Account key correct. Private cache backup retained; temporary auth
+  token reset restored owned exit before source fix. New source selects private
+  account-specific cache and reviewed rode.com geo-exit suffix. No secrets in docs.
+-36 Rust Geph checks,29 Python route checks PASS; CI35576147139 terminalSUCCESS.
+  Includes earlier natural browser-worker-exit race fix47594cd and negative tests.
+- Broad resilience goal remains paused/incomplete: same-account token revocation,
+  long media, independent fallbacks, pool occupancy, sleep/wake and legacy .23
+  migration remain unqualified. This turn handled RODE and cross-account cache.
+- Old pending1ab5b2b9 superseded; NEVER dispatch. No pending authorization/build.
+
+2026-09-20 compact authoritative handoff (reconcile live state before acting):
+
+- Full goal remains ordered: traffic-qualified updates, runtime recovery,
+  long media flows, independent fallbacks, mixed load plus sleep/wake. Not done.
+- Physical checkout is this AUD-17 repo, branch codex/codebase-audit-20260905.
+  PR376 draft remains open. Preserve user-owned AGENTS.md and untracked output/.
+- INSTALLED: source2fb0270, consumed transaction5f5ec434 exit0 at11:58:32Z.
+  Tree1794a4534a25df1c5eb70e4f86e97daa5bcb51b4c8207f00d7ff33d96f23f69f,
+  daemon919d3cf8, live PID23123 at qualification. Normal CLI Quit/open worked.
+  Canonical build-chain/artifact/install/attestation/live-service and all six
+  complete public transfers PASS. Evidence output/aud30-install-5f5ec434/.
+  Never replay consumed scripts. All backups/learning preserved. No admin prompt.
+  CUA observed messages/attachment elements, not fresh calls/streams or cold cache.
+- Green baseline CI35508641621 on326d25e: all four real packaged cases,
+  browser, lifecycle PASS; audit35508641655 PASS. Single-host fault accepted
+  candidate; both-host fault left successor alive until deadline then restored
+  exact previous tree/tray; both injected DNS fixtures observed and cleaned up.
+- Remote PR376 head0a1fa88 provenance follow-up: CI35509303661 terminal SUCCESS;
+  audit35509303665 PASS. All four packaged cases/browser/lifecycle green.
+  Accept and rollback artifacts downloaded to output/aud30-traffic-gate/accept-provenance-0a1fa88/:
+  rollback-provenance-0a1fa88/ additionally proves old tray survives; cleanup=[].
+  previous-helper1614e68a verified against journal/runtime copy, candidate-helper
+  83797af8 distinct. New helper startup-failure fixtures PASS separately. This is
+  CURRENT preparer plus PREVIOUS helper, not shipped .23 initiating an update.
+- Public legacy .23 migration remains OPEN: old preparer selects its installed
+  helper and lacks AbandonProcessGroup. Candidate-only changes cannot prove
+  both acceptance and early-failure rollback. RELEASES.md records exact boundary.
+- Local recovery commits a71c2a9/5b98384/d5afa50/aeb51c4 fix old-worker cleanup,
+  stale DNS/probe result publication, disk I/O under scheduler lock, and bound
+  private worker lifetime at120s. Guards bind to attempt start; current-owner
+  in-memory publication is atomic, persistence outside lock. No Geph/route changes.
+- 15 focused tests PASS, including real overlapping threads and running shared
+  executor cancellation;101 neighboring recovery tests PASS reused. Evidence
+  output/aud30-traffic-gate/resweep-{regression,publication,lock,threaded,deadline,final}*
+  and recovery-neighbors-tests.log. Running libc DNS itself cannot be cancelled;
+  shared64-worker occupancy remains a separate concern, not claimed solved.
+- Recovery build60609 completed exit0, canonical artifact/build-chain PASS.
+  Source4a500a9 (runtimeaeb51c4). Report:
+  output/aud30-traffic-gate/recovery-candidate-canonical.json; tree
+  7b023e11439b1730ec2a038677f69c608b4834ccb29aae136230fae1faf660f7,
+  daemon4cc2e8d, main817cce69. NOT installed. No build active.
+  Earlier build1217/d5afa50/tree16b14290 is superseded by deadline fix.
+- Recovery installation transaction1ab5b2b9 prepared and staged, NOT DISPATCHED.
+  output/aud30-recovery-install-1ab5b2b9/; pending-install.json points here.
+  Staged canonical PASS tree7b023e11; installed old tree1794a453 reverified.
+  Exact script delta reviewed: nonce/source/trees/new daemon plus prior5f5ec434
+  backup. bash -n PASS. Await recovery CI before normal Quit/authorization.
+  No build/installation process or administrator prompt pending.
+- Recovery CI35510044024 on1eb658c is terminal FAILURE. All four transaction
+  cases and browser qualification PASS; lifecycle-heavy fails at
+  active-worker-uninstall:active with "daemon status could not be removed".
+  This message aggregates status file, attestation, semantic/pending sockets and
+  browser-worker cleanup; exact failed component is not yet identified.
+  Log: output/aud30-traffic-gate/recovery-ci-failed.log. No blind rerun.
+  Diagnostic follow-up separates attestation/socket/worker cleanup failures and
+  reports bounded worker error codes/errno without paths or environment values.
+  Ten scoped lifecycle/cleanup tests PASS. This is instrumentation, not a
+  claimed root-cause fix. Next CI reproduction must identify the exact boundary.
+  Diagnostic CI35510971356 on6f654c5 is live; do not cancel for another push.
+  Independently reproduced natural-worker-exit race: exact validated worker can
+  exit0 before SIGTERM arrives; cleanup incorrectly required worker_terminated.
+  Regression red1/green40 module tests. Accept exit0 (worker guarantees cleanup),
+  retain termination proof for nonzero. Evidence natural-exit-cleanup-before/after
+  in output/aud30-traffic-gate/. Not yet linked to observed CI failure; not pushed
+  while diagnostic CI runs. Runtime diff requires a fresh build/install candidate.
+  Transaction1ab5b2b9 remains NOT DISPATCHED; installed baseline unchanged.
+  Next: diagnose _remove_daemon_status_artifacts and active browser-worker
+  shutdown, add precise evidence/regression before replacement. Recovery/media,
+  legacy migration, independent fallback and sleep/wake gates remain open.
+
+## Superseded working notes (historical evidence, not current instructions)
+
+2026-09-20 authoritative continuation:
+- Real shared-executor timeout test PASS: running resolver survives cancellation
+  while the private recovery loop returns, then controlled release joins executor.
+ 15 final focused tests PASS (resweep-final-tests.log),101 neighbor baseline reused.
+  New canonical build session60609 for source4a500a9 (runtimeaeb51c4) is live; log
+  output/aud30-traffic-gate/recovery-deadline-build.log. Do not restart. Earlier
+  d5afa50 candidate is superseded, not installed. Installed2fb0270 remains active.
+- Recovery build1217 completed exit0 canonical PASS for runtimed5afa50:
+  tree16b142905d84f5efe1dad7ea7cf0f35aae67ca5173e80901a662d41ee755fb48,
+  daemonbcd17a9216906e964696936e8d0bf784f126db1895df1db3c0a96a5632412a3d.
+  NOT installed; subsequent deadline fix invalidates this candidate for final use.
+- Found unbounded sweep wait on shared-executor system DNS. Worker now wraps
+  sweep in wait_for(STALE_AFTER=120s), releasing private event-loop thread on
+  expiry; stale publication guards remain.14 focused tests PASS including
+  cancellation/finally slot cleanup. An already-running libc DNS call cannot be
+  cancelled; shared executor occupancy is a remaining separate concern, not
+  claimed fixed. Need new canonical build after this runtime diff.
+  Remote35509303661 now running four packaged cases/browser, no failures.
+- Added real-thread overlap regression: old private worker held in DNS while
+  replacement completes; releasing old worker must not republish or alter winner.
+ 13 focused tests PASS (resweep-threaded-tests.log), complementing101 neighboring
+  recovery tests. Runtime remainsd5afa50; test-only follow-up needs no rebuild.
+  Local build1217 still live compiling Tauri after daemon freezebcd17a92.
+  Remote CI35509303661 still live packaged-app-build, no failures at last poll.
+- Recovery local build session1217 started for exact runtimed5afa50; log
+  output/aud30-traffic-gate/recovery-local-build.log. Poll this handle, do not
+  duplicate build. Installed2fb0270/5f5ec434 unchanged. Provenance CI35509303661
+  remains live; recovery changes not yet pushed to avoid cancelling it.
+- Recovery lock review found synchronous cache persistence inside global resweep
+  lock. Split memory mutation from persistence: ownership+memory commit remains
+  atomic, disk save occurs after release. Test acquires lock from another real
+  thread during persistence.12 targeted tests PASS;101 neighboring recovery,
+  Discord adaptive and autonomous bootstrap tests PASS. Evidence resweep-lock-
+  tests.log and recovery-neighbors-tests.log. No network/await under lock.
+  Next canonical local build/install plus actual runtime verification.
+- Stage2 second race confirmed/fixed: superseded DNS/payload success/failure
+  previously published strategy outcomes after replacement (3 regression failures).
+  Scheduled attempts now carry expected_start; ownership checks before/after
+  awaits and atomic check+publication under resweep RLock suppress stale writes.
+  Positive current-owner case still records winner/removes dead mark.12 focused
+  tests PASS, evidence resweep-publication-{before,after}.log. Not built/installed.
+  Next review lock ordering/publication side effects, then scoped runtime tests
+  and build/install qualification. Remote provenance CI35509303661 still live
+  without failures; do not cancel to push recovery changes.
+- Stage2 recovery patch prepared: stale resweep finally releases only its own
+  monotonic-start slot, preserving a replacement worker. Regression covers both
+  success and exception of old worker:2 failures before,8 focused tests PASS after
+  (.audit-venv/bin/python pytest test_tproxy_doh -k local_bypass_resweep /
+  stale_resweep_completion / runtime_failure). Evidence resweep-regression-*
+  under output/aud30-traffic-gate/. No build/install yet. Next investigate stale
+  result publication before packaging; cleanup ownership alone does not prevent
+  an obsolete probe overwriting newer strategy state. New remote provenance CI
+  35509303661 confirmed live, audit35509303665 PASS; do not cancel.
+- NEW INSTALLED baseline: transaction5f5ec434 CONSUMED exit0 at11:58:32Z.
+  Never replay. Source2fb0270 tree1794a453, main49f8cf39, daemon919d3cf8.
+  Normal open followed; app-tauri npm run verify:local-install exit0 PASS
+  (first invocation from repo root had ENOENT before checks; corrected cwd).
+  Full build-chain/artifact/installed/attestation/live-service and all six payload
+  transfers PASS:984455+471047 bytes on IPv4/IPv6/transparent paths. Logs under
+  output/aud30-install-5f5ec434/. All old backups and learning preserved.
+  CUA observed Discord messages and attachment image elements, no forced reload,
+  no cold-cache/call/stream qualification claimed. No pending authorization.
+  PR376 remote0a1fa88 carries provenance follow-up; reconcile its CI next.
+- CI35508641621 terminal SUCCESS including lifecycle-heavy; all four transaction
+  cases and browser passed. Fresh one-shot5f5ec434 DISPATCHED via native
+  authorization, shell session92977 still live with empty authorization log.
+  Normal CLI --quit succeeded and tray disappearance verified before dispatch.
+  Outcome pending: never replay authorize-once.py. Poll session92977 and read
+  output/aud30-install-5f5ec434/authorization-result.json/log. After exit0 normal
+  open then canonical installed verification and real app; do not claim installed
+  until recorded authorization outcome. Old source4442098 stopped for replacement.
+- New workstation transaction5f5ec434 prepared and STAGED, NOT DISPATCHED:
+  output/aud30-install-5f5ec434/ and pending-install.json. Canonical candidate and
+  staged artifact PASS tree1794a453; verified installed previous tree3e6c8181.
+  Runtime source2fb0270; diff to HEAD contains no app/spike changes. Exact script
+  delta reviewed (nonce/source/tree plus retaining b4bb66a0 backup); bash -n PASS.
+  CI35508641621 lifecycle-heavy still live. Do not Quit/authorize until terminal
+  green; then normal --quit, fresh one-shot authorize-once.py, normal open,
+  npm run verify:local-install and real-app observation. No admin prompt pending.
+- CI35508641621 / remote326d25e: all FOUR packaged transaction cases PASS,
+  browser PASS. Lifecycle-heavy still live; do not cancel. Primary-unavailable
+  artifact confirms media query_received, exact candidate tree844faa92 accepted,
+  cleanup_errors=[]; two-host failure confirms both queries, unsignalled live
+  successor/advancing daemon, deadline rollback to exact old treed2423806 and
+  surviving restored PID5467, cleanup_errors=[]. Downloaded evidence:
+  output/aud30-traffic-gate/{primary-unavailable,traffic-failure}-326d25e/.
+  Current-preparer/previous-helper proof, not published .23 initiation.
+  Audit35508641655 PASS. Installed source4442098 unchanged.
+- Prepared explicit helper-provenance gate in packaged transaction harness:
+  first observed journal helper path/hash and runtime bytes must match previous
+  bundle helper; report separately includes candidate helper digest. This prevents
+  treating current-preparer/old-helper matrix as new-helper coverage.17 focused
+  harness tests PASS; not pushed while CI35508641621 remains live.
+- Stage2 scheduler race reproduced read-only from exact source AST with queued
+  threads: start100, replacement221, old completion removes replacement marker,
+  third start282 incorrectly admitted while replacement age61 < stale120.
+  Evidence output/aud30-traffic-gate/resweep-race-reproduction.json. No runtime
+  patch yet; not established as cause of historical Discord hangs. After stage1
+  gates, add regression and ownership-aware cleanup; also investigate stale
+  result publication separately. Installed baseline unchanged.
+- Follow-ups pushed: remote PR376 head326d25ef2121eded146e4b13229531904d20fbb4.
+  New four-case CI35508641621 queued; audit35508641655 and Windows35508641618
+  queued, verified via GitHub. Next inspect these exact runs; do not cancel
+  to push checkpoint-only changes. Candidate1794a453 remains NOT installed.
+- CI35507770642 terminal failure collected: lifecycle-heavy and packaged browser
+  PASS; aggregate lifecycle failed only because obsolete traffic_failure failed.
+  Full failed log: output/aud30-traffic-gate/90318cd-failed.log. Prepared four-case
+  follow-ups are now ready to push; no live jobs cancelled. Correct-project graph
+  transport returned Transport closed; bounded direct source reads used instead.
+- Local build25244 for runtime2fb0270 completed exit0, canonical build-chain and
+  artifact PASS. Log output/aud30-traffic-gate/local-independent-payload-build.log.
+  Tree1794a4534a25df1c5eb70e4f86e97daa5bcb51b4c8207f00d7ff33d96f23f69f;
+  main49f8cf396ae31a9f667eb8de33ad10991c2268e8d551e0f34c8ee1a351d0a1eb.
+  NOT installed. Existing installed4442098/b4bb66a0 remains verified baseline.
+- Found and repaired follow-up qualification gap: traffic_failure previously
+  stalled only primary host, invalid after redundancy. Prepared four-case matrix
+  adds primary_unavailable acceptance and stalls BOTH reviewed domains for
+  traffic_failure rollback. Baseline requires both objects on every route;
+  query observation and reverse/partial-start cleanup enforced.16 harness tests,
+  54 config tests and actionlint PASS. Actual four-case CI remains pending push.
+- Exact published .23 source comparison confirms helper comes from old installed
+  target, not candidate archive; legacy23-causal-boundary.json records hash and
+  evidence. Candidate-only fixes cannot replace its transaction owner. External
+  migration or proven legacy-compatible transition remains a release gate.
+
+- Local follow-up now uses two DISTINCT public objects as well as hosts:
+  existing media sticker984455bytes and official Cheerful Choco Wave
+  cdn.discordapp.com/stickers/781291131828699156.png471047bytes. Public catalogue
+  discovery recorded in ROUTING_RESEARCH.md; no credentials/runtime catalogue
+  dependency. Rust11PASS including live test, Python7PASS, all six live transfers
+  complete. Evidence output/aud30-traffic-gate/independent-object-*.
+  Object deletion no longer shares a single point of failure. Discord-wide
+  outage still correctly prevents acceptance; neutral success cannot mask it.
+- Local follow-up adds minimum64KiB to updater and installed payload admission:
+  a syntactically valid tiny PNG must not hide a large-response cutoff. CRC,
+  full terminal framing,2MiB maximum, route isolation and twelve-second budget
+  remain. Rust10PASS/1ignored plus explicit live1PASS, Python7PASS. Live six
+  transfers each984455bytes. Evidence output/aud30-traffic-gate/payload-size-*.
+  Not installed. Do not cancel live90318cd CI merely to push this focused change.
+
+- Follow-up90318cd pushed to PR376 (not yet installed): successor traffic gate races two
+  reviewed Discord delivery hosts per route, cancelling pending HTTP work after
+  a valid full payload. Installed verifier reports all six attempts and keeps
+  three mandatory route results. This remote version still uses one object;
+  local follow-up above removes that shared dependency. Legacy migration remains
+  OPEN; neither installed replacement nor current-preparer CI proves it.
+  CI35507770642 still live; audit35507770702 terminal PASS for90318cd.
+  Completed traffic_failure job106071408287 failed at "expected injected timeout
+  rollback" with cleanup_errors=[]; downloaded artifact under
+  output/aud30-traffic-gate/traffic-failure-90318cd/. Its fixture stalls only
+  primary, so it no longer represents total failure after host redundancy.
+  Prepared0d50b4a corrects this and adds explicit primary_unavailable acceptance.
+  Do not count the old negative case as a valid rollback pass or cancel remaining
+  live jobs; after terminal collect them and push local2fb0270/0d50b4a follow-ups.
+  Focused Rust9PASS plus explicit live Rust1PASS; Python6+27PASS; six transfers each
+  completed984455bytes. Evidence output/aud30-traffic-gate/redundant-host-*.
+
+- Runtime source4442098 / CI35506810015: build, product/common checks, packaged
+  browser and accept/rollback/traffic_failure jobs PASS. Lifecycle-heavy PASS; full CI terminal SUCCESS. Audit35506809983 PASS.
+- Downloaded accept artifact for merge2511299a to
+  output/aud30-traffic-gate/accept-4442098/. Candidate watchdog spawn_refused and
+  early_exit fixtures PASS with helper83797af8d8918453f7b501b6dd70df23efdbde22bfceeb44f5129bc6fa692865.
+  Fixture checks old executable restoration, exactly one old relaunch, terminal
+  old_relaunched record and no active journal/stage/backup. This is packaged
+  helper coverage, not launchd/tray/signed-feed migration.
+  Real accept matched candidate treeea3450e0f5d8094631f30086a8a25e4d30a477079a154ffed7ec6f75736a65fd,
+  acknowledged and removed transaction. Current-preparer coverage only.
+- Local build88544 completed exit0; canonical build-chain/artifact PASS.
+  Runtime source4442098; later local commits change only checkpoint docs.
+  App tree3e6c818117aa98381a1a5cd9a0a809fec749390581b6cb155f87c7771ee636e3;
+  mainbc9a0141af52b06130dd7c9a8453071d2213aafecc1d732acfac7433183ffec9;
+  watchdogcf0161ea077324f3cfeb0ae4414f3b895bbb99d0ba78b8898f7167fa133b4e9b.
+  Daemon919d3cf8 unchanged. Geph verified r2 source442e982e; bundled85e7f58d
+  differs only in signature and two __LINKEDIT vmsize fields (comparison on
+  copies, originals unchanged); geph-signature-compare-*/mach-o-comparison.json.
+- NEW replacement b4bb66a0 reviewed against prior transaction and staged at
+  /Applications/.Slipstream.incoming-b4bb66a0.app; canonical verifier PASS in
+  output/aud30-install-b4bb66a0/staged-artifact.json. Normal CLI Quit completed; authorization session39529 finished exit0 at
+  11:18:45Z. Transaction CONSUMED, NEVER redispatch. Normal app launch followed.
+  npm verify:local-install PASS: exact tree, live PID5028, active fresh StatusV2,
+  three complete984455-byte PNGs (IPv4/IPv6 proxy and transparent). Evidence
+  output/aud30-install-b4bb66a0/installed-verification.log.
+  CUA observed real Discord messages and rendered attachment/avatars after
+  install. User changed channel during attempted refresh; no fresh reload or
+  cache-bypass claim. Calls/streams/long media remain unqualified.
+  Pending manifest:
+  output/aud30-traffic-gate/pending-install.json. Script and native authorization
+  runner in output/aud30-install-b4bb66a0/; hashes pinned in manifest/runner.
+  Old treeb975dd5b (AUD29e1bdc3e3). Preserve learning and all previous backups.
+  Consumed transaction3f81f9ad is read-only reference, NEVER replay it.
+- Remote PR376 head90318cd; prior unresolved-review query was empty. User-owned
+  AGENTS.md edits and untracked output/.playwright-cli remain untouched.
+- Combined69647ce CI35506125919 and audit35506125912 terminal PASS form reusable
+  baseline. Current source adds startup-failure rollback and helper fixtures.
+
+Verified update evidence:
+- Combined69647ce / merge ddb10d73 accept, rollback and traffic_failure PASS;
+  downloaded output/aud30-traffic-gate/*-69647ce reports independently checked.
+  Accepted candidate tree5fbb25b3ead6a3b8315a2931ec55d7b08efcc3e0d3309e6eb12328cad68bfc59;
+  both exact previous trees restored, journals removed, cleanup_errors=[];
+  traffic_failure successor unsignalled and live_traffic_failure=true.
+- Watchdog LaunchAgent AbandonProcessGroup preserves accepted/restored trays.
+- Archive extraction now restores ordinary file/directory modes after private
+  extraction. Real accept tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9
+  matched candidate; both rollback trees matched old
+  d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea.
+- Real stopped-successor and unsignalled-live-traffic-failure rollback PASS.
+  Journals removed, surviving process identity checked, cleanup_errors=[] in
+  all reports. Artifacts output/aud30-traffic-gate/*-653649e/.
+
+Startup-failure changes qualified in candidate CI:
+- f9356cc/7de2b6c restore old bundle when OS refuses spawn or the owned child
+  exits before identity capture. Missing metadata alone is not exit evidence.
+  26 transaction tests PASS (early-exit-tests.log), including real failed spawn
+  and exiting child; existing rollback identity/hash boundaries unchanged.
+- 3e11ea9 adds qualify_watchdog_startup_failure.py once on the accept CI runner.
+  Uses exact signed candidate helper in owner-private disposable fixtures,
+  actual helper and old-fixture processes, no synthetic ACK. Verifies old bytes,
+  exactly one relaunch, terminal failed record and no journal/stage/backup.
+  3 fixture-verifier tests (+3 negative subcases),54 build-config tests,
+  actionlint and py_compile PASS. Actual disposable helper run PASS in CI35506810015.
+  Coverage is helper fixture, not real tray/launchd/feed.
+
+Geph dependency repair complete at source/publication boundary:
+- PR377 merged normally at6c5895fcbad0b382067a54c7387208e27de46df5 after required
+  CI/audits and resolved review; integrated into audit branch atc466766.
+- Reviewed source0.3.9-r2 published by successful run35505388093. All8downloaded
+  assets verified against source/lock/version and SHA256SUMS; GitHub provenance
+  bound to exact main6c5895fc and SPDX binary/SBOM binding verified.
+  BinarySHA442e982e51d7837b158cdb5efaff4adee754db4270780568bcf1683a4fe84748.
+  Audit484packages/9unchanged exceptions/3informational/0blockers.
+  Artifacts output/aud30-traffic-gate/geph-r2-*.
+- GitHub isImmutable=false: no-overwrite policy and exact signed-content
+  verification are present, not a platform-enforced release lock.
+- Integrated ci_scope/build-config61tests PASS. Narrow exact rustls/webpki lock
+  exception rejects unrelated graph/metadata changes; main never bootstraps.
+
+Remaining first-stage gates and next action:
+1. Installed candidate4442098 is qualified at artifact/daemon/full public PNG
+   boundary; next address shipped .23 preparer migration below and independent
+   control-resource coverage. Do not repeat unchanged install or broad CI.
+2. Existing three-case harness uses current preparer with published .23 helper;
+   new-helper tests complement it, never silently relabel it as a public migration.
+3. Published .23 source6ba71ef7 lacks AbandonProcessGroup; helper spawns BOTH new
+   and restored old tray in its group. Candidate-only startup changes cannot
+   cover old-tray rollback or a successor that never starts. Qualify a safe
+   migration through the shipped preparer; signed .23->.24 gate remains open.
+4. Workstation now source4442098, transactionb4bb66a0, canonical installed and
+   full public payload PASS; Discord visible media observed. Never replay
+   consumed b4bb66a0 or3f81f9ad. This does not prove public signed-feed migration.
+
+Active goal: address remaining reliability weaknesses in the accepted order:
+1) real traffic qualification before accepting updates, 2) safe runtime recovery
+without restart, 3) long Discord/YouTube media flows, 4) independent fallback
+mechanisms, 5) sustained mixed load and sleep/wake qualification. All remain in
+scope; none is considered complete from a short probe or a status heartbeat.
+
+AUD-30 in progress: standard npm verify:local-install now requires full public
+PNG through explicit IPv4/IPv6 proxies and transparent TCP. Bounded curl checks
+HTTP200, full PNG chunk CRC/framing/IEND, transport exit; verifier rechecks same
+PID afterward. 32 tests +19subtests PASS including truncation/corruption, failed
+IPv6, green identity with failed payload, and daemon-change rejection. Live all
+three paths200/984455bytes; canonical installed verification with payload PASS.
+Evidence output/aud30-traffic-gate/{tests.log,live.json,installed.log}.
+Runtime/app binary unchanged (AUD-29 below). No pending tool/admin.
+AUD-30 successor ACK candidate now implemented in update_traffic.rs +lib.rs:
+background 12s total proof, three parallel reqwest full PNG/CRC requests, no
+ambient proxy inheritance, exact attested bundled-daemon SHA/PID binding,
+5s completion freshness, one in-flight probe, 3s retry cooldown. ACK rechecks
+fresh status/identity under existing lifecycle coordinator and refuses pending
+Quit/resume. Offline/dormant/unproven traffic does not acknowledge; unchanged
+60s watchdog rollback remains. No claim that a remote failure is a local defect.
+16 affected updater tests +23 transaction/rollback tests PASS; explicit live Rust
+three-path full-payload test PASS0.75s. No new dependencies. Graph fallback remains.
+Canonical builds6c56055 and0aa2dc6 PASS, neither installed. Latest0aa2dc6
+artifact tree cd8ce95c30109fc9ef7aac9674a0d78e039c1d25c87c308222d6a584e9c11875
+is superseded by the resolver-pool fix now in source. Uncancellable system DNS
+must neither delay the timeout result nor create a detached runtime per retry:
+one process-lifetime runtime shares at most three blocking resolver workers.
+Regression with eight stalled attempts fails on0aa2dc6 (eight lingering workers)
+and passes on corrected code. All eight tests PASS including live three-path
+full payload (0.73s total). See rust-resolver-pool-*
+logs in output/aud30-traffic-gate. This is updater-only, not a traffic concurrency
+limit. No installed daemon or network settings changed.
+Resolver-pool source committed1e44571. Canonical build session35601 finished PASS,
+artifact tree efa0789d80d85e543c43ee95ad0ce1c8ffb58e82f52a0d06ea54522fb7f714c1;
+not installed. Summary output/aud30-traffic-gate/build-resolver-pool-summary.json.
+No running build/admin. Next: exact
+candidate/update lifecycle qualification, negative packaged ACK/rollback path
+and real successor acceptance. Workstation /Applications/Slipstream.app is root-owned
+(stat verified); derive_target intentionally refuses in-app updates to non-user-owned
+bundles. Do not bypass that ownership contract or treat another privileged manual
+replacement as watchdog qualification. Use a user-owned packaged installation on
+disposable CI for the real transaction and injected failure.
+Disposable qualification harness added: scripts/packaged_update_transaction_smoke.py
+and non-shipping Rust example prepare_packaged_update. Production preparer,
+bundled watchdog and real tray; no synthesized ACK. Accept binds surviving
+successor identity and full candidate tree; rollback injects exact-identity SIGSTOP,
+waits unchanged60s deadline, requires prior tree and distinct live restored tray.
+Driver built; actual workstation invocation correctly refused before mutation.
+Six harness tests +4subtests PASS (identity drift, reused PID, unrelated rollback,
+missing journal, workstation guard). Evidence output/aud30-traffic-gate/transaction-*.
+CI now provisions isolated accept/rollback matrix jobs from the same immutable
+packaged build plus publishedpreview.23 ZIP pinned toSHA256
+b2accee8c068f454d4952174c9e5088d473e9dd5673d59b8466463ee882cce63
+(verified live GitHub release metadata). Non-shipping driver gets a separate
+artifact. Required packaged lifecycle aggregate includes both matrix results.
+Root provisioner reuses existing clean-runner preflight, canonical installed
+identity and local-only state checks, runs harness as original console user,
+cleans only private-root watchdog/trays, uninstalls owned daemon and checks PF
+snapshot restoration. Workstation invocation refused; PID-reuse and unrelated
+watchdog cleanup tests pass. Harness now reads nested StatusV2 through canonical
+verifier instead of assuming top-level state. 67 affected tests +19subtests PASS;
+actionlint clean. Evidence transaction-ci-tests.log, transaction-provision-*.log,
+transaction-workflow-lint.log. Next push draft PR and observe real macOS matrix;
+no live packaged case passed yet. Workstation app/runtime unchanged.
+Draft PR376 created and attached: https://github.com/aiwaki/slipstream/pull/376
+Remote head53ffbfed6d1692b5a0b3a9bafbf1fd4c47c58f67. Fresh runs verified active:
+CI35502811564, dependency audit35502811545, Windows35502811546.
+Packaged-app-build is in progress; accept/rollback matrix awaits that immutable
+artifact. Do not restart or push checkpoint-only changes over this live run.
+CI watcher live exec9676 writes output/aud30-traffic-gate/ci-watch-35502811564.log.
+Product checks finished:1803passed/4failed. All four stale test doubles repaired
+locally (new relay diagnostic kwargs, BIO TLS boundary); focused4/4PASS. Runtime
+unchanged by these repairs. Chromium/Windows adapter jobs passed; packaged build
+still running at last live poll. Do not restart it just because other jobs failed.
+Dependency run35502811545 finished failure: app1blocker, Geph1blocker. Original
+reports were not uploaded on failure; fix now preserves them with if:always.
+Pinned OSV scanner on prior SBOMs identifies newly published2026-09-14 advisory
+RUSTSEC-2026-0285: app rustls0.23.41 and Geph0.23.43; patched>=0.23.45 confirmed
+from rustsec.org/advisories/RUSTSEC-2026-0285.html. These diagnostic prior-SBOM scans
+are not fresh current-source qualification. No exception/policy weakening or
+runtime dependency changes yet. App lock update and reviewed bundled-Geph rebuild
+remain required before promotion. Evidence product-ci-failed.log,
+ci-regression-tests.log,dependency-ci-failed.log,osv-current-{app,geph}.json in
+output/aud30-traffic-gate. Scanner sessions37620/55458 finished (exit1=findings).
+Next collect packaged matrix result for current remote53ffbfe, then fix concrete
+runtime/dependency failures and push the pending test/report corrections together
+with necessary fixes. PR is draft; no merge or installation claimed.
+Manual install alone is not an updater-transaction test; stage1 still open. Later
+stages remain in original scope. Installed AUD-29 unchanged. No pending admin.
+Prior evidence output/aud30-traffic-gate/{build.log,build-deadline.log,
+rust-deadline-tests.log,rust-update-tests.log,rust-transaction-tests.log,rust-live.log}.
+User AGENTS.md changes preserved.
+
+AUD-29 CORRECTED installed e1bdc3e3ca69af9cf248af7040cb9ffc30557426 via
+3f81f9ad at2026-09-20T08:52:31Z; transaction CONSUMED NEVER replay.
+Daemon919d3cf86db662b9942e281958088d9993f88a7ec6d97dddebb83d8cb32ce7bf;
+app tree b975dd5b79f504e40e5819f576c377a1706e6b555deb0d3f07acd475b1f210b9.
+73 focused tests, native scoped ioctl, canonical build/staged/installed PASS.
+Direct loopback gets ordinary TCP state without reply-to; transparent rules remain.
+Startup lsof-gated exact-loopback/service-port migration, no global state flush.
+Exact formerly failing49893 now0.153ms; neighbor0.075ms; IPv6 0.077ms.
+10/10 concurrent full public Discord objects valid0.314–0.563s; repeated original
+40-request APNG batch40/40, maxconnect3.511ms, maxcomplete1.333s. Transparent
+no-proxy API200/35bytes0.352s. Native Discord reload: history loaded, no message/
+image error, no active call. No fresh audio/stream/YouTube qualification.
+PF old day-long ESTABLISHED id absent; new exact tuple TIME_WAIT with46sremaining.
+Unrelated persistent local TCP control survived replacement with no interruption.
+Evidence output/aud29-pf-loopback/{tests-corrected.log,installed-corrected.log,
+fixed-port.json,installed-media-parallel.json,curl-results.json,pf-corrected.json,
+transparent.json,native-check.json,control-corrected.json}. All diagnostics ended.
+First candidate3313895c/5b1b938 REJECTED after stateless regression; consumed,
+never replay. Corrected candidate above supersedes it. No pending authorization.
+User AGENTS.md preserved. Next investigate a specific fresh failing stream/video
+if reported; current fix qualifies this localhost failure, not universal immunity.
+
+Historical diagnosis before the repair:
+
+AUD-28 diagnosis complete, no code/network mutation. Exact localhost timeout
+reproduces by binding source127.0.0.1:49893 toproxy1080; same source tocontrol and
+neighboring port toproxy succeed. lo0 repeated SYN/no SYN-ACK; PF retains exact
+ESTABLISHED tuple47min old with23h expiry, no matching kernel socket. Cause strongly
+localized to stale PF state, not daemon overload/curl/upstream. Current stateful
+lo0 reply-to rule includes direct proxy clients; rules/NAT cleanup leaves states.
+No state deleted; no global flush. Original missed-close event not captured.
+Next fix separate explicit-loopback proxy from transparent reply-to and safely
+handle pre-existing stale state, with targeted PF qualification. Evidence and
+limitations in ROUTING_RESEARCH AUD-28/output/aud28-loopback. All capture/admin
+processes ended. Installed AUD-27 below unchanged.
+
+
+AUD-27 installeda5a675d63f9e9e53eaf9081d1000e024d1748ae3 viace65fe95 at
+2026-09-20T08:22:26Z; consumed NEVER replay. Build/staged/installed canonical PASS.
+Daemon718ce3657dd70b0d7b6282df56b06c2c0fc82f24a827053716bc928ead314bb0.
+Eight new Discord TCP reserve profiles (two write layouts x four fake families).
+Eight TLS-record candidates timed out live and are excluded from runtime ladder.
+129 scoped tests PASS; eight reserve voice-control trials HTTP1010.24–0.27s;
+16/16 reserve public avatar/APNG trials complete0.21–0.44s. No actual new call,
+stream or YouTube qualification. Native post-install reload showed message history,
+no message-load error/no active call; sticker-picker AX action had no visible effect.
+Installed concurrent probes9/10 passed: one localhost1080 connect timeout before
+upstream use. Two targeted APNG repeats full HTTP200/984455bytes0.718/0.719s.
+This transient resembles earlier AUD-25 startup symptom; cause remains unproven,
+not fixed or attributed to reserve strategies. Installed voice WS1010.501/0.307s.
+Evidence output/aud27-reserves/{tests-final.log,live-reserves.json,live-media.json,
+installed.log,installed-media-parallel.json,installed-apng-recheck.json,
+installed-voice-control.json,native-check.json}. No pending build/admin/probe.
+User AGENTS.md preserved. Next if continuing reliability: investigate localhost
+listener/connect transient separately; expand other mechanisms only with live proof.
+
+Historical prior installed state:
+
+AUD-26 installed5c39283dbed3da0fb5e14779f34f975c498e6795 viac7a059b4 at
+2026-09-20T08:03:24Z; transaction consumed NEVER replay. Canonical build/staged/
+installed PASS. Daemon271011dba4dff9ee0a0c848b44167caf7ae7729c73dd9fb388a5dafd383a3e07.
+Independent Discord fake families; preferred/cached failures demoted, full payload
+failure survives TLS-prefix success; exact-host recovery preserves neighbors.
+Full API/PNG and request-bound WebSocket qualification, observed voice canary,
+modern TLS Discord resweep.103 focused tests PASS. Expanded suite959 passed;
+4 unrelated failures reproduced on old HEAD,3 changed expectations then fixed.
+No claim of green entire suite; see ROUTING_RESEARCH for baseline details.
+Installed10 concurrent avatar/Lottie/APNG/API/app requests HTTP200 complete and
+valid in0.353–0.628s; voice WebSocket101 in0.479/0.234s. Actual Discord reload
+showed current DM history and avatars loaded; no active call. Sticker picker UI
+attempt did not open, second attempt CUA noWindowsAvailable; not qualified anew.
+Public full sticker objects passed; previous native sticker gate remains prior
+version evidence. No message sent, call joined, media file downloaded from chat.
+Evidence output/aud26-local-recovery/{tests-final.log,installed.log,
+installed-media-parallel.json,installed-voice-control.json,native-check.json}.
+No pending build/admin. User AGENTS.md preserved. Streaming/YouTube original
+reports remain unqualified; do not claim universal blocking immunity. Next
+investigate specific failing stream/video if reported, not repeat green matrices.
+
+Historical prior installed state:
+
+Voice follow-up installedeeff76c1a2515f9bcd5e99ed9b4afe0d58b5a563 via2ad62192
+at2026-09-19T21:31:36Z; consumed NEVER replay. Build/staged/installed-voice
+canonical PASS. Daemon187c480aff2689e2f0d7bcb71f52b900392514accc7bfadc61ad5fac2f2c5f5e.
+82 scoped tests PASS. Automatic Quit verified tray absent +launchctl113.
+Native prior RTC stuck CONNECTING to finland14023.discord.media, before UDP.
+Installed no-auth voice WebSocket probes now101 in0.438/0.270s. User retried
+and confirmed call works ("теперь всё гуд"). Native call qualified by user report;
+streaming and YouTube stalls remain separately unverified.
+No voice joined or audio sent by agent. Media baseline below stays green.
+Evidence output/aud25-discord-update/{voice-derived.json,voice-tests.log,
+installed-voice.log,installed-voice-control.json}.
+
+AUD-25 media fix0f661fdd3f9e5b3effb6f5b03d5cc9268390733d installed via
+transactione69daa65 at2026-09-19T21:21:00Z. Consumed NEVER replay.
+Canonical build/staged/installed-media PASS; daemon6dfdf793142ca0aaadea4481af86f43e1da22863cb7df2708fc5f5fafb96880c.
+Automatic --quit stopped tray and service (launchctl113), replacement completed
+without manual tray-menu action.73 scoped tests PASS. User AGENTS.md preserved.
+Native Discord original broken attachment now visibly rendered; missing avatar
+and all three activity game icons rendered. Sticker picker visibly shows frequent
+and server stickers plus pack icons. Closed picker afterward; sent nothing.
+Installed ten concurrent public avatar/Lottie/APNG/API/app requests all completed
+HTTP200, valid PNG/JSON and full curl success,0.235–0.524s. Initial startup batch
+had one localhost-connect timeout; preserved separately, repeated after canonical
+readiness, all10 passed. This is not an unlimited-load qualification.
+Evidence: output/aud25-discord-update/{installed-media.log,
+installed-media-parallel.json,installed-media-parallel-startup.json,
+native-media-qualified.json}. Voice/stream and YouTube stalls remain OPEN and
+are not qualified by these media tests. Need specific failing media flow for
+next reproduction. Discord/YouTube remain local-only; no Geph fallback.
+
+Historical prior installation (superseded):
+
+AUD-25 installed8e63eaa82935fa6418028504ec10d14612ca7f97 via0470694e at
+2026-09-19T21:00:25Z; transaction consumed NEVER replay. Canonical build/staged/
+installed-rest-quit PASS. Daemon559bb211c6c0d82a46111b891abfc13bfe7b42a0ccc59fe0fbb5e723fe1cfe89.
+Exact discord.com matched decoy uses www.mail.ru on443; gateway substitution
+unchanged;8443 restricted to updates.discord.com.65 scoped baseline tests +3
+changed-decoy tests PASS. Public /app complete; actual original Discord chat
+history now populated (70 AX descendants), no message error or visible image
+error. No messages sent, no voice joined. native-rest-qualified.json records
+sanitized evidence only. Voice/stream and reported YouTube stalls remain OPEN.
+
+Automatic --quit added, shares menu lifecycle/terminal ownership guards.13 Quit
++2 terminal tests PASS. Live running-instance command stopped tray and service
+(launchctl113); absent-instance command exited0 without starting routing.
+Restart canonical installed-after-cli-quit-ready PASS (first immediate verifier
+was premature, status absent). User no longer needs to operate tray menu for Quit.
+
+Initial installed concurrent probes had immediate TLS EOF on5/6 requests, and
+some images were missing. After qualified Quit/restart6/6 concurrent API,/app,
+/channels/@me completed HTTP200 in0.226–0.279s. Cause of initial concurrent EOF
+not proven; inspect local circuit/admission state if it recurs, do not describe
+this one passing batch as unlimited-load qualification. Evidence under
+output/aud25-discord-update/: installed-mail-parallel.json, parallel-after-restart.json,
+quit-cli-qualified.json, native-rest-qualified.json and installed-after-cli-quit-ready.log.
+No pending admin/collector/build. Superseded0d645fb1 NOT consumed and must NOT
+be installed; olderd205b205/910c2e46 consumed. User AGENTS.md preserved.
+Next reproduce actual remaining media failure with a specific user stream/video;
+do not claim native chat qualification validates voice/stream or YouTube media.
+
+Previous AUD-25 state:
+
+AUD-25 current user screenshot: Discord remains on loading splash after updater
+check. Fresh renderer01:13–01:14 repeatedly CONNECT gateway.discord.gg then
+WS CLOSED, no chat readiness. Managed proxy TLS fails3.162s. Same current
+gateway IP162.159.134.234:443 TLS timeout,8443 TLS completes but no HTTP upgrade.
+Two diagnostic plain/SNI-segment tests through interception failed. Normal Quit
+then launchctl113 verified; same probes without service both TLS-timeout4s.
+App reopened immediately afterward (exec45014 completed). This proves failure
+also exists without Slipstream, not that the ISP alone is proven. No new source
+changes or alternate gateway route installed. Evidence gateway-current.json,
+gateway-segments.json, gateway-without-slipstream.json. Next compare another
+network for this exact gateway; Discord remains unresolved.
+
+AUD-25 2026-09-20: source21ca4f5 installed viafb6818ab; both187f10ae and
+fb6818ab consumed NEVER replay. First failed before mutation because old /var/tmp
+snapshots absent. Replacement validates surviving snapshots and always creates
+a fresh verified runtime backup; existing app backups retained. Canonical build,
+staged-retained, installed PASS; live PID78076. Daemon4ffa15354f68f408c6d600bc9cb4c00c52ebe2b2b5fda95d336a368cfc7edd4a.
+Exact updates.discord.com local8443 added (no Geph);52 affected tests PASS.
+Same-IP443 failed TLS,8443 returned complete9067-byte manifest. Installed managed
+proxy returned HTTP200/9067 bytes in3.361s. Native Discord opened by agent,
+01:09:46 manifest request ->01:09:51 optional-update decision, QueryCurrentVersions
+and SetManifests Running, no TLS error. This unblocks startup manifest check;
+no claim a new optional package was downloaded/installed.
+Evidence output/aud25-discord-update; no capture/admin prompt running.
+User reports Discord stream and intermittent YouTube stalls, Gauzy delayed
+recovery, changed Geph account last week. Current ownedGeph off. Media/gateway
+remain OPEN/local-only. Asked user for failing video URL/browser and whether
+Discord stream is viewing or sending; awaiting details for exact reproduction.
+Next investigate those actual media flows, not repeat old exhausted gateway
+probe matrices. Preserve AGENTS.md changes. No open PR for this branch.
+
+Previous AUD-24 checkpoint:
+
+AUD-24 ef2550c/a8543617 installed still blank, user screenshot. early-events.json
+now proves accepted provenance -> browser-proof wait_failed at8s. Isolated actual
+helper8s returned navigation_pending. Same bundled Chromium/ownedSOCKS full load
+12.383s (root2.422s); cold DCL3.099/load11.678s and3s screenshot Loading overlay.
+Therefore keep full-frame readiness; don't weaken to DOM/body bytes.
+V2 candidate adds separately admitted fixed20s owned-only browser comparison
+only after safe-incomplete+provenance; V1 eight-second protocol unchanged.
+Same-owner continuation uses existing bounded metadata; full proof retains exact
+host/capability/PID/expiry/cancellation and4s handoff. No Geph for Discord/YouTube.
+34 Rust and288 affected Python/traffic/runtime tests PASS. Isolated debug candidate
+with production pinned Chromium/ownedSOCKS submitted usable at10.076s, exit0 at
+10.790s (isolated-worker-v2.json); no production learning from diagnostic broker.
+Source5fa1d9d installed via521eff9c at2026-09-13T15:13:03Z after normal Quit
+and launchctl absence113; runner consumed NEVER replay. Canonical build-v2,
+staged-v2 and installed-v2 PASS, live PID93063 active/PF applied.
+User confirmed Gauzy works in ordinary Chrome after V2 install; screenshot
+codex-clipboard-d573feba-18f9-4658-9bd3-4498e87e12b5.png shows full landing
+content and cookie panel. Chrome user-visible gate PASS for this navigation;
+Safari V2 verification and Discord gateway remain OPEN. No native
+prompt/collector running. Base consumed a8543617; never replay.
+Diagnostic Playwright aud24-owned closed. User AGENTS.md untouched. Discord gateway remains OPEN.
+
+Historical investigation notes:
+
+AUD-24 current diagnostic candidate: actual foreground peer accepted in0.735s
+(provenance-foreground-result.json); user navigation still failed, logs show
+local strategy then delayed root safe_incomplete=1 with no comparison.
+IMPORTANT: bsexec48233 lsappinfo yieldedNULL/asuser141, but a real temporary
+system LaunchDaemon saw SAME front ASN as authorization/asuser contexts.
+The bsexec simulation was misleading; no bootstrap/asuser routing fix justified.
+Temporary diagnostic job/files removed. Evidence launchd-context-result.json.
+Add drop-only fixed enum provenance reasons inside actual service plus per-host
+accepted/refused state; no routing behavior change.47 focused tests PASS.
+Canonical build-reasons/staged-reasons PASS for b02747c.
+NEW cac10760 dispatched after normal Quit/service absence; NEVER replay.
+Await authorization-result.json (exec21217), then canonical installed verify
+and capture actual-service reason. No standalone diagnostic collector running.
+
+AUD-24 user confirms latest61bcb2a STILL blank. Logs input-rotated-events.json
+and input-events.json show safe_incomplete=1, no comparison, then Xbox-local
+partial-record stall: local progression fixed but transport still fails.
+One read-only live-peer provenance diagnostic verified Chrome ownership/signature,
+rejected not_frontmost (current app state, NOT proof of original failure).
+The45s new-peer collector completed with results=[]: no new peer observed;
+this does not establish absence of navigation (connection reuse possible).
+Replacement read-only collector output/aud24-gauzy/provenance-foreground.py
+waits up to300s for Chrome foreground, checks up to3 existing peers with exact
+production1.5s/.5s/5s admission limits. Native exec72834 pending, output
+provenance-foreground-result.json. User asked to open Gauzy, leave Chrome
+foreground15s; response pending. No app source edits or installation this turn.
+Resume collector output before any additional probe; avoid duplicate prompts.
+No route/proxy/DNS changes. All runners through82e0d6a5 consumed.
+
+AUD-24 installed61bcb2a73b58da0f0bff0ce829d515715dcec075 via82e0d6a5
+at2026-09-13T13:42:14Z. Runner consumed NEVER replay. Canonical
+output/aud24-gauzy/installed-input.log PASS, live PID48233 active/PF applied.
+Daemon dbb68203c45c385796d72cb9298e974b69a7fb7cf0613283e9e9bdc035c40ddd.
+All three source corrections installed. 134 completion/traffic and45 root/gzip/
+input tests reused; no unchanged suite rerun. User asked asynchronously to open
+https://gauzy.co/ once in a fresh ordinary Chrome tab without reload. Awaiting
+content/blank/error result; automated navigation is not physical input evidence.
+No Chrome automation sessions or admin prompts pending. No current capture.
+Next correlate user's result with fresh exact-attempt logs if failure persists.
+Do not claim Gauzy fixed yet; Discord gateway remains OPEN, local-only unchanged.
+Source61bcb2a, docs newer; user AGENTS.md remains untouched/uncommitted.
+
+Previous AUD-24 checkpoints below are historical:
+
+AUD-24 input timing candidate: gzip-events.json confirms safe_incomplete=1
+but no subsequent comparison. Independent code defect: recent input checked
+against fixed5s AFTER >=5s network probe. Anchor window to preflight admission,
+keep fresh owner/signature/frontmost checks; reject future/nonfinite/>25s starts.
+45 root/gzip/input checks PASS; new build pending. This timing defect is real,
+but exact provenance rejection category was not logged, so do not claim it was
+proven as the sole cause of the last failed navigation. Native log read33965
+completed; no prompt pending. Installed remains9e76e89, Chrome aud24-gzip open.
+
+AUD-24 installed 9e76e899abdd301dfe022662303703b43fd480a3 via5366612e
+at2026-09-13T12:06:31Z. Canonical installed-gzip.log PASS, daemon
+60bc79016a83f0a0a19346fc1eb40374e2078eda1e48ff78303a5e0fca39dd42.
+Runner5366612e consumed NEVER replay. Fresh physical Chrome aud24-gzip STILL
+BLANK after60s,33 errors,title only. Both source fixes are tested but user-visible
+qualification FAILED. Do not call Gauzy or Discord gateway fixed.
+Read-only root log command output/aud24-gauzy/read-gzip.py currently waits on
+native administrator prompt (exec session33965); resume this once, do not spam
+another capture. Latest snapshot .playwright-cli/console-2026-09-13T12-07-17-579Z.log.
+Next correlate gzip-events.json with fresh attempt once native prompt returns:
+was safe_incomplete recognized, provenance accepted, comparison attempted?
+No more source change/reinstall without this evidence. Chrome aud24-gzip open.
+
+AUD-24 second candidate: installed bbee156 via da897768 at11:52:11Z,
+canonical install PASS, but fresh Chrome still blank. Runner consumed NEVER replay.
+Root asks for gzip but incomplete detector excludes gzip; timeout path also
+returns before qualified incomplete/browser verification. Candidate recognizes
+strict gzip framing shortfall on idle only, keeps gzip EOF on hard local recovery,
+and retains existing foreground provenance plus complete browser comparison.
+134 completion/traffic tests +44 root/gzip tests PASS. Canonical build/staged
+PASS. NEW 5366612e dispatched after normal Quit/service absence; NEVER replay.
+Inspect authorization-result.json before proceeding.
+Chrome aud24-gauzy-fixed remains open. Discord gateway OPEN.
+
+AUD-24 Gauzy incomplete page reproduced in fresh physical Chrome (aud24-gauzy)
+and reported in Safari. Installed remains a0a1174 until a new transaction.
+Direct/CONNECT/8443 all returned partial content or stalled; no port rule added.
+Found recovery regression: partial-stall recheck resets local recovery stage to
+system, then an inconclusive preflight recommits the same suspect system stream.
+Candidate preserves pending Xbox/local ladder after unqualified recheck, closes
+held exact before local retry, and prohibits Geph from historical stall alone.
+Two regression cases pass; traffic contract run in output/aud24-gauzy.
+118 traffic contracts PASS; canonical build/staged PASS for bbee156.
+NEW da897768 runner dispatched after normal Quit and confirmed service absence.
+Never replay; inspect authorization-result.json before any further transaction.
+Next installed verification and real Gauzy browser check. Discord gateway still
+OPEN as below. Current Chrome aud24-gauzy owned session open; no active capture.
+
+
+AUD-23 web loading fixed in fresh Chrome; overall Discord qualification OPEN.
+Installed source a0a11747890bb0296458f6481e190f109dd644a2 via a592d138 succeeded
+2026-09-13T11:20:16Z. Canonical installed-port.log PASS; daemon62be7c6856aa5a34ed9d90f0398c7adda8e877c9b9a9144056e6f67beef6827a.
+
+- Confirmed BPF EMSGSIZE for1523-byte decoy, fixed to517 bytes in d22c60c.
+  Six decoys now visible on wire; this alone did not restore Discord.
+- Exact discord.com:443 now tries SAME resolved IP:8443, unchanged TLS and URL,
+  no Geph/intermediary. Other hosts/ports cannot select it. 443 fake fallbacks
+  remain. Canary/resweep use the same port choice. See DECISIONS.md.
+- Fresh Chrome /login fully rendered fields/button: HTML466ms, load1768ms,
+  207 scripts; readyState complete. Evidence output/playwright/aud23-port.
+  Installed explicit CONNECT curl still returns200/65689 bytes later.
+- Safari initially failed on canonical URL, then a new canonical tab title was
+  Discord after direct8443 diagnostic. CUA still fails3811; JavaScript Apple
+  Events disabled. FORM NOT VERIFIED. Async user question pending; own temporary
+  8443 tab closed. Canonical Safari tab left for user inspection.
+- QR login remains broken: remote-auth-gateway.discord.gg WebSocket closes.
+  Do not claim authenticated messaging/voice/gateway qualification. Tests of
+  gateway alternative ports/addresses, splitTLS and native IP fragments failed;
+  provider shared edge returned1034. No gateway override was installed.
+-42 focused tests +117 traffic tests pass (port-tests.log,port-traffic.log);
+ 6 exact-boundary tests rerun after fixture-order preservation. All in
+ output/aud23-next. Source code matches installed; docs newer.
+-Consumed runners: all throughb4f166ad,536bd10b(failed before mutation because
+ Quit was still completing),1c1a6b99(success),a592d138(success). NEVER replay.
+ Own Chrome sessions closed, native probes complete; no pending admin process.
+ Next: user Safari form result; further evidence-backed LOCAL gateway transport
+ work if continuing full Discord qualification. Preserve local-only invariant.
+
+Update 2026-09-13 (AUD-22 Safari X login CONFIRMED):
+User confirms X login appeared on one fresh Safari navigation after c295501
+install118f22e4. Logs14:52:24 show x.com geph_response_usable and
+singleton_payload_usable; evidence output/aud21-recurrence/singleton-events.json.
+Installed sourcec295501, daemon70230, canonical installed verification PASS.
+Minute/start cooldown removed from synchronous navigation; bounded executor
+queues requests instead of immediate quota refusal. Eight socket/two heavy jobs
+remain internal resource bounds; no unlimited-throughput claim.82 focused and
+117 traffic tests PASS; prior queue/admission evidence retained. Capacitor and
+Facebook content previously verified in concurrent Chrome run on d0b2fa5;
+Safari X latest user confirmation closes the reported remaining hang. Cold
+latency remains unqualified/slow; historical Capacitor proof_absent exact cause
+was not reproduced and should not be invented. All runners through118f22e4
+consumed; do not reinstall/retest unchanged code without a new reason.
+
+Update 2026-09-13 (AUD-22 singleton INSTALLED; Safari verification pending):
+c295501 installed via118f22e4 succeeded09:50:47Z; runner consumed NEVER replay.
+Canonical installed verify PASS, daemon70230 active, ownedGeph up after tray launch.
+App treeb1c4361db3a5eb9e8fd73e73eef1643c4573676b3b8ce1396e68b655abec215d,
+daemonb4d8cde39046f3de20531b60a536dc05dab4ceaca9c667834c4abd3ba41ffc87.
+82 final focused tests and117 traffic tests PASS. All backups/learning retained;
+normal Quit restored original proxy before new install. User asked to open X once
+in fresh Safari tab and wait30s; answer pending. No fresh Chrome warming first.
+Next correlate singleton_payload_usable/refused with user result; do not claim
+Safari fixed until visible login content confirmed. Prior d0b2fa5 Safari X failed.
+
+AUD-22 c295501 canonical singleton build PASS. NEW118f22e4 runner prepared,
+incoming verified. Next normal Quit then single dispatch. dc793e87 consumed,
+never replay; installed still d0b2fa5 until new transaction succeeds.
+
+Update 2026-09-13 (AUD-22 Safari X still stalled; singleton candidate):
+User confirms Safari X hangs after installed d0b2fa5. Its current system DNS has
+one public A address; logs show local_stage_skips_root after partial local TLS.
+Candidate accepts typed singleton measured full-window stall only with extra
+complete usable same-origin owned-Geph payload proof, then existing exact-stream
+hard-timeout/PID/single-use consumer. No persistent learning or shared claim.
+Local partial-stall evidence triggers independent root recheck on next request.
+81 focused root/preflight/request-only tests and117 full traffic tests PASS.
+Next build, NEW transaction based on consumed dc793e87. Safari X remains OPEN.
+
+Update 2026-09-13 (AUD-22 queued admission INSTALLED, three Chrome sites PASS):
+Installed d0b2fa5 via dc793e87 runner succeeded09:36:10Z; consumed NEVER replay.
+Canonical installed verification PASS, daemon62189/PF active/ownedGeph up/PAC.
+App treeb25aa021b5377f6dedddabf270c15c8aee0000b0482586d774e876decca3dc9d,
+daemon4a4b81ddb7883afdb9903c516d0345711aff3405bc91c0c0ef6da338cf5e0b48.
+All backups/learning retained. Normal Quit restored proxy before replacement.
+Concurrent fresh Chrome three-origin test: Capacitor main content DOM13.29s,
+Facebook login DOM12.46s, X login DOM28.66s; all load events completed, no reload.
+Capacitor exact denial -> geph_response_usable -> committed14:36:49. Facebook
+hard TLS error recovered locally; X TLS timeout recovered via local strategy.
+No claim that historical proof_absent cause is identified (not reproduced).
+Cold delays remain, notably abs.twimg.com TLS timeout. User Safari check pending.
+Evidence output/playwright/aud22-queue/content.log and output/aud21-recurrence/
+postinstall-events.json, installed-verification.log.208 focused tests, final15
+admission and all116 traffic tests PASS. Own diagnostic Chrome session closing.
+
+AUD-22 final d0b2fa5 canonical build PASS. NEW dc793e87 runner prepared and
+incoming verified; next normal Quit then dispatch once. fdc265fa and older
+runners consumed. Source matched build-final.log; no code changes since build.
+
+Update 2026-09-13 (AUD-22 queued admission + expired direct candidate):
+User wants parallel load handling without site refusals caused by quotas.
+Added deadline-bounded waiting for active owners (eight network jobs; two heavy
+browser jobs independently), cancellation isolation, no minute/start cooldown.
+Fixed unqualified held exact TIMEOUT being attached back to browser: close it
+and enter existing DNS/local ladder; timeout does not grant Geph or learning.
+208 focused tests PASS, final15 admission tests PASS; all116 traffic tests PASS in
+output/aud21-recurrence/traffic-tests-final.log. Source d0b2fa5 final build running
+(build-final.log). Prior31205c1 build uninstalled; db17441 build cancelled after
+response-preservation correction. Next canonical final build + new runner.
+Installed still3332d27/fdc265fa. All historical runners consumed. Preserve learning.
+
+Update 2026-09-13 (AUD-22 navigation admission candidate):
+User requests fix and rejects two-wide global preflight bottleneck. Candidate
+removes synchronous rolling-minute quota and per-host cooldown, uses eight
+execution leases and a separate two-worker headless cap. Exact-IP coalescing,
+proof, exclusions, background-probe limiter unchanged. Recent starts telemetry
+bounded128.178 focused admission/preflight/bootstrap tests PASS. Added explicit
+proof_context_refused/proof_learning_noise_refused/proof_owner_refused states;
+old proof_absent did not distinguish pre-probe admission from payload failure.
+Read-only owned SOCKS Capacitor control returned200 in1.38s; not proof of the
+historical failure cause. Install still3332d27; fdc265fa consumed NEVER replay.
+Next canonical build/new unique replacement then targeted reproduction. TLS
+stall recovery and original missing proof remain unqualified; do not claim fixed.
+
+Update 2026-09-13 (AUD-21 recurrence OPEN after fairness install):
+User reports Chrome Capacitor block and Safari Facebook/X navigation stalls.
+Fresh daemon48375/PAC active/ownedGeph up; source3332d27 still installed.
+Logs14:15:37 www.facebook.com root admitted,14:15:42 TLS timeout; second
+at14:15:47 host_window_refused. x.com14:15:50 admitted,14:15:55 TLS timeout.
+Capacitor14:16:05 admitted,14:16:10 edge_access_denied + proof_absent;
+then system_plain partial record watchdog/local_stage_skips_root.
+Facebook14:16:58 also global window_refused, then local strategy.
+Evidence output/aud21-recurrence/window-route-events.json. Thus minute limits
+aggravate recovery but do not explain initial failures; removing them alone
+is not a demonstrated fix. Prior user Safari Weather success was one navigation.
+Next investigate missing Geph proof and TLS-stall recovery; reconsider inherited
+background-probe quota for synchronous navigation. No new runtime changes yet.
+
+Update 2026-09-13 (AUD-21 fairness INSTALLED; Safari forecast confirmed):
+Installed source3332d27e6495d5e0fd683b5d5061d2c00c7803aa via NEW fdc265fa
+one-shot runner; succeeded09:11:37Z. fdc265fa consumed, NEVER replay.
+Canonical installed verify PASS; daemon48375 active/PF ready/managed PAC.
+App tree467026b27871a8a90e8e10f105713c701b18c4c802646a03b81f3096f7cf33a7.
+Normal Quit restored original proxy dictionary before replacement. Backups and
+learning retained.96 focused preflight/bootstrap tests PASS; build PASS.
+Fresh Chrome www.weather.com redirects to weather.com/?Goto=Redirected; no
+regional denial, document contains site UI. Response2415ms/DOM3030ms; forecast
+values placeholders and load event0 at sample, so not full weather-data proof.
+Evidence output/playwright/aud21-www-weather/result.json; installed artifacts
+output/aud21-www-weather. User confirmed forecast appeared on one fresh Safari www navigation after install.
+Do not call warm navigation proof of cold admission: www learned before patch.
+Unique-host saturation remains possible; duplicate admission issue fixed.
+
+Update 2026-09-13 (AUD-21 www Weather recurrence; candidate fairness fix):
+Installed6b8ca7c remains active. User Safari www origin returned regional denial.
+Logs prove window_refused after seven background root starts, including a
+duplicate ocsp host/address variant. Diagnostic at13:58:47 learned www route;
+do not erase learning or claim subsequent warm success proves cold admission.
+Candidate limits each host to one root start per60-second admission window;
+exact-address proof/coalescing and global8/child reservations unchanged.
+96 focused preflight/bootstrap tests PASS, output/aud21-www-weather/fairness-tests.log.
+Canonical build PASS. NEW fdc265fa runner ready/incoming tree verified;
+source3332d27, daemon4e39f763d13fbaf5cd99a06663529800a4f55a0ffdbfa3a3d6de438d86f94989.
+Next normal Quit then dispatch output/aud21-fairness-bundle-20260913.fdc265fa/authorize-once.py
+once;39c49075 and predecessors consumed. Installed verification/browser check pending. Unique-host saturation
+remains possible; patch is duplicate fairness, not unlimited admission.
+User AGENTS changes preserved. See ROUTING_RESEARCH for measured sequence.
+
+Update 2026-09-13 (AUD-21 managed CONNECT installed and browser-checked):
+Installed source6b8ca7c63a31fedaa4e2fb41c3db2fd488531394 via NEW39c49075
+runner, succeeded08:50:59Z. Both e0e82cc8 and39c49075 runners consumed; NEVER
+replay. App treea248be10b7e8a59395e2f4feb0dfce75d5cad002ec15b0f025d8a787fab5dcc2,
+daemonb5b96107b663c645f38abc8f3553e17e42734caa35be0e3c8e2e8d43b27bfcfd.
+Canonical installed verification PASS; daemon37864, PF ready, ownedGeph up,
+managed PAC active. PAC HTTP fetch200/556bytes. All learning/backups retained.
+Fresh headed installed Chrome152/no network override flags: Capacitor content
+(first response2697ms/load4728ms), Weather content/no regional denial(first
+response1484ms; load event incomplete at sample), Aikido/login(first470ms/load
+3594ms), no manual reload. NetLog confirms CONNECT for all three exact origins
+plus Aikido CDN via127.0.0.1:1080. Own diagnostic Chrome session closed.
+Safari normal document navigations: correct Capacitor title, Weather forecast
+title, Aikido/login URL. Safari DOM not inspected: Apple Events JS disabled and
+left unchanged; AX heading query empty. Preserve this evidence distinction.
+Artifacts output/playwright/aud21-installed-connect and output/aud21-connect.
+Actual normal Quit of e0e82cc8 restored original scutil proxy dictionary; native
+session SIGKILL canary also passed. Shutdown/lease code unchanged in6b8ca7c.
+54 focused transport/lease tests and27 verifier tests PASS;7 PAC route cases.
+No remaining installation step. Monitor only on reported recurrence; no repeated
+unchanged browser matrix or full-suite soak. Opt-in managed mode is enabled for
+this user, not a claim of extensionless transparent ECH support for all users.
+
+Update 2026-09-13 (AUD-21 e0e82cc8 installed; local PAC transport defect found):
+NEW runner e0e82cc8 dispatched once/succeeded08:44:22Z; now consumed, never
+replay. Canonical installed verification PASS, daemon33833, ownedGeph up,
+PAC active/managed. Normal tray relaunched. HTTP PAC fetch reset: native
+DIOCNATLOOK control proves local unredirected flow returns127.0.0.1:1080,
+not ENOENT, so recursion guard discarded legitimate proxy requests.
+Evidence output/aud21-connect/pac-natlook.json. Fixed source to admit this
+exact unchanged loopback tuple as CONNECT/PAC; no recursive TLS dialing.
+Regression test added; next build/new unique replacement required.
+Preserve e0e82cc8 backups and all earlier generations. User already authorized
+managed proxy/install; no new permission needed. Physical site success is OPEN.
+
+Update 2026-09-13 (AUD-21 candidate READY, awaiting normal user Quit):
+Source128b5002ddfe5a59989226b6ad8ad552c3567727 committed.53 focused tests plus
+27 canonical verifier tests PASS;7 PAC routing cases PASS. Native temporary
+non-network key appeared and vanished after SIGKILL; preferences unchanged.
+Canonical npm build:local PASS: daemon eb8f65f857f4eddc1fa85bb5299f12a34c962a8c1f02a0a0a92c31a24d20795a,
+app tree80b8b6dea25bdc28c3e0841645a090614e2398a7557f06e049693ea35ba449ae.
+New UNUSED one-shot runner:
+output/aud21-connect-bundle-20260913.e0e82cc8/authorize-once.py.
+Incoming /Applications/.Slipstream.incoming-e0e82cc8.app matches canonical tree.
+Exact delta reviewed: new identities/paths, preservepror2xal backup, install
+--managed-https-proxy. Native script snapshots/checks its own root-private copy.
+No authorization-dispatched marker exists; DO NOT run until normal Quit and
+stable stop proof. CUA getApp Slipstream timed out(-10005); user must choose
+tray Quit (AppleEvent Quit is code-less and app intentionally ignores it).
+Installedbebada1 remains live/unchanged. Next user ready -> dispatch NEW runner
+once, verify installed status/PAC/launchd via npm verify:local-install, launch
+tray normally/ownedGeph, then fresh visible Chrome+Safari without flags/reloads.
+All historical runners consumed; never replay. Learning/backups/AGENTS preserved.
+
+Update 2026-09-13 (AUD-21 candidate implementation; NOT installed):
+User explicitly authorized managed proxy mode in this task. Added bounded
+CONNECT admission on the existing loopback listener when no PF entry exists;
+per-stream authority feeds existing routing, no IP/cover-name learning.
+Added opt-in temporary SCDynamicStore HTTPS lease, refusal of foreign settings,
+shutdown-before-listener cleanup, primary-network refresh, installed flag
+preservation and managed status. New modules https_connect.py and
+managed_https_proxy.py; user AGENTS.md remains untouched by agent.
+Focused tests in output/aud21-connect/focused-tests.log; native harmless-key SIGKILL selftest passed and
+modified no network preferences. Frozen daemon built; app build/install still
+pending. CLI flag --managed-https-proxy is opt-in. Local PAC preserves HTTP/non443/IP-literal/intranet direct paths; CONNECT
+admits only public DNS authorities on443. Installedbebada1/learning/backups remain unchanged. Next: candidate
+integration/browser proof, canonical bundle, new one-shot replacement only.
+
+Update 2026-09-13 (AUD-21 cause CONFIRMED via Chrome NetLog; not fixed):
+Installed Chrome152 headed temporary profiles via Playwright. Daemon40559/PF/
+ownedGeph active checked; earlier learning expired. Evidence under
+output/playwright/capacitor-netlog-20260913T130313/comparison-summary.json.
+Default failure: actual ECH innercapacitorjs.com/publiccloudflare-ech.com decoded,
+TCP immediate then TLS30,003ms timeout. Another actual-ECH profile got403/direct
+ISP IP. --disable-features=EncryptedClientHello ineffective; do not reuse as off.
+Temporary Local State ssl.ech_enabled=false actually disables ECH: visible host,
+root denial/proof committed13:07:39, content. Ordinary profile unchanged.
+Default later success: HTTPS DNS task cancelled37ms, no ECH config, visible SNI
+(with GREASE extension). This explains intermittent success. See AUD-21/research.
+Aikido one cold navigation: first response22,246ms, load24,193ms then /login
+without reload; matching22s child recovery. Historical infinite hang not reproduced.
+All diagnostic sessions closed; preserve profiles/netlogs as private evidence.
+Next exact-origin/connection-binding design for ECH; do not blanket-route public
+cover names/sharedIPs or mistake GREASE for ECH. No product source/install changes;
+installedbebada1 learning/backups and user AGENTS preserved. Full Quit gate open.
+
+Update 2026-09-13 (independent transport proof; diagnosis remains bounded):
+Wireshark4.6.8 CLI installed globally; native FIFO/tcpdump -> unprivileged tshark
+pipeline checked with UID502 control sourceports50595/51307. All children reaped,
+FIFOs removed. User Chrome restart block; handshake-only file contains control
+only (inconclusive for user ECH). Subsequent new-tab block during all-TCP metadata
+capture tls-20260913T042202.tsv shows Chrome existing sourceport50869 to
+172.67.203.214 via lo0, encrypted request792bytes then response289bytes ~32ms
+later. No new handshake; confirms intercepted established TCP response, not QUIC
+bypass or a contemporaneous connection timeout. Do not label TLS bytes HTTP403.
+Separate initial wait remains unmeasured. This is meaningful evidence, NOT a fix.
+Actual failed-flow SNI/ECH binding still missing. Source outer-name health flaw
+and production idle-broker unavailability confirmed as described in research;
+exact Capacitor ECH causality and Aikido original-tab fate remain open.
+Next avoid repeating blind captures/user restarts: use exact per-connection
+SNI/route correlation or controlled browser ECH A/B with restored settings,
+within routing invariants. No product source/browser/network settings changed.
+Installedbebada1/all backups and user AGENTS preserved.
+
+Update 2026-09-13 (fresh Chrome block then content; TLS proof still open):
+User full Chrome Quit/reopen first immediately blocked, next attempt content.
+Custom TLS collector initially lo0 then PKTAP/pcapng: root and UID502 controlled
+TLS handshakes decoded correctly (sourceport65484/49797, capacitorjs.com no ECH),
+but user capture tls-metadata-20260913T041305.json has no decoded handshake.
+Do NOT infer ECH absence/presence from empty capture. No raw payload retained.
+All captures bounded and child reaped. Current Chrome NetworkService55327 has
+existing TCP104.21.93.31:443 from49369. Installing global Homebrew wireshark CLI
+(HOMEBREW_NO_AUTO_UPDATE=1) to independently decode Chrome TLS; inspect build
+session/result before repeating install. No browser or routing settings changed.
+Aikido source: commit updates _auto_geph only; active local relay not migrated.
+Production sets _pending_navigation_probe_available only for disposable fixtures;
+old idle broker is explicitly disabled in production due missing provenance.
+This explains absence of that recovery mechanism, not exact per-tab causality.
+Next independent handshake decoder and failed-flow correlation; preservebebada1.
+
+Update 2026-09-13 (Chrome block captured; ECH outer-name candidate):
+User reproduced HTTPS Capacitor block during v2 capture; Safari works; Aikido
+hung until reload. Capture output preserved, tcpdump child killed/reaped by
+wrapper after TERM timeout.134 target-IP TCP packets onlo0, existing port62958,
+no SYN/target QUIC; cannot bind shared CDN address to hidden HTTP origin.
+Private chrome-recurrence-summary.json and browser-ech-events.json inpror2xal.
+Logs show cloudflare-ech.com root usable/cache/local routes; source treats outer
+SNI as normal host without ECH distinction. Strong causal candidate, not exact
+flow proof. Next fresh TLS handshake with only SNI/ECH/tuple metadata to confirm;
+then exact-host design. Never broadly Geph-route cover name/shared CDN IP.
+Aikido shows admission refusal then child commit15s after admission, existing
+local stream errors; original-tab recovery remains open. See ROUTING_RESEARCH.
+No source/settings/install mutation; installedbebada1/backups preserved.
+
+Update 2026-09-13 (fresh Chrome HTTPS immediate content; capture failed):
+User reports immediate content on one fresh ordinary Chrome HTTPS navigation,
+without intervening routing/browser settings changes. Intermittent failure cause
+remains unproved. Metadata capture ran but root wrapper lost its buffered output
+when tcpdump did not exit within5s after SIGINT at60s timeout. Result JSON records
+the wrapper exception, NOT packet evidence; cannot infer TCP/QUIC from this run.
+Exact orphan capture PID46326 identified by complete argv; targeted native cleanup
+completed successfully (TERM then KILL only if same exact argv remains).
+Do not repeat browser test solely for another successful sample. Before another
+capture, use capture-chrome-metadata-v2.py with TERM/KILL cleanup and unique output;
+syntax checked, not yet executed. Capture a recurrence, not another success.
+Installed sourcebebada1 and all settings/learning/backups remain unchanged.
+
+Update 2026-09-13 (Chrome HTTPS confirmed; protocol capture pending):
+User copied https://capacitorjs.com/ from blocked Chrome tab: HTTP80 hypothesis
+is excluded for this incident. Direct ISP egress remains confirmed by user footer;
+TCP vs QUIC/UDP bypass not yet established. Started a bounded60s, read-only native-
+authorized tcpdump pktap metadata capture scoped to Chrome main/network PIDs
+74403/74603 (pid or effective pid), TCP/UDP443 only, text headers without payload
+output. User asked for one fresh ordinary Chrome HTTPS navigation after approval.
+Evidence runner:output/aud20-redirect-bundle-20260913.pror2xal/capture-chrome-metadata.py;
+result chrome-metadata-capture.json pending. No routing/browser settings changed.
+Next inspect capture status and correlate protocol/destination/time with user
+result before any source or installation change. Preserve installedbebada1/backups.
+
+Update 2026-09-13 (Chrome blocked page confirms direct egress; HTTP hypothesis):
+User reports Cloudflare Your IP is their ordinary ISP address, different from
+verified owned-egress-check.json. This proves Chrome blocked response direct;
+previous Geph events cannot be attributed to Chrome. Do not assume QUIC.
+Screenshot hides URL scheme and shows info icon. User asked to copy full blocked
+tab URL to distinguish HTTP80 from HTTPS443; answer pending. Independent GET
+http://capacitorjs.com/ returns403 Cloudflare block phrase,4550 bytes, port80,
+in0.154s with NO Location header. Current PF only intercepts TCP443. If blocked
+Chrome URL is HTTP this directly explains bypass; do not claim it until confirmed.
+No browser setting/QUIC/global network changes or packet capture performed.
+Evidence:output/aud20-redirect-bundle-20260913.pror2xal/capacitor-http-control.{headers,body}
+(private). Weather successful route committed; Capacitor Chrome qualification
+still unresolved pending exact URL. Preserve installedbebada1 and all backups.
+
+Update 2026-09-13 (AUD-20 mixed browser result; Chrome Capacitor still fails):
+User initially reports both work, then corrects: Chrome Capacitor ERR_TIMED_OUT
+followed by Cloudflare block, Safari works concurrently. Treat Chromium success
+as unstable, not completed qualification. Weather tab/user content success;
+03:40:47+0500 www.weather.com geph_response_usable/committed confirms new chain.
+Apex weather.com root terminal_error/cache and child window_refused also observed.
+Capacitor03:41:16 two relay-end stage=geph client_read_error records; records lack
+browser identity and do not prove Chrome direct bypass or Geph-origin denial.
+Current owned Geph up/PF ready. No source edits or resets for this symptom.
+User asked to read Cloudflare blocked-page Your IP in Chrome to discriminate
+actual egress; reply pending. Independent verified-owned HTTPS api.ipify.org
+control saved privately as owned-egress-check.json when complete. No external
+Geph/settings mutation. Compare reply with this evidence before choosing protocol,
+route or browser-specific denial diagnosis; do not assume cache/QUIC/fingerprint.
+Evidence:output/aud20-redirect-bundle-20260913.pror2xal/browser-redirect-events.json.
+Full installed Quit gate remains open; all learning/backups preserved.
+
+Update 2026-09-13 (AUD-20 sourcebebada1 INSTALLED; Weather test pending):
+pror2xal transaction dispatched ONCE and exited0 at22:39:36.729560Z. Never replay
+it or any older runner. Learning and every app/private backup retained, including
+new /Applications/.Slipstream.before-pror2xal.app and
+/private/var/tmp/slipstream-replacement-20260913.pror2xal.
+Canonical installed verification PASS as console user: exact artifact/build-chain/
+installed-unprivileged identity and fresh active StatusV2 daemon40559. Normal CUA
+getApp launched tray40906 despite AX timeout; owned Geph up verified before test.
+Evidence:output/aud20-redirect-bundle-20260913.pror2xal/{authorization-result.json,
+installed-verification.log,installed-verification.json,launched-backend.json}.
+User asked for ONE fresh ordinary Chrome https://www.weather.com navigation,
+without reloads; forecast/denial and approximate delay pending. Next correlate
+new private events since22:39:36Z. Browser success/full Quit qualification open.
+Capacitor succeeded on precedingc140aaf; no repeated matrix yet. Preserve all
+learning/backups/AGENTS edits. Historical intermittent direct Weather cause remains
+unproven; do not equate prior standalone proof with installed page success.
+
+Update 2026-09-13 (AUD-20 Weather candidate READY; awaiting Quit):
+Sourcebebada19ff353fb4f58a4843102f2cc9700161a3 built ONCE, exit0.
+Canonical artifact/build-chain/incoming PASS. Evidence
+output/aud20-redirect-bundle-20260913.pror2xal; staged
+/Applications/.Slipstream.incoming-pror2xal.app.
+Tree94ea02a4a02be52d447da3bf2fbee386a2112573ba3ac521f97e9d8f08ff4ad1;
+daemon6df22bcf299bd8915c59eb1b13b4892d41e517239822b98f4be0d34fb0b16cf5.
+NEW native entry:python3 output/aud20-redirect-bundle-20260913.pror2xal/authorize-once.py
+Script SHA64b3bbcb52a59fe0ca076ea99773f8001a35e523abc16e3648b088abaa1c9b6d;
+runner SHA2097e63ce0598d00b26317540b9a18a9fb9abfb7124b2c325161d9802932a188;
+AppleScript SHAf4915b65c45ad9523f658e597f8e31b990ffc72a72ba8c2198d3cdabcfe9b0a7.
+Root exact-delta review/bash syntax PASS; prior protected transaction plus exact
+new identities and required gaafxtr6 backup. No new independent review claimed.
+No dispatch. Current installedc140aaf active: Capacitor user fast success,
+Weather still regional denial. Next user ordinary Quit, verify owned stop and
+script hashes/new paths, dispatch ONLY pror2xal once, inspect result then
+canonical installed verification, normal launch/Geph ready, ONE Chrome Weather
+navigation. Never replay gaafxtr6/kagd4hmw/older transactions. Preserve learning,
+all backups and AGENTS.md. Control success is not installed browser qualification.
+
+Update 2026-09-13 (Capacitor works; AUD-20 Weather cause source-qualified):
+User Chrome Capacitor loads without delay; matching installedc140aaf log shows
+geph_response_usable/committed. Weather user screenshot again regional denial;
+new log root_admitted/regional_access_denied/proof_absent twice, no admission miss.
+Owned controls locate3-hop redirect chain plus413130-byte decoded page exceeding
+prior256KiB cap. Generic bounded redirect/decode correction qualified,47 tests PASS;
+full production non-mutating control413130 usable bytes in5.288s, same owner.
+See AUD-20 audit, ROUTING_RESEARCH and DECISIONS new section for policy bounds.
+Sourcebebada1 committed; ONE build running in
+output/aud20-redirect-bundle-20260913.pror2xal; inspect build-result.json.
+Next canonical staged verification and NEW preserved
+replacement after normal Quit. Installedc140aaf unchanged; Weather fix not installed.
+Do not replay gaafxtr6/kagd4hmw/older runners. All learning/backups preserved.
+Prior intermittent direct Weather response-change cause and full latency still
+not fully established; do not equate this control with ordinary browser success.
+
+Update 2026-09-13 (state diagnostic sourcec140aaf INSTALLED):
+gaafxtr6 native transaction dispatched ONCE and exited0 at22:22:51.410714Z.
+Never replay this/older runners. Learning preserved; all previous backups and
+new /Applications/.Slipstream.before-gaafxtr6.app plus
+/private/var/tmp/slipstream-replacement-20260913.gaafxtr6 retained.
+Canonical installed verification PASS, fresh active StatusV2 daemon10357,
+exact artifact/build-chain/installed-unprivileged identity bound. Normal getApp
+launched tray11663 despite CUA AX timeout. Owned Geph up verified before test.
+Evidence:output/aud19-state-bundle-20260913.gaafxtr6/{authorization-result.json,
+installed-verification.log,installed-verification.json,launched-backend.json}.
+User asked for ONE fresh ordinary Chrome Capacitor navigation without reloads,
+plus rough delay if long. Result pending. Next read exact new private host events
+since22:22:51Z, including route-preflight-state admission/proof/stage decisions.
+This is diagnostic qualification; previous source4c6d60d still failed browser.
+New installed full Quit and browser success remain open; Weather latency open.
+
+Update 2026-09-13 (semantic state diagnostic candidate READY; awaiting Quit):
+Sourcec140aaf3fa2eefdbb3268a0a7587819d9e3b7a82 built ONCE, exit0.
+Canonical artifact/build-chain and incoming PASS. Candidate and evidence in
+output/aud19-state-bundle-20260913.gaafxtr6; incoming
+/Applications/.Slipstream.incoming-gaafxtr6.app.
+Tree4fab20108c28a2172e62031a6fd56d2c7239e6526c269f37379957ab94cb502d;
+daemone15210bd01af840716d888ce684438215369cb8588428ac510ec46498d8182a7.
+NEW native entry:python3 output/aud19-state-bundle-20260913.gaafxtr6/authorize-once.py
+Script SHA6cbdfaae2ed98e635428e3d5f3a6955d5a676328b6c503a6d64d0a9d318aab77;
+runner SHA8296fa903428821657c37dcf89bb9df505eb74c4eaddcc3e2d368ee0c07fee8c;
+AppleScript SHA9c311b39c869f6579ad58ec3f6ae3fba5d73877b74f67b0bc17830f8be6da9cc.
+Exact-delta root review and bash syntax PASS; same protected transaction,
+requires preserved kagd4hmw generation in addition to all earlier backups.
+No dispatch yet. Installed4c6d60d remains active and Capacitor still fails.
+Next user normal Quit; verify owned stop/identities and new absence, dispatch
+ONLY gaafxtr6 ONCE. Never replay kagd4hmw/ozu40ser/any earlier transaction.
+Then canonical installed verification, normal launch/owned-Geph ready and ONE
+Chrome Capacitor attempt; read new route-preflight-state records to distinguish
+admission/cache/local-stage bypass from payload/proof/commit failure.
+This candidate adds diagnostics, not a claimed second routing fix. Preserve
+learning/backups/AGENTS.md. Weather latency remains unresolved.
+
+Update 2026-09-13 (installed AUD-19 browser FAILED; state diagnostics qualified):
+User reports long load and unchanged Capacitor Cloudflare block. Current installed
+4c6d60d remains active. No Capacitor root record after install; system partial-record
+watchdog then Xbox-stage read failures. Other root logging active,34 records.
+Cannot infer precise first admission failure from current logs. Source gate also
+skips initial semantic root for Xbox/local retry stages. Fixed-category drop-only
+state diagnostics added for actual admissions/cache/proof/commit/stage skips;
+no routing/budget/probe changes.40 focused tests and14 overlapping admission cases
+PASS, diff-check clean. See ROUTING_RESEARCH newest section and private evidence.
+Sourcec140aaf committed; ONE canonical build running in
+output/aud19-state-bundle-20260913.gaafxtr6 (inspect build-result.json).
+Next new exact preserved transaction
+only after normal Quit; never replay kagd4hmw or older runners. User-visible
+Capacitor and Weather latency remain unresolved. Do not claim AUD-19 solved page.
+
+Update 2026-09-13 (AUD-19 source4c6d60d INSTALLED; browser result pending):
+kagd4hmw native transaction dispatched ONCE and exited0 at22:06:00.507072Z.
+Never replay this or older runners. All app/private backup generations retained;
+learning not reset. New backup /Applications/.Slipstream.before-kagd4hmw.app,
+private snapshot /private/var/tmp/slipstream-replacement-20260913.kagd4hmw.
+Canonical npm run verify:local-install as console user PASS: exact build/artifact/
+installed-unprivileged, fresh active StatusV2 daemon78127. Normal CUA getApp
+launched tray79492 despite AX timeout. Geph initially off during startup, then
+owned/up verified before requesting navigation. Evidence in
+output/aud19-full-root-bundle-20260913.kagd4hmw/{authorization-result.json,
+authorization-execution.log,installed-verification.log,installed-verification.json,
+launched-backend.json}. CUA ordinary browser capture remains unavailable.
+User asked for ONE fresh ordinary Chrome Capacitor navigation, no reloads.
+Next: correlate user result with new private log after22:06:00Z. New installed
+browser/Quit qualification pending. Weather latency/response-change cause open.
+
+Update 2026-09-13 (AUD-19 candidate READY; awaiting ordinary Quit):
+Built source4c6d60d98a6e386134724eaa776c1d8215823f04 ONCE; build exited0.
+Canonical build-chain/artifact and incoming verification PASS.
+output/aud19-full-root-bundle-20260913.kagd4hmw contains build/source/result/
+verification and transaction-review.json; staged app
+/Applications/.Slipstream.incoming-kagd4hmw.app.
+New app tree10b7c8586b952dec9e9c21a74001cececb0b9816cd74c87f078ac8da334590e6;
+new daemon2b8c228de812a0556ee872ef4f8b1f41fa7a0fb4ea56578c190f0eea99c5383f.
+Fresh native runner:python3 output/aud19-full-root-bundle-20260913.kagd4hmw/authorize-once.py
+Script SHA33208c1794c95c9e18777edf798e39e2d524391eb270c700771d9e204f5906f4;
+runner SHA9fc7e7dd4beb037f4e503b717120d75afccc08d766b2bc95530440f2b8816f13;
+AppleScript SHAbfdd0fd358d02f8777052556b755616b188f6f8165cda4ccd3f222b7eeac41b6.
+Exact-delta/root review and bash syntax PASS; uses previously reviewed protected
+transaction mechanism, adds required preserved ozu40ser backup. No new independent
+agent review claimed. No dispatch marker; installed73de754 remains running.
+Next: user ordinary Quit (CUA menus unavailable), verify owned stop and hashes,
+then dispatch ONLY new kagd4hmw runner ONCE. Never replay old transactions.
+On success canonical installed verification, normal launch, ONE fresh Chrome
+Capacitor navigation. Current source control passed; installed page fix unproven.
+All learning and backup generations must remain. Weather latency remains open.
+
+Update 2026-09-13 (AUD-19 Capacitor prefix defect source-qualified):
+User confirms current Capacitor block. Root log=edge_access_denied, relay direct.
+Verified-owned production control proved request-induced206 prefix98300/125562
+rejected by full_selection_inconclusive. Default owned semantic root request
+now omits Range; same128KiB cap/deadlines/full-representation/ownership guards.
+New full-root control125929 usable bytes in0.607s;30 focused tests PASS.
+See AUD-19 audit and ROUTING_RESEARCH sections for exact evidence/limits.
+ONE canonical build running for source4c6d60d in
+output/aud19-full-root-bundle-20260913.kagd4hmw/build.log; inspect build-result.json
+before restarting anything. Next fresh staged verification/new preserved replacement
+transaction after ordinary Quit; NEVER replay ozu40ser or any prior transaction.
+Installed73de754 still active; source-only correction is not browser success.
+Preserve user AGENTS.md, all learning/backups. Weather latency remains open.
+
+Update 2026-09-13 (Weather now loads slowly; Capacitor investigation added):
+User reports fresh Weather no longer shows regional denial and eventually loads
+content, but slowly. User requests causal explanation and investigation of prior
+capacitorjs.com Cloudflare "Sorry, you have been blocked" screenshot. Both remain
+active scope: do not drop Weather latency/causality while investigating Capacitor.
+No claim that diagnostic-only73de754 fixed either cause; learning was preserved.
+Read-only native-authorized log reader completed:
+output/aud17-comparison-bundle-20260913.ozu40ser/read-weather-capacitor-events.py
+weather-capacitor-events-2.{json,stderr}:26 Weather events, none Capacitor.
+Observed Weather relays system_plain; root terminal_error in100ms_to_500ms.
+Separate current-route control: root302 to/de-DE/?Goto=Redirected in0.526s;
+exact redirect200 with2041965 bytes in1.763s. See ROUTING_RESEARCH.md new section.
+Historical failure cause and full browser latency remain unproven.
+User asked for ONE fresh ordinary Chrome Capacitor navigation to distinguish old
+screenshot from installed current behavior. Reply pending. Source/docs already
+contain generic regional and strict edge-denial handling; no site rule justified.
+Next: inspect reader result and timeline; separate root classification, route
+commit/proof, child recovery and network latency. Do not infer Cloudflare reason
+from page alone or claim historical controls are current proof.
+
+Update 2026-09-13 (user resumes Weather regional-denial investigation):
+Aikido and lifecycle work accepted by user. New attached Chrome screenshot shows
+weather.com with "This content is no longer available in your area".
+No timing/install identity is inferred from screenshot. Read-only filtered live
+log since21:38:02Z contains zero weather/www.weather/dsx.weather records in current
+176049-byte log. User asked for ONE fresh normal Chrome https://weather.com
+navigation on installed73de754; response pending. Do not add a host rule or
+infer route failure from screenshot alone. Current generic semantic detector
+already recognizes this marker; historical extension-only paragraphs are
+superseded by current exact-IP preflight (BROWSER_COMPANION.md P0 header).
+Next: correlate fresh navigation and root semantic/owned-Geph result; diagnose
+actual failure before edits. Graph BM25 returned no matches; bounded direct
+reads used. Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/
+weather-diagnostic-events.json and read-weather-events.py. Preserve initial
+snapshot before collecting later events. Installed app remains running.
+
+Update 2026-09-13 (installed73de754 browser + normal Quit/restart checks PASS):
+User confirmed Aikido works in separate new ordinary Chrome and Safari tabs.
+Then user performed normal Quit. Read-only native-authorized checks passed3
+stable samples at2026-09-12T21:43:55Z: owned launchd jobs absent, root label
+persistently disabled, owned processes/listeners absent, private PF anchor
+filter/NAT/subanchors empty, status/sockets/PF token/lo0 lease absent.
+No learning/backup/runtime mutation by verification; no replacement replay.
+Normal CUA getApp launched tray28320 despite AX timeout. Initial installed check
+ran before StatusV2 existed (saved failure); after service start, readiness
+verification PASS, active fresh StatusV2 and launchd daemon28934, exact installed
+identity retained. App is left running. Evidence in
+output/aud17-comparison-bundle-20260913.ozu40ser/: quit-verification.json,
+restart-verification.{log,json} (initial startup race),
+restart-ready-verification.{log,json} (PASS).
+This qualifies observed browser operation before Quit and service readiness
+after normal restart; post-restart page navigation was not repeated. Earlier
+comparison refusal cause remains undetermined; diagnostics did not change policy.
+All learning/backups preserved. No unchanged build or source suite repeated.
+
+Update 2026-09-13 (73de754 INSTALLED; ordinary navigation pending):
+NEW ozu40ser native transaction dispatched ONCE and exited0 at
+2026-09-12T21:38:02.423173Z. NEVER replay its runner or any older transaction.
+Normal Quit of55fd57a was user-confirmed and stable root preflight passed.
+All learning and app/private backup generations were retained, including new
+App backup /Applications/.Slipstream.before-ozu40ser.app and private
+/private/var/tmp/slipstream-replacement-20260913.ozu40ser.
+Canonical npm run verify:local-install exited0 as console user; overall PASS,
+artifact/build-chain/installed-unprivileged PASS. Tree a3b88da3..., daemon c20ef4fd...
+match source73de754. Fresh StatusV2 active, daemon13572; privileged runtime
+verification subset was not run by this unprivileged verifier.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/{authorization-result.json,
+authorization-execution.log,installed-verification.log,installed-verification.json}.
+After user unlock, normal getApp launched tray17966; daemon13572 still present.
+CUA AX menu access times out, Chrome capture still fails ScreenCaptureKit-3811.
+User completed ONE ordinary Chrome Aikido navigation and reports "работает".
+Installed73de754 Chrome AND Safari user-visible success confirmed: user reports
+"работает" separately after each requested fresh ordinary tab, without reloads.
+Read-only authorized private log after install found10 Aikido events. At
+02:40:45+0500 cdn.aikido.dev same-origin child decision=committed geph=committed,
+direct and all three local outcomes=incomplete_idle_timeout; root boundary=usable.
+Eight Geph relay upstream_eof events are not by themselves page success/failure.
+No new comparison_refused in this bounded snapshot; do not infer old refusal
+cause or routing fix from this different same-origin observation.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/aikido-diagnostic-events.json.
+Next: full normal Quit qualification of installed73de754, followed by ordinary
+launch. Both ordinary browser checks passed by user observation; CUA capture
+remains unavailable. Prior55fd57a failed both browsers; diagnostic-only73de754
+now works in both. Earlier refusal cause and durable recovery are not established
+by these successful observations; no routing policy change claimed.
+
+Update 2026-09-13 (comparison diagnostic artifact READY; awaiting normal Quit):
+Active physical checkout is /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
+branch codex/codebase-audit-20260905. Built source73de7546d09b7c55f6622a91ed11047499c74a3e.
+Installed55fd57a is active and both user Chrome/Safari still fail; details below.
+The new private diagnostics distinguish first refused Geph guard, range result
+and I/O phase without extra probes, changed bounds/authority or sensitive data.
+Focused source evidence is recorded below/audit; original guard AST preserved.
+ONE npm run build:local on73de754 exited0, canonical artifact/build-chain PASS.
+Fresh/staged/bundled daemon:
+c20ef4fdedcbe8cf6b7ee766eb596a0c0a36d48d61a5e6a921786c2779ee6597.
+App tree:a3b88da345028e584a41dd69a58a6a53def5367a4393b3076811acfdd5ca6cf5.
+/Applications/.Slipstream.incoming-ozu40ser.app passed staged canonical verification.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/{build.log,
+build-result.json,build-verification.json,incoming-verification.json}.
+New replacement script SHA256:
+ae9012833f7584947f88e96bef2725fe304a1fffb00a209b46d2f54600c3d267.
+Native entry:python3 output/aud17-comparison-bundle-20260913.ozu40ser/authorize-once.py
+Runner SHA06ad43db5d959c9a998d588e164fdc27ba85e322f6251acc87d799bdf7cae653.
+Exact delta to reviewed prior transaction changes only pinned identities/paths,
+requires preserved cf4swt_9 generation too, and retains every safeguard. New
+snapshot path:/private/var/tmp/slipstream-replacement-20260913.ozu40ser;
+new app backup:/Applications/.Slipstream.before-ozu40ser.app. Neither exists yet;
+no new dispatch marker/authorization request. Do NOT rerun cf4swt_9 or any older
+transaction; its earlier native execution succeeded and marker is consumed.
+User was asked for ordinary Quit of current55fd57a (CUA capture-3811/menus unavailable).
+Next after reply: verify owned absence, dispatch NEW ozu40ser native entry ONCE,
+inspect result; on failure preserve snapshots and stop, never replay. Then
+verify:local-install as UID502, normal launch and ONE fresh user Chrome Aikido
+attempt with matching new geph_guard/geph_result/geph_io logs. This is diagnostic
+qualification, not a claimed routing fix. Preserve learning, all backups and
+AGENTS.md edits; no rebuild for later checkpoint-only edits, no unchanged suites.
+
+Update 2026-09-13 (55fd57a INSTALLED; user Chrome and Safari both still fail):
+The cf4swt_9 native transaction ran ONCE and exited0 at2026-09-12T21:12:43Z.
+Never rerun authorize-once.py or replacement script; dispatch marker exists.
+All earlier backups plus /Applications/.Slipstream.before-cf4swt_9.app and
+/private/var/tmp/slipstream-replacement-20260913.cf4swt_9 are preserved.
+Canonical npm run verify:local-install as UID502 passed artifact/build-chain/
+installed; exact tree23680d22… and daemon1fd44f14…. Installed Chromium0755,
+root-owned, now executes --version successfully as UID502 (AUD-18 fixed).
+Normal launch: daemon72999, tray73741, owned Geph73793 active/up. No learning reset.
+CUA window capture fails ScreenCaptureKit-3811 in Chrome and Safari, also after
+one session reset. User opened fresh ordinary tabs and reports both unchanged.
+Aikido success is NOT established; no repeated user reload requested.
+New private log at02:15:13+0500: cross-child cdn.aikido.dev direct idle plus all
+three local stages incomplete_idle_timeout; Geph comparison was attempted but
+refused. Current comparison_refused conflates object mismatch, response,
+deadline, authority and owned-backend guards; it cannot identify the cause.
+Later relay events show watchdog closures at system/Xbox/local-strategy stages.
+Evidence in output/aud17-console-bundle-20260913.cf4swt_9/: installed-verification
+{.log,.json}, installed-console-execution.json, aikido-post-install-events.json.
+Fixed-category geph_guard/geph_result/geph_io diagnostics are now source-qualified.
+Original comparison guard AST is preserved; no extra network/ownership/clock
+probes.76 autonomous cases passed, then14 affected/drop-only cases passed;
+45 compatibility cases plus2 corrected log expectations passed (overlapping
+selections are not summed). Logs/audit record exact coverage.
+Next: commit this diagnostic-only source and ONE canonical build, then a NEW
+replacement with preserved learning/backups after normal Quit of installed55fd57a.
+No old transaction replay; all learning/backups preserved. Full Quit of the new
+installed artifact remains open (the prior user Quit qualified the old bundle).
+
+Update 2026-09-13 (AUD-17 + AUD-18 packaging fix built; NOT installed):
+Physical checkout /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
+branch codex/codebase-audit-20260905; source55fd57aab4e14e846e19fbd6a5b0dd7aba42dab0.
+The saved Documents project is a symlink here. Preserve user AGENTS.md edits;
+output/ remains private/untracked. PR373 still OPEN at513484ac with17
+SUCCESS/SKIPPED checks; merged PR372/main2780de4b. Not local-audit CI evidence.
+Resume found a real root-installation blocker (AUD-18): Chromium0744 became
+root-owned and console UID502 could not execute it (kernel errno13). The old
+installed-verification branch could miss this despite tree/hash equality.
+Materializer now emits portable0755 executables/directories and0644 resources;
+canonical verifier checks browser/helper/runtime access before and after install.
+26 verifier +13 materializer tests passed; independent review has no blocker.
+Reuse63a0d2c routing/source qualification; no routing code changed or suites rerun.
+ONE justified npm run build:local on55fd57a completed exit0; automatic canonical
+artifact/build-chain PASS. Fresh/staged/bundled daemon:
+1fd44f14bea8a08efbee6827c82974cb09487567d376d3e59b59c69aa41f255d.
+New app tree:23680d22e1e77dae18e944b2c5ffa51edce1fbe0106cf5884d53ca238bf47d50.
+Canonical verification of /Applications/.Slipstream.incoming-cf4swt_9.app also
+PASS. Evidence:output/aud17-console-bundle-20260913.cf4swt_9/{build.log,
+build-result.json,build-verification.json,incoming-verification.json}.
+The older63a0d2c candidate is superseded, preserved at incoming-0o1uetlu.app;
+old Chromium source and pinned archive retained in the0o1uetlu output directory.
+Do not rebuild for later checkpoint-only edits. Installed AUD-16 is unchanged;
+no new replacement/Stop/Quit, learning/settings reset or site navigation occurred.
+New cf4swt_9 replacement is prepared, bash-n PASS, independent review clear:
+output/aud17-console-bundle-20260913.cf4swt_9/replace-exact-bundle.sh
+SHA256 cf3ce7e8504b06875d756bf9609866aa33aee6f2ecebd71b9f136d9665691537.
+It uses protected Apple CLT Python3.9, a self-contained tree verifier and a new
+root-private learning/runtime snapshot; all prior backup generations required.
+Native entry:python3 output/aud17-console-bundle-20260913.cf4swt_9/authorize-once.py.
+The wrapper hashes/copies the exact script into root-private storage before
+execution and records one dispatch; NEVER rerun it if its dispatch marker exists.
+User confirmed NORMAL Quit. Both owned launchd jobs now return113/service-not-found;
+no owned process remains. External Geph854/874 unchanged. Exact script/wrapper
+hashes rechecked; dispatch marker/private transaction/new app backup absent.
+Native one-shot authorization is the immediate next action; inspect its marker
+and result before any continuation, never replay it.
+Next after user Quit: recheck owned absence, invoke the new native entry ONCE,
+inspect result (on error stop, preserve every snapshot, never replay), then
+npm run verify:local-install from app-tauri as console UID502. Normal launch,
+ordinary Chrome/Safari fresh site loading with matching diagnostics and full
+Quit remain separate gates. No old transactions or disposable lifecycle flags.
+Browser success and full Quit remain open; passing build is not product proof.
+
+Update 2026-09-08 (USER PAUSE at 4% quota; AUD-17 built, NOT installed):
+Resume in /Users/aiwaki/Developer/slipstream-codebase-audit-20260905,
+branch codex/codebase-audit-20260905, NOT the baseline-diagnostics cwd.
+Exact source commit:63a0d2c61e7fc4cda9734e80a44acd772fc4fa05.
+The single canonical npm run build:local finished successfully (exit0).
+Its automatic verifier reports overall/build-chain PASS; fresh/staged/bundled
+daemon all c65f4a54127537def2516205eb403be917c00574be210d12e836819e5e9c966b.
+App tree:bf6b37e25d044ca85302224106cb96ed0fdb975905a1641addf753341d5a6273.
+Candidate:app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app;
+version0.1.9-preview.23, valid ad-hoc signature, NOT notarized.
+Evidence:output/aud17-bundle-20260908.kHFT1K/build.log and build-result.json;
+the marker records this exact source head,code0,signal null. No build is pending.
+Source review/scoped tests are recorded below and in audit AUD-17; do not rerun
+unchanged tests or rebuild for this documentation-only checkpoint.
+Installed app remains AUD-16 d1c81c1; Aikido success is NOT established.
+No install, runtime, settings, learning, browser or external-Geph changes in
+this repair turn. User requested saving progress and stopping before install.
+Next after resumption: reconcile git/artifact identity, then prepare ONE new
+exact-artifact workstation replacement, preserving learning and every backup.
+Use normal Quit and native macOS administrator authorization; never store or
+replay a password. Do NOT rerun any previous replacement transaction, including
+output/aud16-bundle-20260908.b8M9iA/replace-exact-bundle.sh. Do NOT use disposable
+CI lifecycle scripts/flags on this primary workstation. After replacement,
+verify installed identity and normal Chrome/Safari fresh site loading with
+matching child/local-stage diagnostics; full Quit remains an open gate.
+No claim that routing recovers already-failed JS imports or replayed TLS.
+Last PR373 check:OPEN at513484ac43ae0348df06e61fca5af9d3105eb225,17
+SUCCESS/SKIPPED; NOT evidence for this local source. No push/CI dispatch this
+turn. output/ remains untracked and contains private evidence: do not add it.
+
+Update 2026-09-08 (AUD-17 exact source qualified; canonical build next):
+Autonomous exact-object recovery and pending-request lifetime corrections are
+complete in the active audit checkout. Independent final review found no open
+blocker. Same/cross-origin children both get one fresh8+8+3 bounded window;
+owner, coalesced-parent and exact-child callers preserve that admitted bound,
+including early exact-CLOSED. Committed same-origin local/Geph claims get a fresh
+4s handoff; no delivered TLS replay. Selected-local cancellation closes its
+owned upstream. Fixed allowlisted local-stage diagnostics expose proof stops.
+Scoped evidence: TLS28; bounded DNS32; autonomous60 unique cases accumulated
+without unchanged reruns; pending/local-plan focused logs under
+output/pending-child-focused-u9FHJk; existing ownership/budget35, diagnostic30,
+and root coalescing/cancellation5 affected cases passed. These groups overlap;
+do not add them into a fictitious total. Detailed exact logs: audit AUD-17.
+Next: commit this exact delta, one canonical npm run build:local with automatic
+fresh/staged/bundled equivalence verification. Installed d1c81c1 is unchanged;
+ordinary Chrome/Safari product success, exact replacement and full Quit remain
+open. No network or workstation mutation during source qualification.
+
+Update 2026-09-08 (AUD-17 autonomous recovery authorized; source in progress):
+User explicitly authorized bounded recovery beyond AUD-16 diagnostic-only idle.
+Work remains in slipstream-codebase-audit-20260905 at HEAD84fa8e3, source dirty;
+installed d1c81c1 remains unchanged and Aikido is NOT fixed in the installed app.
+New measured TLS ingress, shared-deadline Xbox DNS, three-stage parallel exact
+critical-object qualification and same-object owned-Geph proof are implemented.
+A full local object instead selects an ephemeral exact local plan. Pending
+parallel child requests join their admitted observation before consulting stale
+root health. Review is closing the early exact-CLOSED branch that could cancel
+that waiter. No runtime, settings, learning, browser or external Geph mutation.
+New narrow tests are underway; completed TLS28 and DNS32 passed. Autonomous
+blocking/async integration and local-plan/join tests have first-run evidence;
+test-only expectations are being corrected and only affected selectors rerun.
+Do not build/install until exact-delta regressions and independent review finish.
+Do not repeat unchanged full suites. Current PR373 remains OPEN at513484ac with
+17 SUCCESS/SKIPPED checks; those checks are not evidence for this local delta.
+Detailed bounds and source qualification: DECISIONS AUD-17 and audit AUD-17.
+
+Update 2026-09-08 (AUD-16 fresh Chrome attempt FAILED; continuation gap located):
+The new user screenshot after the16:48 install shows Aikido spinner and169
+Console errors. This IS a new d1c81c1 attempt, not the retained14:11 report.
+Fresh daemon93766/owned-Geph status and read-only private-log extraction show
+critical cdn.aikido.dev `direct_idle_timeout` with
+`geph=diagnostic_same_object_complete` at21:51:39+0500. Thus the owned comparison
+ran and completed the same object; its diagnostic-only contract cannot route.
+Two CDN relays were closed by `local_partial_record_watchdog` (system/plain,
+then Xbox/plain); their separate recovery events say confirmation_not_scheduled.
+`relay-end recovery=not_attempted` is only the pre-handler default, NOT absence
+of recovery. Source confirms callbacks run, but remaining local strategies wait
+for future browser connections. Post-relay state advancement schedules no local
+continuation; tests manually feed stage evidence and do not prove this liveness.
+Do not attribute all169 JS errors to the two observed relays. Detailed evidence,
+limits and exact source pointers: audit AUD-16 post-install continuation gap.
+Logs0600: `aikido-relay-child-20260908T1656.log` and
+`aikido-existing-events-20260908T1705.log` under the existing b8M9iA output dir;
+osascript records are CR-separated. No production edit/test/build/install,
+new site request, reload or runtime/learning change in this diagnosis turn.
+Next: explicit authorization for bounded autonomous recovery qualification
+beyond the diagnostic-only idle exception; retain independent local proof,
+same-object/owned-Geph guards and protected exclusions. Do not replay a delivered
+TLS stream or imply advancing a route resurrects already-failed browser imports.
+
+Update 2026-09-08 16:48 UTC (AUD-16 installed and active; new browser gate pending):
+The authorized b8M9iA transaction executed ONCE through native macOS
+administrator authorization and exited0: exact d1c81c1 installed, root daemon
+hash5828f2d1… matched, learning not reset. All prior backups and new
+`/Applications/.Slipstream.before-b8M9iA.app` plus root-private
+`/private/var/tmp/slipstream-replacement-20260908.b8M9iA` snapshot are retained.
+Do not rerun this or previous transactions. No password stored/replayed.
+Canonical `npm run verify:local-install` exited0 with overall/build-chain/
+installed PASS, app treee8a4f984…, valid schema3 witness and live launchd PID
+93766 matching fresh active StatusV2. Its privileged runtime checks remain
+not_run; pre-install privileged absence and final root daemon hash were checked
+inside the successful transaction. Logs: `replacement-execution.log` and
+`installed-verification.log` under `output/aud16-bundle-20260908.b8M9iA/`.
+Opened `/Applications/Slipstream.app` normally: tray94371, owned Geph launchd
+94411. Fresh backends.geph reports state=up, owned=true. External Geph untouched.
+CUA read the existing ordinary Chrome Aikido tab with its prior169 Console
+errors; no new navigation/reload was performed. Those old errors are NOT a
+failure observation of AUD-16. Next: one fresh normal Chrome Aikido navigation,
+then correlate its new child/relay diagnostics; Safari qualification remains
+open. No new tests/build, route/learning reset or other site probes this turn.
+
+Update 2026-09-08 (AUD-16 replacement authorized; ready for native authorization):
+the user explicitly authorized installing the exact d1c81c1 bundle. Its copy at
+`/Applications/.Slipstream.incoming-b8M9iA.app` passed the canonical verifier
+again: overall/build-chain PASS, tree e8a4f984…, daemon5828f2d1…. No tests/build
+repeated. Both owned launchd jobs are now absent (113) and no owned process
+remains; root-private stable listener/PF absence will be checked inside the
+transaction. External Geph854/874 were observed separately and untouched.
+Reviewed one-shot script (NOT executed yet):
+`output/aud16-bundle-20260908.b8M9iA/replace-exact-bundle.sh`, SHA-256
+`2ac6782918a4f3ded07a4a82c8669955aa039ddc080f1757d123446dfac2f475`.
+Syntax and independent exact-delta review PASS. New before-b8M9iA app backup
+and private replacement directory do not yet exist. It requires all prior
+backup generations, snapshots current learning, and does not reset it on
+success. Installer failure can remove live learning; the private snapshot is
+the recovery source, never automatically rerun the transaction. Next: native
+macOS administrator authorization of this fixed script, inspect exit once,
+then canonical installed verification and normal app launch/browser gate.
+
+Update 2026-09-08 (AUD-16 exact local bundle PASS; NOT installed):
+the user answered YES to the bounded diagnostic-only same-object Geph request.
+Source based on c15da33 now enters one owned comparison for valid critical-child
+INCOMPLETE + IDLE_TIMEOUT, still returns retryable-inconclusive with no proof,
+route/cache/learning. Its deadline is min(original final, now+3s), request bytes
+are reused, and the SOCKS connector is pinned to GEPH_OWNED_PORT rather than
+mutable backend state. Cancellation/wait-timeout signals the child before drain;
+the lease remains owned until cleanup. DECISIONS records the narrow supersession.
+Affected existing tests:63 passed initially; three old idle-prohibition
+expectations were updated for the explicit policy change, and those3 passed
+separately (66 affected cases green, no unchanged rerun). After the final bounded
+ownership runner change, only seven affected integration cases were rerun: PASS.
+The new helper/cancellation file passes49 synthetic cases, including shrinking
+lsof/ps deadlines and pre/post readiness. Independent review has no remaining
+blocker. See audit AUD-16 for exact commands, logs and limits.
+Source committed as `d1c81c1f4b2d3aa8a86e70cfee2921aac20e607f`. One canonical
+`npm run build:local` completed exit0; embedded verification reports overall,
+artifact and build-chain PASS. Fresh/staged/bundled daemon all `5828f2d1…`;
+app tree `e8a4f984…`, valid adhoc signature, not notarized. Full log and hashes:
+`output/aud16-bundle-20260908.b8M9iA/build.log`, audit AUD-16. Artifact is
+`app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app`. Post-build
+worktree had only untracked output; later checkpoint-only docs do not change
+the built source. Do not repeat build/tests for those documentation updates.
+PR373 remains OPEN at513484ac with17 SUCCESS/SKIPPED checks; it is not this local
+delta. No site probe, installation or runtime change; installed10e2cd6 and the
+failed14:11 report are unchanged. Next: obtain confirmation for the exact
+workstation replacement, use normal Quit/authorized lifecycle without losing
+settings or learning, then canonical installed verification and ordinary
+Chrome/Safari qualification. No further permission needed for the source
+diagnostic-only behavior; do not repeat the resolved policy question below.
+
+Update 2026-09-08 (AUD-15 source fixes and causal relay diagnostics; NOT installed):
+continuation source is `codex/codebase-audit-20260905`, based on9c73287.
+Two independently reviewed defects are fixed in `spike/tproxy.py`: TLS ingress
+was observed only after browser drain, allowing a false partial-record watchdog
+under downstream backpressure; peer EOF order came from coroutine cleanup,
+allowing cleanup/cancellation to masquerade as upstream-first EOF. Ingress is
+now observed before drain, delivery remains after drain, the watchdog runs only
+during an actual upstream read, and peer read-end order is captured before
+cleanup (including equal clock ticks). None proves which mechanism caused the
+retained physical Aikido failure; that report lacks the new event evidence.
+New bounded `relay_diagnostics.py` records causal termination reasons and
+recovery dispositions without routing authority. StatusV2 and tray projection
+expose typed counters only; normalized host/stage/reason is private-log-only,
+never URL/path/body. Script install payload includes the new module. Private
+queue/tail can drop events; absence is not negative evidence. Independent review
+found one misleading recovery label, corrected to `local_ladder_unchanged`.
+Change-scoped checks: module60+2 and new enum1, core3, status_client8; focused
+Python43, then36 after the final read-order change (overlapping selections,
+not additive totals). Exact commands/logs and limits: audit AUD-15. Changed-file
+rustfmt and diff-check pass. No full suite, network navigation/probe, build,
+installation or runtime/learning change. Installed source remains10e2cd6 and
+the14:11 report above remains the same failed attempt; do not request it again.
+HISTORICAL POLICY CHOICE (resolved by the AUD-16 authorization above): the existing critical-child idle-timeout contract explicitly
+forbids even starting Geph. The user was asked whether one bounded diagnostic-only
+same-object probe through verified internal Geph is allowed, with NO route/cache/
+learning authority. At this checkpoint there was no answer; AUD-16 now records
+the authorized diagnostic-only exception. Actual relay
+EOF cannot be substituted for EOF of the separate critical-object probe, and
+the existing incomplete-response fallback's `GET /` is not same-object proof.
+The source contract and affected checks are now complete as recorded above;
+exact build and ordinary Chrome/Safari qualification remain. Do not claim
+Aikido recovered.
+
+Update 2026-09-08 (AUD-14 physical Chrome attempt FAILED; next boundary identified):
+user still sees Aikido's spinner on exact installed10e2cd6. Fresh Copy Diagnostics
+generated14:11:40.680Z, mtime14:11:44.352Z, daemon86054, preserved mode0600:
+`output/aud14-bundle-20260908.dHZffB/diagnostics-20260908T141144Z.json`.
+Its bounded80-line tail records at19:10:12+0500 child cdn.aikido.dev:
+`decision=direct_idle_timeout direct=incomplete_idle_timeout geph=not_started`;
+parent app.aikido.dev is usable/assets3. Earlier concurrent/window refusals no
+longer occur in this captured child attempt, but product recovery has failed.
+Source7850 intentionally returns retryable-inconclusive before Geph; the
+reader's timeout is an absolute eight-second budget, not measured eight-second
+silence. Parsed incomplete206 identity-JS framing is established, but neither
+EOF/reset nor actual progress/silence duration nor same-object Geph success.
+No cache/learn is allowed here; do not remove that guard or increase timing
+based on this label. See audit AUD-14 post-install comparison for exact paths.
+Console evidence RECEIVED: the user's screenshot shows many cdn.aikido.dev
+JavaScript requests with ERR_CONNECTION_CLOSED and counter169. The user
+explicitly confirms this report was exported immediately AFTER the same
+attempt. Opening Console later does not move the errors after the export;
+the request for another Copy Diagnostics was mistaken and withdrawn. Do not
+ask for another export/reload of this unchanged attempt.
+Source trace finds three distinct real-relay close mechanisms: upstream
+EOF/reset, Slipstream's six-second partial-TLS-record watchdog, and a proved
+pending-navigation retry abort. The separate eight-second child probe does
+not identify which mechanism closed Chrome's streams. The current report
+contains no matching per-relay reason; aggregate route_health is not such
+evidence. See the audit's Console/relay causality section. Next: close the
+bounded per-relay diagnostics gap at the actual close decision, preserving
+slow-link/routing guards, before requesting any further workstation attempt.
+No source changes, tests, build/install, route reset, network probe or
+navigation were run during this trace. Installed runtime and backups stay intact.
+
+Update 2026-09-08 14:06 UTC (AUD-14 installed and active; browser gate pending):
+the native macOS-authorized `dHZffB` transaction exited0 and reported exact
+`10e2cd6` installed/root daemon hash matched, without resetting learning.
+Do NOT rerun it. All prior backups and the new app/runtime/learning snapshot
+are retained; no stored/replayed password was used. Canonical
+`npm run verify:local-install` returned overall/build_chain/installed PASS:
+same complete app tree and daemon below, schema3 witness valid, exact live
+launchd/StatusV2 PID86054 and fresh active heartbeat. The verifier's independent
+privileged live kernel PF/listener checks remain not_run; the transaction
+itself checked pre-install privileged absence and final daemon hash.
+Evidence: `output/aud14-bundle-20260908.dHZffB/installed-verification.log`.
+Opened `/Applications/Slipstream.app` normally; tray86978 and owned Geph
+launchd87038 are running. At14:05:55Z StatusV2 reports Geph up/owned=true/
+port_conflict=false and local engine ready. These are runtime checks, not
+Aikido success. Next requires the user's single ordinary Chrome Aikido
+navigation and built-in Copy Diagnostics; no repeated reload, manual route,
+profile reset or artificial proxy flags. Then inspect the fresh bounded child
+decisions and ordinary Safari outcome. CUA browser control was previously
+blocked by ScreenCaptureKit -3811; no repeated unchanged permission attempt.
+
+Build/replacement evidence (14:02 UTC preparation, now executed):
+one canonical `npm run build:local` on clean exact source
+`10e2cd6186303d89ad6f49905460e24d7afd1366` exited0 at13:54:20Z;
+automatic overall/build_chain PASS. Fresh/staged/bundled daemon SHA-256:
+`bcaf262dae85ed82c1bdc7e0b837460f5fa3398b422f546d28ce2f78d6d098c8`.
+App tree `82b81cd9fc9e5070085db2ea1933d5c765766897ff2364ab208cbd7ad70c6a47`.
+The complete `/Applications/.Slipstream.incoming-dHZffB.app` copy separately
+passes the canonical verifier. Evidence: `output/aud14-bundle-20260908.dHZffB/`
+(`build-exit.json`, `build-verification.json`, `incoming-verification.log`).
+Ad-hoc signature only; unnotarized. Replaced installed source was `dc2937bc`.
+User authorized proceeding and performed normal Quit. Read-only observation:
+no owned processes, both launchd jobs absent, root label disabled, status and
+status.tmp absent. External Geph854/874 untouched. Privileged port/PF absence
+was subsequently checked by the successful transaction. Reviewed one-shot script:
+`output/aud14-bundle-20260908.dHZffB/replace-exact-bundle.sh`, SHA-256
+`b046c0aca303fdf745de420c68715455dd7b7f4c0afce1c49ab5d2f976db40ba`.
+It binds old/new full app and daemon identities, preserves all three previous
+backup generations, snapshots current learning without reset, and requires
+three stable privileged absence samples. New backup paths:
+`/Applications/.Slipstream.before-dHZffB.app` and
+`/private/var/tmp/slipstream-replacement-20260908.dHZffB`.
+Transaction, canonical installed verifier and normal launch are complete;
+ordinary Aikido evidence remains pending. Do not replay any transaction. No tests or
+soaks repeated; build success is not site success. Main`2780de4` and PR373
+OPEN/exact`513484a` required PASS rechecked. This checkpoint is docs-only;
+the product artifact remains bound to exact source`10e2cd6`.
+
+Update 2026-09-08 (AUD-14 source correction; installed build unchanged):
+the user authorized fixing the diagnosed child admission starvation. Source
+now separates execution leases from root coalescing/child proof Futures.
+Only the original root task can transfer its drained execution slot to its
+one selected cross-child; exact child proof capability/IP and cancellation
+drain remain independent. Root admission reserves one future child start;
+actual starts plus reservations remain <=8/60s and execution jobs <=2. Child
+conversion uses its own timestamp; actual starts are never refunded.
+Conservative tradeoff: a root needs two available window credits initially,
+releasing the unused reservation when it has no cross-child. Details and the
+three pre-I/O refusals are in audit AUD-14, not a new site exception.
+Existing affected Python selection:74PASS/709deselected,
+`output/aud14-focused-LKpVG3/existing-preflight-tests.log`. Independent static
+review found no production blocker. New synthetic admission tests:11 distinct
+cases PASS (four unchanged passes reused, seven corrected/new passes), logs
+`output/preflight-admission-tests-20260908.sb88Nb/{pytest,pytest-guards}.log`.
+The sole initial failure was a test callback bypassing the production drain
+adapter; only that test was corrected. Source verification is complete:
+85 distinct affected cases green, AST and diff checks PASS. No full-suite rerun.
+No new browser/network probe, runtime mutation, learning reset, full suite,
+workflow or soak. Installed exact source remains `dc2937bc`, with last failed
+Aikido observation and fresh report already captured below; no fresh product
+success is claimed. Next: canonical build/equality on the committed fix
+before a separately gated install and ordinary Chrome/Safari evidence.
+Live main remains `2780de4`; PR373 remains OPEN/exact`513484a`, required checks
+PASS. PR374 moved to`b1bf2a9` (OPEN/no listed checks), remains excluded; PR362
+still OPEN/diagnostic-only. Primary checkout remains`a22a698` with only its
+pre-existing untracked directories. Work stays on the audit branch, not main.
+
+Update 2026-09-08 12:02 UTC (user navigation still fails; fresh export needed):
+user accidentally opened Aikido in Safari first, then Chrome; reports unchanged
+failure and supplies a Chrome screenshot with only the loading spinner. Keep
+that order in the evidence; it is not an isolated Chrome-first comparison.
+Installed daemon2946 remains active; Geph is up/owned/no conflict with learned1/
+pending0, which does not identify the learned host or prove critical resources.
+The default diagnostic file still has mtime 10:31:37Z, predating the new bundle
+and navigation; do not interpret it as this attempt's child record. Next:
+built-in Copy Diagnostics with local authorization, without another reload,
+then inspect the fresh bounded child decisions. No speculative routing changes,
+new tests, build, runtime mutation or browser navigation occurred in response.
+
+Update 2026-09-08 11:58 UTC (diagnostic replacement verified; browser UI blocked):
+the native macOS-authorized `nBz5za` transaction exited0 and reported exact
+`dc2937bc` app installed/root daemon hash matched, without learning reset.
+Do NOT rerun it. New previous app and root-private backup must be preserved.
+`output/aikido-child-diagnostic-20260908.nBz5za/installed-verification.log`
+records canonical overall/build_chain/installed pass: app tree `15668061...`,
+daemon `7bef1eb8...`, schema3 witness valid, fresh active StatusV2 and exact live
+launchd PID2946. Coverage is installed-unprivileged: the transaction itself
+proved pre-install privileged absence and final daemon hash; independent live
+kernel PF/listener verification is not claimed by the unprivileged verifier.
+Opened `/Applications/Slipstream.app` normally. Tray3774 and owned Geph3834
+run; `gui/502/dev.slipstream.geph` is running, StatusV2 Geph up/owned=true/
+port_conflict=false. No manual resume-marker deletion or learning reset.
+No Aikido navigation has happened: Chrome CUA selection again failed
+ScreenCaptureKit -3811 before interaction. Next requires the user's one normal
+Chrome Aikido navigation (no reload/rules/profile changes), then built-in Copy
+Diagnostics with local authorization and visual result. Capture the NEW bounded
+child-decision record; do not reuse the old sensitive report or claim the
+site is fixed. No further build, unchanged tests or soak are required.
+
+Update 2026-09-08 11:49 UTC (normal Quit confirmed; new transaction ready):
+user performed Quit. Read-only inspection found no owned processes, both
+launchd services absent (113), root label disabled, and status/status.tmp absent.
+External Geph854/874 remain untouched. Nonroot absence is not the privileged
+port/PF proof; the transaction must check three stable absence samples itself.
+New reviewed one-shot script:
+`output/aikido-child-diagnostic-20260908.nBz5za/replace-exact-bundle.sh`, SHA-256
+`53986e902973dff9639f12f0ae2f7ebaad6d58057fd7afe41e8411bb574b59ff`.
+It binds old `dde2498` and incoming `dc2937bc` bundle/daemon hashes, checks
+TCP1080/1443 and private PF filter/translation/child anchors, preserves both
+prior backup generations, snapshots current runtime/learning privately, and
+does not reset learning or manually remove the Quit-resume marker.
+New backup paths: `/Applications/.Slipstream.before-nBz5za.app` and
+`/private/var/tmp/slipstream-replacement-20260908.nBz5za`. They are absent before
+dispatch; their creation forbids blind retry. `bash -n` and parent diff review
+passed. A native macOS authorization prompt is the next execution boundary;
+no password is stored/replayed. Do not infer success from this checkpoint:
+inspect transaction completion and run the canonical installed verifier first.
+
+Update 2026-09-08 (diagnostic bundle built/staged; awaiting normal Quit):
+one canonical local build on clean source
+`dc2937bc887d47d4af14b0d3cea703ee13d67a1b` completed with exit0 and automatic
+verifier overall/build_chain pass. Fresh/staged/bundled daemon SHA-256 is
+`7bef1eb8dc5d153ec2d234eb60681845e237e2177d52d90d8b8b8c25fd81456e`;
+app tree is `156680611337a40ac8fffcf5c66bb0d285f7dfa288ae671d71cacd03ea692c85`.
+The complete copy at `/Applications/.Slipstream.incoming-nBz5za.app` separately
+passes that canonical verifier. Both logs are under
+`output/aikido-child-diagnostic-20260908.nBz5za/`. Tracked source remained clean
+through build/staging. No tests repeated; no soak or browser navigation.
+Installed `dde2498` has NOT been replaced or stopped. Last live observation:
+daemon39797/tray41298/owned Geph81799; external Geph854/874 remain distinct and
+untouched. sudo-n is unavailable. CUA Slipstream selection timed out; selecting
+Chrome failed with ScreenCaptureKit -3811, so no UI Quit/navigation occurred.
+Next: user performs normal Quit and local macOS authentication, then a NEW
+fixed replacement with old/new identities and new backup paths, preserving
+learning and every Sep5/ywqzED backup. Do not replay either old transaction.
+After replacement, `verify:local-install`, owned startup, then one ordinary
+Aikido navigation plus bounded child decisions. Aikido remains unqualified;
+the app is ad-hoc signed/unnotarized, not a published release.
+
+Update 2026-09-08 11:17 UTC (diagnostic replacement authorized):
+the user explicitly approved building/installing the child-diagnostic and
+privacy-export source changes, followed by one ordinary Aikido attempt.
+Reuse the recorded 67 Python and 17 Rust passing cases; do not repeat unchanged
+suites or run a soak. Canonical `npm run build:local` will bind fresh/staged/
+bundled daemon identity with test-only overrides unset. Evidence directory:
+`output/aikido-child-diagnostic-20260908.nBz5za/`. Installed `dde2498` remains
+unchanged until the newly verified bundle passes a fresh exact replacement
+transaction; preserve configuration, learned state, Quit-resume semantics and
+all previous app/runtime backups. Do not replay the old replacement script.
+Main/PR373/PR374/PR362 were rechecked and match the checkpoint below; primary
+checkout still has only its pre-existing untracked output directories.
+No routing fix or browser success is claimed. Next: canonical build, scoped
+owned-runtime stop/replacement with local authentication, installed verifier,
+then one Aikido navigation and bounded child-decision evidence.
+
+Update 2026-09-08 (fresh Aikido diagnostics read; child outcome missing):
+the user-authenticated Copy Diagnostics report was preserved privately at
+`output/workstation-replacement-20260908.ywqzED/diagnostics-20260908T103137Z.json`
+(mode0600). Its bounded root tail contains the failed navigation: at
+15:23:34+0500 `app.aikido.dev` and at 15:23:35+0500 `cdn.aikido.dev` both report
+root `boundary=usable`, `outcome=usable`, exact address, multiple candidates,
+no retryable/hard/incomplete failure and three extracted bootstrap assets.
+This excludes the earlier TLS-before-HTTP failure for these root observations;
+it does NOT prove their child files or page were usable. Owned Geph remains up
+in that report. The negative child outcome is transient and not exported:
+StatusV2 aggregates and the root record cannot distinguish child admission,
+range completion/EOF/timeout or Geph proof rejection. Do not guess which ran.
+
+Source work is complete, NOT installed: `fb19315` adds bounded allowlisted
+child-decision diagnostics without changing routing, proof, cache, timing,
+concurrency or cancellation policy (67 distinct affected cases pass).
+`a728100` separately fixes diagnostic export of embedded Geph cookie/route
+records (17 focused cases pass, independent boundary/bypass review and root
+final diff review complete). Incomplete sensitive records and byte-truncated
+Geph tails are omitted; ordinary root decision logs and structured Geph state
+remain. The old saved report is still PRIVATE, not fully sanitized: do not
+dump, upload or commit it. No secret values belong in repository documents.
+No target reload, live probe, runtime mutation, build, install, learning reset
+or protected workflow occurred. Installed product remains `dde2498`; source
+changes are not installed or browser-qualified. Next requires a canonical
+verified bundle of the new source and a separately authorized replacement,
+then one ordinary Aikido attempt with the child record captured. Do not repeat
+the old installed attempt: that daemon discards the missing evidence. Do not
+claim the page is fixed. Primary/recovery worktrees and backups are untouched.
+Main remains `2780de4`, PR373 remains open at `513484a`; CI32867878889 and
+audit32867879962 attempt1 and exact-head required checks pass for that PR only.
+PR374 and diagnostic-only PR362 remain open/unmerged and excluded. Detailed
+commands, failure/retest boundaries and privacy tradeoff are in the audit.
+
+Update 2026-09-08 (first browser observations; Aikido failure captured):
+ordinary Chrome navigation to Capacitor rendered the real homepage with CSS
+and hero imagery, no manual reload/rule/reset. It was observed loaded 33s after
+navigation; this is an observation bound, NOT a measured load time. Ordinary
+Chrome Aikido remained at its spinner beyond 45s. DevTools, opened only after
+failure and without reloading, reported 162 errors; visible CDN JavaScript
+resources failed with `net::ERR_CONNECTION_CLOSED` on `cdn.aikido.dev`.
+Do not call this qualification successful or infer a routing cause from the
+spinner alone. Root StatusV2 still reports owned Geph up/no conflict, active
+daemon PID39797 and live dual-stack descriptor witness. The startup defect is
+separate from this still-open critical-resource failure.
+
+Next: user invokes built-in Copy Diagnostics and authenticates its bounded
+root-log export, then inspect the freshly saved sanitized diagnostic file for
+this navigation before changing code or repeating the site. Raw root log
+`/var/log/slipstream.log` is root0600 and sudo-n still requires authentication;
+no password was reused, no new privileged read or speculative fix occurred.
+If the default 80-line exported tail omits this attempt, request a scoped
+historical log slice rather than reloading to manufacture new evidence. The
+first Safari app-selection attempt hit a ScreenCaptureKit capture error before
+target navigation; Safari remains unverified. Preserve both browser tabs and
+all existing runtime/learning backups. Detailed observations are in the audit.
+
+Update 2026-09-08 10:20 UTC (replacement verified; owned Geph now starts):
+user reports the fixed replacement completed. Canonical `verify:local-install`
+passes overall/build_chain/installed for exact `dde2498` bundle tree
+`b1690537...` and daemon `5af9020b...`; log:
+`output/workstation-replacement-20260908.ywqzED/installed-verification.log`.
+Root daemon PID39797 is active with a fresh dual-stack descriptor witness and
+StatusV2 PF ready. Historical schema-3 install attestation is valid; its dormant
+snapshot is not current PF state. Independent privileged runtime checks were
+not rerun by the unprivileged verifier. The new backup paths exist; do NOT
+replay the transaction or export its root-private runtime snapshot.
+
+After normal app launch, installed tray PID41298 and owned Geph PID41356 run;
+`gui/502/dev.slipstream.geph` is loaded/running and StatusV2 reports Geph up,
+owned=true, port_conflict=false. The app cleared the old Quit-resume marker
+itself; no manual marker removal or learning reset occurred. External Geph
+PID854/874 remains separately identified and untouched. This closes the
+evidenced old listener-visibility/startup blocker, not the browser gate.
+Next: ordinary Chrome/Safari Capacitor/Aikido observations, then remaining
+critical-resource and full Quit/Restart qualification. Keep original learning
+restoration open. Audit/primary/live main/PR373 checks show no source delta;
+older PR CI does not qualify local `dde2498`. No rebuilt or repeated test suite.
+
+Update 2026-09-08 (Quit observed; exact replacement staged, awaiting local sudo):
+after the user's normal Quit, at 10:06:44 UTC no owned tray/root daemon/Geph
+process remained; both launchd labels were absent, root label disabled, and
+status/status.tmp absent. The private Quit-resume marker is preserved.
+Unprivileged empty lsof is NOT listener absence proof; root lsof/private-PF
+checks remain pending because sudo requires user authentication. External
+Geph.app processes are separately identified and untouched.
+
+Incoming `/Applications/.Slipstream.incoming-ywqzED.app` passed the canonical
+complete bundle/build-chain verifier for source `dde2498`, app tree
+`b1690537bdc4b4270c0a8c3a02e475efaa24086b1f5b68017221feded5471d6c`.
+Installed `b172617` is unchanged and stopped. The fixed one-shot replacement
+is `output/workstation-replacement-20260908.ywqzED/replace-exact-bundle.sh`;
+verification logs, script identity and transaction boundaries are in the audit.
+It has NOT executed. It must recheck privileged absence before writes, preserve
+both original Sep-5 backups and the resume marker, and leave learning in place.
+New backups are `/Applications/.Slipstream.before-ywqzED.app` and root-private
+`/private/var/tmp/slipstream-replacement-20260908.ywqzED`; their existence stops
+a repeat attempt. Never run the old installer/reset or blind-retry a failure.
+Next: user-authenticated execution of this exact script in their own Terminal,
+then inspect completion and verify installed identity/owned Geph startup before
+ordinary browser qualification. Original learning restoration and browser/full
+Quit/Restart proof remain open; no new tests, rebuild, CI or soak are needed
+for this documentation-only checkpoint.
+
+Update 2026-09-08 (corrected exact bundle verified; replacement not started):
+product source `dde2498bc9107999726d6f9709b7ac96c16a83b5` includes listener fix
+`dd5be8e` and the fail-fast Chromium input guard. One canonical build on this
+clean source completed: overall/build_chain pass, installed not_run. App tree
+`b1690537bdc4b4270c0a8c3a02e475efaa24086b1f5b68017221feded5471d6c`;
+fresh/staged/bundled daemon all
+`5af9020bbb42e931b4bb0e5a3e4bd04e725f6f45f416683bf9e2356f8cf58a95`.
+DMG checksum is valid. Complete evidence is in
+`output/post-input-guard-bundle-20260908.aCajiw/` and the audit log. This is an
+ad-hoc signed, unnotarized local bundle, not a published or browser-qualified
+release. Documentation-only commits after this source need no rebuild.
+
+Scoped evidence: Python listener/status 47 passed; matching Rust witness/resume
+11 + 5 passed (unchanged, reused); build guard 5 tests + 28 subtests passed.
+Both independent narrow reviews found no actionable blocker. An earlier build
+was correctly rejected because staging lacked the Chromium executable; only
+that verified pinned file was restored from the unchanged installed app.
+No speculative Tauri cache fix, full-suite rerun, protected workflow or soak.
+
+Next: user performs normal Quit on current `/Applications/Slipstream.app`,
+then verify complete owned root/tray/Geph absence before a new narrowly scoped
+replacement transaction for the exact bundle above. The installed app is still
+`b172617`, with the previously diagnosed old resume marker/Geph-off state.
+Do not rerun the old one-shot installer or delete the marker. Preserve
+`/Applications/.Slipstream.previous-B5fQMm.app` and original root-private backup
+`/private/var/tmp/slipstream-qualification-20260905.B5fQMm`; original learning
+restoration remains outstanding. External Geph and primary checkout untouched.
+After replacement, verify exact installed identity and actual owned Geph start,
+then ordinary Chrome/Safari critical resources and full Quit/Restart. No sites
+have yet been qualified against this correction.
+
+Update 2026-09-08 (listener correction tests green; no new installation):
+audit HEAD remains `6b7bf54`, with the preserved uncommitted witness correction.
+Live main `2780de4` and PR #373 head `513484a` are unchanged; required CI
+`32867878889` and audit `32867879962` still pass for that older PR head only.
+The dirty primary checkout's tracked state and HEAD `a22a698` are untouched.
+Rust witness/resume selections already passed 11 + 5 tests and need no rerun
+without a relevant diff. Darwin's unsupported SO_ACCEPTCONN query is replaced
+by bounded TCP_CONNECTION_INFO kernel LISTEN-state evidence. Both previously
+failing real-socket tests plus 24 helper cases pass; the complete affected
+producer selection passes 47 tests (693 deselected). Independent final narrow
+review found no actionable blocker. Next: commit the source and build one
+canonical verified bundle; the installed app remains the old `b172617` build.
+Do not replace actual socket evidence with `is_serving`, alter the resume
+marker, install the unqualified tree, or start browser/account-backed gates.
+Original private backups and learning restoration remain outstanding.
+
+Update 2026-09-05 (root listener confirmed; causal resume correction in progress):
+user-run privileged lsof independently confirms PID11973/root owns BOTH
+`[::1]:1080` and `127.0.0.1:1080`. The installed `b172617` daemon is listening;
+the tray's non-root lsof/netstat visibility failure is the proven blocking
+resume predicate. Enabled Geph in the menu is configuration, not running-state
+proof. No target browser navigation or route-learning shortcut was used.
+The audit branch now adds a root-authored per-heartbeat descriptor witness to
+the existing status file and a bounded, root-file-authenticated tray reader;
+only the two daemon/Geph resume readiness calls may use it when system listener
+ownership is unavailable. A visible conflicting owner still vetoes readiness.
+Exact install, owned process, label, PF, freshness and lifecycle guards remain.
+Source/tests/review are in progress; do NOT install or describe this working
+tree as qualified yet. Keep the running installed app and original private
+learning/runtime backup unchanged. Detailed evidence and focused test outcomes
+belong in `docs/CODEBASE_AUDIT_2026-09-05.md`; next is the completed narrow diff,
+scoped tests and one canonical verified bundle before any replacement.
+
+Update 2026-09-05 17:11 UTC (exact installation verified; browser gate not started):
+the user ran the authorized one-shot installer successfully. Canonical
+`npm run verify:local-install` reports overall/build_chain/installed pass for
+product source `b172617`: installed app tree `0baa30fc...`, daemon `3d86a086...`,
+valid schema-3 attestation and fresh active root daemon PID 11973. Full verifier
+output is `output/workstation-qualification-20260905.B5fQMm/installed-verification.log`.
+The root-private original learning/runtime backup exists at
+`/private/var/tmp/slipstream-qualification-20260905.B5fQMm` (root, 0700), and
+the actual previous app is `/Applications/.Slipstream.previous-B5fQMm.app`.
+Do not rerun the installer, delete backups, or export the private runtime backup.
+Installed tray PID 13022 is running, but owned Geph remains off and its
+LaunchAgent absent; enabled setting is `1`, and the Aug-31 Quit-resume marker
+remains. A Valid marker permits resume but does not force reinstall when exact
+installation and enabled label already match. The watchdog cannot clear the
+marker: `listener_pid(1080)` returns None. Non-root lsof sees no root listener;
+netstat TCP output is empty even for a bounded same-user ephemeral listener
+which lsof correctly sees. Fresh status/PF/owned PID checks pass; current
+listener ownership still needs independent proof. No pending OS auth exists.
+Next: user runs read-only `sudo /usr/sbin/lsof -nP -iTCP:1080 -sTCP:LISTEN`
+in their own Terminal (sudo -n still requires authentication). Inspect the
+result before a causal code correction; do not delete the marker or replace
+current listener proof with historical attestation. Target navigation remains
+blocked on this startup boundary, not yet a browser-routing failure.
+Auto-Geph learned/pending are zero. Ambient apps have learned a few unrelated
+local strategies; that is not a global-zero cache claim or proof of RAM-cold
+targets. No physical target navigation has occurred in this transaction.
+Original learning restoration and ordinary Chrome/Safari/Quit/Restart gates
+remain pending. External Geph and the dirty primary checkout are untouched.
+
+Previous update 2026-09-05 (workstation transaction authorized; waiting for OS authentication):
+the user explicitly authorized installation of the exact `b172617` bundle and
+temporary learning reset with backup/restoration. The user performed old tray
+Quit: its PID and root daemon are absent, `system/dev.slipstream.tproxy` is
+absent and disabled. The separate Geph.app service remains untouched; it is not
+Slipstream's owned bundled Geph. Old `/Applications/Slipstream.app` is unchanged
+and copied to `output/workstation-qualification-20260905.B5fQMm/previous-Slipstream.app`.
+Incoming `/Applications/.Slipstream.qualification-B5fQMm.app` passed the whole
+bundle verifier with app tree `0baa30fc54851f2eab1b250b08d4005fe8e20389a5dc428bc27e0413f5637b16`.
+No root backup/reset/install has executed: the sudo prompt could not be entered
+through the app panel and was cancelled. The narrow user-run installer and
+reviewed prepare/reset/restore helper are in that output directory. Root backup
+will be `/private/var/tmp/slipstream-qualification-20260905.B5fQMm`; it may
+contain private runtime secrets and must never enter diagnostic exports.
+Next: user runs the exact `install-exact-bundle.sh` with sudo, then inspect its
+outcome and run installed-identity verification before opening any target site.
+Never rerun that one-shot installer blindly; preserve both old app copies and
+the original learned-state backup until qualification/restoration is complete.
+
+Update 2026-09-05 16:48 UTC (canonical local build verified; not installed):
+the controlled integration is committed as
+`b172617b105b3cab758288ec1bd686b4da94fef5`, with audit parent `84873f2` and
+preserved recovery parent `ee8ba0e`. One canonical `npm run build:local`
+completed successfully with no test resource override. The tracked source
+remained clean at that exact commit throughout the build. The automatic whole
+bundle verifier reports `overall=pass`, `build_chain=pass`, and
+`installed=not_run`. Fresh, staged and bundled daemon SHA-256 all equal
+`3d86a086ec9cd171ea4f67a861e8127d6f1c1dddc27ba8e028a22e19ea913a22`.
+App tree SHA-256 is
+`0baa30fc54851f2eab1b250b08d4005fe8e20389a5dc428bc27e0413f5637b16`.
+The DMG checksum is valid; full artifact identities, commands, logs and limits
+are recorded in [`CODEBASE_AUDIT_2026-09-05.md`](CODEBASE_AUDIT_2026-09-05.md).
+This is an ad-hoc signed, unnotarized local build, not a published or physically
+qualified release. Later documentation commits do not change its source SHA.
+
+The primary checkout and installed tray/daemon hashes remain unchanged. No
+installation, privileged networking, learned-state reset, physical browser
+test, account-backed workflow, soak, push or new PR was performed in this stage.
+Next is a separately authorized workstation installation/qualification
+transaction or a disposable macOS test environment. Require exact installed
+identity before ordinary Chrome/Safari critical-resource recovery and tray
+Quit/Restart proof. Quit/Restart preserve learned state: they do not establish
+`learned=0`. Do not silently delete the cache or call a warmed run cold.
+Disposable CI lifecycle scripts must not be run on the primary workstation.
+
+Previous update 2026-09-05 (source integration verified; before canonical build):
+the user authorized the next stage. Live main and PR #373 remain at the exact
+SHAs below, and the primary checkout is unchanged. The lost uncommitted tail is
+now preserved as `ee8ba0e8f78b1070f41b54f75b06cd6e802c557b` on durable branch
+`codex/recover-aikido-tail-full-20260905`: 238 confirmed main/child patch calls,
+13 tracked files, all 54 Rust patch calls with eight recorded formatting-only
+normalizations and no known unresolved recovery gap. Independent read-only
+comparison of recovered Python against the installed frozen daemon matched all
+800 code objects including the module, excluding paths/line metadata.
+
+The audit worktree has integrated that preserved baseline with the audit corrections.
+Do not transplant the audit's older preflight/lifecycle implementation over the
+stronger restored exact-object/IP authority, continuous-root TLS and Quit-resume
+coordinator. Transfer only missing fixes and their scoped regressions. A cold-build
+defect is also corrected: daemon freeze/staging must be `beforeBuildCommand`,
+before Cargo resource copying, not the later `beforeBundleCommand`.
+The missing Python fixes pass 13 scoped cases; build configuration passes 53
+tests and five subtests. Rust's affected Quit behavior/authority checks and the
+unchanged scoped Geph/login/coordinator checks are green. An obsolete
+source-shape assertion was corrected after adding read-only install proof;
+only that assertion was rerun. Independent review verified the final marker
+admission and pristine-Quit fixes; no open finding remains in that bounded diff.
+Root directory presence alone cannot mint resume authority: the existing exact
+schema-3 install proof is required for enabled installations. Pristine absence
+does not require a launchd disabled-table entry but still needs the full root
+absence check. The recovered coordinator and Geph ownership chain are retained.
+Final lib.rs SHA-256 is
+`c40613341a7838776ce4cabe7207507174725baffbba9e8c141315967c06d6c6`;
+file-only rustfmt and whitespace checks pass. Full unchanged suites were not rerun.
+
+At that checkpoint Chromium and Geph preparation was complete. The next step was to commit/pin this merge,
+run one canonical `npm run build:local` with no test resource override, and
+require fresh/staged/bundled identity plus the complete bundle verifier before
+considering installation. Build logs belong in
+`output/post-audit-bundle-20260905/`. Installation and physical browser/lifecycle
+qualification remain pending. Progress and limits
+belong in the post-audit section of
+[`CODEBASE_AUDIT_2026-09-05.md`](CODEBASE_AUDIT_2026-09-05.md).
+
+Update 2026-09-05 (whole-project source audit; not installed qualification):
+the user requested an audit prompt, a pass across the codebase, causal fixes and
+a separate persistent Markdown record. The prompt, inventory, twelve defect
+groups, reproductions, focused checks and remaining limits are in
+[`CODEBASE_AUDIT_2026-09-05.md`](CODEBASE_AUDIT_2026-09-05.md).
+
+Work is in the durable worktree
+`/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`, branch
+`codex/codebase-audit-20260905`, based on the latest saved local
+`codex/aikido-cdn-recovery` commit `8cee1ca1ab14e27dca377e44960718867fd3e71a`.
+The completed audit source correction and regressions are committed locally as
+`c060518d52ab888dfd9e92c7472a10dbabe8e555`; this checkpoint is the following
+documentation-only commit. No push, new PR or merge was performed.
+The user's primary checkout remains at
+`a22a698e809af5c1892e90ad462512f6719e56e7` with its existing untracked
+diagnostics untouched. The former `/private/tmp/slipstream-aikido-rootfix.Bekk7h/worktree`
+is incomplete; its historical uncommitted tail and the current installed app
+must not be assumed to match this saved source. Live main is
+`2780de4b3f5d77ab3852e46381b997c618bd5080`; PR #373 is still open at
+`513484ac43ae0348df06e61fca5af9d3105eb225` with matching CI `32867878889`
+and audit `32867879962`. Those remote checks do not qualify this audit diff.
+
+Source fixes isolate root cache/inflight/QUIC health by host and destination IP,
+prevent one root/child object's health from clearing another critical resource,
+add non-destructive explicit Quit coordination, retain ambiguous owned-Geph
+state, enforce CDP absolute read deadlines, redact escaped secret values, bound
+companion retention and Windows terminal-event backpressure, preserve an old
+staged daemon on early build failure, and reject nonfinite soak evidence and
+oversized runtime downloads. Launch at Login reports only verified state
+instead of optimistic success. Local Python/Rust/JS/Swift baselines and scoped
+regressions are recorded in the audit log. App tests use a test-only resource
+override, not a production bundle. Dependency policy scans pass, but existing
+Geph exceptions still expire on 2026-09-30; Chromium integrity-only coverage is
+not a vulnerability scan.
+
+The next product gate is canonical fresh/staged/bundled/installed identity,
+then genuinely cold ordinary Chrome and Safari recovery and explicit Quit /
+Restart lifecycle evidence. No installation, privileged networking, protected
+account workflow, soak or publication was performed during the audit. Do not
+rerun unchanged full suites merely for reassurance, reuse remote CI as current
+source proof, or claim that the original Aikido symptom is physically resolved.
+Legacy source-only installs and unknown/partial cleanup state deliberately fail
+closed rather than executing a mutable privileged fallback.
+
+### Previous checkpoints (historical)
+
+Update 2026-08-31 (TLS wire evidence and deadline ownership corrected locally):
+installation was **not** the next action when this correction began because the
+pre-install build-integrity gate was still open. The exact app recorded in the
+following Quit-lifecycle checkpoint was built before the latest production
+routing edits and is now historical evidence only; it must not be installed.
+That missing gate has since completed for the current source tree. Work remains
+only in the isolated
+`codex/aikido-cdn-recovery` worktree at local base HEAD
+`8cee1ca1ab14e27dca377e44960718867fd3e71a`; the user's dirty primary checkout
+remains untouched. Open PR #373 and its green checks still apply only to remote
+head `513484ac43ae0348df06e61fca5af9d3105eb225`, not this uncommitted tree.
+
+The last static review found two concrete causal defects and both are corrected.
+First, an all-edge TLS-stall consensus previously counted semantic payload bytes,
+so a partial encrypted `ServerHello` could look like zero ingress. The production
+probe now keeps the exact raw socket under cancellation control, drives TLS with
+`MemoryBIO`, and measures every encrypted byte received before decryption. A
+zero-ingress candidate is admissible only after the complete initial
+`ClientHello` flight was sent, at least four seconds of post-send receive budget
+remained, that whole remaining receive budget was actually consumed, and raw
+ingress stayed exactly zero. Slow TCP connect, a blocked or partial ClientHello
+send, a short post-send wait, EOF/cancellation, or even one received ciphertext
+byte remains `retryable_inconclusive` and cannot create a capability, cache,
+route, status event, successor, or learning.
+
+Second, the exact stream's eight-second request-only boundary could cancel an
+unfinished ordinary semantic or critical-child proof that historically owned a
+longer bounded evidence window. Only an explicit system `closed` result now
+fast-cancels that ordinary proof. At exact `timeout` or `unclear`, the handler
+snapshots whether the preflight had already finished: a request-only claim that
+appears later is rejected, while a later ordinary semantic/critical-child result
+may still win within its own unchanged deadline. This preserves the hard
+request-only boundary without silently shortening unrelated evidence.
+
+Change-scoped evidence is green: the affected TLS/preflight selection passes
+`33` tests (`656` deselected), the independent exact-race/ownership/cancellation
+selection passes `21`, and Python compilation plus `git diff --check` are clean.
+Independent post-patch reviews found no blocking TLS measurement, cancellation,
+deadline, ownership, or direct-priority defect. No broad suite, soak,
+account-backed workflow, installation, or browser run was repeated.
+
+One canonical `npm run build:local` then rebuilt the current Python 3.13 frozen
+daemon, Tauri app, and DMG and completed its built-in verifier at
+`overall=pass`, `build_chain.status=pass`, and
+`installed.status=not_run`. Fresh, staged, and bundled daemon executables are
+byte-identical at SHA-256
+`4fbd59f26210ec5151909afe7a2ccfc25fbbba37b3f57fb6b03d2bb6b38cf7e3`;
+the fresh/staged daemon trees both hash to
+`27fc14e7df20a38503b8d69fffae6b072fa23abced06614e346240e97246737e`;
+the materialized/bundled daemon tree hashes to
+`e044f45a7e5686b9f0a4fbf4baceaaf32aab006bf3220d077e29e0b807802f22`;
+and the valid ad-hoc-signed, unnotarized app tree hashes to
+`e49d75322c5c9744eae2061fce8bdbae1d815470927dfed65b5cc5e7cab85467`.
+The automated pre-install gate is therefore complete. This checkpoint stops
+before installation; installation and cold ordinary Chrome/Safari validation
+remain later, separate transactions. Aikido, Capacitor, Weather, and full-page
+recovery are not yet claimed.
+
+Update 2026-08-31 (explicit Quit lifecycle corrected locally): the user-visible
+symptom was structural, not a browser or timing issue. The tray exited while
+the root LaunchDaemon and user Geph LaunchAgent remained `KeepAlive`, so killing
+one process allowed launchd to restore it and the owned layers could appear to
+restore each other. Work remains only in the isolated
+`codex/aikido-cdn-recovery` worktree; the user's dirty primary checkout has not
+been used for these edits.
+
+The local correction makes Quit a serialized, fail-closed transaction. It
+writes an exact owner-private resume marker, runs the bundled daemon's
+non-destructive and idempotent `--stop`, proves root launchd/PF/listener absence
+without deleting the installed runtime, plist, attestation, strategy cache, or
+auto-Geph state, then proves the Geph LaunchAgent and exact private process are
+absent before exiting the tray. Launchctl state is checked: only success means
+loaded and only the exact service-not-found response means absent. Geph TERM
+requires current UID, label, exact private executable/config, stable process
+birth, exact command, and listener; a later KILL requires the same birth
+identity after the verified TERM boundary. Missing or stale ownership never
+authorizes signalling and instead requires a bounded all-process proof that no
+exact private Geph remains. Unrelated listeners remain external. Startup
+quiesces a stale sidecar before status reconciliation, while watchdog repair
+rechecks stop intent, installed attestation, enabled label, status, and listener
+under the lifecycle lock so queued work cannot undo Quit, manual disable, or a
+partial uninstall.
+
+The final static review found and closed one separate process-level race: a
+previously started asynchronous updater could finish during Quit or Uninstall,
+exit the tray, and hand control to its relaunch watchdog. Update, Quit, and
+Uninstall now share one atomic terminal-operation owner. Each claims it
+synchronously before spawning work, prompting, or mutating lifecycle state;
+every cancellation or failure releases only its own claim, while success keeps
+the claim through an owner-checked exit. A late updater therefore cannot
+interrupt or relaunch across an explicit Quit/Uninstall transaction.
+
+Change-scoped evidence is green. The focused Rust process-identity selection
+passes `3`, signal-boundary `1`, stale-ownership `1`, watchdog `1`, startup-order
+`1`, checked-launchctl classifier/bootout `2`, and bounded Geph-stop `6` tests;
+the terminal-operation arbiter passes `2`, and the earlier coordinator/marker/
+setup/root-proof filters remain green. The exact Python `--stop` preservation/
+idempotence/CLI selection passes `4` cases. Independent fresh reviews found no
+blocking root/Geph stop or Update/Quit/Uninstall ownership defect; their
+remaining observations fail closed. Rust formatting and `git diff --check` are
+clean. One canonical exact-tree `npm run build:local` then completed with the
+automated verifier at `overall=pass`: fresh, staged, and bundled daemon copies
+are byte-identical at SHA-256
+`3d2dd1b8f62d10246a9f1a00efe2a9022e3aaa80855884c773f50c4ad4e59669`;
+the materialized/bundled daemon tree is
+`021c9a493987819cc4acebde727f21035f6e56a6118afe0839518e4b0d841a03`;
+the ad-hoc-signed app tree is
+`9efb75eb5d704f8a91ba9db694c7917843b7db9acdd5f076cf8e85891628604f`.
+The build is intentionally unnotarized. No install, process stop, physical
+Quit/relaunch, or browser run followed that exact bundle. Later production
+routing corrections invalidated it as a current-tree artifact, so it must not
+be installed. Its hashes remain only historical proof that the automated
+fresh/staged/bundled daemon-equality guard worked on that older exact tree.
+
+Update 2026-08-31 (all-edge TLS-stall first-request boundary implemented and
+reviewed): the user's dirty primary checkout remains untouched. Work continues
+only in the isolated `codex/aikido-cdn-recovery` worktree at local base HEAD
+`8cee1ca1ab14e27dca377e44960718867fd3e71a`; the production, build-guard, test,
+and documentation changes are still uncommitted. They are not qualified by
+open PR #373, whose live remote head remains
+`513484ac43ae0348df06e61fca5af9d3105eb225`. Its old exact-head checks are green
+but apply to another tree. Live `origin/main` remains
+`2780de4b3f5d77ab3852e46381b997c618bd5080`.
+
+The generic causal chain is now explicit. One exact-numeric-IP root socket is
+owned continuously through TCP, TLS, request, receive, framing, decode,
+classification, and inspection; direct cache/in-flight authority is exact
+host plus PF IP, QUIC evidence is destination-specific, and each critical
+object proves itself without borrowing root/other-object cache. One timeout is
+still `retryable_inconclusive`: it cannot cache, consult provenance, expose a
+child, contact Geph, recover locally, or learn. Cancellation drains the owned
+worker/socket before releasing its authority.
+
+Current read-only evidence shows a real but timing-ambiguous split. The complete
+current public A set for `app.aikido.dev` is `54.195.217.18`, `63.33.115.70`,
+and `54.229.203.255`. Every production continuous-root observation actually
+spent its full five-second allocation in `tls_handshake_timeout` with zero wire
+or payload bytes, no hard error, and no assets. A separate exact edge also
+remained byte-empty through the full eight-second hard window. The identical
+root through the already-owned Geph listener returned a complete usable payload
+in roughly 2.2 seconds (19,603 decoded bytes; 6,314 compressed wire bytes). No
+route, cache, learning state, browser, or external setting was mutated by these
+diagnostics.
+
+The correction does not persist that timing as route evidence. Only the
+production probe, with a complete bounded set of two or three current public
+system IPv4 addresses all exhausting the real five-second TLS window in the
+same zero-byte boundary, may mint one volatile request capability. It is bound
+to normalized host, exact PF IP, port 443, the current verified owned-Geph PID,
+random owner token, exact-system not-before time, and common twelve-second
+handoff deadline. The handler keeps its separate exact PF stream alive through
+the full eight-second hard window and then races it against at least 64 bytes
+from the same held Geph PID. Any direct byte before the no-await commit wins,
+including bytes arriving during PID validation. The capability is burned before
+runtime awaits, cannot be shared or retried, and creates no route/cache/status,
+confirmation, successor, or learning. Invalid identity/readiness/PID/session/
+drain/deadline/payload falls back to the held exact stream when possible; both
+streams ending byte-empty closes only that request.
+
+Change-scoped verification is green without repeating the known-green full
+baseline: all `62` newly added root/address/object/cancellation/diagnostic/cache/
+QUIC/request-only cases pass; the affected existing root/preflight/QUIC/cache
+selection passes `62`; the handler/request-only/owned-Geph selection passes
+`43`; narrower consensus/claim and exact-race selections pass `21` and `33`.
+Python compilation and `git diff --check` are clean. Deterministic tests cover
+single use, fragmented `1+31+32` Geph payload, host/IP/port/time/PID mismatch,
+late and tied direct bytes, deadline expiry inside PID validation, cancellation,
+session cleanup, generic-helper rejection, and absence of routing-state side
+effects. Independent fresh review found no remaining concrete ownership,
+direct-priority, PID/deadline, cancellation, or session-leak defect.
+
+No app bundle, install, physical browser, route-learning/cache mutation, soak,
+or account-backed run has followed this local tree. The remaining pre-install
+gate is the automated fresh/staged/bundled daemon-equality and build-entrypoint
+guard. Only after its static review and narrow tests are green may this exact
+tree be built once, verified, installed, and tested from a genuinely cold
+ordinary Chrome and Safari first request. Do not claim Aikido, Capacitor,
+Weather, or complete-page recovery before that physical evidence.
+
+Update 2026-08-30 (selected-representation root boundary isolated locally):
+the user's dirty primary checkout remains untouched; work continues only in the
+isolated `codex/aikido-cdn-recovery` worktree. The exact installed `9baf111`
+predecessor, app tree SHA-256
+`3c2582ccff8e9349df5906b39c66ef32de40cb65244bce1a8ea62094b2f3a9d6`, and
+bundled/root daemon SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`
+still left a genuinely cold Chrome Aikido navigation empty with no learned
+route. The earlier visible result on `513484a` reused an already learned exact
+overlay, so neither result proves cold first-navigation recovery. Physical
+success in fresh ordinary Chrome and Safari remains open.
+
+History and bounded diagnostics identify the next causal boundary without a
+hostname rule or longer timeout. The semantic root request asked for identity
+content, and shared extractor blob
+`477e2796bd8b4daf525df47c347627c88d7740d0` had no gzip decoder. Against the
+same direct root target, range, and cache controls, the identity request
+received HTTP `200` with `19,688` response-body bytes and `9.219354` seconds to
+first byte; changing only request negotiation to advertise gzip received HTTP
+`200` with `3,561` response-body bytes and `1.872561` seconds to first byte. The
+capture retained no response headers, so this evidence does not assert live
+`Content-Encoding`, `Content-Length`, or `Content-Range` values.
+
+The exact product correction is commit
+`7d3c871582f1b795e7cf7ac061f718255ab3cdaa`. It makes direct and owned-Geph
+semantic root requests byte-identical with gzip negotiation, requires complete raw framing
+and a full selected representation before decode/classification/extraction,
+and accepts only identity content or one bounded gzip stream. Every malformed,
+truncated, concatenated, trailing, unsupported, capped, range, framing, or
+deadline failure remains retryable-inconclusive. On the direct path, at most
+the existing one retry may run, with no healthy cache, child resolution/probe,
+Geph call, or learning; an invalid Geph representation is likewise unusable and
+cannot authorize learning. Critical-child probes remain identity encoded. Change-scoped
+coverage includes the decoder/framing limits, full-versus-prefix `206`, exact
+request equality, and route/cache/learning guards. With an isolated clean
+bytecode cache, the decoder/extractor set passes `54` tests and the exact
+production-chain set passes `17`; the documentation set passes `9` tests,
+compilation and `git diff --check` are clean, and mutation controls fail when
+request equality or the full-selected-representation guard is removed. The
+canonical bundle/daemon equality and one genuinely cold Chrome result must be
+recorded before Safari validation or any product-success claim.
+
+Update 2026-08-28 (cold Aikido request/parser boundary reproduced and corrected
+locally): the user's dirty primary checkout remains untouched. Work continues
+only in the isolated worktree on `codex/aikido-cdn-recovery`. The exact product
+correction is commit `9baf1110b5b4d17fd5a31df9cb42aa1986eead02`, with two
+independent no-findings reviews complete; this checkpoint is its following
+documentation-only update. Live PR #373 remains open at the older remote head
+`513484ac43ae0348df06e61fca5af9d3105eb225` with its exact-head CI and
+dependency audit green. No current browser result or local patch is attributed
+to that remote head.
+
+The exact `dfe300e017103dc3db7de25dea795cd49cc02567` app was subsequently built,
+verified, installed, and observed through the embedded/root-daemon SHA-256
+`23f5ce6342d396d7e6789cf1e2e97f5ed45efb6029c23b43b6e4766ad7b6c707`
+at launchd PID `65464`. A genuinely fresh temporary-profile Chrome navigation
+started at public `learned=0`, `pending=0`, and `last_state=idle`, but Aikido
+remained an empty shell. Its four primary critical CDN requests failed after
+about `8.7` seconds and the wider resource set failed after about `31.6`
+seconds; this was not an observation made too early. StatusV2 still showed no
+learning or pending proof, so the deadline correction's isolated child proof
+had not been entered by the real first-navigation path.
+
+History explains why Aikido appeared to work earlier. At exact product commit
+`513484ac43ae0348df06e61fca5af9d3105eb225`, daemon SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`,
+and PID `68160`, Chrome and Safari both rendered the login page. Before the
+Aikido navigation, however, one exact route was already learned; Capacitor
+advanced the learned count from one to two. That physical result proved reuse
+of an automatically learned shared overlay across browsers, not the missing
+clean transition `learned=0 -> first Aikido navigation -> child learned -> full
+render`.
+
+The remaining production composition defect is exact. The bounded root
+preflight always sends `Range`, and the semantic classifier accepts a complete,
+non-empty `206` as usable. The bootstrap extractor added later accepted only
+status `200`, so a valid full-representation `206` yielded zero critical assets.
+`_run_initial_route_preflight` then skipped the child direct/owned-Geph branch
+and could cache the parent as usable for ten minutes. This is sufficient to
+produce the observed `learned=0`, `pending=0`, idle state and direct CDN
+failures. The retained physical artifact does not include the internal root
+preflight's status and headers, so it is not falsely described as a captured
+live `206`; the defect is instead reproduced through the exact production
+request -> response classifier -> root inspector -> child proof chain.
+
+The exact correction introduces an explicit root-inspection result. A
+`206` is scannable only when one valid in-bound `Content-Range` proves the
+entire identity HTML representation and observed/declared lengths agree. A
+proper prefix response, malformed/out-of-bound metadata, inconsistent framing,
+or an exhausted inspection deadline is retryable-inconclusive: it triggers at
+most the existing one bounded direct retry and publishes no healthy cache,
+child probe, Geph authority, or learning. A complete parent may expose the same
+bounded ephemeral critical objects as before; only explicit child EOF/reset
+plus complete same-object owned-Geph evidence may learn that exact child. No
+Aikido, CDN, Capacitor, IP, suffix, status-only, browser-focus, Discord,
+YouTube, or googlevideo rule was added.
+
+Deterministic verification now covers the formerly absent composition boundary.
+One cold production-chain regression feeds an Aikido-shaped full-representation
+`206` through the real TLS root probe and `_run_unknown_initial_route_race`,
+requires the parent payload to remain held, and proves that only the critical
+child is learned after direct EOF and complete same-object owned-Geph evidence.
+The negative production-chain regression feeds prefix-only `206` twice and
+requires zero child resolution/Geph calls, zero learned routes, and no healthy
+cache. The complete extractor tests plus both regressions pass `39` tests; the
+adjacent plain-preflight, route-preflight, critical-child, adaptive-retry, and
+slow/inconclusive set passes `25` tests with `594` unrelated tests deselected.
+Compilation and `git diff --check` are clean. These are change-scoped checks
+against the previously green full-suite baseline; no unchanged full suite,
+protected browser matrix, soak, or account-backed workflow was repeated.
+
+No physical browser validation has been started for exact product commit
+`9baf1110b5b4d17fd5a31df9cb42aa1986eead02`. Its canonical `npm run
+build:local` completed successfully after a fresh Python 3.13 freeze. The
+fresh, staged, and final bundled daemon copies are byte-identical at SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`;
+the canonical verifier reports `overall=pass`, `build_chain.status=pass`, a
+valid ad-hoc app signature, app tree SHA-256
+`3c2582ccff8e9349df5906b39c66ef32de40cb65244bce1a8ea62094b2f3a9d6`,
+and bundled materialized-daemon tree SHA-256
+`019efc6ee023da3c25f8c795a2e006a899223cb5773cb7161f72e6ad0756a0d6`.
+The installed app still carries the older `dfe300e` daemon and has not been
+mutated by this build. The next verified action is to install only this exact
+bundle for one genuinely fresh Chrome and one real Safari qualification. A warm
+route, manual seed, reload, helper-only probe, or a root page without complete
+critical resources will not count as product success.
+
+The first local Tauri rebuild exposed a separate repeated packaging hazard:
+`npm run build:local` rebuilt the tray but silently reused the preceding frozen
+daemon (`sha256:6b43cc0d...`), so installing that apparently fresh app would
+not have installed the routing correction. The canonical local and release npm
+scripts now rebuild and transactionally stage the Python 3.13 daemon before
+Tauri and compare the staged executable's SHA-256 with the fresh PyInstaller
+output. Build-configuration and documentation tests pin that order and
+verification (`60 passed`). The green full-suite baseline is reused because
+the later diff changes only build orchestration and documentation; the
+repository now explicitly requires change-scoped verification instead of
+rerunning unchanged broad gates. The current fresh daemon is
+`sha256:9ba7583c...`; the discarded intermediate bundle was not installed.
+
+The former manual post-build hash reconstruction is now one canonical,
+read-only verifier wired into both local/release npm builds and every packaged
+macOS CI boundary. It checks fresh/staged executable equality, full source and
+materialized PyInstaller trees, the final app tree and critical binaries,
+architecture/helper/routing/signature invariants, and—when requested—the exact
+installed app, strict schema-3 attestation/witness/plist contract, fresh
+StatusV2 heartbeat, and live launchd program/arguments/PID. The implementation
+snapshots symlinks before materialization, rejects JSON booleans/floats where
+Rust requires integers or booleans, and orders signature/build-chain checks
+before any bundled executable runs. It also requires the exact production
+LaunchDaemon key set, a complete and unambiguous live launchctl snapshot, a
+stable production StatusV2 phase, and operational PF flags for an active
+daemon. Both bundle version fields must match `VERSION`, and the independently
+verified build-chain hash must equal the daemon hash read from the authenticated
+app. The focused verifier/build/docs set is green (`83 tests`);
+`npm run verify:local-install` passes against the real
+installed `dc54fbc` bundle and binds PID `12185` across attestation, StatusV2,
+and launchd. Fresh/staged/bundled daemon SHA-256 remains
+`9ba7583cc9d00baca88693021441100f01881dcf9510f49d3c987497f39bd596`.
+Direct root-only daemon hashing, listener ownership, and kernel PF inspection
+remain explicitly `not_run`; no full suite, protected run, browser matrix, or
+soak was repeated because this diff is confined to verification automation and
+documentation. Physical Chrome/Safari routing validation remains the next
+product gate.
+
+Update 2026-08-26 (first-request handoff correction locally green): the user's
+dirty primary checkout remains untouched; work continues only in the isolated
+PR #373 worktree on `codex/aikido-cdn-recovery`. A clean installed-candidate
+Capacitor control started with `learned=0`, correctly classified and learned
+the exact host, but its initiating curl still ended in `SSL_ERROR_SYSCALL`
+after roughly eleven seconds. This is a late-handoff failure, not successful
+recovery. History and source review found that the hard-transport marker added
+by `672c613` entered the old sequential local ladder, while the preflight
+deadline was discarded before fresh Geph readiness/payload waits; the later
+bounded direct retry in `af3e515` exposed the overrun more consistently.
+Timeout was also incorrectly accepted as zero-payload evidence.
+
+The current uncommitted correction carries one absolute eight-second deadline
+from client accept through downstream drain, reserves four seconds for the
+verified owned-Geph payload, and races app-owned Xbox DNS plus exactly two
+distinct local strategies after the independent system hard failure. Only
+three explicit current-attempt `closed` stages authorize Geph; timeout,
+pending, failed, cancellation, or incomplete results publish no evidence,
+cache, learning, or successor. A local payload wins immediately. Confirmation
+is scheduled only after at least 64 Geph bytes have drained to the original
+client before deadline. The full local suite passes `1763` tests plus `181`
+subtests; only the existing Scapy finite-field-DH deprecation warning remains,
+and `git diff --check` is clean. Codebase-memory reindexing returned
+`Transport closed`, so the review used the documented narrow `rtk` fallback.
+The next verified action is final review, exact commit/build/install, then a
+clean first curl and fresh Chrome/Safari physical validation. No account-backed
+workflow or 30-minute soak was started, and no physical success is claimed yet.
+
+Update 2026-08-25 (post-release browser-visible recovery correction under
+review): live `origin/main` remains
+`2780de4b3f5d77ab3852e46381b997c618bd5080`. [PR #373](https://github.com/aiwaki/slipstream/pull/373)
+contains the generic strict-edge and critical-cross-origin recovery correction
+through exact transport head `124499bb1d44d6343f3ba7cd6246a502302a075c`,
+plus the current-macOS foreground parser correction
+`6e3c31e4e0d7d95439b470c431a20763de111307`.
+The first physical Capacitor/Aikido attempt left public auto-geo-exit status at
+`learned=0`, `pending=0`, `last_state=idle`: the foreground browser connection
+was rejected before semantic classification or any route proof. Exact loopback
+socket attribution reproduced both causes. Current Google Chrome's exact signed
+root bundle fails only `codesign --verify --strict` because Finder metadata is
+present, while `--strict=symlinks` passes; current Cryptex WebKit Networking
+fails resource-envelope verification as obsolete but passes
+`--ignore-resources --strict=symlinks`. Production now preserves exact canonical
+paths, identifiers, Apple/Google designated requirements, team, process tree,
+socket owner, foreground state, and recent physical input while selecting only
+the compatible verifier form. `--ignore-resources` is restricted to exact
+system Safari/WebKit roots and is never used for Chrome or an arbitrary path.
+
+The fresh physical Chrome/Safari attempt then passed that admission boundary
+but still did not restore either page. Public state advanced from idle to
+`last_state=learned`, `learned=1`, `pending=0` at
+`2026-08-24T17:33:27Z`. The canonical one-entry private cache size plus the
+usable Aikido root/critical-asset control identifies the learned exact child as
+`cdn.aikido.dev`; no parent or suffix rule was added. Nevertheless the visible
+Chrome child remained incomplete, Capacitor still showed the direct Cloudflare
+edge denial, and Safari held both URLs over Start Page. Bounded controls after
+the attempt reproduced direct Capacitor denial and incomplete Aikido asset
+delivery, while the same Capacitor root and Aikido asset each returned a full
+65,536-byte range through the owned Geph listener. The remaining cause is QUIC:
+the existing v1/v2 observer moved only static `geo_exit` policy to TCP, so an
+automatically learned exact child could still bypass its TCP-only Geph route,
+and a QUIC-first unknown parent could bypass semantic preflight entirely.
+
+Production routing still contains no Aikido or Capacitor hostname rule and no
+broad `403` rule. Slow progressive reads are inconclusive and uncacheable; only
+explicit EOF/reset with valid incomplete framing can continue to the existing
+complete same-object owned-Geph proof. The ordinary 400-ms/500-ms path and
+absolute eight-second job remain unchanged; one bounded same-IP direct retry may
+run before browser provenance while preserving 1.5 seconds for cold provenance,
+50 ms of wait grace, two seconds for proof, and 25 ms for scheduling. Repeated
+timeout remains inconclusive and cannot authorize Geph.
+
+The first exact installed QUIC correction still failed visibly in both
+browsers. Public auto-geo-exit state advanced from one to two learned exact
+hosts, but Chrome retained Aikido's loader and Capacitor's direct Cloudflare
+denial; Safari retained Start Page for Aikido and rendered the direct Capacitor
+denial. During a fresh Safari Aikido navigation, the signed WebKit Networking
+process held the root on TCP while the critical CDN connection remained on
+UDP/443. The daemon's valid Version Negotiation therefore lost a packet race:
+RFC 9000 requires the client to ignore VN after it has processed a real server
+packet. The evidence rules out another hostname, classifier, or provenance
+exception.
+
+The correction now sends bounded Version Negotiation plus one matching
+ICMPv4/ICMPv6 port-unreachable response for only one exact QUIC Initial flow
+when a static geo-exit, a learned exact host, or a fresh exact unknown first
+contact needs the TCP evidence path. The ICMP quote contains only that observed
+address/port tuple and eight QUIC payload bytes, allowing the kernel to fail
+the exact connected UDP socket even when the real server wins the VN race. It
+adds no persistent PF rule and does not authorize Geph: the TCP
+path retains the complete direct/owned proof and foreground provenance. A
+fresh usable or challenge/auth direct result is cached and restores QUIC for
+that exact host; an inconclusive slow link remains direct and unlearned.
+Explicit direct/local policy, Discord, YouTube, Googlevideo, ECH/no-SNI,
+unsupported QUIC, inactive PF, and unowned/unready Geph remain untouched. There
+is no destination-IP/CDN rule and no global UDP/443 block.
+
+Exact transport head `124499bb1d44d6343f3ba7cd6246a502302a075c` was then
+built and installed. Its exact-head [CI `32763184998`](https://github.com/aiwaki/slipstream/actions/runs/32763184998)
+and [dependency audit `32763185003`](https://github.com/aiwaki/slipstream/actions/runs/32763185003)
+both passed. Automated Chrome reached the Aikido login after a delayed load,
+but that is diagnostic rather than physical-browser proof. A fresh physical
+Chrome Capacitor reload opened a new TCP connection and still rendered the
+complete direct Cloudflare denial with the workstation's ordinary public IP.
+The same root was complete and usable through the owned-Geph listener.
+
+The blocker was an independent macOS observation compatibility bug. On the live
+signed Chrome NetworkService socket, ownership, exact process ancestry, and
+signatures passed, but `_read_frontmost` returned `not_frontmost` even while
+Chrome was actually frontmost. Current `lsappinfo` emits indented
+`bundleID="..."` and `pid = N` fields with PID metadata, whereas production
+accepted only the older quoted `"CFBundleIdentifier"`/`"pid"` pair. The
+correction accepts one complete known dialect, rejects mixed, duplicate,
+partial, unindented-current, and malformed fields, and preserves exact
+bundle/PID, path, signature/team/designated requirement, ancestry, socket
+stability, repeated foreground observation, and the five-second physical-input
+gate. A live read-only A/B check reached `input_not_recent` after the fix when
+no recent physical input was present, proving that the real current-format
+socket crossed the repaired parser without treating automation as product
+evidence.
+
+Parser head `138d2b07baae7c9804618f73e3376c48ad0ef711` then passed
+[exact-head CI `32766607891`](https://github.com/aiwaki/slipstream/actions/runs/32766607891)
+and
+[dependency audit `32766607935`](https://github.com/aiwaki/slipstream/actions/runs/32766607935),
+was built, installed, and matched the running daemon. A fresh physical attempt
+still left public auto-geo-exit state idle. The resulting bounded diagnostic
+snapshot isolated two liveness defects rather than a missing hostname rule.
+On a current live Chrome NetworkService socket, the first production provenance
+assessment returned `signature_failed` after `0.279` seconds because its cold
+`codesign` subprocess exceeded the generic `0.25`-second command limit. The
+exact same Google-signed executable passed strict verification, and a warm
+repeat crossed signature verification to the independent foreground check.
+Separately, the owned Geph listener was unavailable for about two seconds after
+wake; the old edge-denial branch could turn that transient inability to prove
+the alternate route into a two-minute retry cache.
+
+The branch now gives only the already-actionable browser-recovery path a
+`1.5`-second total provenance budget and `0.5` seconds per command, still under
+the unchanged absolute eight-second route job. The ordinary direct probe
+remains `0.4` seconds and a slow usable connection remains inconclusive rather
+than Geph evidence. An actionable denial observed while owned Geph is still
+recovering no longer publishes the retry cache; only a later independently
+admitted physical navigation may try again, and it still needs the complete
+owned-Geph proof before learning. Focused regressions, the complete
+`test_tproxy_doh.py` routing suite (`587` tests), and the combined full local
+suite (`1733` tests plus `181` subtests) pass, as do compilation and
+`git diff --check`. Product head
+`fdb6c4a8d3b0148e6ed5f448ceea380ec68263a7` then passed exact-head
+[dependency audit `32861205555`](https://github.com/aiwaki/slipstream/actions/runs/32861205555).
+Its [CI `32861205567`](https://github.com/aiwaki/slipstream/actions/runs/32861205567)
+passed the product, Windows, Chromium, packaged-build, and packaged-browser
+jobs, but failed only the heavy packaged lifecycle before navigation: its one
+three-second idle sample measured `1.020` seconds of daemon CPU against the
+unchanged `1.000`-second ceiling while finite startup PF rollback/retry work was
+still settling. The same unchanged harness measured `0.559` and `0.390`
+seconds on the two preceding green exact heads, and the `fdb6c4a` browser
+recovery path is not entered before a browser job.
+
+The narrow qualification-only correction retains the one-second-per-three-
+seconds ceiling. Only a first excessive sample permits exactly one consecutive
+three-second sample; worker processes and profiles must remain absent after
+each, and two excessive samples still fail. Evidence now records every CPU
+sample, the sample count, and the total observation duration. Focused harness
+verification passes `76` tests plus `20` subtests.
+
+Repeated physical Capacitor checks then confirmed the remaining policy defect:
+the strict direct Cloudflare denial and complete same-host owned-Geph HTTP 200
+proof were sufficient network evidence, but first-host learning still depended
+on Chrome being `frontmost`. The working tree now removes foreground/recent-
+input admission only for a complete strict regional/edge denial followed by a
+complete usable exact-host owned-Geph payload proof. Ambiguous retry,
+incomplete-navigation, and critical-child paths retain signed foreground
+browser provenance. A failed strict-denial proof is no longer cached. Ordinary
+403/429, CAPTCHA/login, idle timeout, slow usable direct, and the Discord/
+YouTube/googlevideo exclusions are unchanged; no hostname rule was added.
+Focused routing regressions, the complete `test_tproxy_doh.py` suite (`589`
+tests), and the combined full local suite (`1738` tests plus `181` subtests)
+pass. The exact working tree was frozen with Python 3.13, rebuilt, and installed;
+the root daemon attestation and embedded daemon both bind SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`,
+and the replacement launchd PID is `68160`. Chrome was closed through its UI
+and its surviving `--no-startup-window` root plus NetworkService were then
+terminated before a genuinely fresh launch. In that clean real Chrome,
+Capacitor loaded the normal product page instead of the Cloudflare denial and
+public auto-geo-exit state advanced from one to two learned exact hosts; Aikido
+then completed to its login page. A separate private Safari window likewise
+loaded the normal Capacitor page and the complete Aikido login page, after which
+only that temporary window was closed and the user's ordinary four-tab window
+remained intact. This was a warm Aikido result: one automatically learned exact
+route existed before Aikido was opened, so Chrome and Safari proved overlay
+reuse rather than cold critical-child discovery from `learned=0`. There is
+still no Capacitor/Aikido hostname rule, broad `403` rule, or foreground
+requirement for the strict-denial decision. That correction was committed as
+exact PR head `513484ac43ae0348df06e61fca5af9d3105eb225`; exact-head CI
+`32867878889` and dependency audit `32867879962` passed.
+
+A broader physical sweep then exposed slow convergence without invalidating the
+Capacitor/Aikido proof. RuTracker eventually completed in Chrome only after a
+long sequence of retries while Safari showed hard TLS/connect failures. The
+handler could retain a few initial system TLS bytes, run an independent direct
+probe that ended in a hard TLS/socket failure, and still commit the suspect
+exact stream instead of using the existing app-owned DNS/local ladder. The
+working tree now carries a separate hard-transport observation bit and hands
+only socket/TLS exception or EOF without admissible HTTP framing into that
+ladder in the same request. Idle/deadline timeout, slow working progress, and a
+complete ordinary `403` remain non-authorizing. Weather independently showed a
+bodyless owned-Geph redirect from the `www` root to its apex followed by a usable
+apex payload; the proof may now follow exactly one such apex/`www` HTTPS root
+redirect under the same absolute deadline and still learns only the original
+exact host. LinkedIn slow-progress controls and Yelp's direct-good/owned-denied
+asymmetry remain negative guards against routing from time or visual
+incompleteness alone. Focused tests plus the complete routing suites pass:
+`603` `test_tproxy_doh.py` tests and `68` traffic-contract tests. The complete
+local project run also passes with `1753` tests and `181` subtests; its sole
+warning is the existing Scapy/cryptography finite-field-DH deprecation. The
+next verified action is final diff review, then commit, rebuild/install that
+exact commit, and fresh physical Chrome/Safari validation before requesting
+fresh exact-head CI/audit. This targeted diagnosis did not start another
+30-minute soak and does not weaken or replace any later release gate. The local
+app remains ad-hoc and unnotarized.
+
+That transport/redirect correction was committed locally as
+`672c6132a03d029f048bbf36b5e755760e71c968`, built and installed, and its exact
+daemon bytes were verified before the broader physical check. Chrome RuTracker
+then reached the fully styled page, but only after a delay that remains too long
+for acceptable product behavior; Safari still did not converge. Chrome Weather
+loaded its layout and news while leaving forecast placeholders unresolved, and
+Safari continued to show the regional denial. An isolated diagnostic browser
+trace (not product evidence) located the critical Weather request at
+`dsx.weather.com`: the exact object returned direct HTTP `403` with the complete
+minimal `Bad Request - Blocked`/HTML/CSP/nosniff fingerprint, while the verified
+owned listener returned HTTP `200` and complete JSON. The first owned target
+connection could time out and the next one succeed within the original proof
+budget.
+
+The current uncommitted correction therefore adds no hostname rule: it
+classifies only that exact strict status/body/header response and still requires
+the complete same-host owned-Geph proof. The proof keeps its six-second absolute
+deadline, caps the first target connection at three seconds, and permits exactly
+one retry connection only from the remaining budget. Focused classifier,
+route-selection, deadline, malformed-fingerprint, and retry regressions are
+green; the complete `test_tproxy_doh.py` suite passes `604` tests, the adjacent
+traffic contracts pass `68`, and the complete local project run passes `1754`
+tests plus `181` subtests. Its sole warning is the existing
+Scapy/cryptography finite-field-DH deprecation. Diff and compilation checks are
+also clean. The next verified action is one exact commit, rebuild/install, and
+fresh physical Chrome/Safari validation. PR
+#373 remains unpushed at remote head `513484ac43ae0348df06e61fca5af9d3105eb225`;
+no account-backed workflow or new 30-minute soak is relevant to this correction.
+The local app remains ad-hoc and unnotarized.
+
+Exact comparison with the earlier physically successful `513484a` candidate
+then isolated why Capacitor could regress again without removal of that strict-
+denial policy. The classifier, same-host owned-Geph payload proof, and exact-
+host learning path are unchanged and still work: a live complete direct
+Capacitor denial classified as `edge_access_denied`, and the same host returned
+a complete usable payload through owned Geph in roughly 1.7-2.4 seconds. The
+first production direct slice, however, is intentionally only 400 ms and could
+finish as retryable-inconclusive before that denial completed. Production asked
+for signed foreground/recent-input provenance at that point, before running its
+adaptive direct retry, so a purely network-authoritative strict denial could be
+discarded as `not_frontmost` or `input_not_recent`. Repeated diagnostics
+eventually learned the host only because later timing crossed that gate. A
+browser that already held a direct HTTP/2, TCP, or QUIC connection could then
+continue showing the old denial even after learning because existing sessions
+cannot be migrated.
+
+The working tree now performs exactly one bounded same-IP direct network retry
+before provenance. A final usable direct result stays direct; a second
+inconclusive result returns without cache, provenance, or Geph; a final complete
+strict denial uses only the existing complete exact-host owned-Geph proof; and
+only a final safe-incomplete or critical-resource result enters signed browser
+provenance. Actionable denial/incomplete branches default to no cache, and only
+a successfully committed proof restores it, so proof timeout or exception
+cannot create a two-minute denial cache. The retry remains inside the unchanged
+eight-second job and preserves 1.5 seconds for cold provenance, 50 ms of wait
+grace, two seconds for proof, and 25 ms for scheduling. Focused latency, denial,
+proof-exception, cache, and critical-resource regressions pass. The full local
+project run passes `1755` tests plus `181` subtests; the only warning remains the
+existing Scapy/cryptography finite-field-DH deprecation, and `git diff --check`
+passes. The next verified action is to commit, build, and install these exact
+bytes, reset process-local learned state, and require the first request to
+converge on genuinely fresh Chrome and Safari connections. No hostname rule,
+account-backed workflow, or new soak is relevant.
 
 Update 2026-08-24 (verified preview `.23` release):
 [Slipstream `v0.1.9-preview.23`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)
@@ -2719,20 +6261,18 @@ and dependency audit in
 
 ## Next Verified Action
 
-Merge PR #336, which records PR #335 and protected run
-`31587594114` only after all six checks and exact-head review pass. The complete
-automatic local-browser implementation and protected exact-artifact gate are
-then qualified. Do not repeat the protected run or install its artifact during
-this documentation transaction. Any later workstation transaction must use
-only artifact `9137909918`, preserve external DNS/proxy/PAC/VPN/PF owners,
-retain Discord, YouTube, and Googlevideo on local bypass, and roll back on the
-first failed required smoke. Continue the next independent product milestone
-from live `main` only after this evidence checkpoint merges.
+Follow the dated top checkpoint and live PR376, not historical milestone labels.
+Publish the accumulated Googlevideo/voice recovery changes after focused checks,
+then inspect exact-head CI and review. Keep installed4564274 distinct from the
+new source head: documentation integration does not justify another install.
+Real Discord incoming-audio/stream recovery, sustained Safari playback, physical
+route-change/sleep-wake and stable-release qualification remain separate gates.
+Do not start a call, sleep the Mac, or reset installed learning for a smoke test.
 
-Safari may advance through deterministic source, Swift contract tests, and
-unsigned packaging, but the signed app-extension sandbox/socket path must be
-proven on a disposable build before it is bundled, enabled, or described as
-runtime-ready.
+The former instruction to merge PR336 was historical and superseded; its retained
+protected-run evidence remains in the chronological sections above.
+
+### Historical M4 qualification evidence
 
 Continue M4 on disposable systems. PRs #193 and #194 proved no-payload IPv4
 and IPv6 socket selection under competing exact Wintun routes on exact main,
@@ -2937,6 +6477,7 @@ exact-main native run `30481891835` passed on AMD64 and ARM64, CI
 passed. The next independent M4 gate is bounded production service-host
 composition; the existing production host remains no-network until that gate
 passes.
+
 
 ## External Gates
 

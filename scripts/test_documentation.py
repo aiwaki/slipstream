@@ -98,6 +98,28 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("cargo test", text)
         self.assertIn("SLIPSTREAM_DISPOSABLE_CI=1", text)
         self.assertIn("primary workstation", text)
+        self.assertIn("npm run verify:local-install", text)
+        self.assertIn("`not_run`", text)
+
+    def test_bundle_verification_uses_one_canonical_command(self) -> None:
+        troubleshooting = (ROOT / "docs/TROUBLESHOOTING.md").read_text(
+            encoding="utf-8"
+        )
+        app_readme = (ROOT / "app-tauri/README.md").read_text(encoding="utf-8")
+
+        self.assertGreaterEqual(
+            troubleshooting.count("npm run verify:local-install"),
+            2,
+        )
+        manual_hash_block = (
+            "shasum -a 256 \\" + "\n  spike/dist/slipstreamd/slipstreamd"
+        )
+        self.assertNotIn(manual_hash_block, troubleshooting)
+        self.assertIn("npm run verify:local-install", app_readme)
+        self.assertIn("fresh StatusV2", troubleshooting)
+        self.assertIn("live launchd", troubleshooting)
+        self.assertIn("fresh StatusV2", app_readme)
+        self.assertIn("live launchd", app_readme)
 
     def test_build_script_does_not_recommend_installing_the_daemon(self) -> None:
         text = (ROOT / "spike" / "build_daemon.sh").read_text(encoding="utf-8")

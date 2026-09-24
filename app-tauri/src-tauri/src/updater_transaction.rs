@@ -56,6 +56,8 @@ pub struct UpdateJournalV1 {
     pub nonce: String,
     pub uid: u32,
     pub initiator_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legacy_tray: Option<LegacyTrayIdentity>,
     pub target: PathBuf,
     pub backup: PathBuf,
     pub stage: PathBuf,
@@ -333,6 +335,15 @@ fn is_safe_process_start(value: &str) -> bool {
 }
 
 fn validate_journal(path: &Path, journal: &UpdateJournalV1) -> Result<(), String> {
+    if let Some(tray) = &journal.legacy_tray {
+        if journal.current_version != "0.1.9-preview.23"
+            || !(2..=i32::MAX as u32).contains(&tray.pid)
+            || tray.uid != journal.uid
+            || !is_safe_process_start(&tray.started)
+        {
+            return Err("legacy tray journal identity is invalid".into());
+        }
+    }
     if journal.schema_version != JOURNAL_VERSION
         || journal.uid != current_uid()
         || !(2..=i32::MAX as u32).contains(&journal.initiator_pid)
@@ -574,6 +585,7 @@ where
     let decoder = GzDecoder::new(archive);
     let mut tar = tar::Archive::new(decoder);
     let result = (|| {
+        let mut directory_modes = Vec::new();
         for entry in tar
             .entries()
             .map_err(|_| "update archive is unreadable".to_string())?
@@ -584,6 +596,17 @@ where
                 .map_err(|_| "update archive path is invalid".to_string())?
                 .into_owned();
             let Some(relative) = relative_archive_path(&archive_path)? else {
+                if !entry.header().entry_type().is_dir() {
+                    return Err("archive bundle root is not a directory".into());
+                }
+                directory_modes.push((
+                    stage.to_path_buf(),
+                    entry
+                        .header()
+                        .mode()
+                        .map_err(|_| "staged directory mode is invalid".to_string())?
+                        & 0o777,
+                ));
                 continue;
             };
             let destination = stage.join(&relative);
@@ -595,6 +618,14 @@ where
             if entry_type.is_dir() {
                 fs::create_dir_all(&destination)
                     .map_err(|error| format!("cannot create staged directory: {error}"))?;
+                directory_modes.push((
+                    destination,
+                    entry
+                        .header()
+                        .mode()
+                        .map_err(|_| "staged directory mode is invalid".to_string())?
+                        & 0o777,
+                ));
             } else if entry_type.is_file() {
                 let mode = entry
                     .header()
@@ -609,6 +640,11 @@ where
                     .map_err(|error| format!("cannot create staged file: {error}"))?;
                 io::copy(&mut entry, &mut output)
                     .map_err(|error| format!("cannot extract staged file: {error}"))?;
+                // Creation respects umask; restore the signed archive's exact
+                // ordinary permission bits before syncing the completed file.
+                output
+                    .set_permissions(fs::Permissions::from_mode(mode))
+                    .map_err(|error| format!("cannot restore staged file mode: {error}"))?;
                 sync_file(&output).map_err(|error| format!("cannot sync staged file: {error}"))?;
             } else if entry_type.is_symlink() {
                 let target = entry
@@ -624,6 +660,13 @@ where
             } else {
                 return Err("update archive entry type is unsupported".into());
             }
+        }
+        // Keep the root private while writing, then restore directory metadata
+        // from the inside out so read-only ancestors cannot obstruct extraction.
+        directory_modes.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+        for (path, mode) in directory_modes {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))
+                .map_err(|error| format!("cannot restore staged directory mode: {error}"))?;
         }
         sync_staged_directories_with(stage, sync_directory_entry)
     })();
@@ -647,6 +690,9 @@ fn xml_escape(value: &str) -> String {
 }
 
 fn launch_agent_bytes(helper: &Path, journal: &Path, state_dir: &Path) -> Vec<u8> {
+    // The accepted successor (or restored old tray) must outlive this job.
+    // launchd otherwise kills the remaining process group when the watchdog
+    // exits/boots out. Failed successors are still stopped by exact identity.
     format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -655,6 +701,7 @@ fn launch_agent_bytes(helper: &Path, journal: &Path, state_dir: &Path) -> Vec<u8
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ProcessType</key><string>Background</string>
+<key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>{}</string>
 <key>StandardErrorPath</key><string>{}</string>
 </dict></plist>
@@ -889,6 +936,198 @@ pub fn prepare_transaction(
     current_version: &str,
     expected_version: &str,
 ) -> Result<PreparedTransaction, String> {
+    prepare_transaction_with_helper(
+        current_exe,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        current_version,
+        expected_version,
+        HelperOrigin::Installed,
+        None,
+    )
+}
+
+/// External migration preparation only: the caller must authenticate the archive
+/// and stop the old tray before calling. This is not a public CLI or a substitute
+/// for signed-feed admission. The staged helper survives target replacement in
+/// owner-private runtime storage and handles both acceptance and rollback.
+pub fn prepare_legacy_migration_transaction(
+    current_exe: &Path,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    current_version: &str,
+    expected_version: &str,
+) -> Result<PreparedTransaction, String> {
+    if current_version != "0.1.9-preview.23" {
+        return Err("external legacy migration supports only published preview.23".into());
+    }
+    prepare_transaction_with_helper(
+        current_exe,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        current_version,
+        expected_version,
+        HelperOrigin::VerifiedStage,
+        None,
+    )
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyTrayIdentity {
+    pid: u32,
+    uid: u32,
+    started: String,
+}
+
+/// Called only after authenticated archive admission. Preparation leaves the
+/// old tray running; the durable candidate watchdog owns its exact stop and all
+/// subsequent replacement/recovery. An external launcher must not stop it first.
+pub fn prepare_running_legacy_migration(
+    executable: &Path,
+    pid: u32,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    expected_version: &str,
+) -> Result<PreparedTransaction, String> {
+    let target = derive_target(executable)?;
+    if bundle_version(&target)? != "0.1.9-preview.23" {
+        return Err("external legacy migration supports only published preview.23".into());
+    }
+    if pid < 2 || pid > i32::MAX as u32 || pid == std::process::id() {
+        return Err("legacy tray PID is invalid".into());
+    }
+    let snapshot =
+        process_snapshot(pid).ok_or_else(|| "cannot inspect legacy tray identity".to_string())?;
+    if snapshot.uid != current_uid()
+        || snapshot.is_zombie()
+        || !command_matches_target(&snapshot.command, &target)
+        || kernel_process_path(pid)? != bundle_executable(&target)
+    {
+        return Err("legacy tray process does not match the installed bundle".into());
+    }
+    let identity = LegacyTrayIdentity {
+        pid,
+        uid: snapshot.uid,
+        started: snapshot.started,
+    };
+    prepare_transaction_with_helper(
+        executable,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        "0.1.9-preview.23",
+        expected_version,
+        HelperOrigin::VerifiedStage,
+        Some(identity),
+    )
+}
+
+fn kernel_process_path(pid: u32) -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut buffer = vec![0u8; 4096];
+        // SAFETY: writable buffer of the supplied size; valid positive PID.
+        let size = unsafe {
+            libc::proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32)
+        };
+        if size <= 0 {
+            return Err("cannot inspect kernel executable path for legacy tray".into());
+        }
+        let end = buffer
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(buffer.len());
+        use std::os::unix::ffi::OsStrExt;
+        Ok(PathBuf::from(std::ffi::OsStr::from_bytes(&buffer[..end])))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pid;
+        Err("legacy tray migration requires macOS".into())
+    }
+}
+
+fn matches_legacy_tray(
+    snapshot: &ProcessSnapshot,
+    identity: &LegacyTrayIdentity,
+    target: &Path,
+) -> bool {
+    snapshot.pid == identity.pid
+        && snapshot.uid == identity.uid
+        && snapshot.started == identity.started
+        && !snapshot.is_zombie()
+        && command_matches_target(&snapshot.command, target)
+}
+
+fn stop_legacy_tray(journal: &UpdateJournalV1) -> Result<(), String> {
+    let Some(identity) = &journal.legacy_tray else {
+        return Ok(());
+    };
+    if sha256_file(&bundle_executable(&journal.target))? != journal.old_executable_sha256 {
+        return Err("legacy tray executable changed before stop".into());
+    }
+    for attempt in 0..50 {
+        if !process_exists(identity.pid) {
+            return Ok(());
+        }
+        let snapshot = process_snapshot(identity.pid)
+            .ok_or_else(|| "cannot revalidate live legacy tray identity".to_string())?;
+        if snapshot.is_zombie()
+            && snapshot.uid == identity.uid
+            && snapshot.started == identity.started
+        {
+            return Ok(());
+        }
+        if !matches_legacy_tray(&snapshot, identity, &journal.target)
+            || kernel_process_path(identity.pid)? != bundle_executable(&journal.target)
+        {
+            return Err("legacy tray identity changed; refusing signal or replacement".into());
+        }
+        if attempt == 0 {
+            // SAFETY: exact PID, UID, birth time and kernel executable path were
+            // checked immediately above. No name-wide or process-group signal.
+            if unsafe { libc::kill(identity.pid as i32, libc::SIGTERM) } != 0
+                && io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+            {
+                return Err("cannot terminate the verified legacy tray".into());
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Err("legacy tray did not exit; replacement is deferred".into())
+}
+
+#[derive(Clone, Copy)]
+enum HelperOrigin {
+    Installed,
+    VerifiedStage,
+}
+
+fn packaged_helper(origin: HelperOrigin, target: &Path, stage: &Path) -> PathBuf {
+    match origin {
+        HelperOrigin::Installed => target,
+        HelperOrigin::VerifiedStage => stage,
+    }
+    .join("Contents/MacOS")
+    .join(WATCHDOG_BINARY)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_transaction_with_helper(
+    current_exe: &Path,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    current_version: &str,
+    expected_version: &str,
+    helper_origin: HelperOrigin,
+    legacy_tray: Option<LegacyTrayIdentity>,
+) -> Result<PreparedTransaction, String> {
     let uid = current_uid();
     if uid == 0 {
         return Err("the tray updater must not run as root".into());
@@ -932,7 +1171,7 @@ pub fn prepare_transaction(
     }
     let old_executable_sha256 = sha256_file(&bundle_executable(&target))?;
     let new_executable_sha256 = sha256_file(&bundle_executable(&stage))?;
-    let packaged_helper = target.join("Contents/MacOS").join(WATCHDOG_BINARY);
+    let packaged_helper = packaged_helper(helper_origin, &target, &stage);
     let helper = state_dir.join("runtime").join(WATCHDOG_BINARY);
     let watchdog_sha256 = match install_runtime_helper(&packaged_helper, &helper) {
         Ok(digest) => digest,
@@ -946,6 +1185,7 @@ pub fn prepare_transaction(
         nonce,
         uid,
         initiator_pid: std::process::id(),
+        legacy_tray,
         target,
         backup,
         stage: stage.clone(),
@@ -1499,7 +1739,37 @@ fn advance_prelaunch_phase(
     Ok(false)
 }
 
+// Roll back only when no successor exists: spawn failed or the owned child
+// is confirmed exited. Unobservable identity alone is not proof of termination.
+fn spawn_successor_or_rollback<R>(
+    journal_path: &Path,
+    journal: &mut UpdateJournalV1,
+    relaunch: &mut R,
+) -> Result<Option<(Child, ProcessSnapshot)>, String>
+where
+    R: FnMut(&Path, &Path) -> Result<(), String>,
+{
+    let failure = match spawn_bundle(&journal.target, journal_path) {
+        Ok(mut child) => match wait_for_spawned_successor(&mut child, journal) {
+            Ok(snapshot) => return Ok(Some((child, snapshot))),
+            Err(error) => {
+                if !child_has_exited(&mut child)? {
+                    return Err(error);
+                }
+                error
+            }
+        },
+        Err(error) => error,
+    };
+    rollback_impl_with_child_and_relaunch(journal_path, journal, None, true, relaunch)
+        .map_err(|error| format!("{failure}; rollback failed: {error}"))?;
+    Ok(None)
+}
+
 fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Result<(), String> {
+    if journal.phase == TransactionPhase::Prepared {
+        stop_legacy_tray(journal)?;
+    }
     let initiator_executable = bundle_executable(&journal.target).display().to_string();
     while process_exists(journal.initiator_pid)
         && process_command(journal.initiator_pid).is_some_and(|command| {
@@ -1517,8 +1787,11 @@ fn run_locked_watchdog(journal_path: &Path, journal: &mut UpdateJournalV1) -> Re
         let snapshot = match find_exact_successor(journal)? {
             Some(snapshot) => snapshot,
             None => {
-                let mut child = spawn_bundle(&journal.target, journal_path)?;
-                let snapshot = wait_for_spawned_successor(&mut child, journal)?;
+                let Some((child, snapshot)) =
+                    spawn_successor_or_rollback(journal_path, journal, &mut direct_relaunch)?
+                else {
+                    return Ok(());
+                };
                 spawned_successor = Some(child);
                 snapshot
             }
@@ -1678,6 +1951,115 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
+    #[test]
+    fn legacy_stop_identity_rejects_reuse_foreign_owner_and_other_executable() {
+        let target = Path::new("/Applications/Slipstream.app");
+        let identity = LegacyTrayIdentity {
+            pid: 42,
+            uid: 501,
+            started: "Thu Sep 24 12:00:00 2026".into(),
+        };
+        let good = ProcessSnapshot {
+            pid: 42,
+            uid: 501,
+            state: 'S',
+            started: identity.started.clone(),
+            command: bundle_executable(target).display().to_string(),
+        };
+        assert!(matches_legacy_tray(&good, &identity, target));
+        let mut changed = good.clone();
+        changed.pid += 1;
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good.clone();
+        changed.uid = 0;
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good.clone();
+        changed.started = "Thu Sep 24 12:00:01 2026".into();
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good.clone();
+        changed.command.push_str("-other");
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+        changed = good;
+        changed.state = 'Z';
+        assert!(!matches_legacy_tray(&changed, &identity, target));
+    }
+
+    #[test]
+    fn legacy_stop_rejects_changed_bundle_before_any_signal() {
+        let root = TempDir::new().unwrap();
+        let (_, mut record) = journal(root.path());
+        fs::create_dir_all(record.target.join("Contents/MacOS")).unwrap();
+        fs::write(bundle_executable(&record.target), b"changed").unwrap();
+        // Deliberately use this test process: digest rejection must happen first.
+        record.legacy_tray = Some(LegacyTrayIdentity {
+            pid: std::process::id(),
+            uid: current_uid(),
+            started: "Thu Sep 24 12:00:00 2026".into(),
+        });
+        assert_eq!(
+            stop_legacy_tray(&record).unwrap_err(),
+            "legacy tray executable changed before stop"
+        );
+        let mut serialized = serde_json::to_value(&record).unwrap();
+        serialized.as_object_mut().unwrap().remove("legacy_tray");
+        let old: UpdateJournalV1 = serde_json::from_value(serialized).unwrap();
+        assert!(old.legacy_tray.is_none());
+        assert!(stop_legacy_tray(&old).is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn kernel_path_identifies_test_process_without_using_argv() {
+        assert_eq!(
+            kernel_process_path(std::process::id())
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            std::env::current_exe().unwrap().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn migration_copies_staged_helper_and_preserves_installed_helper() {
+        let root = TempDir::new().unwrap();
+        let target = root.path().join("old/Slipstream.app");
+        let stage = root.path().join("new/Slipstream.app");
+        let old = packaged_helper(HelperOrigin::Installed, &target, &stage);
+        let new = packaged_helper(HelperOrigin::VerifiedStage, &target, &stage);
+        for (path, bytes) in [
+            (&old, b"old helper".as_slice()),
+            (&new, b"fixed helper".as_slice()),
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let destination = root.path().join("runtime").join(WATCHDOG_BINARY);
+        let digest = install_runtime_helper(&new, &destination).unwrap();
+        assert_eq!(digest, sha256_file(&new).unwrap());
+        assert_eq!(fs::read(&destination).unwrap(), b"fixed helper");
+        assert_eq!(fs::read(&old).unwrap(), b"old helper");
+        fs::remove_dir_all(&stage).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"fixed helper");
+    }
+
+    #[test]
+    fn migration_rejects_other_versions_before_filesystem_mutation() {
+        let root = TempDir::new().unwrap();
+        let error = prepare_legacy_migration_transaction(
+            &root.path().join("absent"),
+            &root.path().join("state"),
+            &root.path().join("agents"),
+            b"unverified",
+            "0.1.9-preview.22",
+            "0.1.9-preview.24",
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("only published preview.23"));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
     fn journal(root: &Path) -> (PathBuf, UpdateJournalV1) {
         let state = root.join("state");
         fs::create_dir_all(state.join("runtime")).unwrap();
@@ -1689,6 +2071,7 @@ mod tests {
             nonce: nonce.clone(),
             uid: current_uid(),
             initiator_pid: std::process::id(),
+            legacy_tray: None,
             target: target.clone(),
             backup: target
                 .parent()
@@ -1787,6 +2170,11 @@ mod tests {
             Path::new("/private/journal"),
             Path::new("/private/state"),
         );
+        let policy = plist::Value::from_reader_xml(bytes.as_slice()).unwrap();
+        assert_eq!(
+            policy.as_dictionary().unwrap().get("AbandonProcessGroup"),
+            Some(&plist::Value::Boolean(true))
+        );
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("<string>Background</string>"));
         assert!(text.contains("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>"));
@@ -1817,6 +2205,67 @@ mod tests {
                 .unwrap()
                 .is_zombie()
         );
+    }
+
+    #[test]
+    fn refused_successor_spawn_restores_old_bundle_without_retrying_activation() {
+        let root = TempDir::new().unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.target, b"not executable");
+        fs::set_permissions(
+            bundle_executable(&value.target),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        value.old_executable_sha256 = executable(&value.backup, b"old");
+        value.phase = TransactionPhase::SuccessorLaunchPlanned;
+        write_journal(&path, &value).unwrap();
+        let mut relaunches = 0;
+        let result = spawn_successor_or_rollback(&path, &mut value, &mut |bundle, _| {
+            assert_eq!(fs::read(bundle_executable(bundle)).unwrap(), b"old");
+            relaunches += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(result.is_none());
+        assert_eq!(relaunches, 1);
+        assert_eq!(value.phase, TransactionPhase::OldRelaunched);
+        assert!(!path.exists());
+        assert!(!value.backup.exists());
+        assert!(!value.stage.exists());
+        let failed = path.with_file_name(format!(
+            "app-update-transaction-failed-{}.json",
+            value.nonce
+        ));
+        assert!(failed.exists());
+    }
+
+    #[test]
+    fn successor_exit_before_identity_capture_restores_old_bundle() {
+        let root = TempDir::new().unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.target, b"#!/bin/sh\nexit 1\n");
+        fs::set_permissions(
+            bundle_executable(&value.target),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        value.old_executable_sha256 = executable(&value.backup, b"old");
+        value.phase = TransactionPhase::SuccessorLaunchPlanned;
+        write_journal(&path, &value).unwrap();
+        let mut relaunches = 0;
+        let result = spawn_successor_or_rollback(&path, &mut value, &mut |bundle, _| {
+            assert_eq!(fs::read(bundle_executable(bundle)).unwrap(), b"old");
+            relaunches += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(result.is_none());
+        assert_eq!(relaunches, 1);
+        assert_eq!(value.phase, TransactionPhase::OldRelaunched);
+        assert!(!path.exists());
+        assert!(!value.backup.exists());
+        assert!(!value.stage.exists());
     }
 
     #[test]
@@ -2070,6 +2519,58 @@ mod tests {
             synced.iter().position(|path| path == &contents).unwrap()
                 < synced.iter().position(|path| path == &stage).unwrap()
         );
+    }
+
+    #[test]
+    fn archive_modes_are_restored_after_private_extraction() {
+        let root = TempDir::new().unwrap();
+        let stage = root.path().join("Slipstream.app");
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (name, mode, directory) in [
+            ("Slipstream.app", 0o755, true),
+            ("Slipstream.app/Contents", 0o750, true),
+            ("Slipstream.app/Contents/payload", 0o640, false),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(name).unwrap();
+            header.set_mode(mode);
+            header.set_entry_type(if directory {
+                tar::EntryType::Directory
+            } else {
+                tar::EntryType::Regular
+            });
+            header.set_size(if directory { 0 } else { 3 });
+            header.set_cksum();
+            builder
+                .append(&header, if directory { &b""[..] } else { &b"abc"[..] })
+                .unwrap();
+        }
+        let bytes = builder.into_inner().unwrap().finish().unwrap();
+        extract_archive_with_sync(
+            &bytes,
+            &stage,
+            &|_| {
+                assert_eq!(
+                    fs::metadata(&stage).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+                Ok(())
+            },
+            &|_| Ok(()),
+        )
+        .unwrap();
+        for (path, expected) in [
+            (&stage, 0o755),
+            (&stage.join("Contents"), 0o750),
+            (&stage.join("Contents/payload"), 0o640),
+        ] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                expected
+            );
+        }
+        assert_eq!(fs::read(stage.join("Contents/payload")).unwrap(), b"abc");
     }
 
     #[test]
