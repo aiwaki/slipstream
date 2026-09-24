@@ -10,6 +10,12 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 pushed1cbee281b03b2643c65f48176671ce5c96e2fbd7 to PR376.
+- New CI36025040811 queued; Windows36025040764 and dependency36025040835 queued.
+  Includes local CLI implementation and explicit historical-defect assertions.
+  Preserve handles; old CI36022169923 is terminal and its passing migration/core
+  evidence remains recorded below. No workstation changes.
+
 2026-09-24 pinned legacy diagnostic contract now explicit, awaiting CI.
 - --expect-legacy-defect applies only to named historical driver accept/rollback;
   requires previous helper provenance, observed live successor, exact terminal
