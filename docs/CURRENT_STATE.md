@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 published .23 preparer failure reproduced on disposable macOS.
+- CI36016073363, PR head a49f224, tested merge c12814ea5b065333b42c655792f7ae586f76967f.
+  Packaged build and product checks PASS. Current-preparer accept PASS.
+  Legacy accept FAIL: accepted successor identity disappears (actual=None).
+  Legacy rollback FAIL: terminal record phase old_relaunched exists but no
+  distinct live restored tray. Both provisioning cleanup_errors=[];
+  source provenance matches6ba71ef7/ab48e76d. Full artifacts retained in
+  output/legacy23-ci-36016073363/{accept,rollback}/.
+- This is real packaged evidence consistent with the missing legacy
+  AbandonProcessGroup policy, not signed-feed qualification. Both terminal
+  outcomes need repair; successor-only detachment remains insufficient.
+- Remaining CI jobs are still live; preserve run36016073363. Next implement
+  and qualify an external migration path with exact ownership/rollback proof.
+  Local report/provenance follow-ups remain unpushed pending current run.
+
 2026-09-24 legacy migration CI wiring prepared after Juniper qualification.
 - Live PR376 remains OPEN at5cd45e8 with green old-head checks; those do not
   qualify this checkout. Added pinned .23 preparer build/provenance to the

@@ -62,6 +62,12 @@ external migration entry point or a demonstrated compatible legacy transition;
 new-successor-only detachment cannot prove early-launch-failure rollback.
 Exact-source analysis is recorded in output/aud30-traffic-gate/legacy23-causal-boundary.json
 (source6ba71ef7, SHAab48e76d); it is not a live migration pass.
+Disposable CI36016073363 now reproduces both failures using that pinned preparer
+and the published previous bundle: accepted successor identity disappears;
+rollback records old_relaunched but leaves no distinct live restored tray.
+Current-preparer acceptance passes in the same run. Artifacts are preserved in
+output/legacy23-ci-36016073363/. This confirms the missing terminal-liveness gate;
+it is not signed-feed coverage or evidence of a completed migration repair.
 
 To build a diagnostic driver with that exact historical preparer, run
 `python3 scripts/materialize_legacy_update_driver.py`, then
