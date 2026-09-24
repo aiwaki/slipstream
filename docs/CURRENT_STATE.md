@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36025040811 terminal FAILURE solely historical accept tree mismatch.
+- Lifecycle-heavy PASS; completed log read and JSON extracted into
+  output/lifecycle-36025040811-result.json: uninstall clean, sentinel connection
+  and state preserved, global PF unchanged. Corrected transaction cases and
+  browser gate PASS; no production regression inferred from historical failure.
+- Pinned .23 source independently inspected (output/pinned23-updater-source.rs):
+  extract_archive_with_sync forces stage root0700 and skips archive root mode;
+  directory modes are not restored. Current extractor already restores these.
+  This is a concrete candidate cause, not yet the complete artifact difference.
+- Next push signed collector follow-up plus tree diagnostics, then inspect new
+  historical accept tree-mismatch.json before changing the diagnostic contract.
+  Installed workstation remains unchanged; public signed release gate remains.
+
 2026-09-24 CI36025040811 historical accept exposed a distinct tree mismatch.
 - All corrected current/migration cases and packaged-browser-qualification PASS.
   Legacy rollback diagnostic PASS; legacy accept FAIL at canonical terminal tree
