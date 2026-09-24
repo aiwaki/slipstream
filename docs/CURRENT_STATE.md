@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 Discord UI and PR evidence reconciliation completed.
+- Current native Discord UI showed loaded messages/member state. Opened an existing
+  image attachment and visually confirmed full image rendering, then dismissed
+  the viewer. No private message text or signed attachment URL stored in artifacts.
+  This proves observed rendering only; cache/network provenance is not established.
+  No call joined or message sent. Voice/stream remains open.
+- Updated PR376 body with current installed, Quit/restart, Juniper and sampled
+  YouTube/mixed-load results; draft retained. No source push or repeated CI.
+- Async timing question pending for physical sleep/wake or user-run Discord stream.
+  Do not force sleep or initiate communication while awaiting that choice.
+
 2026-09-24 real Chrome YouTube4K60 five-minute sample completed, no source change.
 - Official Blender aqz-KE-bpKQ video muted, stats show3840x2160@60;
   observed t158.51->223.03 over65s, buffer12.24->13.94s, frames5424->9295,
