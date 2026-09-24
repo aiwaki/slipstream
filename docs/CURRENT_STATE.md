@@ -22,6 +22,14 @@ prompt pending; install/browser pass still pending. No system settings or
 external Geph modified. After user runs it inspect private transaction completion
 first, NEVER replay once consumed; then verify:local-install and actual Safari.
 Evidence output/juniper-20260924/.
+- User attempted install; root preflight rejected service absence before any
+  transaction directory/replacement. Live follow-up: both launchd jobs absent
+  (exit113), root label disabled, no owned tray/daemon processes. The old fixed
+  3s delay did not establish stop completion; race is plausible, not captured.
+  Replaced it with bounded observation of jobs/processes (60s maximum) and kept
+  every root preflight. Added launchctl exit/output diagnostics. Read-only stop
+  check PASS, shell syntax PASS. f649eb7d remains unconsumed; updated wrapper is
+  ready for user execution, installation and browser qualification still pending.
 
 2026-09-23 user explicitly resumed broad work after the requested pause.
 - Physical checkout and HEAD6dee0e9 reconciled; user AGENTS.md edits preserved.
