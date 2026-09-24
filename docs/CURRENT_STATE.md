@@ -10,6 +10,15 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 pushed4cad0fd; real running-tray migration CI is live.
+- PR376 head4cad0fd034336aef2d5dcbbf8794e5b430ba1552 verified remotely.
+  CI36022169923 in_progress; dependency36022169945 and Windows36022170165
+  also live. Preserve these run handles; do not redispatch on observation timeout.
+- This push includes authenticated admission, watchdog-owned exact legacy stop,
+  running-tray3-case matrix and earlier heartbeat-race/lifecycle diagnostics.
+ 54 build-config tests also PASS locally. Wait for actual package results;
+  do not describe local unit checks as running-tray migration acceptance.
+
 2026-09-24 running legacy tray qualification wired for next CI.
 - Migration accept/rollback/startup_failure now start the actual published .23
   tray from the private target bundle. Missing-archive preflight must fail with
