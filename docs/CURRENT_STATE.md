@@ -10,6 +10,46 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 live Safari YouTube stall CONFIRMED; higher-priority open defect.
+- User requested non-disruptive checks only; do not sleep/reboot or start calls.
+- M1mUuyV67Sg froze at291.67s, buffer0, frames1798/dropped0,2880x2160@24,
+  SABR. Same position at22:43:59 and22:47:54; no agent reload/seek/pause.
+- User authorized enabling Safari web developer features; enabled. Web Inspector
+  identified videoplayback fetch to rr18---sn-n8v7znse.googlevideo.com failing
+  with "A TLS error caused the secure connection to fail." No security details.
+- Daemon active PID76105, heartbeat fresh. Fresh curl HEAD / to same public host
+  completed verified TLS andHTTP404 over transparent(2.64s TLS) and owned HTTP
+  proxy(2.84s TLS). This is reachability only, not Safari or media payload recovery.
+  An initial SOCKS probe was invalid:1080 is HTTP proxy; disregard its timeout.
+- Bounded privileged log reads exit0; private logs and sanitized observation in
+  output/local-qualification-a8248cfe/safari-stall.json. No signed media URL stored.
+- Follow-up Safari fresh public-root navigation to the exact CDN host also failed
+  secure connection, unlike curl. Separate agent-created test tab retained; original
+  video not reloaded. This contradicts a player-only stale-request explanation.
+- Exact-endpoint packet metadata capture tls-20260924T225015.tsv: native auth exit0,
+  decoder exit0; bounded tcpdump required forced terminal kill after25s, no process
+  left. Multiple Safari-SNI ClientHello streams sent1567-byte real flight (plus
+  local decoys) with TCP ACKs but zero incoming payload; independent no-SNI-visible
+  connection53665 received4494bytes. No payload/pcap retained, metadata only.
+  Next compare client-flight-sensitive local strategies, not global network settings.
+- Isolated verified OpenSSL matrix on same owned HTTP proxy: X25519 small,
+  +400-byte ALPN and +800-byte ALPN succeed(~2.7s); +1200-byte ALPN and
+  hybridX25519MLKEM768:X25519 failEOF(~17s). Pure hybrid also fails; curl remains
+  healthy. Size-sensitive failure now reproducible without Safari. Evidence
+  tls-size-matrix.json and hybrid-tls-probe.json; no production mutation.
+- Bounded raw TCP segmentation harness initially rejected macOS SYN flags[SEW]
+  (old capture regex onlyS/S.); corrected observer regex. Do not count those
+  invalid captures as network failures. Exact-host tests only, no PF/DNS changes.
+- Isolated root socket+MemoryBIO TLS probes: small238-byteTLS1.2 verifies;
+  +1200-byte ALPN times out,512-byte paced TCP writes also time out. Larger
+  low-TTL poison coverage also times out (both ordinary/paced). These attempted
+  fixes are rejected, not production candidates. TCP_MAXSEG1000 unsupported
+  (EINVAL before connection), not a network failure. All subprocesses terminal.
+  Evidence flight-experiments-summary.json; scripts are experimental, not installer.
+- Inspector closed; stats overlay remains. Playback still stalled. Root cause not
+  established; next compare Safari TLS/request path and recovery with actual flow
+  evidence. Do not claim all-YouTube success from earlier Chrome sample.
+
 2026-09-24 Discord UI and PR evidence reconciliation completed.
 - Current native Discord UI showed loaded messages/member state. Opened an existing
   image attachment and visually confirmed full image rendering, then dismissed
@@ -18,8 +58,7 @@ file.
   No call joined or message sent. Voice/stream remains open.
 - Updated PR376 body with current installed, Quit/restart, Juniper and sampled
   YouTube/mixed-load results; draft retained. No source push or repeated CI.
-- Async timing question pending for physical sleep/wake or user-run Discord stream.
-  Do not force sleep or initiate communication while awaiting that choice.
+- User deferred disruptive checks; physical sleep/wake and Discord stream remain open.
 
 2026-09-24 real Chrome YouTube4K60 five-minute sample completed, no source change.
 - Official Blender aqz-KE-bpKQ video muted, stats show3840x2160@60;
