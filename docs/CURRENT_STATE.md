@@ -10,6 +10,24 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36027438904 terminal; lifecycle evidence inspected.
+- Only failure is historical accept's now-diagnosed root0755->0700 mismatch.
+  All corrected transactions/browser/lifecycle gates PASS. Read job107730931031
+  log; extracted output/lifecycle-36027438904-result.json: active worker uninstall
+  cleans worker and original capture, installed state absent, sentinel preserved,
+  global PF unchanged. Idle worker process/profile counts zero.
+- Ready to push0abae33 diagnostic contract and docs. Production source unchanged
+  since testedb830c17; retain this run as baseline, no workstation changes.
+
+2026-09-24 CI36027438904 all7 corrected transaction reports inspected.
+- Downloaded current4/migration3 artifacts into output/qualification-36027438904/.
+  Every provision result PASS, cleanup_errors=[], exact terminal tree matches.
+  Current accept4880/primary_unavailable4973 survive; rollback restores3736;
+  traffic failure restores6150 with both resolver faults observed. Migration
+  accept11364 survives, rollback restores5629, startup failure restores3322.
+- Browser qualification PASS. Lifecycle-heavy still running; retain this handle.
+  Next finish lifecycle evidence then push0abae33 historical diagnostic fix.
+
 2026-09-24 CI36027438904 historical root-mode mismatch causally confirmed.
 - Historical accept tree-mismatch.json downloaded/read: only difference is root
   directory0755 ->0700. All other file contents/types/modes equal candidate.
