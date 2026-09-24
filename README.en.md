@@ -1,136 +1,89 @@
-# Slipstream
+# Slipstream — bypass network blocks on Mac
 
 <div align="center">
 
-<img src="app-tauri/src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Slipstream app icon">
+<img src="app-tauri/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="Slipstream app icon">
 
-[Русский](README.md) · **English**
+**YouTube buffering? Discord won't connect? Websites won't open?**
 
-[![preview](https://img.shields.io/badge/preview-macOS%20Apple%20Silicon-000000?logo=apple)](#install)
+Slipstream helps bypass network censorship in browsers and apps on macOS.
+
+**[Download for Mac](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)** · [Installation](#installation) · [Русский](README.md)
+
+**Apple silicon (M1 and later) · Free · Open source · Preview**
+
 [![ci](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
 
-<div align="center">
+Install Slipstream, approve its background service, and use your usual browsers
+and apps. It runs from the menu bar and selects a connection method for services
+that need a bypass. Local bypass requires no account, separate server, or browser
+extension.
 
-## Slipstream 0.1.9-preview.23: install Slipstream — sites just work
+## What it is for
 
-**Fast. Automatic. Unobtrusive.**
-
-**The next macOS Apple Silicon preview is undergoing final checks.**
-
-[Available preview releases](https://github.com/aiwaki/slipstream/releases)
-
-</div>
-
-Slipstream is a selective-routing app for networks affected by blocking and DPI
-filtering. It chooses a route for each service instead of enabling a system-wide
-VPN for all traffic.
-
-The intended user flow is simple: install the app, approve its background
-service once, then open sites in an ordinary browser. Local bypass does not
-require a Chrome extension, a Slipstream account, or a cloud server.
-
-## For users
-
-### Routes
-
-| Route | Purpose |
-|---|---|
-| Direct | Services that do not need bypassing. |
-| Local bypass | DPI-based blocking without changing your public IP address. |
-| Foreign exit | Explicitly reviewed services that block connections from Russian IP addresses, routed through the bundled Geph client. |
-| Telegram | A local proxy offered when a direct connection is unavailable. |
-
-Discord and YouTube use local bypass and are never routed through Geph. For an
-unknown host, Slipstream first checks the system route, the app's built-in DNS
-fallback, and multiple local strategies. A temporary foreign route is allowed
-only for a single exact hostname after independent checks confirm the failure;
-it never becomes a general VPN fallback.
-
-### What happens automatically
-
-- The background service starts with macOS, keeps running when the menu bar app
-  closes or restarts, and recovers from routine process failures.
-- After sleep or a Wi-Fi/Ethernet change, Slipstream rechecks the interface, its
-  private routing rules, and route availability.
-- If the browser attempts HTTP/3 for a reviewed foreign-exit site, Slipstream
-  moves only that flow onto the same managed TCP route through the bundled Geph
-  client. Other QUIC/UDP traffic is not blocked.
-- Starting with `0.1.9-preview.23`, a pinned local headless engine checks rare
-  ambiguous failures for a single exact hostname, and only after confirming an
-  active tab in Safari or Chrome. It stays off for known, healthy routes. A
-  candidate is published only after packaged-app and live-site checks plus a
-  measured 30-minute check for visible UI or focus changes. The engine runs
-  without an installed copy of Chrome, a browser extension, or Chrome Web Store
-  setup; it never opens a window or sends URL paths, cookies, or page content
-  off the device.
-- With a full-tunnel VPN or another transparent filter active, Slipstream safely
-  pauses its own interception and resumes automatically once the conflict is
-  gone.
-  External DNS, proxy, PAC, and VPN settings are detected but never changed.
-- The menu reports routing, Geph, and Telegram state; it can restart the service,
-  copy redacted diagnostics, check for updates, and remove all Slipstream-owned
-  components.
-- Starting with `0.1.9-preview.23`, Slipstream checks its signed update channel
-  automatically and shows a native macOS notification when a new version is
-  available. The update installs only when you choose it from the menu; the
-  current app is backed up locally and restored if the updated app fails its
-  health check.
-
-### Install
-
-Available for: macOS on Apple silicon.
-
-1. In [Releases](https://github.com/aiwaki/slipstream/releases), select the newest `Slipstream` release marked **Pre-release** and download `Slipstream_*.dmg`.
-2. Open the disk image and drag `Slipstream.app` to the Applications folder.
-3. Launch Slipstream and approve installation of the background service.
-
-The same release also includes a ZIP archive.
-
-A Geph account and exit location are needed only for foreign-exit routes and can
-be configured from the menu. Slipstream offers the Telegram proxy automatically
-when needed.
-
-After installation, leave Slipstream running in the menu bar. The network route
-stays active while the menu-bar app restarts, but the menu shows status, Geph
-settings, diagnostics, and updates.
+- **YouTube and Discord:** local bypass of DPI, the connection filtering used by
+  internet providers. Your public IP address stays the same.
+- **Websites with country restrictions:** an exit abroad through the bundled Geph
+  client for supported routes. This requires a Geph account.
+- **Telegram:** a local proxy the app offers to configure when a direct connection
+  is unavailable.
+- **Other websites:** a direct connection when no bypass is needed.
 
 > [!NOTE]
-> Preview builds are not notarized by Apple. If macOS blocks the app,
-> Control-click it in Finder and choose **Open**.
+> Slipstream is a preview. Results depend on your provider and the blocking
+> method: page loading, video, and calls may still fail. The public build may
+> lag behind fixes in the repository; access to every website is not guaranteed.
 
-Plans for other platforms are tracked in
-[`docs/ROADMAP.md`](docs/ROADMAP.md). Troubleshooting for recurring symptoms is
-available in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+## Installation
 
-## For developers
+The available build is **for macOS on Apple silicon**. See the
+[roadmap](docs/ROADMAP.md) for other platforms.
 
-Slipstream consists of a Tauri tray app, a Python background service, bundled
-sidecars, and shared JSON contracts. There is no public CLI or API yet; the
-testable cross-platform surface lives in `contracts/`.
+1. Open the [Slipstream release for Mac](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23) and download **`Slipstream_0.1.9-preview.23_aarch64.dmg`** under Assets.
+2. Open the DMG and drag **Slipstream.app** into **Applications**.
+3. Launch it from Applications and approve installation of the background service.
+4. Open the website or app you need. Connection status and settings are available from the Slipstream menu bar icon.
 
-- [Setup and build](DEVELOPMENT.md#setup)
-- [Safe local checks without root](DEVELOPMENT.md#safe-local-checks)
-- [Privileged checks on disposable CI only](DEVELOPMENT.md#privileged-qualification)
-- [Architecture and component boundaries](docs/ARCHITECTURE.md)
-- [Engineering documentation map](docs/README.md)
-- [Routing and recovery contracts](contracts/README.md)
-- [Contributing](CONTRIBUTING.md)
-- [Report a vulnerability](SECURITY.md)
-- [Roadmap](docs/ROADMAP.md)
+The same release includes a ZIP archive if you prefer that format.
+The [releases page](https://github.com/aiwaki/slipstream/releases) also includes internal
+Geph builds: choose **Slipstream**, not **Internal dependency**, to install the app.
 
-## Privacy and licenses
+The preview build is not notarized by Apple. If macOS blocks it, allow it to open
+in **System Settings → Privacy & Security**, then launch it again.
 
-Routing decisions, rare browser checks, and diagnostics run locally. Only
-traffic assigned to a reviewed foreign route—or to a strictly confirmed
-exact-host fallback—passes through the Geph network; direct and local routes
-never use Geph. Logs and diagnostic exports have strict size limits and redact
-URLs, cookies, account secrets, and page content.
+## Do I need to configure a VPN?
 
-- **Slipstream** — [MIT](LICENSE).
-- **geph5-client** — MPL-2.0, © [Geph](https://geph.io).
-- **tg-ws-proxy** — MIT, © [Flowseal](https://github.com/Flowseal/tg-ws-proxy).
+Not for local bypass. Slipstream selects a route separately for each service.
+**YouTube and Discord are never routed through Geph.** For supported websites
+that need an IP address abroad, configure a Geph account in the Slipstream menu;
+a separate Geph app is not required.
 
-Details: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Slipstream is not designed to anonymize all internet traffic. When it conflicts
+with a full-tunnel VPN, it pauses its own interception. It does not change external
+DNS, proxy, PAC, or VPN settings. See the [routing policy](docs/DECISIONS.md) for details.
+
+## If something won't load
+
+Check the service status in the Slipstream menu. You can also restart the service
+and copy redacted diagnostics there. When reporting a failure, include the website
+or app, browser, approximate time, and what failed: the page, images, video, or a call.
+
+[Troubleshooting](docs/TROUBLESHOOTING.md) ·
+[Report an issue](https://github.com/aiwaki/slipstream/issues)
+
+## Development and privacy
+
+Slipstream uses Tauri and a Python background service. Routing decisions run
+locally; only traffic assigned to foreign routes passes through Geph. Diagnostic
+exports redact URLs, cookies, account secrets, and page content.
+
+[Build from source](DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) ·
+[Report a vulnerability](SECURITY.md)
+
+Slipstream is licensed under [MIT](LICENSE). Licenses for bundled components,
+including Geph and the Telegram proxy, are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
