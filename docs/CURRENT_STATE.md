@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36025040811 historical accept exposed a distinct tree mismatch.
+- All corrected current/migration cases and packaged-browser-qualification PASS.
+  Legacy rollback diagnostic PASS; legacy accept FAIL at canonical terminal tree
+  equality, after terminal-process-loss assertion. Provision cleanup_errors=[].
+  Its report lacks file differences; cause is not yet established. Evidence:
+  output/qualification-36025040811/*legacy*accept*/ (harness/provision logs read).
+- Added metadata-only tree-mismatch.json diagnostics with expected/actual hashes,
+  preserved observed transaction phases and per-path mode/type/content differences;
+  artifact upload includes it. Canonical equality requirement remains unchanged.
+-15 focused harness tests PASS (output/tree-diagnostics-tests.log); actionlint
+  .github/workflows/ci.yml PASS. Full actionlint reports pre-existing issues in
+  other unchanged workflows, including unsupported concurrency.queue syntax.
+- Lifecycle-heavy still live at packaged lifecycle/sentinel smoke. Do not cancel
+  it with a push. Once terminal, inspect evidence, then push collector+diagnostics.
+  No workstation install; public signed-flow prerequisite remains open.
+
 2026-09-24 CI36025040811 first packaged artifacts inspected (merge7b6aee08).
 - Running-legacy migration accept/rollback/startup_failure PASS with candidate
   watchdog: old trays exit-15, all preflight refusals preserve tray; accept live

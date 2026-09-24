@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -228,6 +229,34 @@ def read_advancing_status(status_path: Path, expected_pid: int) -> dict:
     raise AssertionError("unreachable")
 
 
+def bundle_inventory(root: Path) -> dict:
+    """Diagnostic metadata only; canonical tree verification remains authoritative."""
+    entries = {}
+    for path in [root, *sorted(root.rglob("*"))]:
+        metadata = path.lstat()
+        entry = {"mode": oct(stat.S_IMODE(metadata.st_mode))}
+        if stat.S_ISLNK(metadata.st_mode):
+            entry.update(kind="symlink", target=os.readlink(path))
+        elif stat.S_ISDIR(metadata.st_mode):
+            entry.update(kind="directory")
+        elif stat.S_ISREG(metadata.st_mode):
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            entry.update(kind="file", size=metadata.st_size, sha256=digest.hexdigest())
+        else:
+            entry.update(kind="unsupported")
+        entries[path.relative_to(root).as_posix()] = entry
+    return entries
+
+
+def inventory_changes(expected: dict, actual: dict) -> dict:
+    return {name: {"expected": expected.get(name), "actual": actual.get(name)}
+            for name in sorted(expected.keys() | actual.keys())
+            if expected.get(name) != actual.get(name)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-bundle", type=Path, required=True)
@@ -260,11 +289,13 @@ def main() -> int:
     target = work / "Slipstream.app"
     shutil.copytree(args.previous_bundle, target, symlinks=True)
     old_tree = deterministic_tree_sha256(target)
+    old_inventory = bundle_inventory(target)
     helper_name = "Contents/MacOS/slipstream-update-watchdog"
     previous_helper_sha256 = hashlib.sha256((target / helper_name).read_bytes()).hexdigest()
     candidate_helper_sha256 = hashlib.sha256(
         (args.candidate_bundle / helper_name).read_bytes()).hexdigest()
     new_tree = deterministic_tree_sha256(args.candidate_bundle)
+    new_inventory = bundle_inventory(args.candidate_bundle)
     require(old_tree != new_tree, "previous and candidate bundles must be distinct")
     state = work / "state"
     state.mkdir(mode=0o700)
@@ -334,7 +365,14 @@ def main() -> int:
         require(survivor_identity is not None, "terminal tray already exited")
         require_surviving_process(survivor_pid, survivor_identity)
     expected = old_tree if args.case in ("rollback", "traffic_failure", "startup_failure") else new_tree
-    require(deterministic_tree_sha256(target) == expected, "terminal bundle tree mismatch")
+    actual_tree = deterministic_tree_sha256(target)
+    if actual_tree != expected:
+        expected_inventory = old_inventory if expected == old_tree else new_inventory
+        report.update(expected_tree=expected, actual_tree=actual_tree,
+                      previous_tree=old_tree, candidate_tree=new_tree,
+                      tree_changes=inventory_changes(expected_inventory, bundle_inventory(target)))
+        (work / "tree-mismatch.json").write_text(json.dumps(report, indent=2) + "\n")
+    require(actual_tree == expected, "terminal bundle tree mismatch; inspect tree-mismatch.json")
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
     report.update(bundle_tree=expected, previous_tree=old_tree, candidate_tree=new_tree,
                   candidate_watchdog_sha256=candidate_helper_sha256,

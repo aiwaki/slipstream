@@ -9,6 +9,28 @@ import packaged_update_transaction_smoke as gate
 
 
 class TransactionGateTests(unittest.TestCase):
+    def test_bundle_diagnostics_identify_bytes_modes_links_and_missing_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "bundle"
+            root.mkdir()
+            binary = root / "binary"
+            binary.write_bytes(b"old")
+            binary.chmod(0o755)
+            (root / "link").symlink_to("binary")
+            before = gate.bundle_inventory(root)
+            self.assertEqual(gate.inventory_changes(before, before), {})
+            binary.write_bytes(b"new")
+            binary.chmod(0o644)
+            (root / "link").unlink()
+            (root / "extra").write_bytes(b"extra")
+            changes = gate.inventory_changes(before, gate.bundle_inventory(root))
+            self.assertEqual(set(changes), {"binary", "link", "extra"})
+            self.assertNotEqual(changes["binary"]["expected"]["sha256"],
+                                changes["binary"]["actual"]["sha256"])
+            self.assertEqual(changes["binary"]["actual"]["mode"], "0o644")
+            self.assertIsNone(changes["link"]["actual"])
+            self.assertIsNone(changes["extra"]["expected"])
+
     def test_watchdog_provenance_requires_journal_and_actual_previous_bytes(self):
         import hashlib
         with tempfile.TemporaryDirectory() as tmp:
