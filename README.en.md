@@ -8,7 +8,7 @@
 
 Slipstream helps bypass network censorship in browsers and apps on macOS.
 
-**[Download for Mac](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)** · [Installation](#installation) · [Русский](README.md)
+**[Download for Mac](https://github.com/aiwaki/slipstream/releases)** · [Installation](#installation) · [Русский](README.md)
 
 **Apple silicon (M1 and later) · Free · Open source · Preview**
 
@@ -39,10 +39,11 @@ extension.
 
 ## Installation
 
-The available build is **for macOS on Apple silicon**. See the
-[roadmap](docs/ROADMAP.md) for other platforms.
+Currently available **for macOS on Apple silicon**. We plan to expand to
+**Windows and Android**, with **iOS and Linux** under consideration. There are
+no announced dates yet. See the [roadmap](docs/ROADMAP.md) for details.
 
-1. Open the [Slipstream release for Mac](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23) and download **`Slipstream_0.1.9-preview.23_aarch64.dmg`** under Assets.
+1. Open [Releases](https://github.com/aiwaki/slipstream/releases), choose the latest **Slipstream** release (currently a preview), and download the **`.dmg`** file for your Mac under Assets.
 2. Open the DMG and drag **Slipstream.app** into **Applications**.
 3. Launch it from Applications and approve installation of the background service.
 4. Open the website or app you need. Connection status and settings are available from the Slipstream menu bar icon.

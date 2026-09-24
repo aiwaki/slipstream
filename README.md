@@ -8,7 +8,7 @@
 
 Slipstream помогает обходить сетевые блокировки в браузерах и приложениях на macOS.
 
-**[Скачать для Mac](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23)** · [Установка](#установка) · [English](README.en.md)
+**[Скачать для Mac](https://github.com/aiwaki/slipstream/releases)** · [Установка](#установка) · [English](README.en.md)
 
 **Apple Silicon (M1 и новее) · Бесплатно · Открытый исходный код · Preview**
 
@@ -39,10 +39,11 @@ Slipstream помогает обходить сетевые блокировки
 
 ## Установка
 
-Доступная сборка — **для macOS на Apple Silicon**. Планы для других платформ —
-в [roadmap](docs/ROADMAP.md).
+Сейчас доступна сборка **для macOS на Apple Silicon**. Планируем расширить
+поддержку на **Windows и Android**; **iOS и Linux** рассматриваем как возможные
+направления. Сроки пока не определены. Подробности — в [roadmap](docs/ROADMAP.md).
 
-1. Откройте [релиз Slipstream для Mac](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.23) и скачайте **`Slipstream_0.1.9-preview.23_aarch64.dmg`** из раздела Assets.
+1. Откройте [Releases](https://github.com/aiwaki/slipstream/releases), выберите последний релиз **Slipstream** (сейчас это preview) и скачайте файл **`.dmg`** для вашего Mac из раздела Assets.
 2. Откройте DMG и перенесите **Slipstream.app** в папку **«Программы»**.
 3. Запустите приложение из «Программ» и разрешите установку фоновой службы.
 4. Откройте нужный сайт или приложение. Состояние подключения и настройки доступны через значок Slipstream в строке меню.
