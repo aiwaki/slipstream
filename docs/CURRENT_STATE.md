@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 historical diagnostic cases PASS in CI36029605888; artifacts inspected.
+- Tested merge010024bcdeb91a5b10b5edbc41e7ec9f8bf5ef95 (head94ed6dc).
+  accept: observed live successor and acknowledged, then terminal tray loss;
+  sole bundle delta root0755->0700 explicitly reported. rollback: exact recorded
+  old_relaunched and terminal tray loss. Previous-bundle watchdog both; both
+  provision PASS with cleanup_errors=[]. Coverage explicitly diagnostic, not
+  update success. Evidence output/qualification-36029605888/ downloaded/read.
+- Exact historical-defect assertion now qualified; no additional source fix is
+  indicated by these cases. Remaining corrected cases/browser/lifecycle are live;
+  next inspect overall terminal result, then resume remaining release gates.
+
 2026-09-24 browser baseline scope audited from completed36027438904 logs.
 - Job107730930836 log saved output/browser-36027438904.log: packaged headless
   Chromium sandbox enabled, hidden launch, no visible windows/frontmost change,
