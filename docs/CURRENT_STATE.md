@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 public signed-flow prerequisite verified against live releases.
+- Bounded GitHub release inventory (100) still has .23 as newest app preview;
+  output/migration-release-inventory.json. No newer published app archive exists
+  for the monotonic public CLI path. Do not weaken version/key/URL guards or
+  describe fixture authentication as a full public transition.
+- Positive published-download/CLI acceptance is a later new-release gate.
+  It remains incomplete; current core real-tray acceptance/rollback evidence and
+  signed fixture rejection/acceptance remain separate. No release was created.
+- CI36025040811 remains live on1cbee28; next inspect its historical-defect
+  assertions and packaged CLI source results, then push the local collector
+  follow-up after terminal evidence. Overall goal still has remaining work.
+
 2026-09-24 positive signature boundary verified locally (not full CLI migration).
 - Shared SignedArchiveCollector now owns bounded chunk collection and signature
   finalization in the HTTP downloader. Tests feed a deterministic signed inert
