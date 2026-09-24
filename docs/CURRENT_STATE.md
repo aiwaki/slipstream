@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 browser baseline scope audited from completed36027438904 logs.
+- Job107730930836 log saved output/browser-36027438904.log: packaged headless
+  Chromium sandbox enabled, hidden launch, no visible windows/frontmost change,
+  outcome navigation_pending. This gate alone does not prove page content loads.
+- Lifecycle composed_original_navigation independently reports CSS/JS/image each1,
+  ready callback1, original->worker->original channels, no manual reload, extension
+  disabled, elapsed28254ms, worker cleanup clean. Chrome/Safari probes survive tray
+  crash/restart. Controlled fixture evidence is not real public site qualification.
+- Current CI36029605888 live, package/source checks running. No duplicate gate.
+
+2026-09-24 pushed94ed6dc0c5bda713476794f40061e4fd642d3a6f.
+- New CI36029605888 queued; Windows36029605790/dependency36029605538 live.
+  Only harness/docs changes since tested productionb830c17. Next inspect exact
+  historical diagnostic acceptance; preserve existing corrected-path baseline.
+
 2026-09-24 CI36027438904 terminal; lifecycle evidence inspected.
 - Only failure is historical accept's now-diagnosed root0755->0700 mismatch.
   All corrected transactions/browser/lifecycle gates PASS. Read job107730931031
