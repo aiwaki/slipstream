@@ -10,26 +10,26 @@ file.
 
 ## Current Checkpoint
 
-2026-09-24 Juniper storefront repair in progress: Safari blank; root HTML
-complete but CDN JS truncated. Owned9954 completes both same gzip JS objects
-with valid CRC. Source922c876 adds narrow cdn.junipercreates.com exit;10 focused
-tests PASS. Canonical build/bundle verifier PASS. Fresh transactionf649eb7d
-staged at /Applications/.Slipstream.incoming-f649eb7d.app; NOT dispatched.
-output/juniper-20260924/install.command is ready for user execution: normal
-Quit, exact-hash root replacement with backup, normal launch. sudo requires
-password; CUA explicitly denies Terminal access, no bypass attempted. No native
-prompt pending; install/browser pass still pending. No system settings or
-external Geph modified. After user runs it inspect private transaction completion
-first, NEVER replay once consumed; then verify:local-install and actual Safari.
-Evidence output/juniper-20260924/.
-- User attempted install; root preflight rejected service absence before any
-  transaction directory/replacement. Live follow-up: both launchd jobs absent
-  (exit113), root label disabled, no owned tray/daemon processes. The old fixed
-  3s delay did not establish stop completion; race is plausible, not captured.
-  Replaced it with bounded observation of jobs/processes (60s maximum) and kept
-  every root preflight. Added launchctl exit/output diagnostics. Read-only stop
-  check PASS, shell syntax PASS. f649eb7d remains unconsumed; updated wrapper is
-  ready for user execution, installation and browser qualification still pending.
+2026-09-24 Juniper storefront repair INSTALLED AND BROWSER VERIFIED.
+- Source 922c876b16053ae30640a633b7ce9fd2de21515d adds a narrow
+  cdn.junipercreates.com exit after reproducible incomplete CDN JavaScript.
+  Ten focused tests and canonical build/bundle verification PASS.
+- Transaction f649eb7d is CONSUMED; NEVER replay install.command. User reports
+  exact source installed and root daemon hash matching; learning and all prior
+  app/private backups retained. Initial service-absence preflight rejected before
+  replacement; fixed 3s wait was replaced by bounded job/process stop observation.
+  A stop race was plausible, not captured; root preflight checks were retained.
+- Canonical npm run verify:local-install PASS: build-chain, artifact,
+  installed-unprivileged and installed-public-payload. Live daemon PID5119,
+  fresh StatusV2 active, PF applied/enabled/rules_loaded. Installed daemon SHA256
+  b6fadaae73a934389e1580eab1ab37022724e91603845a0214960590f29b771c.
+- Normal Safari navigation renders the Gorilla Tag product photo, description,
+  $39.99 price and Add to Cart. No purchase interaction performed. Installed
+  HTTP CONNECT main JS returns HTTP200, full146115 wire bytes in1.81s.
+  Evidence: output/juniper-20260924/installed-verification.log and installed-main.js.
+  No external Geph or system settings changed. Independent post-install normal
+  Quit qualification remains open; do not interrupt the working app just to
+  repeat installation. Broader updater migration gate remains below.
 
 2026-09-23 user explicitly resumed broad work after the requested pause.
 - Physical checkout and HEAD6dee0e9 reconciled; user AGENTS.md edits preserved.

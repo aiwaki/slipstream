@@ -2861,5 +2861,16 @@ PID42544 on9954 completed the same gzip objects:102780 and146115 wire bytes,
 539582 and645245 decoded bytes; gzip CRC/end-of-stream verified. This supports
 a reviewed CDN route repair, not a broad platform/CloudFront route. Root store
 remains local. Evidence: output/juniper-20260924/. Ten focused route/selection
-tests pass. Installation and real Safari result pending. External Geph processes
-were observed but not changed; comparisons used app-owned9954 only.
+tests pass. External Geph processes were observed but not changed; comparisons
+used app-owned9954 only.
+
+Source922c876 installed via consumed transactionf649eb7d (never replay).
+Canonical installed verification PASS, including fresh active StatusV2, live
+launchd daemon PID5119 and installed public payload checks. Normal Safari
+navigation visibly renders the product photo, description, price and Add to
+Cart. Checkout was not exercised. Installed CONNECT main JS completes HTTP200,
+146115 wire bytes in1.81s. Logs and payload: output/juniper-20260924/.
+The first install attempt rejected service absence before replacement; a fixed
+3s stop wait was replaced with bounded launchd/process observation while keeping
+root preflight checks. A race was plausible, not conclusively captured. User
+confirmed successful retry; all old app/private backups and learning retained.
