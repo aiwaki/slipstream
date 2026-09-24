@@ -24,9 +24,11 @@ release transition is itself a gate for `.24`: it must prove notification
 identity/submission, the bounded signed install, successor health, rollback on
 failure, and no Dock tile, window or focus change. Local MockRuntime tests are
 updater mechanics evidence only and do not satisfy that future live gate.
-Until `.23` is actually published, both root READMEs label these behaviors with
-that exact upcoming version and link only to the set of available previews;
-they do not describe the currently downloadable `.22` as carrying `.23` code.
+Root READMEs link to the releases list and instruct users to select the newest
+Slipstream app release, excluding internal dependency releases. Keep installation
+instructions version-independent; do not use GitHub's latest pointer for previews.
+Describe preview limitations without presenting unpublished repository fixes as
+capabilities of the downloadable build.
 
 The `.23` installer itself is transactional. After signature and bundle
 validation, a separately signed non-AppKit watchdog durably records a

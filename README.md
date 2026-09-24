@@ -10,7 +10,7 @@ Slipstream помогает обходить сетевые блокировки
 
 **[Скачать для Mac](https://github.com/aiwaki/slipstream/releases)** · [Установка](#установка) · [English](README.en.md)
 
-**Apple Silicon (M1 и новее) · Бесплатно · Открытый исходный код · Preview**
+**macOS 13+ · Apple Silicon (M1 и новее) · Бесплатно · Открытый исходный код · Preview**
 
 [![ci](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/лицензия-MIT-blue.svg)](LICENSE)
@@ -39,7 +39,7 @@ Slipstream помогает обходить сетевые блокировки
 
 ## Установка
 
-Сейчас доступна сборка **для macOS на Apple Silicon**. Планируем расширить
+Сейчас доступна сборка **для macOS 13 и новее на Apple Silicon**. Планируем расширить
 поддержку на **Windows и Android**; **iOS и Linux** рассматриваем как возможные
 направления. Сроки пока не определены. Подробности — в [roadmap](docs/ROADMAP.md).
 
@@ -81,12 +81,16 @@ PAC и VPN приложение не меняет. Подробности — в
 
 Приложение построено на Tauri и фоновой Python-службе. Решения о маршрутизации
 принимаются локально; через Geph проходит только трафик назначенных зарубежных
-маршрутов. Экспорт диагностики очищается от URL, cookies, секретов аккаунта и
+маршрутов. Для неизвестного сайта также возможен временный маршрут через Geph,
+но только для его точного имени хоста: после независимых неудачных проверок
+прямого соединения, встроенного DNS и нескольких локальных способов обхода,
+а затем успешной проверки загрузки через встроенный Geph. Это исключение
+не применяется к YouTube и Discord. Экспорт диагностики очищается от URL, cookies, секретов аккаунта и
 содержимого страниц.
 
 [Сборка из исходников](DEVELOPMENT.md) · [Архитектура](docs/ARCHITECTURE.md) ·
 [Документация](docs/README.md) · [Участие в разработке](CONTRIBUTING.md) ·
-[Сообщить об уязвимости](SECURITY.md)
+[Сообщить об уязвимости](SECURITY.md) · [Контракты маршрутизации](contracts/README.md)
 
 Slipstream распространяется под [MIT](LICENSE). Лицензии встроенных компонентов,
 включая Geph и Telegram-прокси: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

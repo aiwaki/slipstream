@@ -10,7 +10,7 @@ Slipstream helps bypass network censorship in browsers and apps on macOS.
 
 **[Download for Mac](https://github.com/aiwaki/slipstream/releases)** · [Installation](#installation) · [Русский](README.md)
 
-**Apple silicon (M1 and later) · Free · Open source · Preview**
+**macOS 13+ · Apple silicon (M1 and later) · Free · Open source · Preview**
 
 [![ci](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -39,7 +39,7 @@ extension.
 
 ## Installation
 
-Currently available **for macOS on Apple silicon**. We plan to expand to
+Currently available **for macOS 13 or later on Apple silicon**. We plan to expand to
 **Windows and Android**, with **iOS and Linux** under consideration. There are
 no announced dates yet. See the [roadmap](docs/ROADMAP.md) for details.
 
@@ -78,12 +78,16 @@ or app, browser, approximate time, and what failed: the page, images, video, or 
 ## Development and privacy
 
 Slipstream uses Tauri and a Python background service. Routing decisions run
-locally; only traffic assigned to foreign routes passes through Geph. Diagnostic
+locally; only traffic assigned to foreign routes passes through Geph. An unknown
+website may also receive a temporary Geph route for its exact hostname, but only
+after independent failures of the direct connection, built-in DNS, and multiple
+local bypass methods, followed by a successful payload check through the bundled
+Geph client. This exception never applies to YouTube or Discord. Diagnostic
 exports redact URLs, cookies, account secrets, and page content.
 
 [Build from source](DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) ·
-[Report a vulnerability](SECURITY.md)
+[Report a vulnerability](SECURITY.md) · [Routing contracts](contracts/README.md)
 
 Slipstream is licensed under [MIT](LICENSE). Licenses for bundled components,
 including Geph and the Telegram proxy, are listed in
