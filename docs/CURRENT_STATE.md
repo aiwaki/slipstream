@@ -10,6 +10,23 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 external migration CLI implemented locally, not released/installed.
+- --migrate-legacy VERSION SIGNATURE_FILE TARGET_EXE PID is handled before
+  Tauri/single-instance/native startup. Exact argument/path/PID validation;
+  bounded regular nofollow signature input; public key compiled into candidate;
+  official version-bound archive download before any preparation/stop.
+  Current user's home comes from passwd, not caller-supplied state paths.
+- CLI delegates admitted bytes to durable running-tray preparation. A successful
+  CLI exit means prepared, never accepted/completed. Local Rust parser test,
+  actual slipstream binary build and missing-argument execution PASS (exit1,
+  output/legacy-cli-refusal.json), without normal tray startup.
+- This is unqualified source on the PR branch, not a shipped public migration.
+  Positive signed-feed end-to-end and packaged running-tray outcomes remain
+  required. Do not install/release based on argument rejection tests.
+- CI36022169923 remains in_progress after successful same-handle retry of a
+  transient GitHub connection timeout. Chromium and Windows adapter PASS;
+  packaged build/product checks remain live. Do not restart the run.
+
 2026-09-24 independent exact historical driver generation/build verified.
 - Fresh temporary root used current driver entry plus digest-verified pinned
   legacy module; generated historical driver compiled successfully and refused

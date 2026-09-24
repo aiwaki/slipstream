@@ -8,6 +8,7 @@
 // later; main.rs is a thin desktop shim.
 
 mod app_update;
+mod legacy_migration;
 mod daemon_listener;
 mod diagnostics;
 mod geph_config;
@@ -20,6 +21,7 @@ mod updater_transaction;
 mod update_traffic;
 
 pub use native_messaging::run_native_messaging_if_requested;
+pub use legacy_migration::requested as run_legacy_migration_if_requested;
 pub use slipstream_core::{
     address_attempts, connection_race, route_circuit, route_circuit_registry,
 };

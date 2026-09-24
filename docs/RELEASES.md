@@ -494,3 +494,15 @@ tray before potentially failing preparation, and does not rely on the external
 launcher's path matching the normal tray initiator wait. This path still needs
 an isolated packaged running-tray qualification and a public CLI; unit checks
 are not evidence of a successful live .23 migration.
+
+### External launcher entry (not release-qualified)
+
+The candidate executable implements `--migrate-legacy VERSION SIGNATURE_FILE
+TARGET_EXE PID` before Tauri and single-instance forwarding. Input paths must be
+absolute. The signature is read from a bounded regular non-symlink file. The
+archive URL and trust key cannot be supplied by the caller. Canonical user state
+and LaunchAgents paths come from the current UID's home directory. Successful
+preparation prints the journal path and exits; that exit does not imply updater
+acceptance. Missing/invalid arguments fail without starting an ordinary tray.
+This source entry is pending signed-feed end-to-end and real running-tray
+qualification; do not treat CLI parsing or compilation as release approval.
