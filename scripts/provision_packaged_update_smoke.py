@@ -102,6 +102,7 @@ def main() -> int:
     parser.add_argument("--candidate-bundle", required=True, type=Path)
     parser.add_argument("--driver", required=True, type=Path)
     parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure", "primary_unavailable"))
+    parser.add_argument("--legacy-migration", action="store_true")
     args = parser.parse_args()
     lifecycle._require_disposable_ci()
     runner = lifecycle.pf.PfctlRunner()
@@ -143,6 +144,7 @@ def main() -> int:
             "--previous-bundle", str(args.previous_bundle.resolve()),
             "--candidate-bundle", str(args.candidate_bundle.resolve()),
             "--driver", str(args.driver.resolve()), "--case", args.case,
+            *(["--legacy-migration"] if args.legacy_migration else []),
         ], env=environment, user=uid, group=gid,
             extra_groups=lifecycle._user_supplementary_groups(uid, gid),
             capture_output=True, text=True, timeout=180)

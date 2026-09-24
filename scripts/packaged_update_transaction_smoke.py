@@ -58,7 +58,8 @@ def stop_successor(journal: dict, executable: Path) -> None:
     os.kill(pid, signal.SIGSTOP)
 
 
-def watchdog_payload_evidence(journal: dict, helper: Path, expected_sha256: str) -> dict:
+def watchdog_payload_evidence(journal: dict, helper: Path, expected_sha256: str,
+                              source: str = "previous-bundle") -> dict:
     """Bind journal provenance to the previous bundle's actual runtime copy."""
     require(journal.get("helper") == str(helper), "unexpected transaction watchdog path")
     require(journal.get("watchdog_sha256") == expected_sha256,
@@ -66,11 +67,12 @@ def watchdog_payload_evidence(journal: dict, helper: Path, expected_sha256: str)
     require(not helper.is_symlink() and helper.is_file(), "unsafe runtime watchdog file")
     actual = hashlib.sha256(helper.read_bytes()).hexdigest()
     require(actual == expected_sha256, "runtime watchdog bytes differ from journal")
-    return {"source": "previous-bundle", "sha256": actual, "runtime_path": str(helper)}
+    return {"source": source, "sha256": actual, "runtime_path": str(helper)}
 
 
 def observe(journal_path: Path, executable: Path, case: str,
-            *, timeout: float = 90, traffic_health=None, expected_watchdog=None) -> dict:
+            *, timeout: float = 90, traffic_health=None, expected_watchdog=None,
+            watchdog_source="previous-bundle") -> dict:
     deadline = time.monotonic() + timeout
     phases: list[str] = []
     stopped = False
@@ -106,7 +108,7 @@ def observe(journal_path: Path, executable: Path, case: str,
                     "successor_pid": successor_pid, "transaction_removed": True,
                     "live_traffic_failure": live_traffic_failure, "watchdog_payload": watchdog}
         if expected_watchdog is not None and watchdog is None:
-            watchdog = watchdog_payload_evidence(journal, *expected_watchdog)
+            watchdog = watchdog_payload_evidence(journal, *expected_watchdog, source=watchdog_source)
         phase = journal["phase"]
         if not phases or phases[-1] != phase:
             phases.append(phase)
@@ -164,6 +166,7 @@ def main() -> int:
     parser.add_argument("--candidate-bundle", type=Path, required=True)
     parser.add_argument("--driver", type=Path, required=True)
     parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure", "primary_unavailable"), required=True)
+    parser.add_argument("--legacy-migration", action="store_true")
     args = parser.parse_args()
     root = guard()  # Must precede every filesystem/process mutation.
     require(subprocess.run(["/usr/bin/pgrep", "-x", "slipstream"],
@@ -194,7 +197,8 @@ def main() -> int:
     executable = target / "Contents/MacOS/slipstream"
     # The driver bootstraps the real bundled watchdog. This harness never writes
     # an ACK, shortcuts the deadline, or substitutes a fake successor process.
-    result = subprocess.run([str(args.driver.resolve(strict=True)), str(executable),
+    result = subprocess.run([str(args.driver.resolve(strict=True)),
+                             *(["--legacy-migration"] if args.legacy_migration else []), str(executable),
                              str(archive), str(state)], capture_output=True, text=True, timeout=45)
     (work / "prepare.log").write_text(result.stdout + result.stderr)
     require(result.returncode == 0, "production transaction preparation failed; inspect prepare.log")
@@ -206,7 +210,8 @@ def main() -> int:
     report = observe(state / "app-update-transaction-v1.json", executable, args.case,
                      traffic_health=traffic_health,
                      expected_watchdog=(state / "runtime/slipstream-update-watchdog",
-                                        previous_helper_sha256))
+                                        candidate_helper_sha256 if args.legacy_migration else previous_helper_sha256),
+                     watchdog_source="verified-candidate" if args.legacy_migration else "previous-bundle")
     if args.case in ("rollback", "traffic_failure"):
         report["restored_pid"] = restored_app_pid(executable, report["successor_pid"])
     survivor_pid = report.get("restored_pid", report["successor_pid"])
@@ -220,7 +225,8 @@ def main() -> int:
                   candidate_watchdog_sha256=candidate_helper_sha256,
                   preparer={"name": args.driver.name,
                             "sha256": hashlib.sha256(args.driver.read_bytes()).hexdigest()},
-                  coverage="selected-preparer-previous-watchdog-not-signed-feed")
+                  coverage=("external-migration-candidate-watchdog-not-signed-feed" if args.legacy_migration
+                            else "selected-preparer-previous-watchdog-not-signed-feed"))
     (work / "result.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)
     return 0

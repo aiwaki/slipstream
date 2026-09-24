@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 migration acceptance/rollback qualification wiring prepared locally.
+- Disposable driver now accepts --legacy-migration and invokes the new core;
+  historical driver materialization explicitly rejects that mode while retaining
+  original preparer source and runner guards. Harness/provisioner forward mode
+  and bind runtime helper digest to candidate rather than previous bundle.
+  CI adds distinct migration accept/rollback cases and unique mode artifact names.
+- actionlint PASS;4 materializer,9 harness,8 provisioner,54 build-config tests PASS.
+  Actual current driver builds and refuses workstation execution in migration
+  mode (exit1). Evidence output/legacy23-ci-36016073363/migration-driver-*.log.
+- NOT pushed while CI36016073363 lifecycle-heavy remains live. Next add the
+  early-startup-failure migration case, then push after this run terminates.
+  Public signed launcher/old-tray ownership gate remains unimplemented.
+
 2026-09-24 external migration core prepared, NOT exposed or installed.
 - prepare_legacy_migration_transaction supports preview.23 only and selects
   the staged helper for owner-private runtime copying/hash binding. Ordinary

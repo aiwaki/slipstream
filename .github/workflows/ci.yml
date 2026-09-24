@@ -1571,11 +1571,20 @@ jobs:
       matrix:
         case: [accept, rollback, traffic_failure, primary_unavailable]
         driver: [prepare_packaged_update]
+        mode: [current]
         include:
           - case: accept
             driver: prepare_legacy23_update
+            mode: legacy
           - case: rollback
             driver: prepare_legacy23_update
+            mode: legacy
+          - case: accept
+            driver: prepare_packaged_update
+            mode: migration
+          - case: rollback
+            driver: prepare_packaged_update
+            mode: migration
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -1605,7 +1614,7 @@ jobs:
           ditto -x -k Slipstream-macos-arm64.zip .
           tar -xzf "$GITHUB_WORKSPACE/dist-update-driver/driver.tar.gz" -C "$RUNNER_TEMP/update-driver"
       - name: Candidate watchdog startup failure qualification
-        if: matrix.case == 'accept' && matrix.driver == 'prepare_packaged_update'
+        if: matrix.case == 'accept' && matrix.mode == 'current'
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
@@ -1614,16 +1623,21 @@ jobs:
       - name: Real packaged successor and rollback qualification
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
+          PREPARER_MODE: ${{ matrix.mode }}
         run: |
+          migration_args=()
+          if [ "$PREPARER_MODE" = migration ]; then
+            migration_args+=(--legacy-migration)
+          fi
           sudo -E "$(command -v python3)" scripts/provision_packaged_update_smoke.py \
             --candidate-bundle "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app" \
             --previous-bundle "$RUNNER_TEMP/previous/Slipstream.app" \
             --driver "$RUNNER_TEMP/update-driver/${{ matrix.driver }}" \
-            --case '${{ matrix.case }}'
+            --case '${{ matrix.case }}' "${migration_args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: packaged-update-${{ matrix.driver }}-${{ matrix.case }}-${{ github.sha }}
+          name: packaged-update-${{ matrix.mode }}-${{ matrix.driver }}-${{ matrix.case }}-${{ github.sha }}
           path: |
             dist-update-driver/provenance.json
             ${{ runner.temp }}/watchdog-*/result.json

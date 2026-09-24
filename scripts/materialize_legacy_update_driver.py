@@ -24,6 +24,16 @@ def materialize(repo: Path, source: bytes) -> dict:
     entry = (examples / "prepare_packaged_update.rs").read_text()
     if entry.count(MODULE) != 1:
         raise ValueError("qualification entry point module binding changed")
+    selection = """let prepare = if migration {
+        updater_transaction::prepare_legacy_migration_transaction
+    } else {
+        updater_transaction::prepare_transaction
+    };"""
+    if selection in entry:
+        entry = entry.replace(selection, """if migration {
+        return Err("historical driver cannot prepare an external migration".into());
+    }
+    let prepare = updater_transaction::prepare_transaction;""")
     generated = examples / "legacy23_generated"
     driver = examples / "prepare_legacy23_update.rs"
     if driver.exists() or driver.is_symlink():

@@ -11,7 +11,12 @@ fn run() -> Result<(), String> {
     {
         return Err("requires an unprivileged disposable GitHub Actions runner".into());
     }
-    let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let mut raw: Vec<_> = std::env::args_os().skip(1).collect();
+    let migration = raw.first().is_some_and(|arg| arg == "--legacy-migration");
+    if migration {
+        raw.remove(0);
+    }
+    let args: Vec<PathBuf> = raw.into_iter().map(PathBuf::from).collect();
     if args.len() != 3 {
         return Err("usage: prepare_packaged_update CURRENT_EXE ARCHIVE STATE_DIR".into());
     }
@@ -59,7 +64,12 @@ fn run() -> Result<(), String> {
         .ok_or("missing current version")?;
     // Input archives are canonical local candidates. Signature/feed discovery
     // remains a separate release qualification; this driver never ships.
-    let transaction = updater_transaction::prepare_transaction(
+    let prepare = if migration {
+        updater_transaction::prepare_legacy_migration_transaction
+    } else {
+        updater_transaction::prepare_transaction
+    };
+    let transaction = prepare(
         &args[0],
         &args[2],
         &launch_agents,
