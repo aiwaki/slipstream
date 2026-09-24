@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 pinned legacy diagnostic contract now explicit, awaiting CI.
+- --expect-legacy-defect applies only to named historical driver accept/rollback;
+  requires previous helper provenance, observed live successor, exact terminal
+  phase/nonce and tree, then confirmed absence of successor/restored target tray.
+  Other failures propagate and cleanup remains mandatory. Current/migration
+  branches still require live terminal tray. No continue-on-error introduced.
+-76 harness/provision/build-config tests PASS, actionlint PASS. Tests reject
+  never-live successor, wrong rollback nonce, surviving original/restored tray,
+  and observation failure. Report says defect-reproduction-not-update-success.
+- Next CI also includes the new public CLI source; signed positive CLI flow
+  remains unqualified. Prior run36022169923 terminal, so next push is safe.
+
 2026-09-24 CI36022169923 terminal review and lifecycle evidence inspected.
 - Lifecycle-heavy SUCCESS: composed navigation worker cleanup clean, active
   worker uninstall clean, installed_state absent, sentinel preserved, global PF

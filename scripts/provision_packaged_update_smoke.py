@@ -104,6 +104,7 @@ def main() -> int:
     parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure", "primary_unavailable", "startup_failure"))
     parser.add_argument("--legacy-migration", action="store_true")
     parser.add_argument("--running-legacy", action="store_true")
+    parser.add_argument("--expect-legacy-defect", action="store_true")
     args = parser.parse_args()
     lifecycle._require_disposable_ci()
     runner = lifecycle.pf.PfctlRunner()
@@ -147,6 +148,7 @@ def main() -> int:
             "--driver", str(args.driver.resolve()), "--case", args.case,
             *(["--legacy-migration"] if args.legacy_migration else []),
             *(["--running-legacy"] if args.running_legacy else []),
+            *(["--expect-legacy-defect"] if args.expect_legacy_defect else []),
         ], env=environment, user=uid, group=gid,
             extra_groups=lifecycle._user_supplementary_groups(uid, gid),
             capture_output=True, text=True, timeout=180)

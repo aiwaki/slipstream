@@ -87,8 +87,9 @@ legacy migration. The harness records the selected driver name and SHA-256,
 with coverage `selected-preparer-previous-watchdog-not-signed-feed`. CI retains
 historical source provenance alongside the results and runs separate legacy
 accept/rollback cases. These are not signed-feed migration qualification; a
-failed legacy case must not be relabelled as a pass because current-driver
-cases succeed. Older a49f224 reports still contain the current-preparer label;
+failed legacy update must not be relabelled as a successful update because
+current-driver cases succeed. Historical diagnostic mode instead explicitly
+requires the known terminal-tray-loss defect, as described below. Older a49f224 reports still contain the current-preparer label;
 use their matrix driver and provenance to distinguish the historical cases.
 
 
@@ -515,3 +516,14 @@ surviving successor; both failures restore the exact previous tree with a
 surviving restored tray. All three cleanup reports are empty. Detailed results
 are in output/running-migration-ci-36022169923/. This qualifies the running-tray
 transaction boundary only; public signed CLI success is still unproven.
+
+Historical matrix cases now use `--expect-legacy-defect` only with the pinned
+legacy driver, accept/rollback cases and previous-bundle watchdog provenance.
+They must observe the successor alive, complete the expected transaction (and
+exact nonce/old_relaunched record for rollback), verify the exact terminal bundle
+tree, then confirm absence of both the original successor and any restored tray.
+Inspection errors, surviving trays, preparation failures, wrong tree/nonce and
+cleanup errors still fail. Report coverage is
+`pinned-legacy-defect-reproduction-not-update-success`. A green diagnostic means
+the old defect was reproduced, never that the old updater works. Migration and
+current-preparer cases retain their live-survivor assertions unchanged.

@@ -1640,6 +1640,8 @@ jobs:
           migration_args=()
           if [ "$PREPARER_MODE" = migration ]; then
             migration_args+=(--legacy-migration --running-legacy)
+          elif [ "$PREPARER_MODE" = legacy ]; then
+            migration_args+=(--expect-legacy-defect)
           fi
           sudo -E "$(command -v python3)" scripts/provision_packaged_update_smoke.py \
             --candidate-bundle "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app" \

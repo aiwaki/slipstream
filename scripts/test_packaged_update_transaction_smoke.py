@@ -53,7 +53,7 @@ class TransactionGateTests(unittest.TestCase):
                     gate.stop_successor(journal, exe)
                 kill.assert_not_called()
 
-    def observe(self, case, *, failure_nonce="a", changed_process=False):
+    def observe(self, case, *, failure_nonce="a", changed_process=False, expect_legacy_defect=False):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "app-update-transaction-v1.json"
             exe = Path(tmp) / "Slipstream.app/Contents/MacOS/slipstream"
@@ -74,11 +74,37 @@ class TransactionGateTests(unittest.TestCase):
             identity = (os.getuid(), journal["successor_started"], str(exe))
             with patch.object(gate.time, "sleep", side_effect=terminal), \
                     patch.object(gate, "stop_successor") as stop, \
-                    patch.object(gate, "snapshot", return_value=None if changed_process else identity):
-                result = gate.observe(path, exe, case, expected_watchdog=(helper, digest))
+                    patch.object(gate, "snapshot", side_effect=lambda _:
+                                 None if changed_process or (expect_legacy_defect and not path.exists()) else identity):
+                result = gate.observe(path, exe, case, expected_watchdog=(helper, digest),
+                                      expect_legacy_defect=expect_legacy_defect)
                 self.assertEqual(result["watchdog_payload"]["sha256"], digest)
                 self.assertEqual(stop.call_count, int(case == "rollback"))
                 return result
+
+    def test_legacy_defect_requires_live_successor_and_exact_terminal_phase(self):
+        self.observe("accept", expect_legacy_defect=True)
+        self.observe("rollback", expect_legacy_defect=True)
+        with self.assertRaisesRegex(RuntimeError, "never observed alive"):
+            self.observe("accept", changed_process=True, expect_legacy_defect=True)
+        with self.assertRaisesRegex(RuntimeError, "exact transaction"):
+            self.observe("rollback", failure_nonce="other", expect_legacy_defect=True)
+
+    def test_legacy_defect_requires_no_terminal_tray_not_just_missing_original_pid(self):
+        exe = Path("/private/test/Slipstream.app/Contents/MacOS/slipstream")
+        with patch.object(gate, "snapshot", return_value=None), \
+                patch.object(gate, "matching_app_pids", return_value=[]), \
+                patch.object(gate.time, "sleep"):
+            gate.require_legacy_terminal_loss(exe, 123)
+        for original, matches in [(None, [456]), ((501, "birth", str(exe)), [])]:
+            with patch.object(gate, "snapshot", return_value=original), \
+                    patch.object(gate, "matching_app_pids", return_value=matches), \
+                    patch.object(gate.time, "monotonic", side_effect=[0, 6]):
+                with self.assertRaisesRegex(RuntimeError, "not reproduced"):
+                    gate.require_legacy_terminal_loss(exe, 123)
+        with patch.object(gate, "snapshot", side_effect=RuntimeError("inspection failed")):
+            with self.assertRaisesRegex(RuntimeError, "inspection failed"):
+                gate.require_legacy_terminal_loss(exe, 123)
 
     def test_startup_failure_can_finish_before_first_observation(self):
         for wrong_target, pid in ((False, None), (True, None), (False, 123)):
