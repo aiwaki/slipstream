@@ -72,9 +72,13 @@ retains all current disposable-runner guards. Its provenance manifest is at
 `app-tauri/src-tauri/examples/legacy23_generated/provenance.json`.
 Use this driver only on disposable CI, with the pinned published previous
 bundle and the existing transaction harness. A compilation pass does not qualify
-legacy migration. The harness's default coverage label describes the current
-preparer; historical-driver evidence must identify the actual driver separately
-and must not be published as a current-preparer or migration pass.
+legacy migration. The harness records the selected driver name and SHA-256,
+with coverage `selected-preparer-previous-watchdog-not-signed-feed`. CI retains
+historical source provenance alongside the results and runs separate legacy
+accept/rollback cases. These are not signed-feed migration qualification; a
+failed legacy case must not be relabelled as a pass because current-driver
+cases succeed. Older a49f224 reports still contain the current-preparer label;
+use their matrix driver and provenance to distinguish the historical cases.
 
 
 After a preview is published and its remote tag, state, identity, asset set and
