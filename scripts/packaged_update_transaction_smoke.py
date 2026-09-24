@@ -206,8 +206,10 @@ def main() -> int:
     parser.add_argument("--driver", type=Path, required=True)
     parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure", "primary_unavailable", "startup_failure"), required=True)
     parser.add_argument("--legacy-migration", action="store_true")
+    parser.add_argument("--running-legacy", action="store_true")
     args = parser.parse_args()
     root = guard()  # Must precede every filesystem/process mutation.
+    require(not args.running_legacy or args.legacy_migration, "running tray requires migration")
     require(args.case != "startup_failure" or args.legacy_migration,
             "startup failure is an external migration qualification case")
     require(subprocess.run(["/usr/bin/pgrep", "-x", "slipstream"],
@@ -237,10 +239,36 @@ def main() -> int:
         out.add(args.candidate_bundle, arcname="Slipstream.app",
                 filter=remove_successor_execute if args.case == "startup_failure" else None)
     executable = target / "Contents/MacOS/slipstream"
+    old_process = None
+    old_identity = None
+    if args.running_legacy:
+        # This packaged previous-version tray is private to this disposable job.
+        log = (work / "legacy-tray.log").open("wb")
+        old_process = subprocess.Popen([str(executable)], stdout=log, stderr=subprocess.STDOUT,
+                                       start_new_session=True)
+        log.close()
+        time.sleep(2)
+        require(old_process.poll() is None, "published tray did not survive startup")
+        old_identity = snapshot(old_process.pid)
+        require(old_identity is not None and old_identity[0] == os.getuid()
+                and old_identity[2] == str(executable), "published tray identity mismatch")
+        # Reject a nonexistent input before preparation, proving the external
+        # launcher does not stop the tray on a preflight failure.
+        preflight = subprocess.run([str(args.driver.resolve(strict=True)), "--legacy-migration",
+                                   "--running-legacy-pid", str(old_process.pid), str(executable),
+                                   str(work / "missing-archive.tar.gz"), str(state)],
+                                  capture_output=True, text=True, timeout=15)
+        (work / "preflight-refusal.log").write_text(preflight.stdout + preflight.stderr)
+        require(preflight.returncode != 0, "missing archive unexpectedly admitted")
+        require(old_process.poll() is None and snapshot(old_process.pid) == old_identity,
+                "failed preflight disturbed the old tray")
+        require(deterministic_tree_sha256(target) == old_tree and not list(state.iterdir()),
+                "failed preflight mutated bundle or transaction state")
     # The driver bootstraps the real bundled watchdog. This harness never writes
     # an ACK, shortcuts the deadline, or substitutes a fake successor process.
     result = subprocess.run([str(args.driver.resolve(strict=True)),
-                             *(["--legacy-migration"] if args.legacy_migration else []), str(executable),
+                             *(["--legacy-migration"] if args.legacy_migration else []),
+                             *(["--running-legacy-pid", str(old_process.pid)] if old_process else []), str(executable),
                              str(archive), str(state)], capture_output=True, text=True, timeout=45)
     (work / "prepare.log").write_text(result.stdout + result.stderr)
     require(result.returncode == 0, "production transaction preparation failed; inspect prepare.log")
@@ -254,6 +282,12 @@ def main() -> int:
                      expected_watchdog=(state / "runtime/slipstream-update-watchdog",
                                         candidate_helper_sha256 if args.legacy_migration else previous_helper_sha256),
                      watchdog_source="verified-candidate" if args.legacy_migration else "previous-bundle")
+    if old_process is not None:
+        require(old_process.wait(timeout=5) == -signal.SIGTERM,
+                "bound published tray was not terminated by the watchdog")
+        report["legacy_tray"] = {"pid": old_process.pid, "identity": old_identity,
+                                 "exit_code": old_process.returncode,
+                                 "preflight_refusal_preserved_tray": True}
     if args.case in ("rollback", "traffic_failure", "startup_failure"):
         report["restored_pid"] = restored_app_pid(executable, report["successor_pid"])
     survivor_pid = report.get("restored_pid", report["successor_pid"])
@@ -267,7 +301,8 @@ def main() -> int:
                   candidate_watchdog_sha256=candidate_helper_sha256,
                   preparer={"name": args.driver.name,
                             "sha256": hashlib.sha256(args.driver.read_bytes()).hexdigest()},
-                  coverage=("external-migration-candidate-watchdog-not-signed-feed" if args.legacy_migration
+                  coverage=("running-legacy-migration-watchdog-stop-not-signed-feed" if args.running_legacy
+                            else "external-migration-candidate-watchdog-not-signed-feed" if args.legacy_migration
                             else "selected-preparer-previous-watchdog-not-signed-feed"))
     (work / "result.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)

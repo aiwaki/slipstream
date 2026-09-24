@@ -16,6 +16,21 @@ fn run() -> Result<(), String> {
     if migration {
         raw.remove(0);
     }
+    let running_pid = if raw.first().is_some_and(|arg| arg == "--running-legacy-pid") {
+        if !migration || raw.len() < 2 {
+            return Err("running PID requires migration mode".into());
+        }
+        raw.remove(0);
+        Some(
+            raw.remove(0)
+                .to_str()
+                .ok_or("invalid PID")?
+                .parse::<u32>()
+                .map_err(|_| "invalid PID")?,
+        )
+    } else {
+        None
+    };
     let args: Vec<PathBuf> = raw.into_iter().map(PathBuf::from).collect();
     if args.len() != 3 {
         return Err("usage: prepare_packaged_update CURRENT_EXE ARCHIVE STATE_DIR".into());
@@ -64,6 +79,20 @@ fn run() -> Result<(), String> {
         .ok_or("missing current version")?;
     // Input archives are canonical local candidates. Signature/feed discovery
     // remains a separate release qualification; this driver never ships.
+    // BEGIN_RUNNING_MIGRATION
+    if let Some(pid) = running_pid {
+        let transaction = updater_transaction::prepare_running_legacy_migration(
+            &args[0],
+            pid,
+            &args[2],
+            &launch_agents,
+            &std::fs::read(&args[1]).map_err(|e| e.to_string())?,
+            version,
+        )?;
+        println!("{}", transaction.journal_path.display());
+        return Ok(());
+    }
+    // END_RUNNING_MIGRATION
     let prepare = if migration {
         updater_transaction::prepare_legacy_migration_transaction
     } else {

@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 running legacy tray qualification wired for next CI.
+- Migration accept/rollback/startup_failure now start the actual published .23
+  tray from the private target bundle. Missing-archive preflight must fail with
+  the same live tray identity, unchanged tree and empty transaction state.
+  Production driver then calls prepare_running_legacy_migration with its PID;
+  terminal evidence requires that child exited via SIGTERM before checking
+  successor/restored tree and surviving tray as before. Coverage explicitly
+  running-legacy-migration-watchdog-stop-not-signed-feed.
+-24 harness/materializer/provision tests PASS and current Rust driver build PASS;
+  actionlint PASS. No workstation transaction run. Published-driver generation
+  strips the new migration-only branch and still refuses migration mode.
+- Next inspect the exact pushed CI run for3 running-tray outcomes and newly
+  retained lifecycle diagnostics. Public signed launcher remains unexposed.
+
 2026-09-24 durable watchdog-owned legacy tray stop implemented, not installed.
 - VerifiedLegacyMigration.prepare_running_tray binds the installed .23 tray by
   PID/UID/birth/command and kernel proc_pidpath, then stages a candidate-owned

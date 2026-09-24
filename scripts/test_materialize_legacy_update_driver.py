@@ -45,6 +45,7 @@ class LegacyDriverTests(unittest.TestCase):
                 driver.materialize(root, source)
             generated = (examples / "prepare_legacy23_update.rs").read_text()
             self.assertNotIn("::prepare_legacy_migration_transaction", generated)
+            self.assertNotIn("::prepare_running_legacy_migration", generated)
             self.assertIn("historical driver cannot prepare an external migration", generated)
             self.assertIn('std::env::var("SLIPSTREAM_DISPOSABLE_CI")', generated)
             self.assertIn("all transaction inputs must be inside RUNNER_TEMP", generated)

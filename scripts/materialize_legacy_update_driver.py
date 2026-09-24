@@ -34,6 +34,11 @@ def materialize(repo: Path, source: bytes) -> dict:
         return Err("historical driver cannot prepare an external migration".into());
     }
     let prepare = updater_transaction::prepare_transaction;""")
+    start = entry.find("    // BEGIN_RUNNING_MIGRATION")
+    if start >= 0:
+        end_marker = "    // END_RUNNING_MIGRATION"
+        end = entry.index(end_marker, start) + len(end_marker)
+        entry = entry[:start] + '    let _ = running_pid;\n' + entry[end:]
     generated = examples / "legacy23_generated"
     driver = examples / "prepare_legacy23_update.rs"
     if driver.exists() or driver.is_symlink():
