@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 external launcher compatibility check against exact published source.
+- Pinned6ba71ef7 lib.rs has no --quit/is_quit_command entry point. Its run-loop
+  comment explicitly leaves daemon and Geph running on tray exit. Do not assume
+  the modern --quit protocol when implementing public migration from .23.
+- External initiation must authenticate candidate first, bind old bundle and
+  PID/UID/birth/executable identity, then stop only that old tray with verified
+  absence before replacement; no name-wide kill or changes to external services.
+  This remains design work, not an implemented public launcher or a live stop.
+- Migration CI36018610119 still running: Chromium/changes PASS; package build,
+  product checks and Windows adapter live. No redispatch performed.
+
 2026-09-24 migration CI58c576d dispatched and live: run36018610119.
 - changes and Chromium checks PASS; package build, product tests and Windows
   adapter still in_progress. Preserve this run; migration cases await package.

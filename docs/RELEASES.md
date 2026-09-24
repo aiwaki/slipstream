@@ -60,6 +60,11 @@ records that old helper's hash. A helper placed only inside a new archive cannot
 replace the transaction owner. Qualification/repair must therefore include an
 external migration entry point or a demonstrated compatible legacy transition;
 new-successor-only detachment cannot prove early-launch-failure rollback.
+The pinned .23 tray source also predates the --quit command. Its old menu exit
+leaves the daemon and Geph alive. An external migration launcher cannot assume
+modern Quit IPC; it needs authenticated candidate admission and exact old-tray
+PID/UID/birth/executable ownership before stopping that tray, with no name-wide
+termination or mutations of unrelated network services.
 Exact-source analysis is recorded in output/aud30-traffic-gate/legacy23-causal-boundary.json
 (source6ba71ef7, SHAab48e76d); it is not a live migration pass.
 Disposable CI36016073363 now reproduces both failures using that pinned preparer
