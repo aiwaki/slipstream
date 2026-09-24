@@ -17,8 +17,11 @@ file.
   Existing current-driver cases remain intact; legacy failures are not ignored.
 - actionlint PASS; 3 materializer and54 build-config tests PASS. Reused prior
   actual legacy driver build/workstation-refusal evidence; no live workstation
-  transaction performed. Next: push and observe exact-head disposable macOS
-  results; inspect legacy failure artifacts before changing migration behavior.
+  transaction performed. Pushed a49f2246c90f9c42b95ee8a3cca9f74272f1e499;
+  PR376 head confirmed. Exact-head CI run36016073363 is queued, Windows
+  run36016073469 in_progress, dependency audit36016073319 queued.
+  Next: observe those existing handles (do not redispatch); inspect legacy
+  accept/rollback artifacts before changing migration behavior.
 
 2026-09-24 Juniper storefront repair INSTALLED AND BROWSER VERIFIED.
 - Source 922c876b16053ae30640a633b7ce9fd2de21515d adds a narrow
