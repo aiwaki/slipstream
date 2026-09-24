@@ -506,3 +506,12 @@ preparation prints the journal path and exits; that exit does not imply updater
 acceptance. Missing/invalid arguments fail without starting an ordinary tray.
 This source entry is pending signed-feed end-to-end and real running-tray
 qualification; do not treat CLI parsing or compilation as release approval.
+
+Running-old-tray migration qualification passed in CI36022169923
+(head4cad0fd, merge98871aaf): accept, rollback and startup_failure. Each real
+published .23 tray survives missing-input preflight, then exits by SIGTERM from
+the candidate watchdog. Success acknowledges the exact candidate tree with a
+surviving successor; both failures restore the exact previous tree with a
+surviving restored tray. All three cleanup reports are empty. Detailed results
+are in output/running-migration-ci-36022169923/. This qualifies the running-tray
+transaction boundary only; public signed CLI success is still unproven.

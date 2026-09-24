@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 running-.23 migration3-case boundary PASSED and artifacts inspected.
+- CI36022169923 head4cad0fd / merge98871aaf27ab47cd90644e26ede140a6a622c5ff.
+  accept: old PID9604 exit-15, acknowledged live successor9960, exact new tree.
+  rollback: old6143 exit-15, rejected6298, restored8183, exact old tree.
+  startup_failure: old7403 exit-15, successor null, restored7792, exact old tree.
+  All3 preflight refusals preserve the same live old tray; terminal trays survive
+  watchdog cleanup and every provision cleanup_errors=[]. Downloaded/read:
+  output/running-migration-ci-36022169923/{accept,rollback,startup_failure}/.
+- This proves durable candidate-watchdog stop/replacement from a running old
+  bundle, NOT signed-feed/public CLI success. New CLI is local/unpushed.
+- Same CI still live: current rollback and lifecycle-heavy running; pinned
+  legacy accept/rollback fail as before. No reset/restart/new push performed.
+- Next inspect lifecycle diagnostics and complete signed CLI qualification.
+  Reuse these3 passing core cases unless their affected source changes.
+
 2026-09-24 real CLI rejection checks passed without network/preparation.
 - Built debug slipstream binary rejected6 negative cases with exit1 and exact
   expected errors: old version, malformed base64 signature, invalid minisign,
