@@ -474,16 +474,15 @@ permitted by the existing disposable macOS CI guard; never on the workstation.
 
 ### External migration admission (implementation boundary)
 
-The pending external launcher uses `VerifiedLegacyMigration` to download the
+The external launcher uses `VerifiedLegacyMigration` to download the
 exact official archive for a canonical preview newer than .23. Admission uses
 the launcher's compile-time packaged updater key; callers cannot supply a trust
 key or archive URL. Signature verification precedes bounded archive inspection,
 which requires matching identity/version and a regular, nonempty executable
-watchdog. Only immutable bytes/version are exposed, and admission performs no
-filesystem or process mutation. The constructor is not yet wired to a public
-launcher. Unit rejection checks and the shared downloader are not evidence of a
-successful live signed-feed migration; exact legacy tray ownership/stop and
-preparation-failure recovery remain required before public exposure.
+watchdog. The archive and version stay private, and admission performs no filesystem or
+process mutation. The constructor is wired to the CLI described below. Unit
+rejection checks and the shared downloader do not prove a successful live
+signed-feed migration.
 
 The admitted archive can now prepare a running legacy tray by its exact PID.
 Preparation records PID/UID/birth identity and verifies the kernel executable
@@ -492,9 +491,8 @@ journal. In Prepared phase that watchdog rechecks executable hash and live
 identity, sends only SIGTERM to the bound PID and verifies exit before renames.
 Timeout or unverifiable identity defers replacement. This avoids stopping the
 tray before potentially failing preparation, and does not rely on the external
-launcher's path matching the normal tray initiator wait. This path still needs
-an isolated packaged running-tray qualification and a public CLI; unit checks
-are not evidence of a successful live .23 migration.
+launcher's path matching the normal tray initiator wait. The packaged running-tray boundary has passed the isolated qualification
+described below. It does not qualify the complete public signed CLI path.
 
 ### External launcher entry (not release-qualified)
 
@@ -505,8 +503,8 @@ archive URL and trust key cannot be supplied by the caller. Canonical user state
 and LaunchAgents paths come from the current UID's home directory. Successful
 preparation prints the journal path and exits; that exit does not imply updater
 acceptance. Missing/invalid arguments fail without starting an ordinary tray.
-This source entry is pending signed-feed end-to-end and real running-tray
-qualification; do not treat CLI parsing or compilation as release approval.
+This source entry is pending signed-feed end-to-end qualification; do not treat
+CLI parsing, compilation, or the isolated transaction tests as release approval.
 
 Running-old-tray migration qualification passed in CI36022169923
 (head4cad0fd, merge98871aaf): accept, rollback and startup_failure. Each real
@@ -527,3 +525,16 @@ cleanup errors still fail. Report coverage is
 `pinned-legacy-defect-reproduction-not-update-success`. A green diagnostic means
 the old defect was reproduced, never that the old updater works. Migration and
 current-preparer cases retain their live-survivor assertions unchanged.
+
+The public positive transition requires an official signed preview newer than
+`.23`; the live release inventory checked on 2026-09-24 had no such archive
+(`output/migration-release-inventory.json`). Keep the production key, immutable
+URL and monotonic version guards intact. Shared collector fixtures verify
+signature acceptance and tamper rejection separately from this release gate.
+
+CI36025040811 additionally passed all current and running-migration transaction
+cases plus browser/lifecycle gates. The historical rollback diagnostic passed;
+historical accept reached the terminal tree check but failed equality. Pinned
+`.23` extraction keeps the root at0700 and does not restore archive directory
+modes. This is a candidate explanation, pending the per-file diagnostic evidence
+added in b830c17; do not dismiss arbitrary tree differences as the known defect.

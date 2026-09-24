@@ -10,6 +10,11 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 pushed b830c17c54aa1e3a7761dc567d1f6b529dbdc941; PR376 head verified.
+- New CI36027438904 queued; Windows36027438876 live, dependency36027439093 queued.
+  Includes signed collector fixture coverage and terminal bundle diff diagnostics.
+- Preserve handles; next inspect historical accept diagnostics and affected gates.
+
 2026-09-24 CI36025040811 terminal FAILURE solely historical accept tree mismatch.
 - Lifecycle-heavy PASS; completed log read and JSON extracted into
   output/lifecycle-36025040811-result.json: uninstall clean, sentinel connection
