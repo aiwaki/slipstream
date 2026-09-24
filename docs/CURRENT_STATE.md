@@ -22,8 +22,22 @@ file.
   Transcript bytes preserved; no cipher downgrade or Geph. Existing ladders retained.
 - Focused tests:7 new transcript/scope/input-boundary tests plus15 existing strategy
   tests PASS. Previous green remote94ed6dc CI baseline reused; no unchanged suite.
-- Next build canonical candidate, then qualify real Safari when replacement can
-  avoid disrupting user work. Current installed df59aae still has the defect.
+- Canonical local build at6eab51c completed exit0; build-chain/artifact PASS.
+  Log output/googlevideo-large-flight-build.log; session98571 is terminal.
+  Candidate bundle tree c682a21aa48b9a5870b527670aba42612905e9fcaaa20e66c328d8c717ac84da;
+  daemon 1efadb6445cd07cc93b30a0120bfc4efce5491499c40041440e9a1e4b4fabcc6.
+  New replacement DRAFT e292da1d prepared; bash syntax PASS, NOT executed.
+  output/googlevideo-replacement-e292da1d pins candidate/current hashes and retains
+  a8248cfe backup. transaction_ready=DRAFT prevents execution until final review.
+  Fresh canonical current-install verification PASS: output/googlevideo-before-install.json.
+  Candidate retained at output/googlevideo-replacement-e292da1d/Slipstream.app;
+  staged-verification.json canonical artifact PASS, exact tree matches built candidate.
+  Draft incoming points to this retained copy; root-private copy verification remains
+  in transaction before execution of installer. Current connections untouched.
+  Next final review and install when brief restart is convenient, then qualify real
+  Safari. Never replay consumed a8248cfe.
+  User requested non-disruption; installation timing pending.
+  Current installed df59aae still has the defect.
   Evidence output/local-qualification-a8248cfe/flight-probe-*.json and matrices.
 
 2026-09-24 live Safari YouTube stall CONFIRMED; higher-priority open defect.
