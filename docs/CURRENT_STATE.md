@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36025040811 first packaged artifacts inspected (merge7b6aee08).
+- Running-legacy migration accept/rollback/startup_failure PASS with candidate
+  watchdog: old trays exit-15, all preflight refusals preserve tray; accept live
+  successor6960 exact candidate tree, rollback restored3853 and startup failure
+  restored11029 exact previous tree. All provision cleanup_errors=[].
+- Historical rollback now explicitly reproduces terminal tray loss after a live
+  successor6189 and old_relaunched phase, with previous-bundle watchdog and exact
+  old tree; clean teardown. This is diagnostic success, not old updater success.
+- Evidence downloaded/read under output/qualification-36025040811/. Remaining
+  matrix/browser/lifecycle jobs still live; preserve run and defer local push.
+
+2026-09-24 CI36025040811 package build completed successfully.
+- Verified remote PR376 remains open at1cbee281b03b2643c65f48176671ce5c96e2fbd7.
+  All source checks and packaged-app-build PASS. Nine update transaction cases,
+  packaged browser qualification and lifecycle-heavy are queued on this handle.
+- Preserve this run; local collector follow-up is still unpushed. Next inspect
+  historical expected-defect artifacts and corrected current/migration terminal
+  process evidence after completion. No workstation mutation or new release.
+
 2026-09-24 public signed-flow prerequisite verified against live releases.
 - Bounded GitHub release inventory (100) still has .23 as newest app preview;
   output/migration-release-inventory.json. No newer published app archive exists
