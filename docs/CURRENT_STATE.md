@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 migration core qualified on disposable packaged macOS, all3 cases.
+- CI36018610119, head58c576d / merge655dd0d8e8814b99f5996a370d28bf5d2bbd0b94:
+  migration accept, rollback and startup_failure SUCCESS. Downloaded and read
+  detailed result/provision files under output/migration-ci-36018610119/.
+  Runtime helper hash83797af8d8918453f7b501b6dd70df23efdbde22bfceeb44f5129bc6fa692865
+  matches candidate in all3. Acceptance reaches acknowledged and live successor;
+  rollback restores exact old tree/live tray. Startup failure has successor_pid
+  null, reaches old_relaunched and restored PID6337 survives. cleanup_errors=[]
+  in all3. This is NOT signed-feed or public external launcher qualification.
+- Next implement authenticated public migration admission and exact legacy-tray
+  ownership/stop handling (published .23 lacks --quit). Keep these3 case results
+  as reusable core baseline; extend verification to the new launcher boundary.
+- Existing CI also has independent heartbeat-read race (local fix prepared) and
+  still requires overall terminal review. Preserve run36018610119; local
+  diagnostic/report follow-ups remain unpushed. Workstation unchanged.
+
 2026-09-24 live migration CI36018610119 first results:
 - Migration rollback job SUCCESS; accept and startup_failure still in_progress.
   Detailed success artifacts still need inspection. Preserve current run.

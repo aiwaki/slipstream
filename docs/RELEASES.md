@@ -102,6 +102,15 @@ it then retries the archival finalizer without rebuilding or replacing files.
 Drafts, tag-only collisions and mismatched publications remain fail-closed. The
 previous tag and verified artifacts remain unchanged.
 
+Migration core qualification (CI36018610119, source58c576d): candidate-owned
+watchdog acceptance, timeout rollback, and OS spawn-refusal rollback all passed
+with actual packaged trays on disposable macOS. Helper digest matches candidate;
+terminal bundle tree and live tray identity survive watchdog cleanup in all
+three. The spawn-refusal case has no successor PID and restores the old tray.
+Artifacts are retained under output/migration-ci-36018610119/. Public signed
+archive admission and safe external stopping of the old .23 tray remain open;
+these results do not qualify the public migration entry point.
+
 ## Disposable packaged transaction qualification
 
 `scripts/packaged_update_transaction_smoke.py` exercises the actual bundled
