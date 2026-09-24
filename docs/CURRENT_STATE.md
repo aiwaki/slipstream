@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36029605888 terminal SUCCESS on94ed6dc (merge010024bc).
+- All nine transaction cases, source/build/browser/lifecycle gates PASS. Historical
+  diagnostic reports already inspected. Lifecycle job107738642109 log downloaded;
+  output/lifecycle-36029605888-result.json confirms clean active worker/original
+  capture cleanup, absent installed state, sentinel preserved and global PF unchanged.
+- PR376 body updated to final implemented migration behavior and current evidence;
+  remains draft. No public signed transition/release or workstation install claimed.
+- Next reconcile remaining release gates: positive public signed CLI requires a
+  newer official preview; current candidate workstation/browser/Quit, sustained
+  media/mixed-load and physical sleep/wake qualification remain. Preserve green
+  baseline; do not rerun unchanged packaged matrix for documentation-only changes.
+
 2026-09-24 historical diagnostic cases PASS in CI36029605888; artifacts inspected.
 - Tested merge010024bcdeb91a5b10b5edbc41e7ec9f8bf5ef95 (head94ed6dc).
   accept: observed live successor and acknowledged, then terminal tray loss;
