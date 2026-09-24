@@ -10,14 +10,29 @@ file.
 
 ## Current Checkpoint
 
-2026-09-24 voice refresh candidate implemented, NOT installed.
+2026-09-24 voice refresh candidate4564274 INSTALLED; real-call gate open.
 - Exact recognized IPv4 voice tuple refresh on real packets/keepalives, once30s;
   initial primer unchanged, own decoys/unknown flows excluded, monotonic clock.
-- Focused voice tests24 PASS (see output/discord-midcall-20260924/focused-tests.log).
+- Focused voice tests24 PASS (output/discord-midcall-20260924/focused-tests.log).
   Covers model filter reset at8/37/121/307s, silent-listener keepalive, self-decoy
   exclusion, scope, cadence and bounded state. Not proof of actual Discord cause.
-- Next canonical build then real-call qualification at non-disruptive timing;
-  installed Googlevideo candidate6eab51c remains unchanged during preparation.
+- Canonical build source4564274 complete exit0, artifact/build-chain PASS; log
+  output/discord-midcall-20260924/build.log. Retained candidate verified at
+  output/voice-replacement-40cc1f1c/Slipstream.app.
+- CLI Quit exit0; transaction40cc1f1c authorization/install exit0, CONSUMED.
+  Never replay. Previous app/private backups and learning preserved.
+  Backup /Applications/.Slipstream.before-40cc1f1c.app contains6eab51c.
+  Current-install initial verifier caught unstable phase; fresh retry PASS.
+  Discord last media state DISCONNECTED23:32:13 before Quit.
+- Canonical npm run verify:local-install PASS including installed-public-payload;
+  StatusV2 active, fresh heartbeat, launchd PID52195, PF applied/enabled/rules loaded.
+  Evidence output/voice-replacement-40cc1f1c/{authorization-result.txt,installed-verification.log}.
+  Build64587, install86948 and verification17382 are terminal exit0; do not poll.
+  CUA launch returned -10005 but subsequent canonical verification proved launch.
+- Includes prior Googlevideo candidate6eab51c. Real Discord incoming audio/stream
+  recovery and sustained Safari playback remain unqualified; no real call joined.
+  Next correlate any recurrence with media/control evidence and qualify real call
+  at non-disruptive timing. Historical entries below describe prior states.
 
 2026-09-24 Discord mid-call investigation underway, no voice fix claimed.
 - User window22:00-00:00; compared Sep23/24 sanitized client log events.
