@@ -86,7 +86,7 @@ PAC и VPN приложение не меняет. Подробности — в
 
 [Сборка из исходников](DEVELOPMENT.md) · [Архитектура](docs/ARCHITECTURE.md) ·
 [Документация](docs/README.md) · [Участие в разработке](CONTRIBUTING.md) ·
-[Сообщить об уязвимости](SECURITY.md)
+[Сообщить об уязвимости](SECURITY.md) · [Контракты маршрутизации](contracts/README.md)
 
 Slipstream распространяется под [MIT](LICENSE). Лицензии встроенных компонентов,
 включая Geph и Telegram-прокси: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

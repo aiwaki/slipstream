@@ -83,7 +83,7 @@ exports redact URLs, cookies, account secrets, and page content.
 
 [Build from source](DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) ·
-[Report a vulnerability](SECURITY.md)
+[Report a vulnerability](SECURITY.md) · [Routing contracts](contracts/README.md)
 
 Slipstream is licensed under [MIT](LICENSE). Licenses for bundled components,
 including Geph and the Telegram proxy, are listed in
