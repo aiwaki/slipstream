@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 real CLI rejection checks passed without network/preparation.
+- Built debug slipstream binary rejected6 negative cases with exit1 and exact
+  expected errors: old version, malformed base64 signature, invalid minisign,
+  oversized signature file, symlink, FIFO (nonblocking). Each completed within
+ 5s and left the nonexistent target unchanged. Only temporary fixtures created.
+  Evidence output/legacy-cli-negative-6ly4z9rt/report.json. These are refusal
+  checks, not positive signed update/migration or installed app qualification.
+- CI36022169923 live: product-checks/checks/Chromium/Windows adapter PASS;
+  packaged-app-build still packaging, migration jobs await its output. Preserve
+  this run; CLI commits remain local to avoid cancelling packaged qualification.
+
 2026-09-24 external migration CLI implemented locally, not released/installed.
 - --migrate-legacy VERSION SIGNATURE_FILE TARGET_EXE PID is handled before
   Tauri/single-instance/native startup. Exact argument/path/PID validation;
