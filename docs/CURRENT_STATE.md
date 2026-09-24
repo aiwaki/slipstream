@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 independent exact historical driver generation/build verified.
+- Fresh temporary root used current driver entry plus digest-verified pinned
+  legacy module; generated historical driver compiled successfully and refused
+  workstation execution (exit1, disposable-runner guard). Evidence:
+  output/legacy-current-source-d8vw2fkx/report.json and build.log.
+  Existing ignored generated inputs were preserved; they were not mistaken for
+  fresh current-entry evidence. Temporary compilation example was removed.
+- CI36022169923 remains live on4cad0fd: Chromium PASS; packaged build,
+  product checks and Windows adapter still in_progress. No new push/redispatch.
+  Next inspect packaged running-legacy3-case and lifecycle evidence when ready.
+
 2026-09-24 pushed4cad0fd; real running-tray migration CI is live.
 - PR376 head4cad0fd034336aef2d5dcbbf8794e5b430ba1552 verified remotely.
   CI36022169923 in_progress; dependency36022169945 and Windows36022170165
