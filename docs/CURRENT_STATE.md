@@ -10,6 +10,16 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 legacy migration CI wiring prepared after Juniper qualification.
+- Live PR376 remains OPEN at5cd45e8 with green old-head checks; those do not
+  qualify this checkout. Added pinned .23 preparer build/provenance to the
+  packaged driver artifact and separate accept/rollback matrix cases using it.
+  Existing current-driver cases remain intact; legacy failures are not ignored.
+- actionlint PASS; 3 materializer and54 build-config tests PASS. Reused prior
+  actual legacy driver build/workstation-refusal evidence; no live workstation
+  transaction performed. Next: push and observe exact-head disposable macOS
+  results; inspect legacy failure artifacts before changing migration behavior.
+
 2026-09-24 Juniper storefront repair INSTALLED AND BROWSER VERIFIED.
 - Source 922c876b16053ae30640a633b7ce9fd2de21515d adds a narrow
   cdn.junipercreates.com exit after reproducible incomplete CDN JavaScript.

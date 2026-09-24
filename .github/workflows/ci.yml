@@ -474,6 +474,8 @@ jobs:
       SLIPSTREAM_EPHEMERAL_ROUTE_POLICY_KEY_ID: ci-packaged-lifecycle
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
         with:
@@ -779,19 +781,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Build non-shipping transaction qualification driver
+      - name: Build current and pinned legacy non-shipping transaction drivers
         working-directory: app-tauri/src-tauri
         run: |
           set -euo pipefail
+          python3 ../../scripts/materialize_legacy_update_driver.py
           cargo build --locked --release --target "$SLIPSTREAM_TAURI_TARGET" \
-            --example prepare_packaged_update
+            --example prepare_packaged_update --example prepare_legacy23_update
           mkdir -p ../../dist-update-driver
+          cp examples/legacy23_generated/provenance.json ../../dist-update-driver/
           tar -czf ../../dist-update-driver/driver.tar.gz \
-            -C "target/$SLIPSTREAM_TAURI_TARGET/release/examples" prepare_packaged_update
+            -C "target/$SLIPSTREAM_TAURI_TARGET/release/examples" \
+            prepare_packaged_update prepare_legacy23_update
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packaged-update-driver-${{ github.sha }}
-          path: dist-update-driver/driver.tar.gz
+          path: |
+            dist-update-driver/driver.tar.gz
+            dist-update-driver/provenance.json
           if-no-files-found: error
           retention-days: 7
 
@@ -1563,6 +1570,12 @@ jobs:
       fail-fast: false
       matrix:
         case: [accept, rollback, traffic_failure, primary_unavailable]
+        driver: [prepare_packaged_update]
+        include:
+          - case: accept
+            driver: prepare_legacy23_update
+          - case: rollback
+            driver: prepare_legacy23_update
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -1592,7 +1605,7 @@ jobs:
           ditto -x -k Slipstream-macos-arm64.zip .
           tar -xzf "$GITHUB_WORKSPACE/dist-update-driver/driver.tar.gz" -C "$RUNNER_TEMP/update-driver"
       - name: Candidate watchdog startup failure qualification
-        if: matrix.case == 'accept'
+        if: matrix.case == 'accept' && matrix.driver == 'prepare_packaged_update'
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
@@ -1605,13 +1618,14 @@ jobs:
           sudo -E "$(command -v python3)" scripts/provision_packaged_update_smoke.py \
             --candidate-bundle "$RUNNER_TEMP/candidate/bundle/macos/Slipstream.app" \
             --previous-bundle "$RUNNER_TEMP/previous/Slipstream.app" \
-            --driver "$RUNNER_TEMP/update-driver/prepare_packaged_update" \
+            --driver "$RUNNER_TEMP/update-driver/${{ matrix.driver }}" \
             --case '${{ matrix.case }}'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: packaged-update-${{ matrix.case }}-${{ github.sha }}
+          name: packaged-update-${{ matrix.driver }}-${{ matrix.case }}-${{ github.sha }}
           path: |
+            dist-update-driver/provenance.json
             ${{ runner.temp }}/watchdog-*/result.json
             ${{ runner.temp }}/watchdog-*/helper.log
             ${{ runner.temp }}/watchdog-*/state/*.json
