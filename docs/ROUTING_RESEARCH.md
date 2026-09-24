@@ -2849,3 +2849,17 @@ or the reason the user's later attempt succeeded.
 Primary source: https://bugs.webkit.org/show_bug.cgi?id=284559 documents305
 on localhost link navigation and distinctions from explicit typed HTTP URLs.
 No Safari security settings, certificates, DNS or proxy preferences changed.
+
+## 2026-09-24 Juniper Gorilla Tag storefront
+
+Safari reproduced a blank product page with Slipstream active. Explicit local
+HTTP CONNECT completed the root HTML (82916 bytes, HTTP200, 1.28s), but
+cdn.junipercreates.com vendor JS stopped at16922 bytes with curl18 and the main
+JS failed HTTP2 framing. A system-path request also stopped at16902 bytes; with
+PF active that is not an independent unfiltered direct-path control. Owned Geph
+PID42544 on9954 completed the same gzip objects:102780 and146115 wire bytes,
+539582 and645245 decoded bytes; gzip CRC/end-of-stream verified. This supports
+a reviewed CDN route repair, not a broad platform/CloudFront route. Root store
+remains local. Evidence: output/juniper-20260924/. Ten focused route/selection
+tests pass. Installation and real Safari result pending. External Geph processes
+were observed but not changed; comparisons used app-owned9954 only.

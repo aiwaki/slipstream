@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 Juniper storefront repair in progress: Safari blank; root HTML
+complete but CDN JS truncated. Owned9954 completes both same gzip JS objects
+with valid CRC. Source922c876 adds narrow cdn.junipercreates.com exit;10 focused
+tests PASS. Canonical build/bundle verifier PASS. Fresh transactionf649eb7d
+staged at /Applications/.Slipstream.incoming-f649eb7d.app; NOT dispatched.
+output/juniper-20260924/install.command is ready for user execution: normal
+Quit, exact-hash root replacement with backup, normal launch. sudo requires
+password; CUA explicitly denies Terminal access, no bypass attempted. No native
+prompt pending; install/browser pass still pending. No system settings or
+external Geph modified. After user runs it inspect private transaction completion
+first, NEVER replay once consumed; then verify:local-install and actual Safari.
+Evidence output/juniper-20260924/.
+
 2026-09-23 user explicitly resumed broad work after the requested pause.
 - Physical checkout and HEAD6dee0e9 reconciled; user AGENTS.md edits preserved.
   PR376 remains open at5cd45e8 with terminal green checks, not proof for local
