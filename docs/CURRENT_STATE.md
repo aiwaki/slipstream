@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 local candidate build97537 completed exit0, canonical PASS.
+- Source df59aae; output/current-local-build.log and current-local-canonical.json.
+  Bundle treee23410b7f1565bb4a30894fc8f2461bb775fd1b29749364b693f2944a46c78a4;
+  daemonc0d9f1ab65605aa72e202d22ae20bf942c04da24dd7b63bb03df9e7895afa23b.
+  Canonical fresh/staged/bundled payloads agree, valid ad-hoc signature. Local
+  .23 version package, not a newer public signed-feed artifact. Installed not_run.
+- No live build remains. Next prepare a NEW reversible installation transaction
+  against fresh installed identity; do not replay consumed or historic scripts.
+  No workstation app stopped/replaced yet. Preserve learning and all backups.
+
+2026-09-24 next gate: local candidate build started, no installation.
+- npm run build:local at source df59aae, exec session97537; log
+  output/current-local-build.log. Uses canonical bundled verifier automatically.
+- Production diff from installed922c876b comprises updater migration/admission
+  and browser-worker diagnostics; no route-policy change. Green CI36029605888
+  production baseline reused. No existing cargo/build process before start.
+- Next wait same build handle, inspect canonical output, then prepare reviewable
+  workstation qualification. Do not replay consumedf649eb7d or old pending installs.
+
 2026-09-24 CI36029605888 terminal SUCCESS on94ed6dc (merge010024bc).
 - All nine transaction cases, source/build/browser/lifecycle gates PASS. Historical
   diagnostic reports already inspected. Lifecycle job107738642109 log downloaded;
