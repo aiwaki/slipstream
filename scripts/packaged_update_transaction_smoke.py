@@ -257,6 +257,13 @@ def inventory_changes(expected: dict, actual: dict) -> dict:
             if expected.get(name) != actual.get(name)}
 
 
+def require_legacy_root_mode_defect(changes: dict) -> None:
+    require(changes == {".": {
+        "expected": {"mode": "0o755", "kind": "directory"},
+        "actual": {"mode": "0o700", "kind": "directory"},
+    }}, "historical bundle differs beyond the known root mode defect")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-bundle", type=Path, required=True)
@@ -372,9 +379,16 @@ def main() -> int:
                       previous_tree=old_tree, candidate_tree=new_tree,
                       tree_changes=inventory_changes(expected_inventory, bundle_inventory(target)))
         (work / "tree-mismatch.json").write_text(json.dumps(report, indent=2) + "\n")
-    require(actual_tree == expected, "terminal bundle tree mismatch; inspect tree-mismatch.json")
+    if args.expect_legacy_defect and args.case == "accept":
+        # Pinned .23 drops the archive root mode. Require this exact defect as
+        # well as terminal tray loss; any other content/mode difference fails.
+        require_legacy_root_mode_defect(
+            inventory_changes(new_inventory, bundle_inventory(target)))
+        report["bundle_contract"] = "known-legacy-root-mode-loss-reproduced"
+    else:
+        require(actual_tree == expected, "terminal bundle tree mismatch; inspect tree-mismatch.json")
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
-    report.update(bundle_tree=expected, previous_tree=old_tree, candidate_tree=new_tree,
+    report.update(bundle_tree=actual_tree, previous_tree=old_tree, candidate_tree=new_tree,
                   candidate_watchdog_sha256=candidate_helper_sha256,
                   preparer={"name": args.driver.name,
                             "sha256": hashlib.sha256(args.driver.read_bytes()).hexdigest()},

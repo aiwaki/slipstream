@@ -9,6 +9,19 @@ import packaged_update_transaction_smoke as gate
 
 
 class TransactionGateTests(unittest.TestCase):
+    def test_legacy_root_mode_contract_rejects_every_other_difference(self):
+        known = {".": {"expected": {"mode": "0o755", "kind": "directory"},
+                       "actual": {"mode": "0o700", "kind": "directory"}}}
+        gate.require_legacy_root_mode_defect(known)
+        variants = [{}, {**known, "binary": {"expected": "original", "actual": "changed"}},
+                    {**known, "nested": {"expected": "0o755", "actual": "0o700"}}]
+        for mode in ("0o777", "0o750", "0o755"):
+            variants.append({".": {"expected": known["."]["expected"],
+                                   "actual": {"mode": mode, "kind": "directory"}}})
+        for changed in variants:
+            with self.assertRaisesRegex(RuntimeError, "beyond the known"):
+                gate.require_legacy_root_mode_defect(changed)
+
     def test_bundle_diagnostics_identify_bytes_modes_links_and_missing_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "bundle"

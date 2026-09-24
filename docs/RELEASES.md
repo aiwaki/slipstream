@@ -518,10 +518,13 @@ transaction boundary only; public signed CLI success is still unproven.
 Historical matrix cases now use `--expect-legacy-defect` only with the pinned
 legacy driver, accept/rollback cases and previous-bundle watchdog provenance.
 They must observe the successor alive, complete the expected transaction (and
-exact nonce/old_relaunched record for rollback), verify the exact terminal bundle
-tree, then confirm absence of both the original successor and any restored tray.
+exact nonce/old_relaunched record for rollback), confirm absence of both the original successor and any restored tray, and verify
+the terminal bundle. Rollback requires the exact previous tree. Historical
+accept requires only the observed root-directory mode loss (0755 to0700), with
+all other metadata and content identical to the candidate.
 Inspection errors, surviving trays, preparation failures, wrong tree/nonce and
-cleanup errors still fail. Report coverage is
+cleanup errors still fail. The actual bundle hash is recorded even in the
+expected historical-defect case. Report coverage is
 `pinned-legacy-defect-reproduction-not-update-success`. A green diagnostic means
 the old defect was reproduced, never that the old updater works. Migration and
 current-preparer cases retain their live-survivor assertions unchanged.
@@ -538,3 +541,10 @@ historical accept reached the terminal tree check but failed equality. Pinned
 `.23` extraction keeps the root at0700 and does not restore archive directory
 modes. This is a candidate explanation, pending the per-file diagnostic evidence
 added in b830c17; do not dismiss arbitrary tree differences as the known defect.
+
+CI36027438904 historical accept diagnostics confirm the root mode is the sole
+bundle difference: archive0755 becomes0700; every other entry matches. Evidence
+is `output/qualification-36027438904/*legacy*accept*/**/tree-mismatch.json`.
+The historical diagnostic now requires this exact metadata defect alongside
+terminal process loss, and rejects additional changes or a different root mode.
+Corrected current/migration paths still require canonical full-tree equality.

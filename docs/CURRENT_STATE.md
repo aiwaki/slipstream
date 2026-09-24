@@ -10,6 +10,19 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 CI36027438904 historical root-mode mismatch causally confirmed.
+- Historical accept tree-mismatch.json downloaded/read: only difference is root
+  directory0755 ->0700. All other file contents/types/modes equal candidate.
+  This matches inspected pinned .23 extraction. Successor4336 acknowledged then
+  terminal tray loss observed; evidence output/qualification-36027438904/.
+- Historical accept contract now explicitly requires that exact sole metadata
+  defect plus terminal tray loss, retaining actual canonical tree hash in result.
+  Additional changes, different root mode or surviving tray fail; current and
+  migration canonical tree equality unchanged.16 focused tests PASS in
+  output/legacy-root-mode-tests.log. Local follow-up; do not cancel live CI.
+- Next inspect remaining36027438904 results, then push this evidence-backed
+  diagnostic contract. Public signed migration release gate remains unqualified.
+
 2026-09-24 pushed b830c17c54aa1e3a7761dc567d1f6b529dbdc941; PR376 head verified.
 - New CI36027438904 queued; Windows36027438876 live, dependency36027439093 queued.
   Includes signed collector fixture coverage and terminal bundle diff diagnostics.
