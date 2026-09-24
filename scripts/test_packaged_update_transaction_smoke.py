@@ -114,6 +114,20 @@ class TransactionGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "regular file"):
             gate.remove_successor_execute(link)
 
+    def test_heartbeat_read_retries_only_bounded_atomic_replacement_race(self):
+        unstable = gate.VerificationError("StatusV2 changed while read")
+        with patch.object(gate, "verify_status_v2", side_effect=[unstable, {"heartbeat_seq": 4}]) as read, \
+                patch.object(gate.time, "sleep"):
+            self.assertEqual(gate.read_advancing_status(Path("status"), 123), {"heartbeat_seq": 4})
+            self.assertEqual(read.call_count, 2)
+            read.assert_called_with(status_path=Path("status"), expected_pid=123)
+        for error, calls in ((unstable, 3), (gate.VerificationError("wrong daemon PID"), 1)):
+            with patch.object(gate, "verify_status_v2", side_effect=error) as read, \
+                    patch.object(gate.time, "sleep"):
+                with self.assertRaises(gate.VerificationError):
+                    gate.read_advancing_status(Path("status"), 123)
+                self.assertEqual(read.call_count, calls)
+
     def test_accept_requires_surviving_exact_successor(self):
         self.assertTrue(self.observe("accept")["transaction_removed"])
         self.assertTrue(self.observe("primary_unavailable")["transaction_removed"])

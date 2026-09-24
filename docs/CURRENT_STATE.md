@@ -10,6 +10,16 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 live migration CI36018610119 first results:
+- Migration rollback job SUCCESS; accept and startup_failure still in_progress.
+  Detailed success artifacts still need inspection. Preserve current run.
+- Current traffic_failure stopped at canonical StatusV2 changed while read,
+  not a payload/rollback assertion. Exact harness trace downloaded under
+  output/migration-ci-36018610119/traffic_failure/.
+- Local harness fix retries ONLY that exact VerificationError, at most3 full
+  canonical reads with10ms intervals. Ownership/PID/format/other errors still
+  fail immediately;12 affected harness tests PASS. Not pushed during live CI.
+
 2026-09-24 external launcher compatibility check against exact published source.
 - Pinned6ba71ef7 lib.rs has no --quit/is_quit_command entry point. Its run-loop
   comment explicitly leaves daemon and Geph running on tray exit. Do not assume

@@ -21,7 +21,7 @@ import tarfile
 import tempfile
 import time
 
-from verify_macos_app_bundle import deterministic_tree_sha256, verify_codesign, verify_status_v2
+from verify_macos_app_bundle import VerificationError, deterministic_tree_sha256, verify_codesign, verify_status_v2
 
 
 def require(condition: bool, message: str) -> None:
@@ -186,6 +186,19 @@ def remove_successor_execute(member: tarfile.TarInfo) -> tarfile.TarInfo:
     return member
 
 
+def read_advancing_status(status_path: Path, expected_pid: int) -> dict:
+    # Atomic heartbeat publication can race a read. Retry only that explicit
+    # unstable-snapshot result; every attempt repeats canonical validation.
+    for attempt in range(3):
+        try:
+            return verify_status_v2(status_path=status_path, expected_pid=expected_pid)
+        except VerificationError as error:
+            if str(error) != "StatusV2 changed while read" or attempt == 2:
+                raise
+            time.sleep(.01)
+    raise AssertionError("unreachable")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-bundle", type=Path, required=True)
@@ -232,7 +245,7 @@ def main() -> int:
     (work / "prepare.log").write_text(result.stdout + result.stderr)
     require(result.returncode == 0, "production transaction preparation failed; inspect prepare.log")
     def traffic_health():
-        current = verify_status_v2(status_path=status_path, expected_pid=status["pid"])
+        current = read_advancing_status(status_path, status["pid"])
         require(current["state"] == "active", "daemon lost active state during traffic fault")
         return current["heartbeat_seq"]
 
