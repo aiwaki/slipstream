@@ -356,6 +356,7 @@ STEAM_STORE_HOSTS = (
     "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
 )
 GEPH_MISC_HOSTS = (
+    "cdn.junipercreates.com",     # local JS truncates; owned exit completes gzip body
     "rode.com",                   # direct 403; complete RODE page via owned Geph
     "cdn.explorecams.com",        # local full-object stalls; owned exit completes JS/photos
     "onfotolife.com",             # local challenge JS truncates; owned exit completes same object

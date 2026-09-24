@@ -54,3 +54,11 @@ def test_reviewed_photo_challenge_hosts_are_narrow():
     for host in ('sampleshots.com', 'notsampleshots.com', 'notonfotolife.com',
                  'www.sampleshots.com.attacker.example', 'challenges.cloudflare.com'):
         assert tproxy.route_policy(host)['route_class'] != 'geo_exit'
+
+
+def test_reviewed_juniper_cdn_does_not_route_entire_store_platform():
+    assert tproxy.route_policy('cdn.junipercreates.com')['route_class'] == 'geo_exit'
+    for host in ('junipercreates.com', 'gorillatag.junipercreates.com',
+                 'notcdn.junipercreates.com', 'cdn.junipercreates.com.attacker.example',
+                 'cloudfront.net', 'discord.com', 'youtube.com'):
+        assert tproxy.route_policy(host)['route_class'] != 'geo_exit'
