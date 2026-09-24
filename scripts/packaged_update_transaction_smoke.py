@@ -218,7 +218,9 @@ def main() -> int:
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
     report.update(bundle_tree=expected, previous_tree=old_tree, candidate_tree=new_tree,
                   candidate_watchdog_sha256=candidate_helper_sha256,
-                  coverage="current-preparer-previous-watchdog-not-signed-feed")
+                  preparer={"name": args.driver.name,
+                            "sha256": hashlib.sha256(args.driver.read_bytes()).hexdigest()},
+                  coverage="selected-preparer-previous-watchdog-not-signed-feed")
     (work / "result.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)
     return 0

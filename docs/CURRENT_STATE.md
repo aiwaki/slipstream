@@ -20,8 +20,14 @@ file.
   transaction performed. Pushed a49f2246c90f9c42b95ee8a3cca9f74272f1e499;
   PR376 head confirmed. Exact-head CI run36016073363 is queued, Windows
   run36016073469 in_progress, dependency audit36016073319 queued.
-  Next: observe those existing handles (do not redispatch); inspect legacy
-  accept/rollback artifacts before changing migration behavior.
+  Rechecked run36016073363: in_progress; changes PASS, packaged-app-build,
+  product-checks, Windows adapter and Chromium contract still running.
+  Local report follow-up records selected preparer filename/SHA256 rather than
+  always claiming current-preparer coverage;9 affected harness tests PASS.
+  This follow-up is not pushed while the existing run is live. Current-run
+  legacy reports may retain the old coverage string; matrix driver/provenance
+  identify the actual preparer. Next: inspect existing legacy accept/rollback
+  artifacts before changing migration behavior; do not redispatch on timeout.
 
 2026-09-24 Juniper storefront repair INSTALLED AND BROWSER VERIFIED.
 - Source 922c876b16053ae30640a633b7ce9fd2de21515d adds a narrow
