@@ -17,7 +17,7 @@ file.
   published main content; user AGENTS.md edits preserved unstaged.
 - Focused post-merge checks: nine documentation tests and24 voice tests PASS;
   no runtime mutation, restart, or claim of new physical-call evidence.
-- Next publish this accumulated recovery branch to PR376, inspect exact-head CI
+- Accumulated recovery branch published to PR376; next inspect exact-head CI
   and review. Prior green94ed6dc is a baseline, not proof for later runtime changes.
 - Real Discord call/stream and sustained Safari media gates remain open; user
   will report recurrence. Do not interrupt their work to manufacture those gates.
@@ -6215,6 +6215,213 @@ Do not start a call, sleep the Mac, or reset installed learning for a smoke test
 
 The former instruction to merge PR336 was historical and superseded; its retained
 protected-run evidence remains in the chronological sections above.
+
+### Historical M4 qualification evidence
+
+Continue M4 on disposable systems. PRs #193 and #194 proved no-payload IPv4
+and IPv6 socket selection under competing exact Wintun routes on exact main,
+native AMD64 and ARM64, while removing every owned route, address, session,
+and adapter. PR #195's exact main passed one synthetic IPv4 UDP datagram into
+the owned capture ring and one synthetic response injected back to the same
+socket under one strict deadline on native AMD64 and ARM64. It has no external
+endpoint, backend, default route, production host, DNS, proxy, PAC, or VPN
+effect. PR #196's exact main passed the equivalent closed IPv6 proof with its
+mandatory UDP checksum in the audited runs recorded above. PR #197's exact main
+then constrained `GetBestRoute2` to the retained baseline source/LUID while the
+owned exact route was active, preserved kernel-selected synthetic VPN evidence,
+and exposed field-specific mismatch codes before any active probe. PR #198's
+exact main commit `c036fa1cad5bb95439f2ce98ad095267dfdd34a0` passed the bounded
+pre-existing IPv4 UDP flow gate on native AMD64 and ARM64 in
+[run 29962673071](https://github.com/aiwaki/slipstream/actions/runs/29962673071),
+all required checks and packaged lifecycle in
+[run 29962673111](https://github.com/aiwaki/slipstream/actions/runs/29962673111),
+and dependency audit in
+[run 29962673054](https://github.com/aiwaki/slipstream/actions/runs/29962673054).
+The gate uses two owned IPv4 Wintun adapters, one owned non-default `/24`
+baseline route, and one exact `/32` capture route. A connected UDP socket first
+completes a checksum-valid closed baseline round trip. Under activation it must
+either keep using that baseline path, or cause the active probe to fail so the
+owner removes only the exact route and the same socket completes a bounded
+baseline retry. Every acquired route and address reaches explicit verified
+cleanup before any result is accepted. This closes only the first IPv4 UDP
+subgate; PR #200 below subsequently closes TCP pre-existing-flow activation.
+Crash-safe capture removal is closed by PR #202. At that checkpoint,
+independent external-network-owner coexistence remained separate; PR #204 below
+closes one bounded VPN-like route-owner case. Broader physical, full-tunnel,
+split, and per-app vendor VPN qualification remains separate from the next
+packet-to-flow contract and from production composition. A partial DNS cache is
+never treated as complete attribution.
+External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
+
+PR #200 is the independent IPv4 TCP pre-existing-flow gate. Its qualified code
+head `d384817c7e64d79806c6ac18eab9a6f4803f3092` passed native AMD64 and ARM64
+twice in
+[run 29965217892](https://github.com/aiwaki/slipstream/actions/runs/29965217892),
+all required checks and packaged lifecycle in
+[run 29965217886](https://github.com/aiwaki/slipstream/actions/runs/29965217886),
+and dependency audit in
+[run 29965217897](https://github.com/aiwaki/slipstream/actions/runs/29965217897).
+The final PR head repeated the native proof on both architectures before merge.
+The exact main commit `8cac5602eaccd992a1f2a5e86bb2510aac789a9a` then passed native AMD64 and
+ARM64 in
+[run 29966086550](https://github.com/aiwaki/slipstream/actions/runs/29966086550),
+all required checks and packaged lifecycle in
+[run 29966086559](https://github.com/aiwaki/slipstream/actions/runs/29966086559),
+and dependency audit in
+[run 29966086558](https://github.com/aiwaki/slipstream/actions/runs/29966086558).
+The gate establishes one real Windows TCP stream through the owned baseline Wintun ring,
+requires a checksum-valid SYN/SYN-ACK/final-ACK exchange and a payload round
+trip before activation, then accepts only baseline continuity or fail-closed
+exact-route rollback followed by retransmission recovery. The same stream must
+also complete another baseline exchange after route removal. Its first native
+revision exposed that `peer_addr()` alone can become observable before Windows
+has completed the handshake; the corrected candidate requires the captured
+final ACK with exact sequence and acknowledgment numbers before treating the
+stream as established. TCP pre-existing-flow activation is now closed. PR #202
+subsequently closed bounded crash-safe removal of capture ownership without
+inferring external-VPN coexistence from that result.
+
+PR #202's crash-removal gate keeps the baseline adapter, exact source, and
+non-default `/24` in the parent while an exact child process owns the
+capture adapter, source, and production-gated `/32`. An atomic marker is
+published only from the active probe. The parent independently observes the
+active capture identity, terminates only that retained child handle, and then
+requires bounded adapter, address, and `/32` absence plus exact baseline route
+recovery. It uses no external endpoint, backend, default route, production-host
+composition, DNS, proxy, PAC, VPN, broad process kill, or driver mutation.
+PR #202 head passed this proof on native AMD64 and ARM64 in
+[run 29967959561](https://github.com/aiwaki/slipstream/actions/runs/29967959561),
+all required checks and packaged lifecycle in
+[run 29967959616](https://github.com/aiwaki/slipstream/actions/runs/29967959616),
+and dependency audit in
+[run 29967959553](https://github.com/aiwaki/slipstream/actions/runs/29967959553).
+The exact merge commit `ebe9f9c70b378f688badf6ba35cd96dd200d0bb4`
+repeated native AMD64 and ARM64 qualification in
+[run 29968586744](https://github.com/aiwaki/slipstream/actions/runs/29968586744),
+all required checks and packaged lifecycle in
+[run 29968586745](https://github.com/aiwaki/slipstream/actions/runs/29968586745),
+and dependency audit in
+[run 29968586782](https://github.com/aiwaki/slipstream/actions/runs/29968586782).
+Crash-safe capture removal is closed. At that merge boundary, independent
+external-network-owner coexistence was the next native gate; PR #204 below
+closes its bounded synthetic route-owner case.
+
+PR #204 narrowed that gate to independently owned route state. An exact
+child process owns a uniquely named Wintun adapter,
+the synthetic VPN-like source `198.18.0.2/32`, and a non-default public `/24`.
+The parent owns a separate capture adapter and only the production-gated
+destination `/32`. It must prove the child, adapter, address, and broader route
+remain unchanged during activation, exact-route recovery, and Slipstream's own
+capture cleanup. Ordinary route selection must return to the child-owned source
+and interface before the parent releases it; the child then removes only its
+own resources. No default route, real VPN endpoint or protocol, external
+payload, backend, production-host composition, DNS, proxy, PAC, driver, or
+broad process effect is present. Exact merge commit
+`8c1addbcfeb93f6cbd64cac07b29b98f7aae4bbb` passed native AMD64 and ARM64 in
+[run 29971683285](https://github.com/aiwaki/slipstream/actions/runs/29971683285),
+all required checks and packaged lifecycle in
+[run 29971683270](https://github.com/aiwaki/slipstream/actions/runs/29971683270),
+and dependency audit in
+[run 29971683269](https://github.com/aiwaki/slipstream/actions/runs/29971683269).
+The independent VPN-like route-owner gate is closed. It does not qualify every
+physical, full-tunnel, split, or per-app vendor VPN.
+
+The versioned pure packet-to-flow v1 contract now lives after isolated capture
+classification and egress admission in merged PR #206 at exact main commit
+`e8cb475fc65a375d0dd57f757e2f5bc575a4fcde`. It keeps bounded TCP/UDP flow
+ownership, backpressure, half-close/reset, timeout, route-class dispatch, and
+cleanup outside the production SCM host and performs no socket, route, adapter,
+DNS, proxy, PAC, VPN, or packet effect. Capture v3 preserves the client's
+original destination port without changing frozen v2 policy semantics. Keyed
+events update only one bounded flow, data-plane session/request ownership is
+unique until generation retirement, admission consumes a binding minted from
+the still-opening accepted data-plane session rather than an unrelated raw ID,
+backend opening revalidates a fresh capability for that same current session,
+retained command batches resume from an exact failure cursor without replay,
+and a rejected reused request cancels only its exact new data-plane session.
+Required CI and the disposable native AMD64/ARM64 workflow run this complete
+packet-flow contract before the existing Wintun gates. Exact main
+`c154f2d880d1d4aad34c83c813a03f11006b5d4e` passed that matrix in
+[run 30465700678](https://github.com/aiwaki/slipstream/actions/runs/30465700678).
+Capture v4 and userspace-flow-binding v1 now retain and validate the original
+client source address/port without patching frozen capture v3 or packet-flow
+v1. The binding requires exact generation, flow ID, transport, destination
+address/port, IP family, active policy, and expiry agreement, and explicitly
+keeps the original client source separate from the outbound egress source. It
+also retains the exact admission capability, so byte ownership cannot open from
+an independently valid same-key transition for another destination or request;
+the complete backend-open and idle-deadline command set must match as well.
+The bounded byte-owner bridge now retains exact flow, direction, sequence, and
+payload bytes after successful packet-flow-v1 acceptance. Every active
+transition must preserve the complete admission capability retained by the
+immutable tuple binding and exactly equal a fresh reduction from its supplied
+full predecessor and configuration. A bounded full-registry cursor advances on
+exact unrelated transitions too, preventing a stale target-only snapshot from
+rolling back another flow. It releases bytes
+only after one injected atomic effect succeeds, retains the exact suffix on
+failure, and accepts staging only from the exact current packet-flow predecessor
+with the matching queue delta and transition-issued forwarding authorization.
+Client payload queued before backend readiness remains non-forwardable until an
+exact one-to-one `BackendReady` command set authorizes it. Ordinary terminal
+cleanup removes only its exact flow; explicit generation retirement is
+high-watermark bounded. Before either path releases bytes, its transition must
+exactly equal a fresh reduction from the supplied full registry. Delivery preflights the exact acknowledgement from the
+current full registry before invoking the effect, including its global
+monotonic watermark. Generic reconciliation rejects `Forwarded` while an owner
+exists, so it cannot skip the effect. A final acknowledgement that makes a
+gracefully closed flow terminal also releases its empty owner immediately,
+including when bounded terminal-history pruning removes that exact flow from
+the reducer output. A separate test-only effect-evaluation crate now exercises
+that owner against pinned `smoltcp` through a deterministic in-memory Layer 3
+pair. IPv4/IPv6 TCP/UDP payloads cross in both directions, and an injected
+pre-mutation failure retains the exact payload for one successful retry without
+linking `smoltcp` into the Windows adapter. Bounded IPv6 fragment input is now
+qualified separately in that isolated stack-selection harness. Its additive
+capture-fragment composition classifies before state, binds assemblies to exact
+capture identity and tuple, and expires them no later than the five-second
+evidence deadline. An additive native connector contract now transfers one
+exact client frame atomically into a bounded connector queue. Numeric loopback
+TCP proves complete retention after failure-before-progress and exact suffix
+retention after partial writes; numeric loopback UDP proves one complete
+datagram. Every write revalidates the exact flow key, backend, and transport, while Discord,
+YouTube, and UDP remain excluded from Geph. An additive composition now proves
+selected-stack output reaches the connector queue and retains bounded native
+backend reads until the selected stack accepts one exact frame. Flow, backend,
+transport, and reverse sequence identity are revalidated before mutation, and
+pre-mutation failures preserve the current byte owner. PR #263 added the first
+test-only Wintun-to-stack packet handoff: a real OS IPv4 UDP request crosses an
+exact owned route into Wintun, enters the pinned selected stack as the exact
+captured Layer 3 packet, and returns to the OS only from the stack-emitted
+response packet. The boundary is fixed-MTU, fixed-queue, bounded-poll, and
+fail-closed. It merged as `105551ec27f8139e455783b7ae2bf89d63812166`;
+exact-main native run `30472082661` passed on both AMD64 and ARM64, CI
+`30472083693` passed including the packaged lifecycle, and audit `30472083055`
+passed. The implementation remains a development-only qualification dependency
+and does not compose networking into the production SCM host.
+
+PR #265 completed the additive IPv6 UDP gate without changing frozen IPv4 v1.
+A separate `raw_packet_udp_ipv6_v1` boundary validates one raw IPv6 UDP request
+through pinned `smoltcp`, emits one checksum-valid fixed-MTU response, and
+exposes bounded structured failures. The disposable Windows `/128` route proof
+retains the exact captured packet and injects only that selected-stack response;
+its manual IPv6 response builder is removed. It merged as
+`9979889d82316f21701f1ef8304ffe3b8a11bb7d`; exact-main native run
+`30476588359` passed on AMD64 and ARM64, CI `30476589552` passed including the
+packaged lifecycle, and audit `30476588735` passed. The dependency remains
+qualification-only and the production SCM host remains closed.
+
+PR #267 completed the additive IPv4 TCP Wintun-to-selected-stack gate. A real
+Windows TCP socket supplies the SYN, handshake ACK, and request payload; the
+selected stack emits the SYN-ACK and response packets injected through the same
+owned Wintun session. The proof contains no manual handshake or response packet
+builder and preserves the exact route, address, session, and adapter cleanup
+requirements. It merged as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`;
+exact-main native run `30481891835` passed on AMD64 and ARM64, CI
+`30481892061` passed including packaged lifecycle, and audit `30481891839`
+passed. The next independent M4 gate is bounded production service-host
+composition; the existing production host remains no-network until that gate
+passes.
+
 
 ## External Gates
 
