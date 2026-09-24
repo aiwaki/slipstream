@@ -10,6 +10,27 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 workstation transaction a8248cfe installed source df59aae successfully.
+- Fresh old identity matched922c876 bundle4b0c7db0/daemonb6fadaae. New incoming
+  canonical build-chain/artifact PASS before normal --quit and native authorization.
+- New one-shot replacement completed exit0; all prior backups plus new old-app
+  and runtime/learning snapshots retained. No learning reset. This transaction
+  is CONSUMED; never replay its install.command or replace-exact-bundle.sh.
+- npm run verify:local-install PASS: treee23410b7, daemonc0d9f1ab, live PID64613;
+  both public PNGs984455/471047 bytes fully valid over IPv4/IPv6 proxy and
+  transparent paths. Evidence output/local-qualification-a8248cfe/.
+- Real Chrome fresh navigation to Juniper product9594453754133 rendered image,
+  description, price and controls without reload (CUA screenshot observed).
+  Existing Safari was actively used by user; did not interrupt its browsing.
+- Ordinary installed --quit completed in12.17s: both launchd jobs exit113 with
+  exact missing-service evidence and zero owned processes. Restart via CUA timed
+  out at UI observation, but daemon then reached active PID76105; canonical
+  installed + complete public PNG traffic PASS in restart-active-verification.json.
+  Initial restart-verification.json sampled startup and is correctly FAIL, not hidden.
+- Local install/browser/CLI-Quit/restart gates now PASS. Literal menu-Quit was not
+  clicked; sustained media/mixed-load and physical sleep/wake remain unqualified.
+  Public signed positive migration still needs newer official artifact; no release.
+
 2026-09-24 local candidate build97537 completed exit0, canonical PASS.
 - Source df59aae; output/current-local-build.log and current-local-canonical.json.
   Bundle treee23410b7f1565bb4a30894fc8f2461bb775fd1b29749364b693f2944a46c78a4;
