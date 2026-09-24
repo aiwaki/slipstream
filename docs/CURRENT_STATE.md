@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+2026-09-25 browser-worker shutdown ordering candidate, NOT installed.
+- CI failure is consistent with a verified source ordering bug: serve_until_shutdown
+  closed the pending-navigation broker in auxiliary_servers before amain finally
+  waited for the worker. A claiming/submitting worker can lose its IPC socket.
+- Candidate disables new worker admission and awaits owned-worker drain before
+  closing auxiliary sockets, on both shutdown and listener-completion paths.
+  Does not accept failed cleanup as successful or weaken PID/profile checks.
+- Targeted shutdown/quiescence tests17 PASS; includes three new ordering cases.
+  Real packaged lifecycle rerun remains required after publishing this candidate.
+- TestGlider diagnostic object helper returned UNKNOWN for HTML/CSS because its
+  contract only accepts206 JavaScript; those files are NOT valid same-object
+  eligibility evidence. Full-document canary run is tracked separately.
+- PR376 b1c001b exact-head build/product checks observed live; do not restart
+  merely because observation times out. User app remains unchanged.
+
+
 2026-09-25 TestGlider redirect preflight candidate, NOT installed.
 - Actual /en transfer declares243860 bytes but ends at16384; same-host CSS
   also truncates. Explicit owned CONNECT reproduces the incomplete document.

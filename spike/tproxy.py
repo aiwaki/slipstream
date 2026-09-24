@@ -4316,6 +4316,16 @@ def _close_pending_navigation_probe_worker():
     )
 
 
+
+async def _quiesce_pending_navigation_probe_worker():
+    # A claiming/submitting worker still needs its broker socket during drain.
+    # Stop admitting new launches before waiting for the owned worker to exit.
+    global _pending_navigation_probe_available, _route_preflight_headless_available
+    _pending_navigation_probe_available = False
+    _route_preflight_headless_available = False
+    return await asyncio.to_thread(_close_pending_navigation_probe_worker)
+
+
 def _unknown_local_recovery_candidate_allowed(host):
     return _auto_geph_base_host_allowed(host)
 
@@ -14219,6 +14229,7 @@ async def serve_until_shutdown(
     drain_timeout=SHUTDOWN_DRAIN_SECONDS,
     auxiliary_servers=(),
     before_stop=None,
+    before_auxiliary_close=None,
 ):
     """Stop new interception before giving accepted streams time to finish."""
     async with server:
@@ -14230,6 +14241,8 @@ async def serve_until_shutdown(
         )
         if before_stop is not None:
             before_stop()
+        if before_auxiliary_close is not None:
+            await before_auxiliary_close()
         if serving in done:
             stopping.cancel()
             await asyncio.gather(stopping, return_exceptions=True)
@@ -22880,6 +22893,7 @@ async def amain(port, voice=True, managed_https_proxy=False):
                 pending_navigation_server,
             ),
             before_stop=proxy_lease.close if proxy_lease is not None else None,
+            before_auxiliary_close=_quiesce_pending_navigation_probe_worker,
         )
         if not drained:
             print(

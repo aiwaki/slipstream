@@ -2933,3 +2933,17 @@ Evidence: `output/testglider-20260925/`. Admin root-log read completed exit0;
 no runtime restart performed. Codex desktop logs separately recorded pubsub
 reconnect scheduling; these events alone cannot identify response-stream failure
 or attribute it to Slipstream.
+
+
+### Follow-up: preserve evidence boundaries and broker lifetime
+
+The attempted HTML/CSS comparisons through the JavaScript range evidence helper
+returned UNKNOWN by contract (requires206 JavaScript), so they cannot support
+same-object identity or route authorization. Separate full-document canaries
+use `_local_payload_probe` with GET `/en` and complete-body validation.
+
+CI36052190320's active-worker uninstall failure (`socket_unavailable`) matches
+source shutdown ordering: auxiliary broker close preceded worker quiescence.
+The candidate drains the worker before closing that socket and disables admission
+first. Focused tests cover both normal shutdown and listener completion; packaged
+CI, installed Quit and real browser outcomes remain separate gates.
