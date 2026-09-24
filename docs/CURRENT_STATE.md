@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 migration spawn-refusal case prepared for next CI.
+- New migration-only startup_failure modifies only the private archive's main
+  executable permission bits. Original packaged inputs/helper stay intact.
+  Observer accepts a fast terminal failure only from the fresh state directory,
+  exact target, candidate-helper hash, no successor PID and old_relaunched phase;
+  final old bundle tree and restored tray survival remain mandatory.
+- 11 harness +8 provisioner tests and actionlint PASS. Earlier28 watchdog tests,
+  4 materializer,54 build-config and actual guarded-driver build remain baseline.
+- Previous CI36016073363 is terminal FAILURE. Legacy accept/rollback failures
+  confirmed; additionally lifecycle-heavy failed at active-worker-uninstall:
+  browser_worker_cleanup_failed, retained runtime/status. Exact log:
+  output/legacy23-ci-36016073363/failed-jobs.log. Do not dismiss as infrastructure.
+  Current-preparer transaction cases passed. Next inspect new migration matrix
+  results, then isolate this cleanup failure with retained lifecycle evidence.
+  Signed public external launcher remains open; workstation unchanged.
+
 2026-09-24 migration acceptance/rollback qualification wiring prepared locally.
 - Disposable driver now accepts --legacy-migration and invokes the new core;
   historical driver materialization explicitly rejects that mode while retaining

@@ -87,15 +87,33 @@ def observe(journal_path: Path, executable: Path, case: str,
         try:
             journal = json.loads(journal_path.read_text())
         except FileNotFoundError:
-            require(bool(phases), "transaction disappeared before any phase was observed")
             failures = list(journal_path.parent.glob("app-update-transaction-failed-*.json"))
-            if case in ("rollback", "traffic_failure"):
-                require((stopped if case == "rollback" else live_traffic_failure)
-                        and len(failures) == 1, "expected injected timeout rollback")
+            if case == "startup_failure" and not phases:
+                # Spawn refusal may finish before the first observer read. The
+                # state directory is fresh; bind its sole record to this target
+                # and the already verified candidate helper, never any old log.
+                require(len(failures) == 1 and expected_watchdog is not None,
+                        "missing exact startup failure record")
+                failed = json.loads(failures[0].read_text())
+                require(failed.get("target") == str(executable.parents[2])
+                        and failed.get("successor_pid") is None,
+                        "startup failure target or process identity mismatch")
+                watchdog = watchdog_payload_evidence(failed, *expected_watchdog,
+                                                     source=watchdog_source)
+                nonce = failed["nonce"]
+                phases.append(failed["phase"])
+            require(bool(phases), "transaction disappeared before any phase was observed")
+            if case in ("rollback", "traffic_failure", "startup_failure"):
+                injected = (case == "startup_failure" or
+                            (stopped if case == "rollback" else live_traffic_failure))
+                require(injected and len(failures) == 1, "expected injected rollback")
                 if case == "traffic_failure":
                     require(successor_deadline is not None and time.time() >= successor_deadline,
                             "traffic rollback occurred before the ACK deadline")
                 failed = json.loads(failures[0].read_text())
+                if case == "startup_failure":
+                    require(failed.get("successor_pid") is None and successor_pid is None,
+                            "startup failure unexpectedly launched a successor")
                 require(failed["phase"] == "old_relaunched" and failed["nonce"] == nonce,
                         "rollback did not relaunch the exact transaction's old app")
             else:
@@ -134,7 +152,7 @@ def observe(journal_path: Path, executable: Path, case: str,
     raise RuntimeError(f"transaction did not terminate: {phases}")
 
 
-def restored_app_pid(executable: Path, rejected_pid: int) -> int:
+def restored_app_pid(executable: Path, rejected_pid: int | None) -> int:
     result = subprocess.run(["/usr/bin/pgrep", "-x", "slipstream"],
                             capture_output=True, text=True, timeout=5)
     require(result.returncode in (0, 1), "cannot inspect restored tray")
@@ -160,15 +178,25 @@ def require_surviving_process(pid: int, identity: tuple, duration: float = 2) ->
         time.sleep(.05)
 
 
+def remove_successor_execute(member: tarfile.TarInfo) -> tarfile.TarInfo:
+    """Fault only the private archive's main executable, preserving its bytes."""
+    if member.name == "Slipstream.app/Contents/MacOS/slipstream":
+        require(member.isfile(), "successor archive entry is not a regular file")
+        member.mode &= ~0o111
+    return member
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-bundle", type=Path, required=True)
     parser.add_argument("--candidate-bundle", type=Path, required=True)
     parser.add_argument("--driver", type=Path, required=True)
-    parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure", "primary_unavailable"), required=True)
+    parser.add_argument("--case", choices=("accept", "rollback", "traffic_failure", "primary_unavailable", "startup_failure"), required=True)
     parser.add_argument("--legacy-migration", action="store_true")
     args = parser.parse_args()
     root = guard()  # Must precede every filesystem/process mutation.
+    require(args.case != "startup_failure" or args.legacy_migration,
+            "startup failure is an external migration qualification case")
     require(subprocess.run(["/usr/bin/pgrep", "-x", "slipstream"],
                            capture_output=True).returncode == 1, "a tray already exists")
     status_path = Path("/var/run/slipstream.status")
@@ -193,7 +221,8 @@ def main() -> int:
     state.mkdir(mode=0o700)
     archive = work / "candidate.tar.gz"
     with tarfile.open(archive, "w:gz") as out:
-        out.add(args.candidate_bundle, arcname="Slipstream.app")
+        out.add(args.candidate_bundle, arcname="Slipstream.app",
+                filter=remove_successor_execute if args.case == "startup_failure" else None)
     executable = target / "Contents/MacOS/slipstream"
     # The driver bootstraps the real bundled watchdog. This harness never writes
     # an ACK, shortcuts the deadline, or substitutes a fake successor process.
@@ -212,13 +241,13 @@ def main() -> int:
                      expected_watchdog=(state / "runtime/slipstream-update-watchdog",
                                         candidate_helper_sha256 if args.legacy_migration else previous_helper_sha256),
                      watchdog_source="verified-candidate" if args.legacy_migration else "previous-bundle")
-    if args.case in ("rollback", "traffic_failure"):
+    if args.case in ("rollback", "traffic_failure", "startup_failure"):
         report["restored_pid"] = restored_app_pid(executable, report["successor_pid"])
     survivor_pid = report.get("restored_pid", report["successor_pid"])
     survivor_identity = snapshot(survivor_pid)
     require(survivor_identity is not None, "terminal tray already exited")
     require_surviving_process(survivor_pid, survivor_identity)
-    expected = old_tree if args.case in ("rollback", "traffic_failure") else new_tree
+    expected = old_tree if args.case in ("rollback", "traffic_failure", "startup_failure") else new_tree
     require(deterministic_tree_sha256(target) == expected, "terminal bundle tree mismatch")
     require(not list(work.glob(".Slipstream.app.slipstream-*")), "staging or backup remains")
     report.update(bundle_tree=expected, previous_tree=old_tree, candidate_tree=new_tree,

@@ -101,7 +101,7 @@ def main() -> int:
     parser.add_argument("--previous-bundle", required=True, type=Path)
     parser.add_argument("--candidate-bundle", required=True, type=Path)
     parser.add_argument("--driver", required=True, type=Path)
-    parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure", "primary_unavailable"))
+    parser.add_argument("--case", required=True, choices=("accept", "rollback", "traffic_failure", "primary_unavailable", "startup_failure"))
     parser.add_argument("--legacy-migration", action="store_true")
     args = parser.parse_args()
     lifecycle._require_disposable_ci()

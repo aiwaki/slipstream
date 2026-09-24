@@ -80,6 +80,40 @@ class TransactionGateTests(unittest.TestCase):
                 self.assertEqual(stop.call_count, int(case == "rollback"))
                 return result
 
+    def test_startup_failure_can_finish_before_first_observation(self):
+        for wrong_target, pid in ((False, None), (True, None), (False, 123)):
+            with self.subTest(wrong_target=wrong_target, pid=pid), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                exe = root / "Slipstream.app/Contents/MacOS/slipstream"
+                helper = root / "helper"
+                helper.write_bytes(b"candidate helper")
+                digest = gate.hashlib.sha256(helper.read_bytes()).hexdigest()
+                record = {"phase": "old_relaunched", "nonce": "a" * 32,
+                          "target": str(root / ("wrong.app" if wrong_target else "Slipstream.app")),
+                          "successor_pid": pid, "helper": str(helper), "watchdog_sha256": digest}
+                (root / "app-update-transaction-failed-a.json").write_text(json.dumps(record))
+                def observe():
+                    return gate.observe(root / "absent.json", exe, "startup_failure",
+                                        expected_watchdog=(helper, digest), watchdog_source="verified-candidate")
+                if wrong_target or pid is not None:
+                    with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
+                        observe()
+                else:
+                    report = observe()
+                    self.assertEqual(report["watchdog_payload"]["source"], "verified-candidate")
+                    self.assertIsNone(report["successor_pid"])
+
+    def test_spawn_fault_changes_only_main_executable_archive_mode(self):
+        for name in ("slipstream", "slipstream-update-watchdog"):
+            member = gate.tarfile.TarInfo("Slipstream.app/Contents/MacOS/" + name)
+            member.mode = 0o755
+            result = gate.remove_successor_execute(member)
+            self.assertEqual(result.mode, 0o644 if name == "slipstream" else 0o755)
+        link = gate.tarfile.TarInfo("Slipstream.app/Contents/MacOS/slipstream")
+        link.type = gate.tarfile.SYMTYPE
+        with self.assertRaisesRegex(RuntimeError, "regular file"):
+            gate.remove_successor_execute(link)
+
     def test_accept_requires_surviving_exact_successor(self):
         self.assertTrue(self.observe("accept")["transaction_removed"])
         self.assertTrue(self.observe("primary_unavailable")["transaction_removed"])
