@@ -2908,3 +2908,28 @@ ongoing call or route Discord via Geph.
 Reference: https://docs.discord.com/developers/topics/voice-connections describes
 separate voice WebSocket and UDP, heartbeats, and DAVE. Googlevideo ClientHello
 record fallback does not apply to UDP media and remains scoped to Googlevideo.
+
+
+## 2026-09-25 TestGlider document truncation behind a healthy redirect
+
+`www.testglider.com/` returned302 with Location `/en` and a complete15-byte
+body. The installed root preflight logged usable/assets0. Public `/en`
+declared243860 bytes but curl received16384 before exit18; its same-host
+`/_next/static/css/c38f03c02db00a32.css` also ended early. Explicit local
+CONNECT and compressed HTTP/1.1 requests reproduced incomplete delivery.
+The daemon logged partial-record watchdogs across local_strategy, system_plain
+and xbox_plain. This proves incomplete ingress, not which upstream component
+caused it. It does not justify sending a generic local failure through Geph.
+
+The candidate root probe follows only validated same-origin server redirects,
+retaining original exact IP, total deadline and cancellation owner. Two follows
+are allowed; cycles/hop exhaustion remain inconclusive. Final-document base URL
+is used for transient asset discovery. No browser URL or cookies are replayed.
+Live candidate observation was navigation_pending/framing_eof_incomplete after
+7.45s; safe_incomplete remained false, so this evidence does not itself grant
+Geph. Browser recovery and installation remain unqualified.
+
+Evidence: `output/testglider-20260925/`. Admin root-log read completed exit0;
+no runtime restart performed. Codex desktop logs separately recorded pubsub
+reconnect scheduling; these events alone cannot identify response-stream failure
+or attribute it to Slipstream.

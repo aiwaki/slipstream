@@ -4925,6 +4925,8 @@ def _semantic_plain_preflight_probe_detail(
     *,
     deadline_monotonic=None,
     control=None,
+    _request_target="/",
+    _redirect_chain=(),
 ):
     """Classify one exact system IP and retain only ephemeral bootstrap targets."""
     h = normalize_host(host)
@@ -5037,9 +5039,12 @@ def _semantic_plain_preflight_probe_detail(
         tls_sock.do_handshake()
         root_stage = "send"
         tls_sock.sendall(
-            _semantic_plain_preflight_probe_request(
+            _semantic_plain_preflight_probe_request(h)
+            if _request_target == "/"
+            else _semantic_geph_probe_request(
                 h,
                 range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
+                request_target=_request_target,
             )
         )
         root_stage = "recv"
@@ -5112,6 +5117,30 @@ def _semantic_plain_preflight_probe_detail(
             and control.cancelled()
         ):
             return cancelled_observation()
+        # A complete redirect is not evidence that its document is usable.
+        # Follow only this origin, on the same exact IP, with the original
+        # deadline and cancellation owner. Never retain the server's target.
+        redirect = _semantic_geph_redirect_target(h, data)
+        if redirect is not None and redirect[0] == h:
+            target = redirect[1]
+            visited = _redirect_chain + (_request_target,)
+            if target in visited or len(visited) >= 3:
+                return _SemanticPlainPreflightObservation(
+                    SEMANTIC_OUTCOME_NAVIGATION_PENDING,
+                    retryable_inconclusive=True,
+                    root_boundary=_RootPreflightBoundary.INSPECTION_INCONCLUSIVE,
+                    **wire_measurement(),
+                )
+            if isinstance(control, _RootPreflightProbeControl):
+                control.clear(sock)
+            (tls_sock or sock).close()
+            return _semantic_plain_preflight_probe_detail(
+                ip, h, timeout,
+                deadline_monotonic=io_deadline,
+                control=control,
+                _request_target=target,
+                _redirect_chain=visited,
+            )
         classify_deadline = (
             time.monotonic() + ROUTE_PREFLIGHT_ROOT_CLASSIFY_BUDGET
         )
@@ -5133,7 +5162,7 @@ def _semantic_plain_preflight_probe_detail(
         if outcome == SEMANTIC_OUTCOME_USABLE:
             root_stage = "inspect"
             inspection = bootstrap_asset_preflight.inspect_critical_bootstrap_assets(
-                f"https://{h}/",
+                f"https://{h}{_request_target}",
                 data,
                 stream_closed=stream_closed,
                 truncated=truncated,

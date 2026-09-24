@@ -10,6 +10,27 @@ file.
 
 ## Current Checkpoint
 
+2026-09-25 TestGlider redirect preflight candidate, NOT installed.
+- Actual /en transfer declares243860 bytes but ends at16384; same-host CSS
+  also truncates. Explicit owned CONNECT reproduces the incomplete document.
+- / root returns a complete15-byte302 to /en; installed preflight logs classify
+  it usable/assets0. Root-only success masks the broken destination.
+- Candidate follows at most two same-origin redirects on the exact original IP,
+  shared deadline/cancellation; cycles remain inconclusive. No Geph authority
+  changes. Final-document URL is the base for ephemeral asset inspection.
+- Seven dedicated regressions PASS; affected preflight/redirect selection27 PASS
+  before the seventh deadline test was added. Live source probe7.45s returns
+  navigation_pending/framing_eof_incomplete, safe_incomplete=false, assets0.
+  This removes false health, NOT proof of browser recovery or Geph eligibility.
+- Evidence output/testglider-20260925; installed daemon not restarted. Root log
+  read through native administrator authorization completed exit0.
+- PR376 exact-head e9646cb CI36052190320 terminal: build/browser and all nine
+  updater transactions PASS; lifecycle-heavy FAIL at active-worker-uninstall
+  (socket_unavailable, browser_worker_cleanup_failed_exit). Log retained there.
+- Next complete TestGlider local recovery/critical-object qualification, then
+  fix the independently failing lifecycle gate before candidate installation.
+
+
 2026-09-25 published README reconciliation and recovery PR continuation.
 - Previous goal turn made progress: PR378 merged as47bf881; both public READMEs
   verified byte-for-byte through GitHub contents API. Required CI passed.
