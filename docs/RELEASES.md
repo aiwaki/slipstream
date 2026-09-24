@@ -470,3 +470,16 @@ three routes) to pass before injecting the fault. Each resolver must receive a
 query. Partial fixture startup and cleanup failures restore all registered
 resolvers in reverse order, retaining cleanup errors. These mutations are only
 permitted by the existing disposable macOS CI guard; never on the workstation.
+
+### External migration admission (implementation boundary)
+
+The pending external launcher uses `VerifiedLegacyMigration` to download the
+exact official archive for a canonical preview newer than .23. Admission uses
+the launcher's compile-time packaged updater key; callers cannot supply a trust
+key or archive URL. Signature verification precedes bounded archive inspection,
+which requires matching identity/version and a regular, nonempty executable
+watchdog. Only immutable bytes/version are exposed, and admission performs no
+filesystem or process mutation. The constructor is not yet wired to a public
+launcher. Unit rejection checks and the shared downloader are not evidence of a
+successful live signed-feed migration; exact legacy tray ownership/stop and
+preparation-failure recovery remain required before public exposure.

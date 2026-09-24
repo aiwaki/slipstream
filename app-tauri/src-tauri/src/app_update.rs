@@ -348,6 +348,51 @@ pub async fn download_verified_archive(
     Ok(body)
 }
 
+/// Authenticated in-memory input for the external .23 migration launcher.
+/// Fields stay private so unverified bytes cannot be substituted after admission.
+/// This admission has no filesystem or process side effects.
+#[allow(dead_code)] // Public launcher wiring is a separate qualification boundary.
+pub struct VerifiedLegacyMigration {
+    archive: Vec<u8>,
+    version: Version,
+}
+
+#[allow(dead_code)]
+impl VerifiedLegacyMigration {
+    pub async fn download(expected_version: &str, signature: &str) -> Result<Self, String> {
+        let version = legacy_migration_version(expected_version)?;
+        // Trust comes from this launcher's packaged configuration, never a feed,
+        // command-line option, or the old installation's mutable state.
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .map_err(|_| "packaged updater configuration is invalid".to_string())?;
+        let key = config
+            .pointer("/plugins/updater/pubkey")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "packaged updater public key is missing".to_string())?;
+        let url = release_asset_url(&format!("v{version}"), "Slipstream.app.tar.gz");
+        let archive = download_verified_archive(&url, signature, key).await?;
+        validate_macos_archive_inner(&archive, &version, true)?;
+        Ok(Self { archive, version })
+    }
+
+    pub fn archive(&self) -> &[u8] {
+        &self.archive
+    }
+
+    pub fn version(&self) -> &Version {
+        &self.version
+    }
+}
+
+fn legacy_migration_version(raw: &str) -> Result<Version, String> {
+    let version = Version::parse(raw).map_err(|_| "migration version is invalid".to_string())?;
+    let previous = Version::parse("0.1.9-preview.23").expect("fixed legacy version");
+    if version <= previous || !is_preview_version(&version) || version.to_string() != raw {
+        return Err("migration requires a newer canonical preview version".into());
+    }
+    Ok(version)
+}
+
 fn safe_archive_path(path: &Path) -> bool {
     !path.is_absolute()
         && path
@@ -363,6 +408,14 @@ fn plist_string<'a>(dictionary: &'a plist::Dictionary, key: &str) -> Result<&'a 
 }
 
 pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Result<(), String> {
+    validate_macos_archive_inner(archive, expected_version, false)
+}
+
+fn validate_macos_archive_inner(
+    archive: &[u8],
+    expected_version: &Version,
+    require_watchdog: bool,
+) -> Result<(), String> {
     if archive.len() > MAX_UPDATE_ARCHIVE_BYTES {
         return Err("update archive exceeds the byte limit".into());
     }
@@ -371,6 +424,7 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
     let mut seen = HashSet::new();
     let mut info_plist = None;
     let mut executable_seen = false;
+    let mut watchdog_seen = false;
     let mut entries = 0usize;
     let mut total_uncompressed = 0u64;
     for entry in tar
@@ -424,6 +478,12 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
                 .mode()
                 .map_err(|_| "update executable mode is invalid".to_string())?;
             executable_seen = entry_type.is_file() && mode & 0o111 != 0;
+        } else if path == Path::new("Slipstream.app/Contents/MacOS/slipstream-update-watchdog") {
+            let mode = entry
+                .header()
+                .mode()
+                .map_err(|_| "update watchdog mode is invalid".to_string())?;
+            watchdog_seen = entry_type.is_file() && mode & 0o111 != 0 && entry.size() > 0;
         } else if path
             .components()
             .next()
@@ -438,6 +498,9 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
     }
     if !executable_seen {
         return Err("update archive is missing the Slipstream executable".into());
+    }
+    if require_watchdog && !watchdog_seen {
+        return Err("migration archive is missing the executable watchdog".into());
     }
     let plist = info_plist.ok_or_else(|| "update archive is missing Info.plist".to_string())?;
     let value = plist::Value::from_reader(Cursor::new(plist))
@@ -514,6 +577,14 @@ mod tests {
     }
 
     fn update_archive(version: &str, executable_mode: u32) -> Vec<u8> {
+        update_archive_with_watchdog(version, executable_mode, None)
+    }
+
+    fn update_archive_with_watchdog(
+        version: &str,
+        executable_mode: u32,
+        watchdog: Option<u32>,
+    ) -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::fast());
         let mut builder = Builder::new(encoder);
         let plist = format!(
@@ -539,8 +610,61 @@ mod tests {
             b"fixture",
             executable_mode,
         );
+        if let Some(mode) = watchdog {
+            append_file(
+                &mut builder,
+                "Slipstream.app/Contents/MacOS/slipstream-update-watchdog",
+                b"helper",
+                mode,
+            );
+        }
         builder.finish().unwrap();
         builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn migration_requires_newer_preview() {
+        for rejected in [
+            "0.1.9-preview.23",
+            "0.1.9-preview.22",
+            "0.1.9",
+            "0.2.0-beta.1",
+            "0.1.9-preview.24+local",
+            "v0.1.9-preview.24",
+        ] {
+            assert!(
+                super::legacy_migration_version(rejected).is_err(),
+                "{rejected}"
+            );
+        }
+        assert!(super::legacy_migration_version("0.1.9-preview.24").is_ok());
+    }
+
+    #[test]
+    fn migration_requires_candidate_executable_helper() {
+        let version = Version::parse("0.1.9-preview.24").unwrap();
+        for mode in [None, Some(0o644)] {
+            let archive = update_archive_with_watchdog(&version.to_string(), 0o755, mode);
+            assert!(super::validate_macos_archive_inner(&archive, &version, true).is_err());
+            assert!(validate_macos_archive(&archive, &version).is_ok());
+        }
+        let archive = update_archive_with_watchdog(&version.to_string(), 0o755, Some(0o755));
+        assert!(super::validate_macos_archive_inner(&archive, &version, true).is_ok());
+        assert!(super::validate_macos_archive_inner(
+            &archive,
+            &Version::parse("0.1.9-preview.25").unwrap(),
+            true
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn migration_rejects_invalid_signature_before_network() {
+        let error = super::VerifiedLegacyMigration::download("0.1.9-preview.24", "invalid!")
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error, "updater signature is not valid base64");
     }
 
     #[test]

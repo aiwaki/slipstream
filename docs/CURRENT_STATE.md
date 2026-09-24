@@ -10,6 +10,23 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 authenticated migration admission implemented locally, not exposed.
+- VerifiedLegacyMigration in app_update.rs downloads only the exact official
+  version-bound archive, verifies with the compile-time packaged updater key,
+  and retains private immutable bytes/version. Requires a canonical preview
+  newer than .23, matching bundle identity/version and regular executable
+  nonempty candidate watchdog before any process or filesystem mutation.
+- All11 app_update tests PASS, including new version/helper/signature rejection
+  tests; log output/migration-admission-tests.log. Shared signature downloader
+  is reused. No positive live signed newer release/launcher test claimed.
+- CI36018610119 is now terminal FAILURE: migration3 cases passed; failures are
+  legacy accept/rollback, current traffic_failure and packaged-app-lifecycle.
+  Local heartbeat-race and cleanup-diagnostic follow-ups remain pending CI.
+- Next wire the admission into the external launcher with exact old tray
+  PID/UID/birth/path ownership, safe stop and preparation-failure recovery.
+  Admission type alone does not qualify the public migration. Workstation
+  remains on922c876b; no install, Quit, learning reset or backup removal.
+
 2026-09-24 migration core qualified on disposable packaged macOS, all3 cases.
 - CI36018610119, head58c576d / merge655dd0d8e8814b99f5996a370d28bf5d2bbd0b94:
   migration accept, rollback and startup_failure SUCCESS. Downloaded and read
