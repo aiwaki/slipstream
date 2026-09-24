@@ -10,6 +10,41 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 voice refresh candidate implemented, NOT installed.
+- Exact recognized IPv4 voice tuple refresh on real packets/keepalives, once30s;
+  initial primer unchanged, own decoys/unknown flows excluded, monotonic clock.
+- Focused voice tests24 PASS (see output/discord-midcall-20260924/focused-tests.log).
+  Covers model filter reset at8/37/121/307s, silent-listener keepalive, self-decoy
+  exclusion, scope, cadence and bounded state. Not proof of actual Discord cause.
+- Next canonical build then real-call qualification at non-disruptive timing;
+  installed Googlevideo candidate6eab51c remains unchanged during preparation.
+
+2026-09-24 Discord mid-call investigation underway, no voice fix claimed.
+- User window22:00-00:00; compared Sep23/24 sanitized client log events.
+- Main Gateway HELLO timeouts are present, not proof of voice-channel outage.
+- Existing voice observer primes first5 packets only; extracted-function simulated
+  30min test confirms active tuple never reprimes. No speculative policy mutation.
+- Detailed evidence/next fault-fixture and incident correlation in ROUTING_RESEARCH.md
+  section mid-call Discord silence and output/discord-midcall-20260924/.
+
+2026-09-24 candidate6eab51c INSTALLED via new transactione292da1d.
+- User explicitly authorized restart; CLI --quit exit0, replacement native authorization
+  exit0. Prior app/private backups and learning retained; transaction consumed.
+- Canonical npm run verify:local-install PASS including installed-public-payload;
+  fresh StatusV2 active, launchd PID24436, exact new daemon identity. Evidence
+  output/googlevideo-replacement-e292da1d/{authorization-result.txt,installed-verification.log}.
+- Safari original stale player still at291.67/buffer0 after restart; one reload
+  performed for new connections. Playback now advances25.97->54.24 over29s,
+  buffer44.44->28.83s, frames623->1298/drop0; auto quality1080->1440.
+  This proves short recovery after reload, NOT sustained original2160/CDN coverage.
+  Next sustain playback and verify formerly failing CDN; recovery without reload open.
+- User reports Discord voice can silently stop receiving audio/activity indicators
+  while UI remains connected; rejoining restores it. Separate open recovery defect;
+  Googlevideo-only candidate does not change Discord voice. Do not claim fixed.
+  Code lead: observe_voice_flow primes only first5 datagrams; active flows refresh
+  idle timestamp indefinitely. Investigate need for re-priming on mid-call path
+  changes with traffic evidence; no voice code changed on assumption.
+
 2026-09-24 Googlevideo large-flight local reserve implemented, NOT installed.
 - Same-endpoint classic large ClientHello fails while google.com large control
   succeeds. Hybrid fails on rr18/rr9 n8v7znse, succeeds on rr2 ug5onuxaxjvh-n8v6;

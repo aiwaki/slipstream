@@ -15174,6 +15174,17 @@ VOICE_REPEAT = 6
 VOICE_CUTOFF = 5                    # prime the first N datagrams of each flow
 VOICE_FLOWS_MAX = 8192             # bound the per-flow table (re-priming is harmless)
 VOICE_FLOW_IDLE_TTL = 5 * 60.0
+# Refresh only recognizable voice traffic, at most one existing six-packet
+# primer per interval. This is not a call timeout and never closes real flows.
+VOICE_FLOW_REFRESH_INTERVAL = 30.0
+
+
+@dataclass
+class _VoiceFlowState:
+    count: int
+    last_seen: float
+    last_prime: float
+    voice_confirmed: bool = False
 
 
 def _fake_stun(txn=b"\x00" * 12):
@@ -15183,20 +15194,44 @@ def _fake_stun(txn=b"\x00" * 12):
 def prune_voice_flows(flows, now, max_flows=VOICE_FLOWS_MAX, idle_ttl=VOICE_FLOW_IDLE_TTL):
     """Drop idle voice flows first, then only the oldest overflow entries."""
     cutoff = now - idle_ttl
-    for key, (_, last_seen) in list(flows.items()):
-        if last_seen >= cutoff:
+    for key, state in list(flows.items()):
+        if state.last_seen >= cutoff:
             break
         del flows[key]
     while len(flows) > max_flows:
         flows.popitem(last=False)
 
 
-def observe_voice_flow(flows, key, now=None):
-    now = time.time() if now is None else now
+def observe_voice_flow(flows, key, now=None, *, payload=b""):
+    now = time.monotonic() if now is None else now
     prune_voice_flows(flows, now)
-    count, _ = flows.get(key, (0, 0.0))
-    should_prime = count < VOICE_CUTOFF
-    flows[key] = (min(count + 1, VOICE_CUTOFF), now)
+    state = flows.get(key)
+    if state is None:
+        # Make room before inserting: the table remains bounded on this call.
+        while len(flows) >= VOICE_FLOWS_MAX:
+            flows.popitem(last=False)
+        state = _VoiceFlowState(0, now, now)
+    count = state.count
+    initial = count < VOICE_CUTOFF
+    # The observer also sees our injected STUN. Never let a decoy authorize
+    # its own renewal, and never periodically prime an arbitrary high-port UDP
+    # flow merely because its first packets passed the legacy setup gate.
+    own_decoy = payload == _fake_stun()
+    if not own_decoy and classify_voice_payload(payload) != "other":
+        state.voice_confirmed = True
+    refresh = (
+        not initial
+        and now - state.last_prime >= VOICE_FLOW_REFRESH_INTERVAL
+        and not own_decoy
+        and bool(payload)
+        and state.voice_confirmed
+    )
+    should_prime = initial or refresh
+    state.count = min(count + 1, VOICE_CUTOFF)
+    state.last_seen = now
+    if should_prime:
+        state.last_prime = now
+    flows[key] = state
     flows.move_to_end(key)
     return should_prime, count
 
@@ -15535,7 +15570,7 @@ def network_monitor(
         if not should_prime_voice_payload(udp.dport, bytes(udp.payload)):
             return
         key = (ip.src, udp.sport, ip.dst, udp.dport)
-        should_prime, n = observe_voice_flow(flows, key)
+        should_prime, n = observe_voice_flow(flows, key, payload=bytes(udp.payload))
         if not should_prime:
             return
         pkt = (IP(src=ip.src, dst=ip.dst, ttl=VOICE_TTL)

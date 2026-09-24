@@ -3,6 +3,24 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Voice flow refresh after established-path state loss (candidate)
+
+The existing IPv4 voice observer keeps its port ranges, initial five-packet
+primer, TTL4 and six-copy decoy. It remembers an exact tuple only after a
+recognized RTP, STUN or Discord discovery packet (excluding its own fixed STUN).
+For such tuples, subsequent nonempty real outbound packets, including listen-only
+keepalives, can emit one existing primer at most every30 monotonic seconds.
+Unknown high-port flows retain initial-only behavior. Captured injected decoys
+cannot identify a flow or trigger renewal. Real packets are never held, rewritten,
+dropped or closed; there is no Geph, DNS, PF, IPv6 or global UDP change.
+The existing idle expiry and bounded LRU remain; insertion also enforces capacity.
+
+This addresses the demonstrated permanent absence of re-priming on continuously
+active tuples. Fault fixtures model a filter losing state while control remains
+alive; they do not prove the user's Discord incident had that cause. Real
+mid-call audio/receive recovery remains a required capability gate. The30s
+cadence bounds additional decoy work, not call duration or traffic capacity.
+
 ## Googlevideo large ClientHello local reserve (candidate)
 
 The size-sensitive Safari CDN failure admits one additional local fallback for

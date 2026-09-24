@@ -2874,3 +2874,37 @@ The first install attempt rejected service absence before replacement; a fixed
 3s stop wait was replaced with bounded launchd/process observation while keeping
 root preflight checks. A race was plausible, not conclusively captured. User
 confirmed successful retry; all old app/private backups and learning retained.
+
+## 2026-09-24 mid-call Discord silence investigation
+
+User reports incoming voice/activity disappears while connected UI remains; leaving
+and rejoining restores it. Approximate window22:00-00:00; date not specified, so
+Sep23 and24 local client logs were compared without exporting private payloads.
+Evidence: output/discord-midcall-20260924/{timeline.json,voice-event-counts.json,voice-flow-reproduction.json}.
+
+Sep23 22:42:32 default RTC clean Force Close followed by reconnect22:42:34;
+preceding voice heartbeat ACKs and decrypted-audio counters still advance. This
+could record a manual rejoin but does not identify why the user stopped hearing.
+Sep24 22:24-22:28 main Gateway has repeated OP_HELLO timeouts; distinguish main
+Gateway from dedicated voice control. Default voice ACKs currently arrive.
+Periodic UDP echo/reconnection successes are not failure evidence. Sparse DAVE
+decrypt failures mostly accompany setup; cumulative error counters must not be
+misread as continuing errors while successful counters advance.
+
+Exact extracted production observe_voice_flow reproduction with simulated time:
+continuous same tuple1801 observations primes only first5; new source port and
+more than300s idle reprime. This is a recovery blind spot if a classifier/path
+changes mid-flow, not proof that periodic poison fixes the incident. Current
+observer sees outbound IPv4 only and cannot distinguish incoming silence from
+participant silence. No speculative voice strategy installed.
+
+Reproduction plan: isolate a disposable UDP media/control fixture; establish both,
+then suppress only incoming media while control remains responsive, separately
+exercise control loss and tuple/path changes. This reproduces failure classes,
+not the production cause. For real incident correlate voice ACK, incoming packet
+counters and decoder success deltas before/after user rejoin; capture only timing,
+lengths and transport state, never voice content/credentials. Do not disrupt an
+ongoing call or route Discord via Geph.
+Reference: https://docs.discord.com/developers/topics/voice-connections describes
+separate voice WebSocket and UDP, heartbeats, and DAVE. Googlevideo ClientHello
+record fallback does not apply to UDP media and remains scoped to Googlevideo.
