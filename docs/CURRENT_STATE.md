@@ -10,6 +10,18 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 positive signature boundary verified locally (not full CLI migration).
+- Shared SignedArchiveCollector now owns bounded chunk collection and signature
+  finalization in the HTTP downloader. Tests feed a deterministic signed inert
+  .24 archive through that same collector with1/7/full-size chunks, then enforce
+  migration archive identity/version/helper checks. Truncation, changed byte,
+  extra byte and wrong expected version fail; fixture cannot authenticate with
+  packaged updater key. Fixture uses documented public test seed, never prod key.
+-12 app_update tests PASS; output/positive-migration-signature-tests.log.
+  Public signed HTTP/CLI end-to-end remains unqualified; no installation done.
+- CI36025040811 still live on1cbee28; Chromium PASS, packaged build/product/
+  Windows checks running. This collector follow-up is local pending that run.
+
 2026-09-24 pushed1cbee281b03b2643c65f48176671ce5c96e2fbd7 to PR376.
 - New CI36025040811 queued; Windows36025040764 and dependency36025040835 queued.
   Includes local CLI implementation and explicit historical-defect assertions.

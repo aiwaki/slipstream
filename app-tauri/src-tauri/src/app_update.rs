@@ -7,7 +7,7 @@
 
 use base64::Engine;
 use flate2::read::GzDecoder;
-use minisign_verify::{PublicKey, Signature};
+use minisign_verify::{PublicKey, Signature, StreamVerifier};
 use reqwest::{redirect::Policy, Client, StatusCode};
 use semver::Version;
 use serde::Deserialize;
@@ -279,6 +279,40 @@ fn allowed_update_redirect(next: &reqwest::Url, previous: &[reqwest::Url]) -> bo
         && !previous.iter().any(|url| url == next)
 }
 
+// Byte collection and authentication share one boundary for HTTP downloads and
+// deterministic signed fixtures. Unauthenticated bytes are never returned.
+struct SignedArchiveCollector<'a> {
+    verifier: StreamVerifier<'a>,
+    body: Vec<u8>,
+}
+
+impl<'a> SignedArchiveCollector<'a> {
+    fn new(key: &'a PublicKey, signature: &'a Signature) -> Result<Self, String> {
+        Ok(Self {
+            verifier: key
+                .verify_stream(signature)
+                .map_err(|_| "updater signature algorithm or key is unsupported".to_string())?,
+            body: Vec::new(),
+        })
+    }
+
+    fn append(&mut self, chunk: &[u8]) -> Result<(), String> {
+        if self.body.len().saturating_add(chunk.len()) > MAX_UPDATE_ARCHIVE_BYTES {
+            return Err("update archive exceeds the byte limit".into());
+        }
+        self.verifier.update(chunk);
+        self.body.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<Vec<u8>, String> {
+        self.verifier
+            .finalize()
+            .map_err(|_| "update archive signature verification failed".to_string())?;
+        Ok(self.body)
+    }
+}
+
 pub async fn download_verified_archive(
     url: &str,
     encoded_signature: &str,
@@ -291,9 +325,7 @@ pub async fn download_verified_archive(
     }
     let public_key = decode_public_key(encoded_public_key)?;
     let signature = decode_signature(encoded_signature)?;
-    let mut verifier = public_key
-        .verify_stream(&signature)
-        .map_err(|_| "updater signature algorithm is unsupported".to_string())?;
+    let mut collector = SignedArchiveCollector::new(&public_key, &signature)?;
     let redirect_policy = Policy::custom(|attempt| {
         if !allowed_update_redirect(attempt.url(), attempt.previous()) {
             attempt.error("unsafe update redirect")
@@ -325,39 +357,24 @@ pub async fn download_verified_archive(
     {
         return Err("update archive exceeds the byte limit".into());
     }
-    let mut body = Vec::with_capacity(
-        response
-            .content_length()
-            .map(|length| length.min(MAX_UPDATE_ARCHIVE_BYTES as u64) as usize)
-            .unwrap_or_default(),
-    );
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|error| format!("update download body failed: {error}"))?
     {
-        if body.len().saturating_add(chunk.len()) > MAX_UPDATE_ARCHIVE_BYTES {
-            return Err("update archive exceeds the byte limit".into());
-        }
-        verifier.update(&chunk);
-        body.extend_from_slice(&chunk);
+        collector.append(&chunk)?;
     }
-    verifier
-        .finalize()
-        .map_err(|_| "update archive signature verification failed".to_string())?;
-    Ok(body)
+    collector.finish()
 }
 
 /// Authenticated in-memory input for the external .23 migration launcher.
 /// Fields stay private so unverified bytes cannot be substituted after admission.
 /// This admission has no filesystem or process side effects.
-#[allow(dead_code)] // Public launcher wiring is a separate qualification boundary.
 pub struct VerifiedLegacyMigration {
     archive: Vec<u8>,
     version: Version,
 }
 
-#[allow(dead_code)]
 impl VerifiedLegacyMigration {
     pub async fn download(expected_version: &str, signature: &str) -> Result<Self, String> {
         let version = legacy_migration_version(expected_version)?;
@@ -391,14 +408,6 @@ impl VerifiedLegacyMigration {
             &self.archive,
             &self.version.to_string(),
         )
-    }
-
-    pub fn archive(&self) -> &[u8] {
-        &self.archive
-    }
-
-    pub fn version(&self) -> &Version {
-        &self.version
     }
 }
 
@@ -638,6 +647,74 @@ mod tests {
         }
         builder.finish().unwrap();
         builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn authentic_migration_archive_passes_but_changed_bytes_and_version_fail() {
+        use base64::Engine;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/legacy-migration-signed.json"
+        ))
+        .unwrap();
+        let key = super::decode_public_key(fixture["public_key"].as_str().unwrap()).unwrap();
+        let signature = super::decode_signature(fixture["signature"].as_str().unwrap()).unwrap();
+        let archive = base64::engine::general_purpose::STANDARD
+            .decode(fixture["archive_base64"].as_str().unwrap())
+            .unwrap();
+        let version =
+            super::legacy_migration_version(fixture["version"].as_str().unwrap()).unwrap();
+        for chunk_size in [1, 7, archive.len()] {
+            let mut verifier = super::SignedArchiveCollector::new(&key, &signature).unwrap();
+            for chunk in archive.chunks(chunk_size) {
+                verifier.append(chunk).unwrap();
+            }
+            let authenticated = verifier.finish().unwrap();
+            assert_eq!(authenticated, archive);
+            super::validate_macos_archive_inner(&authenticated, &version, true).unwrap();
+            assert!(super::validate_macos_archive_inner(
+                &authenticated,
+                &Version::parse("0.1.9-preview.25").unwrap(),
+                true
+            )
+            .is_err());
+        }
+        for payload in [
+            archive[..archive.len() - 1].to_vec(),
+            {
+                let mut changed = archive.clone();
+                changed[20] ^= 1;
+                changed
+            },
+            {
+                let mut extra = archive.clone();
+                extra.push(0);
+                extra
+            },
+        ] {
+            let mut verifier = super::SignedArchiveCollector::new(&key, &signature).unwrap();
+            verifier.append(&payload).unwrap();
+            assert_eq!(
+                verifier.finish().unwrap_err(),
+                "update archive signature verification failed"
+            );
+        }
+        // The public fixture key is deliberately NOT the production trust key.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_ne!(
+            fixture["public_key"],
+            config["plugins"]["updater"]["pubkey"]
+        );
+        let packaged_key =
+            super::decode_public_key(config["plugins"]["updater"]["pubkey"].as_str().unwrap())
+                .unwrap();
+        if let Ok(mut verifier) = super::SignedArchiveCollector::new(&packaged_key, &signature) {
+            verifier.append(&archive).unwrap();
+            assert!(
+                verifier.finish().is_err(),
+                "fixture must never authenticate with the packaged trust key"
+            );
+        };
     }
 
     #[test]
