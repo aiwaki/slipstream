@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+2026-09-25 completion-probe redirect candidate, NOT installed.
+- Built-in Geph ownership verified on9954, PID unchanged across comparison.
+  Direct curl through owned listener returned all243860 TestGlider /en bytes
+  in2.65s. No external Geph/settings changes or learned-route injection.
+- Root-only transport-failure and alternate-payload probes also missed /en.
+  Candidate follows up to two same-origin redirects for HTTP/1.1 and HTTP/2,
+  retaining the original exact local IP and shared deadline. Invalid/cyclic/
+  cross-origin redirects cannot grant incomplete/alternate-success evidence.
+- Live candidate: system-IP incomplete=true; owned-Geph complete_bytes243860;
+  owned PID matches. App-owned DNS returned66.33.60.66,76.76.21.142 in0.13s;
+  first-address completion probe also incomplete=true. Multi-strategy full-body
+  canaries plain/split64/split16 each returned0 verified-complete bytes earlier.
+- Tests81 PASS for completion/HTTP2 affected selection; then two deadline
+  regressions added and dedicated file12 PASS. Prior root/shutdown checks reused.
+- Evidence output/testglider-20260925/{redirect-completion-live,app-dns-completion,
+  full-document-strategies}.json. Next exact-source build/canonical verification,
+  packaged shutdown CI and real browser qualification; no user-visible fix yet.
+
+
 2026-09-25 browser-worker shutdown ordering candidate, NOT installed.
 - CI failure is consistent with a verified source ordering bug: serve_until_shutdown
   closed the pending-navigation broker in auxiliary_servers before amain finally

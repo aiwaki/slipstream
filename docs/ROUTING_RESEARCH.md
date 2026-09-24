@@ -2947,3 +2947,20 @@ source shutdown ordering: auxiliary broker close preceded worker quiescence.
 The candidate drains the worker before closing that socket and disables admission
 first. Focused tests cover both normal shutdown and listener completion; packaged
 CI, installed Quit and real browser outcomes remain separate gates.
+
+
+### Completion-aware redirect comparison
+
+Owned9954 listener identity was verified against the app runtime, with the same
+PID before/after comparison. Geph curl returnedHTTP200 and all243860 bytes of
+`/en` in2.645s. The transport completion probes now follow validated same-origin
+redirects under the original deadline for HTTP/1.1 and HTTP/2. Local probes stay
+on the original exact IP; targets remain transient. No automatic policy guard
+or learning entry is bypassed.
+
+Live updated probe evidence: system-address incomplete=true versus owned-Geph
+complete243860 bytes. App-owned DNS resolved66.33.60.66 and76.76.21.142 in0.13s;
+its first address also produced incomplete=true. Earlier complete-body canaries
+returned0 verified bytes for plain/split64/split16; this does not by itself prove
+an identical failure mechanism for all three. Candidate installation and browser
+outcome are still pending. Existing private learning was not modified.

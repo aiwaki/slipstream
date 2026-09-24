@@ -16673,7 +16673,7 @@ def test_plain_transport_probe_uses_http2_completion_when_negotiated(monkeypatch
         "probe_http2_response",
         lambda sock, host, **kwargs: (
             calls.append((sock, host, kwargs))
-            or SimpleNamespace(incomplete=True)
+            or SimpleNamespace(incomplete=True, complete=False, protocol_error=False, status=200)
         ),
     )
 

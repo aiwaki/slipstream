@@ -5848,10 +5848,12 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     return 0
 
 
-def _incomplete_response_probe_request(host, *, bounded_range):
+def _incomplete_response_probe_request(host, *, bounded_range, request_target="/"):
+    # Reuse the strict target validator without changing this probe's headers.
+    _semantic_geph_probe_request(host, request_target=request_target)
     range_header = "Range: bytes=0-262143\r\n" if bounded_range else ""
     return (
-        "GET / HTTP/1.1\r\n"
+        f"GET {request_target} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         "User-Agent: SlipstreamIncompleteResponse/1\r\n"
         "Accept: text/html,application/xhtml+xml\r\n"
@@ -5883,18 +5885,35 @@ def _incomplete_response_plain_payload_probe(
     ip,
     host,
     timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
+    *, _request_target="/", _redirect_chain=(), _deadline=None,
 ):
     """Prove one incomplete plain-TLS response on the exact observed IP."""
     h = normalize_host(host)
     if not h or not ip:
         return False
     deadline = time.monotonic() + max(float(timeout), 0.001)
+    if _deadline is not None:
+        deadline = min(deadline, _deadline)
+    if time.monotonic() >= deadline:
+        return False
     sock = None
     tls_sock = None
     chunks = []
     size = 0
     stream_closed = False
     idle_timed_out = False
+    def follow(data):
+        target = _semantic_geph_redirect_target(h, data)
+        visited = _redirect_chain + (_request_target,)
+        if (target is None or target[0] != normalize_host(h)
+                or target[1] in visited or len(visited) >= 3):
+            return False
+        (tls_sock or sock).close()
+        return _incomplete_response_plain_payload_probe(
+            ip, h, timeout, _request_target=target[1],
+            _redirect_chain=visited, _deadline=deadline,
+        )
+
     try:
         sock = socket.create_connection(
             (ip, 443),
@@ -5913,10 +5932,15 @@ def _incomplete_response_plain_payload_probe(
                 deadline=deadline,
                 max_bytes=TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES,
                 bounded_range=False,
+                **({"request_target": _request_target} if _request_target != "/" else {}),
             )
+            if result.complete and not result.protocol_error and result.status in {301, 302, 303, 307, 308}:
+                head = b"HTTP/1.1 " + str(result.status).encode() + b" Redirect\r\n"
+                head += b"\r\n".join(k + b": " + v for k, v in result.headers if not k.startswith(b":"))
+                return follow(head + b"\r\n\r\n")
             return result.incomplete
         tls_sock.sendall(
-            _incomplete_response_probe_request(h, bounded_range=False)
+            _incomplete_response_probe_request(h, bounded_range=False, request_target=_request_target)
         )
         while size < TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES:
             try:
@@ -5947,7 +5971,7 @@ def _incomplete_response_plain_payload_probe(
                 stream_closed=False,
                 truncated=False,
             ):
-                return False
+                return follow(data)
         data = b"".join(chunks)
         truncated = size >= TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES
         return http_response_incomplete(
@@ -5968,8 +5992,13 @@ def _incomplete_response_plain_payload_probe(
 def _incomplete_response_geph_payload_probe(
     host,
     timeout=INCOMPLETE_RESPONSE_GEPH_PROBE_TIMEOUT,
+    *, _request_target="/", _redirect_chain=(), _deadline=None,
 ):
     deadline = time.monotonic() + max(float(timeout), 0.001)
+    if _deadline is not None:
+        deadline = min(deadline, _deadline)
+    if time.monotonic() >= deadline:
+        return 0
     sock = _socks5_connect_blocking(
         host,
         443,
@@ -5978,6 +6007,18 @@ def _incomplete_response_geph_payload_probe(
     if sock is None:
         return 0
     tls_sock = None
+    def follow(data):
+        target = _semantic_geph_redirect_target(host, data)
+        visited = _redirect_chain + (_request_target,)
+        if (target is None or target[0] != normalize_host(host)
+                or target[1] in visited or len(visited) >= 3):
+            return 0
+        (tls_sock or sock).close()
+        return _incomplete_response_geph_payload_probe(
+            host, timeout, _request_target=target[1],
+            _redirect_chain=visited, _deadline=deadline,
+        )
+
     try:
         ctx = _incomplete_response_ssl_context()
         _set_socket_deadline_timeout(sock, deadline)
@@ -5990,7 +6031,12 @@ def _incomplete_response_geph_payload_probe(
                 deadline=deadline,
                 max_bytes=INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES,
                 bounded_range=True,
+                **({"request_target": _request_target} if _request_target != "/" else {}),
             )
+            if result.complete and not result.protocol_error and result.status in {301, 302, 303, 307, 308}:
+                head = b"HTTP/1.1 " + str(result.status).encode() + b" Redirect\r\n"
+                head += b"\r\n".join(k + b": " + v for k, v in result.headers if not k.startswith(b":"))
+                return follow(head + b"\r\n\r\n")
             if (
                 result.complete
                 and not result.protocol_error
@@ -6006,7 +6052,7 @@ def _incomplete_response_geph_payload_probe(
                 return result.body_length
             return 0
         tls_sock.sendall(
-            _incomplete_response_probe_request(host, bounded_range=True)
+            _incomplete_response_probe_request(host, bounded_range=True, request_target=_request_target)
         )
         chunks = []
         size = 0
@@ -6045,6 +6091,10 @@ def _incomplete_response_geph_payload_probe(
             stream_closed=stream_closed,
             truncated=truncated,
         )
+        if response_complete and data.split(b"\r\n", 1)[0].split()[1] in {
+            b"301", b"302", b"303", b"307", b"308",
+        }:
+            return follow(data)
         if response_complete and _semantic_geph_response_usable(data):
             body_length = http_response_body_length(
                 data,
