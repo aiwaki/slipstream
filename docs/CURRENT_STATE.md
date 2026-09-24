@@ -10,6 +10,21 @@ file.
 
 ## Current Checkpoint
 
+2026-09-24 real Chrome YouTube4K60 five-minute sample completed, no source change.
+- Official Blender aqz-KE-bpKQ video muted, stats show3840x2160@60;
+  observed t158.51->223.03 over65s, buffer12.24->13.94s, frames5424->9295,
+  dropped12->14. No agent reload/seek. Early hidden AX seek control was stale;
+  use player Stats for nerds Mystery t and frames, not hidden slider alone.
+- Final t307.91 at22:36:48, buffer11.13s, frames14388/dropped20; agent paused
+  at322.59s after test. Observed progress matched wall time, no persistent buffering.
+  This is sampled UI evidence, not continuous stall-event instrumentation.
+- Concurrent Discord complete PNG qualifier PASS on all3 paths, both objects.
+  Read-only daemon sampler completed61 samples/181.4s: samePID76105,
+  allactive, max heartbeat age2.06s, max51 concurrent connections.
+- Evidence output/local-qualification-a8248cfe/youtube-*. No long-term/all-CDN,
+  Discord voice/stream, physical sleep/wake, or route-event proof claimed.
+- PR376 fresh query still draft/open at94ed6dc, all required checks green.
+
 2026-09-24 workstation transaction a8248cfe installed source df59aae successfully.
 - Fresh old identity matched922c876 bundle4b0c7db0/daemonb6fadaae. New incoming
   canonical build-chain/artifact PASS before normal --quit and native authorization.
