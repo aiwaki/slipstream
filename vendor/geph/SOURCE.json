@@ -1,15 +1,15 @@
 {
   "crate": {
     "name": "geph5-client",
-    "sha256": "6d1d641b2548eab0b4e0e73b6bff4961a1faaab1c333c23d4795e6960cdf11eb",
-    "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.3.9.crate",
-    "version": "0.3.9"
+    "sha256": "a237465fe40ae02d96459d17bb569ba97bb161fc0a1469a9f5bf6dee3d7a4a56",
+    "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.4.0.crate",
+    "version": "0.4.0"
   },
   "features": [
     "aws_lambda"
   ],
-  "lock_sha256": "d5a0e6f58cfdd7fea7db79c1322a486cc2d7ba47609c6d92c0edefe7a7e67b81",
-  "release_revision": 2,
+  "lock_sha256": "628b1219cf0abc2139f591b689a1b333322bf7ebbbaffad5f646ce85ae950956",
+  "release_revision": 1,
   "schema_version": 1,
   "targets": [
     "aarch64-apple-darwin",
