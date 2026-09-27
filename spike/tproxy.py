@@ -17958,8 +17958,12 @@ def _strategy_order_for_attempt(host, repeat_stage=None):
     now = time.monotonic()
     with _auto_geph_lock:
         _prune_local_payload_idle_failures(now)
+        _prune_local_partial_stalls(now)
         idle_stages = set(
             _local_payload_idle_failures.get(normalize_host(host), {})
+        )
+        idle_stages.update(
+            _local_partial_stalls.get(normalize_host(host), {})
         )
     idle_names = {
         stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
@@ -17967,8 +17971,9 @@ def _strategy_order_for_attempt(host, repeat_stage=None):
         if stage.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
     }
     if idle_names:
-        # Keep both groups stable: untried strategies retain their ranking and
-        # observed idle strategies retain theirs while moving behind them.
+        # Fresh incomplete-body evidence outranks historical TLS successes.
+        # Keep both groups stable; failed strategies remain available after
+        # untried ones, and this ordering grants no foreign-route authority.
         ordered = [
             *[strategy for strategy in ordered if strategy["name"] not in idle_names],
             *[strategy for strategy in ordered if strategy["name"] in idle_names],

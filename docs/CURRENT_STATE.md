@@ -10,6 +10,63 @@ file.
 
 ## Current Checkpoint
 
+2026-09-27 unlocked-browser follow-up: product gate still FAILS.
+- Chrome ordinary reload reproduced ERR_CONNECTION_CLOSED for document and banner.
+  Fresh daemon window contains accepted browser provenance; foreground identity
+  is not a sufficient explanation. Artifacts unlocked-browser-{daemon,window}.log.
+- Full public banner probes via six local strategies each failed to confirm a
+  complete body within12s on18.165.142.153; zero complete_bytes is NOT zero wire
+  bytes. Owned-Geph complete-object comparison remains independently successful.
+- Fixed an additional deterministic recovery bug: fresh partial-record failure
+  now moves that strategy behind untried strategies despite cached/historical TLS
+  success. No new exit authority; expiry and explicit repeat semantics preserved.
+  Before1fail/5pass; after35pass/828deselected, partial-priority-{before,after}.log.
+- This source change is NOT installed. Installed remains50c09e5. Reuse its green
+  full-suite baseline; no broad rerun until exact candidate installation gate.
+- Remaining structural gap: public root and one JS bootstrap check cannot
+  qualify arbitrary image/API paths. Need transient same-object evidence in the
+  existing privacy/route contract; do not solve by persistent URLs or CDN rules.
+
+2026-09-27 exact50c09e5 installed; canonical installed verification PASS.
+- Native transaction session69230 terminal0; native-install.log records successful
+  exact install/root daemon match. Learning and all backups retained. Do not replay.
+- npm verify:local-install terminal0; latest StatusV2 active/PF applied; tray and
+  owned Geph running. Evidence output/testglider-20260925/installed-50c09e5.log.
+- Product gate STILL FAILS: real Chrome reload has missing banner/review images.
+  API complete200/16688 bytes; banner local HTTP2 framing error, local HTTP1.1
+  closes at16384/400804 bytes; owned Geph completes400804 bytes in2.26s.
+- Evidence installed-assets-50c09e5.json, banner-transport-comparison.json and
+  post-install-daemon.log (native privileged read terminal0). Diagnose browser
+  admission/recovery before further changes; successful installation is not fix.
+- Additional same-host counterexample: local CDN root completesHTTP200/595 bytes,
+  but its banner is incomplete. Root proof cannot qualify resource delivery.
+  Source _confirm_transport_incomplete_response calls the default root-only
+  _incomplete_response_plain_payload_probe; exact object proof remains missing.
+- Live ordinary Chrome retry blocked by macOS lock (CUA explicit locked result).
+  Asked user to unlock; no browser action completed after that response. Read-only
+  source provenance on an existing Chrome socket accepted in~0.3s; generic log
+  process_identity_failed cannot yet be attributed to the browser asset request.
+- Next: after unlock, correlate fresh Chrome resource request with exact-host
+  recovery and provenance. Do not weaken identity or add blanket CDN routing.
+
+2026-09-27 exact50c09e5 CI36335715703 ALL SUCCESS.
+- Local canonical fresh/staged/bundled and retained artifact PASS.
+- Transaction output/recovery-replacement-50c09e5b now READY, native installation
+  authorization starting. Record terminal result before any further install action.
+- Earlier f26a6a08/0a1e5a12 DRAFTs must not be run. All old app/private backups kept.
+- After success: canonical installed verification + real complete resource/browser
+  checks; CI success alone does not clear TestGlider partial rendering.
+
+2026-09-27 active source50c09e5 pushed; CI36335715703 RUNNING.
+- Removed ExitTimeOut only, canonical plist contract preserved.7 focused shutdown
+  tests PASS; reuse78 prior helper/runtime tests and f26 full code-suite baseline.
+- Local build session34279 terminal exit0, canonical PASS; output/testglider-20260925/final-shutdown-build.log.
+- Retained candidate output/recovery-replacement-50c09e5b canonical PASS/DRAFT.
+- No installation is authorized as READY yet. User's confirmed Quit succeeded;
+  installed old app remains stopped/unchanged. Do not replay prior DRAFTs.
+- Next inspect exact CI, complete canonical local build, prepare fresh one-shot
+  transaction, install with native authorization, verify installed + real resources.
+
 2026-09-27 f26a6a0 is REJECTED; do not install its retained DRAFT.
 - CI36334222939 browser/code checks PASS; lifecycle and update cleanup FAIL:
   explicit ExitTimeOut leaves launchd job loaded beyond existing absence protocol.

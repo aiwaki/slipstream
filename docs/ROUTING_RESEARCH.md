@@ -3020,3 +3020,46 @@ only the independently reproduced external helper budget correction and late
 worker guard. Do not infer that launchd's default timeout caused the original
 incident. Intermediate d90 packaged lifecycle passed; full code suite there had
 a separate coalescing timing failure, whereas f26 code suite passed.
+
+
+### 2026-09-27 Installed partial-resource counterexample
+
+Exact source `50c09e5` is installed and canonical local-install verification
+passes. This does not clear the browser product gate: TestGlider still has
+missing images. Through local `:1080`, its public CloudFront banner returns
+HTTP/1.1 200 then closes after 16,384 of 400,804 bytes (curl18,11.73s); HTTP/2
+reports a framing error. Through owned `:9954` the same object completes all
+400,804 bytes in2.26s. The API object independently completes16,688 bytes.
+
+The same CDN's `/` completes200/595 bytes, matching the daemon's usable-root
+classification. `_confirm_transport_incomplete_response` currently invokes
+`_incomplete_response_plain_payload_probe` with its default `/` target. That
+root cannot reproduce or establish completeness of the failing image. This is
+an evidence gap, not permission for a blanket CDN rule or a timeout-based exit.
+Raw diagnostic artifacts remain under `output/testglider-20260925/`:
+`banner-transport-comparison.json`, `installed-assets-50c09e5.json`,
+`cdn-root.headers/body`, and `post-install-daemon.log`.
+
+The daemon records system and app-owned DNS partial-record watchdog outcomes
+with confirmation_not_scheduled; those two stages alone do not complete the
+required local ladder. Generic process_identity_failed messages are not bound
+to a hostname and cannot yet be attributed to the browser asset. A standalone
+same-policy observation on an existing real Chrome socket accepted. Further
+ordinary-browser correlation is blocked while the Mac is locked; no new routing
+change has been made based on the uncorrelated identity messages.
+
+
+After unlock, ordinary Chrome reload again produced ERR_CONNECTION_CLOSED for
+both the document and banner. Fresh logs include successful browser provenance;
+there is no basis to blame foreground state. Six independent root-run local
+strategy payload probes failed to confirm the full banner within12s each on
+one currently resolved edge (18.165.142.153). The recorded zero count means no
+validated complete response, not zero received bytes.
+
+A separate deterministic recovery defect was reproduced: a strategy with many
+TLS-prefix successes could remain first despite fresh framed-partial failure.
+`_strategy_order_for_attempt` now partitions both idle and partial failed stages
+after untried choices, retaining order within groups, expiry and explicit-repeat
+precedence. Before:1failed/5passed; after:35passed/828deselected. This fixes local
+ladder progress only; the same-object image/API proof gap remains open and the
+new source has not been installed.
