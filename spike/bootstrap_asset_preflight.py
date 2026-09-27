@@ -127,7 +127,7 @@ def response_has_full_selected_representation(
 
 @dataclass(frozen=True, slots=True)
 class RangeProbeEvidence:
-    """Non-sensitive proof metadata for one exact ranged JS object.
+    """Non-sensitive proof metadata for one exact ranged script or image object.
 
     The request target and response bytes never enter this value.  A strong
     validator is hashed, as is a fixed-size entity prefix used only when an
@@ -410,7 +410,7 @@ def inspect_range_response(
     if (
         status != 206
         or not _identity_encoded(headers)
-        or not _javascript_content(headers)
+        or not _bootstrap_object_content(headers)
         or range_descriptor is None
     ):
         return _evidence_before_deadline(
@@ -654,12 +654,14 @@ def _html_content(headers):
     return media_type in ("text/html", "application/xhtml+xml")
 
 
-def _javascript_content(headers):
+def _bootstrap_object_content(headers):
     values = headers.get("content-type", ())
     if len(values) != 1:
         return False
     media_type = values[0].split(";", 1)[0].strip().lower()
-    return media_type in _JAVASCRIPT_TYPES
+    return media_type in _JAVASCRIPT_TYPES or media_type in {
+        "image/webp", "image/png", "image/jpeg", "image/avif", "image/gif",
+    }
 
 
 def _content_range(headers, requested_range_end):

@@ -624,3 +624,20 @@ def test_validated_public_redirect_document_resolves_relative_critical_image():
 
 def test_zero_asset_budget_accepts_no_scripts_or_critical_images():
     assert not _assets('<script src="/a.js"></script><img fetchpriority="high" src="/a.webp">', max_assets=0)
+
+
+@pytest.mark.parametrize('media_type', ['image/webp', 'image/png', 'image/jpeg', 'image/avif', 'image/gif'])
+def test_image_range_preserves_complete_and_incomplete_object_evidence(media_type):
+    body = b'public-image-payload' * 100
+    wire = _range_response(body).replace(b'application/javascript', media_type.encode())
+    complete = _inspect(wire)
+    partial = _inspect(wire[:-100])
+    assert complete.outcome is RangeProbeOutcome.COMPLETE
+    assert partial.outcome is RangeProbeOutcome.INCOMPLETE
+    assert partial.proves_same_object_as(complete)
+
+
+@pytest.mark.parametrize('media_type', ['text/html', 'application/json', 'application/octet-stream'])
+def test_generic_payload_cannot_be_image_route_proof(media_type):
+    wire = _range_response(b'not an image').replace(b'application/javascript', media_type.encode())
+    assert _inspect(wire).outcome is RangeProbeOutcome.UNKNOWN

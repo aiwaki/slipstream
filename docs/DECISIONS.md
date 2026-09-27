@@ -144,6 +144,8 @@ which object is measured, never route authority. The complete bounded HTML is
 scanned so early scripts cannot hide a later critical image. Validated public
 root redirects may supply the document base path; arbitrary caller paths remain
 rejected by default. Requests stay ephemeral, cookie-free and identity-encoded.
+Image proofs accept WebP, PNG, JPEG, AVIF and GIF under the existing strict206
+range/framing/identity checks; generic HTML, JSON and opaque binary are refused.
 
 
 The user's explicit authorization permits the critical-object idle path to

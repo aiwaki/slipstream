@@ -18,8 +18,12 @@ file.
   rejection remains; only the internal validated redirect chain opts in.
 - Real retained complete TestGlider HTML now selects the exact failing banner
   on d361z4i9c2q2gv.cloudfront.net. No new CDN policy or parent-derived authority.
-- Tests before4fail/49pass; after55pass plus65 integration pass/785 deselected.
+- Image range classifier now accepts bounded raster MIME types while retaining
+  strict206/framing/object-identity requirements; generic HTML/JSON stay unknown.
+- Tests before4fail/49pass; final76pass plus65 integration pass/785 deselected.
   Evidence output/testglider-20260925/critical-images-{before,after,integration}.log.
+- Intermediate7d61c44 build/canonical PASS, but it omitted image MIME support: do
+  not install that intermediate bundle. Final source needs rebuild.
 - Still not a product PASS: candidate needs build/install/browser verification;
   parents obtainable only through Geph still do not enumerate their children.
 - PR376 exact7672313 product/audit/checks/build green; lifecycle/update/browser
