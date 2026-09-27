@@ -10,15 +10,21 @@ file.
 
 ## Current Checkpoint
 
-2026-09-28 continuation candidate (not installed):
-- Real pinned headless/owned route: complete main HTML2293ms, DOMContentLoaded4091ms,
-  main-frame stop18097ms after15 Vimeo frame requests. V2 now correlates complete
-  document + parser completion to exact main frame/loader; V1 unchanged.
-- Owned-only parent discovery now runs concurrently under comparison deadline;
-  one critical child receives independent existing range/local/owned checks.
-  Retained lease and fixed20+19s continuation; no parent-to-child route authority.
-- Python85 focused tests PASS; Rust/browser/install and cancellation qualification
-  in progress. Installed remains3c56614. Never replay consumed transactions.
+2026-09-28 installed12ea83e9; remaining learned-parent discovery gap:
+- Exact CI36352414817 and dependency/Windows checks now all PASS. Final local
+  build74235 canonical PASS; native install90957 terminal0; canonical installed
+  verification90696 terminal0 overallPASS. Learning and backups preserved.
+- Retained artifact: output/recovery-replacement-12ea83e9/Slipstream.app; tree
+  f46cc2519aad158f9c341fa18d83866e343e46d1ab02c1da7ed7bf1627926754.
+  Its replacement script is CONSUMED, NEVER REPLAY.
+- Real Chrome still has broken hero images. installed-assets.json: document
+  complete243860, API complete16688, banner curl18 at16384/400804bytes. This
+  is not product success. Native diagnostic read94900 exit0 confirms existing
+  learned www parent takes Geph directly and never enumerates its children.
+- Working fix adds bounded/coalesced child discovery alongside already-learned
+  parent relays; same-object independent child proof remains mandatory. No
+  learning reset, broad CDN route, or foreground dependency. Tests/build/install
+  and actual object/browser qualification are next; user AGENTS.md untouched.
 
 2026-09-28 exact3c56614 INSTALLED; browser/resource gate still FAILS.
 - Exact3c56614f9947bf216092c68913aa86cde425bc73 CI36348837348 and PR376

@@ -2835,6 +2835,7 @@ _semantic_plain_confirming = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
 _route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
+_learned_parent_asset_checks = OrderedDict()  # host -> monotonic next check; no paths
 _route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
 _route_preflight_execution_leases = {}  # proof Future -> shared execution lease
 _route_preflight_window = deque(maxlen=128)  # bounded diagnostic history only
@@ -10238,6 +10239,84 @@ async def _wait_for_pending_bootstrap_children(host, address):
         if getattr(task, "_slipstream_bootstrap_join", None) is join:
             del task._slipstream_bootstrap_join
     return min(time.monotonic(), wait_deadline) + UNKNOWN_RECOVERY_GEPH_RESERVE
+
+
+async def _check_learned_parent_assets(host, ip):
+    """Enumerate an already-proven parent's children without lending authority.
+
+    Runs alongside its live relay. A retained root lease owns the bounded
+    discovery thread and one independently proven child, including on cancel.
+    The host-only cooldown prevents every pooled connection repeating the work.
+    """
+    h = normalize_host(host)
+    try:
+        address = ipaddress.ip_address(ip)
+    except (TypeError, ValueError):
+        return
+    if (not address.is_global or not _auto_geph_base_host_allowed(h)
+            or not _auto_geph_learned_exact_host(h)
+            or _shutdown_started.is_set()):
+        return
+    started = time.monotonic()
+    key = _route_preflight_inflight_key(h, address)
+    with _route_preflight_lock:
+        _prune_initial_route_preflights_locked(started)
+        if (_learned_parent_asset_checks.get(h, 0) > started
+                or any(k[0] == h for k in _route_preflight_inflight)
+                or _route_preflight_execution_count_locked() >= ROUTE_PREFLIGHT_CONCURRENT_MAX):
+            return
+        epoch = Future()
+        lease = _RoutePreflightExecutionLease(key, epoch, asyncio.current_task())
+        lease.child_ready = True
+        _route_preflight_inflight[key] = epoch
+        _route_preflight_execution_leases[epoch] = lease
+        _route_preflight_window.append(started)
+        _learned_parent_asset_checks[h] = started + ROUTE_PREFLIGHT_RETRY_TTL
+        _learned_parent_asset_checks.move_to_end(h)
+        while len(_learned_parent_asset_checks) > ROUTE_PREFLIGHT_CACHE_MAX:
+            _learned_parent_asset_checks.popitem(last=False)
+    assets = []
+    worker = None
+    try:
+        discovery_deadline = started + route_preflight.MAX_DEADLINE_MS / 1000.0
+        worker = asyncio.create_task(asyncio.to_thread(
+            _discover_owned_preflight_assets, h, discovery_deadline, assets,
+        ))
+        await _await_owned_preflight_worker(worker, timeout=max(
+            0.001, discovery_deadline - time.monotonic()) + 0.1)
+        if not _auto_geph_learned_exact_host(h) or _shutdown_started.is_set():
+            return
+        unproven_assets = []
+        for candidate in assets:
+            if _auto_geph_learned_exact_host(candidate.exact_host):
+                candidate.forget()
+            else:
+                unproven_assets.append(candidate)
+        asset, _cross_origin = _select_route_preflight_bootstrap_asset(unproven_assets, h)
+        if asset is None:
+            return
+        healthy_deadline = time.monotonic() + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
+        final_deadline = (healthy_deadline + ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
+                          + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE)
+        await _run_bootstrap_asset_preflight(
+            asset, h, str(address), healthy_deadline, final_deadline,
+            execution_lease=lease,
+        )
+    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
+        _log_route_preflight_state(h, "learned_parent_assets_inconclusive")
+    finally:
+        if worker is not None and not worker.done():
+            await _drain_root_preflight_worker(worker)
+        for asset in assets:
+            asset.forget()
+        with _route_preflight_lock:
+            if _route_preflight_inflight.get(key) is epoch:
+                _route_preflight_inflight.pop(key, None)
+            lease.child_reserved = False
+            if _route_preflight_execution_leases.get(epoch) is lease:
+                _route_preflight_execution_leases.pop(epoch, None)
+            if not epoch.done():
+                epoch.set_result(False)  # Enumeration is never parent proof.
 
 
 async def _run_initial_route_preflight(
@@ -18861,6 +18940,8 @@ async def _commit_owned_geph_first_payload(
     reader,
     writer,
     geph_result,
+    *,
+    exact_address=None,
 ):
     """Commit a replay-safe owned stream only after its first target bytes."""
     gr, gw, server_first = geph_result
@@ -18889,10 +18970,20 @@ async def _commit_owned_geph_first_payload(
         downstream_bytes=len(server_first),
         first_downstream_seen=True,
     )
-    await relay_local_stream(
-        reader, gw, gr, writer, activity,
-        diagnostic_host=host, diagnostic_stage="geph",
-    )
+    asset_check = (asyncio.create_task(_check_learned_parent_assets(host, exact_address))
+                   if exact_address is not None else None)
+    try:
+        await relay_local_stream(
+            reader, gw, gr, writer, activity,
+            diagnostic_host=host, diagnostic_stage="geph",
+        )
+    finally:
+        if asset_check is not None:
+            # Relay close does not orphan discovery or its independent proof.
+            # The bounded worker drains even when the connection is cancelled.
+            _result, cancelled = await _drain_root_preflight_worker(asset_check)
+            if cancelled:
+                raise asyncio.CancelledError
     return True
 
 
@@ -20707,6 +20798,7 @@ async def _handle_impl(reader, writer):
                             reader,
                             writer,
                             g,
+                            exact_address=dst_ip,
                         )
                         return
                     runtime_route_circuit_record_result(
@@ -20769,6 +20861,7 @@ async def _handle_impl(reader, writer):
                             reader,
                             writer,
                             retry_result,
+                            exact_address=dst_ip,
                         )
                         return
                     geph_failure = retry_failure or geph_failure

@@ -5468,7 +5468,8 @@ def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
         attempts.append(args)
         return (object(), object(), b"server-first"), None
 
-    async def commit(*args):
+    async def commit(*args, **kwargs):
+        assert kwargs["exact_address"] == "203.0.113.8"
         committed.append(args)
 
     async def direct_must_not_run(*_args):

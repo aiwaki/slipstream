@@ -121,3 +121,97 @@ def test_expired_discovery_never_starts_network_work(monkeypatch):
     monkeypatch.setattr(tproxy, '_owned_geph_confirmation_pid',
                         lambda: pytest.fail('expired work must not start'))
     tproxy._discover_owned_preflight_assets('parent.example', time.monotonic()-1, [])
+
+
+@pytest.fixture
+def learned_parent(monkeypatch):
+    from collections import OrderedDict
+    _enable_owned_geph_preflight(monkeypatch)
+    monkeypatch.setattr(tproxy, '_learned_parent_asset_checks', OrderedDict())
+    tproxy._auto_geph['parent.example'] = time.time() + 600
+    return 'parent.example'
+
+
+def test_existing_learned_parent_checks_child_without_reset_or_inherited_proof(monkeypatch, learned_parent):
+    asset = tproxy.bootstrap_asset_preflight.EphemeralBootstrapAsset(
+        exact_host='images.example.net', host_header='images.example.net', request_target='/hero.webp')
+    discovery = []
+    def discover(h, deadline, sink):
+        discovery.append(h)
+        sink.append(asset)
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', discover)
+    children = []
+    async def child(item, parent, ip, healthy, final, **kwargs):
+        assert tproxy._route_preflight_child_lease_valid_locked(kwargs['execution_lease'], parent, ip)
+        assert not tproxy._auto_geph_learned_exact_host(item.exact_host)
+        children.append(item.exact_host)
+        return False, tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING
+    monkeypatch.setattr(tproxy, '_run_bootstrap_asset_preflight', child)
+    async def scenario():
+        await asyncio.gather(*(tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8') for _ in range(5)))
+        await tproxy._check_learned_parent_assets(learned_parent, '1.1.1.1')
+    asyncio.run(scenario())
+    assert discovery == [learned_parent]
+    assert children == ['images.example.net']
+    assert tproxy._auto_geph_learned_exact_host(learned_parent)
+    assert not tproxy._auto_geph_learned_exact_host('images.example.net')
+    assert not tproxy._route_preflight_inflight
+    assert not tproxy._route_preflight_execution_leases
+    with pytest.raises(RuntimeError):
+        asset.build_range_request()
+
+
+@pytest.mark.parametrize('host,ip', [('discord.com','8.8.8.8'), ('youtube.com','8.8.8.8'), ('parent.example','127.0.0.1'), ('unknown.example','8.8.8.8')])
+def test_learned_discovery_rejects_protected_unlearned_and_private(monkeypatch, learned_parent, host, ip):
+    tproxy._auto_geph[host] = time.time()+600 if host != 'unknown.example' else 0
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', lambda *a: pytest.fail('ineligible discovery'))
+    asyncio.run(tproxy._check_learned_parent_assets(host, ip))
+    assert not tproxy._route_preflight_inflight
+
+
+def test_learned_discovery_cancellation_retains_thread_ownership(monkeypatch, learned_parent):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    def discover(*args):
+        entered.set()
+        assert release.wait(2)
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', discover)
+    async def scenario():
+        task = asyncio.create_task(tproxy._check_learned_parent_assets(learned_parent,'8.8.8.8'))
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert tproxy._route_preflight_execution_leases
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(scenario())
+    assert not tproxy._route_preflight_inflight
+    assert not tproxy._route_preflight_execution_leases
+
+
+def test_live_relay_runs_concurrently_and_drains_discovery(monkeypatch, learned_parent):
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        async def check(host, ip):
+            assert (host, ip) == (learned_parent, '8.8.8.8')
+            entered.set()
+            await release.wait()
+        async def relay(*args, **kwargs):
+            await entered.wait()
+            release.set()
+        class Writer:
+            def write(self, data):
+                assert data == b'payload'
+            async def drain(self):
+                pass
+        monkeypatch.setattr(tproxy, '_check_learned_parent_assets', check)
+        monkeypatch.setattr(tproxy, 'relay_local_stream', relay)
+        monkeypatch.setattr(tproxy, 'runtime_route_circuit_record_result', lambda *a, **kw: None)
+        monkeypatch.setattr(tproxy, 'clear_geph_route_failure', lambda: None)
+        assert await asyncio.wait_for(tproxy._commit_owned_geph_first_payload(
+            {}, learned_parent, object(), Writer(), (object(), object(), b'payload'),
+            exact_address='8.8.8.8'), 1)
+    asyncio.run(scenario())

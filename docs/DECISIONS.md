@@ -861,3 +861,12 @@ system/app-DNS/local-strategy/owned-payload checks and host exclusions.
 One fixed continuation covers the 20s comparison plus the existing 19s child
 budget; it is announced once, cannot refresh, and cancellation drains discovery
 before forgetting targets or releasing the slot. No global CDN rule is added.
+
+Already learned exact parents also enumerate public critical assets alongside
+their owned relay, using the same independent child proof. Parent learning is
+not reset or inherited by children. Enumeration coalesces across connections
+and addresses, retains an existing execution lease, and has an 8s discovery
+plus 19s child bound. A bounded host-only two-minute cooldown prevents pooled
+connections amplifying probes; no URL is stored. Already learned children are
+skipped. Relay completion/cancellation drains the worker rather than orphaning
+it. Protected services and private destinations remain excluded.

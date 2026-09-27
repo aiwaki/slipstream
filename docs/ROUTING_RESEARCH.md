@@ -3103,3 +3103,19 @@ prove which internal stage exhausted every previous production attempt.
 Candidate separates exact main-document parser completion (V2 only) and adds
 owned-parent critical-asset enumeration with independent child proof. Focused
 Python85pass; further cancellation/integration/build/install gates pending.
+
+### 2026-09-28: learned parent skips newly added child discovery
+
+Installed12ea83e9 passed canonical installed verification (90696), but live public
+probes still showed banner16384/400804 with curl18; document243860 and API16688
+completed. Evidence: output/recovery-replacement-12ea83e9/installed-assets.json
+and browser-daemon.log (native read94900 exit0). The www parent was already
+learned and went directly through Geph, so the newly added initial-parent
+comparison/discovery never ran. This is a separate control-flow gap, not a
+reason to reset learning or repeat the earlier browser observer correction.
+
+The new learned-parent continuation enumerates one critical unlearned child
+alongside the relay and uses the existing independent object proof. It retains
+and drains its scheduling lease/thread, coalesces pooled connections across
+addresses, and stores only a bounded host cooldown. Focused Python integration
+99pass and discovery/lifecycle14pass; live candidate qualification remains due.
