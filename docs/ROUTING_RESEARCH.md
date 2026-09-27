@@ -3063,3 +3063,30 @@ after untried choices, retaining order within groups, expiry and explicit-repeat
 precedence. Before:1failed/5passed; after:35passed/828deselected. This fixes local
 ladder progress only; the same-object image/API proof gap remains open and the
 new source has not been installed.
+
+
+## 2026-09-28 TestGlider: browser comparison redirects and remaining cutoff
+
+Installed exact3c56614 after green CI and canonical build/install checks. The V2
+observer previously treated every correlated redirect as terminal, including the
+observed owned-Geph public root302 to `/en`. It now admits up to three exact-origin
+HTTPS redirects, preserving request correlation, deadline and final-completion
+classification. Pending-navigation/V1 behavior remains unchanged; Rust36 tests pass.
+
+This was not the whole incident. Fresh accepted-provenance attempts now wait20s
+then report `browser-proof wait_failed`, rather than the previous immediate
+`result_refused`. That log does not distinguish main-document, subframe, DOM or
+IPC delay; the direct launcher currently discards worker stderr. Do not attribute
+it to a specific stage without additional bounded diagnostics.
+
+Ordinary Chrome eventually rendered styled content but retained failed images.
+A same-session explicit-local-proxy public banner GET returned HTTP200 but closed
+at16384 of400804 bytes (curl18,11.85s); the representative public lessons API
+completed16688 bytes (2.30s). DevTools additionally showed `44_TOEFL.webp` with
+ERR_CONNECTION_CLOSED. Evidence: output/recovery-replacement-3c56614f/
+{installed-assets.json,browser-daemon.log,installed-verification.log}.
+
+The unchanged structural limit remains: a usable CDN root does not qualify an
+image, and a parent obtainable only through owned Geph does not currently expose
+critical children to the independent same-object pipeline. No site/CDN policy
+exception was added, and no successful root/install check is a product pass.

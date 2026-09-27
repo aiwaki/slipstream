@@ -10,6 +10,33 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 exact3c56614 INSTALLED; browser/resource gate still FAILS.
+- Exact3c56614f9947bf216092c68913aa86cde425bc73 CI36348837348 and PR376
+  all required checks PASS. Final local build70514 terminal0; Rust36 tests PASS.
+- Normal --quit completed automatically: no tray/osascript/SecurityAgent remained,
+  launchctl113 explicitly reported owned tproxy absent. Native installation46432
+  terminal0. New app and root daemon verified; learning and all backups retained.
+- output/recovery-replacement-3c56614f/replace-exact-bundle.sh is CONSUMED:
+  NEVER REPLAY. canonical verify:local-install37685 terminal0 overallPASS, including
+  installed-public-payload. Retained artifact tree
+  f13cb01d5e18052221e3cbf476f7ca31c5d932a438d90e1439ecc28ff2ec7d76.
+- Real ordinary Chrome initially remained white/spinner; a later exact navigation
+  rendered styled content, but images still fail. DevTools showed a partial banner
+  and 44_TOEFL.webp ERR_CONNECTION_CLOSED. DevTools closed afterward.
+- Fresh installed-assets.json: banner HTTP200 but curl18 after16384/400804 bytes
+  in11.85s; API HTTP200 complete16688 bytes in2.30s. This is NOT product success.
+- Native diagnostic read83721 terminal0, browser-daemon.log: root provenance accepted;
+  previous immediate result_refused changed to browser-proof wait_failed at20s.
+  CDN root is usable with no assets, while object watchdog remains unconfirmed.
+- Redirect correction is installed and tested; do not repeat its build/install.
+  Next investigate the V2 worker's timed-out observation (launcher currently discards
+  stderr) and the owned-only parent asset-discovery gap. Determine whether final
+  main-document completion, subframe load, classification or IPC consumes the budget
+  before changing it. Do not infer the stage solely from wait_failed.
+- Owned-only parents still cannot enumerate their children. Preserve independent
+  same-object local/owned child evidence; no broad CDN rule, learning reset or
+  foreground-dependent workaround. User AGENTS.md edits remain untouched.
+
 2026-09-28 daaa0e2 INSTALLED; product gate still FAILS.
 - Exact CI36343704653 and all PR376 checks green. Native replacement session84755
   terminal0; canonical verify:local-install session16193 terminal0 PASS.
