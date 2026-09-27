@@ -277,6 +277,48 @@ fn is_correlated_document_redirect(event: &Value, expected_request_id: Option<&s
         && event.pointer("/params/redirectResponse").is_some()
 }
 
+fn admit_same_origin_document_redirect(
+    event: &Value,
+    initial_url: &str,
+    visited: &mut BTreeSet<String>,
+) -> bool {
+    let Some(target) = event.pointer("/params/request/url").and_then(Value::as_str) else {
+        return false;
+    };
+    if visited.len() >= 4
+        || target.len() > 2048
+        || !target.is_ascii()
+        || target
+            .bytes()
+            .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+        || target.contains('\\')
+        || !matches!(
+            event
+                .pointer("/params/redirectResponse/status")
+                .and_then(Value::as_u64),
+            Some(301 | 302 | 303 | 307 | 308)
+        )
+    {
+        return false;
+    }
+    let (Ok(initial), Ok(destination)) = (
+        reqwest::Url::parse(initial_url),
+        reqwest::Url::parse(target),
+    ) else {
+        return false;
+    };
+    if destination.scheme() != "https"
+        || destination.origin() != initial.origin()
+        || !destination.username().is_empty()
+        || destination.password().is_some()
+        || destination.fragment().is_some()
+    {
+        return false;
+    }
+    // Transient observer state only: never log or submit the redirected path.
+    visited.insert(destination.to_string())
+}
+
 fn full_navigation_completed(
     document_finished: bool,
     stopped_frame_id: Option<&str>,
@@ -360,7 +402,8 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
 }
 
 fn run_probe_worker() -> ProbeResult<()> {
-    let classification_deadline = Instant::now() + Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS);
+    let classification_deadline =
+        Instant::now() + Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS);
     let termination_requested = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(
         signal_hook::consts::SIGTERM,
@@ -422,7 +465,8 @@ fn run_claimed_probe(
     let worker_v1_deadline = classification_deadline
         - (Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS) - CLASSIFICATION_BUDGET);
     let classification_deadline = classification_deadline.min(claimed_deadline);
-    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 2) {
+    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 2)
+    {
         classification_deadline
     } else {
         classification_deadline.min(worker_v1_deadline)
@@ -1232,6 +1276,7 @@ impl ChromeSession {
         let mut main_frame_id = None;
         let mut document_finished = false;
         let mut stopped_frame_id = None;
+        let mut visited_documents = BTreeSet::from([self.config.target_url.clone()]);
         while Instant::now() < overall_deadline {
             require_not_terminated(termination_requested)?;
             let event = match websocket_read_json(&mut websocket, overall_deadline)? {
@@ -1266,11 +1311,20 @@ impl ChromeSession {
                 continue;
             };
             if is_correlated_document_redirect(&event, request_id.as_deref()) {
-                let _ = websocket_send_json(
-                    &mut websocket,
-                    &json!({"id": 99, "method": "Browser.close"}),
-                );
-                return Ok(NavigationObservation::TerminalError);
+                if !admit_same_origin_document_redirect(
+                    &event,
+                    &self.config.target_url,
+                    &mut visited_documents,
+                ) {
+                    let _ = websocket_send_json(
+                        &mut websocket,
+                        &json!({"id": 99, "method": "Browser.close"}),
+                    );
+                    return Ok(NavigationObservation::TerminalError);
+                }
+                // Only completion of the final correlated document counts.
+                document_finished = false;
+                stopped_frame_id = None;
             }
             if method == "Network.requestWillBeSent"
                 && event.pointer("/params/type").and_then(Value::as_str) == Some("Document")
@@ -2532,6 +2586,65 @@ mod tests {
             Some("other-document")
         ));
         assert!(!is_correlated_document_redirect(&redirect, None));
+    }
+
+    #[test]
+    fn same_origin_document_redirects_are_bounded_and_cycle_checked() {
+        let initial = "https://public.example/";
+        let mut visited = BTreeSet::from([initial.to_string()]);
+        for target in [
+            "https://public.example/en",
+            "https://public.example/en/",
+            "https://public.example/en/home",
+        ] {
+            let event = json!({"params": {"request": {"url": target}, "redirectResponse": {"status": 302}}});
+            assert!(admit_same_origin_document_redirect(
+                &event,
+                initial,
+                &mut visited
+            ));
+        }
+        let fourth = json!({"params": {"request": {"url": "https://public.example/fourth"}, "redirectResponse": {"status": 302}}});
+        assert!(!admit_same_origin_document_redirect(
+            &fourth,
+            initial,
+            &mut visited
+        ));
+        let cycle =
+            json!({"params": {"request": {"url": initial}, "redirectResponse": {"status": 302}}});
+        let mut fresh = BTreeSet::from([initial.to_string()]);
+        assert!(!admit_same_origin_document_redirect(
+            &cycle, initial, &mut fresh
+        ));
+    }
+
+    #[test]
+    fn document_redirects_never_expand_origin_or_accept_unsafe_targets() {
+        let initial = "https://public.example/";
+        for target in [
+            "http://public.example/en",
+            "https://other.example/en",
+            "https://public.example:444/en",
+            "https://user@public.example/en",
+            "https://public.example/en#fragment",
+            " https://public.example/en",
+            "https://public.example/en\n",
+        ] {
+            let mut visited = BTreeSet::from([initial.to_string()]);
+            let event = json!({"params": {"request": {"url": target}, "redirectResponse": {"status": 302}}});
+            assert!(
+                !admit_same_origin_document_redirect(&event, initial, &mut visited),
+                "{target}"
+            );
+            assert_eq!(visited.len(), 1);
+        }
+        let mut visited = BTreeSet::from([initial.to_string()]);
+        let event = json!({"params": {"request": {"url": "https://public.example/en"}, "redirectResponse": {"status": 200}}});
+        assert!(!admit_same_origin_document_redirect(
+            &event,
+            initial,
+            &mut visited
+        ));
     }
 
     #[test]

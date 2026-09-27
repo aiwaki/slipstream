@@ -3,6 +3,17 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Browser comparison same-origin redirects (candidate)
+
+The isolated route comparison may follow at most three HTTP301/302/303/307/308
+main-document redirects on the exact initial HTTPS origin. Correlation stays on
+the original CDP request ID and the original absolute deadline. A redirect never
+counts as completion: only the final document's loadingFinished, main-frame stop
+and DOM classification can produce a usable result. Cross-origin/port changes,
+HTTP downgrade, credentials, fragments, malformed targets and cycles are refused.
+Redirect paths are transient observer state and never cross IPC or enter logs.
+This fixes the public root-to-language-page case without extending route authority.
+
 ## Voice flow refresh after established-path state loss (candidate)
 
 The existing IPv4 voice observer keeps its port ranges, initial five-packet

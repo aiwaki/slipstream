@@ -10,6 +10,39 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 daaa0e2 INSTALLED; product gate still FAILS.
+- Exact CI36343704653 and all PR376 checks green. Native replacement session84755
+  terminal0; canonical verify:local-install session16193 terminal0 PASS.
+- output/recovery-replacement-daaa0e23/replace-exact-bundle.sh is CONSUMED:
+  NEVER REPLAY. Native log confirms exact source/root daemon match; learning
+  preserved. Previous app and private snapshots retained.
+- Ordinary Chrome reload still shows a white page. Fresh browser-daemon.log has
+  provenance_accepted followed by browser-proof result_refused/proof_absent.
+- Deterministic observer defect: every correlated document redirect was terminal,
+  including the live owned root302 Location:/en (parent-root.headers). Candidate
+  admits at most3 same-origin HTTPS hops under the original request/deadline;
+  cross-origin, unsafe, cycle and fourth-hop rejection remain. Rust36 tests PASS
+  (redirect-tests.log). This change is NOT installed yet.
+- Next: qualify/build/install the redirect fix, then check actual Chrome document,
+  banner and API. Do not count canonical installation or root response as success.
+  Remaining structural gap: owned-only parents do not enumerate critical children;
+  parent proof cannot grant child authority. Do not weaken same-object guards.
+
+
+2026-09-28 final critical-image candidate daaa0e2 built/canonical PASS.
+- Local build session42504 terminal0; critical-images-final-build.log.
+- Retained artifact output/recovery-replacement-daaa0e23/artifact.json PASS;
+  replace-exact-bundle.sh is DRAFT, never run until exact CI gates pass.
+- Final76 focused tests and65 integration tests PASS. Actual owned-Geph HTTP1.1
+  banner range validates COMPLETE65536/400804; HTTP2 curl dump is not valid
+  input to this HTTP1-only parser and was not used as route evidence.
+- Installed50c09e5 canonical recheck PASS, live StatusV2 active; no replacement.
+- Exact CI36343704653 running; product and heavy lifecycle/update/browser gates
+  must finish. CUA Slipstream path selection timed out(-10005); no Quit attempted.
+- Next: inspect exact CI, perform safe normal Quit and fresh transaction, then
+  canonical installed and actual browser/image checks. Product remains unproven.
+
+
 2026-09-27 critical-image discovery candidate (not installed):
 - Fixed first-four-script starvation: explicit image preload/high-priority img
   participates in the same bounded candidate set and ranks before scripts.
