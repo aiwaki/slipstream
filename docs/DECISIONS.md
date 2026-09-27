@@ -643,7 +643,7 @@ reports safe-incomplete and initiating-browser provenance is accepted, create
 one fresh owned-Geph-only V2 capability with a fixed20s deadline. The direct
 RoutePreflightV1 eight-second contract is unchanged. V2 never starts for an
 ordinary timeout or protected local-only host. It retains complete document +
-stopped-main-frame + semantic usable classification, pinned owned process,
+parser-complete main-frame + semantic usable classification, pinned owned process,
 exact host/capability, cancellation and expiry guards; no retries or refresh.
 Same-owner waiters may join this already-active stage through the existing
 bounded continuation metadata, without gaining its authority. Successful proof
@@ -842,3 +842,22 @@ do not become partial-record evidence. It grants no foreign-route authority.
 Recheck admission may last for the local recovery stage's lifetime even after
 partial-failure proof expires. The marker is bounded and expiring, cleared with
 route evidence, and never substitutes for fresh evidence to authorize a route.
+
+## 2026-09-28 Main-document comparison and owned-parent asset discovery
+
+V2 compares only the final main document: require its Network.loadingFinished
+and DOMContentLoaded lifecycle event for the exact main frame and loader, then
+semantic classification. Unrelated iframe/image load completion is not parent
+transport evidence. V1/background behavior is unchanged. Partial bodies, old
+loaders and child-frame lifecycle events cannot satisfy this condition.
+
+A safe-incomplete parent may enumerate public critical assets concurrently with
+its already-admitted owned browser comparison. The discovery request retains
+bounded complete framing, validated redirects, ephemeral paths, the original
+comparison deadline and the same owned process. Discovery grants no route.
+Only a successful parent proof may hand the retained execution reservation to
+one selected child, which must independently satisfy the existing same-object,
+system/app-DNS/local-strategy/owned-payload checks and host exclusions.
+One fixed continuation covers the 20s comparison plus the existing 19s child
+budget; it is announced once, cannot refresh, and cancellation drains discovery
+before forgetting targets or releasing the slot. No global CDN rule is added.

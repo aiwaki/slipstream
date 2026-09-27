@@ -12160,6 +12160,7 @@ def test_classification_exception_is_unclear_and_cannot_authorize_recovery(
 
 
 def _enable_owned_geph_preflight(monkeypatch):
+    monkeypatch.setattr(tproxy, "_discover_owned_preflight_assets", lambda *_args: None)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)

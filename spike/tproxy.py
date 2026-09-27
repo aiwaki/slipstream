@@ -5807,7 +5807,7 @@ def _semantic_geph_root_response(host, deadline, request_target="/"):
             pass
 
 
-def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
+def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT, *, _asset_sink=None):
     deadline = time.monotonic() + max(float(timeout), 0.001)
     first_deadline = min(
         deadline,
@@ -5857,8 +5857,30 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
             host, "geph_response_usable" if observation.outcome == SEMANTIC_OUTCOME_USABLE
             else "geph_response_refused",
         )
+        if observation.outcome == SEMANTIC_OUTCOME_USABLE and _asset_sink is not None:
+            inspection = bootstrap_asset_preflight.inspect_critical_bootstrap_assets(
+                f"https://{current_host}{request_target}", data,
+                stream_closed=stream_closed, truncated=truncated,
+                deadline=deadline, clock=time.monotonic,
+                allow_document_path=bool(len(visited) > 1),
+            )
+            _asset_sink.extend(inspection.assets)
         return observation.payload_bytes if observation.outcome == SEMANTIC_OUTCOME_USABLE else 0
     return 0
+
+
+def _discover_owned_preflight_assets(host, deadline, assets):
+    """Enumerate only: parent payload never grants authority to an asset host."""
+    pid = _owned_geph_confirmation_pid()
+    if not pid or not _owned_geph_ready_for_semantic_confirmation():
+        return
+    _semantic_geph_payload_probe(
+        host, timeout=max(0.001, deadline - time.monotonic()), _asset_sink=assets,
+    )
+    if time.monotonic() >= deadline or not _owned_geph_confirmation_pid_matches(pid):
+        for asset in assets:
+            asset.forget()
+        assets.clear()
 
 
 def _incomplete_response_probe_request(host, *, bounded_range, request_target="/"):
@@ -7521,6 +7543,7 @@ class _RoutePreflightExecutionLease:
     child_reserved: bool = True
     child_ready: bool = False
     child_epoch: Future | None = None
+    owned_document_assets: bool = False
 
 
 def _route_preflight_execution_count_locked():
@@ -10103,7 +10126,9 @@ def _route_preflight_owner_child_deadline_locked(future, root_key, now):
         metadata.deadline_monotonic,
         now + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
         + ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
-        + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE,
+        + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE
+        + (route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS / 1000.0
+           if lease.owned_document_assets else 0),
     )
 
 
@@ -10413,6 +10438,8 @@ async def _run_initial_route_preflight(
     eligible_asset_is_cross_origin = False
     direct_safe_incomplete = False
     root_diagnostic_record = None
+    owned_assets = []
+    owned_discovery_task = None
     _log_route_preflight_state(h, "root_admitted")
     try:
         direct_timeout = _route_preflight_root_io_timeout(deadline)
@@ -10532,7 +10559,7 @@ async def _run_initial_route_preflight(
                 eligible_asset,
                 eligible_asset_is_cross_origin,
             ) = _select_route_preflight_bootstrap_asset(bootstrap_assets, h)
-        if not eligible_asset_is_cross_origin:
+        if not eligible_asset_is_cross_origin and not direct_safe_incomplete:
             with _route_preflight_lock:
                 # No second cross-origin observation will be started. Release
                 # only the reservation; the root's start remains charged.
@@ -10652,16 +10679,26 @@ async def _run_initial_route_preflight(
                         + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS,
                     )
                     handoff_deadline = deadline + UNKNOWN_RECOVERY_GEPH_RESERVE
+                    # One fixed continuation covers this comparison and at most
+                    # one independently proven child. It is never refreshed.
+                    asset_pipeline_deadline = (deadline
+                        + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
+                        + ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
+                        + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE)
                     with _route_preflight_lock:
                         execution_lease.child_ready = True
+                        execution_lease.owned_document_assets = True
                         future._slipstream_bootstrap_wait = _PendingBootstrapChildWait(
-                            future, h, str(address), deadline,
+                            future, h, str(address), asset_pipeline_deadline,
                         )
                     comparison_task = asyncio.current_task()
                     comparison_join = _PendingBootstrapChildJoin(
-                        comparison_task, h, str(address), deadline,
+                        comparison_task, h, str(address), asset_pipeline_deadline,
                     )
                     comparison_task._slipstream_bootstrap_join = comparison_join
+                    owned_discovery_task = asyncio.create_task(asyncio.to_thread(
+                        _discover_owned_preflight_assets, h, deadline, owned_assets,
+                    ))
                     proof = await _run_headless_owned_geph_preflight(
                         job,
                         peer_endpoint,
@@ -10688,7 +10725,20 @@ async def _run_initial_route_preflight(
                         job.capability,
                         handoff_deadline,
                     )
-        elif outcome == SEMANTIC_OUTCOME_USABLE and eligible_asset is not None:
+                if owned_discovery_task is not None:
+                    # Keep the thread owned even on cancellation; its absolute
+                    # socket deadline bounds draining and ephemeral retention.
+                    await _await_owned_preflight_worker(
+                        owned_discovery_task,
+                        timeout=max(0.001, deadline - time.monotonic()) + 0.1,
+                    )
+                    if selected:
+                        eligible_asset, eligible_asset_is_cross_origin = (
+                            _select_route_preflight_bootstrap_asset(owned_assets, h)
+                        )
+        if eligible_asset is not None and (
+            outcome == SEMANTIC_OUTCOME_USABLE or selected
+        ):
             # The bounded root candidate runner has already drained all its
             # workers. Keep its Future pending for coalesced callers, while
             # allowing this coroutine's one selected child to use the slot.
@@ -10707,6 +10757,8 @@ async def _run_initial_route_preflight(
                 + ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_RESERVE
                 + ROUTE_PREFLIGHT_BOOTSTRAP_GEPH_RESERVE
             )
+            if owned_discovery_task is not None:
+                asset_final_deadline = min(asset_final_deadline, asset_pipeline_deadline)
             asset_selected, asset_outcome = await _run_bootstrap_asset_preflight(
                 eligible_asset,
                 h,
@@ -10723,6 +10775,10 @@ async def _run_initial_route_preflight(
                 child_finished_at + UNKNOWN_RECOVERY_GEPH_RESERVE
                 if child_finished_at < asset_final_deadline else None
             )
+            if selected and child_handoff_deadline is not None:
+                selected_claim = _owned_geph_preflight_claim(
+                    h, job.capability, child_handoff_deadline,
+                )
             if asset_selected and asset_host == h:
                 if (
                     child_handoff_deadline is not None
@@ -10762,6 +10818,10 @@ async def _run_initial_route_preflight(
         _log_route_preflight_state(h, "root_exception")
         selected = False
     finally:
+        if owned_discovery_task is not None and not owned_discovery_task.done():
+            await _drain_root_preflight_worker(owned_discovery_task)
+        for asset in owned_assets:
+            asset.forget()
         comparison_task = asyncio.current_task()
         comparison_join = getattr(comparison_task, "_slipstream_bootstrap_join", None)
         if (type(comparison_join) is _PendingBootstrapChildJoin

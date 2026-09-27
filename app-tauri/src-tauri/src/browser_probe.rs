@@ -327,6 +327,17 @@ fn full_navigation_completed(
     document_finished && main_frame_id.is_some() && stopped_frame_id == main_frame_id
 }
 
+// V2 compares the completed main document, not every independently routed
+// iframe/image on the page. Correlate parser completion to its exact loader;
+// an old document or a child frame must never authorize the current request.
+fn main_document_parsed(event: &Value, frame: Option<&str>, loader: Option<&str>) -> bool {
+    frame.is_some() && loader.is_some()
+        && event.get("method").and_then(Value::as_str) == Some("Page.lifecycleEvent")
+        && event.pointer("/params/name").and_then(Value::as_str) == Some("DOMContentLoaded")
+        && event.pointer("/params/frameId").and_then(Value::as_str) == frame
+        && event.pointer("/params/loaderId").and_then(Value::as_str) == loader
+}
+
 fn observation_outcome(observation: NavigationObservation) -> &'static str {
     match observation {
         NavigationObservation::Pending => OUTCOME_PENDING,
@@ -1264,6 +1275,12 @@ impl ChromeSession {
             &json!({"id": 1, "method": "Network.enable"}),
         )?;
         websocket_send_json(&mut websocket, &json!({"id": 2, "method": "Page.enable"}))?;
+        if allow_document_redirects {
+            websocket_send_json(&mut websocket, &json!({
+                "id": 5, "method": "Page.setLifecycleEventsEnabled",
+                "params": {"enabled": true},
+            }))?;
+        }
         let navigation_started = Instant::now();
         websocket_send_json(
             &mut websocket,
@@ -1279,6 +1296,7 @@ impl ChromeSession {
         let mut request_started = None;
         let mut main_frame_id = None;
         let mut document_finished = false;
+        let mut document_parsed = false;
         let mut stopped_frame_id = None;
         let mut visited_documents = BTreeSet::from([self.config.target_url.clone()]);
         while Instant::now() < overall_deadline {
@@ -1330,6 +1348,7 @@ impl ChromeSession {
                 }
                 // Only completion of the final correlated document counts.
                 document_finished = false;
+                document_parsed = false;
                 stopped_frame_id = None;
             }
             if method == "Network.requestWillBeSent"
@@ -1343,6 +1362,11 @@ impl ChromeSession {
                     request_id = Some(observed_id.to_string());
                     request_started.get_or_insert_with(Instant::now);
                 }
+            }
+            if allow_document_redirects && main_document_parsed(
+                &event, main_frame_id.as_deref(), request_id.as_deref(),
+            ) {
+                document_parsed = true;
             }
             if method == "Page.frameStoppedLoading" {
                 stopped_frame_id = event
@@ -1371,11 +1395,14 @@ impl ChromeSession {
                     }
                 }
             }
-            if full_navigation_completed(
-                document_finished,
-                stopped_frame_id.as_deref(),
-                main_frame_id.as_deref(),
-            ) {
+            let ready = if allow_document_redirects {
+                document_finished && document_parsed
+            } else {
+                full_navigation_completed(
+                    document_finished, stopped_frame_id.as_deref(), main_frame_id.as_deref(),
+                )
+            };
+            if ready {
                 let observation = classify_loaded_document(&mut websocket, overall_deadline)
                     .unwrap_or(NavigationObservation::TerminalError);
                 let _ = websocket_send_json(
@@ -2400,6 +2427,18 @@ mod tests {
             Some("main"),
         ));
         assert!(full_navigation_completed(true, Some("main"), Some("main"),));
+    }
+
+    #[test]
+    fn v2_parser_completion_is_bound_to_main_document_loader() {
+        let event = json!({"method": "Page.lifecycleEvent", "params": {
+            "name": "DOMContentLoaded", "frameId": "main", "loaderId": "final"
+        }});
+        assert!(main_document_parsed(&event, Some("main"), Some("final")));
+        assert!(!main_document_parsed(&event, Some("child"), Some("final")));
+        assert!(!main_document_parsed(&event, Some("main"), Some("previous")));
+        assert!(!main_document_parsed(&event, None, Some("final")));
+        assert!(!main_document_parsed(&event, Some("main"), None));
     }
 
     #[test]

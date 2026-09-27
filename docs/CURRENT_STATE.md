@@ -10,6 +10,16 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 continuation candidate (not installed):
+- Real pinned headless/owned route: complete main HTML2293ms, DOMContentLoaded4091ms,
+  main-frame stop18097ms after15 Vimeo frame requests. V2 now correlates complete
+  document + parser completion to exact main frame/loader; V1 unchanged.
+- Owned-only parent discovery now runs concurrently under comparison deadline;
+  one critical child receives independent existing range/local/owned checks.
+  Retained lease and fixed20+19s continuation; no parent-to-child route authority.
+- Python85 focused tests PASS; Rust/browser/install and cancellation qualification
+  in progress. Installed remains3c56614. Never replay consumed transactions.
+
 2026-09-28 exact3c56614 INSTALLED; browser/resource gate still FAILS.
 - Exact3c56614f9947bf216092c68913aa86cde425bc73 CI36348837348 and PR376
   all required checks PASS. Final local build70514 terminal0; Rust36 tests PASS.

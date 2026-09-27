@@ -3090,3 +3090,16 @@ The unchanged structural limit remains: a usable CDN root does not qualify an
 image, and a parent obtainable only through owned Geph does not currently expose
 critical children to the independent same-object pipeline. No site/CDN policy
 exception was added, and no successful root/install check is a product pass.
+
+### 2026-09-28 Owned root waits for unrelated resources
+
+An isolated pinned headless browser through owned SOCKS9954 observed TestGlider:
+final main-document loadingFinished at2293ms, DOMContentLoaded4091ms, 15 Vimeo
+iframe document requests beginning8058ms, main-frame stop18097ms. Launch and
+runtime validation consume the same20s production deadline. This demonstrates
+that main-frame stop delays an already complete parent, although it does not
+prove which internal stage exhausted every previous production attempt.
+
+Candidate separates exact main-document parser completion (V2 only) and adds
+owned-parent critical-asset enumeration with independent child proof. Focused
+Python85pass; further cancellation/integration/build/install gates pending.
