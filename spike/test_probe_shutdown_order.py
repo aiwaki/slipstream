@@ -57,3 +57,27 @@ def test_shutdown_refuses_late_worker_acquisition(monkeypatch, existing):
                         lambda: pytest.fail('shutdown must not create a runtime'))
     with pytest.raises(RuntimeError, match='shutting down'):
         tproxy._get_pending_navigation_probe_worker(allow_production_headless=True)
+
+
+def test_owned_stop_allows_worker_drain_before_force_kill(monkeypatch):
+    import signal
+    clock = [0.0]
+    signals = []
+    monkeypatch.setattr(tproxy.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(tproxy.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(tproxy, '_process_command_for_pid',
+                        lambda pid: 'owned' if clock[0] < 20 else None)
+    monkeypatch.setattr(tproxy, '_installed_daemon_command_owned', lambda cmd: cmd == 'owned')
+    monkeypatch.setattr(tproxy.os, 'kill', lambda pid, sig: signals.append(sig))
+    monkeypatch.setattr(tproxy, '_flush_private_pf_with_retry', lambda **kw: True)
+    monkeypatch.setattr(tproxy, '_restore_pf_loopback_skip', lambda: True)
+    assert tproxy._stop_owned_daemon_pid(4242)
+    assert signals == [signal.SIGTERM]
+
+
+def test_launchd_exit_budget_covers_worker_and_connection_drain():
+    import plistlib
+    plist = plistlib.loads(tproxy.launchd_plist_text(['/owned/daemon'], '/owned').encode())
+    minimum = (tproxy.pending_navigation_probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS
+               + 5 + tproxy.SHUTDOWN_DRAIN_SECONDS)
+    assert minimum < plist['ExitTimeOut'] < 180

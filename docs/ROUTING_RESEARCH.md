@@ -3001,3 +3001,14 @@ reproduce this; the final acquisition now rejects shutdown under the same lock.
 48 affected tests pass. Drain start/end and broker-close bounded diagnostics are
 added for the next packaged gate; no claim that this explains the CI failure yet.
 The workstation candidate remains uninstalled, with existing app/backups preserved.
+
+
+Shutdown budget correction: external owned-daemon stop used12s before force-kill,
+while internal worker drain permits125s and Rust comparison itself permits20s.
+A fake-clock20s orderly exit reproduced premature SIGKILL. The helper and explicit
+launchd ExitTimeOut now share137s (125 worker +10 connections +2 margin); ordinary
+exit still completes immediately. Ownership/PF guards remain unchanged. Two new
+regressions failed before and pass after;78 scoped tests PASS,822 deselected.
+Evidence: output/testglider-20260925/shutdown-budget-{before,after}.log.
+This establishes a shutdown defect; exact packaged CI is still needed to attribute
+and clear the observed uninstall failure. No new candidate installed.

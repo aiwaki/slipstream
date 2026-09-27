@@ -270,6 +270,11 @@ _route_preflight_browser_claims = {}
 _route_preflight_headless_failures = deque()
 _route_preflight_headless_breaker_until = 0.0
 SHUTDOWN_DRAIN_SECONDS = 10.0
+# Outer supervisors must allow the same worker + connection drain as amain.
+BROWSER_WORKER_SHUTDOWN_SECONDS = (
+    pending_navigation_probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS + 5.0
+)
+DAEMON_SHUTDOWN_SECONDS = BROWSER_WORKER_SHUTDOWN_SECONDS + SHUTDOWN_DRAIN_SECONDS + 2.0
 SHUTDOWN_DRAIN_QUIET_SECONDS = 0.1
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
@@ -4313,11 +4318,7 @@ def _close_pending_navigation_probe_worker():
     if worker is None:
         return True
     return worker.close(
-        timeout=(
-            pending_navigation_probe_runtime
-            .PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS
-            + 5.0
-        )
+        timeout=BROWSER_WORKER_SHUTDOWN_SECONDS
     )
 
 
@@ -21656,6 +21657,7 @@ def launchd_plist_text(prog_args, workdir, browser_worker=None):
         f'  <key>ProgramArguments</key><array>{prog_xml}</array>\n'
         '  <key>RunAtLoad</key><true/>\n'
         '  <key>KeepAlive</key><true/>\n'
+        f'  <key>ExitTimeOut</key><integer>{int(DAEMON_SHUTDOWN_SECONDS)}</integer>\n'
         '  <key>EnvironmentVariables</key><dict>'
         '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
         '<key>PYTHONUNBUFFERED</key><string>1</string>'
@@ -21851,7 +21853,7 @@ def _owned_listener_pids(port):
     ]
 
 
-def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
+def _stop_owned_daemon_pid(pid, timeout=DAEMON_SHUTDOWN_SECONDS):
     command = _process_command_for_pid(pid)
     if not _installed_daemon_command_owned(command):
         return False
