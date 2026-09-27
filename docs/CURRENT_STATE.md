@@ -10,6 +10,84 @@ file.
 
 ## Current Checkpoint
 
+2026-09-27 general recovery candidate, NOT built/installed yet.
+- Terminal TLS partial-record EOF/reset reproduced:4 failing tests before fix,
+  all pass after fix. Relay now feeds those server-first truncations into the
+  existing exact-host recovery path even before idle timeout and above8KB.
+- Background comparison no longer needs frontmost/recent input, but retains
+  signed exact socket/process identity and independent owned-route proof.
+  Shared WebKit exception requires canonical signed XPC parented by launchd.
+  Default verifier remains strict; see DECISIONS.md for narrowly changed scope.
+-55 focused provenance/terminal/recheck tests PASS;41 affected preflight checks
+  PASS (recovery-preflight-tests.log); session61430 terminal exit0.
+- Existing recheck lifetime candidate included. No site rules or external network
+  settings changed. Next finish affected checks, build/verify candidate, then
+  installed real browser/CDN completion; no claim that all loads are repaired.
+
+2026-09-27 TestGlider partial render remains FAIL; candidate NOT installed.
+- HEAD04d7975 and PR376 head match; live GitHub checks all required SUCCESS,
+  including packaged lifecycle-heavy, browser and update transactions. Reuse
+  that baseline for unchanged code; local uncommitted candidate differs.
+- Installed transaction96b471ac remains unchanged. Native log read24116 is
+  terminal exit0; do not poll or repeat it. browser-route-recheck.log retained.
+- User manually refreshed foreground Chrome: page loaded, some images missing.
+  Foreground-only recovery is explicitly not an acceptable product requirement.
+- Chrome Console shows API ERR_CONTENT_LENGTH_MISMATCH and CloudFront image /
+  blog ERR_CONNECTION_CLOSED. Own DevTools was closed after inspection.
+- Independent installed-proxy public banner GET: HTTP200,15752/400804 bytes,
+  timeout25s. API GET complete16688 bytes in1.67s. Evidence asset-probe.json,
+  banner-asset.headers/body and api-asset.headers/body under
+  output/testglider-20260925/. Root rendering alone is not a pass.
+- Deterministic expiry reproduction: partial proof expires5min while local
+  recovery stage persists10min, causing local_stage_skips_root. Uncommitted
+  tproxy candidate retains bounded recheck admission10min, never route proof;
+  existing proof expiry/protected-host and independent Geph guards unchanged.
+  Focused results in recheck-lifetime-expanded-tests.log. Candidate is neither
+  built, committed nor installed. AGENTS.md contains user changes: preserve.
+- Next: qualify actual request-handler recheck and diagnose exact CDN object
+  recovery. Background parity is still unresolved; do not simply remove signed
+  socket ownership / independent payload evidence, nor call this site fixed.
+
+
+2026-09-25 transaction96b471ac INSTALLED (authorization exit0).
+- Exact04d7975 installed, learning and prior backups retained. Never replay.
+- npm run verify:local-install exit0/PASS including full public Discord PNG
+  payloads via IPv4, IPv6 and transparent TCP; root StatusV2 active PID34323.
+- Chrome ordinary reload still shows unstyled TestGlider with oversized image;
+  real browser gate FAIL. Continue asset/route diagnosis; do not claim fixed.
+
+
+2026-09-25 authorization061100db TERMINAL failure before mutation.
+- User confirmed prompt; script rejected still-running old root job52195.
+- Now launchctl proves root job absent; no owned Slipstream processes visible.
+- No061100db private directory or app backup exists; old files unchanged.
+- New96b471ac transaction uses identical qualified candidate and all guards;
+  only private/backup destination IDs changed. Session19821 later exited0;
+  transaction96b471ac is installed and consumed (see above). Never replay.
+
+
+2026-09-25 exact04d7975 local candidate built; transaction061100db DRAFT.
+- npm run build:local terminal exit0 (session27687); canonical build-chain and
+  artifact PASS. output/testglider-20260925/{build-local.log,candidate-verification.json}.
+- Canonical current-install verification first caught transient recovering phase;
+  after fresh StatusV2 active observation, second verification exit0/PASS.
+  Original failed observation preserved as before-install-transient-phase.json.
+- Retained candidate output/testglider-replacement-061100db/Slipstream.app.
+  New one-shot replacement pins candidate/current tree and daemon identities,
+  preserves40cc1f1c and all earlier backups, bash-n PASS. DRAFT, NOT executed.
+  Do not reuse prior consumed transactions. Final diff review/READY and normal
+  Quit required before native authorization and canonical installed verification.
+- CI36062744143 exact04d7975: build, product, Chromium/Windows contracts,
+  packaged-browser-qualification and all nine update transactions PASS.
+  Lifecycle-heavy job107848763222 is verified live in the actual smoke step;
+  keep polling the same run/job, do not restart. No unresolved PR376 review threads.
+- Transaction061100db diff reviewed against prior consumed script: only source,
+  exact hashes/paths and added preservation of40cc1f1c changed; still DRAFT until
+  lifecycle evidence. No owned process stopped and no installation executed.
+- User app unchanged. Next inspect lifecycle result, then install qualified
+  candidate and verify actual TestGlider in Chrome/Safari; completion unproven.
+
+
 2026-09-25 completion-probe redirect candidate, NOT installed.
 - Built-in Geph ownership verified on9954, PID unchanged across comparison.
   Direct curl through owned listener returned all243860 TestGlider /en bytes

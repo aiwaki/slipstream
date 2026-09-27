@@ -630,3 +630,36 @@ def test_invalid_peer_fails_without_running_commands(address: str, port: int) ->
 
     assert result.reason is AdmissionReason.INVALID_PEER
     assert runner.calls == []
+
+
+@pytest.mark.parametrize('family', ['chrome', 'safari', 'shared_webkit'])
+def test_background_transport_comparison_ignores_focus_and_input(family):
+    clock = FakeClock()
+    processes = {
+        'chrome': {201: (200, 501, CHROME_HELPER_PATH), 200: (1, 501, CHROME_PATH)},
+        'safari': {201: (200, 501, WEBKIT_PATH), 200: (1, 501, SAFARI_PATH)},
+        'shared_webkit': {201: (1, 501, CRYPTEX_WEBKIT_PATH)},
+    }[family]
+    runner = FixtureRunner(clock, processes=processes, front_bundle='com.apple.finder',
+                           front_pid=999, idle_nanoseconds=3600_000_000_000)
+    result = assess(runner, policy=AdmissionPolicy(allow_background_transport_comparison=True))
+    assert result.accepted
+    assert not any(call[0][0] in (LSAPPINFO_PATH, IOREG_PATH) for call in runner.calls)
+    assert sum(call[0][0] == LSOF_PATH for call in runner.calls) == 2
+
+
+@pytest.mark.parametrize('failure', ['signature', 'owner_changed', 'untrusted_path', 'bad_parent'])
+def test_background_transport_comparison_preserves_identity_checks(failure):
+    runner = FixtureRunner(FakeClock(), processes={201: (1, 501, CRYPTEX_WEBKIT_PATH)})
+    if failure == 'signature':
+        runner.verify_failures.add(CRYPTEX_WEBKIT_PATH)
+    elif failure == 'owner_changed':
+        runner.lsof_outputs = [runner._lsof(201, 501, runner.endpoint),
+                               runner._lsof(202, 501, runner.endpoint)]
+    elif failure == 'untrusted_path':
+        runner.processes[201] = (1, 501, '/tmp/com.apple.WebKit.Networking')
+    else:
+        runner.processes[201] = (200, 501, CRYPTEX_WEBKIT_PATH)
+        runner.processes[200] = (1, 501, '/tmp/untrusted')
+    result = assess(runner, policy=AdmissionPolicy(allow_background_transport_comparison=True))
+    assert not result.accepted

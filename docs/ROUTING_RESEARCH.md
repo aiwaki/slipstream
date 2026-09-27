@@ -2964,3 +2964,28 @@ its first address also produced incomplete=true. Earlier complete-body canaries
 returned0 verified bytes for plain/split64/split16; this does not by itself prove
 an identical failure mechanism for all three. Candidate installation and browser
 outcome are still pending. Existing private learning was not modified.
+
+
+### 2026-09-27 TestGlider foreground partial render and recovery expiry
+
+Manual foreground Chrome navigation loaded the styled page, but the user still
+reported missing images. Console independently showed content-length mismatch
+for the public lesson API and connection-closed errors for CloudFront banners,
+examples and blog posts. A bounded public banner GET through the installed
+proxy received HTTP200 and15752 of400804 bytes before the25s deadline; the
+public API request completed16688 bytes in1.67s. No signed image URL or browser
+authentication data was needed for this comparison. Evidence is in
+`output/testglider-20260925/asset-probe.json` and accompanying headers/bodies.
+
+A process-local deterministic reproduction identified a separate recovery
+lifetime gap: partial TLS evidence expires after300s while the attempted local
+DNS/recovery state persists600s. Between301s and599s, requests skip the root
+preflight because their proof has expired although the local ladder persists.
+The candidate retains only a bounded recheck marker for the recovery lifetime;
+it does not extend any evidence accepted for a foreign-exit route. Tests cover
+expiry without route authority, protected hosts and bounded storage.
+
+This candidate is not installed and does not settle CDN completion or background
+browser recovery. Foreground/manual interaction must not be treated as the
+product requirement. Removing a provenance check alone would not prove complete
+resources or preserve independent exact-host routing evidence.

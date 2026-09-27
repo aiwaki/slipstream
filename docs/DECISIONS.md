@@ -796,3 +796,28 @@ for Cloudflare. Browser challenge completion remains a required open gate;
 these follow-up routes were installed by transactione69dcd10. Safari Sampleshots
 loads its camera page, while Onfotolife still fails browser challenge completion. No CAPTCHA/security warning
 is bypassed. Apex sampleshots.com and challenges.cloudflare.com remain unchanged.
+
+
+### 2026-09-27 Background transport comparison and terminal partial records
+
+For independently safe-incomplete unknown-host transport comparisons, recent
+physical input and the frontmost application are no longer admission criteria.
+The opt-in verifier still requires the exact socket owner, non-root matching UID,
+canonical executable, valid Apple/Google signature, and signed application
+ancestry, followed by repeated socket/process identity. Apple's canonical signed
+WebKit networking XPC may instead be directly parented by launchd; this admits
+transport comparison, not attribution to a particular Safari tab or user intent.
+The verifier's default interaction policy remains unchanged for other callers.
+This narrowly supersedes earlier foreground admission requirements for this
+comparison. Independent complete owned-Geph proof, exact-host binding, noise
+guards, worker bounds, and protected Discord/YouTube routing remain unchanged.
+
+An upstream EOF/reset inside a tracked TLS record is incomplete even if it beats
+the idle watchdog or follows a large payload. Only server-first termination with
+valid preceding records and no failed downstream write enters the existing
+partial-stream local recovery path. Client cancellation and complete-record EOF
+do not become partial-record evidence. It grants no foreign-route authority.
+
+Recheck admission may last for the local recovery stage's lifetime even after
+partial-failure proof expires. The marker is bounded and expiring, cleared with
+route evidence, and never substitutes for fresh evidence to authorize a route.

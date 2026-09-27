@@ -2785,6 +2785,7 @@ class _RoutePreflightBrowserCapability:
 
 _auto_geph_noise_invalidated = set()  # active proofs invalidated by global noise
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
+_local_partial_recheck_until = {}  # admission only; never route evidence
 _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
 _auto_geph_one_shot_consumed_at = {}  # host -> latest stage timestamp spent
 _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
@@ -6424,6 +6425,7 @@ def _confirm_semantic_geo_exit(host):
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
+        _local_partial_recheck_until.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
@@ -6497,6 +6499,7 @@ def _confirm_incomplete_response_geo_exit(host):
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
+        _local_partial_recheck_until.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
@@ -6571,6 +6574,7 @@ def _remember_auto_geph_host(
         _auto_geph_candidates.pop(h, None)
         _auto_geph_noise_invalidated.discard(h)
         _local_partial_stalls.pop(h, None)
+        _local_partial_recheck_until.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
@@ -6744,6 +6748,7 @@ def _forget_auto_geph_host(host, reason):
         _auto_geph_candidates.pop(h, None)
         _auto_geph_noise_invalidated.discard(h)
         _local_partial_stalls.pop(h, None)
+        _local_partial_recheck_until.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
@@ -6778,6 +6783,16 @@ def record_auto_geph_runtime_failure(host, reason, now=None):
                 if not values or values[-1] < cutoff:
                     _auto_geph_runtime_failures.pop(old_host, None)
         return len(q)
+
+
+def _partial_route_recheck_pending(host, now):
+    """Retain recheck admission for the local recovery lifetime, not proof."""
+    for h, expiry in list(_local_partial_recheck_until.items()):
+        if expiry <= now:
+            _local_partial_recheck_until.pop(h, None)
+    while len(_local_partial_recheck_until) > AUTO_GEPH_STATE_MAX:
+        _local_partial_recheck_until.pop(next(iter(_local_partial_recheck_until)))
+    return _local_partial_recheck_until.get(normalize_host(host), 0.0) > now
 
 
 def _prune_local_partial_stalls(now):
@@ -7107,6 +7122,15 @@ def _record_partial_tls_stall_evidence(host, stage, now):
     with _auto_geph_lock:
         _prune_local_partial_stalls(now)
         _prune_local_zero_payload_failures(now)
+        # A request may stay on the local ladder after its five-minute proof
+        # expires. Keep only permission to recheck for that longer lifetime;
+        # foreign-exit decisions still require fresh independent evidence.
+        _local_partial_recheck_until[h] = now + max(
+            AUTO_GEPH_PARTIAL_STALL_WINDOW,
+            XBOX_DNS_CANDIDATE_TTL,
+            XBOX_DNS_ATTEMPT_TTL,
+        )
+        _partial_route_recheck_pending(h, now)
         observations = _local_partial_stalls.setdefault(h, {})
         observations[stage] = now
         if not _local_route_evidence_complete(
@@ -7822,7 +7846,7 @@ def _browser_navigation_provenance_accepted(
         if not math.isfinite(elapsed) or not 0.0 <= elapsed <= 25.0:
             return finish(False, "invalid_navigation_start")
         # Judge input against admission time, not after network probe latency.
-        # Socket ownership, signatures and frontmost identity remain fresh.
+        # Socket ownership and signatures remain fresh.
         recent_input_seconds += elapsed
     assessor = (
         macos_browser_provenance.assess_browser_navigation_provenance
@@ -7842,6 +7866,7 @@ def _browser_navigation_provenance_accepted(
                 ),
                 recent_input_seconds=recent_input_seconds,
                 allow_shared_signed_webkit_with_frontmost_safari=True,
+                allow_background_transport_comparison=True,
             ),
         )
     except Exception:
@@ -8238,6 +8263,7 @@ def _commit_preflight_owned_geph_proof(
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
+        _local_partial_recheck_until.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
@@ -10504,10 +10530,10 @@ async def _run_initial_route_preflight(
         )
         if requires_browser_provenance:
             # A final ambiguous document may admit the bounded browser worker,
-            # so the parent must stay held until signed foreground provenance
+            # so the parent must stay held until signed connection provenance
             # and that comparison finish.  Complete strict denials and
             # independently verifiable critical-child range comparisons never
-            # enter this UI-dependent path.
+            # enter this browser-comparison path.
             remaining = deadline - time.monotonic()
             try:
                 provenance_ok = bool(
@@ -18322,6 +18348,17 @@ async def relay_local_stream(
         # writes must never manufacture upstream EOF evidence.
         relay_activity.client_ended_first = relay_activity.read_ended_first == "client"
         relay_activity.server_ended_first = relay_activity.read_ended_first == "server"
+        if (
+            detect_partial_tls_stall
+            and relay_activity.server_ended_first
+            and not relay_activity.downstream_write_failed
+            and _incomplete_tls_record_visible(relay_activity)
+        ):
+            # EOF/reset can beat the idle watchdog. A server-terminated record
+            # is still incomplete regardless of bytes already transferred or
+            # elapsed time. Reuse exact-host local recovery, not success or a
+            # new foreign-route permission. Client cancellation is excluded.
+            relay_activity.partial_tls_record_stalled = True
         if relay_activity.client_ended_first and relay_activity.client_half_closed:
             while not server_task.done():
                 last_progress_at = max(
@@ -20793,7 +20830,10 @@ async def _handle_impl(reader, writer):
             and unknown_stage != UNKNOWN_RECOVERY_SYSTEM):
         with _auto_geph_lock:
             _prune_local_partial_stalls(time.monotonic())
-            retry_partial_route = bool(_local_partial_stalls.get(normalize_host(host)))
+            retry_partial_route = bool(
+                _local_partial_stalls.get(normalize_host(host))
+                or _partial_route_recheck_pending(host, time.monotonic())
+            )
         if retry_partial_route:
             # A remembered local strategy that stalled is not a healthy route.
             # Re-run independent preflight; retained failure evidence is never

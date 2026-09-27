@@ -265,6 +265,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_geph_candidates.clear()
         tproxy._auto_geph_noise_invalidated.clear()
         tproxy._local_partial_stalls.clear()
+        tproxy._local_partial_recheck_until.clear()
         tproxy._local_zero_payload_failures.clear()
         tproxy._auto_geph_one_shot_consumed_at.clear()
         tproxy._local_payload_idle_failures.clear()
@@ -379,6 +380,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_geph_noise_invalidated.clear()
         tproxy._auto_geph_noise_invalidated.update(auto_noise_invalidated)
         tproxy._local_partial_stalls.clear()
+        tproxy._local_partial_recheck_until.clear()
         tproxy._local_partial_stalls.update(partial_stalls)
         tproxy._local_zero_payload_failures.clear()
         tproxy._local_zero_payload_failures.update(zero_payload_failures)
@@ -24035,6 +24037,7 @@ def test_browser_input_window_is_anchored_before_network_wait(monkeypatch):
     monkeypatch.setattr(tproxy.time, "monotonic", lambda: 110.0)
     observed = []
     def assessor(_address, _port, *, policy):
+        assert policy.allow_background_transport_comparison
         observed.append(policy.recent_input_seconds)
         return tproxy.macos_browser_provenance.BrowserNavigationProvenance(
             True, tproxy.macos_browser_provenance.BrowserFamily.CHROME, 123,

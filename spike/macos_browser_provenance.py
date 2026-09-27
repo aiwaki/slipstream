@@ -66,6 +66,7 @@ class AdmissionPolicy:
     max_ancestry_depth: int = 12
     max_command_output_bytes: int = 16_384
     allow_shared_signed_webkit_with_frontmost_safari: bool = False
+    allow_background_transport_comparison: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 < self.total_budget_seconds <= 8.0:
@@ -80,6 +81,8 @@ class AdmissionPolicy:
             raise ValueError("max_command_output_bytes must be in [1024, 65536]")
         if not isinstance(self.allow_shared_signed_webkit_with_frontmost_safari, bool):
             raise ValueError("shared WebKit policy must be a boolean")
+        if not isinstance(self.allow_background_transport_comparison, bool):
+            raise ValueError("background transport policy must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -285,6 +288,12 @@ def assess_browser_navigation_provenance(
     ancestry: it binds an Apple-signed WebKit networking XPC to an independently
     verified, stable, frontmost Apple-signed Safari process.  It remains off by
     default because macOS does not expose the originating tab here.
+
+    Background transport comparison is a separate opt-in, not proof of user
+    interaction. It retains signed ancestry or the canonical Apple networking
+    XPC directly owned by launchd, and repeats exact socket/process identity.
+    It may admit only independent transport comparison, never semantic intent
+    or a route change by itself.
     """
 
     peer = _validated_peer(peer_address, peer_port)
@@ -324,7 +333,15 @@ def assess_browser_navigation_provenance(
             path_resolver,
             policy.max_ancestry_depth,
         )
-        if root is None:
+        shared_background = bool(
+            root is None
+            and policy.allow_background_transport_comparison
+            and family is BrowserFamily.SAFARI
+            and _is_webkit_network_path(leaf_path)
+            and leaf.ppid == 1
+        )
+        frontmost = None
+        if root is None and not shared_background:
             if not (
                 policy.allow_shared_signed_webkit_with_frontmost_safari
                 and family is BrowserFamily.SAFARI
@@ -345,29 +362,30 @@ def assess_browser_navigation_provenance(
                 root=True,
             ):
                 return _rejected(AdmissionReason.SIGNATURE_FAILED)
-        else:
+        elif not policy.allow_background_transport_comparison:
             frontmost = _read_frontmost(observer)
 
-        if (
+        if not policy.allow_background_transport_comparison and (
             frontmost.pid != root.pid
             or frontmost.bundle_identifier != _root_bundle_identifier(family)
         ):
             return _rejected(AdmissionReason.NOT_FRONTMOST)
 
-        if _read_hid_idle_seconds(observer) > policy.recent_input_seconds:
+        if (not policy.allow_background_transport_comparison
+                and _read_hid_idle_seconds(observer) > policy.recent_input_seconds):
             return _rejected(AdmissionReason.INPUT_NOT_RECENT)
 
         repeated_leaf = _read_process(observer, owner.pid)
         if repeated_leaf != leaf:
             return _rejected(AdmissionReason.OBSERVATION_CHANGED)
-        if root.pid != leaf.pid and _read_process(observer, root.pid) != root:
+        if root is not None and root.pid != leaf.pid and _read_process(observer, root.pid) != root:
             return _rejected(AdmissionReason.OBSERVATION_CHANGED)
 
         final_lsof = observer.run(_lsof_argv(normalized_address, normalized_port))
         if _matching_lsof_owners(final_lsof, normalized_address, normalized_port) != [owner]:
             return _rejected(AdmissionReason.OBSERVATION_CHANGED)
 
-        if _read_frontmost(observer) != frontmost:
+        if frontmost is not None and _read_frontmost(observer) != frontmost:
             return _rejected(AdmissionReason.OBSERVATION_CHANGED)
 
         return BrowserNavigationProvenance(
