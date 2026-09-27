@@ -164,9 +164,10 @@ class RangeProbeEvidence:
 class EphemeralBootstrapAsset:
     """An exact host plus a deliberately non-serializable request target."""
 
-    __slots__ = ("_exact_host", "_host_header", "_request_target")
+    __slots__ = ("_exact_host", "_host_header", "_request_target", "_discovery_priority")
 
-    def __init__(self, *, exact_host, host_header, request_target):
+    def __init__(self, *, exact_host, host_header, request_target, discovery_priority=0):
+        self._discovery_priority = 1 if discovery_priority == 1 else 0
         self._exact_host = exact_host
         self._host_header = host_header
         self._request_target = request_target
@@ -176,6 +177,11 @@ class EphemeralBootstrapAsset:
         """Return the only value that may be used as a routing/cache key."""
 
         return self._exact_host
+
+    @property
+    def discovery_priority(self):
+        """Document hint only; never authority to select a route."""
+        return self._discovery_priority
 
     def build_range_request(self, *, range_end=DEFAULT_RANGE_END):
         """Consume the target and build one transient identity range GET."""
@@ -190,7 +196,7 @@ class EphemeralBootstrapAsset:
             f"GET {self._request_target} HTTP/1.1\r\n"
             f"Host: {self._host_header}\r\n"
             "User-Agent: SlipstreamBootstrapPreflight/1\r\n"
-            "Accept: application/javascript,text/javascript,*/*;q=0.1\r\n"
+            "Accept: */*\r\n"
             "Accept-Encoding: identity\r\n"
             f"Range: bytes=0-{range_end}\r\n"
             "Cache-Control: no-cache\r\n"
@@ -225,8 +231,9 @@ def inspect_critical_bootstrap_assets(
     clock=time.monotonic,
     max_assets=MAX_CRITICAL_ASSETS,
     requested_range_end=MAX_RANGE_END,
+    allow_document_path=False,
 ):
-    """Inspect one complete root representation for critical JS targets.
+    """Inspect one complete root for scripts and explicitly critical images.
 
     A ranged response is scannable only when it contains the entire selected
     representation (``bytes 0-(total-1)/total``).  Identity and exactly one
@@ -251,7 +258,9 @@ def inspect_critical_bootstrap_assets(
         or requested_range_end > MAX_RANGE_END
     ):
         return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
-    normalized_root = _normalize_https_url(root_url, require_root=True)
+    normalized_root = _normalize_https_url(
+        root_url, require_root=not allow_document_path,
+    )
     if normalized_root is None:
         return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
     parsed_head = _response_head(response)
@@ -302,6 +311,7 @@ def inspect_critical_bootstrap_assets(
                 exact_host=candidate[0],
                 host_header=candidate[1],
                 request_target=candidate[2],
+                discovery_priority=candidate[3],
             )
             for candidate in parser.candidates
         )
@@ -496,10 +506,10 @@ class _CriticalAssetParser(HTMLParser):
             if candidate is not None:
                 self._base_url = candidate[3]
             return
-        if len(self.candidates) >= self._max_assets:
+        if not self._max_assets:
             return
-
         raw_url = None
+        priority = 0
         if lowered_tag == "script" and _is_javascript_script(attributes):
             raw_url = attributes.get("src")
         elif lowered_tag == "link":
@@ -507,14 +517,30 @@ class _CriticalAssetParser(HTMLParser):
             resource_as = attributes.get("as", "").strip().lower()
             if "modulepreload" in rel or ("preload" in rel and resource_as == "script"):
                 raw_url = attributes.get("href")
+            elif "preload" in rel and resource_as == "image":
+                raw_url = attributes.get("href")
+                priority = 1
+        elif (lowered_tag == "img"
+              and attributes.get("fetchpriority", "").strip().lower() == "high"):
+            raw_url = attributes.get("src")
+            priority = 1
         if not raw_url:
             return
 
         candidate = _normalize_https_url(raw_url, base_url=self._base_url)
-        if candidate is None or candidate[3] in self._seen:
+        if candidate is None or candidate[:3] in self._seen:
             return
-        self._seen.add(candidate[3])
-        self.candidates.append(candidate[:3])
+        # Keep only the bounded best candidates, while still inspecting the
+        # complete bounded HTML. A body hero must not disappear merely because
+        # four head scripts appeared first. Equal priorities retain DOM order.
+        if len(self.candidates) >= self._max_assets:
+            if priority <= self.candidates[-1][3]:
+                return
+            removed = self.candidates.pop()
+            self._seen.remove((removed[0], removed[1], removed[2]))
+        self._seen.add(candidate[:3])
+        self.candidates.append((*candidate[:3], priority))
+        self.candidates.sort(key=lambda item: -item[3])
 
 
 def _is_javascript_script(attributes):

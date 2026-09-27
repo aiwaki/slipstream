@@ -5191,6 +5191,7 @@ def _semantic_plain_preflight_probe_detail(
                 deadline=classify_deadline,
                 clock=time.monotonic,
                 requested_range_end=SEMANTIC_PLAIN_PROBE_RANGE_END,
+                allow_document_path=bool(_redirect_chain),
             )
             if (
                 inspection.outcome
@@ -9875,7 +9876,7 @@ def _decode_direct_route_preflight_observation(job, observation):
 
 
 def _select_route_preflight_bootstrap_asset(assets, parent_host):
-    """Prefer the site's own child host before unrelated third-party scripts.
+    """Prefer explicit critical images, then owned children over third parties.
 
     This only ranks the bounded discovery set; every selected exact host still
     needs independent same-object route proof. A subdomain relationship never
@@ -9894,6 +9895,7 @@ def _select_route_preflight_bootstrap_asset(assets, parent_host):
             2 if parent and candidate_host.endswith("." + parent)
             else 1 if candidate_is_cross_origin else 0
         )
+        rank += 3 * candidate.discovery_priority
         if (
             _auto_geph_base_host_allowed(candidate_host)
             and (

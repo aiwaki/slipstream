@@ -584,3 +584,43 @@ def test_shared_deadline_prevents_late_complete_result():
         deadline=1.0,
         clock=lambda: 1.0,
     ) is RangeProbeOutcome.DEADLINE_EXCEEDED
+
+
+def test_critical_image_after_script_budget_is_not_lost():
+    html = ''.join(f'<script src="/script{i}.js"></script>' for i in range(20))
+    html += '<img fetchpriority="high" src="https://cdn.example/hero.webp?version=private">'
+    assets = _assets(html)
+    assert len(assets) == MAX_CRITICAL_ASSETS
+    assert assets[0].exact_host == 'cdn.example'
+    assert assets[0].discovery_priority == 1
+    assert b'GET /hero.webp?version=private HTTP/1.1' in assets[0].build_range_request()
+    assert 'private' not in repr(assets[0])
+
+
+def test_image_preload_deduplicates_and_does_not_admit_ordinary_images():
+    assets = _assets('''
+      <img src="https://ordinary.example/photo.webp">
+      <link rel="preload" as="image" href="https://cdn.example/hero.webp">
+      <img fetchpriority="high" src="https://cdn.example/hero.webp">
+      <img fetchpriority="high" src="http://unsafe.example/hero.webp">
+    ''')
+    assert len(assets) == 1
+    assert assets[0].exact_host == 'cdn.example'
+    request = assets[0].build_range_request()
+    assert b'Accept: */*\r\n' in request
+    assert b'Range: bytes=0-65535\r\n' in request
+
+
+def test_validated_public_redirect_document_resolves_relative_critical_image():
+    response = _response(b'<img fetchpriority="high" src="images/hero.webp">')
+    args = dict(stream_closed=True, truncated=False, deadline=1.0, clock=lambda: 0.0)
+    assert inspect_critical_bootstrap_assets(
+        'https://app.example/en/home', response, **args).outcome is RootDocumentOutcome.UNSCANNABLE
+    inspection = inspect_critical_bootstrap_assets(
+        'https://app.example/en/home', response, allow_document_path=True, **args)
+    assert inspection.outcome is RootDocumentOutcome.COMPLETE
+    assert b'GET /en/images/hero.webp HTTP/1.1' in inspection.assets[0].build_range_request()
+
+
+def test_zero_asset_budget_accepts_no_scripts_or_critical_images():
+    assert not _assets('<script src="/a.js"></script><img fetchpriority="high" src="/a.webp">', max_assets=0)

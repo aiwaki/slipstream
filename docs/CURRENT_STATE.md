@@ -10,6 +10,22 @@ file.
 
 ## Current Checkpoint
 
+2026-09-27 critical-image discovery candidate (not installed):
+- Fixed first-four-script starvation: explicit image preload/high-priority img
+  participates in the same bounded candidate set and ranks before scripts.
+- Fixed validated public redirect inspection: /en was rejected as non-root,
+  discarding the final document's resource candidates. Default arbitrary-path
+  rejection remains; only the internal validated redirect chain opts in.
+- Real retained complete TestGlider HTML now selects the exact failing banner
+  on d361z4i9c2q2gv.cloudfront.net. No new CDN policy or parent-derived authority.
+- Tests before4fail/49pass; after55pass plus65 integration pass/785 deselected.
+  Evidence output/testglider-20260925/critical-images-{before,after,integration}.log.
+- Still not a product PASS: candidate needs build/install/browser verification;
+  parents obtainable only through Geph still do not enumerate their children.
+- PR376 exact7672313 product/audit/checks/build green; lifecycle/update/browser
+  gates were still queued/running at this check. Installed remains50c09e5.
+
+
 2026-09-27 unlocked-browser follow-up: product gate still FAILS.
 - Chrome ordinary reload reproduced ERR_CONNECTION_CLOSED for document and banner.
   Fresh daemon window contains accepted browser provenance; foreground identity

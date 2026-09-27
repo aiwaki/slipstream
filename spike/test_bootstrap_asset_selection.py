@@ -62,3 +62,27 @@ def test_reviewed_juniper_cdn_does_not_route_entire_store_platform():
                  'notcdn.junipercreates.com', 'cdn.junipercreates.com.attacker.example',
                  'cloudfront.net', 'discord.com', 'youtube.com'):
         assert tproxy.route_policy(host)['route_class'] != 'geo_exit'
+
+
+def test_explicit_critical_image_wins_over_unrelated_and_owned_scripts(monkeypatch):
+    monkeypatch.setattr(tproxy, '_auto_geph_base_host_allowed', lambda h: True)
+    image = EphemeralBootstrapAsset(exact_host='images.example.net',
+        host_header='images.example.net', request_target='/hero.webp', discovery_priority=1)
+    script = asset('cdn.gallery.example')
+    selected, cross = tproxy._select_route_preflight_bootstrap_asset(
+        [script, image], 'gallery.example')
+    assert selected is image and cross
+    with pytest.raises(RuntimeError):
+        script.build_range_request()
+
+
+def test_critical_image_priority_never_overrides_protected_host(monkeypatch):
+    monkeypatch.setattr(tproxy, '_auto_geph_base_host_allowed', lambda h: h != 'youtube.com')
+    image = EphemeralBootstrapAsset(exact_host='youtube.com', host_header='youtube.com',
+        request_target='/hero.webp', discovery_priority=1)
+    script = asset('cdn.gallery.example')
+    selected, _ = tproxy._select_route_preflight_bootstrap_asset(
+        [image, script], 'gallery.example')
+    assert selected is script
+    with pytest.raises(RuntimeError):
+        image.build_range_request()

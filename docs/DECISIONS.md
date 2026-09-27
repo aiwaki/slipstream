@@ -138,6 +138,14 @@ physical browser and installed shutdown qualification.
 
 ### AUD-17 bounded autonomous bootstrap recovery — authorized 2026-09-08
 
+Discovery also admits explicit public image preloads and `img fetchpriority=high`.
+They rank ahead of scripts within the same four-object bound; this changes only
+which object is measured, never route authority. The complete bounded HTML is
+scanned so early scripts cannot hide a later critical image. Validated public
+root redirects may supply the document base path; arbitrary caller paths remain
+rejected by default. Requests stay ephemeral, cookie-free and identity-encoded.
+
+
 The user's explicit authorization permits the critical-object idle path to
 advance independently of future browser retries. This narrowly supersedes
 AUD-16's diagnostic-only restriction, not the generic unknown-host policy.
