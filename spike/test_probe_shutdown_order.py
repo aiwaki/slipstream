@@ -75,9 +75,8 @@ def test_owned_stop_allows_worker_drain_before_force_kill(monkeypatch):
     assert signals == [signal.SIGTERM]
 
 
-def test_launchd_exit_budget_covers_worker_and_connection_drain():
+def test_launchd_preserves_existing_exit_policy():
     import plistlib
     plist = plistlib.loads(tproxy.launchd_plist_text(['/owned/daemon'], '/owned').encode())
-    minimum = (tproxy.pending_navigation_probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS
-               + 5 + tproxy.SHUTDOWN_DRAIN_SECONDS)
-    assert minimum < plist['ExitTimeOut'] < 180
+    # A launchd exit-policy change also requires changing its absence protocol.
+    assert 'ExitTimeOut' not in plist

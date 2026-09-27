@@ -10,6 +10,25 @@ file.
 
 ## Current Checkpoint
 
+2026-09-27 f26a6a0 is REJECTED; do not install its retained DRAFT.
+- CI36334222939 browser/code checks PASS; lifecycle and update cleanup FAIL:
+  explicit ExitTimeOut leaves launchd job loaded beyond existing absence protocol.
+- Removed only that plist policy change; retain helper drain budget and late-worker
+  guard. Canonical production plist key set remains unchanged.
+- d90ebf9 packaged lifecycle/update gates PASS; its full suite had an unrelated
+  coalescing timing failure (2 workers versus1), while f26a6a0 full suite PASS.
+  Evidence d90-ci-failure.log; do not claim all d90 CI green.
+- Root app remains old/stopped; no transaction consumed. New candidate must be
+  built/qualified; retained0a1e5a12 and f26a6a08 must never be installed accidentally.
+
+2026-09-27 f26a6a0 built/canonical PASS; CI36334222939 in progress.
+- Build session99993 terminal exit0, shutdown-build-local.log; retained candidate
+  output/recovery-replacement-f26a6a08/ canonical artifact verification PASS.
+- Transaction f26a6a08 remains DRAFT. Earlier0a1e5a12 also unconsumed; do not replay.
+- Source push confirmed. Workstation old app unchanged and still stopped after
+  confirmed normal Quit. Await exact packaged lifecycle, then install/verify and
+  prove complete TestGlider resources in normal/background browsers.
+
 Shutdown budget correction: external owned-daemon stop used12s before force-kill,
 while internal worker drain permits125s and Rust comparison itself permits20s.
 A fake-clock20s orderly exit reproduced premature SIGKILL. The helper and explicit

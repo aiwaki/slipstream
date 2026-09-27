@@ -21657,7 +21657,6 @@ def launchd_plist_text(prog_args, workdir, browser_worker=None):
         f'  <key>ProgramArguments</key><array>{prog_xml}</array>\n'
         '  <key>RunAtLoad</key><true/>\n'
         '  <key>KeepAlive</key><true/>\n'
-        f'  <key>ExitTimeOut</key><integer>{int(DAEMON_SHUTDOWN_SECONDS)}</integer>\n'
         '  <key>EnvironmentVariables</key><dict>'
         '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
         '<key>PYTHONUNBUFFERED</key><string>1</string>'

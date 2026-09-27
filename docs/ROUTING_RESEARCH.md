@@ -3012,3 +3012,11 @@ regressions failed before and pass after;78 scoped tests PASS,822 deselected.
 Evidence: output/testglider-20260925/shutdown-budget-{before,after}.log.
 This establishes a shutdown defect; exact packaged CI is still needed to attribute
 and clear the observed uninstall failure. No new candidate installed.
+
+The explicit launchd ExitTimeOut experiment on f26a6a0 failed: its job remains
+loaded beyond the existing absence check despite logged successful worker drain.
+It also differs from canonical production plist keys. Removed that key; retain
+only the independently reproduced external helper budget correction and late
+worker guard. Do not infer that launchd's default timeout caused the original
+incident. Intermediate d90 packaged lifecycle passed; full code suite there had
+a separate coalescing timing failure, whereas f26 code suite passed.
