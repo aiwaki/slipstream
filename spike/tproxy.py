@@ -5871,6 +5871,8 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT, *, _as
 
 def _discover_owned_preflight_assets(host, deadline, assets):
     """Enumerate only: parent payload never grants authority to an asset host."""
+    if time.monotonic() >= deadline:
+        return
     pid = _owned_geph_confirmation_pid()
     if not pid or not _owned_geph_ready_for_semantic_confirmation():
         return

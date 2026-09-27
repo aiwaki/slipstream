@@ -115,3 +115,9 @@ def test_cancellation_drains_owned_discovery_before_releasing_lease(monkeypatch)
     assert not tproxy._route_preflight_execution_leases
     with pytest.raises(RuntimeError):
         asset.build_range_request()
+
+
+def test_expired_discovery_never_starts_network_work(monkeypatch):
+    monkeypatch.setattr(tproxy, '_owned_geph_confirmation_pid',
+                        lambda: pytest.fail('expired work must not start'))
+    tproxy._discover_owned_preflight_assets('parent.example', time.monotonic()-1, [])
