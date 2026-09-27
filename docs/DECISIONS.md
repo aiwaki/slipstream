@@ -5,7 +5,7 @@ survive across sessions and agents.
 
 ## Browser comparison same-origin redirects (candidate)
 
-The isolated route comparison may follow at most three HTTP301/302/303/307/308
+Only the isolated V2 route comparison may follow at most three HTTP301/302/303/307/308
 main-document redirects on the exact initial HTTPS origin. Correlation stays on
 the original CDP request ID and the original absolute deadline. A redirect never
 counts as completion: only the final document's loadingFinished, main-frame stop

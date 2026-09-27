@@ -474,14 +474,17 @@ fn run_claimed_probe(
 
     let config = ChromeConfig::discover(&job, uid, classification_deadline)?;
     let mut chrome = ChromeSession::launch(uid, config, classification_deadline)?;
-    let observation =
-        match chrome.observe_navigation(termination_requested, classification_deadline) {
-            Ok(observation) => observation,
-            Err(failure) => {
-                chrome.cleanup()?;
-                return Err(failure);
-            }
-        };
+    let observation = match chrome.observe_navigation(
+        termination_requested,
+        classification_deadline,
+        matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 2),
+    ) {
+        Ok(observation) => observation,
+        Err(failure) => {
+            chrome.cleanup()?;
+            return Err(failure);
+        }
+    };
     let outcome = observation_outcome(observation);
     let response = submit_before_cleanup(
         || {
@@ -1243,6 +1246,7 @@ impl ChromeSession {
         &mut self,
         termination_requested: &AtomicBool,
         classification_deadline: Instant,
+        allow_document_redirects: bool,
     ) -> ProbeResult<NavigationObservation> {
         let port = read_devtools_port(&self.profile, self.uid)?
             .ok_or_else(|| error("devtools_unavailable"))?;
@@ -1311,11 +1315,13 @@ impl ChromeSession {
                 continue;
             };
             if is_correlated_document_redirect(&event, request_id.as_deref()) {
-                if !admit_same_origin_document_redirect(
-                    &event,
-                    &self.config.target_url,
-                    &mut visited_documents,
-                ) {
+                if !allow_document_redirects
+                    || !admit_same_origin_document_redirect(
+                        &event,
+                        &self.config.target_url,
+                        &mut visited_documents,
+                    )
+                {
                     let _ = websocket_send_json(
                         &mut websocket,
                         &json!({"id": 99, "method": "Browser.close"}),
