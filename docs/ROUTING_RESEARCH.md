@@ -2989,3 +2989,15 @@ This candidate is not installed and does not settle CDN completion or background
 browser recovery. Foreground/manual interaction must not be treated as the
 product requirement. Removing a provenance check alone would not prove complete
 resources or preserve independent exact-host routing evidence.
+
+
+### 2026-09-27 late shutdown worker acquisition
+
+Run36329652494 still failed active-worker uninstall with `ipc_unavailable`.
+Its retained log cannot distinguish broker shutdown from launchd process death.
+The source additionally allowed an in-flight admission to acquire/recreate the lazy
+worker after shutdown detached it. Two deterministic empty/existing-worker tests
+reproduce this; the final acquisition now rejects shutdown under the same lock.
+48 affected tests pass. Drain start/end and broker-close bounded diagnostics are
+added for the next packaged gate; no claim that this explains the CI failure yet.
+The workstation candidate remains uninstalled, with existing app/backups preserved.

@@ -43,3 +43,17 @@ def test_quiesce_disables_admission_before_worker_wait(monkeypatch):
         return True
     monkeypatch.setattr(tproxy, '_close_pending_navigation_probe_worker', finish)
     assert asyncio.run(tproxy._quiesce_pending_navigation_probe_worker())
+
+
+@pytest.mark.parametrize('existing', [False, True])
+def test_shutdown_refuses_late_worker_acquisition(monkeypatch, existing):
+    import threading
+    stopped = threading.Event()
+    stopped.set()
+    monkeypatch.setattr(tproxy, '_shutdown_started', stopped)
+    monkeypatch.setattr(tproxy, '_pending_navigation_probe_worker',
+                        object() if existing else None)
+    monkeypatch.setattr(tproxy, '_get_pending_navigation_probe_runtime',
+                        lambda: pytest.fail('shutdown must not create a runtime'))
+    with pytest.raises(RuntimeError, match='shutting down'):
+        tproxy._get_pending_navigation_probe_worker(allow_production_headless=True)

@@ -4261,6 +4261,10 @@ def _get_pending_navigation_probe_runtime():
 def _get_pending_navigation_probe_worker(*, allow_production_headless=False):
     global _pending_navigation_probe_worker
     with _pending_navigation_probe_worker_lock:
+        # Admission may have awaited provenance/network I/O before shutdown.
+        # Serialize its final acquisition with worker detachment during drain.
+        if _shutdown_started.is_set():
+            raise RuntimeError("browser probe worker is shutting down")
         if _pending_navigation_probe_worker is None:
             runtime = _get_pending_navigation_probe_runtime()
             disposable_environment = (
@@ -4324,7 +4328,13 @@ async def _quiesce_pending_navigation_probe_worker():
     global _pending_navigation_probe_available, _route_preflight_headless_available
     _pending_navigation_probe_available = False
     _route_preflight_headless_available = False
-    return await asyncio.to_thread(_close_pending_navigation_probe_worker)
+    print(">> browser worker shutdown drain started", file=sys.stderr, flush=True)
+    completed = await asyncio.to_thread(_close_pending_navigation_probe_worker)
+    print(
+        f">> browser worker shutdown drain completed={completed}",
+        file=sys.stderr, flush=True,
+    )
+    return completed
 
 
 def _unknown_local_recovery_candidate_allowed(host):
@@ -14319,6 +14329,7 @@ async def serve_until_shutdown(
             before_stop()
         if before_auxiliary_close is not None:
             await before_auxiliary_close()
+        print(">> shutdown closing auxiliary brokers", file=sys.stderr, flush=True)
         if serving in done:
             stopping.cancel()
             await asyncio.gather(stopping, return_exceptions=True)

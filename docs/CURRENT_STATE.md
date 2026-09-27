@@ -10,6 +10,43 @@ file.
 
 ## Current Checkpoint
 
+2026-09-27 shutdown follow-up candidate (not installed).
+- Late worker acquisition after shutdown reproduced in both empty/existing worker
+  states:2 failed before fix;48 shutdown/runtime tests pass after final acquisition
+  checks shutdown under the worker lock. No new worker can replace the detached one.
+- Added bounded drain-start/completion and broker-close diagnostics to discriminate
+  launchd termination from in-process cleanup. CI failure attribution remains open;
+  this race is established in source/tests, not proven as that failure's cause.
+- No timeout, cleanup acceptance, ownership or network policy was relaxed.
+- Reuse26bc828 routing/build checks; new exact packaged lifecycle remains required.
+
+2026-09-27 normal Quit confirmed; candidate installation BLOCKED by CI.
+- User confirmed authorization. Fresh launchctl reports system/dev.slipstream.tproxy
+  absent; previous Quit/tray processes exited. Installed app files unchanged.
+- CI36329652494 failed active-worker-uninstall with ipc_unavailable and preserved
+  runtime. Other gates passed. Do not install candidate or suppress cleanup error.
+- Transaction0a1e5a12 stays DRAFT/unconsumed. App is currently stopped.
+- Evidence: output/testglider-20260925/recovery-ci-failure.log and
+  ci-lifecycle-36329652494/packaged-lifecycle.log.
+- Investigate daemon termination versus broker/worker lifetime; earlier ordering
+  unit tests do not cover launchd termination or late worker acquisition.
+
+2026-09-27 exact26bc828 built/canonical PASS; installation not started.
+- Source pushed to PR376. Local build session73154 terminal exit0; canonical
+  recovery-candidate-verification.json PASS (fresh/staged/bundled/artifact).
+-71 additional admission/relay/asset checks PASS; wiring check PASS.
+- Current CI36329652494 build/product/contracts/checks PASS; downstream packaged
+  browser/lifecycle/update qualification running. Do not restart.
+- Transaction0a1e5a12 prepared at output/recovery-replacement-0a1e5a12/;
+  hashes/source/backup pins reviewed against prior consumed96b471ac script.
+  New and previous app identities canonical PASS. Previous backups retained.
+  DRAFT until readiness; no normal Quit or root authorization issued yet.
+- Live background identity read initially timed out in Chrome codesign0.5s;
+  independent command valid and later complete assessor accepted in0.536s.
+  Preserve both observations; intermittent budget delay is not invalid signature.
+- Next normal automated Quit, fresh stopped-state evidence, one-shot native
+  installation then canonical installed/public-traffic and real resource checks.
+
 2026-09-27 general recovery candidate, NOT built/installed yet.
 - Terminal TLS partial-record EOF/reset reproduced:4 failing tests before fix,
   all pass after fix. Relay now feeds those server-first truncations into the
