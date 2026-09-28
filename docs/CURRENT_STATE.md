@@ -10,6 +10,24 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 Geph reconnect root cause reproduced; vendor PR380:
+- Clean reusable dependency checkout now codex/geph-tunnel-isolation at
+  /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905.
+  PR380 is isolated from this AUD branch. All vendor edits live THERE.
+- Exact reviewed crate0.3.9 sets session.early_dead on a10s new-tunnel response
+  timeout. Geph logs confirm timeout -> early-dead -> shared session teardown.
+  Deterministic two-stream Rust regression FAILS upstream, PASSES correction;
+  existing stream continues bytes after failed new tunnel. All25 library tests
+  with aws_lambda PASS. Source/edit19, verifier20, SBOM3, build config53/scope8 PASS.
+- Candidate r3 source contract carries complete-file before/after hashes,
+  exact replacement and regression test. No opaque binary/local-only patch.
+  Initial PR CI tried nonexistent r3 binary: bootstrap path adjusted narrowly
+  with tests, retaining main full packaged gates. Await new PR380 checks.
+- NOT installed: cb8f093 with original Geph remains current. Next finish source
+  review/CI, publish immutable vendor r3, then canonical app build/install and
+  sustained real Codex qualification. Do not claim reconnect fixed on workstation.
+- Private logs and red/green evidence: output/reconnecting-20260928/.
+
 2026-09-28 cb8f093 INSTALLED and canonical installed verifier PASS:
 - Native replacement81290 terminal0 confirmed exact source/root daemon; learning
   retained. output/recovery-replacement-cb8f093/replace-exact-bundle.sh is
