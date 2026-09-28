@@ -21,11 +21,12 @@ file.
   a passing rerun is not a causal fix. Focused67+23 tests reused.
 - User requested source-backed diagnostic map and explanation of Codex reconnects.
   docs/DIAGNOSTIC_MAP.md records flow, symptom-to-symbol checks and open gaps.
-- Codex responses_retry confirms actual model-stream disconnects14:14-15:08UTC;
-  remote-control and usage/pubsub failures are separate observations. Latest
-  resets followed the app stop around20:06local, but earlier reconnect cause is
-  NOT established. Do not attribute all events to replacement or general Internet.
-  Private evidence output/reconnecting-20260928/. Never publish raw logs.
+- Reconnecting correlation now confirmed: Codex model-stream errors14:28:36,
+  14:29:54,14:31:40,14:52:03,14:55:52UTC match chatgpt.com Geph relay EOF/reset
+  at the exact local+05 timestamps. New errors persist after relaunch20:28-20:34,
+  plus SOCKS failures/restart20:30:16. Replacement did NOT fix reconnects.
+  Upstream Geph route localized; backend/exit/remote root cause still unresolved.
+  See DIAGNOSTIC_MAP.md timeline. Private raw evidence output/reconnecting-20260928/.
 - Cached-parent trigger browser qualification and generic API JSON/XHR delivery
   remain open. Earlier lessons API truncation and blog XHR failure persist in
   saved browser evidence despite complete dynamic images. Next correlate daemon
