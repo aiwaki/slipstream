@@ -10,6 +10,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 vendor r3 publication in progress:
+- PR380 MERGED as6e037e970c7f36e734ed9aa1dbb02929bfec3d1f after all required
+  checks passed and addressed bootstrap review thread resolved. No admin bypass.
+- Vendor build36453478783 is building locked universal binary (job109033849234).
+  Source-edit contract r3 includes regression; artifact is NOT yet published.
+- AUD branch merged origin/main and is0ebadb9; app daemon build reused exact
+  unchanged b4dfcaf hash. App still uses old Geph until verified r3 downloaded.
+- Next verify release metadata/assets/SBOM/audit/attestation, stage binary,
+  canonical local app build, fresh one-shot replacement (never reuse old scripts),
+  canonical installed verification and real Codex stream qualification.
+
 2026-09-28 Geph reconnect root cause reproduced; vendor PR380:
 - Clean reusable dependency checkout now codex/geph-tunnel-isolation at
   /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905.
