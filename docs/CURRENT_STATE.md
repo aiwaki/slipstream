@@ -10,19 +10,24 @@ file.
 
 ## Current Checkpoint
 
-2026-09-28 owned reviewed cooldown route fix READY FOR BUILD:
-- Native daemon log read86655 exit0. At22:23:44 local owned SOCKS failed;
-  following chatgpt.com requests used system_plain and reset/EOF. Source allowed
-  reviewed services (unlike learned hosts) to fall through during global hold.
-- Regression RED: reviewed chatgpt cooldown/down went direct (2failed/4passed).
-  Fix retains enabled canonical owned exit for reviewed and learned hosts; live
-  owned listener can prove payload despite global hold; circuit/drain still apply.
-  Unavailable owned route closes uncommitted stream. Explicit opt-out/external
-  fallback unchanged. Tests41PASS plus traffic geo/Geph contractsPASS.
-- This fixes route switching after failure, not external exit availability or
-  committed-stream reset. Geph r3 remains installed; new daemon NOT installed.
-- Next canonical build/retained artifact/normal Quit/fresh one-shot transaction,
-  then installed verification and real request checks. No consumed script replay.
+2026-09-28 follow-up ownership/liveness fix READY FOR BUILD:
+- Source458d710 installed79568 exit0, canonical installed46271 exit0PASS.
+  output/recovery-replacement-owned-cooldown-458d710/replace-exact-bundle.sh
+  is CONSUMED. User screenshot proves Codex retries exhausted after installation.
+- Fresh daemon log75282 native read success still shows system_plain following
+  Geph failure. Root cause: probe_geph cleared _geph_owned on session RPC miss
+  even when listener identity was freshly verified. Earlier handler-only guard
+  therefore lost its condition. Do NOT claim458d710 fixed reconnects.
+- Regression monitor-probe -> handler fails upstream for reviewed chatgpt;
+  ownership test also fails. Correction separates verified process ownership,
+  liveness, and retained route choice. Identity loss still revokes permission
+  to use listener but does not permit silently going direct. Explicit opt-out
+  clears route choice; no external listener becomes authorized.
+- Focused47 handler/monitor tests and36 traffic contracts PASS, including actual
+  monitor-to-handler sequence, identity loss, circuit/drain and opt-out.
+- Next build/install exact correction, real post-start observation. External exit
+  failures and already-committed stream recovery remain unproven; do not promise
+  zero reconnects from file probes. Prior Geph r3 cascade fix stays in bundle.
 
 2026-09-28 Geph r3 INSTALLED; timeout isolation verified, reconnect qualification OPEN:
 - Exact app source6673f9264eb5d90e96bd9b6871213a3a48a1b4ca installed by native

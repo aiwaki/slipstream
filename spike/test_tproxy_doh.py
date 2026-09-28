@@ -47,6 +47,7 @@ _PENDING_NAVIGATION_PROBE_CONTRACT = json.loads(
 
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(tproxy, "_geph_owned_route_selected", False)
     monkeypatch.setattr(tproxy, "_recent_asset_parents", OrderedDict())
     monkeypatch.setattr(tproxy, "_learned_parent_recovery_tasks", {})
     monkeypatch.setattr(tproxy, "_status_listener_binding", None)
@@ -3804,6 +3805,32 @@ def test_probe_geph_disabled_clears_external_detection(monkeypatch):
     assert tproxy._external_geph_detected is False
 
 
+def test_verified_geph_ownership_survives_session_miss_but_not_identity_loss(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+    monkeypatch.setattr(tproxy, "_env_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_external_geph_detected", False)
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+    monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda _port: True)
+    monkeypatch.setattr(tproxy, "_geph_live", lambda _port: False)
+    assert not tproxy.probe_geph()
+    assert tproxy._geph_owned_route_selected is True
+    assert tproxy._geph_owned is True
+    assert tproxy._geph_port == tproxy.GEPH_OWNED_PORT
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: False)
+    assert not tproxy.probe_geph()
+    assert tproxy._geph_owned is False
+    assert tproxy._geph_port is None
+    assert tproxy._geph_owned_route_selected is True
+    assert tproxy._geph_port_conflict is True
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    assert not tproxy.probe_geph()
+    assert tproxy._geph_owned_route_selected is False
+
+
 def test_probe_geph_accepts_verified_owned_listener(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
@@ -5523,7 +5550,7 @@ def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
 
 
 @pytest.mark.parametrize("host", ["payments.example.com", "chatgpt.com"])
-@pytest.mark.parametrize("unavailable", ["down", "draining", "circuit"])
+@pytest.mark.parametrize("unavailable", ["down", "draining", "circuit", "identity_lost"])
 def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
     monkeypatch, host, unavailable,
 ):
@@ -5574,6 +5601,21 @@ def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
     monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
     monkeypatch.setattr(tproxy, "_geph_session_started", lambda: unavailable != "draining")
     monkeypatch.setattr(tproxy, "_geph_session_finished", lambda: None)
+    if unavailable in {"down", "identity_lost"}:
+        monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+        monkeypatch.setattr(tproxy, "_env_geph_port", None)
+        monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+        monkeypatch.setattr(tproxy, "_external_geph_detected", False)
+        monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+        monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda _port: False)
+        monkeypatch.setattr(tproxy, "_geph_live", lambda _port: False)
+        assert not tproxy.probe_geph()
+        if unavailable == "identity_lost":
+            monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: False)
+            monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda _port: True)
+            assert not tproxy.probe_geph()
+            assert tproxy._geph_owned is False
+            assert tproxy._geph_port is None
     writer = Writer()
 
     asyncio.run(tproxy._handle_impl(Reader(), writer))

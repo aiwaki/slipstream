@@ -294,6 +294,8 @@ GEPH_LAUNCHD_LABEL = "dev.slipstream.geph"
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
 _geph_owned = False
+# Route selection survives backend loss; this never authorizes using a listener.
+_geph_owned_route_selected = False
 _geph_port_conflict = False
 _external_geph_detected = False
 _geph_active_sessions = 0
@@ -18773,8 +18775,10 @@ def probe_geph():
     intermittently failed under normal tunnel load, mis-reporting geph "down",
     which fired fail-closed and dropped live app connections (the Claude/Codex
     reconnects). geph's own process was stable throughout; only our probe flapped."""
+    global _geph_owned_route_selected
     global _geph_port, _geph_owned, _geph_port_conflict, _external_geph_detected
     if not GEPH_ENABLED:
+        _geph_owned_route_selected = False
         _geph_port = None
         _geph_owned = False
         _geph_port_conflict = False
@@ -18787,6 +18791,7 @@ def probe_geph():
     order = GEPH_PORTS
     if _geph_port in GEPH_PORTS and _geph_port != GEPH_PORTS[0]:
         order = [_geph_port] + [p for p in GEPH_PORTS if p != _geph_port]
+    verified_owned_port = None
     for p in order:
         owned = p == GEPH_OWNED_PORT and geph_listener_owned(p)
         if _env_geph_port is None and not owned:
@@ -18795,11 +18800,20 @@ def probe_geph():
                 _geph_port = None
             _geph_owned = False
             continue
+        if owned:
+            _geph_owned_route_selected = True
+            verified_owned_port = p
         if _geph_live(p):
             _geph_port = p
             _geph_owned = owned
             return True
-    _geph_owned = False
+    # Process identity and tunnel readiness are independent. A control-RPC
+    # miss must not revoke freshly verified ownership and allow geo traffic
+    # to fall through to the system route. Never retain a stale identity:
+    # the listener check above is repeated on every probe.
+    _geph_owned = verified_owned_port is not None
+    if verified_owned_port is not None:
+        _geph_port = verified_owned_port
     if _geph_port_conflict:
         _geph_port = None
     return False    # transient miss -> keep last good _geph_port; hysteresis decides
@@ -20761,7 +20775,9 @@ async def _handle_impl(reader, writer):
         geph_owned = bool(_geph_owned)
         learned_owned_only = bool(policy.get("runtime_learned"))
         owned_exit_required = bool(
-            GEPH_ENABLED and geph_owned and _geph_port == GEPH_OWNED_PORT
+            GEPH_ENABLED
+            and (_geph_owned_route_selected
+                 or (geph_owned and _geph_port == GEPH_OWNED_PORT))
         )
         geph_runtime_eligible = bool(
             not learned_owned_only
@@ -20828,7 +20844,8 @@ async def _handle_impl(reader, writer):
         geph_ready = bool(
             geph_runtime_eligible
             and (
-                (GEPH_ENABLED and _geph_up)
+                (GEPH_ENABLED and _geph_up and geph_owned
+                 and _geph_port == GEPH_OWNED_PORT)
                 if owned_exit_required
                 else (
                     _owned_geph_ready_for_semantic_confirmation()

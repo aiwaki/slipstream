@@ -12,6 +12,10 @@ prove a new stream within the existing first-payload deadline despite a global
 cooldown; the per-route circuit and drain remain enforced. Failure closes the
 uncommitted request, never silently sends it through the system route. Explicit
 Geph opt-out and external/system-only configurations retain existing behavior.
+The monitor retains freshly verified ownership when session liveness fails.
+Once selected, the owned route remains selected across listener loss; selection
+is not permission to dial or restart an unverified listener. Explicit disable
+clears that selection.
 This does not extend Geph to Discord, YouTube, or unknown destinations, does not
 restart active sessions, and never replays a committed application request.
 
