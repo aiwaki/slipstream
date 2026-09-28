@@ -1,9 +1,10 @@
 """Pure, privacy-bounded exact-host route preflight contract."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
 import json
 import re
+from urllib.parse import urlsplit
 
 
 SCHEMA_VERSION = 1
@@ -89,6 +90,58 @@ class RoutePreflightJobV2(RoutePreflightJobV1):
 @dataclass(frozen=True)
 class RoutePreflightResultV2(RoutePreflightResultV1):
     schema_version: int = 2
+
+
+@dataclass(frozen=True)
+class RoutePreflightJobV3(RoutePreflightJobV1):
+    schema_version: int = 3
+    asset_host: str = ""
+
+
+@dataclass(frozen=True)
+class RoutePreflightResultV3(RoutePreflightResultV1):
+    schema_version: int = 3
+    # Ephemeral anonymous discovery only. Never include signed targets in repr.
+    asset_url: str = field(default="", repr=False)
+
+
+def dynamic_asset_host(value):
+    if (not isinstance(value, str) or not value or len(value) > 1024
+            or not value.isascii() or any(ord(c) <= 32 or ord(c) == 127 for c in value)
+            or "\\" in value):
+        raise RoutePreflightError("invalid_asset_url")
+    try:
+        url = urlsplit(value)
+        host = _host(url.hostname)
+        if (url.scheme != "https" or url.username is not None
+                or url.password is not None or url.port not in (None, 443)
+                or url.fragment or url.hostname != host):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise RoutePreflightError("invalid_asset_url") from None
+    return host
+
+
+def parse_route_preflight_job_v3(payload):
+    value = _object(payload, _JOB_FIELDS | {"asset_host"}, 3)
+    asset_host = _host(value.pop("asset_host"))
+    value["schema_version"] = 2
+    base = parse_route_preflight_job_v2(json.dumps(value))
+    return RoutePreflightJobV3(**{**base.__dict__, "schema_version": 3,
+                                 "asset_host": asset_host})
+
+
+def parse_route_preflight_result_v3(payload):
+    value = _object(payload, _RESULT_FIELDS | {"asset_url"}, 3)
+    asset_url = value.pop("asset_url")
+    if asset_url != "":
+        dynamic_asset_host(asset_url)
+    value["schema_version"] = 2
+    base = parse_route_preflight_result_v2(json.dumps(value))
+    if asset_url and base.outcome != "usable":
+        raise RoutePreflightError("invalid_asset_url")
+    return RoutePreflightResultV3(**{**base.__dict__, "schema_version": 3,
+                                    "asset_url": asset_url})
 
 
 @dataclass(frozen=True)
@@ -218,6 +271,8 @@ def validate_route_preflight_result_v1(
         job.schema_version != result.schema_version
         or job.capability != result.capability
         or job.host != result.host
+        or (job.schema_version == 3 and result.asset_url
+            and dynamic_asset_host(result.asset_url) != job.asset_host)
     ):
         reason = REASON_BINDING_MISMATCH
     elif result.candidate_route not in job.candidate_routes:

@@ -550,6 +550,15 @@ def _is_javascript_script(attributes):
     return not script_type or script_type == "module" or script_type in _JAVASCRIPT_TYPES
 
 
+def ephemeral_dynamic_asset(url, expected_host):
+    """Convert a bound, anonymous browser hint; it conveys no route proof."""
+    candidate = _normalize_https_url(url)
+    if candidate is None or candidate[0] != expected_host:
+        return None
+    return EphemeralBootstrapAsset(exact_host=candidate[0], host_header=candidate[1],
+                                   request_target=candidate[2], discovery_priority=1)
+
+
 def _normalize_https_url(raw_url, *, base_url=None, require_root=False):
     if not isinstance(raw_url, str):
         return None

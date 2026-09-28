@@ -10,6 +10,41 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 dynamic resource continuation IN PROGRESS (not installed):
+- Installed a811 remains the qualified static-resource baseline. Disposable
+  Playwright resource-check through local1080 reproduces three broken review
+  images, anonymously hydrated on d3uzrofyuc50h6.cloudfront.net, absent from
+  complete initial HTML. Same exact public image through owned9954 returns
+  HTTP200/56824 bytes. Signed query is not persisted in checkpoint/logs.
+- Candidate adds explicit bounded V3 anonymous exact-host DOM image discovery,
+  then the existing independent child proof. No site exceptions or parent
+  authority inheritance. V1/V2 remain strict; target transient only.
+- Focused contract/cleanup tests and Rust worker tests underway. Build/install
+  and real dynamic-image recovery are NOT yet verified. User AGENTS untouched.
+
+2026-09-28 installed a81107c1753f191f4d90cb19fa5bb4cacaf43d0b:
+- Native install99263 terminal0 confirmed; script CONSUMED, NEVER REPLAY.
+  App reopened; canonical installed verification89728 terminal0 overallPASS,
+  including complete Discord PNG proxyIPv4/IPv6/transparent payloads. Learning
+  preserved. Exact CI36354176495 all PASS. User AGENTS.md untouched.
+- Initial check failed: banner16384/400804 and document17898/243860. Parent
+  proof then committed15:33:17; child owned comparison failed SOCKSconnect.
+- Learned-parent continuation subsequently ran without resetting learning:
+  native second-daemon.log57025 exit0 records child committed15:36:10 after
+  independent system/appDNS/split64/split16 incomplete observations.
+- Post-commit public probe51976 terminal0: banner400804 complete1.82s,
+  document243860 complete2.28s, API16688 complete5.82s (all HTTP200/curl0).
+  Evidence output/recovery-replacement-a81107c1/installed-assets.json; earlier
+  failed probes retained as initial-assets.json and before-child-commit.json.
+- Ordinary Chrome reload now renders styles and lesson thumbnails. A review
+  thumbnail still shows a broken image, so full-page/all-resource qualification
+  is NOT complete. No blanket global reliability claim. Next isolate its exact
+  resource/status and distinguish site-side missing image from routing failure;
+  also retain first owned SOCKSconnect failure as a cold recovery limitation.
+- Canonical build50628 terminal0; retained artifact tree
+  69fef4c3d1a33a3f5a23ac2552e824b9e92614572da88e62d4ce2c820f8d3dd7.
+  Focused99 integration +14 discovery/lifecycle PASS. All backups retained.
+
 2026-09-28 installed12ea83e9; remaining learned-parent discovery gap:
 - Exact CI36352414817 and dependency/Windows checks now all PASS. Final local
   build74235 canonical PASS; native install90957 terminal0; canonical installed

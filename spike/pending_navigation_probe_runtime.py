@@ -277,9 +277,10 @@ def _valid_positive_int(value):
 def _validate_job(job, now_unix_ms):
     if not isinstance(job, dict):
         return None
-    if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
+    if set(job) in (_ROUTE_PREFLIGHT_JOB_FIELDS, _ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_host"}):
         try:
-            parser = (route_preflight.parse_route_preflight_job_v2
+            parser = (route_preflight.parse_route_preflight_job_v3
+                      if job.get("schema_version") == 3 else route_preflight.parse_route_preflight_job_v2
                       if job.get("schema_version") == 2
                       else route_preflight.parse_route_preflight_job_v1)
             parsed = parser(
@@ -322,7 +323,7 @@ def _validate_job(job, now_unix_ms):
 
 
 def _job_expiry_unix_ms(job):
-    if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
+    if set(job) in (_ROUTE_PREFLIGHT_JOB_FIELDS, _ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_host"}):
         return job["deadline_unix_ms"]
     return job["expires_at_unix_ms"]
 

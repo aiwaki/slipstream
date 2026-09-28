@@ -7813,7 +7813,7 @@ def _consume_request_only_geph_preflight_claim(
 
 
 def _route_preflight_job_payload(job):
-    return {
+    payload = {
         "schema_version": job.schema_version,
         "capability": job.capability,
         "host": job.host,
@@ -7821,6 +7821,9 @@ def _route_preflight_job_payload(job):
         "issued_at_unix_ms": job.issued_at_unix_ms,
         "deadline_unix_ms": job.deadline_unix_ms,
     }
+    if isinstance(job, route_preflight.RoutePreflightJobV3):
+        payload["asset_host"] = job.asset_host
+    return payload
 
 
 def _prune_headless_preflight_breaker_locked(now):
@@ -7997,6 +8000,7 @@ async def _run_admitted_headless_owned_geph_preflight(
     exact_address,
     provenance_assessor=None,
     provenance_already_accepted=False,
+    asset_sink=None,
 ):
     """Return one bound owned-Geph observation or fail closed.
 
@@ -8086,6 +8090,14 @@ async def _run_admitted_headless_owned_geph_preflight(
             or not _owned_geph_confirmation_pid_matches(confirmed_pid)
         ):
             return absent("result_refused")
+        if isinstance(job, route_preflight.RoutePreflightJobV3):
+            # Discovery can never mint a parent proof or commit a child route.
+            if asset_sink is not None and result.asset_url:
+                asset = bootstrap_asset_preflight.ephemeral_dynamic_asset(
+                    result.asset_url, job.asset_host)
+                if asset is not None:
+                    asset_sink.append(asset)
+            return None
         return _RoutePreflightOwnedGephProof(
             marker=_ROUTE_PREFLIGHT_OWNED_GEPH_PROOF,
             capability=job.capability,
@@ -10241,6 +10253,35 @@ async def _wait_for_pending_bootstrap_children(host, address):
     return min(time.monotonic(), wait_deadline) + UNKNOWN_RECOVERY_GEPH_RESERVE
 
 
+def _dynamic_asset_failure_candidate(parent):
+    # Transport failures select a discovery target, never route authority.
+    now = time.monotonic()
+    with _auto_geph_lock:
+        _prune_local_partial_stalls(now)
+        candidates = [(max(stages.values()), host)
+                      for host, stages in _local_partial_stalls.items()
+                      if stages and host != parent and _auto_geph_base_host_allowed(host)
+                      and not _auto_geph_learned_exact_host(host)]
+    return max(candidates)[1] if candidates else None
+
+
+async def _discover_dynamic_parent_asset(parent, address, sink):
+    candidate = _dynamic_asset_failure_candidate(parent)
+    if candidate is None:
+        return
+    issued = int(time.time() * 1000)
+    job = route_preflight.RoutePreflightJobV3(
+        capability=secrets.token_hex(16), host=parent, candidate_routes=("owned_geph",),
+        issued_at_unix_ms=issued,
+        deadline_unix_ms=issued + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS,
+        asset_host=candidate,
+    )
+    await _run_headless_owned_geph_preflight(
+        job, None, time.monotonic() + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS / 1000,
+        exact_address=address, provenance_already_accepted=True, asset_sink=sink,
+    )
+
+
 async def _check_learned_parent_assets(host, ip):
     """Enumerate an already-proven parent's children without lending authority.
 
@@ -10292,7 +10333,15 @@ async def _check_learned_parent_assets(host, ip):
                 candidate.forget()
             else:
                 unproven_assets.append(candidate)
-        asset, _cross_origin = _select_route_preflight_bootstrap_asset(unproven_assets, h)
+        dynamic = []
+        try:
+            await _discover_dynamic_parent_asset(h, str(address), dynamic)
+        finally:
+            assets.extend(dynamic)
+        if dynamic:
+            asset = dynamic[0]
+        else:
+            asset, _cross_origin = _select_route_preflight_bootstrap_asset(unproven_assets, h)
         if asset is None:
             return
         healthy_deadline = time.monotonic() + ROUTE_PREFLIGHT_BOOTSTRAP_DIRECT_TIMEOUT
@@ -16919,7 +16968,8 @@ def _pending_navigation_probe_worker_claimed(job, launch_id, now=None):
     ):
         return False
     token = job.get("capability")
-    if set(job) == pending_navigation_probe_runtime._ROUTE_PREFLIGHT_JOB_FIELDS:
+    if set(job) in (pending_navigation_probe_runtime._ROUTE_PREFLIGHT_JOB_FIELDS,
+                    pending_navigation_probe_runtime._ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_host"}):
         with _route_preflight_lock:
             capability = _route_preflight_browser_capabilities.get(token)
             if (
@@ -17333,7 +17383,8 @@ def _submit_route_preflight_browser_result(
     if not isinstance(payload, dict):
         return False
     try:
-        parser = (route_preflight.parse_route_preflight_result_v2
+        parser = (route_preflight.parse_route_preflight_result_v3
+                  if payload.get("schema_version") == 3 else route_preflight.parse_route_preflight_result_v2
                   if payload.get("schema_version") == 2
                   else route_preflight.parse_route_preflight_result_v1)
         result = parser(
@@ -17370,14 +17421,9 @@ def _submit_route_preflight_browser_result(
 
 
 def _submit_browser_probe_result(payload, launch_id=None, *, now=None):
-    if isinstance(payload, dict) and set(payload) == {
-        "schema_version",
-        "capability",
-        "host",
-        "candidate_route",
-        "outcome",
-        "observed_at_unix_ms",
-    }:
+    if isinstance(payload, dict) and (set(payload) == route_preflight._RESULT_FIELDS
+            or (payload.get("schema_version") == 3
+                and set(payload) == route_preflight._RESULT_FIELDS | {"asset_url"})):
         return _submit_route_preflight_browser_result(
             payload,
             launch_id,

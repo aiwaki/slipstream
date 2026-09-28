@@ -870,3 +870,32 @@ plus 19s child bound. A bounded host-only two-minute cooldown prevents pooled
 connections amplifying probes; no URL is stored. Already learned children are
 skipped. Relay completion/cancellation drains the worker rather than orphaning
 it. Protected services and private destinations remain excluded.
+
+## 2026-09-28 Anonymous dynamic image discovery (V3)
+
+HTML enumeration cannot see images added after hydration. A learned parent's
+bounded continuation may therefore ask the existing owned browser worker to
+find one anonymous DOM image on one exact, fresh locally failing host. The host
+must remain unknown/unlearned and satisfy all protected-service exclusions.
+The worker uses its disposable profile and owned Geph only; it never reads the
+user's tab, cookies, storage, account or request headers. A missing match conveys
+nothing. Matching a DOM image also conveys no route authority.
+
+This is an explicit V3 IPC contract, not a relaxation of V1/V2. The job adds
+`asset_host`; the result adds one `asset_url` (empty if absent). Only HTTPS,
+exact-host, ASCII targets up to 1024 bytes, without credentials, fragment,
+nonstandard port, whitespace or backslashes are accepted. The total IPC cap
+stays 2048 bytes, with the existing capability/launch/PID/deadline/replay checks.
+A signed anonymous target may exist only in the transient result and child
+probe; it is excluded from repr, logs, status, routing keys and persisted state.
+Only the separately defined independent system/app-DNS/local-strategy and
+same-object owned-payload proof can learn the child. V3 never mints parent proof.
+
+Fresh transport evidence selects the discovery host; it is not failure proof
+for the discovered object. The worker waits at most three seconds for hydration
+within its original 20s deadline and inspects at most 512 DOM images without
+scrolling or interacting. Existing 8s HTML and 19s independent child budgets
+remain bounded; coalescing/cooldown and cleanup ownership are retained. Dynamic
+images are prioritized over unrelated static candidates when a match exists.
+This does not claim recovery of authenticated-only, offscreen/later-interaction
+resources, or external outages; those require separate evidence and mechanisms.
