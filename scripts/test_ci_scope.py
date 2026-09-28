@@ -30,6 +30,20 @@ class CiScopeTests(unittest.TestCase):
         self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request",
             app_lock_delta=(before, after)).geph_bootstrap)
 
+    def test_source_edit_bootstrap_requires_contract_and_tests(self):
+        paths = ["vendor/geph/SOURCE.json", "scripts/geph_vendor_source.py",
+                 "scripts/test_geph_source_edits.py", "vendor/geph/README.md",
+                 ".github/workflows/build-geph.yml", "scripts/test_build_config.py",
+                 "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
+        self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)
+        for missing in ("vendor/geph/SOURCE.json", "scripts/test_geph_source_edits.py",
+                        "scripts/test_build_config.py", "scripts/test_ci_scope.py"):
+            self.assertFalse(ci_scope.classify_paths([p for p in paths if p != missing],
+                event_name="pull_request").geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths + ["spike/tproxy.py"],
+            event_name="pull_request").geph_bootstrap)
+
     def test_exact_geph_contract_sets_bootstrap_only_on_pull_request(self) -> None:
         required = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock"]
         for paths in (

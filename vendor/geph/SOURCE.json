@@ -9,10 +9,26 @@
     "aws_lambda"
   ],
   "lock_sha256": "d5a0e6f58cfdd7fea7db79c1322a486cc2d7ba47609c6d92c0edefe7a7e67b81",
-  "release_revision": 2,
+  "release_revision": 3,
   "schema_version": 1,
   "targets": [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin"
+  ],
+  "source_edits": [
+    {
+      "path": "src/session.rs",
+      "before": "        .ok_or_else(|| {\n            session.early_dead.set();\n            anyhow::anyhow!(\"timeout waiting for tunnel open response\")\n        })?;",
+      "after": "        .ok_or_else(|| {\n            // Slipstream: a destination open timeout is not a mux failure.\n            // Drop only this new stream; existing tunnels remain usable.\n            // Transport death is still handled by mux liveness/proxy_loop.\n            anyhow::anyhow!(\"timeout waiting for tunnel open response\")\n        })?;",
+      "before_sha256": "a59d0335c63c19d9f7eb7e14569f771d0e0ac7b6aa9160ce1e2e7572a3740fca",
+      "after_sha256": "14cb5b87aa2278ce35708082c73087ed9825bd46a6b76f6639653b11a01f6a32"
+    },
+    {
+      "path": "src/session.rs",
+      "before": "#[cfg(test)]\nmod tests {",
+      "after": "\n#[cfg(test)]\nmod slipstream_isolation_tests {\n    use super::*;\n    use tokio::io::{AsyncReadExt, AsyncWriteExt};\n\n    #[tokio::test]\n    async fn stalled_new_tunnel_preserves_existing_stream() {\n        let (a, b) = tokio::io::duplex(65536);\n        let (ar, aw) = tokio::io::split(a);\n        let (br, bw) = tokio::io::split(b);\n        let mux = Arc::new(PicoMux::new(ar, aw));\n        let peer = PicoMux::new(br, bw);\n        let (existing, accepted) = tokio::join!(mux.open(b\"existing\"), peer.accept());\n        let mut existing = existing.unwrap();\n        let mut accepted = accepted.unwrap();\n        let (accounting, _accounting_loop) = bw_accounting_pair();\n        let session = Arc::new(ConnectedSession {\n            worker_id: 0, exit: \"fixture\".into(), bridge: \"fixture\".into(),\n            mux, accounting, pending_opens: AtomicUsize::new(0),\n            early_dead: Arc::new(ManualResetEvent::new(false)),\n        });\n        let ctx = AnyCtx::new(serde_json::from_value::<Config>(\n            serde_json::json!({\"exit_constraint\":\"auto\"})).unwrap());\n        let opening = open_tunnel_on_session(&ctx, &session,\n            RichTunnelCommand { protocol:\"tcp\".into(), host:\"fixture.invalid:443\".into() });\n        // Keep the accepted new stream alive but never send its open response.\n        let holding_peer = async { let _stalled = peer.accept().await.unwrap();\n            tokio::time::sleep(Duration::from_secs(11)).await; };\n        let (result, ()) = tokio::join!(opening, holding_peer);\n        assert!(result.unwrap_err().to_string().contains(\"timeout waiting\"));\n        assert!(!session.early_dead.is_set(), \"a single tunnel timeout killed the shared session\");\n        assert_eq!(session.pending_opens.load(Ordering::Relaxed), 0);\n        accepted.write_all(b\"still alive\").await.unwrap();\n        let mut bytes = [0u8; 11];\n        tokio::time::timeout(Duration::from_secs(2), existing.read_exact(&mut bytes)).await.unwrap().unwrap();\n        assert_eq!(&bytes, b\"still alive\");\n    }\n}\n\n#[cfg(test)]\nmod tests {",
+      "before_sha256": "14cb5b87aa2278ce35708082c73087ed9825bd46a6b76f6639653b11a01f6a32",
+      "after_sha256": "09a1d0953fb720b1af731b3542313a86091a1dd02e6a7e7380cba6fad6dc5286"
+    }
   ]
 }

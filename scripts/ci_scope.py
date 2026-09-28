@@ -21,6 +21,9 @@ GEPH_BOOTSTRAP_ALLOWED = frozenset(
         "vendor/geph/Cargo.lock",
         "vendor/geph/SOURCE.json",
         "vendor/geph/VERSION",
+        "vendor/geph/README.md",
+        "scripts/geph_vendor_source.py",
+        "scripts/test_geph_source_edits.py",
         # Both TLS graphs may need one coordinated source-only repair. All
         # dependency audits still run; no packaged binary is promoted here.
         "app-tauri/src-tauri/Cargo.lock",
@@ -138,8 +141,12 @@ def classify_paths(paths: list[str], *, event_name: str,
     )
     geph_bootstrap = (
         event_name == "pull_request"
-        and GEPH_BOOTSTRAP_REQUIRED.issubset(changed)
+        and (GEPH_BOOTSTRAP_REQUIRED.issubset(changed) or {
+            "vendor/geph/SOURCE.json", "scripts/geph_vendor_source.py",
+            "scripts/test_geph_source_edits.py",
+        }.issubset(changed))
         and changed.issubset(GEPH_BOOTSTRAP_ALLOWED)
+        and ("scripts/geph_vendor_source.py" not in changed or "scripts/test_geph_source_edits.py" in changed)
         and (APP_LOCK not in changed or (
             app_lock_delta is not None and reviewed_app_lock_repair(*app_lock_delta)))
         and ("scripts/ci_scope.py" not in changed or "scripts/test_ci_scope.py" in changed)

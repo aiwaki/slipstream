@@ -23,10 +23,18 @@ OSV audit. GitHub attestations bind the payload and SBOM to the exact
 `build-geph.yml` run. The app workflow verifies all of these before embedding
 the binary.
 
-The reviewed `0.3.0` source currently emits an upstream deprecation warning for
-`aws_config::BehaviorVersion::v2025_08_07`. Slipstream does not patch the
-redistributed crate silently; the next source update should confirm that Geph
-has moved to the newer AWS behavior version.
+Revision 3 of `0.3.9` carries explicit `source_edits` in `SOURCE.json`.
+Each edit binds the complete input and output file SHA-256 and exactly one
+literal replacement; extraction fails on drift. The contract shipped with the
+release contains both the correction and its regression test, so no unpublished
+patch is needed to reproduce the source. Unedited older contracts remain valid.
+
+The correction isolates a ten-second destination tunnel-open timeout from the
+shared multiplexed session. Upstream otherwise signals `early_dead`, dropping
+existing tunnels with the failed new request. Actual mux death, read errors and
+protocol errors retain upstream handling. The offline two-stream regression
+fails on unmodified0.3.9 and requires the existing stream to remain usable after
+the new tunnel times out. The vendor build runs library tests before packaging.
 
 The daemon supervises only Slipstream's owned copy. Geph remains limited to
 geo-exit routes; local bypass groups such as Discord and YouTube never use it.
