@@ -2836,6 +2836,8 @@ _semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
 _route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
 _learned_parent_asset_checks = OrderedDict()  # host -> monotonic next check; no paths
+_recent_asset_parents = OrderedDict()  # proven HTML host -> (IP, expiry); no URLs
+_learned_parent_recovery_tasks = {}  # parent -> owned asyncio task
 _route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
 _route_preflight_execution_leases = {}  # proof Future -> shared execution lease
 _route_preflight_window = deque(maxlen=128)  # bounded diagnostic history only
@@ -7194,6 +7196,7 @@ def note_partial_tls_stall(
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
     local_ladder_complete = _record_partial_tls_stall_evidence(h, stage, now)
+    _schedule_recent_parent_asset_recovery(h)
 
     # The six-second partial-record watchdog intentionally ends the live relay
     # before the fifteen-second payload-idle observer can run. Preserve the
@@ -10253,6 +10256,72 @@ async def _wait_for_pending_bootstrap_children(host, address):
     return min(time.monotonic(), wait_deadline) + UNKNOWN_RECOVERY_GEPH_RESERVE
 
 
+def _remember_recent_asset_parent(host, address):
+    now = time.monotonic()
+    with _route_preflight_lock:
+        _recent_asset_parents[host] = (address, now + AUTO_GEPH_PARTIAL_STALL_WINDOW)
+        _recent_asset_parents.move_to_end(host)
+        for parent, (_, expiry) in list(_recent_asset_parents.items()):
+            if expiry <= now:
+                _recent_asset_parents.pop(parent, None)
+        while len(_recent_asset_parents) > 4:
+            _recent_asset_parents.popitem(last=False)
+
+
+def _schedule_recent_parent_asset_recovery(failed_host):
+    # A cache hit opens no parent connection. Fresh child truncation must still
+    # be able to request anonymous discovery on recently proven HTML parents.
+    # This hint cannot route the child, retain its URL, or bypass object proof.
+    if (_shutdown_started.is_set() or not _auto_geph_base_host_allowed(failed_host)
+            or _auto_geph_learned_exact_host(failed_host)):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    now = time.monotonic()
+    with _auto_geph_lock:
+        _prune_local_partial_stalls(now)
+        if failed_host not in _local_partial_stalls:
+            return
+    with _route_preflight_lock:
+        parents = list(_recent_asset_parents.items())
+    for parent, (address, expiry) in parents:
+        if (parent == failed_host or expiry <= now
+                or parent in _learned_parent_recovery_tasks
+                or len(_learned_parent_recovery_tasks) >= 4
+                or not _auto_geph_learned_exact_host(parent)):
+            continue
+        async def recover(h=parent, ip=address, deadline=expiry):
+            try:
+                while not _shutdown_started.is_set() and time.monotonic() < deadline:
+                    if not _auto_geph_learned_exact_host(h) or not _dynamic_asset_failure_candidates(h):
+                        return
+                    with _route_preflight_lock:
+                        wait = _learned_parent_asset_checks.get(h, 0) - time.monotonic()
+                        busy = any(key[0] == h for key in _route_preflight_inflight)
+                    if wait <= 0 and not busy:
+                        await _check_learned_parent_assets(h, ip)
+                        return
+                    await asyncio.sleep(min(max(wait, 0.2), max(0.001, deadline-time.monotonic())))
+            finally:
+                if _learned_parent_recovery_tasks.get(h) is asyncio.current_task():
+                    _learned_parent_recovery_tasks.pop(h, None)
+        task = loop.create_task(recover())
+        _learned_parent_recovery_tasks[parent] = task
+        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+
+
+async def _cancel_recent_parent_asset_recovery():
+    tasks = tuple(_learned_parent_recovery_tasks.values())
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    with _route_preflight_lock:
+        _recent_asset_parents.clear()
+
+
 def _dynamic_asset_failure_candidates(parent):
     # Transport failures select a discovery target, never route authority.
     now = time.monotonic()
@@ -10327,6 +10396,8 @@ async def _check_learned_parent_assets(host, ip):
             0.001, discovery_deadline - time.monotonic()) + 0.1)
         if not _auto_geph_learned_exact_host(h) or _shutdown_started.is_set():
             return
+        if assets:
+            _remember_recent_asset_parent(h, str(address))
         unproven_assets = []
         for candidate in assets:
             if _auto_geph_learned_exact_host(candidate.exact_host):
@@ -14520,6 +14591,7 @@ async def serve_until_shutdown(
         )
         if before_stop is not None:
             before_stop()
+        await _cancel_recent_parent_asset_recovery()
         if before_auxiliary_close is not None:
             await before_auxiliary_close()
         print(">> shutdown closing auxiliary brokers", file=sys.stderr, flush=True)

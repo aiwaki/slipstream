@@ -21,6 +21,8 @@ def test_worker_quiesces_before_broker_close(monkeypatch, listener_finishes):
         assert 'broker_closed' not in events
         await asyncio.sleep(0)
         events.append('worker_finished')
+    async def cancel_discovery(): events.append('discovery_drained')
+    monkeypatch.setattr(tproxy, '_cancel_recent_parent_asset_recovery', cancel_discovery)
     async def drain(timeout): return True
     monkeypatch.setattr(tproxy, 'pf_teardown', lambda: True)
     monkeypatch.setattr(tproxy, 'wait_for_connections_to_drain', drain)
@@ -31,7 +33,7 @@ def test_worker_quiesces_before_broker_close(monkeypatch, listener_finishes):
             Listener(), stop, auxiliary_servers=(Broker(),),
             before_auxiliary_close=quiesce)
     assert asyncio.run(run())
-    assert events.index('worker_finished') < events.index('broker_closed')
+    assert events.index('discovery_drained') < events.index('worker_finished') < events.index('broker_closed')
 
 
 def test_quiesce_disables_admission_before_worker_wait(monkeypatch):

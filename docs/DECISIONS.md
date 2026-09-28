@@ -899,3 +899,14 @@ remain bounded; coalescing/cooldown and cleanup ownership are retained. Dynamic
 images are prioritized over unrelated static candidates when a match exists.
 This does not claim recovery of authenticated-only, offscreen/later-interaction
 resources, or external outages; those require separate evidence and mechanisms.
+
+Cached-parent continuation keeps at most four recently verified HTML parent
+hosts and exact addresses in process memory for five minutes; no paths, signed
+queries or browsing state are retained. A fresh unprotected child truncation
+may schedule one coalesced recheck per parent, after the existing cooldown.
+This is discovery only: the anonymous DOM must contain the candidate and the
+same-object independent local/owned proof is still required. Expired/unlearned
+parents and protected hosts are excluded. Quit cancels and drains this registry
+before closing the browser broker. No new parent connection or foreground
+browser is required to trigger the recheck. Already failed browser requests
+may still need a retry; this does not authorize automatic page reloads.

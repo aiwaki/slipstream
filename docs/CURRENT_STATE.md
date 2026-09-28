@@ -10,6 +10,30 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 c1f56c0 INSTALLED; dynamic images now qualified:
+- Native3790 terminal0; replacement script CONSUMED, NEVER REPLAY. Exact
+  installed verifier56742 terminal0 overallPASS, complete Discord PNGs all3
+  routes. Learning/backups retained. Exact CI24success/4skipped.
+- Initial three review images still failed. A fresh parent connection triggered
+  dynamic discovery: discovery-fourth.log records CDN child committed19:00:03
+  after all independent local probes truncated. Browser images-post-commit.txt
+  shows all3 decoded at widths1788/2031/2324. This proves the generic V3 path.
+- Remaining trigger gap: cached parent/persistent connections need no new
+  parent relay. Working fix retains4 recent proven HTML parents5min and queues
+  a cooldown-respecting independent discovery on fresh child truncation; Quit
+  drains these owned tasks before broker shutdown. Next scoped tests/build/
+  install and cached-trigger qualification. No universal site guarantee.
+
+2026-09-28 c1f56c0 refinement built, NOT installed:
+- Canonical build14255 and retained artifact verifier89885 terminal0 PASS.
+  output/recovery-replacement-c1f56c0/artifact.json; tree
+  cad229f119b794a0eb09bcce7f1bedb313d077abfe63c40cafcd948ae32082cc.
+- Focused128 Python plus additional dynamic candidate test (16 in its file),
+  Rust38 PASS. PR376 exact CI product/build PASS; heavy checks still pending.
+- Disposable resource-check closed. Fresh c1f56c0 replacement script prepared,
+  not consumed. Next normal Quit, install, canonical installed verification,
+  then real dynamic-image gate. Installed source remains6f43373 below.
+
 2026-09-28 dynamic resource continuation 6f43373 INSTALLED; browser gate pending:
 - Installed a811 remains the qualified static-resource baseline. Disposable
   Playwright resource-check through local1080 reproduces three broken review

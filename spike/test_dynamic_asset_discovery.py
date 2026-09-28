@@ -134,3 +134,68 @@ def test_newer_api_failure_cannot_starve_older_image_hint(monkeypatch, learned_p
         payload = asdict(j); payload['asset_hosts'] = bad
         with pytest.raises(contract.RoutePreflightError):
             contract.parse_route_preflight_job_v3(json.dumps(payload))
+
+
+@pytest.fixture
+def recent_parent_state(monkeypatch):
+    from collections import OrderedDict
+    monkeypatch.setattr(tproxy, '_recent_asset_parents', OrderedDict())
+    monkeypatch.setattr(tproxy, '_learned_parent_recovery_tasks', {})
+
+
+def test_cached_parent_child_failure_schedules_one_independent_recheck(monkeypatch, learned_parent, recent_parent_state):
+    now = time.monotonic()
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {'images.example.net': {'system': now}})
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+    seen = []
+    async def check(host, ip):
+        seen.append((host, ip))
+        assert not tproxy._auto_geph_learned_exact_host('images.example.net')
+    monkeypatch.setattr(tproxy, '_check_learned_parent_assets', check)
+    async def scenario():
+        for _ in range(5):
+            tproxy._schedule_recent_parent_asset_recovery('images.example.net')
+        assert len(tproxy._learned_parent_recovery_tasks) == 1
+        await asyncio.gather(*tproxy._learned_parent_recovery_tasks.values())
+    asyncio.run(scenario())
+    assert seen == [(learned_parent, '8.8.8.8')]
+    assert not tproxy._learned_parent_recovery_tasks
+
+
+def test_cached_recovery_respects_cooldown_and_quit_drains(monkeypatch, learned_parent, recent_parent_state):
+    now = time.monotonic()
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {'images.example.net': {'system': now}})
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+    tproxy._learned_parent_asset_checks[learned_parent] = now + 120
+    async def forbidden(*args):
+        pytest.fail('cooldown must not be bypassed')
+    monkeypatch.setattr(tproxy, '_check_learned_parent_assets', forbidden)
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery('images.example.net')
+        await asyncio.sleep(0)
+        assert len(tproxy._learned_parent_recovery_tasks) == 1
+        await tproxy._cancel_recent_parent_asset_recovery()
+    asyncio.run(scenario())
+    assert not tproxy._learned_parent_recovery_tasks
+    assert not tproxy._recent_asset_parents
+
+
+@pytest.mark.parametrize('case', ['expired', 'protected', 'unlearned', 'no_failure'])
+def test_cached_recovery_does_not_invent_authority(monkeypatch, learned_parent, recent_parent_state, case):
+    now = time.monotonic()
+    failed = 'discord.com' if case == 'protected' else 'images.example.net'
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {} if case == 'no_failure' else {failed: {'system': now}})
+    tproxy._recent_asset_parents[learned_parent] = ('8.8.8.8', now-1 if case == 'expired' else now+100)
+    if case == 'unlearned':
+        tproxy._auto_geph.pop(learned_parent, None)
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery(failed)
+        assert not tproxy._learned_parent_recovery_tasks
+    asyncio.run(scenario())
+
+
+def test_recent_parent_history_is_bounded_and_has_no_resource_urls(recent_parent_state):
+    for i in range(8):
+        tproxy._remember_recent_asset_parent(f'p{i}.example', '8.8.8.8')
+    assert len(tproxy._recent_asset_parents) == 4
+    assert list(tproxy._recent_asset_parents) == [f'p{i}.example' for i in range(4,8)]

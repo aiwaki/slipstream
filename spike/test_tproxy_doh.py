@@ -47,6 +47,8 @@ _PENDING_NAVIGATION_PROBE_CONTRACT = json.loads(
 
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(tproxy, "_recent_asset_parents", OrderedDict())
+    monkeypatch.setattr(tproxy, "_learned_parent_recovery_tasks", {})
     monkeypatch.setattr(tproxy, "_status_listener_binding", None)
     monkeypatch.setattr(tproxy, "_bootstrap_local_routes", OrderedDict())
     shutdown_started = tproxy._shutdown_started.is_set()
