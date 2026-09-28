@@ -301,6 +301,8 @@ jobs:
           set -euo pipefail
           source_root="${{ steps.source.outputs.root }}"
           mkdir -p out /tmp/geph-metadata
+          # The reviewed contract can carry exact source edits and regression tests.
+          cargo test --manifest-path "$source_root/Cargo.toml" --locked --features aws_lambda --lib
           IFS=',' read -ra targets <<< "$GEPH_TARGETS"
           bins=()
           for target in "${targets[@]}"; do

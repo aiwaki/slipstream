@@ -70,7 +70,7 @@ def load_source_contract(path: Path) -> dict:
             "targets",
             "lock_sha256",
             "release_revision",
-        },
+        } | ({"source_edits"} if "source_edits" in source else set()),
         "Geph source contract",
     )
     schema_version = source["schema_version"]
@@ -103,6 +103,21 @@ def load_source_contract(path: Path) -> dict:
     revision = source.get("release_revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
         raise ValueError("Geph release revision is invalid")
+    edits = source.get("source_edits", [])
+    if not isinstance(edits, list) or len(edits) > 16:
+        raise ValueError("invalid Geph source edits")
+    for edit in edits:
+        if not isinstance(edit, dict):
+            raise ValueError("invalid Geph source edit")
+        _require_exact_keys(edit, {"path", "before_sha256", "after_sha256", "before", "after"}, "Geph source edit")
+        if not isinstance(edit["path"], str) or not re.fullmatch(r"src/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\.rs", edit["path"]):
+            raise ValueError("invalid Geph source edit path")
+        for field in ("before_sha256", "after_sha256"):
+            if not isinstance(edit[field], str) or not SHA256_PATTERN.fullmatch(edit[field]):
+                raise ValueError("invalid Geph source edit digest")
+        for field in ("before", "after"):
+            if not isinstance(edit[field], str) or not edit[field] or len(edit[field]) > 131072:
+                raise ValueError("invalid Geph source edit text")
     return source
 
 
@@ -518,6 +533,27 @@ def prepare_source_contract(
     return contract
 
 
+def apply_source_edits(root: Path, edits: list[dict]) -> None:
+    """Apply reviewed exact edits, bound to complete before/after file digests.
+
+    Edits travel inside SOURCE.json, so released source contracts reproduce
+    the binary without unpublished patch files. Never accept fuzzy hunks.
+    """
+    for edit in edits:
+        path = root / edit["path"]
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            raise ValueError("Geph edit escapes extracted source")
+        if hash_file(path) != edit["before_sha256"]:
+            raise ValueError("Geph source edit input digest mismatch")
+        original = path.read_bytes().decode("utf-8")
+        if original.count(edit["before"]) != 1:
+            raise ValueError("Geph source edit must match exactly once")
+        changed = original.replace(edit["before"], edit["after"], 1).encode("utf-8")
+        if hashlib.sha256(changed).hexdigest() != edit["after_sha256"]:
+            raise ValueError("Geph source edit output digest mismatch")
+        path.write_bytes(changed)
+
+
 def materialize_source(
     *, source_path: Path, version_path: Path, cargo_lock_path: Path, crate_path: Path, output: Path
 ) -> Path:
@@ -530,6 +566,7 @@ def materialize_source(
     root = extract_crate(crate_path=crate_path, version=summary["version"], output=output)
     _verify_manifest(root, summary["version"])
     shutil.copyfile(cargo_lock_path, root / "Cargo.lock")
+    apply_source_edits(root, load_source_contract(source_path).get("source_edits", []))
     return root
 
 
