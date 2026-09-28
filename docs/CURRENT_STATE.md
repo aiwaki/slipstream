@@ -10,34 +10,33 @@ file.
 
 ## Current Checkpoint
 
-2026-09-28 vendor r3 publication in progress:
-- PR380 MERGED as6e037e970c7f36e734ed9aa1dbb02929bfec3d1f after all required
-  checks passed and addressed bootstrap review thread resolved. No admin bypass.
-- Vendor build36453478783 is building locked universal binary (job109033849234).
-  Source-edit contract r3 includes regression; artifact is NOT yet published.
-- AUD branch merged origin/main and is0ebadb9; app daemon build reused exact
-  unchanged b4dfcaf hash. App still uses old Geph until verified r3 downloaded.
-- Next verify release metadata/assets/SBOM/audit/attestation, stage binary,
-  canonical local app build, fresh one-shot replacement (never reuse old scripts),
-  canonical installed verification and real Codex stream qualification.
-
-2026-09-28 Geph reconnect root cause reproduced; vendor PR380:
-- Clean reusable dependency checkout now codex/geph-tunnel-isolation at
-  /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905.
-  PR380 is isolated from this AUD branch. All vendor edits live THERE.
-- Exact reviewed crate0.3.9 sets session.early_dead on a10s new-tunnel response
-  timeout. Geph logs confirm timeout -> early-dead -> shared session teardown.
-  Deterministic two-stream Rust regression FAILS upstream, PASSES correction;
-  existing stream continues bytes after failed new tunnel. All25 library tests
-  with aws_lambda PASS. Source/edit19, verifier20, SBOM3, build config53/scope8 PASS.
-- Candidate r3 source contract carries complete-file before/after hashes,
-  exact replacement and regression test. No opaque binary/local-only patch.
-  Initial PR CI tried nonexistent r3 binary: bootstrap path adjusted narrowly
-  with tests, retaining main full packaged gates. Await new PR380 checks.
-- NOT installed: cb8f093 with original Geph remains current. Next finish source
-  review/CI, publish immutable vendor r3, then canonical app build/install and
-  sustained real Codex qualification. Do not claim reconnect fixed on workstation.
-- Private logs and red/green evidence: output/reconnecting-20260928/.
+2026-09-28 Geph r3 INSTALLED; timeout isolation verified, reconnect qualification OPEN:
+- Exact app source6673f9264eb5d90e96bd9b6871213a3a48a1b4ca installed by native
+  transaction15964 exit0; owned launchd absence was verified before replacement.
+  output/recovery-replacement-geph-r3-6673f92/replace-exact-bundle.sh is CONSUMED,
+  NEVER REPLAY. Old app/private backups and learning retained.
+- Relaunched22:21:52 local /17:21:52UTC. Canonical npm verify:local-install
+  session16878 exit0 overallPASS, StatusV2 active, launchd24196; both PNGs complete
+  on proxy IPv4/IPv6 and transparent paths. App tree6a9fc91c...;
+  signed bundled Geph4d643b42...; unchanged daemonb4dfcaf... .
+- PR380 merged6e037e9 after required CI/review; vendor36453478783 SUCCESS.
+  Release metadata/assets/SBOM/audit/SLSA+SPDX verified before build. PR376 exact
+  source6673f92 CI has no pending/failed checks. Source fix is in AUD and main.
+- Confirmed cause: upstream new-tunnel10s response timeout set shared early_dead,
+  destroying unrelated streams. r3 removes only that timeout's shared signal.
+  Deterministic two-stream regression RED upstream/GREEN patched;25 Geph library
+  tests PASS. Source/edit19, verifier20, SBOM3, config53/scope8 PASS reused.
+- Live r3 log17:23:50-57UTC: five new-tunnel timeouts, ZERO early-dead teardown.
+  This confirms isolation under actual failure, not complete connectivity.
+- Codex responses_retry17:23:45UTC still reports error sending a NEW request.
+  At17:22:08 broker fresh-route parse failed and Geph used cached exit route.
+  Causality for remaining request failure is NOT established; never claim all
+  reconnects or all incomplete sites solved. Private sanitized observation:
+  output/reconnecting-20260928/post-install-observation.json (since17:20UTC).
+- Next correlate remaining new-request failure with owned daemon SOCKS/first-payload
+  evidence and broker/exit health. Preserve existing streams; do not blindly
+  restart shared Geph or replay committed application requests. Cached-parent
+  real-browser and generic API/XHR completeness gates remain open below.
 
 2026-09-28 cb8f093 INSTALLED and canonical installed verifier PASS:
 - Native replacement81290 terminal0 confirmed exact source/root daemon; learning
