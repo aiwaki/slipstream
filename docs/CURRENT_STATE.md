@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 owned reviewed cooldown route fix READY FOR BUILD:
+- Native daemon log read86655 exit0. At22:23:44 local owned SOCKS failed;
+  following chatgpt.com requests used system_plain and reset/EOF. Source allowed
+  reviewed services (unlike learned hosts) to fall through during global hold.
+- Regression RED: reviewed chatgpt cooldown/down went direct (2failed/4passed).
+  Fix retains enabled canonical owned exit for reviewed and learned hosts; live
+  owned listener can prove payload despite global hold; circuit/drain still apply.
+  Unavailable owned route closes uncommitted stream. Explicit opt-out/external
+  fallback unchanged. Tests41PASS plus traffic geo/Geph contractsPASS.
+- This fixes route switching after failure, not external exit availability or
+  committed-stream reset. Geph r3 remains installed; new daemon NOT installed.
+- Next canonical build/retained artifact/normal Quit/fresh one-shot transaction,
+  then installed verification and real request checks. No consumed script replay.
+
 2026-09-28 Geph r3 INSTALLED; timeout isolation verified, reconnect qualification OPEN:
 - Exact app source6673f9264eb5d90e96bd9b6871213a3a48a1b4ca installed by native
   transaction15964 exit0; owned launchd absence was verified before replacement.

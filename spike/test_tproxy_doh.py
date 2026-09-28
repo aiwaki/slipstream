@@ -5445,10 +5445,10 @@ def test_reviewed_geo_exit_first_payload_timeout_never_falls_back_direct(
     assert writer.closed
 
 
+@pytest.mark.parametrize("host", ["payments.example.com", "chatgpt.com"])
 def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
-    monkeypatch,
+    monkeypatch, host,
 ):
-    host = "payments.example.com"
     wall_now = 1_000.0
 
     class Reader:
@@ -5478,7 +5478,7 @@ def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
         raise AssertionError("runtime-learned host leaked to direct")
 
     monkeypatch.setattr(tproxy.time, "time", lambda: wall_now)
-    monkeypatch.setattr(tproxy, "_auto_geph", {host: wall_now + 3600})
+    monkeypatch.setattr(tproxy, "_auto_geph", ({host: wall_now + 3600} if host != "chatgpt.com" else {}))
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
     monkeypatch.setattr(tproxy, "parse_sni", lambda _body: host)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
@@ -5508,7 +5508,7 @@ def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
         lambda *_args, **_kwargs: True,
     )
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
-    monkeypatch.setattr(tproxy, "AUTO_GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_ENABLED", host != "chatgpt.com")
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
@@ -5522,10 +5522,11 @@ def test_runtime_learned_geo_exit_uses_owned_geph_during_global_cooldown(
     assert sessions == ["start", "finish"]
 
 
+@pytest.mark.parametrize("host", ["payments.example.com", "chatgpt.com"])
+@pytest.mark.parametrize("unavailable", ["down", "draining", "circuit"])
 def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
-    monkeypatch,
+    monkeypatch, host, unavailable,
 ):
-    host = "payments.example.com"
 
     class Reader:
         def __init__(self):
@@ -5547,7 +5548,7 @@ def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
     async def direct_must_not_run(*_args):
         raise AssertionError("runtime-learned host leaked to direct")
 
-    monkeypatch.setattr(tproxy, "_auto_geph", {host: tproxy.time.time() + 3600})
+    monkeypatch.setattr(tproxy, "_auto_geph", ({host: tproxy.time.time() + 3600} if host != "chatgpt.com" else {}))
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
     monkeypatch.setattr(tproxy, "parse_sni", lambda _body: host)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
@@ -5556,7 +5557,7 @@ def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
     monkeypatch.setattr(
         tproxy,
         "runtime_route_circuit_allows",
-        lambda *_args, **_kwargs: True,
+        lambda *_args, **_kwargs: unavailable != "circuit",
     )
     monkeypatch.setattr(
         tproxy,
@@ -5567,10 +5568,12 @@ def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
     monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", lambda *_args: None)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "AUTO_GEPH_ENABLED", True)
-    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_up", unavailable != "down")
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_session_started", lambda: unavailable != "draining")
+    monkeypatch.setattr(tproxy, "_geph_session_finished", lambda: None)
     writer = Writer()
 
     asyncio.run(tproxy._handle_impl(Reader(), writer))
@@ -5578,8 +5581,8 @@ def test_runtime_learned_geo_exit_never_falls_direct_when_owned_backend_is_down(
     assert writer.closed is True
 
 
-def test_runtime_learned_exact_host_respects_explicit_geph_opt_out(monkeypatch):
-    host = "payments.example.com"
+@pytest.mark.parametrize("host", ["payments.example.com", "chatgpt.com"])
+def test_runtime_learned_exact_host_respects_explicit_geph_opt_out(monkeypatch, host):
 
     class Reader:
         def __init__(self):
@@ -5601,7 +5604,7 @@ def test_runtime_learned_exact_host_respects_explicit_geph_opt_out(monkeypatch):
     async def geph_must_not_run(*_args):
         raise AssertionError("explicit Geph opt-out attempted owned backend")
 
-    monkeypatch.setattr(tproxy, "_auto_geph", {host: tproxy.time.time() + 3600})
+    monkeypatch.setattr(tproxy, "_auto_geph", ({host: tproxy.time.time() + 3600} if host != "chatgpt.com" else {}))
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
     monkeypatch.setattr(tproxy, "parse_sni", lambda _body: host)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)

@@ -20760,6 +20760,9 @@ async def _handle_impl(reader, writer):
         policy = runtime_policy
         geph_owned = bool(_geph_owned)
         learned_owned_only = bool(policy.get("runtime_learned"))
+        owned_exit_required = bool(
+            GEPH_ENABLED and geph_owned and _geph_port == GEPH_OWNED_PORT
+        )
         geph_runtime_eligible = bool(
             not learned_owned_only
             or (geph_owned and _geph_port == GEPH_OWNED_PORT)
@@ -20817,18 +20820,21 @@ async def _handle_impl(reader, writer):
         )
         geph_now = time.time()
         geph_cooling = geph_now < _geph_backend_hold_until
-        # A runtime-learned exact host has already produced a complete direct
-        # denial and a usable payload through this owned Geph listener.  The
-        # global geo-exit cooldown is therefore not permission to expose a
-        # later connection to the proven-wrong direct route.  Try the verified
-        # owned listener under the normal first-payload guard; if it is not
-        # currently usable, fail this replay-safe request closed below.
+        # A verified owned exit remains the selected route during a global
+        # cooldown, for reviewed services as well as learned exact hosts.
+        # Readiness still requires the owned listener and per-route circuit;
+        # every stream must prove target bytes before committing. A failure
+        # must not silently switch later requests to the system route.
         geph_ready = bool(
             geph_runtime_eligible
             and (
-                _owned_geph_ready_for_semantic_confirmation()
-                if learned_owned_only
-                else geo_exit_backend_ready(now=geph_now)
+                (GEPH_ENABLED and _geph_up)
+                if owned_exit_required
+                else (
+                    _owned_geph_ready_for_semantic_confirmation()
+                    if learned_owned_only
+                    else geo_exit_backend_ready(now=geph_now)
+                )
             )
         )
         geph_failure = "tunnel down"
@@ -21001,10 +21007,10 @@ async def _handle_impl(reader, writer):
             # never receives a partial or semantically wrong direct response.
             writer.close()
             return
-        if learned_owned_only and GEPH_ENABLED:
-            # Persistent runtime learning is exact-host evidence that direct
-            # is semantically unusable.  A cooling, draining, or unavailable
-            # owned backend must never turn that evidence into a direct leak.
+        if owned_exit_required or (learned_owned_only and GEPH_ENABLED):
+            # Neither reviewed owned-exit selection nor persistent learning
+            # may become a system-route fallback when the owned backend is
+            # cooling, draining, circuit-blocked, or unavailable.
             # Closing before any upstream byte lets the browser reconnect once
             # the bounded owned-backend recovery has completed.
             writer.close()

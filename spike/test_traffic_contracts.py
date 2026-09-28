@@ -5212,8 +5212,9 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
     assert direct_calls == ["203.0.113.15"]
 
 
-def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch):
-    """A live SOCKS probe cannot bypass the owned backend failure hold."""
+@pytest.mark.parametrize("owned", [False, True])
+def test_geo_exit_backend_hold_retains_selected_exit(monkeypatch, owned):
+    """Owned exits survive cooldown; external system fallback stays unchanged."""
     isolate_runtime_state(monkeypatch)
     host = "ws.chatgpt.com"
     client, expected_first_flight = tls_client(host, block_after_hello=False)
@@ -5225,7 +5226,12 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
     async def no_backend(name, *args, **kwargs):
         await forbidden_backend(name, *args, **kwargs)
 
+    async def geph_route(*_args):
+        assert owned, "external cooldown must not redial"
+        return streaming_upstream_response(response)
+
     async def system_route(ip, port, first_flight):
+        assert not owned, "owned cooldown leaked to system route"
         assert (ip, port, first_flight) == (
             "203.0.113.19",
             443,
@@ -5238,7 +5244,7 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
-    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", owned)
     monkeypatch.setattr(tproxy, "_geph_backend_hold_until", hold_until)
     monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "early close")
     monkeypatch.setattr(tproxy.time, "time", lambda: 100.0)
@@ -5246,7 +5252,7 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
     monkeypatch.setattr(
         tproxy,
         "dial_via_geph",
-        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+        geph_route,
     )
     monkeypatch.setattr(
         tproxy,
@@ -5273,7 +5279,7 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response
-    assert direct_calls == ["203.0.113.19"]
+    assert direct_calls == ([] if owned else ["203.0.113.19"])
     assert tproxy.geph_active_session_count() == 0
     assert tproxy._geph_backend_hold_until == hold_until
     assert tproxy._geph_backend_hold_reason == "early close"

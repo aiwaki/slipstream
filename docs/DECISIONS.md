@@ -3,6 +3,18 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Owned reviewed geo routes retain their exit during cooldown
+
+When Geph is explicitly enabled and the exact owned listener is selected, both
+reviewed geo-exit services and runtime-learned hosts retain that route during
+cooldown, drain, circuit denial, and backend loss. A live owned listener may
+prove a new stream within the existing first-payload deadline despite a global
+cooldown; the per-route circuit and drain remain enforced. Failure closes the
+uncommitted request, never silently sends it through the system route. Explicit
+Geph opt-out and external/system-only configurations retain existing behavior.
+This does not extend Geph to Discord, YouTube, or unknown destinations, does not
+restart active sessions, and never replays a committed application request.
+
 ## Browser comparison same-origin redirects (candidate)
 
 Only the isolated V2 route comparison may follow at most three HTTP301/302/303/307/308
