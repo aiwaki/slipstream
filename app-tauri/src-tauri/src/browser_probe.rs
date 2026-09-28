@@ -146,7 +146,7 @@ struct ProbeJob {
 #[serde(deny_unknown_fields)]
 struct RoutePreflightProbeJob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    asset_host: Option<String>,
+    asset_hosts: Option<Vec<String>>,
     schema_version: u8,
     capability: String,
     host: String,
@@ -411,18 +411,18 @@ fn valid_dynamic_image_url(value: &str, host: &str) -> bool {
 }
 
 fn discover_dynamic_image(
-    websocket: &mut TcpStream, host: &str, deadline: Instant,
+    websocket: &mut TcpStream, hosts: &[String], deadline: Instant,
     termination: &AtomicBool,
 ) -> ProbeResult<Option<String>> {
     // The promise observes late hydration for at most three seconds, inside
     // the original job deadline. It never scrolls, clicks or authenticates.
-    let host_json = serde_json::to_string(host).map_err(|_| error("asset_host_invalid"))?;
+    let host_json = serde_json::to_string(hosts).map_err(|_| error("asset_host_invalid"))?;
     let expression = format!(r#"new Promise(resolve => {{
         const until = Date.now() + 3000;
         const scan = () => {{
             const found = Array.from(document.images).slice(0, 512).map(i => i.currentSrc || i.src)
                 .find(s => {{ try {{ const u = new URL(s); return s.length <= 1024 &&
-                    u.protocol === 'https:' && u.hostname === {host_json} &&
+                    u.protocol === 'https:' && {host_json}.includes(u.hostname) &&
                     !u.username && !u.password && !u.hash && (!u.port || u.port === '443');
                 }} catch (_) {{ return false; }} }});
             if (found || Date.now() >= until) resolve(found || '');
@@ -436,7 +436,7 @@ fn discover_dynamic_image(
         let Some(event) = websocket_read_json(websocket, deadline)? else { continue; };
         if event.get("id").and_then(Value::as_u64) == Some(6) {
             let value = event.pointer("/result/result/value").and_then(Value::as_str).unwrap_or("");
-            return Ok(valid_dynamic_image_url(value, host).then(|| value.to_string()));
+            return Ok(hosts.iter().any(|host| valid_dynamic_image_url(value, host)).then(|| value.to_string()));
         }
     }
     Ok(None)
@@ -537,7 +537,7 @@ fn run_claimed_probe(
         termination_requested,
         classification_deadline,
         matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2 | 3)),
-        match &job { ClaimedProbeJob::RoutePreflight(j) => j.asset_host.as_deref(), _ => None },
+        match &job { ClaimedProbeJob::RoutePreflight(j) => j.asset_hosts.as_deref(), _ => None },
     ) {
         Ok(observation) => observation,
         Err(failure) => {
@@ -743,8 +743,10 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
         2 | 3 if job.candidate_routes == [OWNED_GEPH_ROUTE] => BROWSER_COMPARE_MAX_DEADLINE_MS,
         _ => return Err(error("claimed_job_invalid")),
     };
-    if (job.schema_version == 3) != job.asset_host.is_some()
-        || job.asset_host.as_deref().is_some_and(|host| !canonical_host(host))
+    if (job.schema_version == 3) != job.asset_hosts.is_some()
+        || job.asset_hosts.as_ref().is_some_and(|hosts| hosts.is_empty() || hosts.len() > 4
+            || hosts.iter().any(|h| !canonical_host(h))
+            || hosts.iter().collect::<BTreeSet<_>>().len() != hosts.len())
         || job.schema_version == 0
         || job.capability.len() != CAPABILITY_HEX_CHARS
         || !job
@@ -857,7 +859,7 @@ fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<Claim
                 return Ok(Some(ClaimedProbeJob::PendingNavigation(job)));
             }
             if job.get("schema_version").and_then(Value::as_u64) != Some(3)
-                && job.get("asset_host").is_some() {
+                && job.get("asset_hosts").is_some() {
                 return Err(error("claimed_job_invalid"));
             }
             let job = serde_json::from_value::<RoutePreflightProbeJob>(job)
@@ -1316,7 +1318,7 @@ impl ChromeSession {
         termination_requested: &AtomicBool,
         classification_deadline: Instant,
         allow_document_redirects: bool,
-        asset_host: Option<&str>,
+        asset_hosts: Option<&[String]>,
     ) -> ProbeResult<NavigationObservation> {
         let port = read_devtools_port(&self.profile, self.uid)?
             .ok_or_else(|| error("devtools_unavailable"))?;
@@ -1465,9 +1467,9 @@ impl ChromeSession {
                 let observation = classify_loaded_document(&mut websocket, overall_deadline)
                     .unwrap_or(NavigationObservation::TerminalError);
                 if observation == NavigationObservation::Usable {
-                    if let Some(host) = asset_host {
+                    if let Some(hosts) = asset_hosts {
                         self.discovered_asset = discover_dynamic_image(
-                            &mut websocket, host, overall_deadline, termination_requested,
+                            &mut websocket, hosts, overall_deadline, termination_requested,
                         ).unwrap_or(None);
                     }
                 }
@@ -2377,7 +2379,7 @@ mod tests {
 
     fn route_preflight_job(now: u64) -> RoutePreflightProbeJob {
         RoutePreflightProbeJob {
-            asset_host: None,
+            asset_hosts: None,
             schema_version: 1,
             capability: "abcdef0123456789abcdef0123456789".to_string(),
             host: "unknown.example".to_string(),
@@ -2393,7 +2395,7 @@ mod tests {
         job.schema_version = 3;
         job.candidate_routes = vec![OWNED_GEPH_ROUTE.to_string()];
         assert!(validate_route_preflight_job(&job).is_err());
-        job.asset_host = Some("images.example.net".to_string());
+        job.asset_hosts = Some(vec!["images.example.net".to_string()]);
         assert!(validate_route_preflight_job(&job).is_ok());
         job.schema_version = 2;
         assert!(validate_route_preflight_job(&job).is_err());

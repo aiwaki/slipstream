@@ -875,14 +875,14 @@ it. Protected services and private destinations remain excluded.
 
 HTML enumeration cannot see images added after hydration. A learned parent's
 bounded continuation may therefore ask the existing owned browser worker to
-find one anonymous DOM image on one exact, fresh locally failing host. The host
+find one anonymous DOM image among at most four exact, fresh locally failing hosts. Each host
 must remain unknown/unlearned and satisfy all protected-service exclusions.
 The worker uses its disposable profile and owned Geph only; it never reads the
 user's tab, cookies, storage, account or request headers. A missing match conveys
 nothing. Matching a DOM image also conveys no route authority.
 
 This is an explicit V3 IPC contract, not a relaxation of V1/V2. The job adds
-`asset_host`; the result adds one `asset_url` (empty if absent). Only HTTPS,
+`asset_hosts`; the result adds one `asset_url` (empty if absent). Only HTTPS,
 exact-host, ASCII targets up to 1024 bytes, without credentials, fragment,
 nonstandard port, whitespace or backslashes are accepted. The total IPC cap
 stays 2048 bytes, with the existing capability/launch/PID/deadline/replay checks.
@@ -891,7 +891,7 @@ probe; it is excluded from repr, logs, status, routing keys and persisted state.
 Only the separately defined independent system/app-DNS/local-strategy and
 same-object owned-payload proof can learn the child. V3 never mints parent proof.
 
-Fresh transport evidence selects the discovery host; it is not failure proof
+Fresh transport evidence selects the discovery hosts; it is not failure proof
 for the discovered object. The worker waits at most three seconds for hydration
 within its original 20s deadline and inspects at most 512 DOM images without
 scrolling or interacting. Existing 8s HTML and 19s independent child budgets

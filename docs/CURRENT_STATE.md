@@ -10,7 +10,7 @@ file.
 
 ## Current Checkpoint
 
-2026-09-28 dynamic resource continuation IN PROGRESS (not installed):
+2026-09-28 dynamic resource continuation 6f43373 INSTALLED; browser gate pending:
 - Installed a811 remains the qualified static-resource baseline. Disposable
   Playwright resource-check through local1080 reproduces three broken review
   images, anonymously hydrated on d3uzrofyuc50h6.cloudfront.net, absent from
@@ -19,8 +19,25 @@ file.
 - Candidate adds explicit bounded V3 anonymous exact-host DOM image discovery,
   then the existing independent child proof. No site exceptions or parent
   authority inheritance. V1/V2 remain strict; target transient only.
-- Focused contract/cleanup tests and Rust worker tests underway. Build/install
-  and real dynamic-image recovery are NOT yet verified. User AGENTS untouched.
+- Focused128 Python +38 Rust worker PASS; additional52 integration PASS.
+  Canonical build12137 terminal0 PASS. Native install10590 terminal0 confirms
+  exact source/root daemon; learning retained. New replacement script CONSUMED,
+  NEVER REPLAY: output/recovery-replacement-6f43373/replace-exact-bundle.sh.
+  App backup /Applications/.Slipstream.before-6f43373.app and private snapshot
+  /private/var/tmp/slipstream-replacement-20260928.6f43373 retained.
+  Installed verifier74579 terminal0 overallPASS (complete PNG all3 routes).
+  Exact CI all24 success/4 skipped. Real dynamic-image recovery not yet qualified.
+- Live checks also show expired parent learning and an interrupted owned route:
+  native Chrome fresh root17:32 had usable comparison then commit_refused, with
+  owned SOCKS transition at17:32:30. No guard was weakened. Parent later used Geph.
+  Latest API failure was newer than image failure, starving single-host dynamic
+  discovery. Working V3 refinement admits up to4 fresh exact candidates; one
+  anonymous image remains the only result and still requires independent proof.
+  Next build/install refinement and prove real images. resource-check browser
+  session remains open (must close before replacement).
+  Source6f43373cfcdf46273a4de594aaf18c8451d694ce; tree
+  98a21c75a593fe101fa9a987aa48b411e0071953049b1d078090a1a555042d2e.
+  User AGENTS untouched.
 
 2026-09-28 installed a81107c1753f191f4d90cb19fa5bb4cacaf43d0b:
 - Native install99263 terminal0 confirmed; script CONSUMED, NEVER REPLAY.

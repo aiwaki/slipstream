@@ -14,7 +14,7 @@ from test_tproxy_doh import reset_smart_dns_state  # noqa: F401
 
 def job():
     return contract.RoutePreflightJobV3('a'*32, 'parent.example', ('owned_geph',),
-                                      1000, 21000, asset_host='images.example.net')
+                                      1000, 21000, asset_hosts=('images.example.net',))
 
 
 def result(url='https://images.example.net/dynamic.png?Signature=ephemeral'):
@@ -56,9 +56,9 @@ def test_candidate_requires_fresh_unprotected_unlearned_failure(monkeypatch, lea
     monkeypatch.setattr(tproxy, '_local_partial_stalls', {
         'stale.example': {'system': now-10000}, 'discord.com': {'system': now},
         'googlevideo.com': {'system': now}, learned_parent: {'system': now}})
-    assert tproxy._dynamic_asset_failure_candidate(learned_parent) is None
+    assert tproxy._dynamic_asset_failure_candidates(learned_parent) == ()
     tproxy._local_partial_stalls['images.example.net'] = {'system': now}
-    assert tproxy._dynamic_asset_failure_candidate(learned_parent) == 'images.example.net'
+    assert tproxy._dynamic_asset_failure_candidates(learned_parent) == ('images.example.net',)
 
 
 def test_dynamic_hint_runs_independent_child_proof_and_is_forgotten(monkeypatch, learned_parent):
@@ -67,7 +67,7 @@ def test_dynamic_hint_runs_independent_child_proof_and_is_forgotten(monkeypatch,
     asset = tproxy.bootstrap_asset_preflight.ephemeral_dynamic_asset(result().asset_url, 'images.example.net')
     async def browser(j, peer, deadline, **kw):
         assert isinstance(j, contract.RoutePreflightJobV3)
-        assert j.asset_host == 'images.example.net'
+        assert j.asset_hosts == ('images.example.net',)
         kw['asset_sink'].append(asset)
         return None  # discovery MUST NOT need or generate parent proof
     monkeypatch.setattr(tproxy, '_run_headless_owned_geph_preflight', browser)
@@ -100,7 +100,7 @@ def test_real_broker_claim_is_bound_and_hint_is_not_route_authority(monkeypatch,
     assert tproxy._submit_browser_probe_result(asdict(r), '0123456789abcdef', now=now)
     assert future.result().asset_url == r.asset_url
     assert not tproxy._submit_browser_probe_result(asdict(r), '0123456789abcdef', now=now)
-    assert not tproxy._auto_geph_learned_exact_host(j.asset_host)
+    assert not tproxy._auto_geph_learned_exact_host(j.asset_hosts[0])
 
 
 def test_dynamic_cancellation_forgets_targets_and_releases_lease(monkeypatch, learned_parent):
@@ -118,3 +118,19 @@ def test_dynamic_cancellation_forgets_targets_and_releases_lease(monkeypatch, le
     asyncio.run(scenario())
     assert not tproxy._route_preflight_execution_leases
     with pytest.raises(RuntimeError): asset.build_range_request()
+
+
+def test_newer_api_failure_cannot_starve_older_image_hint(monkeypatch, learned_parent):
+    from dataclasses import replace
+    now = time.monotonic()
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {
+        'api.example.net': {'system': now}, 'images.example.net': {'system': now-1}})
+    hosts = tproxy._dynamic_asset_failure_candidates(learned_parent)
+    assert hosts == ('api.example.net', 'images.example.net')
+    j = contract.parse_route_preflight_job_v3(json.dumps(asdict(replace(job(), asset_hosts=hosts))))
+    r = contract.parse_route_preflight_result_v3(json.dumps(asdict(result())))
+    assert contract.validate_route_preflight_result_v1(j, r, now_unix_ms=1600).accepted
+    for bad in ([], list(hosts)*3, ['images.example.net']*2):
+        payload = asdict(j); payload['asset_hosts'] = bad
+        with pytest.raises(contract.RoutePreflightError):
+            contract.parse_route_preflight_job_v3(json.dumps(payload))

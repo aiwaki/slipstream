@@ -95,7 +95,7 @@ class RoutePreflightResultV2(RoutePreflightResultV1):
 @dataclass(frozen=True)
 class RoutePreflightJobV3(RoutePreflightJobV1):
     schema_version: int = 3
-    asset_host: str = ""
+    asset_hosts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,12 +123,17 @@ def dynamic_asset_host(value):
 
 
 def parse_route_preflight_job_v3(payload):
-    value = _object(payload, _JOB_FIELDS | {"asset_host"}, 3)
-    asset_host = _host(value.pop("asset_host"))
+    value = _object(payload, _JOB_FIELDS | {"asset_hosts"}, 3)
+    hosts = value.pop("asset_hosts")
+    if not isinstance(hosts, list) or not 1 <= len(hosts) <= 4:
+        raise RoutePreflightError("invalid_asset_hosts")
+    hosts = tuple(_host(h) for h in hosts)
+    if len(set(hosts)) != len(hosts):
+        raise RoutePreflightError("invalid_asset_hosts")
     value["schema_version"] = 2
     base = parse_route_preflight_job_v2(json.dumps(value))
     return RoutePreflightJobV3(**{**base.__dict__, "schema_version": 3,
-                                 "asset_host": asset_host})
+                                 "asset_hosts": hosts})
 
 
 def parse_route_preflight_result_v3(payload):
@@ -272,7 +277,7 @@ def validate_route_preflight_result_v1(
         or job.capability != result.capability
         or job.host != result.host
         or (job.schema_version == 3 and result.asset_url
-            and dynamic_asset_host(result.asset_url) != job.asset_host)
+            and dynamic_asset_host(result.asset_url) not in job.asset_hosts)
     ):
         reason = REASON_BINDING_MISMATCH
     elif result.candidate_route not in job.candidate_routes:

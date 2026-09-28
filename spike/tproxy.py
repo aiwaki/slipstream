@@ -7822,7 +7822,7 @@ def _route_preflight_job_payload(job):
         "deadline_unix_ms": job.deadline_unix_ms,
     }
     if isinstance(job, route_preflight.RoutePreflightJobV3):
-        payload["asset_host"] = job.asset_host
+        payload["asset_hosts"] = list(job.asset_hosts)
     return payload
 
 
@@ -8094,7 +8094,7 @@ async def _run_admitted_headless_owned_geph_preflight(
             # Discovery can never mint a parent proof or commit a child route.
             if asset_sink is not None and result.asset_url:
                 asset = bootstrap_asset_preflight.ephemeral_dynamic_asset(
-                    result.asset_url, job.asset_host)
+                    result.asset_url, route_preflight.dynamic_asset_host(result.asset_url))
                 if asset is not None:
                     asset_sink.append(asset)
             return None
@@ -10253,7 +10253,7 @@ async def _wait_for_pending_bootstrap_children(host, address):
     return min(time.monotonic(), wait_deadline) + UNKNOWN_RECOVERY_GEPH_RESERVE
 
 
-def _dynamic_asset_failure_candidate(parent):
+def _dynamic_asset_failure_candidates(parent):
     # Transport failures select a discovery target, never route authority.
     now = time.monotonic()
     with _auto_geph_lock:
@@ -10262,19 +10262,19 @@ def _dynamic_asset_failure_candidate(parent):
                       for host, stages in _local_partial_stalls.items()
                       if stages and host != parent and _auto_geph_base_host_allowed(host)
                       and not _auto_geph_learned_exact_host(host)]
-    return max(candidates)[1] if candidates else None
+    return tuple(host for _, host in sorted(candidates, reverse=True)[:4])
 
 
 async def _discover_dynamic_parent_asset(parent, address, sink):
-    candidate = _dynamic_asset_failure_candidate(parent)
-    if candidate is None:
+    candidates = _dynamic_asset_failure_candidates(parent)
+    if not candidates:
         return
     issued = int(time.time() * 1000)
     job = route_preflight.RoutePreflightJobV3(
         capability=secrets.token_hex(16), host=parent, candidate_routes=("owned_geph",),
         issued_at_unix_ms=issued,
         deadline_unix_ms=issued + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS,
-        asset_host=candidate,
+        asset_hosts=candidates,
     )
     await _run_headless_owned_geph_preflight(
         job, None, time.monotonic() + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS / 1000,
@@ -16969,7 +16969,7 @@ def _pending_navigation_probe_worker_claimed(job, launch_id, now=None):
         return False
     token = job.get("capability")
     if set(job) in (pending_navigation_probe_runtime._ROUTE_PREFLIGHT_JOB_FIELDS,
-                    pending_navigation_probe_runtime._ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_host"}):
+                    pending_navigation_probe_runtime._ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_hosts"}):
         with _route_preflight_lock:
             capability = _route_preflight_browser_capabilities.get(token)
             if (
