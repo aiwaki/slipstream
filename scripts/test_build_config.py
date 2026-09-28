@@ -87,6 +87,12 @@ class BuildConfigTests(unittest.TestCase):
             env=env,
         )
 
+    def test_geph_source_regressions_run_before_vendor_build(self):
+        workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()
+        test = 'cargo test --manifest-path "$source_root/Cargo.toml" --locked --features aws_lambda --lib'
+        self.assertIn(test, workflow)
+        self.assertLess(workflow.index(test), workflow.index('cargo install'))
+
     def test_local_build_disables_updater_artifacts(self) -> None:
         config = json.loads(
             (ROOT / "app-tauri/src-tauri/tauri.local.conf.json").read_text()
