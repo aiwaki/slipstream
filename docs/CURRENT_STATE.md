@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+2026-09-28 cb8f093 INSTALLED and canonical installed verifier PASS:
+- Native replacement81290 terminal0 confirmed exact source/root daemon; learning
+  retained. output/recovery-replacement-cb8f093/replace-exact-bundle.sh is
+  CONSUMED, NEVER REPLAY. App reopened; live daemon61166.
+- output/cached-recovery-installed-verification.log: overallPASS, installed
+  attestation and complete PNG payloads through proxyIPv4/proxyIPv6/transparent.
+- CI36435011052 failed-job rerun completed24success/4skipped. Initial lifecycle
+  ipc_unavailable/drain failure remains an unexplained intermittent result;
+  a passing rerun is not a causal fix. Focused67+23 tests reused.
+- User requested source-backed diagnostic map and explanation of Codex reconnects.
+  docs/DIAGNOSTIC_MAP.md records flow, symptom-to-symbol checks and open gaps.
+- Codex responses_retry confirms actual model-stream disconnects14:14-15:08UTC;
+  remote-control and usage/pubsub failures are separate observations. Latest
+  resets followed the app stop around20:06local, but earlier reconnect cause is
+  NOT established. Do not attribute all events to replacement or general Internet.
+  Private evidence output/reconnecting-20260928/. Never publish raw logs.
+- Cached-parent trigger browser qualification and generic API JSON/XHR delivery
+  remain open. Earlier lessons API truncation and blog XHR failure persist in
+  saved browser evidence despite complete dynamic images. Next correlate daemon
+  termination causes with Codex timestamps; qualify cached recovery and fix API
+  completeness based on same-object evidence. No all-sites guarantee.
+
 2026-09-28 c1f56c0 INSTALLED; dynamic images now qualified:
 - Native3790 terminal0; replacement script CONSUMED, NEVER REPLAY. Exact
   installed verifier56742 terminal0 overallPASS, complete Discord PNGs all3

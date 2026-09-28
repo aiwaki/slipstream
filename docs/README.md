@@ -9,6 +9,7 @@ support notes here.
 | Need | Read |
 |---|---|
 | Local setup, safe tests, and build instructions | [../DEVELOPMENT.md](../DEVELOPMENT.md) |
+| Symptom-to-code diagnostic map and evidence criteria | [DIAGNOSTIC_MAP.md](DIAGNOSTIC_MAP.md) |
 | System boundaries and data flow | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Contribution workflow | [../CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Private vulnerability reporting and security scope | [../SECURITY.md](../SECURITY.md) |
