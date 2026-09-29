@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+2026-09-29 first-navigation child recovery gap FIXED IN SOURCE, not installed:
+- Physical Chrome Playwright session slipstream-reserve-check opened canonical
+  Chrome (CUA Chrome unavailable). /en has7 stylesheets but3 broken hero images
+  (naturalWidth0); dynamic images also pending. Do not call root-only load a pass.
+- Browser daemon evidence15:13:20-40+0500 proves root admitted, provenance accepted,
+  owned proof committed. Subsequent CDN/API local partial-record failures are
+  confirmation_not_scheduled. Current output/reconnecting-20260929/browser-private.log.
+- First root proof already learns parent, but only a later owned parent relay
+  previously registered _recent_asset_parents. Thus first-page child failures
+  could not schedule the existing recovery path. Register hint after selected
+  proof and completed owned HTML asset discovery in _run_initial_route_preflight.
+- Regression RED old/GREEN new: proven/unproven root distinction and actual
+  later child scheduling without a second parent relay;38 affected tests pass.
+  Child route authority still requires its own object proof; no new host policy.
+- Parallel same-object /en: local HTTP1080 truncates17898/243791bytes (curl18),
+  owned SOCKS9954 complete243791bytes. Curl provenance refusal is expected and
+  cannot stand in for browser qualification. Original reserve code remains installed.
+- Next build canonical candidate from new source, required CI, normal replacement
+  once; validate FIRST browser navigation and children. Existing Codex reconnect,
+  generic API, startup baseline and restart-attestation gaps remain OPEN.
+
+
 2026-09-29 reserve7af6f5c9 INSTALLED; qualification FAILED startup baseline:
 - Exact source7af6f5c9c25cbb2cba35e5deee60db58df66a1ba installed63001 exit0.
   NEW transaction output/recovery-replacement-reserve-7af6f5c9/replace-exact-bundle.sh

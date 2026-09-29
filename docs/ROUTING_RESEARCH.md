@@ -3135,3 +3135,19 @@ server that stalls the first opening proves RED old/GREEN new behavior.
 A temporary proxy using the changed dial completed8/9 responses; one still failed.
 This is bounded recovery coverage, not evidence that all backend faults or
 post-commit stream resets are solved. No external Geph or DNS/proxy settings changed.
+
+
+## 2026-09-29 First navigation did not register its proven HTML parent
+
+Physical Chrome reproduced a restored root with broken CDN hero images.
+The private daemon log records root provenance accepted and proof committed,
+then independent child partial-record failures without scheduled confirmation.
+`_run_initial_route_preflight` learns the parent but previously only the later
+`_check_learned_parent_assets` path registered `_recent_asset_parents`. On a first
+navigation there need not be another parent connection, so later child failures
+had no parent hint. Register that bounded hint after successful root proof and
+completed owned HTML asset discovery. It neither learns a child nor broadens
+routing policy; existing fresh failure, cooldown, TTL, coalescing and independent
+object proof remain required. RED/GREEN tests include subsequent scheduling
+without manually registering a parent or opening another parent connection.
+Physical browser qualification of this source correction remains pending.

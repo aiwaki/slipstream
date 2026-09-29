@@ -77,6 +77,9 @@ def test_owned_parent_retains_child_lease_and_requires_independent_child_proof(m
             tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING, safe_incomplete=True)))
     assert bool(claim) == parent_proven
     assert calls == (['images.example.net'] if parent_proven else [])
+    assert (host in tproxy._recent_asset_parents) == parent_proven
+    if parent_proven:
+        assert tproxy._recent_asset_parents[host][0] == '8.8.8.8'
     assert not tproxy._auto_geph_learned_exact_host('images.example.net')
     with pytest.raises(RuntimeError):
         asset.build_range_request()
@@ -215,3 +218,26 @@ def test_live_relay_runs_concurrently_and_drains_discovery(monkeypatch, learned_
             {}, learned_parent, object(), Writer(), (object(), object(), b'payload'),
             exact_address='8.8.8.8'), 1)
     asyncio.run(scenario())
+
+
+def test_first_proven_navigation_can_schedule_later_child_recovery(monkeypatch):
+    # Exercise actual root proof/commit first, without a second parent relay or
+    # a test-only call to _remember_recent_asset_parent.
+    test_owned_parent_retains_child_lease_and_requires_independent_child_proof(
+        monkeypatch, True)
+    now = time.monotonic()
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {
+        'images.example.net': {'system': now}})
+    monkeypatch.setattr(tproxy, '_learned_parent_asset_checks', {})
+    monkeypatch.setattr(tproxy, '_learned_parent_recovery_tasks', {})
+    checks = []
+    async def check(host, address):
+        checks.append((host, address))
+        assert not tproxy._auto_geph_learned_exact_host('images.example.net')
+    monkeypatch.setattr(tproxy, '_check_learned_parent_assets', check)
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery('images.example.net')
+        await asyncio.gather(*tproxy._learned_parent_recovery_tasks.values())
+    asyncio.run(scenario())
+    assert checks == [('parent.example', '8.8.8.8')]
+    assert not tproxy._auto_geph_learned_exact_host('images.example.net')

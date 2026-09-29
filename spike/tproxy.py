@@ -10936,6 +10936,12 @@ async def _run_initial_route_preflight(
                         timeout=max(0.001, deadline - time.monotonic()) + 0.1,
                     )
                     if selected:
+                        if owned_assets:
+                            # The first navigation already proved this HTML parent.
+                            # Child failures may arrive before any second parent
+                            # connection; retain the same bounded recovery hint now.
+                            # Children still require their own complete object proof.
+                            _remember_recent_asset_parent(h, str(address))
                         eligible_asset, eligible_asset_is_cross_origin = (
                             _select_route_preflight_bootstrap_asset(owned_assets, h)
                         )
