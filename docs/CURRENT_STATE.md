@@ -10,7 +10,33 @@ file.
 
 ## Current Checkpoint
 
-2026-09-29 new-opening reserve PREPARED, not installed:
+2026-09-29 reserve7af6f5c9 INSTALLED; qualification FAILED startup baseline:
+- Exact source7af6f5c9c25cbb2cba35e5deee60db58df66a1ba installed63001 exit0.
+  NEW transaction output/recovery-replacement-reserve-7af6f5c9/replace-exact-bundle.sh
+  is now CONSUMED, NEVER REPLAY. Prior app/private backups and learning retained.
+- CI36548253705 success; required PR376 checks green. Local build/retained verifier
+  pass. Tree191f903b4d329ed53628cff09c79fbfc2f1311120b55ef396a1ba6687ac8823f,
+  daemon3622c3e152edbbc6891e8b74113f5d5ad0da611d5b6998e1d25052164bcb965c.
+- App reopened, but canonical installed32856 and57219 fail: StatusV2 recovering.
+  Not a success claim. Initial daemon13335 dormant, private PF paused because
+  baseline_https_unavailable; Geph off and resume intent retained.
+- Private log: before-PF example.com/apple both OK14:39:33+0500; after-PF both
+  probe_process_unavailable14:39:38 -> rollback and blocked. This reason conflates
+  subprocess timeout/OSError; no proven root cause yet. Quit resume correctly
+  waits for active/PF-ready and thus does not start Geph in this state.
+- Single owned root launchctl kickstart64969 exit0 recovered active state/PF
+  and owned Geph (PID16170,4 sessions at09:50UTC). Do not repeat blindly.
+- Canonical30032 AFTER restart fails attestation PID mismatch: install witness
+  still binds pre-restart PID. Never edit attestation to make it green. Need
+  supported lifecycle re-attestation or verifier treatment of legitimate restarts.
+- Product failure remains: correct HTTP1080 TestGlider returns200 but truncates
+  at13037 bytes/curl18; Codex retries09:48:58,09:50:03,09:51:49UTC persist.
+  Installed reserve does NOT complete the requested reconnect repair.
+- Next diagnose committed-stream EOF separately from new-opening failure;
+  investigate baseline postflight timeouts and safe restart attestation lifecycle.
+  Last successful state active; do not leave service disabled or replay installer.
+- Chrome CUA unavailable. HTTP1080 TestGlider still truncated13037bytes/curl18;
+  other short probe success does not clear the product gate.
 - Current source working tree adds a delayed second SOCKS opening only for
   verified owned Geph. First flight goes to one winner only; losing openings
   are cancelled/closed. Existing streams and external listeners unchanged.
