@@ -18876,15 +18876,8 @@ def _geph_socks_works(port, timeout=2.5):
         return False
 
 
-async def dial_via_geph(host, port, first_flight):
-    """Open a SOCKS5 CONNECT to host:port through geph's local listener and send
-    the buffered first flight PLAIN (the tunnel handles censorship — no desync).
-    CONNECT-by-domain lets geph resolve + exit abroad, sidestepping RU DNS poison
-    and the geo-block entirely. Returns (reader, writer) to geph or None on any
-    failure (caller then falls back to local desync)."""
-    port_socks = _geph_port
-    if not port_socks:
-        return None
+async def _open_geph_socks(host, port, port_socks):
+    """Open one tunnel without sending any application bytes."""
     try:
         gr, gw = await asyncio.wait_for(
             asyncio.open_connection("127.0.0.1", port_socks), timeout=3)
@@ -18901,7 +18894,7 @@ async def dial_via_geph(host, port, first_flight):
         gw.write(b"\x05\x01\x00\x03" + bytes([len(hb)]) + hb + struct.pack("!H", port))
         await gw.drain()
         rep = await asyncio.wait_for(gr.readexactly(4), 8)   # VER REP RSV ATYP
-        if rep[1] != 0x00:
+        if rep[0] != 0x05 or rep[1] != 0x00 or rep[2] != 0x00:
             raise IOError(f"socks5 connect rep={rep[1]}")
         atyp = rep[3]
         if atyp == 0x01:
@@ -18911,9 +18904,9 @@ async def dial_via_geph(host, port, first_flight):
             await gr.readexactly(ln[0])
         elif atyp == 0x04:
             await gr.readexactly(16)
+        else:
+            raise IOError("invalid socks5 address type")
         await gr.readexactly(2)                        # bound port
-        gw.write(first_flight)                         # original ClientHello, plain
-        await gw.drain()
         connected = True
         return gr, gw
     except asyncio.CancelledError:
@@ -18923,6 +18916,66 @@ async def dial_via_geph(host, port, first_flight):
     finally:
         if not connected:
             await _close_stream_writer(gw)
+
+
+async def _open_owned_geph_with_reserve(host, port, port_socks):
+    """Race a slow opening against one reserve; never replay application data.
+
+    Only owned Geph uses this policy. The caller's absolute first-payload
+    deadline still bounds both attempts. Existing tunnels are never restarted.
+    """
+    tasks = [asyncio.create_task(_open_geph_socks(host, port, port_socks))]
+    winner = None
+    try:
+        done, _ = await asyncio.wait(tasks, timeout=0.35)
+        if done:
+            winner = tasks[0].result()
+            if winner is not None:
+                return winner
+        tasks.append(asyncio.create_task(_open_geph_socks(host, port, port_socks)))
+        pending = {t for t in tasks if not t.done()}
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in tasks:
+                if task in done and task.result() is not None:
+                    winner = task.result()
+                    return winner
+        return None
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, tuple) and result is not winner:
+                await _close_stream_writer(result[1])
+
+
+async def dial_via_geph(host, port, first_flight):
+    """Open a target tunnel, then send the buffered first flight exactly once."""
+    port_socks = _geph_port
+    if not port_socks:
+        return None
+    if _geph_owned and port_socks == GEPH_OWNED_PORT:
+        upstream = await _open_owned_geph_with_reserve(host, port, port_socks)
+    else:
+        upstream = await _open_geph_socks(host, port, port_socks)
+    if upstream is None:
+        return None
+    reader, writer = upstream
+    sent = False
+    try:
+        writer.write(first_flight)
+        await writer.drain()
+        sent = True
+        return reader, writer
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return None
+    finally:
+        if not sent:
+            await _close_stream_writer(writer)
 
 
 async def _dial_via_geph_first_payload(

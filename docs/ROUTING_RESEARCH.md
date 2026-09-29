@@ -3119,3 +3119,19 @@ alongside the relay and uses the existing independent object proof. It retains
 and drains its scheduling lease/thread, coalesces pooled connections across
 addresses, and stores only a bounded host cooldown. Focused Python integration
 99pass and discovery/lifecycle14pass; live candidate qualification remains due.
+
+
+## 2026-09-29 Geph new-opening reserve
+
+The selected Montreal path failed2/6 public opens; an isolated Zurich process
+completed6/6. Changing the persistent owned process to Zurich did not eliminate
+opening timeouts. Therefore exit geography alone does not explain the defect.
+The old client dial uses one SOCKS opening, despite multiple Geph sessions.
+The new owned-only dial gives a slow opening one reserve after350ms and sends
+the buffered first flight only to the winning tunnel. Both attempts remain within
+the caller's existing deadline. Losers are closed, cancellation is propagated,
+and no established stream or application request is replayed. A real local SOCKS
+server that stalls the first opening proves RED old/GREEN new behavior.
+A temporary proxy using the changed dial completed8/9 responses; one still failed.
+This is bounded recovery coverage, not evidence that all backend faults or
+post-commit stream resets are solved. No external Geph or DNS/proxy settings changed.

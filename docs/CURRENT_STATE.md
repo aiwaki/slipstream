@@ -10,6 +10,26 @@ file.
 
 ## Current Checkpoint
 
+2026-09-29 new-opening reserve PREPARED, not installed:
+- Current source working tree adds a delayed second SOCKS opening only for
+  verified owned Geph. First flight goes to one winner only; losing openings
+  are cancelled/closed. Existing streams and external listeners unchanged.
+- Real local SOCKS stalled-opening regression RED against HEAD dial implementation,
+  GREEN patched.170 existing Geph/geo tests and8 new tests pass;36 traffic
+  contracts pass. Cancellation, simultaneous success and single-send covered.
+- Isolated Zurich6/6 versus Montreal4/6 initially looked better; production Zurich
+  still timed out, so a city switch is NOT the fix. Current app-owned exit is
+  ch|Zurich, backup /private/var/tmp/slipstream-before-zurich-ujvazxrc.
+- Actual temporary proxy using new reserve:8/9 complete public responses, one
+  opening failed. ChatGPT403 is unauthenticated transport evidence only, not a
+  successful model stream. source reserve-live.json under output/reconnecting-20260928.
+- Earlier zurich-installed-probes.json used WRONG SOCKS protocol on HTTP1080:
+  discard those1080 measurements. Correct HTTP proxy TestGlider still truncated
+  at13037 bytes (curl18). Direct9954 timeout results remain valid.
+- Remaining gates: real Codex sustained stream, generic resource completeness;
+  reserve is a bounded mitigation, not proof remote Geph failures are cured.
+
+
 2026-09-29 ownership/liveness correction37dc0e2c INSTALLED:
 - Exact source37dc0e2c056901d9060315e27b8d2e55572fc521 native88725 exit0,
   root daemon matchesb0bab36d..., tree877f045c... . Script
