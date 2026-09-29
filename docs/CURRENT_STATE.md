@@ -10,24 +10,39 @@ file.
 
 ## Current Checkpoint
 
-2026-09-28 follow-up ownership/liveness fix READY FOR BUILD:
-- Source458d710 installed79568 exit0, canonical installed46271 exit0PASS.
-  output/recovery-replacement-owned-cooldown-458d710/replace-exact-bundle.sh
-  is CONSUMED. User screenshot proves Codex retries exhausted after installation.
-- Fresh daemon log75282 native read success still shows system_plain following
-  Geph failure. Root cause: probe_geph cleared _geph_owned on session RPC miss
-  even when listener identity was freshly verified. Earlier handler-only guard
-  therefore lost its condition. Do NOT claim458d710 fixed reconnects.
-- Regression monitor-probe -> handler fails upstream for reviewed chatgpt;
-  ownership test also fails. Correction separates verified process ownership,
-  liveness, and retained route choice. Identity loss still revokes permission
-  to use listener but does not permit silently going direct. Explicit opt-out
-  clears route choice; no external listener becomes authorized.
-- Focused47 handler/monitor tests and36 traffic contracts PASS, including actual
-  monitor-to-handler sequence, identity loss, circuit/drain and opt-out.
-- Next build/install exact correction, real post-start observation. External exit
-  failures and already-committed stream recovery remain unproven; do not promise
-  zero reconnects from file probes. Prior Geph r3 cascade fix stays in bundle.
+2026-09-29 ownership/liveness correction37dc0e2c INSTALLED:
+- Exact source37dc0e2c056901d9060315e27b8d2e55572fc521 native88725 exit0,
+  root daemon matchesb0bab36d..., tree877f045c... . Script
+  output/recovery-replacement-ownership-37dc0e2c/replace-exact-bundle-r3.sh
+  is CONSUMED, NEVER REPLAY. Prior app/private backups and learning retained.
+- Launched10:02:59+0500 (05:02:59UTC). Canonical npm verify:local-install28785
+  exit0 overallPASS, live launchd4680, complete PNG traffic on all3 routes.
+  Evidence output/reconnecting-20260928/ownership-installed.log.
+- Exact required PR376 CI all green.170 Geph/geo tests and36 traffic contracts
+  passed; monitor->handler regression RED before correction, GREEN after.
+- Fix separates listener identity, session readiness and remembered route choice.
+  A failed liveness probe cannot erase verified ownership; identity loss revokes
+  dial permission but does not send selected geo traffic direct. Explicit disable
+  clears selection. No foreign Geph/Telegram process is modified.
+- Prior458d710 handler-only correction FAILED real Codex qualification: user
+  retries exhausted and system_plain still observed after monitor cleared ownership.
+  Do not treat prior file checks as recovery proof. New observation pending/short;
+  sustained user model stream, cached-parent browser and generic API gates remain.
+- Installation80239 and r2/26485 stopped before mutation: overly broad1443 guard,
+  then externally running TG WS Proxy exited while approval was pending. Final r3
+  accepts no1443 listener OR verified separate TG WS Proxy UID/executable, retaining
+  owned-process,1080,launchd,PF and exact artifact checks. All old scripts terminal.
+- Post-start ownership-observation.json: initial system_plain ends05:02:59-03:17UTC
+  (startup before first owned selection), then Geph EOF/reset. Codex retries recur
+  from05:04 through05:07UTC. New build has NOT cleared user symptom.
+- Owned Geph control lists6 sessions via2 bridges to selected ca|Montreal exit.
+  Log05:06-07 shows17 new-tunnel timeouts and4 inner bridge connection failures,
+  with no shared early-dead teardown. Selection preference is ca|Montreal.
+  External/backend path remains failing; no alternate exit trial performed.
+- Next compare an isolated owned alternate-exit path without changing external
+  Geph or exposing credentials; then address retry/selection based on evidence.
+  External exit failures and committed encrypted stream recovery remain unproven;
+  never promise universal zero reconnects. Geph r3 cascade correction remains.
 
 2026-09-28 Geph r3 INSTALLED; timeout isolation verified, reconnect qualification OPEN:
 - Exact app source6673f9264eb5d90e96bd9b6871213a3a48a1b4ca installed by native
