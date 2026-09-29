@@ -3151,3 +3151,26 @@ routing policy; existing fresh failure, cooldown, TTL, coalescing and independen
 object proof remain required. RED/GREEN tests include subsequent scheduling
 without manually registering a parent or opening another parent connection.
 Physical browser qualification of this source correction remains pending.
+
+
+### 2026-09-29: child proof admitted during an in-flight CDN root probe
+
+Installed842d74e5 passed canonical installation and exact-source CI, but a fresh
+Chrome session still had two failed TestGlider hero images (the third decoded)
+and three failed dynamic images. This does not satisfy browser qualification.
+Private evidence: `output/reconnecting-20260929/first-parent-private.log` and
+sanitized resource report `first-parent-browser-resources.txt` in that directory.
+At15:33:10+0500 the CDN root preflight started, at15:33:15 it returned usable,
+and at15:33:17 the independent bootstrap object committed its owned route.
+The entry-only child join misses a child nonce created during the root probe.
+
+`test_child_started_during_root_probe_is_joined_before_release` reproduces that
+ordering with events rather than network timing. All three cases fail before
+repair: committed/ready, no commitment, and lost owned readiness. The root now
+rechecks existing exact-edge children after its observation and before releasing
+the held ClientHello or publishing a usable-root cache. Waiting supplies no route
+authority; only an independently committed route with current owned readiness
+(or a valid local claim) is eligible. Joined observations never publish root
+health. Existing deadlines, cancellation ownership and protected-host admission
+remain unchanged.76 child/parent/dynamic and94 routing tests pass; physical
+qualification of the new source remains outstanding.

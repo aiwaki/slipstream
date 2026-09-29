@@ -10,7 +10,34 @@ file.
 
 ## Current Checkpoint
 
-2026-09-29 first-navigation child recovery gap FIXED IN SOURCE, not installed:
+2026-09-29 late-child join fix IN SOURCE; next candidate build required:
+- Installed842d74e5 canonical verification PASS, daemon37022 active. Full CI36555036049
+  now SUCCESS. Replacement first-parent-842d74e5 consumed; never replay.
+- New Chrome profile slipstream-first-parent-check reached /en with7 stylesheets;
+  two hero images failed, one decoded2340px;3 dynamic signed images failed. Lazy
+  offscreen pending images are not counted as failures. Full browser gate FAILED.
+- Log15:33:10 CDN root admitted; root usable15:33:15, child object independently
+  committed15:33:17. Thus a root probe can start before the child's nonce exists
+  and finish before its independent proof, releasing the first request too early.
+- Regression3 cases RED (usable root released before late proof); now rejoin an
+  exact-edge child admitted during the root probe before publishing cache/releasing
+  ClientHello. Recheck committed route and current owned readiness; boolean future
+  result alone grants nothing. No encrypted request replay or host-policy expansion.
+-76 pending-child/owned-parent/dynamic tests PASS;94 affected preflight/bootstrap
+  routing tests PASS. Logs output/reconnecting-20260929/late-child-{red,green,routing}.log.
+- New source is NOT installed; build, canonical verifier, required CI, new normal
+  replacement and first-browser resource verification remain. Codex retries and
+  generic API/dynamic resource qualification remain open.
+
+
+2026-09-29 first-navigation child recovery gap842d74e5 INSTALLED; browser pending:
+- Source842d74e5 pushed PR376. Local build72603 terminal0, canonical PASS.
+  Retained candidate output/recovery-replacement-first-parent-842d74e5/Slipstream.app
+  also canonical PASS. Required PR checks green; extra packaged CI36555036049 running.
+  Normal Quit confirmed launchd113; installation35824 terminal0. Transaction
+  CONSUMED, NEVER REPLAY. App reopened; daemon37022 active. Canonical installed
+  verification54497 exit0 (first-parent-installed-verification.log). Browser first
+  navigation session slipstream-first-parent-check open60138 pending. Learning retained.
 - Physical Chrome Playwright session slipstream-reserve-check opened canonical
   Chrome (CUA Chrome unavailable). /en has7 stylesheets but3 broken hero images
   (naturalWidth0); dynamic images also pending. Do not call root-only load a pass.

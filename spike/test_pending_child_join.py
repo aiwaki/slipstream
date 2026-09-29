@@ -511,3 +511,47 @@ def test_join_rejects_unrelated_or_unbound_epochs(join_state, case):
         future.set_result(False)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("committed,ready", [(True, True), (False, True), (True, False)])
+def test_child_started_during_root_probe_is_joined_before_release(
+    monkeypatch, reset_smart_dns_state, committed, ready,
+):
+    import threading
+    from test_tproxy_doh import _enable_owned_geph_preflight
+    _enable_owned_geph_preflight(monkeypatch)
+    learned = {"value": False}
+    monkeypatch.setattr(tproxy, "_auto_geph_learned_exact_host",
+                        lambda host: host == HOST and learned["value"])
+    monkeypatch.setattr(tproxy, "_owned_geph_ready_for_semantic_confirmation", lambda: ready)
+    entered, release = threading.Event(), threading.Event()
+
+    def root(*args):
+        entered.set()
+        assert release.wait(2)
+        return tproxy._SemanticPlainPreflightObservation(tproxy.SEMANTIC_OUTCOME_USABLE)
+
+    async def scenario():
+        waiter = asyncio.create_task(tproxy._run_initial_route_preflight(
+            HOST, ADDRESS, direct_probe=root))
+        assert await asyncio.to_thread(entered.wait, 2)
+        # No child existed at entry; independent object discovery starts while
+        # the ordinary root probe is running.
+        child = pending_child()
+        release.set()
+        for _ in range(100):
+            if waiter.done() or hasattr(waiter, "_slipstream_bootstrap_join"):
+                break
+            await asyncio.sleep(0.005)
+        try:
+            assert not waiter.done(), "usable root released before late child proof"
+            learned["value"] = committed
+            child.set_result(True)  # Boolean result itself is never authority.
+            claim = await waiter
+            assert isinstance(claim, tproxy._RoutePreflightOwnedGephClaim) == (committed and ready)
+            assert HOST not in tproxy._route_preflight_cache
+        finally:
+            if not child.done():
+                child.set_result(False)
+            await waiter
+    asyncio.run(scenario())

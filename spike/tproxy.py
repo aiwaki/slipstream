@@ -10677,6 +10677,24 @@ async def _run_initial_route_preflight(
             direct_hard_transport_failure,
         ) = _decode_direct_route_preflight_observation(job, observation)
         cache_outcome = outcome
+        # A parent's object discovery may admit this exact-edge child while
+        # the root probe is running. Recheck before releasing the ClientHello:
+        # a usable CDN root does not settle the independently observed object.
+        child_handoff = await _wait_for_pending_bootstrap_children(h, address)
+        if child_handoff is not None or _auto_geph_learned_exact_host(h):
+            publish_cache = False
+            committed_handoff = child_handoff or handoff_deadline
+            if (_auto_geph_learned_exact_host(h)
+                    and _owned_geph_ready_for_semantic_confirmation()):
+                selected_claim = _owned_geph_preflight_claim(
+                    h, secrets.token_hex(16), committed_handoff,
+                )
+                selected = bool(selected_claim)
+            elif child_handoff is not None:
+                selected_claim = _bootstrap_local_route_claim(
+                    h, address, committed_handoff,
+                )
+            return selected_claim
         if (
             isinstance(observation, _SemanticPlainPreflightObservation)
             and observation.root_address_source
