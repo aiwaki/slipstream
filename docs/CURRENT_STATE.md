@@ -10,7 +10,46 @@ file.
 
 ## Current Checkpoint
 
-2026-09-29 late-child join fix IN SOURCE; next candidate build required:
+2026-09-29 dynamic hydration cutoff FIXED IN SOURCE, not installed:
+- Source worker used3000ms DOM observation even when original20s deadline had
+  remaining budget. Actual anonymous Chrome via owned9954: DOM6407ms, images
+  absent8962ms, appeared10299ms (~3892ms after DOM). Session54042 terminal0;
+  evidence output/reconnecting-20260929/dynamic-timing-return.txt.
+- Changed observer to remaining original deadline minus100ms CDP reply reserve.
+  Three production-expression tests pass (late hydration, bounded absence,
+  unrelated host). Real Chrome delayed4s fixture RED absent3157ms/GREEN present4048ms.
+  Evidence dynamic-delay-{red,green}.txt. No route-policy or credential expansion.
+- Rust focused test51236 exit0, one dynamic contract test PASS; log
+  dynamic-rust-tests.log in same output. Build/install new candidate and actual dynamic-image recovery
+  remain; acda6bb2 is still installed. Codex reconnect remains OPEN.
+
+2026-09-29 acda6bb2 INSTALLED, stable canonical PASS; dynamic images still fail:
+- Installer62965 terminal0; app reopened. Initial verifier91628 caught startup
+  unstable phase; then fresh status active48958/owned Geph4 sessions. Stable
+  canonical10956 exit0. No kickstart or attestation edits.
+- Chrome open45869 and15875 reported ERR_CONNECTION_CLOSED, but subsequent DOM
+  inspection of session slipstream-late-child-stable proves autonomous page recovery:
+  title/complete document and all3 hero banners decoded2340/1440/2340px. No manual
+  reload. Dynamic d3uzrofyuc50h6 images remain complete/width0. Root gate alone
+  is NOT enough. Evidence late-child-browser-resources.txt under reconnecting output.
+- Private logs late-child-private.log and late-child-followup-private.log. Fresh
+  child failures16:03-04; parent owned root usable16:05:06 but no child commitment
+  or browser-proof failure emitted. Investigate successful V3 with empty asset.
+- Worker discover_dynamic_image scans DOM for only3s after document readiness.
+  Measuring anonymous dynamic hydration through owned SOCKS9954 in disposable
+  Chrome context: session76105, script measure-dynamic.js, dynamic-timing.txt under
+  output/reconnecting-20260929. Poll same handle; URL queries never printed.
+- Diagnostic map edits are uncommitted, AGENTS.md user edits preserved. Root
+  cause for dynamic images/reconnecting remains open; do not claim complete.
+
+2026-09-29 installation acda6bb2 completed62965 exit0:
+- Native authorization completed; transaction late-child-acda6bb2 CONSUMED,
+  NEVER REPLAY. All backups/learning retained. App reopened.
+- Installed verifier91628 and fresh Chrome open45869 running; browser session
+  slipstream-late-child-check. Poll same handles. Previous authorization blocker
+  cleared; do not infer product success from installer success.
+
+2026-09-29 late-child join acda6bb2 IN SOURCE; candidate canonical PASS; installation62965 pending:
 - Installed842d74e5 canonical verification PASS, daemon37022 active. Full CI36555036049
   now SUCCESS. Replacement first-parent-842d74e5 consumed; never replay.
 - New Chrome profile slipstream-first-parent-check reached /en with7 stylesheets;
@@ -25,7 +64,18 @@ file.
   result alone grants nothing. No encrypted request replay or host-policy expansion.
 -76 pending-child/owned-parent/dynamic tests PASS;94 affected preflight/bootstrap
   routing tests PASS. Logs output/reconnecting-20260929/late-child-{red,green,routing}.log.
-- New source is NOT installed; build, canonical verifier, required CI, new normal
+- Build76309 terminal0, retained canonical PASS, source acda6bb2 pushed1268 exit0.
+  Required checks CI36557568300 and audit36557568394 pass; extra CI still running. Normal Quit81729
+  terminal0 and launchd113. NEW replacement session62965 running; poll SAME handle.
+  At10:57UTC native authorization UI still present, service still absent. User
+  confirmation requested once; do not create a duplicate installer or prompt.
+  Third consecutive goal turn confirms62965 live, authorization UI present,
+  no terminal transaction.log, root service absent. Goal blocked on native user
+  confirmation. On resume poll62965 first; do not rerun transaction. Browser and
+  installed verification must wait for its terminal success.
+  Transaction output/recovery-replacement-late-child-acda6bb2/replace-exact-bundle.sh;
+  do not replay. Candidate and transaction.log retained in that directory.
+- New source is NOT installed; canonical verifier, required CI, new normal
   replacement and first-browser resource verification remain. Codex retries and
   generic API/dynamic resource qualification remain open.
 

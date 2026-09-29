@@ -414,11 +414,17 @@ fn discover_dynamic_image(
     websocket: &mut TcpStream, hosts: &[String], deadline: Instant,
     termination: &AtomicBool,
 ) -> ProbeResult<Option<String>> {
-    // The promise observes late hydration for at most three seconds, inside
-    // the original job deadline. It never scrolls, clicks or authenticates.
+    // Use the remaining original job budget: hydration can finish after three
+    // seconds even when the owned route is healthy. Leave time for the CDP
+    // reply; never extend the job, scroll, click or authenticate.
+    let observation_ms = deadline.saturating_duration_since(Instant::now())
+        .as_millis().saturating_sub(100);
+    if observation_ms == 0 {
+        return Ok(None);
+    }
     let host_json = serde_json::to_string(hosts).map_err(|_| error("asset_host_invalid"))?;
     let expression = format!(r#"new Promise(resolve => {{
-        const until = Date.now() + 3000;
+        const until = Date.now() + {observation_ms};
         const scan = () => {{
             const found = Array.from(document.images).slice(0, 512).map(i => i.currentSrc || i.src)
                 .find(s => {{ try {{ const u = new URL(s); return s.length <= 1024 &&

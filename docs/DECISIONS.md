@@ -908,8 +908,8 @@ Only the separately defined independent system/app-DNS/local-strategy and
 same-object owned-payload proof can learn the child. V3 never mints parent proof.
 
 Fresh transport evidence selects the discovery hosts; it is not failure proof
-for the discovered object. The worker waits at most three seconds for hydration
-within its original 20s deadline and inspects at most 512 DOM images without
+for the discovered object. The worker observes hydration within the remaining original 20s deadline
+(reserving100ms for the CDP reply), without a separate three-second cutoff and inspects at most 512 DOM images without
 scrolling or interacting. Existing 8s HTML and 19s independent child budgets
 remain bounded; coalescing/cooldown and cleanup ownership are retained. Dynamic
 images are prioritized over unrelated static candidates when a match exists.

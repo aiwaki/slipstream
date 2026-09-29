@@ -3174,3 +3174,26 @@ authority; only an independently committed route with current owned readiness
 health. Existing deadlines, cancellation ownership and protected-host admission
 remain unchanged.76 child/parent/dynamic and94 routing tests pass; physical
 qualification of the new source remains outstanding.
+
+
+### 2026-09-29: dynamic image observer exits before hydration
+
+Installed acda6bb2 passes stable canonical verification and full CI36557568300.
+Chrome initially reports connection closed but then autonomously reaches the
+complete page with all three hero banners decoded. Dynamic signed images remain
+broken, so the product gate is still open.
+
+An anonymous isolated Chrome context through owned SOCKS9954 reached
+DOMContentLoaded at6407ms and had no dynamic images at8962ms; they appeared at
+10299ms, about3892ms after DOM readiness. Only host, timing, URL length and decode
+state were retained, not signed URLs. Evidence: dynamic-timing-return.txt in
+output/reconnecting-20260929. The worker's fixed3000ms hydration promise can
+therefore return an empty hint even with time remaining in its20s job.
+
+The observer now uses the remaining original job deadline, reserving100ms for
+its CDP reply. This changes neither discovery scope nor route authority. The
+exact production JavaScript expression is tested with virtual DOM/time for late
+hydration, budget exhaustion and an unlisted host. A real Chrome controlled
+4s delayed-image fixture returned absent at3157ms with the old expression and
+present at4048ms with the corrected budget. Those fixtures issue no external
+image request. New source is not yet installed; real-site qualification remains.
