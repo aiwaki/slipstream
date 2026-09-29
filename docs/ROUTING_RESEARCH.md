@@ -3197,3 +3197,18 @@ hydration, budget exhaustion and an unlisted host. A real Chrome controlled
 4s delayed-image fixture returned absent at3157ms with the old expression and
 present at4048ms with the corrected budget. Those fixtures issue no external
 image request. New source is not yet installed; real-site qualification remains.
+
+
+### 2026-09-29 Dynamic browser worker refusal is not one failure class
+
+The retained `output/reconnecting-20260929/dynamic-budget-complete-private.log`
+contains worker signature-unavailable failures at 17:12:58 and 17:13:08 before
+browser-proof wait failure at 17:13:12. The previous signature label conflated
+an OS launch error with the existing three-second codesign timeout. A fresh
+read-only verification of the installed helper and deep bundle passed in
+0.214s and 0.479s respectively; this does not establish what happened earlier.
+The diagnostic labels now distinguish these causes and non-usable result,
+expired deadline, changed backend, and wait exceptions. No deadlines or
+signature checks are relaxed, and no private URL or exception text is logged.
+The earlier result_refused at 17:08:07 remains ambiguous. Full dynamic image
+recovery and Codex reconnecting remain unqualified.

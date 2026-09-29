@@ -8087,14 +8087,19 @@ async def _run_admitted_headless_owned_geph_preflight(
             asyncio.wrap_future(result_future),
             timeout=remaining,
         )
-        if (
-            not isinstance(result, route_preflight.RoutePreflightResultV1)
-            or result.outcome != SEMANTIC_OUTCOME_USABLE
-            or result.candidate_route != "owned_geph"
-            or time.monotonic() >= deadline_monotonic
-            or not _owned_geph_confirmation_pid_matches(confirmed_pid)
-        ):
-            return absent("result_refused")
+        if not isinstance(result, route_preflight.RoutePreflightResultV1):
+            return absent("result_type_refused")
+        if result.outcome != SEMANTIC_OUTCOME_USABLE:
+            # Outcome is allowlisted; never copy arbitrary worker data to logs.
+            outcome = (result.outcome if type(result.outcome) is str
+                       and result.outcome in route_preflight.OUTCOMES else "invalid")
+            return absent(f"result_outcome_{outcome}")
+        if result.candidate_route != "owned_geph":
+            return absent("result_route_refused")
+        if time.monotonic() >= deadline_monotonic:
+            return absent("result_deadline_expired")
+        if not _owned_geph_confirmation_pid_matches(confirmed_pid):
+            return absent("result_backend_changed")
         if isinstance(job, route_preflight.RoutePreflightJobV3):
             # Discovery can never mint a parent proof or commit a child route.
             if asset_sink is not None and result.asset_url:
@@ -8116,8 +8121,12 @@ async def _run_admitted_headless_owned_geph_preflight(
             schema_version=job.schema_version,
             bytes_read=0,
         )
-    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
-        return absent("wait_failed")
+    except asyncio.TimeoutError:
+        return absent("wait_timeout")
+    except (ConnectionError, OSError):
+        return absent("wait_io_failed")
+    except RuntimeError:
+        return absent("wait_runtime_failed")
     finally:
         runtime.discard(job.capability)
         with _route_preflight_lock:

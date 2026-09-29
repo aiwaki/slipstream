@@ -1136,7 +1136,13 @@ class DirectHeadlessBrowserWorkerLauncher:
                     timeout=3.0,
                     check=False,
                 )
-            except (OSError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired as error:
+                # Fixed labels only: never expose the command, path or stderr.
+                target = "bundle" if "--deep" in command else "helper"
+                raise PendingNavigationProbeRuntimeError(
+                    f"browser_worker_signature_{target}_timeout"
+                ) from error
+            except OSError as error:
                 raise PendingNavigationProbeRuntimeError(
                     "browser_worker_signature_unavailable"
                 ) from error

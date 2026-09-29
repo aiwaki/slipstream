@@ -10,7 +10,76 @@ file.
 
 ## Current Checkpoint
 
-2026-09-29 dynamic hydration cutoff FIXED IN SOURCE, not installed:
+2026-09-29 worker launch failure located; diagnostic differentiation in source:
+- Existing private capture dynamic-budget-complete-private.log records
+  browser_worker_signature_unavailable at17:12:58 and17:13:08 before wait_failed
+  at17:13:12. Therefore not all failures are hydration/navigation deadlines.
+- Live read-only codesign succeeds: helper0.214s, deep bundle0.479s, bothexit0.
+  Historical label combines OSError/3s timeout; cannot yet identify which.
+- Source now separates helper/bundle signature timeout, unavailable executable,
+  result outcome/type/route/deadline/backend change, and wait timeout/IO/runtime.
+  Only fixed/allowlisted labels logged; original validation/budgets unchanged.
+- New10 synthetic failure/cleanup/privacy tests and4 direct launcher tests pass.
+  Installed e2f47fce unchanged;
+  this is diagnostic improvement, NOT product fix. Next build diagnostic candidate to capture actual next failure.
+  No pending installation or authorization; do not replay consumed transactions.
+
+
+2026-09-29 e2f47fce real dynamic completion FAILED; next worker deadline diagnosis:
+- Complete check96690 terminal0: exact /en ready=complete, all3 heroes valid,
+  first3 dynamic images complete=true/naturalWidth0 after60.6s. This definitively
+  fails full image delivery, unlike earlier offscreen/partial-decode snapshots.
+- Private capture78655 terminal0: dynamic-budget-complete-private.log. Worker
+  browser-proof result_refused17:08:07 and wait_failed17:13:12; no dynamic child
+  commitment. Increasing hydration observation alone does NOT clear the product.
+- Next distinguish worker result outcome, deadline rejection and owned PID mismatch
+  in _run_admitted_headless_owned_geph_preflight, and where original20s is spent.
+  Do not simply increase budgets/learn hosts/replay private URLs. Current diagnostic
+  result_refused conflates these causes; exact failure is not yet proven.
+- Installed sourcee2f47fce active, canonical26323 PASS, full CI36561302685 success.
+  All replacement transactions already consumed; no pending installer/build.
+  Codex POST/chatgpt.com reconnect root cause also remains OPEN.
+
+2026-09-29 visible dynamic image full-completion check running96690:
+- Exact /en25062 returned all3 hero images decoded but dynamic images pending
+  (complete=false); offscreen lazy state is not a failure. Visible check61123
+  scrolled to image and saw width2031 but complete=false after25.9s. This is
+  partial decode, NOT full delivery success.
+- Next complete check96690 uses explicit complete=true AND width>0 for first3
+  dynamic images, not width alone. Script qualify-dynamic-complete.js and result
+  dynamic-budget-complete-qualification.txt under output/reconnecting-20260929.
+  Poll SAME handle; test page closes in finally. All sessions use isolated
+  Chrome profiles, no credentials or signed URLs in reports.
+
+2026-09-29 dynamic-budget browser qualification running25062:
+- Chrome open30163 timed out60s. Later evaluation78014 found a different title
+  (Speaking Shadowing), so that snapshot does not qualify /en home images.
+- Private capture78830 exit0: dynamic-budget-private.log.17:03 initial root timed
+  out/provenance refused; later17:03:56 accepted, root committed17:04:11,
+  CDN independently committed17:04:28. Foreground/provenance gate still affects
+  first navigation; do not claim focus-independent success.
+- Exact /en fresh test page in known owned session slipstream-dynamic-budget-check:
+  run-code25062 live, script qualify-dynamic.js, output dynamic-budget-qualification.txt
+  under output/reconnecting-20260929. Poll same handle. No manual reload; checks
+  hero and dynamic image decode. Separate test page closes in finally.
+
+2026-09-29 e2f47fce INSTALLED95567 exit0, canonical26323 PASS:
+- Normal Quit completed; transaction dynamic-budget-e2f47fce CONSUMED, NEVER
+  REPLAY. App reopened, stable StatusV2 active, owned Geph up. Terminal log at
+  output/recovery-replacement-dynamic-budget-e2f47fce/transaction.log.
+- Full CI36561302685 success. Fresh Chrome open30163 running; session
+  slipstream-dynamic-budget-check. Poll same handle; dynamic image browser
+  qualification and model-stream retry diagnosis remain open.
+
+2026-09-29 e2f47fce canonical candidate READY; normal Quit authorization pending:
+- Build28660 terminal0, canonical PASS; retained verifier76037 exit0. Candidate
+  output/recovery-replacement-dynamic-budget-e2f47fce/Slipstream.app, artifact.json
+  and NEW guarded replace-exact-bundle.sh prepared, NOT executed. Required checks
+  CI36561302685/audit36561302651 pass. Normal --quit exit0 but service PRESENT and
+  SecurityAgent present; user confirmation requested once. Do not install before
+  launchd113 or replay any older transaction. Installed source remains acda6bb2.
+- Codex target codex_http_client::client confirms repeated POST /responses errors
+  to chatgpt.com (not merely usage/pubsub). Transport cause remains unproven.
 - Source worker used3000ms DOM observation even when original20s deadline had
   remaining budget. Actual anonymous Chrome via owned9954: DOM6407ms, images
   absent8962ms, appeared10299ms (~3892ms after DOM). Session54042 terminal0;
