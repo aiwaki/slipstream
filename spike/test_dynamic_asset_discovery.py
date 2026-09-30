@@ -141,6 +141,7 @@ def recent_parent_state(monkeypatch):
     from collections import OrderedDict
     monkeypatch.setattr(tproxy, '_recent_asset_parents', OrderedDict())
     monkeypatch.setattr(tproxy, '_learned_parent_recovery_tasks', {})
+    monkeypatch.setattr(tproxy, '_learned_parent_recovery_wakeups', {})
 
 
 def test_cached_parent_child_failure_schedules_one_independent_recheck(monkeypatch, learned_parent, recent_parent_state):
@@ -167,6 +168,7 @@ def test_cached_recovery_respects_cooldown_and_quit_drains(monkeypatch, learned_
     monkeypatch.setattr(tproxy, '_local_partial_stalls', {'images.example.net': {'system': now}})
     tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
     tproxy._learned_parent_asset_checks[learned_parent] = now + 120
+    tproxy._learned_parent_asset_attempts[learned_parent] = {'images.example.net'}
     async def forbidden(*args):
         pytest.fail('cooldown must not be bypassed')
     monkeypatch.setattr(tproxy, '_check_learned_parent_assets', forbidden)
@@ -199,3 +201,79 @@ def test_recent_parent_history_is_bounded_and_has_no_resource_urls(recent_parent
         tproxy._remember_recent_asset_parent(f'p{i}.example', '8.8.8.8')
     assert len(tproxy._recent_asset_parents) == 4
     assert list(tproxy._recent_asset_parents) == [f'p{i}.example' for i in range(4,8)]
+
+
+def test_first_dynamic_failure_is_not_delayed_by_static_parent_check(monkeypatch, learned_parent, recent_parent_state):
+    calls = []
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {})
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', lambda *a: None)
+    async def browser(job, peer, deadline, **kwargs):
+        calls.append(job.asset_hosts)
+    monkeypatch.setattr(tproxy, '_run_headless_owned_geph_preflight', browser)
+    async def scenario():
+        await tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8')
+        assert not calls
+        tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+        tproxy._local_partial_stalls['images.example.net'] = {'system': time.monotonic()}
+        tproxy._schedule_recent_parent_asset_recovery('images.example.net')
+        try:
+            await asyncio.wait_for(asyncio.gather(*tproxy._learned_parent_recovery_tasks.values()), .5)
+        finally:
+            await tproxy._cancel_recent_parent_asset_recovery()
+    asyncio.run(scenario())
+    assert calls == [('images.example.net',)]
+
+
+def test_new_failure_admission_is_bounded_and_duplicates_keep_cooldown(monkeypatch, learned_parent):
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {})
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', lambda *a: None)
+    calls = []
+    async def browser(job, *args, **kwargs):
+        calls.append(job.asset_hosts)
+    monkeypatch.setattr(tproxy, '_run_headless_owned_geph_preflight', browser)
+    async def scenario():
+        await tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8')
+        deadline = tproxy._learned_parent_asset_checks[learned_parent]
+        for i in range(4):
+            host = f'images{i}.example.net'
+            tproxy._local_partial_stalls = {host: {'system': time.monotonic()}}
+            await tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8')
+            assert len(calls) == i + 1
+            # A new observation time is not a new host or a new window.
+            tproxy._local_partial_stalls[host]['system'] = time.monotonic()
+            await tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8')
+            assert len(calls) == i + 1
+            assert tproxy._learned_parent_asset_checks[learned_parent] == deadline
+        tproxy._local_partial_stalls = {'fifth.example.net': {'system': time.monotonic()}}
+        await tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8')
+        assert len(calls) == 4
+        assert len(tproxy._learned_parent_asset_attempts[learned_parent]) == 4
+        tproxy._learned_parent_asset_checks[learned_parent] = time.monotonic() - 1
+        await tproxy._check_learned_parent_assets(learned_parent, '8.8.8.8')
+        assert calls[-1] == ('fifth.example.net',)
+        assert tproxy._learned_parent_asset_attempts[learned_parent] == {'fifth.example.net'}
+    asyncio.run(scenario())
+
+
+def test_new_failure_wakes_existing_cooldown_waiter(monkeypatch, learned_parent, recent_parent_state):
+    now = time.monotonic()
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {'old.example.net': {'system': now}})
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+    tproxy._learned_parent_asset_checks[learned_parent] = now + 120
+    tproxy._learned_parent_asset_attempts[learned_parent] = {'old.example.net'}
+    seen = []
+    async def check(host, ip):
+        seen.append(host)
+    monkeypatch.setattr(tproxy, '_check_learned_parent_assets', check)
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery('old.example.net')
+        await asyncio.sleep(0)
+        assert not seen
+        owner = tproxy._learned_parent_recovery_tasks[learned_parent]
+        tproxy._local_partial_stalls['new.example.net'] = {'system': time.monotonic()}
+        tproxy._schedule_recent_parent_asset_recovery('new.example.net')
+        assert tproxy._learned_parent_recovery_tasks[learned_parent] is owner
+        await asyncio.wait_for(owner, .5)
+    asyncio.run(scenario())
+    assert seen == [learned_parent]
+    assert not tproxy._learned_parent_recovery_wakeups

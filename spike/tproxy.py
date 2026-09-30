@@ -2838,8 +2838,10 @@ _semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
 _semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
 _route_preflight_cache = OrderedDict()  # host -> _RoutePreflightCacheEntry
 _learned_parent_asset_checks = OrderedDict()  # host -> monotonic next check; no paths
+_learned_parent_asset_attempts = {}  # parent -> up to four failure hosts in its check window
 _recent_asset_parents = OrderedDict()  # proven HTML host -> (IP, expiry); no URLs
 _learned_parent_recovery_tasks = {}  # parent -> owned asyncio task
+_learned_parent_recovery_wakeups = {}  # parent -> new failure notification
 _route_preflight_inflight = {}  # (host, exact address) -> concurrent Future
 _route_preflight_execution_leases = {}  # proof Future -> shared execution lease
 _route_preflight_window = deque(maxlen=128)  # bounded diagnostic history only
@@ -10279,6 +10281,17 @@ def _remember_recent_asset_parent(host, address):
             _recent_asset_parents.popitem(last=False)
 
 
+def _learned_parent_asset_wait_locked(parent, candidates, now):
+    remaining = _learned_parent_asset_checks.get(parent, 0) - now
+    attempted = _learned_parent_asset_attempts.get(parent, set())
+    # A static enumeration cannot cool down a child failure it never observed.
+    # Bound novelty to four exact hosts per parent/window; repeated failures of
+    # the same host (including a new timestamp) retain the original cooldown.
+    if remaining > 0 and len(attempted) < 4 and set(candidates) - attempted:
+        return 0
+    return remaining
+
+
 def _schedule_recent_parent_asset_recovery(failed_host):
     # A cache hit opens no parent connection. Fresh child truncation must still
     # be able to request anonymous discovery on recently proven HTML parents.
@@ -10299,25 +10312,41 @@ def _schedule_recent_parent_asset_recovery(failed_host):
         parents = list(_recent_asset_parents.items())
     for parent, (address, expiry) in parents:
         if (parent == failed_host or expiry <= now
-                or parent in _learned_parent_recovery_tasks
-                or len(_learned_parent_recovery_tasks) >= 4
                 or not _auto_geph_learned_exact_host(parent)):
             continue
-        async def recover(h=parent, ip=address, deadline=expiry):
+        if parent in _learned_parent_recovery_tasks:
+            wake = _learned_parent_recovery_wakeups.get(parent)
+            if wake is not None:
+                wake.set()
+            continue
+        if len(_learned_parent_recovery_tasks) >= 4:
+            continue
+        wake = asyncio.Event()
+        _learned_parent_recovery_wakeups[parent] = wake
+        async def recover(h=parent, ip=address, deadline=expiry, signal=wake):
             try:
                 while not _shutdown_started.is_set() and time.monotonic() < deadline:
-                    if not _auto_geph_learned_exact_host(h) or not _dynamic_asset_failure_candidates(h):
+                    signal.clear()
+                    candidates = _dynamic_asset_failure_candidates(h)
+                    if not _auto_geph_learned_exact_host(h) or not candidates:
                         return
                     with _route_preflight_lock:
-                        wait = _learned_parent_asset_checks.get(h, 0) - time.monotonic()
+                        wait = _learned_parent_asset_wait_locked(h, candidates, time.monotonic())
                         busy = any(key[0] == h for key in _route_preflight_inflight)
                     if wait <= 0 and not busy:
                         await _check_learned_parent_assets(h, ip)
+                        if signal.is_set():
+                            continue
                         return
-                    await asyncio.sleep(min(max(wait, 0.2), max(0.001, deadline-time.monotonic())))
+                    try:
+                        await asyncio.wait_for(signal.wait(), timeout=min(
+                            max(wait, 0.2), max(0.001, deadline-time.monotonic())))
+                    except asyncio.TimeoutError:
+                        pass
             finally:
                 if _learned_parent_recovery_tasks.get(h) is asyncio.current_task():
                     _learned_parent_recovery_tasks.pop(h, None)
+                    _learned_parent_recovery_wakeups.pop(h, None)
         task = loop.create_task(recover())
         _learned_parent_recovery_tasks[parent] = task
         task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
@@ -10331,6 +10360,7 @@ async def _cancel_recent_parent_asset_recovery():
         await asyncio.gather(*tasks, return_exceptions=True)
     with _route_preflight_lock:
         _recent_asset_parents.clear()
+        _learned_parent_asset_attempts.clear()
 
 
 def _dynamic_asset_failure_candidates(parent):
@@ -10349,6 +10379,11 @@ async def _discover_dynamic_parent_asset(parent, address, sink):
     candidates = _dynamic_asset_failure_candidates(parent)
     if not candidates:
         return
+    with _route_preflight_lock:
+        attempted = _learned_parent_asset_attempts.setdefault(parent, set())
+        for candidate in candidates:
+            if len(attempted) < 4:
+                attempted.add(candidate)
     issued = int(time.time() * 1000)
     job = route_preflight.RoutePreflightJobV3(
         capability=secrets.token_hex(16), host=parent, candidate_routes=("owned_geph",),
@@ -10380,9 +10415,10 @@ async def _check_learned_parent_assets(host, ip):
         return
     started = time.monotonic()
     key = _route_preflight_inflight_key(h, address)
+    candidates = _dynamic_asset_failure_candidates(h)
     with _route_preflight_lock:
         _prune_initial_route_preflights_locked(started)
-        if (_learned_parent_asset_checks.get(h, 0) > started
+        if (_learned_parent_asset_wait_locked(h, candidates, started) > 0
                 or any(k[0] == h for k in _route_preflight_inflight)
                 or _route_preflight_execution_count_locked() >= ROUTE_PREFLIGHT_CONCURRENT_MAX):
             return
@@ -10392,10 +10428,17 @@ async def _check_learned_parent_assets(host, ip):
         _route_preflight_inflight[key] = epoch
         _route_preflight_execution_leases[epoch] = lease
         _route_preflight_window.append(started)
-        _learned_parent_asset_checks[h] = started + ROUTE_PREFLIGHT_RETRY_TTL
+        if _learned_parent_asset_checks.get(h, 0) <= started:
+            _learned_parent_asset_checks[h] = started + ROUTE_PREFLIGHT_RETRY_TTL
+            _learned_parent_asset_attempts[h] = set()
+        attempted = _learned_parent_asset_attempts.setdefault(h, set())
+        for candidate in candidates:
+            if len(attempted) < 4:
+                attempted.add(candidate)
         _learned_parent_asset_checks.move_to_end(h)
         while len(_learned_parent_asset_checks) > ROUTE_PREFLIGHT_CACHE_MAX:
-            _learned_parent_asset_checks.popitem(last=False)
+            evicted, _ = _learned_parent_asset_checks.popitem(last=False)
+            _learned_parent_asset_attempts.pop(evicted, None)
     assets = []
     worker = None
     try:

@@ -10,26 +10,29 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 Geph r5 VERIFIED/STAGED; application build next:
-- PR382 merged main7e196a71a307f470cadf6519d5e753dd7e1b27ac after exact
-  eda3b484 CI36732573423/audit36732573436 PASS and review resolved.
-- build-geph36733271600 SUCCESS; watch18344 terminal0. Immutable
-  geph-vendor-0.3.9-r5 published. Verifier45135 terminal0: all8 assets, checksums,
-  SPDX, dependency audit, exact-source provenance and both architectures PASS;
-  staged into app-tauri binaries. Evidence output/geph-stream-isolation-20260930/
-  vendor-verify-stage.log. Binary daedce04991675983835e00de667a38164561ab4ec907ea2a6f569af6df74600.
-- Primary merge353e019f adopted r5; app opening hedge already removed in bfbc2658.
-  Source regression RED on r4;28 Rust tests and4edit guards PASS; reuse unchanged
-  app9focused checks from r4 integration. No further runtime source edits.
-- NEXT commit/push checkpoint, build:local canonical verification and exact PR376
-  CI; retain new candidate, normal Quit, fresh guarded replacement and
-  verify:local-install. Existing r4 transaction is UNEXECUTED and must not be used.
-- Post-install browser test prepared and node syntax PASS:
-  output/geph-stream-isolation-20260930/qualify-browser-after-install.js.
-  Baseline image criteria + bounded host/type failures/pending + screenshot.
-- Installed4ece4ea4/r3 remains unchanged; no Quit/native authorization/installer
-  pending. Learning and every backup preserved. Real TestGlider resources, Steam
-  and Codex connectivity remain OPEN until installed qualification.
+2026-09-30 r5 installed; dynamic cooldown candidate in working tree:
+- Installed e2871ae6bc51cbbfc5b15d54ea51a2890707de1a, Geph r5. Transaction37451
+  terminal0 CONSUMED; canonical installed66449 PASS, active daemon14327.
+  Do not replay output/recovery-replacement-geph-isolation-e2871ae6 transaction.
+  Learning and all prior app/private backups preserved; no pending native prompt.
+- Real Chrome cold navigation78285 FAILED70.916s. Repeat39040 completed48.264s:
+  static heroes all decoded, dynamic first3 width0/ERR_CONNECTION_CLOSED,
+  api.testglider.com ERR_CONTENT_LENGTH_MISMATCH. Product NOT qualified.
+- Private capture31955 and70774 terminal0 retained as root-after-learned-private.log
+  and root-after-delayed-private.log under output/geph-stream-isolation-20260930.
+  Dynamic failure20:57:00 waited parent cooldown until20:58:36, learned20:59:03.
+- Working candidate: unseen failure hosts bypass static parent's120s cooldown,
+  max4 distinct diagnostic hosts/window; duplicate timestamps do not bypass or
+  extend it. Notifications wake coalesced waiters. Independent proof unchanged.
+  Regression first_dynamic_failure RED39984; routing tests70722 PASS901 in37.02s.
+  Evidence output/geph-stream-isolation-20260930/dynamic-cooldown-routing.log.
+- NEXT review candidate, focused routing checks, commit/push PR376 then exact
+  build/CI/canonical replacement and real browser. API-only discovery and cold
+  backend readiness still open; no blanket all-sites/reconnect claim.
+- Source e2871ae6 CI36735578291/audit36735578087/Windows36735577970 PASS reused.
+  Candidate not built/installed. User AGENTS.md change must stay untouched.
+- Real Chrome session slipstream-worker-diagnostics remains isolated and open;
+  browser script output/geph-stream-isolation-20260930/qualify-browser-after-install.js.
 
 ### Retained r4 candidate evidence
 

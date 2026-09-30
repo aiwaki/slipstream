@@ -3251,3 +3251,26 @@ library tests GREEN11.02s with fix. Guarded source materialization from original
 upstream matches tested source; four guard tests pass. Actual mux death and
 mux stream allocation failure handling remain unchanged. No installed/browser
 success is inferred. Evidence: output/geph-failover-20260930/stream-error-*.log.
+
+
+## 2026-09-30 r5 browser qualification and delayed dynamic recovery
+
+Installed e2871ae6 with canonical installed verification PASS. Cold Chrome still
+failed (70.916s); owned Geph was unready at20:48:13, root learned20:48:40 and
+static CDN20:49:11, after the browser's failures. A second navigation completed
+with all three static heroes decoded, but three dynamic review images failed and
+api.testglider.com returned ERR_CONTENT_LENGTH_MISMATCH. At20:57:00 the dynamic
+CDN hit the local partial-record watchdog; parent enumeration restarted only
+at20:58:36, after the120s parent cooldown, and independently learned the exact
+child at20:59:03. This isolates a scheduler delay, not an absent discovery result.
+
+Candidate allows bounded new failure hosts to enter the existing parent window
+without waiting behind a static enumeration; duplicate failures retain cooldown.
+A new failure wakes an existing cooldown waiter. Regression reproduces the old
+half-second fixture timeout, then passes without sleeps or route authority.
+Independent same-object proof, protected exclusions, leases and shutdown remain.
+This does not yet repair API-only discovery, cold backend readiness, or retry an
+already failed browser request. Do not claim all resources or reconnects fixed.
+Evidence: output/geph-stream-isolation-20260930/{browser-cold-start.log,
+browser-learned-route.log,root-after-delayed-private.log,dynamic-cooldown-red.log,
+dynamic-cooldown-green.log}. Root capture is private and must not be published.

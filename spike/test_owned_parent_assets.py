@@ -131,6 +131,7 @@ def learned_parent(monkeypatch):
     from collections import OrderedDict
     _enable_owned_geph_preflight(monkeypatch)
     monkeypatch.setattr(tproxy, '_learned_parent_asset_checks', OrderedDict())
+    monkeypatch.setattr(tproxy, '_learned_parent_asset_attempts', {})
     tproxy._auto_geph['parent.example'] = time.time() + 600
     return 'parent.example'
 

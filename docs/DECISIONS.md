@@ -919,7 +919,12 @@ resources, or external outages; those require separate evidence and mechanisms.
 Cached-parent continuation keeps at most four recently verified HTML parent
 hosts and exact addresses in process memory for five minutes; no paths, signed
 queries or browsing state are retained. A fresh unprotected child truncation
-may schedule one coalesced recheck per parent, after the existing cooldown.
+may schedule one coalesced recheck per parent. A previously unseen failure host
+may enter immediately during the existing cooldown; at most four distinct failure
+hosts are admitted per parent/window. Repeated timestamps for the same host do
+not bypass the cooldown or extend it. New failure notifications wake an existing
+cooldown waiter without creating another task. This bounds diagnostic work only,
+not live connections.
 This is discovery only: the anonymous DOM must contain the candidate and the
 same-object independent local/owned proof is still required. Expired/unlearned
 parents and protected hosts are excluded. Quit cancels and drains this registry
