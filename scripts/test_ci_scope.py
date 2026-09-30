@@ -44,6 +44,18 @@ class CiScopeTests(unittest.TestCase):
         self.assertFalse(ci_scope.classify_paths(paths + ["spike/tproxy.py"],
             event_name="pull_request").geph_bootstrap)
 
+    def test_existing_source_edit_revision_without_lock_change(self):
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/README.md", "docs/CURRENT_STATE.md", "docs/DECISIONS.md",
+                 "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
+        self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)
+        for extra in ("spike/tproxy.py", "vendor/geph/VERSION",
+                      "app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin",
+                      "app-tauri/src-tauri/src/lib.rs", ".github/workflows/ci.yml"):
+            with self.subTest(extra=extra):
+                self.assertFalse(ci_scope.classify_paths(paths + [extra],
+                    event_name="pull_request").geph_bootstrap)
+
     def test_exact_geph_contract_sets_bootstrap_only_on_pull_request(self) -> None:
         required = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock"]
         for paths in (

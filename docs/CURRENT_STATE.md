@@ -1,3 +1,21 @@
+# Geph r4 source continuation — 2026-09-30
+
+This clean vendor PR branch is codex/geph-session-reserve, based on main6e037e97.
+The AUD-17 application work remains in the Developer checkout/PR376.
+
+- Reviewed source_edits add a distinct-session opening reserve,350ms delay,
+  ten-second total deadline, no application-payload replay or shared teardown.
+- RED two-mux test on r3 fails with healthy reserve unused; GREEN r4 test passes
+  and verifies an existing primary stream survives. All26 Rust library tests and
+  four source-edit guard tests pass; exact tested source matches final edit hash.
+- Evidence lives in Developer checkout output/geph-failover-20260930/{red,green,
+  library-tests}.log. No account/network is used by the Rust regression.
+- Next: CI/review source PR, publish immutable geph-vendor-0.3.9-r4, integrate
+  dependency in PR376 and remove redundant app-level reserve before build/install.
+  Current workstation still runs4ece4ea4/r3. Product repair remains OPEN.
+
+## Previous checkpoint (historical)
+
 # Current Project State
 
 This is Slipstream's compact continuation checkpoint. It exists so a resumed or
@@ -9,6 +27,17 @@ required CI, and current source code always win when they disagree with this
 file.
 
 ## Current Checkpoint
+
+2026-09-30 follow-up: failed reserve / delayed primary test PASS (0.71s).
+- Existing all26 Rust baseline reused; added one real PicoMux regression passes.
+- Initial PR381 CI36719937227 failed fetching unpublished r4 (404): classifier
+  required a lock/helper change although only existing guarded source edits changed.
+- Narrow source-only classification added, with9 scope tests and4 edit guard tests
+  PASS. Source transition validation remains mandatory; main never exempt,
+  app/binary/VERSION/workflow changes reject this narrow path.
+- Installed4ece4ea4/r3 unchanged. Next required CI, r4 publication, app adoption
+  removing redundant outer hedge, then canonical installation/product verification.
+
 
 PR377 review PRRT_kwDOTLueX86kIhE8 correctly rejected path-only app-lock admission.
 Merge was blocked by unresolved review, not bypassed. Fix now compares exact
