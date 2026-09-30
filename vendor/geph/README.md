@@ -23,7 +23,7 @@ OSV audit. GitHub attestations bind the payload and SBOM to the exact
 `build-geph.yml` run. The app workflow verifies all of these before embedding
 the binary.
 
-Revisions 3 and 4 of `0.3.9` carry explicit `source_edits` in `SOURCE.json`.
+Revisions 3 through 5 of `0.3.9` carry explicit `source_edits` in `SOURCE.json`.
 Each edit binds the complete input and output file SHA-256 and exactly one
 literal replacement; extraction fails on drift. The contract shipped with the
 release contains both the correction and its regression test, so no unpublished
@@ -31,8 +31,8 @@ patch is needed to reproduce the source. Unedited older contracts remain valid.
 
 The correction isolates a ten-second destination tunnel-open timeout from the
 shared multiplexed session. Upstream otherwise signals `early_dead`, dropping
-existing tunnels with the failed new request. Actual mux death, read errors and
-protocol errors retain upstream handling. The offline two-stream regression
+existing tunnels with the failed new request. Revision 5 also isolates per-stream response read and parse errors; actual mux
+death and failure to allocate a mux stream retain upstream handling. The offline two-stream regression
 fails on unmodified0.3.9 and requires the existing stream to remain usable after
 the new tunnel times out. The vendor build runs library tests before packaging.
 
@@ -43,6 +43,11 @@ not cancel a still-pending primary. Cancellation drains opening accounting and
 drops only the losing stream, preserving other streams on the shared session.
 The library regressions cover both race directions with real PicoMux peers.
 Consumers must remove outer SOCKS opening hedges when adopting this revision.
+
+Revision 5 prevents EOF or a malformed response on one new stream from
+retiring an otherwise live shared session. The regression keeps an existing
+stream open, injects each response failure, and requires continued data transfer
+and drained opening accounting. Transport death remains supervised by mux liveness.
 
 The daemon supervises only Slipstream's owned copy. Geph remains limited to
 geo-exit routes; local bypass groups such as Discord and YouTube never use it.

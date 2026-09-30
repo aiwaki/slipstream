@@ -28,6 +28,16 @@ file.
 
 ## Current Checkpoint
 
+2026-09-30 Geph r5 source-only stream-error isolation under verification.
+- r4 read/parse errors still set shared early_dead; deterministic EOF test RED.
+- r5 removes those two signals only, with EOF/malformed response + existing
+  stream regression. Actual mux death/allocation failure handling unchanged.
+- Guarded full upstream materialization matches locally tested source.
+- No workstation change. Primary candidate cd39a554/r4 retained; installed r3.
+- Next: library/source-contract checks, reviewed source PR, immutable publication,
+  app adoption and real application qualification.
+
+
 2026-09-30 follow-up: failed reserve / delayed primary test PASS (0.71s).
 - Existing all26 Rust baseline reused; added one real PicoMux regression passes.
 - Initial PR381 CI36719937227 failed fetching unpublished r4 (404): classifier
