@@ -1,3 +1,21 @@
+# Geph r4 source continuation — 2026-09-30
+
+This clean vendor PR branch is codex/geph-session-reserve, based on main6e037e97.
+The AUD-17 application work remains in the Developer checkout/PR376.
+
+- Reviewed source_edits add a distinct-session opening reserve,350ms delay,
+  ten-second total deadline, no application-payload replay or shared teardown.
+- RED two-mux test on r3 fails with healthy reserve unused; GREEN r4 test passes
+  and verifies an existing primary stream survives. All26 Rust library tests and
+  four source-edit guard tests pass; exact tested source matches final edit hash.
+- Evidence lives in Developer checkout output/geph-failover-20260930/{red,green,
+  library-tests}.log. No account/network is used by the Rust regression.
+- Next: CI/review source PR, publish immutable geph-vendor-0.3.9-r4, integrate
+  dependency in PR376 and remove redundant app-level reserve before build/install.
+  Current workstation still runs4ece4ea4/r3. Product repair remains OPEN.
+
+## Previous checkpoint (historical)
+
 # Current Project State
 
 This is Slipstream's compact continuation checkpoint. It exists so a resumed or
