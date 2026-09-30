@@ -144,7 +144,17 @@ def classify_paths(paths: list[str], *, event_name: str,
         and (GEPH_BOOTSTRAP_REQUIRED.issubset(changed) or {
             "vendor/geph/SOURCE.json", "scripts/geph_vendor_source.py",
             "scripts/test_geph_source_edits.py",
-        }.issubset(changed))
+        }.issubset(changed) or (
+            # Existing guarded source edits may change without a lock update.
+            # verify-transition still validates the exact contract/revision;
+            # binary and application changes cannot enter this path.
+            "vendor/geph/SOURCE.json" in changed
+            and changed.issubset({
+                "vendor/geph/SOURCE.json", "docs/CURRENT_STATE.md",
+                "docs/DECISIONS.md", "scripts/ci_scope.py",
+                "scripts/test_ci_scope.py",
+            })
+        ))
         and changed.issubset(GEPH_BOOTSTRAP_ALLOWED)
         and ("scripts/geph_vendor_source.py" not in changed or "scripts/test_geph_source_edits.py" in changed)
         and (APP_LOCK not in changed or (

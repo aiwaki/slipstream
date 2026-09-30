@@ -28,6 +28,17 @@ file.
 
 ## Current Checkpoint
 
+2026-09-30 follow-up: failed reserve / delayed primary test PASS (0.71s).
+- Existing all26 Rust baseline reused; added one real PicoMux regression passes.
+- Initial PR381 CI36719937227 failed fetching unpublished r4 (404): classifier
+  required a lock/helper change although only existing guarded source edits changed.
+- Narrow source-only classification added, with9 scope tests and4 edit guard tests
+  PASS. Source transition validation remains mandatory; main never exempt,
+  app/binary/VERSION/workflow changes reject this narrow path.
+- Installed4ece4ea4/r3 unchanged. Next required CI, r4 publication, app adoption
+  removing redundant outer hedge, then canonical installation/product verification.
+
+
 PR377 review PRRT_kwDOTLueX86kIhE8 correctly rejected path-only app-lock admission.
 Merge was blocked by unresolved review, not bypassed. Fix now compares exact
 base/head lock contents and admits only pinned rustls/webpki transitions while
