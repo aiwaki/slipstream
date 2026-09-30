@@ -946,3 +946,17 @@ new-opening resilience evidence, not proof that established-stream resets or
 all observed browser failures are fixed. Production adoption requires the
 immutable vendor publication and app/browser qualification. Remove the app's
 redundant opening hedge when adopting r4 to avoid stacked duplicate attempts.
+
+## 2026-09-30: isolate Geph opening-response stream errors
+
+Vendor r5 extends opening isolation to a per-stream EOF/read error or malformed
+JSON response. These do not establish that the shared mux died. Return the
+opening error and drop that stream; preserve other tunnels. Actual mux death
+still ends proxy_loop through wait_until_dead, and mux.open failure retains
+its existing fatal handling. Routing and opening deadlines are unchanged.
+
+The offline real-PicoMux regression fails on r4 with a live mux marked early_dead.
+With the correction, both EOF and malformed-response cases must return an error,
+drain pending accounting, leave early_dead unset, and transfer bytes on a
+pre-existing stream. This fixes a causal mechanism, not proof that every observed
+application disconnect has this cause.

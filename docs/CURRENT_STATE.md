@@ -17,8 +17,8 @@ file.
 - Source-only fix preserves shared session after per-stream opening EOF/parse
   failure. RED r4, GREEN28 library tests11.02s plus4guard tests; full guarded
   materialization matches source. Evidence output/geph-failover-20260930/stream-error-*.log.
-- Primary d774a318 docs updated since retained cd39a554/r4 candidate. Merge
-  main7e196a71 next, preserve full AUD-17 docs and user AGENTS change.
+- Primary adopting main7e196a71/r5; retained cd39a554/r4 candidate stays historical.
+  Full AUD-17 docs preserved; user AGENTS change untouched.
 - r5 verifier prepared (NOT EXECUTED) at
   output/geph-stream-isolation-20260930/verify-and-stage-geph.sh.
 - Installed4ece4ea4/r3 unchanged. No Quit/native transaction pending; all learning
