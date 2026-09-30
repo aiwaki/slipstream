@@ -11,6 +11,7 @@ from enum import Enum
 import hashlib
 from html.parser import HTMLParser
 import ipaddress
+import json
 import re
 import time
 from urllib.parse import quote, urljoin, urlsplit
@@ -140,12 +141,14 @@ class RangeProbeEvidence:
     validator_digest: str = ""
     prefix_digest: str = ""
     received_body_bytes: int = 0
+    object_kind: str = "range"
 
     def proves_same_object_as(self, other):
         if not isinstance(other, RangeProbeEvidence):
             return False
         if (
-            self.outcome is not RangeProbeOutcome.INCOMPLETE
+            self.object_kind != other.object_kind
+            or self.outcome is not RangeProbeOutcome.INCOMPLETE
             or other.outcome is not RangeProbeOutcome.COMPLETE
             or self.total_length is None
             or self.total_length != other.total_length
@@ -219,6 +222,89 @@ class EphemeralBootstrapAsset:
 
     def __reduce_ex__(self, _protocol):
         raise TypeError("ephemeral bootstrap targets must not be serialized")
+
+
+class EphemeralPublicJsonAsset(EphemeralBootstrapAsset):
+    """Anonymous GET only; distinct from the frozen ranged image/JS contract."""
+
+    __slots__ = ()
+
+    def build_range_request(self, **kwargs):
+        # Keep the transport interface, but explicitly omit Range: JSON origins
+        # commonly ignore it. No browser headers or credentials are copied.
+        request = super().build_range_request(**kwargs)
+        return request.replace(b"Accept: */*\r\n", b"Accept: application/json\r\n").replace(
+            f"Range: bytes=0-{kwargs.get('range_end', DEFAULT_RANGE_END)}\r\n".encode(), b""
+        )
+
+
+def ephemeral_public_json_asset(url, expected_host):
+    candidate = _normalize_https_url(url)
+    if candidate is None or candidate[0] != expected_host:
+        return None
+    return EphemeralPublicJsonAsset(exact_host=candidate[0], host_header=candidate[1],
+        request_target=candidate[2], discovery_priority=1)
+
+
+def _reject_json_constant(_value):
+    raise ValueError("nonstandard_json_constant")
+
+
+def inspect_public_json_response(response, *, stream_closed, idle_timed_out,
+                                 truncated, deadline, clock=time.monotonic):
+    """Full identity JSON with an unambiguous, bounded Content-Length.
+
+    This opt-in contract never changes inspect_range_response. Framing proves
+    truncation; an object/array parse additionally rejects a complete error page.
+    Routes must still independently establish all local failures and same-object
+    owned completion. Request URLs and JSON values never enter the evidence.
+    """
+    unknown = RangeProbeEvidence(RangeProbeOutcome.UNKNOWN, object_kind="public_json")
+    def finish(value):
+        return _evidence_before_deadline(value, deadline, clock)
+    if not _deadline_open(deadline, clock):
+        return RangeProbeEvidence(RangeProbeOutcome.DEADLINE_EXCEEDED, object_kind="public_json")
+    if (not isinstance(response, bytes) or len(response) > MAX_RANGE_RESPONSE_BYTES
+            or truncated):
+        return finish(unknown)
+    head = _response_head(response)
+    if head is None:
+        return finish(unknown)
+    status, headers = head
+    lengths = headers.get("content-length", ())
+    types = headers.get("content-type", ())
+    if (status != 200 or not _identity_encoded(headers)
+            or headers.get("transfer-encoding") or headers.get("content-range")
+            or len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit()
+            or len(types) != 1 or types[0].split(";", 1)[0].strip().lower() != "application/json"):
+        return finish(unknown)
+    try:
+        total = int(lengths[0])
+    except ValueError:
+        return finish(unknown)
+    if not 0 < total <= MAX_RANGE_END + 1:
+        return finish(unknown)
+    body = response.split(b"\r\n\r\n", 1)[1]
+    if len(body) > total:
+        return finish(unknown)
+    outcome = RangeProbeOutcome.UNKNOWN
+    if len(body) == total:
+        try:
+            decoded = json.loads(body, parse_constant=_reject_json_constant)
+        except (ValueError, UnicodeError, RecursionError):
+            return finish(unknown)
+        if not isinstance(decoded, (dict, list)):
+            return finish(unknown)
+        outcome = RangeProbeOutcome.COMPLETE
+    elif stream_closed or idle_timed_out:
+        outcome = RangeProbeOutcome.INCOMPLETE
+    if outcome is RangeProbeOutcome.UNKNOWN:
+        return finish(unknown)
+    prefix, received = _entity_prefix_binding(response, headers,
+        stream_closed=stream_closed, truncated=False)
+    return finish(RangeProbeEvidence(outcome, total_length=total, range_end=total-1,
+        validator_digest=_strong_validator_digest(headers), prefix_digest=prefix,
+        received_body_bytes=received, object_kind="public_json"))
 
 
 def inspect_critical_bootstrap_assets(

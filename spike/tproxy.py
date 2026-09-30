@@ -5389,7 +5389,11 @@ def _bootstrap_range_response_on_tls_socket(
         data = b"".join(chunks)
         truncated = size >= limit and not complete
         diagnostic_phase = "response_classify"
-        evidence = bootstrap_asset_preflight.inspect_range_response(
+        inspector = (bootstrap_asset_preflight.inspect_public_json_response
+                     if b"\r\nAccept: application/json\r\n" in request
+                     and b"\r\nRange:" not in request
+                     else bootstrap_asset_preflight.inspect_range_response)
+        evidence = inspector(
             data,
             stream_closed=stream_closed,
             idle_timed_out=idle_timed_out,
@@ -8105,8 +8109,11 @@ async def _run_admitted_headless_owned_geph_preflight(
         if isinstance(job, route_preflight.RoutePreflightJobV3):
             # Discovery can never mint a parent proof or commit a child route.
             if asset_sink is not None and result.asset_url:
-                asset = bootstrap_asset_preflight.ephemeral_dynamic_asset(
-                    result.asset_url, route_preflight.dynamic_asset_host(result.asset_url))
+                factory = (bootstrap_asset_preflight.ephemeral_public_json_asset
+                           if isinstance(result, route_preflight.RoutePreflightResultV4)
+                           and result.asset_kind == "public_json"
+                           else bootstrap_asset_preflight.ephemeral_dynamic_asset)
+                asset = factory(result.asset_url, route_preflight.dynamic_asset_host(result.asset_url))
                 if asset is not None:
                     asset_sink.append(asset)
             return None
@@ -8616,11 +8623,11 @@ def _bootstrap_asset_preflight_blocking(
             is not bootstrap_asset_preflight.RangeProbeOutcome.INCOMPLETE
         ):
             return without_proof("direct_invalid")
-        if (
-            direct_termination
-            == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
-        ):
-            if not _bootstrap_measured_stall(direct_observation):
+        if (direct_termination == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
+                or (direct_evidence.object_kind == "public_json"
+                    and direct_termination == _BOOTSTRAP_RANGE_TERMINATION_EOF)):
+            if (direct_termination == _BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT
+                    and not _bootstrap_measured_stall(direct_observation)):
                 # An absolute budget expiring while encrypted bytes still
                 # arrive retains AUD-16's non-authorizing diagnostic behavior.
                 diagnostic_geph = _bootstrap_idle_geph_diagnostic(
@@ -10385,7 +10392,7 @@ async def _discover_dynamic_parent_asset(parent, address, sink):
             if len(attempted) < 4:
                 attempted.add(candidate)
     issued = int(time.time() * 1000)
-    job = route_preflight.RoutePreflightJobV3(
+    job = route_preflight.RoutePreflightJobV4(
         capability=secrets.token_hex(16), host=parent, candidate_routes=("owned_geph",),
         issued_at_unix_ms=issued,
         deadline_unix_ms=issued + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS,
@@ -17533,7 +17540,8 @@ def _submit_route_preflight_browser_result(
     if not isinstance(payload, dict):
         return False
     try:
-        parser = (route_preflight.parse_route_preflight_result_v3
+        parser = (route_preflight.parse_route_preflight_result_v4
+                  if payload.get("schema_version") == 4 else route_preflight.parse_route_preflight_result_v3
                   if payload.get("schema_version") == 3 else route_preflight.parse_route_preflight_result_v2
                   if payload.get("schema_version") == 2
                   else route_preflight.parse_route_preflight_result_v1)
@@ -17573,7 +17581,9 @@ def _submit_route_preflight_browser_result(
 def _submit_browser_probe_result(payload, launch_id=None, *, now=None):
     if isinstance(payload, dict) and (set(payload) == route_preflight._RESULT_FIELDS
             or (payload.get("schema_version") == 3
-                and set(payload) == route_preflight._RESULT_FIELDS | {"asset_url"})):
+                and set(payload) == route_preflight._RESULT_FIELDS | {"asset_url"})
+            or (payload.get("schema_version") == 4
+                and set(payload) == route_preflight._RESULT_FIELDS | {"asset_url", "asset_kind"})):
         return _submit_route_preflight_browser_result(
             payload,
             launch_id,

@@ -976,3 +976,32 @@ Chrome creation, and submission IPC errors are returned only after successful
 The worker job must still be booted out and verified absent. Signals, other exit
 codes, unknown/ownership/IPC errors and Chrome/profile cleanup errors remain
 failures. This does not turn a missing broker into a successful network probe.
+
+## 2026-09-30 Anonymous public JSON discovery (V4)
+
+V4 extends the disposable worker's discovery, not route authority. V1/V2/V3
+remain strict. A learned parent's existing fresh failure candidates may also
+match anonymous Fetch/XHR **GET** requests. The worker correlates request ID,
+exact URL, HTTP200 JSON MIME and a bounded declared length; it retains at most64
+pending IDs and one largest candidate in memory. POST, foreign hosts, redirects
+without a matching GET, user profiles, account headers and interaction are not
+inputs. DOM images retain priority. A V4 result adds `asset_kind` (`image`,
+`public_json`, or empty with an empty URL); the2048-byte IPC and1024-byte URL
+limits, original20s deadline, capability/PID/replay checks remain unchanged.
+
+Public JSON uses a separate full-response contract. The anonymous identity GET
+has no Range, Cookie or Authorization header. Only HTTP200 application/json
+with one positive Content-Length up to262144 bytes, no Transfer-Encoding or
+Content-Range, complete framing and a valid JSON object/array can be complete.
+Capture limits, compression, ambiguous framing, invalid JSON and other response
+kinds are inconclusive. Local EOF/observed idle can prove incomplete framing,
+but cannot change a route. System, app-owned DNS and both local strategies must
+independently fail the same object before verified owned completion can learn
+that exact host. Any complete local reply vetoes Geph. Length plus a strong ETag
+or1024-byte prefix digest binds comparison; JSON and ranged-object evidence
+cannot cross-bind. URLs, query strings and payloads remain transient.
+
+This does not replay user API requests, repair already delivered partial bodies,
+or cover authenticated-only APIs, chunked/compressed JSON and objects over the
+probe bound. Those remain explicit limits, not success. No protected-service,
+external resolver, proxy/PAC, PF or global UDP policy changes.

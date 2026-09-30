@@ -105,6 +105,34 @@ class RoutePreflightResultV3(RoutePreflightResultV1):
     asset_url: str = field(default="", repr=False)
 
 
+@dataclass(frozen=True)
+class RoutePreflightJobV4(RoutePreflightJobV3):
+    schema_version: int = 4
+
+
+@dataclass(frozen=True)
+class RoutePreflightResultV4(RoutePreflightResultV3):
+    schema_version: int = 4
+    asset_kind: str = ""
+
+
+def parse_route_preflight_job_v4(payload):
+    value = _object(payload, _JOB_FIELDS | {"asset_hosts"}, 4)
+    value["schema_version"] = 3
+    base = parse_route_preflight_job_v3(json.dumps(value))
+    return RoutePreflightJobV4(**{**base.__dict__, "schema_version": 4})
+
+
+def parse_route_preflight_result_v4(payload):
+    value = _object(payload, _RESULT_FIELDS | {"asset_url", "asset_kind"}, 4)
+    kind = value.pop("asset_kind")
+    if kind not in ("", "image", "public_json") or bool(kind) != bool(value["asset_url"]):
+        raise RoutePreflightError("invalid_asset_kind")
+    value["schema_version"] = 3
+    base = parse_route_preflight_result_v3(json.dumps(value))
+    return RoutePreflightResultV4(**{**base.__dict__, "schema_version": 4, "asset_kind": kind})
+
+
 def dynamic_asset_host(value):
     if (not isinstance(value, str) or not value or len(value) > 1024
             or not value.isascii() or any(ord(c) <= 32 or ord(c) == 127 for c in value)
@@ -276,7 +304,7 @@ def validate_route_preflight_result_v1(
         job.schema_version != result.schema_version
         or job.capability != result.capability
         or job.host != result.host
-        or (job.schema_version == 3 and result.asset_url
+        or (job.schema_version in (3, 4) and result.asset_url
             and dynamic_asset_host(result.asset_url) not in job.asset_hosts)
     ):
         reason = REASON_BINDING_MISMATCH

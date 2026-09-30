@@ -3292,3 +3292,22 @@ stand in for these failing public data resources. A separately reviewed anonymou
 GET discovery/full-framing contract is needed; do not weaken V3 or route the
 whole API because one manual comparison worked. Live root capture also shows
 xbox_plain and local_strategy partial-record watchdog failures for the API.
+
+### 2026-09-30: TestGlider public API truncation after image recovery
+
+On installed e2871ae6/Geph r5, anonymous real Chrome reported four HTTP200 JSON
+responses truncated (`ERR_CONTENT_LENGTH_MISMATCH`) in8.8–17.2s, including retries.
+For the first two exact failed GET targets, a fresh anonymous context on owned
+9954 completed16688 and83287 bytes in2.862/1.448s. Targets were kept only in memory;
+no user profile, credentials, query strings or response bodies entered artifacts.
+Evidence: `output/geph-stream-isolation-20260930/same-failed-api-comparison.log`.
+Private root capture `root-after-api-private.log` shows app-DNS/local partial
+record stalls; probing API `/` instead produced a short terminal response.
+
+V3 could only return DOM images and the range classifier deliberately rejected
+HTTP200 JSON. Thus root checks and recovered images did not qualify API delivery.
+V4 now supplies a separate anonymous GET hint and full-JSON comparison, preserving
+independent local proof. Its largest bounded response selection avoids tiny
+configuration replies dominating discovery. Source regressions are separate
+from installed/browser qualification; do not claim the live API fixed until the
+new exact candidate has been installed and checked.

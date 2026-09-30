@@ -10,6 +10,29 @@ file.
 
 ## Current Checkpoint
 
+2026-09-30 public JSON V4 candidate in progress; installed r5 unchanged:
+- Physical checkout AUD-17, branch codex/codebase-audit-20260905, PR376 OPEN.
+  Installed source e2871ae6/Geph r5 remains active; no new Quit or native prompt.
+- Cleanup candidate5f09f20a exact CI36746574801 PASS; watch89104 terminal0.
+  Canonical retained bundle output/recovery-replacement-cleanup-socket-5f09f20a
+  remains uninstalled. Hold it to combine the API fix in one later transaction.
+- New V4 anonymous worker discovers bound Fetch/XHR GET JSON candidates alongside
+  existing images. Full identity Content-Length JSON proof is separate from the
+  frozen range contract; all independent local checks also required on hard EOF.
+  No user profile/headers, paths in logs, protected routing or external settings.
+- Evidence output/geph-stream-isolation-20260930/public-json-*.log:
+  original RED17failed/1pass; final pure/broker/reader/vectors23PASS;
+  affected routing1227PASS/1FAIL (existing10ms socket cleanup test saw2instances).
+  Focused timeout/cancellation recheck2PASS; preserve failure rather than erase it.
+  Browser-probe Rust39PASS, clippyPASS. No live new-candidate API claim.
+- NEXT commit/build the combined V4 candidate, exact CI, canonical retained proof,
+  fresh guarded replacement, verify:local-install, real anonymous browser/API.
+  Do NOT replay consumed37451 or HELD11c1bdea replacement scripts.
+  User AGENTS.md modifications stay untouched. Isolated Chrome session
+  slipstream-worker-diagnostics retained; API target URLs stay only in memory.
+
+### Earlier same-day evidence
+
 2026-09-30 r5 installed; dynamic cooldown candidate11c1bdea built:
 - Installed e2871ae6bc51cbbfc5b15d54ea51a2890707de1a, Geph r5. Transaction37451
   terminal0 CONSUMED; canonical installed66449 PASS, active daemon14327.
@@ -45,11 +68,20 @@ file.
   root capture47593 terminal0 retained root-after-api-private.log; Xbox/local stalls.
   V3 discovers images only and ranged inspector excludes200 JSON: separate public
   GET/full-framing contract required before broadening discovery/route authority.
-- Cleanup race fix now in working tree: identity-verified owned worker exit1
+- Cleanup race fix committed5f09f20aa4527414621ed76732b80df7a16c16a8: identity-verified owned worker exit1
   socket_unavailable confirms no Chrome before claim or successful cleanup after
   submission; all other errors/nonzero codes remain refused. Exact failed case
-  reproduced cleanup-socket-red.log; focused runtime/smoke tests green.
-- NEXT commit cleanup fix, build new exact candidate and CI;11c1bdea retained
+  reproduced cleanup-socket-red.log;87 focused runtime/smoke tests PASS.
+  Push54127 terminal128 TCP connect timeout; retry90394 terminal0 pushed5f09f20a.
+  Build10315 terminal0 canonical PASS, retained2369 terminal0 PASS under
+  output/recovery-replacement-cleanup-socket-5f09f20a/ (artifact.json, verification).
+  Tree8f19599d252b49fdefe9ac14e0438e8db5551c3c55bea00325f72db34cda4a8e;
+  daemon9417fb309a35b7300d8c8969c927d62edefb57c7b44b6c1f8507dfa570ef51fb.
+  New exact CI36746574801 and Windows36746574796 running; audit36746574914
+  terminal (confirm conclusion). Watch89104 running at cleanup-socket-ci-watch.log; poll same handle.
+  Previous CI watch45904 terminal1 confirms11c1bdea lifecycle failure.
+- NEXT finish exact CI36746574801; create NEW5f09f20a guarded transaction
+  only after gates pass, then canonical install and real browser;11c1bdea retained
   transaction remains HELD_CI and must not execute. Reuse901 routing baseline.
   Installed e2871ae6 unchanged; no Quit or administrator prompt started. API-only discovery and cold
   backend readiness still open; no blanket all-sites/reconnect claim.

@@ -209,3 +209,15 @@ EOF) и разбора JSON в `open_tunnel_on_session` всё ещё выста
 PR382 убирает только два ошибочных общих сигнала. Настоящая смерть mux
 по-прежнему завершает `proxy_loop`; ошибка выделения mux-потока сохраняет
 прежнюю обработку. До установки и проверки приложения считать сбой открытым.
+
+### Images load but API data is missing
+
+`ERR_CONTENT_LENGTH_MISMATCH` on an API HTTP200 must be compared against the
+same anonymous GET object, not API `/` or the parent HTML. V4 discovery lives in
+`browser_probe.rs::AnonymousGetDiscovery`; strict IPC in `route_preflight.py`;
+full framing/object binding in `bootstrap_asset_preflight.py::inspect_public_json_response`;
+independent route proof in `tproxy.py::_bootstrap_asset_preflight_blocking`.
+A discovered URL or complete owned reply alone cannot learn the host. Check
+system/app-DNS/local outcomes, matching object evidence, then actual browser body
+completion. Chunked/compressed, authenticated-only and oversized JSON remain
+inconclusive, not repaired.

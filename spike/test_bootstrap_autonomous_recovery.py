@@ -927,3 +927,28 @@ def test_geph_io_diagnostic_distinguishes_absent_socket(monkeypatch, remaining, 
     assert len(calls) == (1 if remaining else 0)
     if calls:
         assert calls[0]["socks_port"] == tproxy.GEPH_OWNED_PORT
+
+
+@pytest.mark.parametrize('local_complete', [False, True])
+def test_public_json_eof_requires_independent_local_ladder(monkeypatch, local_complete):
+    from dataclasses import replace
+    def sample(complete=False):
+        obs = observation(Outcome.COMPLETE if complete else Outcome.INCOMPLETE,
+            termination=tproxy._BOOTSTRAP_RANGE_TERMINATION_COMPLETE if complete
+            else tproxy._BOOTSTRAP_RANGE_TERMINATION_EOF)
+        return replace(obs, evidence=replace(obs.evidence, object_kind='public_json'))
+    calls = []
+    def local(*args):
+        calls.append('local')
+        return sample(local_complete)
+    def owned(*args):
+        calls.append('geph')
+        return sample(True)
+    result = run_blocking(direct=lambda *a: sample(), local_probe=local, geph_probe=owned)
+    assert calls.count('local') == 3
+    if local_complete:
+        assert 'geph' not in calls
+        assert result.local_winner is not None
+    else:
+        assert calls[-1] == 'geph'
+        assert result.proof is not None

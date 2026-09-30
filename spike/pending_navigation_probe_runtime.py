@@ -279,7 +279,8 @@ def _validate_job(job, now_unix_ms):
         return None
     if set(job) in (_ROUTE_PREFLIGHT_JOB_FIELDS, _ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_hosts"}):
         try:
-            parser = (route_preflight.parse_route_preflight_job_v3
+            parser = (route_preflight.parse_route_preflight_job_v4
+                      if job.get("schema_version") == 4 else route_preflight.parse_route_preflight_job_v3
                       if job.get("schema_version") == 3 else route_preflight.parse_route_preflight_job_v2
                       if job.get("schema_version") == 2
                       else route_preflight.parse_route_preflight_job_v1)

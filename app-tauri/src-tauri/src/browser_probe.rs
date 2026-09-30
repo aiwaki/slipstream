@@ -196,6 +196,8 @@ struct ProbeResultPayload<'a> {
 struct RoutePreflightResultPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     asset_url: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_kind: Option<&'a str>,
     schema_version: u8,
     capability: &'a str,
     host: &'a str,
@@ -232,6 +234,7 @@ struct ChromeConfig {
 
 struct ChromeSession {
     discovered_asset: Option<String>,
+    discovered_asset_kind: &'static str,
     uid: u32,
     config: ChromeConfig,
     profile: PathBuf,
@@ -375,6 +378,7 @@ fn classified_dom_observation(event: &Value) -> ProbeResult<NavigationObservatio
 fn classify_loaded_document(
     websocket: &mut TcpStream,
     deadline: Instant,
+    public_gets: &mut AnonymousGetDiscovery,
 ) -> ProbeResult<NavigationObservation> {
     websocket_send_json(
         websocket,
@@ -392,6 +396,7 @@ fn classify_loaded_document(
         let Some(event) = websocket_read_json(websocket, deadline)? else {
             continue;
         };
+        public_gets.observe(&event);
         if event.get("id").and_then(Value::as_u64) == Some(DOM_CLASSIFICATION_COMMAND_ID) {
             return classified_dom_observation(&event);
         }
@@ -410,10 +415,64 @@ fn valid_dynamic_image_url(value: &str, host: &str) -> bool {
         && url.port_or_known_default() == Some(443) && url.fragment().is_none()
 }
 
+// V4 observes only the disposable browser's own GET metadata. Bounded transient
+// URLs never enter logs, user profiles, persisted state or routing keys.
+struct AnonymousGetDiscovery {
+    hosts: Vec<String>,
+    pending: std::collections::BTreeMap<String, String>,
+    best: Option<(u64, String)>,
+}
+
+impl AnonymousGetDiscovery {
+    fn new(hosts: &[String]) -> Self {
+        Self { hosts: hosts.to_vec(), pending: Default::default(), best: None }
+    }
+
+    fn observe(&mut self, event: &Value) {
+        if self.hosts.is_empty() { return; }
+        let Some(id) = event.pointer("/params/requestId").and_then(Value::as_str) else { return; };
+        if id.len() > 128 { return; }
+        match event.get("method").and_then(Value::as_str) {
+            Some("Network.requestWillBeSent") => {
+                // A redirect or reused ID must not inherit earlier GET authority.
+                self.pending.remove(id);
+                if self.pending.len() >= 64
+                    || event.pointer("/params/request/method").and_then(Value::as_str) != Some("GET")
+                    || !matches!(event.pointer("/params/type").and_then(Value::as_str), Some("Fetch" | "XHR")) {
+                    return;
+                }
+                let Some(url) = event.pointer("/params/request/url").and_then(Value::as_str) else { return; };
+                if self.hosts.iter().any(|host| valid_dynamic_image_url(url, host)) {
+                    self.pending.insert(id.to_string(), url.to_string());
+                }
+            }
+            Some("Network.responseReceived") => {
+                let Some(url) = self.pending.remove(id) else { return; };
+                if event.pointer("/params/response/url").and_then(Value::as_str) != Some(url.as_str())
+                    || event.pointer("/params/response/status").and_then(Value::as_u64) != Some(200)
+                    || event.pointer("/params/response/mimeType").and_then(Value::as_str) != Some("application/json") {
+                    return;
+                }
+                let Some(headers) = event.pointer("/params/response/headers").and_then(Value::as_object) else { return; };
+                let lengths: Vec<_> = headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("content-length")).collect();
+                if lengths.len() != 1 { return; }
+                let Some(length) = lengths[0].1.as_str().and_then(|s| s.parse::<u64>().ok()) else { return; };
+                if (1..=262144).contains(&length) && self.best.as_ref().is_none_or(|(n, _)| length > *n) {
+                    // Prefer the substantial API object over tiny configuration
+                    // replies; every target still needs independent local proof.
+                    self.best = Some((length, url));
+                }
+            }
+            Some("Network.loadingFailed" | "Network.loadingFinished") => { self.pending.remove(id); }
+            _ => {}
+        }
+    }
+}
+
 fn discover_dynamic_image(
     websocket: &mut TcpStream, hosts: &[String], deadline: Instant,
-    termination: &AtomicBool,
-) -> ProbeResult<Option<String>> {
+    termination: &AtomicBool, public_gets: &mut AnonymousGetDiscovery,
+) -> ProbeResult<Option<(String, &'static str)>> {
     // Use the remaining original job budget: hydration can finish after three
     // seconds even when the owned route is healthy. Leave time for the CDP
     // reply; never extend the job, scroll, click or authenticate.
@@ -440,9 +499,14 @@ fn discover_dynamic_image(
     while Instant::now() < deadline {
         require_not_terminated(termination)?;
         let Some(event) = websocket_read_json(websocket, deadline)? else { continue; };
+        public_gets.observe(&event);
         if event.get("id").and_then(Value::as_u64) == Some(6) {
             let value = event.pointer("/result/result/value").and_then(Value::as_str).unwrap_or("");
-            return Ok(hosts.iter().any(|host| valid_dynamic_image_url(value, host)).then(|| value.to_string()));
+            return Ok(if hosts.iter().any(|host| valid_dynamic_image_url(value, host)) {
+                Some((value.to_string(), "image"))
+            } else {
+                public_gets.best.take().map(|(_, url)| (url, "public_json"))
+            });
         }
     }
     Ok(None)
@@ -530,7 +594,7 @@ fn run_claimed_probe(
     let worker_v1_deadline = classification_deadline
         - (Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS) - CLASSIFICATION_BUDGET);
     let classification_deadline = classification_deadline.min(claimed_deadline);
-    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2 | 3))
+    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2..=4))
     {
         classification_deadline
     } else {
@@ -542,8 +606,9 @@ fn run_claimed_probe(
     let observation = match chrome.observe_navigation(
         termination_requested,
         classification_deadline,
-        matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2 | 3)),
+        matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2..=4)),
         match &job { ClaimedProbeJob::RoutePreflight(j) => j.asset_hosts.as_deref(), _ => None },
+        matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 4),
     ) {
         Ok(observation) => observation,
         Err(failure) => {
@@ -553,6 +618,7 @@ fn run_claimed_probe(
     };
     let outcome = observation_outcome(observation);
     let discovered_asset = chrome.discovered_asset.take();
+    let discovered_asset_kind = chrome.discovered_asset_kind;
     let response = submit_before_cleanup(
         || {
             let observed_at_unix_ms = unix_now_ms()?;
@@ -569,7 +635,8 @@ fn run_claimed_probe(
                 }
                 ClaimedProbeJob::RoutePreflight(job) => {
                     serde_json::to_value(RoutePreflightResultPayload {
-                        asset_url: (job.schema_version == 3).then_some(discovered_asset.as_deref().unwrap_or("")),
+                        asset_url: matches!(job.schema_version, 3 | 4).then_some(discovered_asset.as_deref().unwrap_or("")),
+                        asset_kind: (job.schema_version == 4).then_some(discovered_asset_kind),
                         schema_version: job.schema_version,
                         capability: &job.capability,
                         host: &job.host,
@@ -746,10 +813,10 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
     routes.dedup();
     let max_deadline = match job.schema_version {
         1 => ROUTE_PREFLIGHT_MAX_DEADLINE_MS,
-        2 | 3 if job.candidate_routes == [OWNED_GEPH_ROUTE] => BROWSER_COMPARE_MAX_DEADLINE_MS,
+        2..=4 if job.candidate_routes == [OWNED_GEPH_ROUTE] => BROWSER_COMPARE_MAX_DEADLINE_MS,
         _ => return Err(error("claimed_job_invalid")),
     };
-    if (job.schema_version == 3) != job.asset_hosts.is_some()
+    if matches!(job.schema_version, 3 | 4) != job.asset_hosts.is_some()
         || job.asset_hosts.as_ref().is_some_and(|hosts| hosts.is_empty() || hosts.len() > 4
             || hosts.iter().any(|h| !canonical_host(h))
             || hosts.iter().collect::<BTreeSet<_>>().len() != hosts.len())
@@ -864,7 +931,7 @@ fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<Claim
                 validate_job(&job)?;
                 return Ok(Some(ClaimedProbeJob::PendingNavigation(job)));
             }
-            if job.get("schema_version").and_then(Value::as_u64) != Some(3)
+            if !matches!(job.get("schema_version").and_then(Value::as_u64), Some(3 | 4))
                 && job.get("asset_hosts").is_some() {
                 return Err(error("claimed_job_invalid"));
             }
@@ -1239,6 +1306,7 @@ impl ChromeSession {
         let profile = create_private_profile()?;
         let mut session = Self {
             discovered_asset: None,
+            discovered_asset_kind: "",
             uid,
             config,
             profile,
@@ -1325,6 +1393,7 @@ impl ChromeSession {
         classification_deadline: Instant,
         allow_document_redirects: bool,
         asset_hosts: Option<&[String]>,
+        discover_public_get: bool,
     ) -> ProbeResult<NavigationObservation> {
         let port = read_devtools_port(&self.profile, self.uid)?
             .ok_or_else(|| error("devtools_unavailable"))?;
@@ -1359,6 +1428,8 @@ impl ChromeSession {
         )?;
 
         let overall_deadline = classification_deadline;
+        let mut public_gets = AnonymousGetDiscovery::new(
+            if discover_public_get { asset_hosts.unwrap_or_default() } else { &[] });
         let mut request_id = None;
         let mut request_started = None;
         let mut main_frame_id = None;
@@ -1375,6 +1446,7 @@ impl ChromeSession {
                     continue;
                 }
             };
+            public_gets.observe(&event);
             if event.get("id").and_then(Value::as_u64) == Some(3)
                 && (event.get("error").is_some()
                     || event
@@ -1470,13 +1542,16 @@ impl ChromeSession {
                 )
             };
             if ready {
-                let observation = classify_loaded_document(&mut websocket, overall_deadline)
+                let observation = classify_loaded_document(&mut websocket, overall_deadline, &mut public_gets)
                     .unwrap_or(NavigationObservation::TerminalError);
                 if observation == NavigationObservation::Usable {
                     if let Some(hosts) = asset_hosts {
-                        self.discovered_asset = discover_dynamic_image(
-                            &mut websocket, hosts, overall_deadline, termination_requested,
-                        ).unwrap_or(None);
+                        if let Some((url, kind)) = discover_dynamic_image(
+                            &mut websocket, hosts, overall_deadline, termination_requested, &mut public_gets,
+                        ).unwrap_or(None) {
+                            self.discovered_asset = Some(url);
+                            self.discovered_asset_kind = kind;
+                        }
                     }
                 }
                 let _ = websocket_send_json(
@@ -2396,6 +2471,44 @@ mod tests {
     }
 
     #[test]
+    fn public_get_discovery_excludes_posts_foreign_hosts_and_unbound_responses() {
+        let mut observer = AnonymousGetDiscovery::new(&["api.example.net".into()]);
+        let request = |id: &str, method: &str, url: &str| json!({"method": "Network.requestWillBeSent",
+            "params": {"requestId": id, "type": "Fetch", "request": {"method": method, "url": url}}});
+        let response = |id: &str, url: &str, length: &str| json!({"method": "Network.responseReceived",
+            "params": {"requestId": id, "response": {"url": url, "status": 200,
+                "mimeType": "application/json", "headers": {"content-length": length}}}});
+        let url = "https://api.example.net/public?ephemeral=1";
+        observer.observe(&request("post", "POST", url));
+        observer.observe(&response("post", url, "50000"));
+        observer.observe(&request("foreign", "GET", "https://foreign.example/a"));
+        observer.observe(&response("foreign", url, "50000"));
+        observer.observe(&response("unbound", url, "50000"));
+        assert!(observer.best.is_none());
+        observer.observe(&request("get", "GET", url));
+        observer.observe(&response("get", url, "16000"));
+        assert_eq!(observer.best.as_ref().map(|v| v.0), Some(16000));
+        observer.observe(&request("small", "GET", url));
+        observer.observe(&response("small", url, "50"));
+        observer.observe(&request("large", "GET", url));
+        observer.observe(&response("large", url, "83287"));
+        assert_eq!(observer.best.as_ref().map(|v| v.0), Some(83287));
+        for length in ["262145", "-1", "20\\n20", "unknown"] {
+            observer.observe(&request("invalid", "GET", url));
+            observer.observe(&response("invalid", url, length));
+            assert_eq!(observer.best.as_ref().map(|v| v.0), Some(83287));
+        }
+        let mut frozen = AnonymousGetDiscovery::new(&[]);
+        frozen.observe(&request("get", "GET", url));
+        frozen.observe(&response("get", url, "83287"));
+        assert!(frozen.pending.is_empty() && frozen.best.is_none());
+        for i in 0..100 {
+            observer.observe(&request(&i.to_string(), "GET", url));
+        }
+        assert_eq!(observer.pending.len(), 64);
+    }
+
+    #[test]
     fn dynamic_discovery_requires_v3_bound_host_and_safe_url() {
         let mut job = route_preflight_job(unix_now_ms().unwrap());
         job.schema_version = 3;
@@ -2414,7 +2527,7 @@ mod tests {
         let payload = RoutePreflightResultPayload { schema_version: 3,
             capability: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", host: "parent.example",
             candidate_route: OWNED_GEPH_ROUTE, outcome: OUTCOME_USABLE,
-            observed_at_unix_ms: 1000, asset_url: Some("https://images.example.net/a") };
+            observed_at_unix_ms: 1000, asset_url: Some("https://images.example.net/a"), asset_kind: None };
         assert!(serde_json::to_vec(&payload).unwrap().len() < MAX_IPC_BYTES);
     }
 
