@@ -1,3 +1,24 @@
+# Geph r5 source continuation — 2026-09-30
+
+This vendor branch is codex/geph-stream-error-isolation, PR382, based on
+main c54e0121. Application work remains in the Developer checkout/PR376.
+
+- r4 response EOF/parse failures still set shared early_dead; real PicoMux
+  regression RED. r5 removes only these two signals. Actual mux death and
+  mux stream allocation failure retain their existing handling.
+- All28 library tests PASS11.02s, including EOF/malformed response cases
+  that preserve a pre-existing stream. Four source-edit guard tests PASS.
+  Guarded materialization from original upstream equals tested source.
+- Evidence: Developer checkout output/geph-failover-20260930/stream-error-*.log.
+- ab47b72f source CI36731590349 and audit36731590233 PASS. This documentation
+  correction puts the current next action above historical checkpoints.
+- NEXT finish PR382 checks/review, merge, publish immutable geph-vendor-0.3.9-r5,
+  then adopt in PR376 and build/install/qualify the app. Do not install retained
+  r4 candidate cd39a554 while r5 is pending. Installed4ece4ea4/r3 unchanged.
+  Learning/backups preserved; Steam/Codex/TestGlider product repair remains OPEN.
+
+## Previous checkpoints (historical; not current actions)
+
 # Geph r4 source continuation — 2026-09-30
 
 This clean vendor PR branch is codex/geph-session-reserve, based on main6e037e97.
