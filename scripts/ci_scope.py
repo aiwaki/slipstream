@@ -150,7 +150,7 @@ def classify_paths(paths: list[str], *, event_name: str,
             # binary and application changes cannot enter this path.
             "vendor/geph/SOURCE.json" in changed
             and changed.issubset({
-                "vendor/geph/SOURCE.json", "docs/CURRENT_STATE.md",
+                "vendor/geph/SOURCE.json", "vendor/geph/README.md", "docs/CURRENT_STATE.md",
                 "docs/DECISIONS.md", "scripts/ci_scope.py",
                 "scripts/test_ci_scope.py",
             })

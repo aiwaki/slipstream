@@ -45,7 +45,7 @@ class CiScopeTests(unittest.TestCase):
             event_name="pull_request").geph_bootstrap)
 
     def test_existing_source_edit_revision_without_lock_change(self):
-        paths = ["vendor/geph/SOURCE.json", "docs/CURRENT_STATE.md", "docs/DECISIONS.md",
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/README.md", "docs/CURRENT_STATE.md", "docs/DECISIONS.md",
                  "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
         self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
         self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)

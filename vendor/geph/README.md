@@ -23,7 +23,7 @@ OSV audit. GitHub attestations bind the payload and SBOM to the exact
 `build-geph.yml` run. The app workflow verifies all of these before embedding
 the binary.
 
-Revision 3 of `0.3.9` carries explicit `source_edits` in `SOURCE.json`.
+Revisions 3 and 4 of `0.3.9` carry explicit `source_edits` in `SOURCE.json`.
 Each edit binds the complete input and output file SHA-256 and exactly one
 literal replacement; extraction fails on drift. The contract shipped with the
 release contains both the correction and its regression test, so no unpublished
@@ -35,6 +35,14 @@ existing tunnels with the failed new request. Actual mux death, read errors and
 protocol errors retain upstream handling. The offline two-stream regression
 fails on unmodified0.3.9 and requires the existing stream to remain usable after
 the new tunnel times out. The vendor build runs library tests before packaging.
+
+Revision 4 additionally opens one reserve tunnel on a distinct live session
+when the preferred opening stalls for350ms or fails. Both attempts share the
+original ten-second deadline; the first success wins. A failed reserve does
+not cancel a still-pending primary. Cancellation drains opening accounting and
+drops only the losing stream, preserving other streams on the shared session.
+The library regressions cover both race directions with real PicoMux peers.
+Consumers must remove outer SOCKS opening hedges when adopting this revision.
 
 The daemon supervises only Slipstream's owned copy. Geph remains limited to
 geo-exit routes; local bypass groups such as Discord and YouTube never use it.
