@@ -1,4 +1,4 @@
-"""New-tunnel failures must not duplicate bytes or leak reserve sockets."""
+"""The app must not multiply Geph internal attempts or replay application bytes."""
 import asyncio
 import pytest
 import tproxy
@@ -14,43 +14,27 @@ class Writer:
     async def wait_closed(self): pass
 
 
-@pytest.mark.parametrize('first_fails', [False, True])
-def test_reserve_recovers_without_replaying_first_flight(monkeypatch, first_fails):
+@pytest.mark.parametrize('owned', [False, True])
+@pytest.mark.parametrize('fails', [False, True])
+def test_single_socks_request_even_when_open_is_slow(monkeypatch, owned, fails):
     async def run():
         calls = []
-        cancelled = []
         writer = Writer()
         async def opening(*args):
             calls.append(args)
-            if len(calls) == 1:
-                if first_fails: return None
-                try: await asyncio.Future()
-                finally: cancelled.append(True)
-            return object(), writer
+            await asyncio.sleep(.4)  # Beyond the removed app-level hedge delay.
+            return None if fails else (object(), writer)
         monkeypatch.setattr(tproxy, '_open_geph_socks', opening)
-        monkeypatch.setattr(tproxy, '_geph_owned', True)
-        monkeypatch.setattr(tproxy, '_geph_port', tproxy.GEPH_OWNED_PORT)
-        result = await asyncio.wait_for(tproxy.dial_via_geph('example.com', 443, b'hello'), 1)
-        assert result[1] is writer
-        assert writer.data == [b'hello']
-        assert len(calls) == 2 and not writer.closed
-        assert bool(cancelled) != first_fails
-    asyncio.run(run())
-
-
-def test_fast_open_has_no_reserve(monkeypatch):
-    async def run():
-        calls = []
-        async def opening(*args):
-            calls.append(args)
-            return object(), Writer()
-        monkeypatch.setattr(tproxy, '_open_geph_socks', opening)
-        assert await tproxy._open_owned_geph_with_reserve('example.com',443,9954)
+        monkeypatch.setattr(tproxy, '_geph_owned', owned)
+        monkeypatch.setattr(tproxy, '_geph_port', tproxy.GEPH_OWNED_PORT if owned else 9909)
+        result = await tproxy.dial_via_geph('example.com', 443, b'hello')
         assert len(calls) == 1
+        assert (result is None) == fails
+        assert writer.data == ([] if fails else [b'hello'])
     asyncio.run(run())
 
 
-def test_cancel_cleans_both_openings(monkeypatch):
+def test_cancel_drains_single_opening(monkeypatch):
     async def run():
         started, stopped = [], []
         async def opening(*args):
@@ -58,39 +42,26 @@ def test_cancel_cleans_both_openings(monkeypatch):
             try: await asyncio.Future()
             finally: stopped.append(True)
         monkeypatch.setattr(tproxy, '_open_geph_socks', opening)
+        monkeypatch.setattr(tproxy, '_geph_port', tproxy.GEPH_OWNED_PORT)
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(tproxy._open_owned_geph_with_reserve('example.com',443,9954), .5)
-        assert len(started) == len(stopped) == 2
+            await asyncio.wait_for(tproxy.dial_via_geph('example.com',443,b'hello'), .5)
+        assert len(started) == len(stopped) == 1
     asyncio.run(run())
 
 
-def test_external_listener_gets_single_attempt(monkeypatch):
-    async def run():
-        calls = []
-        async def opening(*args): calls.append(args); return None
-        monkeypatch.setattr(tproxy, '_open_geph_socks', opening)
-        monkeypatch.setattr(tproxy, '_geph_owned', False)
-        monkeypatch.setattr(tproxy, '_geph_port', 9909)
-        assert await tproxy.dial_via_geph('example.com',443,b'hello') is None
-        assert len(calls) == 1
-    asyncio.run(run())
-
-
-def test_real_socks_stall_closes_loser_and_sends_to_winner_only(monkeypatch):
+def test_real_socks_slow_open_sends_first_flight_once(monkeypatch):
     async def run():
         received, handlers = [], []
         async def serve(r,w):
-            ordinal = len(handlers); handlers.append(asyncio.current_task())
+            handlers.append(asyncio.current_task())
             try:
                 assert await r.readexactly(3) == b'\x05\x01\x00'
                 w.write(b'\x05\x00'); await w.drain()
                 head = await r.readexactly(5)
                 await r.readexactly(head[4]+2)
-                if ordinal == 0:
-                    received.append((ordinal, await r.read()))
-                else:
-                    w.write(b'\x05\x00\x00\x01'+b'\x00'*6); await w.drain()
-                    received.append((ordinal, await r.read()))
+                await asyncio.sleep(.4)
+                w.write(b'\x05\x00\x00\x01'+b'\x00'*6); await w.drain()
+                received.append(await r.read())
             finally:
                 w.close(); await w.wait_closed()
         server = await asyncio.start_server(serve,'127.0.0.1',0)
@@ -103,26 +74,9 @@ def test_real_socks_stall_closes_loser_and_sends_to_winner_only(monkeypatch):
             assert result is not None
             await tproxy._close_stream_writer(result[1])
             await asyncio.wait_for(asyncio.gather(*handlers),1)
-            assert sorted(received) == [(0,b''),(1,b'client-hello')]
+            assert received == [b'client-hello'] and len(handlers) == 1
         finally:
             server.close(); await server.wait_closed()
-    asyncio.run(run())
-
-
-def test_simultaneous_success_closes_unused_tunnel(monkeypatch):
-    async def run():
-        writers = [Writer(), Writer()]
-        gate = asyncio.Event()
-        calls = []
-        async def opening(*args):
-            n = len(calls); calls.append(n)
-            if n: gate.set()
-            await gate.wait()
-            return object(), writers[n]
-        monkeypatch.setattr(tproxy, '_open_geph_socks', opening)
-        result = await tproxy._open_owned_geph_with_reserve('example.com',443,9954)
-        assert sum(w.closed for w in writers) == 1
-        assert not result[1].closed
     asyncio.run(run())
 
 

@@ -3212,3 +3212,26 @@ expired deadline, changed backend, and wait exceptions. No deadlines or
 signature checks are relaxed, and no private URL or exception text is logged.
 The earlier result_refused at 17:08:07 remains ambiguous. Full dynamic image
 recovery and Codex reconnecting remain unqualified.
+
+
+### 2026-09-30 Steam and Codex fail together through owned Geph
+
+Retained Steam CEF evidence records TLS `net_error -100` on September29 at
+18:09:04 local; the same second Slipstream records a failed SOCKS opening for
+store.steampowered.com. ChatGPT upstream resets at18:07:20 and18:08:40 coincide
+with Codex request retries. Owned Geph restarts at18:07:31 and18:08:03 follow
+failures, so restart timing alone is not their cause. The install restart was
+at18:01–18:02; an additional shutdown at18:09:13 has an unproven initiator.
+
+A later six-request HEAD comparison saved in
+`output/reconnecting-20260929/steam-owned-comparison.json` independently observed
+TestGlider's SOCKS opening close at10.007s through owned9954 directly, while
+Steam and anonymous ChatGPT answered. This establishes a failure below the
+Slipstream routing layer, not its precise transport cause. Anonymous403 and
+HEAD200 are not authenticated app or full-resource qualification.
+
+The materialized Geph r3 selector uses mux liveness and pending opening count;
+a destination-open timeout no longer kills shared streams, but neither lowers
+selection preference nor retries another session within Geph. Investigate
+bounded independent new-opening failover without tearing down existing streams;
+do not restore shared early-dead behavior or infer all destinations need Geph.

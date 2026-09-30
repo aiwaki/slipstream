@@ -926,3 +926,23 @@ parents and protected hosts are excluded. Quit cancels and drains this registry
 before closing the browser broker. No new parent connection or foreground
 browser is required to trigger the recheck. Already failed browser requests
 may still need a retry; this does not authorize automatic page reloads.
+
+## 2026-09-30: reserve session for new Geph tunnel openings
+
+Vendor r4 races a slow tunnel opening against at most one different live session
+after350ms (or immediately after an opening error). Both attempts share a ten
+second overall opening deadline, including waiting for a session. The selected
+stream retains its own session's bandwidth accounting. A missing reserve leaves
+the original attempt in place; an unsuccessful reserve does not cancel a still
+pending primary. Returning a winner drops only the losing opening future and
+stream, never the shared mux. Application bytes are supplied only after selection.
+There is no cross-request concurrency cap, retry of transmitted application
+payload, or change to routing policy. Discord/YouTube remain local bypass.
+
+The local two-mux regression fails on r3 within the caller's two-second budget
+and passes on r4: a stalled primary uses the healthy reserve, then an existing
+stream on the primary still transfers bytes. All26 library tests pass. This is
+new-opening resilience evidence, not proof that established-stream resets or
+all observed browser failures are fixed. Production adoption requires the
+immutable vendor publication and app/browser qualification. Remove the app's
+redundant opening hedge when adopting r4 to avoid stacked duplicate attempts.

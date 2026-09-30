@@ -18951,48 +18951,14 @@ async def _open_geph_socks(host, port, port_socks):
             await _close_stream_writer(gw)
 
 
-async def _open_owned_geph_with_reserve(host, port, port_socks):
-    """Race a slow opening against one reserve; never replay application data.
-
-    Only owned Geph uses this policy. The caller's absolute first-payload
-    deadline still bounds both attempts. Existing tunnels are never restarted.
-    """
-    tasks = [asyncio.create_task(_open_geph_socks(host, port, port_socks))]
-    winner = None
-    try:
-        done, _ = await asyncio.wait(tasks, timeout=0.35)
-        if done:
-            winner = tasks[0].result()
-            if winner is not None:
-                return winner
-        tasks.append(asyncio.create_task(_open_geph_socks(host, port, port_socks)))
-        pending = {t for t in tasks if not t.done()}
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for task in tasks:
-                if task in done and task.result() is not None:
-                    winner = task.result()
-                    return winner
-        return None
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, tuple) and result is not winner:
-                await _close_stream_writer(result[1])
-
-
 async def dial_via_geph(host, port, first_flight):
     """Open a target tunnel, then send the buffered first flight exactly once."""
     port_socks = _geph_port
     if not port_socks:
         return None
-    if _geph_owned and port_socks == GEPH_OWNED_PORT:
-        upstream = await _open_owned_geph_with_reserve(host, port, port_socks)
-    else:
-        upstream = await _open_geph_socks(host, port, port_socks)
+    # Owned Geph r4 races distinct internal sessions. A second SOCKS request
+    # here would multiply that work and cannot select an independent session.
+    upstream = await _open_geph_socks(host, port, port_socks)
     if upstream is None:
         return None
     reader, writer = upstream

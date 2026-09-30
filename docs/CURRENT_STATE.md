@@ -10,6 +10,157 @@ file.
 
 ## Current Checkpoint
 
+2026-09-30 vendor publication still live; integration saved for next build:
+- Watch78863 ended1 from local SOCKS EOF, not terminal CI. Authoritative jobs
+  query57469 exit0: build109913737699 in_progress restoring cache; resolve PASS.
+  Further live query52253 running. Do not rerun vendor workflow.
+- App integration ready with r4 SOURCE and no outer hedge;9 focused Python tests
+  PASS. Commit this explicit file set excluding user AGENTS.md; push/build only
+  after r4 release asset/provenance verification. Current staged binary remainsr3.
+- Prepared verifier output/geph-failover-20260930/verify-and-stage-geph.sh has
+  not run. Installed4ece4ea4 unchanged, no system prompt or transaction pending.
+
+
+2026-09-30 PR381 MERGED; immutable vendor build RUNNING:
+- Exact33cbbae1 CI36722396972 PASS; dependency audit36722397019 PASS;
+  required checks63541 terminal0, merge15337 terminal0.
+- GitHub confirms merged c54e0121324cf4c3705a5fb083d55ab0052b9add.
+- build-geph run36723286411 at that SHA in_progress. Watch78863 LIVE,
+  output/geph-failover-20260930/vendor-build-watch.log. Poll same handle;
+  GitHub transient EOF/502 may end watcher without determining CI outcome.
+- Primary checkout holds uncommitted r4 integration + diagnostic docs (AGENTS
+  user edit untouched).7 opening tests +2 first-payload tests PASS; prior26 Rust
+  baseline plus new failed-reserve test PASS. No app build/install started.
+- NEXT: successful vendor publication; execute prepared verify-and-stage-geph.sh
+  once (fresh assets dir), binding SOURCE/SBOM/audit/attestations and both arches.
+  Then commit/push PR376 integration, canonical app build/CI/install. Do not ship
+  outer-hedge removal with old r3 binary. All backups/learning retained.
+- Installed4ece4ea4/r3 unchanged. Full dynamic resources and established-stream
+  resets remain unqualified; no claim that source regression fixes all reconnects.
+
+
+2026-09-30 PR381 final head33cbbae1 pending exact CI36722396972:
+- dd0ab6f7 CI36721057314 fully GREEN. Merge was blocked by unresolved Sourcery
+  documentation thread, not failing tests. README updated to describe r3/r4;
+  thread PRRT_kwDOTLueX86nixvP resolved75878 exit0. Push12661 exit0.
+- Auto-merge unsupported (50504 exit1); no admin bypass, no successful merge yet.
+- Root checkout copied candidate SOURCE/README/ci_scope/tests and appended r4
+  decision, alongside outer-hedge removal. These are uncommitted and MUST NOT
+  build/install until published r4 is verified and staged.
+- Prepared syntax-checked output/geph-failover-20260930/verify-and-stage-geph.sh;
+  not executed. Fresh release-assets dir absent, r3 binary retained in staging.
+- Read-only GitHub status15384 failed SOCKS EOF; retry27667 uses app HTTP1080.
+  Product recovery and established stream resets remain OPEN.
+
+
+2026-09-30 app integration PREPARED, not installed/committed:
+- Removed redundant Python _open_owned_geph_with_reserve; dial_via_geph now
+  makes one SOCKS request. Must ship ONLY together with Geph r4 contract/binary.
+-7 scoped tests PASS (91220 exit0), including slow real SOCKS/single first-flight,
+  cancellation and send failure. output/geph-failover-20260930/app-single-opening.log.
+- CI381 watch55407 ended1 due GitHub502, not a known test failure. Job109906090702
+  has no incomplete steps; authoritative status query67395 running.
+- Installed4ece4ea4/r3 remains unchanged. No replacement or authorization pending.
+
+
+2026-09-30 resumed: PR381 now dd0ab6f7, CI36721057314 product-checks running.
+- Initial CI36719937227 failed404 on unpublished r4: scope classifier did not
+  admit source-only revision without lock/helper changes. Narrow condition fixed;
+ 9 scope tests,4 guard tests PASS; verify-transition r3->r4 PASS.
+- Added real PicoMux failed-reserve/delayed-primary test PASS; previous26 Rust
+  tests reused. Exact upstream guarded materialization equals tested source.
+- Push37038 terminal0; dependency audit36721056826 success. No install running.
+- Next finish CI381/review, publish r4, integrate with outer hedge removal.
+  Installed4ece4ea4/r3 unchanged; stream resets and product qualification OPEN.
+
+
+2026-09-30 Geph r4 opening reserve RED/GREEN, source branch pushed:
+- Reused clean managed worktree geph-rustls-02345 (old branch preserved), new
+  codex/geph-session-reserve at e149920e, based on fetched main6e037e97.
+- Test stalled_preferred_session_uses_reserve_without_harming_existing_stream
+  RED on r3 (two-second caller budget), GREEN with new distinct-session hedge.
+  Existing primary stream still transfers bytes; all26 library tests pass,
+  source edit guard4 tests pass. Local evidence output/geph-failover-20260930.
+- Guarded SOURCE.json r4 has exact tested source hash; no binary changed in app.
+  New hedge350ms, maxone other session, shared10s deadline, no payload replay.
+  App-level hedge must be removed when r4 is adopted to avoid stacked attempts.
+- Push17884 exit0. First PRcreate45738 GraphQL EOF; REST21902 confirmed no
+  PR. Retried through per-command owned SOCKS, create22638 exit0: PR381 created
+  and attached. CI36719937227 confirmed in_progress28759; dependency audit
+  36719937365 success. Installed4ece4ea4/r3 unchanged.
+- Next create/attach vendor PR, required CI/review, immutable r4 publication and
+  app integration. Established-stream resets/product qualification remain OPEN.
+
+
+2026-09-30 Steam/Codex correlated failure confirmed; owned backend opening fails:
+- User Steam screenshot correlates to Steam cef_log.txt TLS net_error -100 at
+  Sep29 18:09:04 and rootlog store.steampowered.com SOCKS connect failed same second.
+  chatgpt.com upstream_reset18:07:20/18:08:40 matches Codex request retries.
+  Rootlog restarts owned Geph18:07:31 and18:08:03; failures precede restarts.
+  Installation shutdown18:01:12/start baseline18:02:15 cannot explain all later
+  failures. Another shutdown18:09:13 recorded; do not assume its initiator.
+- Private window capture39287 exit0 at steam-event-window-private.log. Current
+  capture46223 exit0 steam-correlated-private.log is Sep30, not same incident.
+- Current daemon87899 recovering; Gephup with26sessions and restart waiting idle.
+- Direct owned SOCKS comparison93417 exit0: TestGlider SOCKS closed at10.007s
+  (curl97), bypassing Slipstream routing; Steam200 ~1.35s, ChatGPT anonymous403
+  ~1.04s. Through1080 Steam200, ChatGPT403, TestGlider302 ~5.30s. HEAD outcomes
+  isolate tunnel opening only; no product/full-resource success claim.
+  Artifact steam-owned-comparison.json.
+- Source materialized geph r3 src/session.rs selects live sessions by pending_opens
+  and round robin; open timeout preserves session but gives no health penalty or
+  independent session retry. Candidate next investigation: bounded new-opening
+  failover while preserving existing streams, using guarded source_edits contract.
+  Do not blindly increase deadlines or reintroduce shared early_dead on timeout.
+- Browser41386 handle now absent; retained result confirms70.449s timeout, root
+  stillloading, all3heroes incomplete width0. First2970 failed on navigation
+  context destruction; successor script handles redirects. No dynamic V3 reason
+  in captured incident window. Installed4ece4ea4 canonical64347 PASS remains;
+  no installer/build pending. Full browser recovery and reconnecting OPEN.
+
+
+2026-09-29 diagnostic4ece4ea4 INSTALLED, canonical PASS; browser running2970:
+- Transaction96260 terminal0 CONSUMED; never replay. App opened, daemon38374
+  active; installed verifier64347 exit0 PASS at worker-diagnostics-installed-verification.log.
+- Chrome session slipstream-worker-diagnostics opened61005 terminal0, isolated
+  headed profile. Full dynamic-image check2970 running; same script as failed
+  baseline, output worker-diagnostics-browser-result.txt. Poll same handle.
+- Private rootlog capture25112 running, output worker-diagnostics-private.log;
+  log filtered for browser-proof reasons after check. No pending build/install.
+- No product success claimed; dynamic images and model reconnect remain OPEN.
+
+
+2026-09-29 diagnostic4ece4ea4 INSTALL RUNNING96260:
+- CI watch64059 terminal0; lifecycle109417072257 PASS in retained watch log.
+  Later gh check timed out DNS/network; does not invalidate completed watch.
+- Normal --quit exit0, launchctl system service absent113; no SecurityAgent.
+- NEW worker-diagnostics-4ece4ea4 transaction launched96260 via native admin.
+  Poll SAME handle and transaction.log. Do NOT replay. App not reopened yet.
+- After terminal success open canonical app, wait active, verify local install,
+  then reproduce dynamic images. No product success claimed.
+
+
+2026-09-29 diagnostic4ece4ea4 candidate ready; CI36569779943 still running:
+- Build39541 exit0, canonical PASS; retained verifier38273 exit0 PASS.
+  New output/recovery-replacement-worker-diagnostics-4ece4ea4 contains app,
+  artifact.json, retained-verification.log and syntax-checked guarded transaction.
+  Transaction NOT executed. No Quit or native authorization launched yet.
+- Push97438 exit0; product/checks and browser qualification pass; packaged
+  transaction/lifecycle jobs still pending. Finish same CI before installation.
+- CI watch session64059 confirmed live; poll SAME handle. GitHub reports
+  macOS arm64 runner capacity queue. Do not restart build/watch.
+- Installed e2f47fce unchanged; dynamic image failure and reconnecting OPEN.
+
+
+2026-09-29 diagnostic candidate4ece4ea4 BUILD RUNNING39541:
+- Build log output/reconnecting-20260929/worker-diagnostics-build.log; poll SAME
+  session39541. Push session97438 pending; poll it before remote/CI verification.
+- Installed e2f47fce unchanged. No new replacement transaction or authorization.
+- Diagnostics10 tests and direct launcher4 tests passed. Next canonical build
+  verification/required CI, then fresh guarded install if green, then bounded
+  browser reproduction to distinguish signature timeout/OS error/outcome/deadline.
+
+
 2026-09-29 worker launch failure located; diagnostic differentiation in source:
 - Existing private capture dynamic-budget-complete-private.log records
   browser_worker_signature_unavailable at17:12:58 and17:13:08 before wait_failed
