@@ -1,6 +1,7 @@
 # Карта диагностики Slipstream
 
-Карта проверена по исходникам `cb8f093` (2026-09-28). Это карта реализации,
+Базовая карта проверена по исходникам `cb8f093` (2026-09-28); раздел API
+дополнен по `f4251985` (2026-09-30). Это карта реализации,
 а не утверждение, что все ветви успешно работают в установленном приложении.
 Текущая установка и незакрытые проверки — в [CURRENT_STATE.md](CURRENT_STATE.md).
 Политика — в [DECISIONS.md](DECISIONS.md), системные границы — в
@@ -32,6 +33,11 @@ flowchart TD
     Child --> Proof
     Evidence --> Cached[Недавний HTML-родитель даже при попадании страницы в кеш]
     Cached --> Parent
+    Cached --> Browser[Анонимный браузер: ресурсы после JavaScript]
+    Browser --> Image[Изображение: проверка диапазона]
+    Browser --> API[Публичный GET API: проверка полного JSON]
+    Image --> Child
+    API --> Child
 ```
 
 Это схема TCP/HTTPS. Голосовой UDP, DNS и жизненный цикл службы имеют отдельные
@@ -210,14 +216,20 @@ PR382 убирает только два ошибочных общих сигн�
 по-прежнему завершает `proxy_loop`; ошибка выделения mux-потока сохраняет
 прежнюю обработку. До установки и проверки приложения считать сбой открытым.
 
-### Images load but API data is missing
+### Картинки появились, но данные API не загрузились
 
-`ERR_CONTENT_LENGTH_MISMATCH` on an API HTTP200 must be compared against the
-same anonymous GET object, not API `/` or the parent HTML. V4 discovery lives in
-`browser_probe.rs::AnonymousGetDiscovery`; strict IPC in `route_preflight.py`;
-full framing/object binding in `bootstrap_asset_preflight.py::inspect_public_json_response`;
-independent route proof in `tproxy.py::_bootstrap_asset_preflight_blocking`.
-A discovered URL or complete owned reply alone cannot learn the host. Check
-system/app-DNS/local outcomes, matching object evidence, then actual browser body
-completion. Chunked/compressed, authenticated-only and oversized JSON remain
-inconclusive, not repaired.
+`ERR_CONTENT_LENGTH_MISMATCH` при HTTP200 означает, что нужно проверить полноту
+конкретного ответа. Корень API `/` и HTML родительской страницы эту проверку
+не заменяют.
+
+| Этап | Код | Что проверять |
+|---|---|---|
+| Обнаружение анонимного GET после загрузки страницы | `browser_probe.rs::AnonymousGetDiscovery` | Совпадают ID запроса, URL и выбранный хост; метод GET, ответ HTTP200 JSON. Пользовательский профиль не используется. |
+| Передача подсказки процессу daemon | `route_preflight.py::parse_route_preflight_result_v4` | Тип ресурса, хост, одноразовая capability и исходный срок действия. URL не становится правилом маршрутизации. |
+| Полнота и совпадение объекта | `bootstrap_asset_preflight.py::inspect_public_json_response` | Фактический размер совпадает с Content-Length; полный ответ содержит JSON-объект или массив; сравнение привязано к длине и ETag либо хешу префикса. |
+| Выбор маршрута | `tproxy.py::_bootstrap_asset_preflight_blocking` | Независимо проверены системный путь, DNS приложения и локальные стратегии. Полный локальный ответ запрещает переход на Geph. |
+| Проверка результата | Реальный браузер | Завершились тела API-ответов, появились нужные данные и изображения. HTTP200 и загрузки HTML недостаточно. |
+
+Подсказка браузера или полный ответ через Geph сами по себе не разрешают новый
+маршрут. Сжатые ответы, chunked-передача, API с авторизацией и JSON больше лимита
+проверки остаются неподтверждёнными; их нельзя записывать в исправленные.

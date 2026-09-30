@@ -277,3 +277,32 @@ def test_new_failure_wakes_existing_cooldown_waiter(monkeypatch, learned_parent,
     asyncio.run(scenario())
     assert seen == [learned_parent]
     assert not tproxy._learned_parent_recovery_wakeups
+
+
+def test_selected_image_does_not_cool_down_unselected_api(monkeypatch, learned_parent, recent_parent_state):
+    now = time.monotonic()
+    image, api = 'images.example.net', 'api.example.net'
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {
+        image: {'system': now}, api: {'system': now}})
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', lambda *a: None)
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+    selected = []
+    async def browser(job, *args, **kwargs):
+        host = image if image in job.asset_hosts else api
+        selected.append(host)
+        kwargs['asset_sink'].append(tproxy.bootstrap_asset_preflight.ephemeral_dynamic_asset(
+            f'https://{host}/public.png', host))
+    proofs = []
+    async def child(asset, *args, **kwargs):
+        proofs.append(asset.exact_host)
+        return False, tproxy.SEMANTIC_OUTCOME_NAVIGATION_PENDING
+    monkeypatch.setattr(tproxy, '_run_headless_owned_geph_preflight', browser)
+    monkeypatch.setattr(tproxy, '_run_bootstrap_asset_preflight', child)
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery(image)
+        await asyncio.wait_for(asyncio.gather(*tproxy._learned_parent_recovery_tasks.values()), .5)
+    asyncio.run(scenario())
+    assert selected == [image, api]
+    assert proofs == [image, api]
+    assert tproxy._learned_parent_asset_attempts[learned_parent] == {image, api}
+    assert not tproxy._auto_geph_learned_exact_host(api)

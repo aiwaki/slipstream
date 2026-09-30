@@ -10,7 +10,27 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 public JSON V4 candidate in progress; installed r5 unchanged:
+2026-09-30 V4 installed; candidate-accounting fix ready for build:
+- Checkout AUD-17 / codex/codebase-audit-20260905 / PR376. Installed f4251985,
+  exact CI36749756148 and Windows36749755724 PASS. Replacement36622 CONSUMED;
+  verify:local-install53692 PASS. Learning and all backups retained.
+- Browser97998 FAILED root partial HTML; repeat29099 FAILED dynamic images/API.
+  Independent owned root26475 completed302->200. Root captures36940/59227 complete.
+  No pending native prompt. Do not claim full browser or reconnecting recovery.
+- Fixed source accounting: only selected V4 object host counts as attempted;
+  queue drains unselected fresh hosts with progress guard, existing4hostwindow.
+  RED regression reproduced API starvation; focused42 + integration111 PASS.
+  Reuse prior f425 baseline; no unchanged broad rerun needed.
+- NEXT commit/build this fix, exact required CI, retained canonical bundle,
+  fresh guarded replacement (never replay36622), installed verification and
+  real API/dynamic-image completion. User AGENTS.md changes stay untouched.
+- Evidence output/geph-stream-isolation-20260930/selection-fairness-*.log;
+  detailed findings docs/ROUTING_RESEARCH.md. Isolated Chrome session
+  slipstream-worker-diagnostics retained. Keep API targets ephemeral.
+
+### V4 installation evidence (historical sequence)
+
+2026-09-30 public JSON V4 installed; browser qualification running:
 - Physical checkout AUD-17, branch codex/codebase-audit-20260905, PR376 OPEN.
   Installed source e2871ae6/Geph r5 remains active; no new Quit or native prompt.
 - Cleanup candidate5f09f20a exact CI36746574801 PASS; watch89104 terminal0.
@@ -25,11 +45,34 @@ file.
   affected routing1227PASS/1FAIL (existing10ms socket cleanup test saw2instances).
   Focused timeout/cancellation recheck2PASS; preserve failure rather than erase it.
   Browser-probe Rust39PASS, clippyPASS. No live new-candidate API claim.
-- NEXT commit/build the combined V4 candidate, exact CI, canonical retained proof,
+- Combined V4 committed/built and exact CI passed; next canonical retained proof,
   fresh guarded replacement, verify:local-install, real anonymous browser/API.
   Do NOT replay consumed37451 or HELD11c1bdea replacement scripts.
   User AGENTS.md modifications stay untouched. Isolated Chrome session
   slipstream-worker-diagnostics retained; API target URLs stay only in memory.
+
+- Combined candidate f425198564450b6db14d83a0f61836f20d1ee0dd pushed88091
+  terminal0. Build87930 terminal0 canonical PASS; retained70396 terminal0 PASS.
+  output/recovery-replacement-public-json-f4251985 holds bundle/artifact/verifier.
+  Tree6dcd9a7fa8148895cd212f56311c261ee9731ff6ab3946a637102b91c33692bc;
+  daemon1a76a5867687326a20ee05fac5bd49be4ec771ad7d55d5ac5c0b590cba5b01da.
+  Fresh guarded replacement prepared HELD_CI, bash syntax PASS; NOT EXECUTED.
+- Real anonymous Chrome41385 terminal0 confirms V4 CDP metadata: five eligible
+  API GETs, largest83287B. Artifact v4-browser-metadata.log contains only sizes/
+  types/status, no URLs. This qualifies discovery inputs, not installed recovery.
+- Exact CI36749756148 IN PROGRESS, watch2892 live at public-json-ci-watch.log;
+  poll same handle. Windows36749755724 running; dependency36749756171 PASS.
+  Earlier5f09 CI36746574801, Windows36746574796, audit36746574914 all PASS.
+- NEXT finish same CI, unlock reviewed fresh f425 transaction only if green,
+  normal Quit/replacement, canonical installed verifier then real API/image body
+  completion. Learning unchanged. Do not rerun broad1227-pass matrix unchanged;
+  reuse it plus isolated timeout recheck2PASS and final23JSON/Rust39/clippy/docs9.
+
+- Prepared installed behavior check qualify-public-json-installed.js: requires
+  complete bodies for at least5 anonymous API targets plus all3static and first3
+  dynamic images, retains only host/error/size summaries, closes its own page.
+  NOT RUN before installation. Current CI query3879 and watch2892 are the same
+  f425 run; no replacement or root authorization started during this continuation.
 
 ### Earlier same-day evidence
 
@@ -7325,3 +7368,43 @@ Keep this file short and current. A PR that closes a listed gap, changes the
 next verified action, or adds a new release/safety gate must update this
 checkpoint. If live evidence contradicts it, stop, investigate the difference,
 and correct the file rather than improvising a narrative.
+
+- Resume verification: exact CI36749756148 and Windows36749755724 completed SUCCESS
+  at f4251985; watch2892 terminal0. Fresh f425 script unlocked READY; normal Quit
+  starting. No transaction executed yet; installed e2871ae6 until replacement.
+
+- Normal Quit invocation terminal0; service14327/tray14606 still active afterward.
+  Native osascript67430/SecurityAgent67442 confirms admin authorization pending;
+  user confirmation requested. Replacement script NOT executed. Once normal Quit
+  finishes, execute fresh READY f425 transaction, never prior transactions.
+
+- Third consecutive authorization check: same live osascript67430 and
+  SecurityAgent67442; daemon14327/tray14606 remain active. Native approval is
+  the sole next installation blocker. Goal blocked pending user confirmation;
+  do not restart Quit or replay transactions. Fresh f425 transaction unexecuted.
+
+- User confirmed native approval; old service absence verified. Fresh f425
+  transaction36622 terminal0 CONSUMED: exact source installed, learning preserved.
+  Previous app/private backups retained; NEVER replay that transaction.
+  Opened canonical app. verify:local-install53692 terminal0 PASS including
+  complete public PNG traffic on proxyIPv4/proxyIPv6/transparent routes.
+  Real installed Chrome/API/image check97998 live; poll same handle.
+  Evidence public-json-installed-browser.log and installed-verification.log.
+
+- Installed Chrome97998 terminal0 NOT QUALIFIED: root HTML connection closed
+  at24.073s, DOM still loading70.765s, only1/3 static images decoded, no API
+  reached. Do not claim API or page success. Screenshot retained.
+  Root log capture36940 live native authorization pending (osascript74571 /
+  SecurityAgent74574); user confirmation requested. Poll same capture handle.
+
+- Root capture36940 terminal0. First f425 root comparison terminal_error ->
+  no proof; local HTML watchdog closed. Independent owned browser26475 completed
+  root302 to/en200. Installed repeat29099 failed: static3 decoded, dynamic3
+  broken, one API truncated. Root capture59227 terminal0 shows parent committed,
+  image child later committed, API not compared.
+- New source fix: V4 selected-object accounting, exclude attempted candidates,
+  drain remaining fresh candidates only after progress. Previously all hosts
+  cooled down when just one image was selected, starving API. Regression RED1;
+  focused dynamic/owned-parent42PASS. Artifacts selection-fairness-*.log.
+  Not built/installed yet. Next review focused diff, JSON/integration checks,
+  commit/build exact CI, fresh replacement, full browser qualification.

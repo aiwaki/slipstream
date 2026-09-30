@@ -10341,8 +10341,19 @@ def _schedule_recent_parent_asset_recovery(failed_host):
                         wait = _learned_parent_asset_wait_locked(h, candidates, time.monotonic())
                         busy = any(key[0] == h for key in _route_preflight_inflight)
                     if wait <= 0 and not busy:
+                        with _route_preflight_lock:
+                            before = set(_learned_parent_asset_attempts.get(h, ()))
                         await _check_learned_parent_assets(h, ip)
-                        if signal.is_set():
+                        remaining_candidates = _dynamic_asset_failure_candidates(h)
+                        with _route_preflight_lock:
+                            after = set(_learned_parent_asset_attempts.get(h, ()))
+                        # One discovery returns one object. Drain other fresh
+                        # candidates without requiring another browser failure.
+                        # Require progress so a refused/busy check cannot spin.
+                        if signal.is_set() or (
+                            after != before and len(after) < 4
+                            and set(remaining_candidates) - after
+                        ):
                             continue
                         return
                     try:
@@ -10388,9 +10399,9 @@ async def _discover_dynamic_parent_asset(parent, address, sink):
         return
     with _route_preflight_lock:
         attempted = _learned_parent_asset_attempts.setdefault(parent, set())
-        for candidate in candidates:
-            if len(attempted) < 4:
-                attempted.add(candidate)
+        candidates = tuple(h for h in candidates if h not in attempted)[:max(0, 4-len(attempted))]
+    if not candidates:
+        return
     issued = int(time.time() * 1000)
     job = route_preflight.RoutePreflightJobV4(
         capability=secrets.token_hex(16), host=parent, candidate_routes=("owned_geph",),
@@ -10402,6 +10413,12 @@ async def _discover_dynamic_parent_asset(parent, address, sink):
         job, None, time.monotonic() + route_preflight.BROWSER_COMPARE_MAX_DEADLINE_MS / 1000,
         exact_address=address, provenance_already_accepted=True, asset_sink=sink,
     )
+    with _route_preflight_lock:
+        attempted = _learned_parent_asset_attempts.setdefault(parent, set())
+        # A returned object accounts only for its own host. With no result the
+        # whole discovery was inconclusive; cool it down to prevent a hot loop.
+        considered = (sink[0].exact_host,) if sink else candidates
+        attempted.update(h for h in considered if h in candidates)
 
 
 async def _check_learned_parent_assets(host, ip):
@@ -10438,10 +10455,6 @@ async def _check_learned_parent_assets(host, ip):
         if _learned_parent_asset_checks.get(h, 0) <= started:
             _learned_parent_asset_checks[h] = started + ROUTE_PREFLIGHT_RETRY_TTL
             _learned_parent_asset_attempts[h] = set()
-        attempted = _learned_parent_asset_attempts.setdefault(h, set())
-        for candidate in candidates:
-            if len(attempted) < 4:
-                attempted.add(candidate)
         _learned_parent_asset_checks.move_to_end(h)
         while len(_learned_parent_asset_checks) > ROUTE_PREFLIGHT_CACHE_MAX:
             evicted, _ = _learned_parent_asset_checks.popitem(last=False)

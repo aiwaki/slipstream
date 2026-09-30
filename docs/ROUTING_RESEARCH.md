@@ -3311,3 +3311,24 @@ independent local proof. Its largest bounded response selection avoids tiny
 configuration replies dominating discovery. Source regressions are separate
 from installed/browser qualification; do not claim the live API fixed until the
 new exact candidate has been installed and checked.
+
+### 2026-09-30: V4 discovery candidate accounting
+
+Installed f4251985 canonical verification passed, but real Chrome qualification
+failed. First navigation closed its incomplete root HTML after24.073s; owned
+browser proof was terminal_error. A later independent owned browser completed
+302 `/` to200 `/en`. Installed repeat committed the parent but still delivered
+an incomplete API body and broken dynamic images. Logs subsequently showed the
+image child committed; no API object comparison followed in that window.
+
+Code marked every V4 candidate host attempted before the browser returned its
+single chosen object. Image-first selection therefore suppressed unselected API
+hosts for the parent cooldown. The regression
+`test_selected_image_does_not_cool_down_unselected_api` failed before the fix.
+Account only for the selected host, exclude already attempted hosts from the next
+job, and continue coalesced recovery while new candidates remain and progress
+was made. An empty discovery cools down its queried hosts; four-host window and
+all independent object proof requirements remain. Focused42 tests passed.
+Evidence: output/geph-stream-isolation-20260930/selection-fairness-{red,green}.log.
+This does not establish the earlier browser terminal-error cause or repair an
+already delivered partial response. Installed behavior remains unqualified.
