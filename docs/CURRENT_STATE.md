@@ -10,30 +10,22 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 r4 candidate held; per-stream EOF shared-session defect reproduced:
-- Primary HEAD cd39a554 unchanged; exact CI36728527337 SUCCESS (live API);
-  watch65644 terminal0. Candidate canonical PASS remains retained, NOT installed.
-- Found current r3/r4 open_tunnel_on_session marks shared early_dead on response
-  read EOF or malformed JSON despite a live mux. Installed log read failures at
-  2026-09-30T14:20:23.765596Z and14:23:39.694089Z; individual incident causality
-  is not yet established.
-- New real-PicoMux test RED on r4, GREEN after removing only those two signals.
-  EOF/malformed cases require error + live mux + unset early_dead + pending0 +
-  continued bytes on a pre-existing stream. All28 Rust library tests PASS11.02s.
-  Four source-edit guard tests PASS; whole upstream materialization equals source.
-  Evidence output/geph-failover-20260930/stream-error-{red,green}.log.
-- Vendor worktree /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905
-  branch codex/geph-stream-error-isolation HEADeda3b484 pushed35212 exit0, PR382 attached.
-  Source ab47b72f CI36731590349/audit36731590233 PASS; watch55863 terminal0.
-  Documentation-only follow-up moves r5 checkpoint above historical r4; fresh
-  required CI pending. Review thread PRRT_kwDOTLueX86nlQlT resolution pending20550.
-  Log output/geph-failover-20260930/r5-source-ci.log.
-  SOURCE revision5 retains actual mux-death and mux.open failure handling.
-- No workstation transaction/Quit/native prompt started. Installed4ece4ea4/r3
-  unchanged, learning/all backups preserved. Do not install r4 while r5 is pending.
-- NEXT source-only PR CI/review/merge, immutable r5 publication+provenance, app
-  adoption/build/exact gates then normal Quit+fresh guarded install and canonical
-  local verification. Real Chrome TestGlider resources, Steam and Codex still OPEN.
+2026-09-30 PR382 MERGED; Geph r5 publication running:
+- PR382 eda3b484 exact CI36732573423 and audit36732573436 PASS; review thread
+  resolved. Merge43193 exit0; main7e196a71a307f470cadf6519d5e753dd7e1b27ac.
+- build-geph36733271600 in_progress (live API). Reuse run; do not redispatch.
+- Source-only fix preserves shared session after per-stream opening EOF/parse
+  failure. RED r4, GREEN28 library tests11.02s plus4guard tests; full guarded
+  materialization matches source. Evidence output/geph-failover-20260930/stream-error-*.log.
+- Primary d774a318 docs updated since retained cd39a554/r4 candidate. Merge
+  main7e196a71 next, preserve full AUD-17 docs and user AGENTS change.
+- r5 verifier prepared (NOT EXECUTED) at
+  output/geph-stream-isolation-20260930/verify-and-stage-geph.sh.
+- Installed4ece4ea4/r3 unchanged. No Quit/native transaction pending; all learning
+  and backups retained. r4 candidate must not be installed while r5 is pending.
+- NEXT verify r5 publication/assets/attestations, stage, build app and exact CI,
+  fresh guarded replacement and canonical verify:local-install. Then real Chrome
+  TestGlider resources, Steam and Codex qualification; product goal remains OPEN.
 
 ### Retained r4 candidate evidence
 
