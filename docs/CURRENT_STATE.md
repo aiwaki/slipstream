@@ -10,33 +10,62 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 Geph r4 VERIFIED/STAGED; app integration ready for build:
-- PR381 merged c54e0121324cf4c3705a5fb083d55ab0052b9add after exact33cbbae1
-  CI36722396972 and dependency audit36722397019 PASS. No admin bypass.
-- Vendor build36723286411 completed; immutable geph-vendor-0.3.9-r4 published.
-  Binary a648b55d2b365f765a0326171f12e3debb2adb346e45fa7372c93a57bc1ec833.
-- Original verifier83377 stopped on network EOF during attestations. Resume22349
-  exit0: all artifact provenance and SPDX verified, both macOS arches verified,
-  binary staged. Evidence output/geph-failover-20260930/vendor-verify-stage.log
-  and vendor-attest-resume.log. Old staged r3 saved as geph-before-r4.
-- App integration bfbc2658 removes outer SOCKS hedge; r4 owns bounded reserve
-  across distinct sessions.9 focused Python checks PASS.26 Rust baseline plus
-  new failed-reserve/delayed-primary regression PASS; guarded source matches.
-- Merging origin/main affects only same vendor/CI changes and checkpoint docs;
-  preserve fuller AUD-17 checkpoint/decisions. User AGENTS.md remains unstaged.
-- NEXT commit merge/checkpoint, push PR376, canonical build:local and exact CI;
-  retain fresh app, normal Quit, guarded replacement, installed verifier and
-  real TestGlider dynamic/static/API, Steam and Codex connection qualification.
-- Installed4ece4ea4/r3 unchanged. No app build/installer/system prompt pending.
-  Full resource recovery and established-stream resets remain OPEN.
+2026-09-30 r4 candidate held; per-stream EOF shared-session defect reproduced:
+- Primary HEAD cd39a554 unchanged; exact CI36728527337 SUCCESS (live API);
+  watch65644 terminal0. Candidate canonical PASS remains retained, NOT installed.
+- Found current r3/r4 open_tunnel_on_session marks shared early_dead on response
+  read EOF or malformed JSON despite a live mux. Installed log read failures at
+  2026-09-30T14:20:23.765596Z and14:23:39.694089Z; individual incident causality
+  is not yet established.
+- New real-PicoMux test RED on r4, GREEN after removing only those two signals.
+  EOF/malformed cases require error + live mux + unset early_dead + pending0 +
+  continued bytes on a pre-existing stream. All28 Rust library tests PASS11.02s.
+  Four source-edit guard tests PASS; whole upstream materialization equals source.
+  Evidence output/geph-failover-20260930/stream-error-{red,green}.log.
+- Vendor worktree /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905
+  branch codex/geph-stream-error-isolation HEADeda3b484 pushed35212 exit0, PR382 attached.
+  Source ab47b72f CI36731590349/audit36731590233 PASS; watch55863 terminal0.
+  Documentation-only follow-up moves r5 checkpoint above historical r4; fresh
+  required CI pending. Review thread PRRT_kwDOTLueX86nlQlT resolution pending20550.
+  Log output/geph-failover-20260930/r5-source-ci.log.
+  SOURCE revision5 retains actual mux-death and mux.open failure handling.
+- No workstation transaction/Quit/native prompt started. Installed4ece4ea4/r3
+  unchanged, learning/all backups preserved. Do not install r4 while r5 is pending.
+- NEXT source-only PR CI/review/merge, immutable r5 publication+provenance, app
+  adoption/build/exact gates then normal Quit+fresh guarded install and canonical
+  local verification. Real Chrome TestGlider resources, Steam and Codex still OPEN.
 
-Incident evidence motivating r4:
-- Sep29 Steam TLS net_error -100 at18:09:04+05 matches daemon SOCKS failure;
-  chatgpt upstream resets18:07:20/18:08:40 precede owned restarts.
-- Sep30 direct owned9954 TestGlider tunnel failed curl97 at10.007s before TLS,
-  bypassing tproxy. HEAD success for other hosts is not product qualification.
-- Browser41386 retained result70.449s timeout, all3 heroes width0/incomplete.
-  See docs/DIAGNOSTIC_MAP.md and ROUTING_RESEARCH.md for symptom boundaries.
+### Retained r4 candidate evidence
+
+2026-09-30 candidate cd39a554 BUILT/VERIFIED; exact CI still running:
+- Primary branch codex/codebase-audit-20260905 HEADcd39a5542bb79054225d646cca5bace264193fcd,
+  pushed84375 exit0 to PR376. Merged origin/main c54e0121 with checkpoint/decision
+  conflicts resolved preserving fuller AUD-17 docs; AGENTS user change untouched.
+- PR381 merged and geph-vendor-0.3.9-r4 published by build36723286411.
+  Vendor original verifier83377 stopped on network EOF; resume22349 exit0 verified
+  every provenance/SPDX artifact and both architectures, then staged r4.
+  Evidence output/geph-failover-20260930/vendor-{verify-stage,attest-resume}.log.
+- App outer SOCKS hedge removed; Geph r4 handles distinct-session reserve itself.
+ 9 focused Python checks PASS.26 Rust baseline plus failed-reserve regression PASS.
+- build30107 exit0 canonical PASS; retained verifier3247 exit0 PASS.
+  Candidate output/recovery-replacement-geph-reserve-cd39a554/Slipstream.app,
+  artifact.json, retained-verification.log, syntax-checked replace-exact-bundle.sh.
+  Whole tree25769bdedb073600fb837795372658dd6beaf2658fb4a44a8b2c9bcbcf32b595.
+  Daemon2fabec822e7c0b7e245e8846bfcc3a3fc56c6128a2e04fe36e094cb70fd50259.
+- Fresh replacement transaction NOT EXECUTED. Normal Quit NOT started.
+  Installed4ece4ea4/r3 still running. All learning/backups preserved.
+- Exact CI36728527337: product-checks, packaged-app-build, checks, Windows and
+  Chromium contract PASS (query21525 exit0). Packaged update transaction matrix
+  running/queued; browser109936105801 and lifecycle109936105884 queued.
+  Dependency audit36728527347 success. Watch65644 LIVE at app-ci-watch.log.
+  Poll same handle; transient GitHub EOF/502 is not CI failure. Do not rerun.
+- Superseded r4 installation plan (HELD pending r5): inspect fresh transaction identity, normal Quit,
+  guarded native replacement, launch and verify:local-install. Then real Chrome
+  TestGlider heroes/dynamic images/API, Steam and Codex connectivity qualification.
+  Browser baseline script output/reconnecting-20260929/qualify-dynamic-navigation-safe.js.
+- Product goal OPEN: prior TestGlider70.449s timeout/all3heroes width0; Steam
+  TLS-100 correlated with SOCKS failure; Codex established upstream resets.
+  Source regression and canonical installation are not full product proof.
 
 ### Earlier evidence (historical; not live process handles)
 

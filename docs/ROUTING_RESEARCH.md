@@ -3235,3 +3235,19 @@ a destination-open timeout no longer kills shared streams, but neither lowers
 selection preference nor retries another session within Geph. Investigate
 bounded independent new-opening failover without tearing down existing streams;
 do not restore shared early-dead behavior or infer all destinations need Geph.
+
+### 2026-09-30 opening-response EOF also retires a shared session
+
+A focused real-PicoMux regression on r4 confirms a second shared-session kill
+path: response read EOF or JSON parse error sets early_dead although mux.is_alive
+remains true. Unlike the r3 timeout fix, these branches retained upstream
+behavior. Current installed logs had read-response errors at14:20:23.765596Z
+and14:23:39.694089Z, but correlation to a specific app interruption remains open.
+
+Vendor r5/PR382 removes only those two early_dead assignments. The regression
+requires an error, pending_opens zero, no shared death signal and byte transfer
+on a pre-existing stream for both EOF and malformed JSON. RED on r4; all28
+library tests GREEN11.02s with fix. Guarded source materialization from original
+upstream matches tested source; four guard tests pass. Actual mux death and
+mux stream allocation failure handling remain unchanged. No installed/browser
+success is inferred. Evidence: output/geph-failover-20260930/stream-error-*.log.
