@@ -9,7 +9,7 @@
     "aws_lambda"
   ],
   "lock_sha256": "d5a0e6f58cfdd7fea7db79c1322a486cc2d7ba47609c6d92c0edefe7a7e67b81",
-  "release_revision": 4,
+  "release_revision": 5,
   "schema_version": 1,
   "targets": [
     "aarch64-apple-darwin",
@@ -71,6 +71,27 @@
       "after": "\n    #[tokio::test]\n    async fn failed_reserve_does_not_cancel_delayed_primary() {\n        let ctx = AnyCtx::new(serde_json::from_value::<Config>(\n            serde_json::json!({\"exit_constraint\":\"auto\"})).unwrap());\n        let mut peers = Vec::new();\n        let mut sessions = Vec::new();\n        for worker_id in 0..2 {\n            let (a,b) = tokio::io::duplex(65536);\n            let (ar,aw) = tokio::io::split(a);\n            let (br,bw) = tokio::io::split(b);\n            let (accounting, _) = bw_accounting_pair();\n            let session = Arc::new(ConnectedSession {\n                worker_id, exit:\"fixture\".into(), bridge:format!(\"fixture-{worker_id}\"),\n                mux:Arc::new(PicoMux::new(ar,aw)), accounting,\n                pending_opens:AtomicUsize::new(0),\n                early_dead:Arc::new(ManualResetEvent::new(false)),\n            });\n            ctx.get(CURRENT_SESSIONS).lock().insert(session.clone());\n            sessions.push(session);\n            peers.push(PicoMux::new(br,bw));\n        }\n        let (existing, accepted) = tokio::join!(sessions[0].mux.open(b\"existing\"), peers[0].accept());\n        let mut existing = existing.unwrap();\n        let mut accepted = accepted.unwrap();\n        let first = async {\n            let mut stream = peers[0].accept().await.unwrap();\n            tokio::time::sleep(Duration::from_millis(700)).await;\n            let response = RichTunnelResponse::Success {\n                resolved_addr:\"192.0.2.1:443\".parse().unwrap(), open_ms:Some(1),\n            };\n            write_prepend_length(&serde_json::to_vec(&response).unwrap(), &mut stream).await.unwrap();\n            stream.write_all(b\"primary\").await.unwrap();\n            std::future::pending::<()>().await;\n        };\n        let second = async {\n            let stream = peers[1].accept().await.unwrap();\n            drop(stream);\n            std::future::pending::<()>().await;\n        };\n        let opening = async {\n            let mut conn = open_conn(&ctx, \"tcp\", \"fixture.invalid:443\").await.unwrap();\n            let mut bytes = [0;7]; conn.read_exact(&mut bytes).await.unwrap();\n            assert_eq!(&bytes,b\"primary\");\n        };\n        tokio::select! {\n            _ = first => panic!(\"stalled peer ended\"),\n            _ = second => panic!(\"reserve peer ended\"),\n            r = tokio::time::timeout(Duration::from_secs(2), opening) =>\n                r.expect(\"failed reserve cancelled healthy primary\"),\n        }\n        assert!(!sessions[0].early_dead.is_set());\n        assert_eq!(sessions[0].pending_opens.load(Ordering::Relaxed),0);\n        accepted.write_all(b\"still alive\").await.unwrap();\n        let mut bytes=[0;11];\n        tokio::time::timeout(Duration::from_secs(1),existing.read_exact(&mut bytes)).await.unwrap().unwrap();\n        assert_eq!(&bytes,b\"still alive\");\n    }\n\n    use super::*;\n    use tokio::io::{AsyncReadExt, AsyncWriteExt};",
       "before_sha256": "2515cd0c0e41aedaefdda23a2c3b9cc5e9958a3314b49f0fb5b181f9c308641c",
       "after_sha256": "77de8353c2b18703143c6f062b9a2c0fef88cff1de2fbe143322bf7af7ae317e"
+    },
+    {
+      "path": "src/session.rs",
+      "before": "                session.early_dead.set();\n                return Err(err).context(\"could not parse tunnel open response\");",
+      "after": "                // Only this stream failed; mux liveness owns shared transport death.\n                return Err(err).context(\"could not parse tunnel open response\");",
+      "before_sha256": "77de8353c2b18703143c6f062b9a2c0fef88cff1de2fbe143322bf7af7ae317e",
+      "after_sha256": "a3fd9b5c246847a701315df10c2aaf81fb4fd2778cbfdb6808aae446d6b1bc1b"
+    },
+    {
+      "path": "src/session.rs",
+      "before": "            session.early_dead.set();\n            return Err(err).context(\"could not read tunnel open response\");",
+      "after": "            // Only this stream failed; mux liveness owns shared transport death.\n            return Err(err).context(\"could not read tunnel open response\");",
+      "before_sha256": "a3fd9b5c246847a701315df10c2aaf81fb4fd2778cbfdb6808aae446d6b1bc1b",
+      "after_sha256": "0afb8777d4aec45d65418971713f68af58285fa1da7dfbb00b860fe09232df82"
+    },
+    {
+      "path": "src/session.rs",
+      "before": "mod slipstream_isolation_tests {",
+      "after": "mod slipstream_isolation_tests {\n    #[tokio::test]\n    async fn stream_open_errors_preserve_shared_session() {\n        for malformed in [false, true] {\n            let (a,b) = tokio::io::duplex(65536);\n            let (ar,aw) = tokio::io::split(a);\n            let (br,bw) = tokio::io::split(b);\n            let mux = Arc::new(PicoMux::new(ar,aw));\n            let peer = PicoMux::new(br,bw);\n            let (existing, accepted) = tokio::join!(mux.open(b\"existing\"), peer.accept());\n            let mut existing = existing.unwrap();\n            let mut accepted = accepted.unwrap();\n            let (accounting, _) = bw_accounting_pair();\n            let session = Arc::new(ConnectedSession {\n                worker_id:0, exit:\"fixture\".into(), bridge:\"fixture\".into(),\n                mux, accounting, pending_opens:AtomicUsize::new(0),\n                early_dead:Arc::new(ManualResetEvent::new(false)),\n            });\n            let ctx = AnyCtx::new(serde_json::from_value::<Config>(\n                serde_json::json!({\"exit_constraint\":\"auto\"})).unwrap());\n            let opening = open_tunnel_on_session(&ctx, &session,\n                RichTunnelCommand {protocol:\"tcp\".into(),host:\"fixture.invalid:443\".into()});\n            let failing_peer = async {\n                let mut stream = peer.accept().await.unwrap();\n                if malformed { write_prepend_length(b\"not-json\", &mut stream).await.unwrap(); }\n            };\n            let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {\n                tokio::join!(opening, failing_peer)\n            }).await.unwrap();\n            assert!(result.is_err());\n            assert!(session.mux.is_alive());\n            assert!(!session.early_dead.is_set(), \"stream error retired shared session; malformed={malformed}\");\n            assert_eq!(session.pending_opens.load(Ordering::Relaxed), 0);\n            accepted.write_all(b\"still alive\").await.unwrap();\n            let mut bytes = [0;11];\n            tokio::time::timeout(Duration::from_secs(1), existing.read_exact(&mut bytes)).await.unwrap().unwrap();\n            assert_eq!(&bytes, b\"still alive\");\n        }\n    }\n",
+      "before_sha256": "0afb8777d4aec45d65418971713f68af58285fa1da7dfbb00b860fe09232df82",
+      "after_sha256": "6dde1eb7d580f6a22d33a28adffdebc0f30e884d36fc3df44f7c953f52bb69d8"
     }
   ]
 }
