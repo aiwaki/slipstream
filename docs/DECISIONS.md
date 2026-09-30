@@ -965,3 +965,14 @@ With the correction, both EOF and malformed-response cases must return an error,
 drain pending accounting, leave early_dead unset, and transfer bytes on a
 pre-existing stream. This fixes a causal mechanism, not proof that every observed
 application disconnect has this cause.
+
+
+## Broker disappearance during owned browser-worker shutdown
+
+For an identity-verified owned worker, exit1 with the bounded `socket_unavailable`
+reason is a confirmed resource-clean exit during cleanup: claim IPC precedes
+Chrome creation, and submission IPC errors are returned only after successful
+`submit_before_cleanup`. Cleanup errors take precedence over submission errors.
+The worker job must still be booted out and verified absent. Signals, other exit
+codes, unknown/ownership/IPC errors and Chrome/profile cleanup errors remain
+failures. This does not turn a missing broker into a successful network probe.

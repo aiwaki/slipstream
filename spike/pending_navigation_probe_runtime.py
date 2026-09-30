@@ -1889,7 +1889,16 @@ class PendingNavigationBrowserWorkerLauncher:
                 # Successful natural exit already proves worker-owned cleanup.
                 # It may race SIGTERM after the exact PID/UID validation above.
                 worker_error = self._read_worker_error(paths.stderr, identity)
-                if exit_code != 0 and worker_error != _BROWSER_WORKER_TERMINATION_ERROR:
+                # The owned broker can disappear while shutdown waits for this
+                # exact worker. socket_unavailable is emitted only by IPC:
+                # claim runs before Chrome exists; submission errors propagate
+                # only after submit_before_cleanup has successfully drained it.
+                # Do not accept a signal, arbitrary exit, ownership error, or
+                # chrome/profile cleanup failure as this expected shutdown race.
+                clean_shutdown_error = exit_code == 1 and worker_error in {
+                    _BROWSER_WORKER_TERMINATION_ERROR, "socket_unavailable",
+                }
+                if exit_code != 0 and not clean_shutdown_error:
                     # Only the bounded enum parsed by _read_worker_error is
                     # exposed; never raw stderr, paths or worker request data.
                     print(

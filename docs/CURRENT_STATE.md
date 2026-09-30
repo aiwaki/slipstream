@@ -10,7 +10,7 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 r5 installed; dynamic cooldown candidate in working tree:
+2026-09-30 r5 installed; dynamic cooldown candidate11c1bdea built:
 - Installed e2871ae6bc51cbbfc5b15d54ea51a2890707de1a, Geph r5. Transaction37451
   terminal0 CONSUMED; canonical installed66449 PASS, active daemon14327.
   Do not replay output/recovery-replacement-geph-isolation-e2871ae6 transaction.
@@ -26,11 +26,35 @@ file.
   extend it. Notifications wake coalesced waiters. Independent proof unchanged.
   Regression first_dynamic_failure RED39984; routing tests70722 PASS901 in37.02s.
   Evidence output/geph-stream-isolation-20260930/dynamic-cooldown-routing.log.
-- NEXT review candidate, focused routing checks, commit/push PR376 then exact
-  build/CI/canonical replacement and real browser. API-only discovery and cold
+- Candidate11c1bdea446a4afd0598085d920d7be2da01415d pushed48161 to PR376.
+  Build3526 terminal0 canonical PASS. Retained candidate at
+  output/recovery-replacement-dynamic-cooldown-11c1bdea/Slipstream.app;
+  retained verifier87222 terminal0 PASS, artifact.json.
+  tree568d729977f8724a24fc675a426d4d16b658f4fee9433c105a791fa7dd07b898,
+  daemon0dea9ef1ed7fff898a47eb27452d428e4bd2f25c3e116a055fb0abf3084115c6.
+  CI36743280424 lifecycle109986714625 FAILED: active-worker-uninstall,
+  worker exit1 socket_unavailable. Do not install11c1bdea. Other core/browser
+  gates passed; audit36743280364 PASS. Watch45904 poll until terminal.
+  Windows36743280562 was running. New replacement script prepared HELD_CI,
+  syntax check PASS; no Quit/authorization started.
+- Chrome99781 terminal0 on installed r5 AFTER existing delayed child learning:
+ 17.642s, static3 and first dynamic3 fully decoded. API2 still pending when
+  image check ended; not API success. Evidence browser-after-child-learned.log.
+- API comparison36346 then exact-failed-target30239 terminal0: installed responses
+  HTTP200 truncated; same failed anonymous GETs via owned9954 complete16688/83287B.
+  root capture47593 terminal0 retained root-after-api-private.log; Xbox/local stalls.
+  V3 discovers images only and ranged inspector excludes200 JSON: separate public
+  GET/full-framing contract required before broadening discovery/route authority.
+- Cleanup race fix now in working tree: identity-verified owned worker exit1
+  socket_unavailable confirms no Chrome before claim or successful cleanup after
+  submission; all other errors/nonzero codes remain refused. Exact failed case
+  reproduced cleanup-socket-red.log; focused runtime/smoke tests green.
+- NEXT commit cleanup fix, build new exact candidate and CI;11c1bdea retained
+  transaction remains HELD_CI and must not execute. Reuse901 routing baseline.
+  Installed e2871ae6 unchanged; no Quit or administrator prompt started. API-only discovery and cold
   backend readiness still open; no blanket all-sites/reconnect claim.
 - Source e2871ae6 CI36735578291/audit36735578087/Windows36735577970 PASS reused.
-  Candidate not built/installed. User AGENTS.md change must stay untouched.
+  Candidate built, not installed. User AGENTS.md change must stay untouched.
 - Real Chrome session slipstream-worker-diagnostics remains isolated and open;
   browser script output/geph-stream-isolation-20260930/qualify-browser-after-install.js.
 

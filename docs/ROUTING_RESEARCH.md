@@ -3274,3 +3274,21 @@ already failed browser request. Do not claim all resources or reconnects fixed.
 Evidence: output/geph-stream-isolation-20260930/{browser-cold-start.log,
 browser-learned-route.log,root-after-delayed-private.log,dynamic-cooldown-red.log,
 dynamic-cooldown-green.log}. Root capture is private and must not be published.
+
+
+Anonymous API comparison on the still-installed r5 (2026-09-30): five public
+GET targets were observed transiently in the isolated Chrome navigation. Three
+had actual browser requestfailed records; two of those exact failed targets were
+then opened anonymously through owned SOCKS9954. Both completed HTTP200,16688
+and83287 bytes, in2.862s and1.448s. Installed-route responses included HTTP200
+with incomplete bodies/ERR_CONTENT_LENGTH_MISMATCH. No target URL, query,
+headers, cookies or body was persisted; result retains host-free sizes/status.
+Artifact: output/geph-stream-isolation-20260930/same-failed-api-comparison.log.
+This establishes alternate payload availability, not sufficient learning proof:
+independent system/app-DNS/local-strategy comparisons for the same object remain
+required. Existing V3 only discovers document.images, and ranged bootstrap
+inspection explicitly refuses generic200 JSON. API-root404 therefore cannot
+stand in for these failing public data resources. A separately reviewed anonymous
+GET discovery/full-framing contract is needed; do not weaken V3 or route the
+whole API because one manual comparison worked. Live root capture also shows
+xbox_plain and local_strategy partial-record watchdog failures for the API.

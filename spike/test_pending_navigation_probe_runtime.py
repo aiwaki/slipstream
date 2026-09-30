@@ -1648,6 +1648,11 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime(capsys):
 
 @pytest.mark.parametrize("exit_code,worker_error,expected_clean", [
     (1, "worker_terminated", True),
+    (1, "socket_unavailable", True),
+    (2, "socket_unavailable", False),
+    (-15, "socket_unavailable", False),
+    (1, "socket_unowned", False),
+    (1, "ipc_unavailable", False),
     (0, "", True),
     (1, "", False),
     (1, "chrome_cleanup_failed", False),
