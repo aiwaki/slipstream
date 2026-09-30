@@ -10,114 +10,35 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 vendor publication still live; integration saved for next build:
-- Watch78863 ended1 from local SOCKS EOF, not terminal CI. Authoritative jobs
-  query57469 exit0: build109913737699 in_progress restoring cache; resolve PASS.
-  Further live query52253 running. Do not rerun vendor workflow.
-- App integration ready with r4 SOURCE and no outer hedge;9 focused Python tests
-  PASS. Commit this explicit file set excluding user AGENTS.md; push/build only
-  after r4 release asset/provenance verification. Current staged binary remainsr3.
-- Prepared verifier output/geph-failover-20260930/verify-and-stage-geph.sh has
-  not run. Installed4ece4ea4 unchanged, no system prompt or transaction pending.
+2026-09-30 Geph r4 VERIFIED/STAGED; app integration ready for build:
+- PR381 merged c54e0121324cf4c3705a5fb083d55ab0052b9add after exact33cbbae1
+  CI36722396972 and dependency audit36722397019 PASS. No admin bypass.
+- Vendor build36723286411 completed; immutable geph-vendor-0.3.9-r4 published.
+  Binary a648b55d2b365f765a0326171f12e3debb2adb346e45fa7372c93a57bc1ec833.
+- Original verifier83377 stopped on network EOF during attestations. Resume22349
+  exit0: all artifact provenance and SPDX verified, both macOS arches verified,
+  binary staged. Evidence output/geph-failover-20260930/vendor-verify-stage.log
+  and vendor-attest-resume.log. Old staged r3 saved as geph-before-r4.
+- App integration bfbc2658 removes outer SOCKS hedge; r4 owns bounded reserve
+  across distinct sessions.9 focused Python checks PASS.26 Rust baseline plus
+  new failed-reserve/delayed-primary regression PASS; guarded source matches.
+- Merging origin/main affects only same vendor/CI changes and checkpoint docs;
+  preserve fuller AUD-17 checkpoint/decisions. User AGENTS.md remains unstaged.
+- NEXT commit merge/checkpoint, push PR376, canonical build:local and exact CI;
+  retain fresh app, normal Quit, guarded replacement, installed verifier and
+  real TestGlider dynamic/static/API, Steam and Codex connection qualification.
+- Installed4ece4ea4/r3 unchanged. No app build/installer/system prompt pending.
+  Full resource recovery and established-stream resets remain OPEN.
 
+Incident evidence motivating r4:
+- Sep29 Steam TLS net_error -100 at18:09:04+05 matches daemon SOCKS failure;
+  chatgpt upstream resets18:07:20/18:08:40 precede owned restarts.
+- Sep30 direct owned9954 TestGlider tunnel failed curl97 at10.007s before TLS,
+  bypassing tproxy. HEAD success for other hosts is not product qualification.
+- Browser41386 retained result70.449s timeout, all3 heroes width0/incomplete.
+  See docs/DIAGNOSTIC_MAP.md and ROUTING_RESEARCH.md for symptom boundaries.
 
-2026-09-30 PR381 MERGED; immutable vendor build RUNNING:
-- Exact33cbbae1 CI36722396972 PASS; dependency audit36722397019 PASS;
-  required checks63541 terminal0, merge15337 terminal0.
-- GitHub confirms merged c54e0121324cf4c3705a5fb083d55ab0052b9add.
-- build-geph run36723286411 at that SHA in_progress. Watch78863 LIVE,
-  output/geph-failover-20260930/vendor-build-watch.log. Poll same handle;
-  GitHub transient EOF/502 may end watcher without determining CI outcome.
-- Primary checkout holds uncommitted r4 integration + diagnostic docs (AGENTS
-  user edit untouched).7 opening tests +2 first-payload tests PASS; prior26 Rust
-  baseline plus new failed-reserve test PASS. No app build/install started.
-- NEXT: successful vendor publication; execute prepared verify-and-stage-geph.sh
-  once (fresh assets dir), binding SOURCE/SBOM/audit/attestations and both arches.
-  Then commit/push PR376 integration, canonical app build/CI/install. Do not ship
-  outer-hedge removal with old r3 binary. All backups/learning retained.
-- Installed4ece4ea4/r3 unchanged. Full dynamic resources and established-stream
-  resets remain unqualified; no claim that source regression fixes all reconnects.
-
-
-2026-09-30 PR381 final head33cbbae1 pending exact CI36722396972:
-- dd0ab6f7 CI36721057314 fully GREEN. Merge was blocked by unresolved Sourcery
-  documentation thread, not failing tests. README updated to describe r3/r4;
-  thread PRRT_kwDOTLueX86nixvP resolved75878 exit0. Push12661 exit0.
-- Auto-merge unsupported (50504 exit1); no admin bypass, no successful merge yet.
-- Root checkout copied candidate SOURCE/README/ci_scope/tests and appended r4
-  decision, alongside outer-hedge removal. These are uncommitted and MUST NOT
-  build/install until published r4 is verified and staged.
-- Prepared syntax-checked output/geph-failover-20260930/verify-and-stage-geph.sh;
-  not executed. Fresh release-assets dir absent, r3 binary retained in staging.
-- Read-only GitHub status15384 failed SOCKS EOF; retry27667 uses app HTTP1080.
-  Product recovery and established stream resets remain OPEN.
-
-
-2026-09-30 app integration PREPARED, not installed/committed:
-- Removed redundant Python _open_owned_geph_with_reserve; dial_via_geph now
-  makes one SOCKS request. Must ship ONLY together with Geph r4 contract/binary.
--7 scoped tests PASS (91220 exit0), including slow real SOCKS/single first-flight,
-  cancellation and send failure. output/geph-failover-20260930/app-single-opening.log.
-- CI381 watch55407 ended1 due GitHub502, not a known test failure. Job109906090702
-  has no incomplete steps; authoritative status query67395 running.
-- Installed4ece4ea4/r3 remains unchanged. No replacement or authorization pending.
-
-
-2026-09-30 resumed: PR381 now dd0ab6f7, CI36721057314 product-checks running.
-- Initial CI36719937227 failed404 on unpublished r4: scope classifier did not
-  admit source-only revision without lock/helper changes. Narrow condition fixed;
- 9 scope tests,4 guard tests PASS; verify-transition r3->r4 PASS.
-- Added real PicoMux failed-reserve/delayed-primary test PASS; previous26 Rust
-  tests reused. Exact upstream guarded materialization equals tested source.
-- Push37038 terminal0; dependency audit36721056826 success. No install running.
-- Next finish CI381/review, publish r4, integrate with outer hedge removal.
-  Installed4ece4ea4/r3 unchanged; stream resets and product qualification OPEN.
-
-
-2026-09-30 Geph r4 opening reserve RED/GREEN, source branch pushed:
-- Reused clean managed worktree geph-rustls-02345 (old branch preserved), new
-  codex/geph-session-reserve at e149920e, based on fetched main6e037e97.
-- Test stalled_preferred_session_uses_reserve_without_harming_existing_stream
-  RED on r3 (two-second caller budget), GREEN with new distinct-session hedge.
-  Existing primary stream still transfers bytes; all26 library tests pass,
-  source edit guard4 tests pass. Local evidence output/geph-failover-20260930.
-- Guarded SOURCE.json r4 has exact tested source hash; no binary changed in app.
-  New hedge350ms, maxone other session, shared10s deadline, no payload replay.
-  App-level hedge must be removed when r4 is adopted to avoid stacked attempts.
-- Push17884 exit0. First PRcreate45738 GraphQL EOF; REST21902 confirmed no
-  PR. Retried through per-command owned SOCKS, create22638 exit0: PR381 created
-  and attached. CI36719937227 confirmed in_progress28759; dependency audit
-  36719937365 success. Installed4ece4ea4/r3 unchanged.
-- Next create/attach vendor PR, required CI/review, immutable r4 publication and
-  app integration. Established-stream resets/product qualification remain OPEN.
-
-
-2026-09-30 Steam/Codex correlated failure confirmed; owned backend opening fails:
-- User Steam screenshot correlates to Steam cef_log.txt TLS net_error -100 at
-  Sep29 18:09:04 and rootlog store.steampowered.com SOCKS connect failed same second.
-  chatgpt.com upstream_reset18:07:20/18:08:40 matches Codex request retries.
-  Rootlog restarts owned Geph18:07:31 and18:08:03; failures precede restarts.
-  Installation shutdown18:01:12/start baseline18:02:15 cannot explain all later
-  failures. Another shutdown18:09:13 recorded; do not assume its initiator.
-- Private window capture39287 exit0 at steam-event-window-private.log. Current
-  capture46223 exit0 steam-correlated-private.log is Sep30, not same incident.
-- Current daemon87899 recovering; Gephup with26sessions and restart waiting idle.
-- Direct owned SOCKS comparison93417 exit0: TestGlider SOCKS closed at10.007s
-  (curl97), bypassing Slipstream routing; Steam200 ~1.35s, ChatGPT anonymous403
-  ~1.04s. Through1080 Steam200, ChatGPT403, TestGlider302 ~5.30s. HEAD outcomes
-  isolate tunnel opening only; no product/full-resource success claim.
-  Artifact steam-owned-comparison.json.
-- Source materialized geph r3 src/session.rs selects live sessions by pending_opens
-  and round robin; open timeout preserves session but gives no health penalty or
-  independent session retry. Candidate next investigation: bounded new-opening
-  failover while preserving existing streams, using guarded source_edits contract.
-  Do not blindly increase deadlines or reintroduce shared early_dead on timeout.
-- Browser41386 handle now absent; retained result confirms70.449s timeout, root
-  stillloading, all3heroes incomplete width0. First2970 failed on navigation
-  context destruction; successor script handles redirects. No dynamic V3 reason
-  in captured incident window. Installed4ece4ea4 canonical64347 PASS remains;
-  no installer/build pending. Full browser recovery and reconnecting OPEN.
-
+### Earlier evidence (historical; not live process handles)
 
 2026-09-29 diagnostic4ece4ea4 INSTALLED, canonical PASS; browser running2970:
 - Transaction96260 terminal0 CONSUMED; never replay. App opened, daemon38374
