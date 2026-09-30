@@ -10,22 +10,26 @@ file.
 
 ## Current Checkpoint
 
-2026-09-30 PR382 MERGED; Geph r5 publication running:
-- PR382 eda3b484 exact CI36732573423 and audit36732573436 PASS; review thread
-  resolved. Merge43193 exit0; main7e196a71a307f470cadf6519d5e753dd7e1b27ac.
-- build-geph36733271600 in_progress (live API). Reuse run; do not redispatch.
-- Source-only fix preserves shared session after per-stream opening EOF/parse
-  failure. RED r4, GREEN28 library tests11.02s plus4guard tests; full guarded
-  materialization matches source. Evidence output/geph-failover-20260930/stream-error-*.log.
-- Primary adopting main7e196a71/r5; retained cd39a554/r4 candidate stays historical.
-  Full AUD-17 docs preserved; user AGENTS change untouched.
-- r5 verifier prepared (NOT EXECUTED) at
-  output/geph-stream-isolation-20260930/verify-and-stage-geph.sh.
-- Installed4ece4ea4/r3 unchanged. No Quit/native transaction pending; all learning
-  and backups retained. r4 candidate must not be installed while r5 is pending.
-- NEXT verify r5 publication/assets/attestations, stage, build app and exact CI,
-  fresh guarded replacement and canonical verify:local-install. Then real Chrome
-  TestGlider resources, Steam and Codex qualification; product goal remains OPEN.
+2026-09-30 Geph r5 VERIFIED/STAGED; application build next:
+- PR382 merged main7e196a71a307f470cadf6519d5e753dd7e1b27ac after exact
+  eda3b484 CI36732573423/audit36732573436 PASS and review resolved.
+- build-geph36733271600 SUCCESS; watch18344 terminal0. Immutable
+  geph-vendor-0.3.9-r5 published. Verifier45135 terminal0: all8 assets, checksums,
+  SPDX, dependency audit, exact-source provenance and both architectures PASS;
+  staged into app-tauri binaries. Evidence output/geph-stream-isolation-20260930/
+  vendor-verify-stage.log. Binary daedce04991675983835e00de667a38164561ab4ec907ea2a6f569af6df74600.
+- Primary merge353e019f adopted r5; app opening hedge already removed in bfbc2658.
+  Source regression RED on r4;28 Rust tests and4edit guards PASS; reuse unchanged
+  app9focused checks from r4 integration. No further runtime source edits.
+- NEXT commit/push checkpoint, build:local canonical verification and exact PR376
+  CI; retain new candidate, normal Quit, fresh guarded replacement and
+  verify:local-install. Existing r4 transaction is UNEXECUTED and must not be used.
+- Post-install browser test prepared and node syntax PASS:
+  output/geph-stream-isolation-20260930/qualify-browser-after-install.js.
+  Baseline image criteria + bounded host/type failures/pending + screenshot.
+- Installed4ece4ea4/r3 remains unchanged; no Quit/native authorization/installer
+  pending. Learning and every backup preserved. Real TestGlider resources, Steam
+  and Codex connectivity remain OPEN until installed qualification.
 
 ### Retained r4 candidate evidence
 
