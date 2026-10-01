@@ -518,6 +518,42 @@ def test_direct_and_geph_evidence_must_bind_the_same_js_object():
     assert not direct.proves_same_object_as(other)
 
 
+@pytest.mark.parametrize('media_type', ['application/javascript', 'image/webp'])
+def test_conflicting_strong_etags_cannot_be_overridden_by_common_prefix(media_type):
+    # Two deployments can have the same license/banner or image header and
+    # total size, but are still explicitly different representations.
+    direct_wire = _range_response(
+        b'x' * 2048, declared_length=4096, content_range='bytes 0-4095/8192',
+    ).replace(b'application/javascript', media_type.encode())
+    owned_wire = _range_response(
+        b'x' * 2048 + b'y' * 2048, content_range='bytes 0-4095/8192',
+    ).replace(b'"fixture-v1"', b'"fixture-v2"').replace(
+        b'application/javascript', media_type.encode())
+    direct, owned = _inspect(direct_wire), _inspect(owned_wire)
+    assert direct.outcome is RangeProbeOutcome.INCOMPLETE
+    assert owned.outcome is RangeProbeOutcome.COMPLETE
+    assert direct.prefix_digest == owned.prefix_digest
+    assert direct.validator_digest != owned.validator_digest
+    assert not direct.proves_same_object_as(owned)
+
+
+@pytest.mark.parametrize('etag_change', [
+    None, b'', b'ETag: W/"fixture-v1"\r\n',
+])
+def test_object_binding_preserves_matching_etag_or_unversioned_prefix(etag_change):
+    complete_wire = _range_response(b'x' * 4096, content_range='bytes 0-4095/8192')
+    if etag_change is not None:
+        complete_wire = complete_wire.replace(b'ETag: "fixture-v1"\r\n', etag_change)
+    partial_wire = complete_wire[:-2048]
+    assert _inspect(partial_wire).proves_same_object_as(_inspect(complete_wire))
+    # An equal validator never overrides a wrong range or encoded response.
+    for invalid in (
+        complete_wire.replace(b'0-4095/8192', b'0-4095/8193'),
+        complete_wire.replace(b'\r\n\r\n', b'\r\nContent-Encoding: gzip\r\n\r\n'),
+    ):
+        assert not _inspect(partial_wire).proves_same_object_as(_inspect(invalid))
+
+
 def test_content_range_and_declared_framing_must_agree():
     short_but_framing_complete = _range_response(
         b"short",

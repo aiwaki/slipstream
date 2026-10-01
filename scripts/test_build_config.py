@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -71,6 +72,8 @@ def write_executable(path: Path, body: str = "exit 0\n") -> None:
 
 
 def stage_chromium_prerequisite_fixture(repo: Path) -> None:
+    lock_helper = Path("scripts/lock_daemon_build.py")
+    shutil.copyfile(ROOT / lock_helper, repo / lock_helper)
     source_path = Path("vendor/chromium-headless-shell/SOURCE.json")
     (repo / source_path).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / source_path, repo / source_path)
@@ -309,6 +312,52 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
                         list(resources_dir.glob(".slipstreamd-stage.*")), []
                     )
 
+    def test_parallel_daemon_builds_do_not_enter_the_shared_freeze_together(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "scripts").mkdir()
+            (repo / "spike").mkdir()
+            (repo / "app-tauri/src-tauri").mkdir(parents=True)
+            builder = repo / "scripts/build_and_stage_daemon.sh"
+            builder.write_bytes((ROOT / "scripts" / builder.name).read_bytes())
+            builder.chmod(0o755)
+            fake_python = repo / "python3.13"
+            write_build_python_fixture(fake_python)
+            stage_chromium_prerequisite_fixture(repo)
+            write_executable(repo / "spike/build_daemon.sh", """root="$(cd "$(dirname "$0")/.." && pwd -P)"
+printf ready > "$root/$BUILD_FIXTURE_NAME-entered"
+while [[ ! -e "$root/release-build" ]]; do sleep 0.01; done
+mkdir -p "$root/spike/dist/slipstreamd"
+printf 'frozen-daemon\\n' > "$root/spike/dist/slipstreamd/slipstreamd"
+chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
+""")
+            env = os.environ.copy()
+            env["SLIPSTREAM_PYTHON_313"] = str(fake_python)
+            env.pop("SLIPSTREAM_DAEMON_BUILD_LOCK_FD", None)
+            first = subprocess.Popen([str(builder)], cwd=repo, env={**env, "BUILD_FIXTURE_NAME": "first"},
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            second = None
+            try:
+                deadline = time.monotonic() + 5
+                while not (repo / "first-entered").exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue((repo / "first-entered").exists(), "first build failed to enter freeze")
+                second = subprocess.Popen([str(builder)], cwd=repo, env={**env, "BUILD_FIXTURE_NAME": "second"},
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                deadline = time.monotonic() + 0.5
+                while not (repo / "second-entered").exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertFalse((repo / "second-entered").exists(), "two builders can mutate the shared freeze together")
+            finally:
+                (repo / "release-build").touch()
+                first_output = first.communicate(timeout=5)
+                second_output = second.communicate(timeout=5) if second is not None else None
+            self.assertEqual(first.returncode, 0, first_output)
+            self.assertIsNotNone(second)
+            self.assertEqual(second.returncode, 0, second_output)
+            self.assertTrue((repo / "second-entered").exists())
+            self.assertEqual(list((repo / "app-tauri/src-tauri").glob(".slipstreamd-stage.*")), [])
+
     def test_daemon_staging_preserves_previous_payload_before_swap(self) -> None:
         """Validation failure is not evidence that this transaction owns target."""
         builder = ROOT / "scripts/build_and_stage_daemon.sh"
@@ -347,6 +396,29 @@ printf 'fresh-resource\\n' > "$root/spike/dist/slipstreamd/resource.dat"
                 self.assertEqual((target / "slipstreamd").read_text(), "previous-daemon")
                 self.assertEqual((target / "resource.dat").read_text(), "previous-resource")
                 self.assertEqual(list(target.parent.glob(".slipstreamd-stage.*")), [])
+
+    def test_daemon_build_lock_survives_nested_exec_and_releases_after_failure(self) -> None:
+        helper = ROOT / "scripts/lock_daemon_build.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "spike").mkdir()
+            verify = shlex.join([sys.executable, str(helper), "--verify-held", str(repo)])
+            env = os.environ.copy()
+            env.pop("SLIPSTREAM_DAEMON_BUILD_LOCK_FD", None)
+            for expected_exit in (27, 0):
+                result = subprocess.run(
+                    [sys.executable, str(helper), "--exec", str(repo), "/bin/bash", "-c",
+                     f"{verify} && exit {expected_exit}"],
+                    env=env, capture_output=True, text=True, timeout=5, check=False,
+                )
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
+            # An inherited marker alone cannot admit an unlocked script.
+            invalid = subprocess.run(
+                [sys.executable, str(helper), "--verify-held", str(repo)],
+                env={**env, "SLIPSTREAM_DAEMON_BUILD_LOCK_FD": "98765"},
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            self.assertNotEqual(invalid.returncode, 0)
 
     def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
         config = json.loads((ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text())

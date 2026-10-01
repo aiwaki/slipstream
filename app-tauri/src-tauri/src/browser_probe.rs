@@ -2320,9 +2320,14 @@ fn websocket_send_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) -> P
 
 fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult<Option<Value>> {
     let mut fragmented = Vec::new();
+    let mut message_started = false;
     loop {
         if Instant::now() >= deadline {
-            return Ok(None);
+            return if message_started {
+                Err(error("devtools_unavailable"))
+            } else {
+                Ok(None)
+            };
         }
         let mut first = [0_u8; 2];
         match read_exact_before(stream, &mut first, deadline, Duration::from_millis(250)) {
@@ -2333,7 +2338,12 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                return Ok(None)
+                // Keep ownership of a fragmented message across idle polls.
+                // Returning here would discard its prefix before continuation.
+                if message_started {
+                    continue;
+                }
+                return Ok(None);
             }
             Err(_) => return Err(error("devtools_unavailable")),
         }
@@ -2364,7 +2374,16 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
         read_exact_before(stream, &mut payload, deadline, Duration::from_millis(250))
             .map_err(|_| error("devtools_unavailable"))?;
         match opcode {
-            0x0 | 0x1 => {
+            0x1 if !message_started => {
+                message_started = true;
+                fragmented.extend_from_slice(&payload);
+                if fin {
+                    return serde_json::from_slice(&fragmented)
+                        .map(Some)
+                        .map_err(|_| error("devtools_message_invalid"));
+                }
+            }
+            0x0 if message_started => {
                 fragmented.extend_from_slice(&payload);
                 if fin {
                     return serde_json::from_slice(&fragmented)
@@ -2424,6 +2443,57 @@ mod tests {
         assert!(start.elapsed() < Duration::from_millis(800));
         drop(connection);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn fragmented_websocket_message_survives_idle_between_frames() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(b"\x01\x05{\"id\"").unwrap();
+            std::thread::sleep(Duration::from_millis(400));
+            let _ = connection.write_all(b"\x80\x03:4}");
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), Some(json!({"id": 4})));
+    }
+
+    #[test]
+    fn empty_fragment_does_not_lose_message_ownership() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(&[0x01, 0]).unwrap();
+            std::thread::sleep(Duration::from_millis(400));
+            let _ = connection.write_all(b"\x80\x02{}");
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), Some(json!({})));
+    }
+
+    #[test]
+    fn fragmented_message_deadline_is_terminal_not_an_idle_poll() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(b"\x01\x01{").unwrap();
+            release_rx.recv().unwrap();
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let start = Instant::now();
+        let result = websocket_read_json(&mut connection, start + Duration::from_millis(350));
+        release_tx.send(()).unwrap();
+        server.join().unwrap();
+        assert!(result.is_err());
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

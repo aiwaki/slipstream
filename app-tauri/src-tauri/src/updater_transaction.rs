@@ -793,10 +793,6 @@ fn bootstrap_watchdog(uid: u32, launch_agent: &Path) -> Result<(), String> {
     }
 }
 
-fn bootout_watchdog(uid: u32) {
-    let _ = unload_watchdog(uid);
-}
-
 fn try_transaction_lock(state_dir: &Path) -> Result<Option<File>, String> {
     let lock_path = state_dir.join(JOURNAL_FILE).with_extension("lock");
     let lock = OpenOptions::new()
@@ -1134,6 +1130,11 @@ fn prepare_transaction_with_helper(
     }
     ensure_user_directory(state_dir, true)
         .map_err(|error| format!("update state directory is unsafe: {error}"))?;
+    // Preparation publishes the same helper/journal/plist that recovery and
+    // the watchdog mutate. Claim their lock before checking journal absence:
+    // neither a concurrent migration nor another preparer may overwrite it.
+    let transaction_lock = try_transaction_lock(state_dir)?
+        .ok_or_else(|| "another durable update transaction owns the lock".to_string())?;
     let journal_path = state_dir.join(JOURNAL_FILE);
     match fs::symlink_metadata(&journal_path) {
         Ok(_) => return Err("a durable Slipstream update transaction is already active".into()),
@@ -1213,13 +1214,45 @@ fn prepare_transaction_with_helper(
         let _ = fs::remove_file(&journal_path);
         return cleanup_stage(error);
     }
-    bootout_watchdog(uid);
-    if let Err(error) = bootstrap_watchdog(uid, &launch_agent) {
-        let _ = fs::remove_file(&launch_agent);
-        let _ = fs::remove_file(&journal_path);
-        return cleanup_stage(error);
+    handoff_prepared_transaction_with(
+        &journal_path,
+        &journal,
+        transaction_lock,
+        unload_watchdog,
+        watchdog_service_loaded,
+        bootstrap_watchdog,
+    )
+}
+
+fn handoff_prepared_transaction_with<U, L, B>(
+    journal_path: &Path,
+    journal: &UpdateJournalV1,
+    transaction_lock: File,
+    unload: U,
+    service_loaded: L,
+    bootstrap: B,
+) -> Result<PreparedTransaction, String>
+where
+    U: Fn(u32) -> Result<(), String>,
+    L: Fn(u32) -> Result<bool, String>,
+    B: Fn(u32, &Path) -> Result<(), String>,
+{
+    // A published Prepared journal is the recovery boundary. Keep it and its
+    // stage on every handoff failure, including an uncertain launchctl result.
+    // Removing either after releasing the lock can race an admitted watchdog.
+    unload(journal.uid)?;
+    if service_loaded(journal.uid)? {
+        return Err("existing durable update watchdog remained loaded".into());
     }
-    Ok(PreparedTransaction { journal_path })
+    // Release before bootstrap: a helper that exits cleanly on lock contention
+    // is intentionally not relaunched by launchd's unsuccessful-exit policy.
+    drop(transaction_lock);
+    if let Err(error) = bootstrap(journal.uid, &journal.launch_agent) {
+        if !service_loaded(journal.uid)? {
+            return Err(error);
+        }
+    }
+    Ok(PreparedTransaction { journal_path: journal_path.to_owned() })
 }
 
 fn process_exists(pid: u32) -> bool {
@@ -2688,6 +2721,51 @@ mod tests {
     }
 
     #[test]
+    fn preparation_handoff_preserves_published_state_after_bootstrap_failure() {
+        let root = TempDir::new().unwrap();
+        let (path, value) = journal(root.path());
+        fs::create_dir_all(&value.stage).unwrap();
+        fs::create_dir_all(value.launch_agent.parent().unwrap()).unwrap();
+        fs::write(&value.launch_agent, b"published launch agent").unwrap();
+        write_journal(&path, &value).unwrap();
+        let state_dir = path.parent().unwrap();
+        let lock = try_transaction_lock(state_dir).unwrap().unwrap();
+        let result = handoff_prepared_transaction_with(
+            &path, &value, lock,
+            |_| Ok(()),
+            |_| Ok(false),
+            |_, _| {
+                // launchctl may already have started a helper when its client
+                // reports an error. The helper must be able to own this lock.
+                assert!(try_transaction_lock(state_dir).unwrap().is_some());
+                Err("injected ambiguous bootstrap error".into())
+            },
+        );
+        assert!(result.unwrap_err().contains("bootstrap error"));
+        assert!(path.exists(), "durable journal was erased after handoff");
+        assert!(value.stage.exists(), "watchdog stage was erased after handoff");
+        assert!(value.launch_agent.exists());
+    }
+
+    #[test]
+    fn preparation_handoff_requires_old_watchdog_absence_before_bootstrap() {
+        let root = TempDir::new().unwrap();
+        let (path, value) = journal(root.path());
+        write_journal(&path, &value).unwrap();
+        let lock = try_transaction_lock(path.parent().unwrap()).unwrap().unwrap();
+        let bootstrap_count = Cell::new(0);
+        let result = handoff_prepared_transaction_with(
+            &path, &value, lock,
+            |_| Err("injected bootout failure".into()),
+            |_| Ok(true),
+            |_, _| { bootstrap_count.set(bootstrap_count.get() + 1); Ok(()) },
+        );
+        assert!(result.is_err());
+        assert_eq!(bootstrap_count.get(), 0);
+        assert!(path.exists());
+    }
+
+    #[test]
     fn prepared_journal_is_rebootstrapped_and_retained_across_bootstrap_failure() {
         let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
         let (path, mut value) = journal(root.path());
@@ -2771,6 +2849,32 @@ mod tests {
         .unwrap());
         assert_eq!(unloads.get(), 1);
         assert_eq!(restarts.get(), 1);
+    }
+
+    #[test]
+    fn preparation_cannot_enter_while_another_transaction_owns_the_lock() {
+        let root = TempDir::new().unwrap();
+        let state = root.path().join("state");
+        ensure_user_directory(&state, true).unwrap();
+        // A preparer owns the lock before publishing its first journal. A
+        // second preparer must not inspect/copy its bundle or replace helper
+        // state merely because the journal is not visible yet.
+        let lock = try_transaction_lock(&state).unwrap().unwrap();
+        let error = prepare_transaction(
+            &root.path().join("absent-executable"),
+            &state,
+            &root.path().join("agents"),
+            b"unused archive",
+            "1.0.0",
+            "1.0.1",
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("another durable update transaction owns the lock"), "{error}");
+        assert!(!state.join(JOURNAL_FILE).exists());
+        assert!(!state.join("runtime").exists());
+        assert!(!root.path().join("agents").exists());
+        drop(lock);
     }
 
     #[test]

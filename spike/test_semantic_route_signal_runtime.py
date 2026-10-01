@@ -9,6 +9,8 @@ import tempfile
 
 import pytest
 
+import semantic_route_signal_runtime as semantic_runtime
+
 from semantic_route_signal import (
     ACTION_CONFIRM_EXACT_HOST_GEO_EXIT,
     ACTION_NONE,
@@ -396,3 +398,46 @@ def test_supervisor_starts_after_login_and_rebinds_on_session_change():
             assert not socket_path.exists()
 
     asyncio.run(scenario())
+
+
+def test_cancelled_ipc_reader_closes_transport():
+    async def scenario():
+        class Writer:
+            closed = False
+            def close(self): self.closed = True
+            async def wait_closed(self): pass
+        reader = asyncio.StreamReader()
+        writer = Writer()
+        task = asyncio.create_task(semantic_runtime.handle_semantic_signal_client(reader, writer, None))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert writer.closed
+    asyncio.run(scenario())
+
+
+def test_cancelled_server_start_releases_bound_socket(monkeypatch):
+    async def scenario(directory):
+        import socket
+        path = Path(directory) / 'probe.sock'
+        class Server:
+            closed = False
+            socket = None
+            async def start_serving(self): raise asyncio.CancelledError
+            def close(self): self.closed = True; self.socket.close()
+            async def wait_closed(self): pass
+        server = Server()
+        async def start(*args, **kwargs):
+            server.socket = socket.socket(socket.AF_UNIX)
+            server.socket.bind(str(path))
+            return server
+        monkeypatch.setattr(semantic_runtime.asyncio, 'start_unix_server', start)
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await semantic_runtime.start_owned_semantic_signal_server(str(path), os.getuid(), os.getgid(), None)
+            assert server.closed
+            assert not path.exists()
+        finally:
+            server.socket.close()
+    with tempfile.TemporaryDirectory(prefix='ss-ipc-', dir='/tmp') as directory:
+        asyncio.run(scenario(directory))

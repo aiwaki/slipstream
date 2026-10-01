@@ -107,8 +107,11 @@ def _chunked_body_state(body):
                 return "incomplete"
             if b";" in pending:
                 return "invalid"
-            if all(
-                byte in b"0123456789abcdefABCDEF" for byte in pending
+            # EOF may split the CRLF after a valid size. The final CR is
+            # framing in progress, not a malformed hexadecimal digit.
+            pending_size = pending[:-1] if pending.endswith(b"\r") else pending
+            if pending_size and all(
+                byte in b"0123456789abcdefABCDEF" for byte in pending_size
             ):
                 return "incomplete"
             return "invalid"

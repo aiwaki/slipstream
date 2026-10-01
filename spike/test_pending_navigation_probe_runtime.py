@@ -1933,3 +1933,111 @@ def test_browser_comparison_v2_queue_validation_is_owned_only():
     assert runtime._validate_job(dict(job, deadline_unix_ms=21001), 1001) is None
     assert runtime._validate_job(dict(job, candidate_routes=['system','owned_geph']), 1001) is None
     assert runtime._validate_job(job, 21000) is None
+
+
+def test_lazy_worker_close_during_thread_start_is_joinable():
+    starting = threading.Event()
+    release_start = threading.Event()
+    closed = threading.Event()
+    errors = []
+    launches = []
+
+    class DelayedStart(threading.Thread):
+        def start(self):
+            starting.set()
+            assert release_start.wait(2)
+            super().start()
+
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=lambda: 1,
+        launch_worker=lambda: launches.append('unexpected'),
+        thread_factory=DelayedStart,
+    )
+    notifier = threading.Thread(target=worker.notify_job_ready)
+    def close():
+        try:
+            assert worker.close(timeout=1)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            closed.set()
+    closer = threading.Thread(target=close)
+    notifier.start()
+    assert starting.wait(1)
+    closer.start()
+    assert worker._stop.wait(1)
+    release_start.set()
+    notifier.join(2)
+    closer.join(2)
+    assert closed.is_set()
+    assert not errors
+    assert not launches
+    assert worker.close(timeout=1)
+
+
+def test_lazy_worker_close_between_job_count_and_registration():
+    sampled = threading.Event()
+    resume = threading.Event()
+    created = []
+    result = []
+    def pending():
+        sampled.set()
+        assert resume.wait(2)
+        return 1
+    def factory(**kwargs):
+        created.append('thread')
+        return threading.Thread(**kwargs)
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=pending, launch_worker=lambda: None, thread_factory=factory,
+    )
+    notifier = threading.Thread(target=lambda: result.append(worker.notify_job_ready()))
+    notifier.start()
+    assert sampled.wait(1)
+    assert worker.close()
+    resume.set()
+    notifier.join(2)
+    assert result == [False]
+    assert not created
+
+
+def test_cancelled_ipc_reader_closes_transport():
+    async def scenario():
+        class Writer:
+            closed = False
+            def close(self): self.closed = True
+            async def wait_closed(self): pass
+        reader = asyncio.StreamReader()
+        writer = Writer()
+        task = asyncio.create_task(probe_runtime.handle_pending_navigation_probe_client(reader, writer, None))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert writer.closed
+    asyncio.run(scenario())
+
+
+def test_cancelled_server_start_releases_bound_socket(monkeypatch):
+    async def scenario(directory):
+        import socket
+        path = Path(directory) / 'probe.sock'
+        class Server:
+            closed = False
+            socket = None
+            async def start_serving(self): raise asyncio.CancelledError
+            def close(self): self.closed = True; self.socket.close()
+            async def wait_closed(self): pass
+        server = Server()
+        async def start(*args, **kwargs):
+            server.socket = socket.socket(socket.AF_UNIX)
+            server.socket.bind(str(path))
+            return server
+        monkeypatch.setattr(probe_runtime.asyncio, 'start_unix_server', start)
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await probe_runtime.start_owned_pending_navigation_probe_server(str(path), os.getuid(), os.getgid(), None)
+            assert server.closed
+            assert not path.exists()
+        finally:
+            server.socket.close()
+    with tempfile.TemporaryDirectory(prefix='ss-ipc-', dir='/tmp') as directory:
+        asyncio.run(scenario(directory))

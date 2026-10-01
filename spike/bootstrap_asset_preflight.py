@@ -156,8 +156,10 @@ class RangeProbeEvidence:
             or self.range_end != other.range_end
         ):
             return False
-        if self.validator_digest and self.validator_digest == other.validator_digest:
-            return True
+        if self.validator_digest and other.validator_digest:
+            # A shared banner/prefix cannot override explicit evidence that
+            # two routes returned different strong-validator representations.
+            return self.validator_digest == other.validator_digest
         return bool(
             self.prefix_digest
             and self.prefix_digest == other.prefix_digest

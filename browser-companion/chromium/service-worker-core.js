@@ -382,6 +382,32 @@
     return Object.freeze({ discard, peek, remember, take });
   }
 
+  // Ephemeral identity only: no URLs, paths or payloads are retained. A late
+  // callback must still own the tab's navigation, even when the host is equal.
+  function createTabNavigationTracker() {
+    const current = new Map();
+    function begin(details) {
+      if (details?.type !== "main_frame" || details.frameId !== 0 ||
+          !Number.isInteger(details.tabId) || details.tabId < 0 ||
+          typeof details.requestId !== "string") return null;
+      const token = Object.freeze({ tabId: details.tabId, requestId: details.requestId });
+      current.delete(details.tabId);
+      current.set(details.tabId, token);
+      while (current.size > MAX_INCOMPLETE_RESPONSE_CANDIDATES) {
+        current.delete(current.keys().next().value);
+      }
+      return token;
+    }
+    function capture(details) {
+      const token = current.get(details?.tabId);
+      return token?.requestId === details?.requestId ? token : null;
+    }
+    function isCurrent(token) {
+      return Boolean(token && current.get(token.tabId) === token);
+    }
+    return Object.freeze({ begin, capture, isCurrent });
+  }
+
   function reloadInstruction(nativeResponse, signal) {
     if (
       !nativeResponse ||
@@ -419,6 +445,7 @@
     buildSemanticSignal,
     browserOwnedHostname,
     createIncompleteResponseTracker,
+    createTabNavigationTracker,
     exactMessage,
     incompleteResponseCandidate,
     incompleteResponseStorageKey,

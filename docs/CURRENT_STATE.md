@@ -10,6 +10,36 @@ file.
 
 ## Current Checkpoint
 
+
+2026-10-01 bugs/races audit source ready; candidate build/CI next:
+- Physical AUD-17, branch codex/codebase-audit-20260905, PR376 OPEN/CLEAN.
+  Audit base dcf4bcb0 canonical build and exact CI36760899622 /
+  Windows36760899617 SUCCESS. These do not qualify the later audit diff.
+- Three subagents + root completed recovery/core, transport/DNS/Geph,
+  lifecycle/updater/Windows-source, IPC/CDP/browser companion, connection-race,
+  build/release helpers and all 11 Telegram vendor modules; independent reviews
+  closed permit eviction/TTL and Telegram cleanup regressions in the new patch.
+  Exact coverage, RED/GREEN and limits: CODEBASE_AUDIT_2026-09-05.md Oct1 section;
+  symptom-to-code links updated in DIAGNOSTIC_MAP.md. No no-bugs-everywhere claim.
+- Integration baseline Python2841 PASS +288subtests (known Scapy warning);
+  app all-target Rust366 PASS/1ignored, Clippy-Dwarnings PASS; core45,
+  evaluation41/effect40 PASS, companion35 PASS. Later focused tests: permits124,
+  shutdown23, connection ownership17, downloader7+4subtests, Telegram31 /
+  independent40+5subtests and shutdown3. Counts overlap; do not add them.
+  Evidence output/code-audit-20261001/, output/transport-*, output/telegram-*,
+  output/circuit-*, output/lifecycle-*, output/connection-race-*, output/downloader-*.
+- Installed last verified f4251985; verify:local-install53692 PASS is historical.
+  Its physical browser/API/dynamic-image result FAILED. This audit has not
+  installed/restarted anything or opened a native authorization prompt.
+- NEXT commit source/docs (preserve user's AGENTS.md), canonical local build,
+  exact PR CI; record results. Physical Chrome/Safari, normal Quit/update,
+  sleep/wake, Discord voice/stream and native Windows are separate open gates.
+  Do not repeat unchanged broad suites; use focused tests after the baseline.
+  Never replay consumed replacement36622; all private/app backups and learning
+  remain retained. Do not claim user-visible reconnecting repaired by unit tests.
+
+### Previous candidate checkpoint (superseded by audit above)
+
 2026-09-30 V4 installed; candidate-accounting fix ready for build:
 - Checkout AUD-17 / codex/codebase-audit-20260905 / PR376. Installed f4251985,
   exact CI36749756148 and Windows36749755724 PASS. Replacement36622 CONSUMED;
@@ -7408,3 +7438,9 @@ and correct the file rather than improvising a narrative.
   focused dynamic/owned-parent42PASS. Artifacts selection-fairness-*.log.
   Not built/installed yet. Next review focused diff, JSON/integration checks,
   commit/build exact CI, fresh replacement, full browser qualification.
+
+- Candidate-accounting fix committed/pushed dcf4bcb0ad9039e0a8c0f853ad6ff83ce5017164;
+  push70516 terminal0. Local canonical build69243 LIVE, poll same handle;
+  log selection-fairness-build.log. CI36760899622 and Windows36760899617 LIVE;
+  dependency audit36760899700 PASS. No replacement prepared/executed for dcf4.
+  Installed remains f4251985. User AGENTS.md unstaged unchanged.

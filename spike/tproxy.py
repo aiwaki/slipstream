@@ -1878,6 +1878,33 @@ def _apply_runtime_route_circuit(event):
         return None
 
 
+def _runtime_route_circuit_request_task():
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
+
+
+def _retain_runtime_route_circuit_permit(task, key, registry, permit):
+    permits = getattr(task, '_slipstream_route_circuit_permits', None)
+    if permits is None:
+        permits = {}
+        task._slipstream_route_circuit_permits = permits
+
+        def finished(done):
+            retained = getattr(done, '_slipstream_route_circuit_permits', {})
+            for owner, token in retained.values():
+                owner.abandon_owned(token)
+            if hasattr(done, '_slipstream_route_circuit_permits'):
+                del done._slipstream_route_circuit_permits
+
+        task.add_done_callback(finished)
+    previous = permits.get(key)
+    if previous is not None:
+        previous[0].abandon_owned(previous[1])
+    permits[key] = (registry, permit)
+
+
 def runtime_route_circuit_before_request(
     policy,
     backend,
@@ -1897,7 +1924,24 @@ def runtime_route_circuit_before_request(
             else int(now_ms)
         ),
     )
-    return _apply_runtime_route_circuit(event)
+    task = _runtime_route_circuit_request_task()
+    if task is None:
+        return _apply_runtime_route_circuit(event)
+    try:
+        registry = _runtime_route_circuits
+        previous = getattr(task, '_slipstream_route_circuit_permits', {}).get(key)
+        if previous is not None:
+            # Admissions for a backend are sequential within one handler task.
+            # Retire its prior attempt before reserving a new half-open slot.
+            previous[0].abandon_owned(previous[1])
+        decision, permit = registry.before_request_owned(key, event.now_ms)
+        # Retain a tombstone on rejection too: a later result must not fall
+        # back to an unowned result or consume a prior attempt's permit.
+        _retain_runtime_route_circuit_permit(task, key, registry, permit)
+        return decision
+    except Exception:
+        _runtime_route_circuits.clear()
+        return None
 
 
 def runtime_route_circuit_record_result(
@@ -1924,7 +1968,21 @@ def runtime_route_circuit_record_result(
             else int(now_ms)
         ),
     )
-    return _apply_runtime_route_circuit(event)
+    task = _runtime_route_circuit_request_task()
+    permits = getattr(task, '_slipstream_route_circuit_permits', {})
+    retained = permits.get(key)
+    if retained is None:
+        try:
+            return _runtime_route_circuits.record_unowned(event)
+        except Exception:
+            _runtime_route_circuits.clear()
+            return None
+    registry, permit = retained
+    try:
+        return registry.complete_owned(permit, ok, event.now_ms)
+    except Exception:
+        registry.clear()
+        return None
 
 
 def runtime_route_circuit_allows(policy, backend, *, owned=True, now_ms=None):
@@ -10339,7 +10397,11 @@ def _schedule_recent_parent_asset_recovery(failed_host):
                         return
                     with _route_preflight_lock:
                         wait = _learned_parent_asset_wait_locked(h, candidates, time.monotonic())
-                        busy = any(key[0] == h for key in _route_preflight_inflight)
+                        busy = (
+                            any(key[0] == h for key in _route_preflight_inflight)
+                            or _route_preflight_execution_count_locked()
+                            >= ROUTE_PREFLIGHT_CONCURRENT_MAX
+                        )
                     if wait <= 0 and not busy:
                         with _route_preflight_lock:
                             before = set(_learned_parent_asset_attempts.get(h, ()))
@@ -10367,7 +10429,15 @@ def _schedule_recent_parent_asset_recovery(failed_host):
                     _learned_parent_recovery_wakeups.pop(h, None)
         task = loop.create_task(recover())
         _learned_parent_recovery_tasks[parent] = task
-        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        def finished(done, h=parent):
+            # A task cancelled before its first step never enters recover's
+            # finally. Release only its own registration in that case too.
+            if _learned_parent_recovery_tasks.get(h) is done:
+                _learned_parent_recovery_tasks.pop(h, None)
+                _learned_parent_recovery_wakeups.pop(h, None)
+            if not done.cancelled():
+                done.exception()
+        task.add_done_callback(finished)
 
 
 async def _cancel_recent_parent_asset_recovery():
@@ -14687,19 +14757,17 @@ async def serve_until_shutdown(
             (serving, stopping),
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # Unexpected listener completion is terminal too: background monitors
+        # must not re-arm interception or reopen a lease while workers drain.
+        request_daemon_shutdown(shutdown)
         if before_stop is not None:
             before_stop()
         await _cancel_recent_parent_asset_recovery()
         if before_auxiliary_close is not None:
             await before_auxiliary_close()
         print(">> shutdown closing auxiliary brokers", file=sys.stderr, flush=True)
-        if serving in done:
-            stopping.cancel()
-            await asyncio.gather(stopping, return_exceptions=True)
-            await _close_auxiliary_servers(auxiliary_servers)
-            await serving
-            return True
-
+        stopping.cancel()
+        await asyncio.gather(stopping, return_exceptions=True)
         await _close_auxiliary_servers(auxiliary_servers)
         # Keep the listener alive until the private anchor is definitely gone.
         # Closing it first turns a transient pfctl failure into a TCP/443 black
@@ -14711,6 +14779,11 @@ async def serve_until_shutdown(
         drained = await wait_for_connections_to_drain(drain_timeout)
         if not drained:
             await cancel_active_connections()
+        if serving in done:
+            # An accept-loop failure still owns PF and accepted streams. Finish
+            # the same teardown before propagating its error to the supervisor.
+            await serving
+            return drained
         serving.cancel()
         await asyncio.gather(serving, return_exceptions=True)
         return drained
@@ -16301,71 +16374,59 @@ def _doh_request(host, doh_sni):
             f"connection: close\r\n\r\n").encode("ascii")
 
 
+DOH_MAX_RESPONSE = 64 * 1024
+
+
 def _doh_query(doh_ip, doh_sni, host, timeout=3):
-    ctx = _doh_ssl_context()
-    inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
-    obj = ctx.wrap_bio(inbio, outbio, server_hostname=doh_sni)
-    s = socket.create_connection((doh_ip, 443), timeout=timeout)
-    s.settimeout(timeout)
-    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    sent = [False]
+    raw = stream = None
     try:
-        while True:                                   # handshake (tlsrec first flight)
-            try:
-                obj.do_handshake()
-                break
-            except ssl.SSLWantReadError:
-                out = outbio.read()
-                if out:
-                    if not sent[0]:
-                        s.sendall(make_blob(out[:5], out[5:], doh_sni, FIRST_REC_CAP)
-                                  if out[:1] == b"\x16" else out)
-                        sent[0] = True
-                    else:
-                        s.sendall(out)
-                data = s.recv(65536)
-                if not data:
-                    raise IOError("eof in handshake")
-                inbio.write(data)
-        req = _doh_request(host, doh_sni)
-        obj.write(req)
-        while True:
-            out = outbio.read()
-            if not out:
-                break
-            s.sendall(out)
-        buf = b""
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            return None
+        deadline = time.monotonic() + timeout
+        context = _doh_ssl_context()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        # A failed endpoint is a miss, not an exception that skips its reserve.
+        raw = socket.create_connection((doh_ip, 443), timeout=remaining)
+        raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        stream = bootstrap_tls_stream.BootstrapTlsStream(
+            raw, context, doh_sni, deadline,
+            idle_timeout=timeout,
+            monotonic=time.monotonic,
+            first_flight_transform=lambda out: (
+                make_blob(out[:5], out[5:], doh_sni, FIRST_REC_CAP)
+                if out[:1] == b"\x16" else out
+            ),
+        )
+        stream.do_handshake()
+        stream.sendall(_doh_request(host, doh_sni))
+        buf = bytearray()
         while True:
             try:
-                data = s.recv(65536)
-            except socket.timeout:
+                data = stream.recv(min(65536, DOH_MAX_RESPONSE + 1 - len(buf)))
+            except TimeoutError:
                 break
-            if data:
-                inbio.write(data)
-            while True:
-                try:
-                    dec = obj.read(65536)
-                except ssl.SSLWantReadError:
-                    break
-                except ssl.SSLError:
-                    dec = b""
-                if not dec:
-                    break
-                buf += dec
             if not data:
                 break
-        s.close()
-        j = buf.find(b"{")
-        doc = json.loads(buf[j:buf.rfind(b"}") + 1])
-        ips = [a["data"] for a in doc.get("Answer", []) if a.get("type") == 1]
-        if ips:
-            return ips
+            buf.extend(data)
+            if len(buf) > DOH_MAX_RESPONSE:
+                return None
+        start, end = buf.find(b"{"), buf.rfind(b"}")
+        if start < 0 or end < start:
+            return None
+        document = json.loads(buf[start:end + 1])
+        ips = [answer["data"] for answer in document.get("Answer", [])
+               if answer.get("type") == 1]
+        return ips or None
     except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
-    return None
+        return None
+    finally:
+        if stream is not None:
+            stream.close()
+        elif raw is not None:
+            raw.close()
 
 
 DOH_TTL = 300.0          # re-resolve every 5 min — Cloudflare rotates IPs, a
@@ -16399,26 +16460,36 @@ def doh_resolve(host):
     return ips
 
 
-async def doh_resolve_async(host):
-    """Resolve on the dedicated pool, collapsing concurrent first-time lookups
-    for the same host into a single query (no await between get+set -> race-free
-    on the single-threaded loop)."""
-    fut = _doh_inflight.get(host)
-    if fut is not None:
-        return await fut
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    _doh_inflight[host] = fut
-    ips = []
+async def _shared_dns_resolve(host, resolver, inflight):
+    """Let the resolver, not an individual connection, own shared lookup work."""
+    future = inflight.get(host)
+    if future is None:
+        # Publication has no await; all callers on this loop see one worker.
+        try:
+            future = asyncio.get_running_loop().run_in_executor(_POOL, resolver, host)
+        except RuntimeError:
+            return []
+        inflight[host] = future
+
+        def finished(done):
+            if inflight.get(host) is done:
+                inflight.pop(host, None)
+            # Every caller may have gone away before a resolver fails.
+            if not done.cancelled():
+                done.exception()
+
+        future.add_done_callback(finished)
     try:
-        ips = await loop.run_in_executor(_POOL, doh_resolve, host)
+        # Cancelling one socket must not cancel resolution for other sockets or
+        # evict the in-flight entry while its blocking resolver still runs.
+        return await asyncio.shield(future)
     except Exception:
-        ips = []
-    finally:
-        _doh_inflight.pop(host, None)
-        if not fut.done():
-            fut.set_result(ips)
-    return ips
+        return []
+
+
+async def doh_resolve_async(host):
+    """Collapse concurrent lookups without sharing caller cancellation."""
+    return await _shared_dns_resolve(host, doh_resolve, _doh_inflight)
 
 
 async def xbox_dns_resolve_async(host):
@@ -16426,22 +16497,7 @@ async def xbox_dns_resolve_async(host):
     host = normalize_host(host)
     if not host:
         return []
-    fut = _xbox_dns_inflight.get(host)
-    if fut is not None:
-        return await fut
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    _xbox_dns_inflight[host] = fut
-    ips = []
-    try:
-        ips = await loop.run_in_executor(_POOL, xbox_dns_resolve, host)
-    except Exception:
-        ips = []
-    finally:
-        _xbox_dns_inflight.pop(host, None)
-        if not fut.done():
-            fut.set_result(ips)
-    return ips
+    return await _shared_dns_resolve(host, xbox_dns_resolve, _xbox_dns_inflight)
 
 
 def system_resolve(host, port=443):
@@ -18918,23 +18974,46 @@ def probe_geph():
     return False    # transient miss -> keep last good _geph_port; hysteresis decides
 
 
+GEPH_CONTROL_MAX_BYTES = 64 * 1024
+GEPH_SOCKS_REPLY_TIMEOUT = 8.0
+
+
 def _geph_conn_info_sessions(control_port, timeout=3):
-    """Active-session count from geph's control RPC conn_info, or None if the
-    control listener is unreachable."""
+    """Read one size/deadline-bounded control reply without opening a tunnel."""
+    sock = None
     try:
-        s = socket.create_connection(("127.0.0.1", control_port), timeout=timeout)
-        s.settimeout(timeout)
-        s.sendall(b'{"jsonrpc":"2.0","id":1,"method":"conn_info","params":[]}\n')
-        buf = b""
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            return None
+        deadline = time.monotonic() + timeout
+        sock = socket.create_connection(("127.0.0.1", control_port), timeout=timeout)
+
+        def prepare_io():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Geph control deadline exceeded")
+            sock.settimeout(remaining)
+
+        prepare_io()
+        sock.sendall(b'{"jsonrpc":"2.0","id":1,"method":"conn_info","params":[]}\n')
+        buf = bytearray()
         while b"\n" not in buf:
-            d = s.recv(65536)
-            if not d:
+            prepare_io()
+            chunk = sock.recv(min(65536, GEPH_CONTROL_MAX_BYTES + 1 - len(buf)))
+            if not chunk:
                 break
-            buf += d
-        s.close()
-        return len(json.loads(buf.decode()).get("result", {}).get("sessions", []))
+            buf.extend(chunk)
+            if len(buf) > GEPH_CONTROL_MAX_BYTES:
+                return None
+        document = json.loads(buf.decode())
+        result = document.get("result") if isinstance(document, dict) else None
+        sessions = result.get("sessions") if isinstance(result, dict) else None
+        return len(sessions) if isinstance(sessions, list) else None
     except Exception:
         return None
+    finally:
+        if sock is not None:
+            sock.close()
 
 
 def _geph_live(socks_port, timeout=3):
@@ -18975,6 +19054,26 @@ def _geph_socks_works(port, timeout=2.5):
         return False
 
 
+async def _read_geph_socks_reply(reader):
+    """Consume the complete SOCKS bound address before returning the tunnel."""
+    reply = await reader.readexactly(4)
+    if reply[0] != 0x05 or reply[1] != 0x00 or reply[2] != 0x00:
+        raise OSError("SOCKS connect refused")
+    address_type = reply[3]
+    if address_type == 0x01:
+        await reader.readexactly(4)
+    elif address_type == 0x03:
+        length = (await reader.readexactly(1))[0]
+        if not length:
+            raise OSError("empty SOCKS bound domain")
+        await reader.readexactly(length)
+    elif address_type == 0x04:
+        await reader.readexactly(16)
+    else:
+        raise OSError("invalid SOCKS address type")
+    await reader.readexactly(2)
+
+
 async def _open_geph_socks(host, port, port_socks):
     """Open one tunnel without sending any application bytes."""
     try:
@@ -18992,20 +19091,9 @@ async def _open_geph_socks(host, port, port_socks):
         hb = host.encode("ascii", "ignore")[:255]
         gw.write(b"\x05\x01\x00\x03" + bytes([len(hb)]) + hb + struct.pack("!H", port))
         await gw.drain()
-        rep = await asyncio.wait_for(gr.readexactly(4), 8)   # VER REP RSV ATYP
-        if rep[0] != 0x05 or rep[1] != 0x00 or rep[2] != 0x00:
-            raise IOError(f"socks5 connect rep={rep[1]}")
-        atyp = rep[3]
-        if atyp == 0x01:
-            await gr.readexactly(4)
-        elif atyp == 0x03:
-            ln = await gr.readexactly(1)
-            await gr.readexactly(ln[0])
-        elif atyp == 0x04:
-            await gr.readexactly(16)
-        else:
-            raise IOError("invalid socks5 address type")
-        await gr.readexactly(2)                        # bound port
+        await asyncio.wait_for(
+            _read_geph_socks_reply(gr), GEPH_SOCKS_REPLY_TIMEOUT,
+        )
         connected = True
         return gr, gw
     except asyncio.CancelledError:
@@ -19149,30 +19237,31 @@ def _recover_owned_geph_for_replay_blocking(host):
         _finish_geph_restart_drain()
 
 
+def _owned_geph_recovery_worker(host):
+    try:
+        return bool(_recover_owned_geph_for_replay_blocking(host))
+    except (ConnectionError, OSError, RuntimeError):
+        return False
+
+
 async def _coalesced_owned_geph_recovery_for_replay(host):
     """Share one bounded owned-Geph recovery across simultaneous failures."""
     global _owned_geph_runtime_recovery_future
-    owner = False
     with _owned_geph_runtime_recovery_lock:
         future = _owned_geph_runtime_recovery_future
         if future is None or future.done():
-            future = Future()
+            # Completion belongs to the worker, including its restart-drain
+            # cleanup. Cancelling the initiating connection cannot orphan the
+            # result or let a second restart overlap the still-running worker.
+            try:
+                future = _POOL.submit(_owned_geph_recovery_worker, host)
+            except RuntimeError:
+                return False
             _owned_geph_runtime_recovery_future = future
-            owner = True
-    if owner:
-        try:
-            recovered = await asyncio.to_thread(
-                _recover_owned_geph_for_replay_blocking,
-                host,
-            )
-        except (ConnectionError, OSError, RuntimeError):
-            recovered = False
-        if not future.done():
-            future.set_result(bool(recovered))
     try:
         return bool(
             await asyncio.wait_for(
-                asyncio.wrap_future(future),
+                asyncio.shield(asyncio.wrap_future(future)),
                 timeout=(
                     GEPH_RESTART_SUCCESSOR_GRACE
                     + GEPH_RESTART_PAYLOAD_READY_GRACE

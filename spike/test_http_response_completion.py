@@ -462,6 +462,29 @@ def test_partial_chunked_body_is_proven_only_after_the_stream_stops():
     )
 
 
+def test_every_proper_chunked_prefix_is_incomplete_after_eof():
+    body = b"5\r\nhello\r\nA\r\n0123456789\r\n0\r\n\r\n"
+    for length in range(len(body)):
+        partial = _response(b"Transfer-Encoding: chunked", body[:length])
+        assert http_response_incomplete(
+            partial,
+            stream_closed=True,
+            idle_timed_out=False,
+            truncated=False,
+        ), repr(body[:length])
+        assert not http_response_complete(
+            partial, stream_closed=True, truncated=False,
+        )
+
+    for malformed in (b"\r", b"5\r\r", b"5\n", b"5\rX", b";ext\r"):
+        assert not http_response_incomplete(
+            _response(b"Transfer-Encoding: chunked", malformed),
+            stream_closed=True,
+            idle_timed_out=False,
+            truncated=False,
+        )
+
+
 def test_unsuccessful_malformed_or_locally_truncated_response_stays_unknown():
     denied = b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 5\r\n\r\nno"
     conflicting = _response(

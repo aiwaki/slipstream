@@ -22,12 +22,12 @@ if __name__ == '__main__' and (__package__ is None or __package__ == ''):
 
 from .utils import *
 from .stats import stats
-from .config import proxy_config, parse_dc_ip_list, start_cfproxy_domain_refresh, coerce_domain_list
+from .config import proxy_config, parse_dc_ip_list, start_cfproxy_domain_refresh, stop_cfproxy_domain_refresh, coerce_domain_list
 from .bridge import MsgSplitter, CryptoCtx, do_fallback, bridge_ws_reencrypt
-from .raw_websocket import RawWebSocket, WsHandshakeError, set_sock_opts
+from .raw_websocket import RawWebSocket, WsHandshakeError, set_sock_opts, close_writer
 from .fake_tls import proxy_to_masking_domain, verify_client_hello, build_server_hello, FakeTlsStream, TLS_RECORD_HANDSHAKE
 from .balancer import balancer
-from .pool import ws_pool, cf_worker_pool
+from .pool import ws_pool, cf_worker_pool, _await_cleanup
 from ._aes import Cipher, algorithms, modes
 
 
@@ -517,8 +517,7 @@ async def _handle_client(reader, writer, secret: bytes):
     finally:
         stats.connections_active -= 1
         try:
-            writer.close()
-            await writer.wait_closed()
+            await close_writer(writer)
         except BaseException:
             pass
 
@@ -532,20 +531,13 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
     global _server_instance, _server_stop_event, fronting_until
     _server_stop_event = stop_event
 
-    ws_pool.reset()
-    cf_worker_pool.reset()
+    await ws_pool.reset()
+    await cf_worker_pool.reset()
     ws_blacklist.clear()
     dc_fail_until.clear()
     ip_fail_until.clear()
     _client_tasks.clear()
     fronting_until = 0.0
-
-    if proxy_config.fallback_cfproxy:
-        user = proxy_config.cfproxy_user_domains
-        if user:
-            balancer.update_domains_list(user)
-        else:
-            start_cfproxy_domain_refresh()
 
     secret_bytes = bytes.fromhex(proxy_config.secret)
 
@@ -610,9 +602,6 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
 
     log_stats_task = asyncio.create_task(log_stats())
 
-    await ws_pool.warmup()
-    await cf_worker_pool.warmup()
-
     async def _quiet_cancel(t):
         if not t.done():
             t.cancel()
@@ -621,7 +610,17 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
         except (asyncio.CancelledError, Exception):
             pass
 
+    waiters = []
     try:
+        if proxy_config.fallback_cfproxy:
+            user = proxy_config.cfproxy_user_domains
+            if user:
+                balancer.update_domains_list(user)
+            else:
+                start_cfproxy_domain_refresh()
+
+        await ws_pool.warmup()
+        await cf_worker_pool.warmup()
         while True:
             serve_task = asyncio.create_task(server.serve_forever())
             stop_task = (asyncio.create_task(stop_event.wait())
@@ -643,19 +642,10 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
                 waiters, return_when=asyncio.FIRST_COMPLETED)
 
             if stop_task is not None and stop_task in done:
-                for task in list(_client_tasks):
-                    task.cancel()
-                if _client_tasks:
-                    await asyncio.gather(
-                        *_client_tasks, return_exceptions=True)
-                await _quiet_cancel(watchdog_task)
-                await _quiet_cancel(serve_task)
-                server.close()
-                await server.wait_closed()
                 break
 
-            await _quiet_cancel(watchdog_task)
-            await _quiet_cancel(serve_task)
+            for waiter in waiters:
+                await _quiet_cancel(waiter)
             log.warning(
                 "Listening socket died, restarting server")
             server.close()
@@ -680,17 +670,23 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
             log.warning("Server restored, listening on %s:%d",
                         proxy_config.host, proxy_config.port)
     finally:
-        log_stats_task.cancel()
-        try:
-            await log_stats_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            server.close()
+        # Stop admission before draining accepted clients and pool connectors.
+        stop_cfproxy_domain_refresh()
+        server.close()
+        tasks = [log_stats_task, *waiters, *list(_client_tasks)]
+        for task in tasks:
+            task.cancel()
+        async def finish_shutdown():
+            await asyncio.gather(*tasks, return_exceptions=True)
             await server.wait_closed()
-        except Exception:
-            pass
-    _server_instance = None
+            await asyncio.gather(ws_pool.close(), cf_worker_pool.close())
+
+        try:
+            await _await_cleanup(finish_shutdown())
+        finally:
+            _server_instance = None
+            _server_stop_event = None
+
 
 
 def run_proxy(stop_event: Optional[asyncio.Event] = None):

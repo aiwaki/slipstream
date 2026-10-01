@@ -306,3 +306,130 @@ def test_selected_image_does_not_cool_down_unselected_api(monkeypatch, learned_p
     assert proofs == [image, api]
     assert tproxy._learned_parent_asset_attempts[learned_parent] == {image, api}
     assert not tproxy._auto_geph_learned_exact_host(api)
+
+
+@pytest.mark.parametrize('occupancy', ['inflight', 'retained_lease'])
+def test_cached_recovery_waits_for_other_hosts_capacity(monkeypatch, learned_parent, recent_parent_state, occupancy):
+    from concurrent.futures import Future
+
+    now = time.monotonic()
+    failed = 'images.example.net'
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {failed: {'system': now}})
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+    occupied = {(f'busy{i}.example', '8.8.4.4'): Future()
+                for i in range(tproxy.ROUTE_PREFLIGHT_CONCURRENT_MAX)}
+    if occupancy == 'inflight':
+        tproxy._route_preflight_inflight.update(occupied)
+    else:
+        # Root cleanup can retain its execution lease while draining a worker;
+        # an empty host-key map is not proof of available capacity.
+        tproxy._route_preflight_execution_leases.update({
+            epoch: tproxy._RoutePreflightExecutionLease(key, epoch, None)
+            for key, epoch in occupied.items()})
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets', lambda *args: None)
+    seen = []
+    async def browser(job, *args, **kwargs):
+        seen.append(job.asset_hosts)
+    monkeypatch.setattr(tproxy, '_run_headless_owned_geph_preflight', browser)
+
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery(failed)
+        owner = tproxy._learned_parent_recovery_tasks[learned_parent]
+        try:
+            await asyncio.sleep(0)
+            assert not seen
+            assert not owner.done(), 'capacity refusal lost the queued child failure'
+            assert learned_parent not in tproxy._learned_parent_asset_attempts
+            # No second browser failure/notification: freeing existing work is
+            # sufficient to service the already queued discovery.
+            for key, epoch in occupied.items():
+                tproxy._route_preflight_inflight.pop(key, None)
+                tproxy._route_preflight_execution_leases.pop(epoch, None)
+                epoch.set_result(False)
+            await asyncio.wait_for(owner, 1)
+        finally:
+            await tproxy._cancel_recent_parent_asset_recovery()
+            for key in occupied:
+                tproxy._route_preflight_inflight.pop(key, None)
+            for epoch in occupied.values():
+                tproxy._route_preflight_execution_leases.pop(epoch, None)
+    asyncio.run(scenario())
+    assert seen == [(failed,)]
+    assert not tproxy._route_preflight_execution_leases
+
+
+def test_cancel_before_recovery_starts_releases_registry(monkeypatch, learned_parent, recent_parent_state):
+    failed = 'images.example.net'
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {
+        failed: {'system': time.monotonic()}})
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+    async def forbidden(*args):
+        pytest.fail('pre-start cancellation must not begin network discovery')
+    monkeypatch.setattr(tproxy, '_check_learned_parent_assets', forbidden)
+
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery(failed)
+        # The task has not entered its coroutine's try/finally yet.
+        await tproxy._cancel_recent_parent_asset_recovery()
+        assert not tproxy._learned_parent_recovery_tasks
+        assert not tproxy._learned_parent_recovery_wakeups
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('stop', ['deadline', 'cancel'])
+def test_capacity_wait_is_bounded_and_does_not_cancel_owners(monkeypatch, learned_parent, recent_parent_state, stop):
+    from concurrent.futures import Future
+
+    failed = 'images.example.net'
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {
+        failed: {'system': time.monotonic()}})
+    tproxy._recent_asset_parents[learned_parent] = (
+        '8.8.8.8', time.monotonic() + (0.05 if stop == 'deadline' else 60))
+    occupied = {(f'busy{i}.example', '8.8.4.4'): Future()
+                for i in range(tproxy.ROUTE_PREFLIGHT_CONCURRENT_MAX)}
+    tproxy._route_preflight_inflight.update(occupied)
+    monkeypatch.setattr(tproxy, '_discover_owned_preflight_assets',
+                        lambda *args: pytest.fail('work must remain queued'))
+
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery(failed)
+        owner = tproxy._learned_parent_recovery_tasks[learned_parent]
+        await asyncio.sleep(0)
+        assert not owner.done()
+        if stop == 'cancel':
+            await tproxy._cancel_recent_parent_asset_recovery()
+            assert owner.cancelled()
+        else:
+            await asyncio.wait_for(owner, 1)
+        assert not tproxy._learned_parent_recovery_tasks
+        assert not tproxy._learned_parent_recovery_wakeups
+        assert all(not epoch.done() for epoch in occupied.values())
+        assert learned_parent not in tproxy._learned_parent_asset_attempts
+        tproxy._route_preflight_inflight.clear()
+    asyncio.run(scenario())
+
+
+def test_prestart_cancel_callback_cannot_remove_successor(monkeypatch, learned_parent, recent_parent_state):
+    failed = 'images.example.net'
+    monkeypatch.setattr(tproxy, '_local_partial_stalls', {
+        failed: {'system': time.monotonic()}})
+    tproxy._remember_recent_asset_parent(learned_parent, '8.8.8.8')
+
+    async def scenario():
+        tproxy._schedule_recent_parent_asset_recovery(failed)
+        old = tproxy._learned_parent_recovery_tasks[learned_parent]
+        old.cancel()
+        successor = asyncio.create_task(asyncio.sleep(60))
+        wake = asyncio.Event()
+        tproxy._learned_parent_recovery_tasks[learned_parent] = successor
+        tproxy._learned_parent_recovery_wakeups[learned_parent] = wake
+        try:
+            await asyncio.gather(old, return_exceptions=True)
+            assert tproxy._learned_parent_recovery_tasks[learned_parent] is successor
+            assert tproxy._learned_parent_recovery_wakeups[learned_parent] is wake
+        finally:
+            successor.cancel()
+            await asyncio.gather(successor, return_exceptions=True)
+            tproxy._learned_parent_recovery_tasks.clear()
+            tproxy._learned_parent_recovery_wakeups.clear()
+    asyncio.run(scenario())

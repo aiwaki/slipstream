@@ -47,6 +47,13 @@ if [[ "$("$python_313" -c 'import sys; print(f"{sys.version_info.major}.{sys.ver
   exit 1
 fi
 
+# Keep both the shared freezer output and rollback target under one lock.
+# The inherited descriptor also admits the nested spike/build_daemon.sh.
+if [[ -z "${SLIPSTREAM_DAEMON_BUILD_LOCK_FD:-}" ]]; then
+  exec "$python_313" "$script_dir/lock_daemon_build.py" --exec "$repo_root" /bin/bash "$0" "$@"
+fi
+"$python_313" "$script_dir/lock_daemon_build.py" --verify-held "$repo_root"
+
 # Fail before the expensive freeze if the separately materialized, pinned
 # Chromium source is incomplete. This is read-only and never downloads a fix;
 # the final exact-bundle verifier remains mandatory after Tauri packages it.

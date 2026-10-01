@@ -328,6 +328,96 @@ def test_caller_cancellation_cleans_up_pending_connector():
     asyncio.run(scenario())
 
 
+def test_cancellation_during_loser_cleanup_closes_unreturned_winner():
+    async def scenario():
+        loser_started = asyncio.Event()
+        loser_cleanup_started = asyncio.Event()
+        release_loser = asyncio.Event()
+        loser_finished = asyncio.Event()
+
+        class Writer:
+            closed = False
+            def close(self): self.closed = True
+            async def wait_closed(self): pass
+
+        winner = Writer()
+
+        async def connector(candidate, _port):
+            if candidate.id == "winner":
+                await loser_started.wait()
+                return asyncio.StreamReader(), winner
+            loser_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                loser_cleanup_started.set()
+                await release_loser.wait()
+                loser_finished.set()
+
+        task = asyncio.create_task(connection_race_io.open_connection_race(
+            "cleanup.test", 443, {}, _key(), _race_config(), _circuit_config(),
+            resolver=_static_resolver(
+                _candidate("winner"), _candidate("loser", "192.0.2.2"),
+            ),
+            connector=connector,
+        ))
+        await asyncio.wait_for(loser_cleanup_started.wait(), timeout=1)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()  # Repeated cancellation must not orphan the cleanup owner.
+        release_loser.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert winner.closed, "winner was removed from the session but never delivered"
+        assert loser_finished.is_set(), "caller cancellation interrupted connector cleanup"
+        assert not [pending for pending in asyncio.all_tasks()
+                    if pending is not asyncio.current_task() and not pending.done()]
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_cancellation_does_not_skip_later_owned_streams():
+    async def scenario():
+        first_waiting = asyncio.Event()
+        release_first = asyncio.Event()
+
+        class Writer:
+            def __init__(self, blocks=False):
+                self.blocks = blocks
+                self.closed = False
+            def close(self): self.closed = True
+            async def wait_closed(self):
+                if self.blocks:
+                    first_waiting.set()
+                    await release_first.wait()
+
+        writers = [Writer(True), Writer(), Writer()]
+        session = connection_race_io._RaceSession(
+            "cleanup.test", 443, None, None, connection_race_io.monotonic_ms,
+        )
+        session._connections.update({
+            str(index): connection_race_io.OwnedStream(
+                str(index), asyncio.StreamReader(), writer,
+            ) for index, writer in enumerate(writers)
+        })
+        task = asyncio.create_task(session.shutdown())
+        await asyncio.wait_for(first_waiting.wait(), timeout=1)
+        closed_before_wait_finished = all(writer.closed for writer in writers)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        release_first.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert all(writer.closed for writer in writers), "later streams lost their cleanup owner"
+        assert closed_before_wait_finished, "one wait_closed delayed closing other transports"
+        assert not session._connections
+        assert not [pending for pending in asyncio.all_tasks()
+                    if pending is not asyncio.current_task() and not pending.done()]
+
+    asyncio.run(scenario())
+
+
 def test_open_route_circuit_rejects_before_resolver_or_connector():
     async def scenario():
         resolver_calls = 0

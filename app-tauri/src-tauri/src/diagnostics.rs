@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -318,15 +317,27 @@ pub(crate) fn diagnostic_snapshot_path() -> PathBuf {
 }
 
 pub(crate) fn write_diagnostic_snapshot_file(path: &Path, text: &str) -> bool {
-    if fs::write(path, text).is_err() {
-        return false;
-    }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).is_ok()
+    // Publish a complete private snapshot without following an existing
+    // destination symlink or exposing a truncated file to a concurrent reader.
+    crate::write_atomic_mode(path, text.as_bytes(), 0o600).is_ok()
 }
 
 #[cfg(test)]
 mod privacy_tests {
     use super::*;
+
+    #[test]
+    fn snapshot_publication_does_not_follow_an_existing_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("unrelated.txt");
+        fs::write(&target, b"keep me").unwrap();
+        let snapshot = root.path().join("snapshot.json");
+        std::os::unix::fs::symlink(&target, &snapshot).unwrap();
+        assert!(write_diagnostic_snapshot_file(&snapshot, "{\"ok\":true}"));
+        assert_eq!(fs::read(&target).unwrap(), b"keep me");
+        assert!(!fs::symlink_metadata(&snapshot).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(snapshot).unwrap(), "{\"ok\":true}");
+    }
 
     #[test]
     fn diagnostics_omit_opaque_cookie_and_route_records_in_all_value_shapes() {

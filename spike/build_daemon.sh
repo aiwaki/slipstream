@@ -11,6 +11,11 @@ if [[ "$PY_MINOR" != "3.13" ]]; then
   echo "Python 3.13 is required to build slipstreamd (found $PY_MINOR)" >&2
   exit 1
 fi
+repo_root="$(cd .. && pwd -P)"
+if [[ -z "${SLIPSTREAM_DAEMON_BUILD_LOCK_FD:-}" ]]; then
+  exec "$PY" "$repo_root/scripts/lock_daemon_build.py" --exec "$repo_root" /bin/bash "$repo_root/spike/build_daemon.sh" "$@"
+fi
+"$PY" "$repo_root/scripts/lock_daemon_build.py" --verify-held "$repo_root"
 echo ">> build venv + pyinstaller + runtime deps ..."
 rm -rf .buildvenv
 "$PY" -m venv .buildvenv

@@ -10,7 +10,7 @@ from .utils import *
 from .stats import stats
 from .balancer import balancer
 from .config import proxy_config
-from .raw_websocket import RawWebSocket
+from .raw_websocket import RawWebSocket, close_writer
 from .pool import cf_worker_pool
 from ._aes import Cipher, algorithms, modes
 
@@ -275,8 +275,12 @@ async def _tcp_fallback(reader, writer, dst, port, relay_init, label, ctx: Crypt
         return False
 
     stats.connections_tcp_fallback += 1
-    rw.write(relay_init)
-    await rw.drain()
+    try:
+        rw.write(relay_init)
+        await rw.drain()
+    except BaseException:
+        await close_writer(rw)
+        raise
     await _bridge_tcp_reencrypt(reader, writer, rr, rw, label, ctx)
     return True
 
@@ -385,8 +389,7 @@ async def bridge_ws_reencrypt(reader, writer, ws: RawWebSocket, label,
         except BaseException:
             pass
         try:
-            writer.close()
-            await writer.wait_closed()
+            await close_writer(writer)
         except BaseException:
             pass
 
@@ -433,7 +436,6 @@ async def _bridge_tcp_reencrypt(reader, writer, remote_reader, remote_writer,
                 pass
         for w in (writer, remote_writer):
             try:
-                w.close()
-                await w.wait_closed()
+                await close_writer(w)
             except BaseException:
                 pass

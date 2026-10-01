@@ -2310,3 +2310,117 @@ No product source/policy/settings change or installation. Fix must preserve
 exact-origin authority; no blanket cover-name/IP Geph rule or global ECH disable.
 Aikido cold-navigation delay separately measured22.2s held response/24.2s load;
 original infinite-until-reload symptom remains unqualified.
+
+
+## 2026-10-01: повторный аудит багов и гонок
+
+Запрос пользователя: проверить весь код, начать с текущего неполного
+восстановления страницы, разделить работу между сабагентами и исправлять
+подтверждённые дефекты. База — физический AUD-17 checkout, PR376,
+`dcf4bcb0ad9039e0a8c0f853ad6ff83ce5017164`. Каноническая сборка этой базы и
+CI36760899622 прошли. Они не являются доказательством более позднего diff.
+Пользовательские изменения `AGENTS.md` сохранены отдельно и в diff аудита
+не включаются. Установленное приложение остаётся на `f4251985`; его последняя
+проверка браузера не прошла. Ни установка, ни привилегированные/network-account
+испытания, ни публикация релиза этим проходом не выполнялись.
+
+### Распределение и фактическое покрытие
+
+Инвентаризация отслеживаемых файлов с исходным кодом сохранена локально в
+`output/code-audit-20261001/source-inventory.json`: 384 файла, включая тесты и
+сборочные утилиты. Это размер исходного списка, **не число файлов, полностью
+прочитанных и доказанно исправных**. Индекс выбирался для физического AUD-17;
+после `Transport closed` использовались прямые ограниченные чтения и `rg`.
+
+| Проверяющий | Просмотренная область | Граница вывода |
+|---|---|---|
+| Recovery/core | Python queue/discovery, Smart DNS/Geph/replay circuit calls; `route_circuit*`, `routing_recovery`, `route_preflight` v1–v4, bootstrap/parser/evidence; Rust core circuits, routing, connection race, preflight, semantic signals, policy manifest/bundle/activation, StatusV2 | Большой `tproxy.py` просматривался по перечисленным причинным путям; frozen reducers/vectors не менялись |
+| Transport | DNS/DoH, Geph control/session/drain, relay/pump/watchdogs; `bootstrap_tls_stream`, `https_connect`, `managed_https_proxy`, HTTP/2 и HTTP/1 framing, relay diagnostics; raw TCP/UDP/IPv6 и effect evaluation crates | Evaluation crates не являются доказательством production Windows dataplane; реальный внешний exit не квалифицирован |
+| Lifecycle/platform | macOS coordinator/quit/start/reconcile/resume, Geph runtime staging; updater journal/watchdog/recovery/launchd; daemon startup/shutdown/PF/status, install guard и Python policy activation | Изменения системной службы не выполнялись. Native Quit/upgrade/rollback остаются отдельными gates |
+| Lifecycle/platform | Windows service operation lock, controller/host/worker, lifecycle state, direct connector/ingress, route changes, packet egress/admission, userspace ownership | Просмотр исходников; без native Windows execution. EOF semantics frozen v1 не изменялись |
+| Root/integration | Pending/semantic IPC, browser worker и CDP, Chromium/Safari companion, native messaging/Safari bridge, diagnostics, Status client/listener и provenance; connection-race IO/probe ownership, targeted release/artifact tooling | Проверена навигационная идентичность в JS harness, не физические браузерные аккаунты/профили |
+| Transport + независимый recovery reviewer | Все 11 production Python modules в `vendor/tg-ws-proxy/proxy`: raw WebSocket/FakeTLS, bridges, pools, domain refresher, server/client shutdown, config/balancer/helpers | Изменено 6 modules; LICENSE и upstream VERSION1.8.1 сохранены, локальный diff описан в `vendor/tg-ws-proxy/LOCAL_CHANGES.md`. Frozen daemon ещё требует новой сборки |
+| Повторный независимый review | Transport проверил новые permits, root IPC/CDP/MV3; root проверил updater/atomic files/build locking и интеграцию | Найденные на review ошибки новой реализации исправлены до фиксации результата |
+
+### Подтверждённые дефекты и исправления
+
+| Граница / причина | Исправление | Регрессия и локальное свидетельство |
+|---|---|---|
+| V4 отмечал все кандидаты просмотренными, хотя выбран один объект; остальные API/CDN больше не сравнивались | В базе `dcf4bcb0` учитывается только выбранный объект, очередь продолжает свежие кандидаты при прогрессе | Предшествующий RED и focused42/integration111: `output/geph-stream-isolation-20260930/selection-fairness-*.log`; не выдается за новую правку этого diff |
+| Recovery owner завершался при занятых общих execution slots; отмена до первого шага оставляла task registration | Ожидание ёмкости в прежнем deadline; identity-aware done callback не удаляет successor | Два RED: `output/queue-audit-red.log`; `test_dynamic_asset_discovery.py` |
+| Отменённый HALF_OPEN занимал слот; DENY/IGNORE продлевали TTL; старый/чужой/повторный outcome менял circuit нового владельца | Одноразовые task-owned permits, epoch/tombstone; завершение и отказ согласованы с реальными handler/replay paths. Python/Rust TTL wrappers не обновляют ignored outcome | RED: `circuit-recovery-red.log`, `circuit-core-recovery-red.log`; GREEN124: `circuit-runtime-permits-green.log`, handler19: `circuit-handler-green.log` |
+| Review нового permit-кода: eviction epoch оставлял занятый circuit; partial success продлевал state без остальных permits | Atomic eviction epoch/state/timestamp; согласованное продление живого epoch | Два независимых RED: `transport-permit-review-red.log`; GREEN14: `transport-permit-review-green.log` |
+| Совпадение короткого prefix переопределяло конфликтующие strong validators двух объектов | Конфликт сильных validators запрещает same-object proof; prefix fallback только без пары сильных validators | Image/JSON RED; GREEN104: `asset-validator-green.log`, дополнительные boundaries41: `queue-circuit-boundaries-green.log` |
+| Отмена одного DNS waiter отменяла общий future; отмена Geph initiator оставляла future и освобождала слот ещё живого worker | `shield` разделяет waiter и владельца; pool worker завершает общий результат и cleanup сам | `test_shared_network_cancellation.py`; `output/transport-final-focused.log` |
+| Только первые четыре байта SOCKS reply имели timeout; остальные поля и control newline могли ждать бесконечно | Один deadline полного SOCKS reply; bounded control reply и закрытие сокета во всех исходах | `test_geph_io_deadlines.py`; focused26 в `transport-final-focused.log` |
+| DoH connect exception происходил до обработчика и не достигал резервного resolver | Deadline-aware `BootstrapTlsStream`, ограничение ответа 64 KiB, проверка TLS сохранена; ошибочный connect возвращает отказ и cleanup | `test_doh_runtime_deadline.py`; baseline912 в `transport-doh-green.log` |
+| Обрезанное начало chunk size (`5\r`) считалось malformed, а не incomplete | Допустимый незаконченный prefix сохраняет incomplete; malformed negatives остаются отказом | `test_http_response_completion.py`; protocol143 + 8 subtests в `transport-protocol-green.log` |
+| Lazy IPC worker публиковал ещё не запущенный thread; close мог join до start или notify запускал thread уже после close | Проверка stop и start под общей блокировкой, rollback идентичного owner при ошибке start | Два RED: `code-audit-20261001/worker-start-red.log`; barrier-based regression |
+| Отмена IPC handler до write оставляла writer; отмена start_serving оставляла Unix socket | Cleanup охватывает read/work/write; startup ловит cancellation и удаляет только свой socket | Pending/semantic RED и GREEN76: `code-audit-20261001/semantic-ipc-green.log` |
+| CDP fragmented JSON терял начало при idle timeout между frames | Состояние сообщения живёт до завершения/абсолютного deadline; orphan continuation и незаконченный message terminal | Настоящий `--bin slipstream-browser-probe`: RED, GREEN42 в `code-audit-20261001/websocket-fragment-*.log` |
+| Старый native recovery reply или pending timer относился к новой странице того же хоста | Эфемерная идентичность навигации; reload только своего поколения. Допустимый persisted signal при MV3 restart сохранён | Chrome+Safari harness: исходные4 RED, затем MV3-review2 RED; GREEN35 в `code-audit-20261001/browser-navigation-green.log` |
+| Preparation updater проверяла отсутствие journal до общего flock; handoff ошибочно удалял опубликованное состояние после ambiguous bootstrap и игнорировал unload | Lock до проверки/подготовки; опубликованный Prepared journal/stage сохраняются для recovery; подтверждение отсутствия старого watchdog | `lifecycle-audit-preparation-lock-red.log`, `lifecycle-handoff-red.log`; app all-target tests |
+| Atomic file writers одного PID делили temp path; diagnostics писал через существующий symlink | `create_new` уникального staging, запись/permissions/fsync через собственный FD, затем rename; diagnostics использует тот же helper | Concurrent16 writers RED, diagnostics symlink RED; `lifecycle-atomic-red.log`, `code-audit-20261001/diagnostics-red.log` |
+| Geph resume watcher мог пересечься с disable/uninstall; старое lifecycle completion уменьшало watermark нового поколения | Полная Geph mutation transaction сериализована; completed_generation использует `fetch_max` | Thread serialization и out-of-order completion tests; `lifecycle-coordinator-red.log` и общий app GREEN |
+| Две daemon builds удаляли общий freeze output или восстанавливали чужой staging | Один checkout flock удерживается через exec и вложенный freeze; inherited FD проверяется по inode/owner, lock file не удаляется | Concurrent build fixture RED, GREEN4: `build-stage-concurrency-*.log`; shell syntax PASS |
+| Неожиданный выход accept loop обходил PF-first shutdown и не публиковал terminal intent | Любой terminal event останавливает monitors; quiesce → PF teardown → listener close → drain/cancel; исходная ошибка возвращается supervisor | Четыре teardown RED и четыре terminal-intent RED; GREEN23: `lifecycle-shutdown-related-green.log` |
+| Ограниченное число попыток скачивания релиза не ограничивало зависший первый subprocess | Deadline каждой попытки (120 s по умолчанию, настраивается); TimeoutExpired проходит cleanup/retry после kill/reap | Два RED; GREEN7 + 4 subtests и caller contract1: `downloader-timeout-green.log`, `downloader-callers-green.log`; реальные локальные sleep-processes, без сети |
+| Caller отменял connection race во время loser cleanup: winner уже вынут из карты, но не возвращён; отмена первого close пропускала остальные writers | Единственный shielded cleanup owner завершается даже при повторной отмене; все writers закрываются до await; winner возвращается после cleanup или закрывается локально | Два event-driven RED; GREEN17 adapter/probe и независимый root rerun17: `connection-race-ownership-*.log`, `code-audit-20261001/connection-owner-review.log` |
+| Telegram WebSocket терял continuation bytes; пустые WebSocket/FakeTLS fragments считались EOF | Сохраняется byte stream через continuation/control frames; пустые records не завершают transport | `test_telegram_transport_lifecycle.py`, RED в `transport-telegram-red.log`, `transport-telegram-more-red.log`; GREEN31 с existing utils |
+| Telegram upstream CLOSE, отмена handshake/initial send и reset оставляли sockets/child tasks; повторная отмена cleanup теряла остальных владельцев | Bounded close/abort, tracked refill/close owners, shielded draining; listener/client/pools имеют общий shutdown. Независимый review закрыл cancellation-before-first-step и повторную отмену pool cleanup | RED в `transport-telegram-cleanup-red.log`, `transport-telegram-repeat-shutdown-red.log`; независимый combined40 + 5 subtests GREEN |
+| HTTP upgrade Telegram обновлял timeout на каждой строке, не ограничивал заголовки, принимал 101 с EOF без конца заголовков | Общий deadline connect/write/read, cap 64 KiB, полный header terminator | Четыре RED: `transport-telegram-upgrade-red.log`; GREEN в `transport-telegram-green.log` |
+| Domain refresher Telegram продолжал жить после shutdown и мог опубликовать ответ старого запуска | Stop/generation guard под lock; поздний fetch не публикуется, thread не планирует следующий refresh | Delayed-fetch RED: `transport-telegram-refresh-red.log`; join-based regression в общем GREEN |
+| Evaluation TCP принимал RST как успешный SYN-ACK | Переход только из действительно полученного `SynReceived` | `transport-stack-syn-red.log`, evaluation41 + effects40 GREEN; это не production route change |
+
+Все имена артефактов без начального каталога в таблице относятся к `output/`.
+Это локальные журналы, не публикуемые сырые сетевые данные. Новые регрессии
+в исходниках воспроизводимы без пользовательских аккаунтов и системных
+маршрутов. Изменения не добавляют правила конкретных сайтов, не переводят
+Discord/YouTube/Telegram в Geph и не меняют внешнюю сетевую конфигурацию.
+
+### Интеграционная проверка и повторное использование базы
+
+- `spike/.venv/bin/python -m pytest -q spike scripts`: **2841 passed,
+  288 subtests**, один ранее известный Scapy warning. Лог
+  `output/code-audit-20261001/combined-python.log`. Это общий snapshot до
+  последних двух review-исправлений permits и завершающих scoped проверок;
+  перечисленные ниже узкие прогоны закрывают изменения после него.
+- `cargo test --manifest-path app-tauri/src-tauri/Cargo.toml --all-targets`:
+  **366 passed, 1 ignored** по итогам всех targets (часть модулей компилируется
+  в разных binaries). Лог `output/code-audit-20261001/app-tests.log`.
+- `cargo clippy --manifest-path app-tauri/src-tauri/Cargo.toml --all-targets -- -D warnings`:
+  PASS, `output/code-audit-20261001/app-clippy.log`.
+- Core **45 passed**, evaluation **41**, effect evaluation **40**, evaluation
+  Clippy PASS: `core-audit-tests.log`, `transport-stack-green.log`,
+  `transport-stack-effect-green.log`, `transport-stack-clippy.log`.
+- `node --test browser-companion/chromium/tests/*.test.mjs`: **35 passed**,
+  включая Safari worker harness и MV3 restart. Повторять неизменённый набор
+  ради другого счётчика не требуется.
+- После общей базы permits проверены **124 passed**, независимый review
+  **14 passed**; shutdown/PF/status **23 passed**, downloader **7 + 4 subtests**
+  и caller contract **1 passed**. Docs/semantic IPC после переноса импорта —
+  **26 passed** (`code-audit-20261001/docs-semantic-final.log`);
+  connection ownership **17 passed**.
+- Telegram lifecycle + existing utils **31 passed**, production integration
+  **39 passed**, build boundary **2 + 2 subtests**, независимый combined review
+  **40 + 5 subtests**: `transport-telegram-{green,integration,build-boundary}.log`,
+  `telegram-independent-combined-review.log`. Freeze spec уже собирает vendor
+  через `collect_submodules('proxy')`; отдельного TG SOURCE/hash manifest нет.
+  Все эти scoped числа
+  пересекаются с общей базой, их нельзя суммировать.
+
+### Остаточные границы
+
+- Пять и более сменяющихся recent parents при четырёх занятых recovery owners:
+  потенциальная граница saturation не воспроизведена. Admission не расширяли
+  на основании предположения; это отдельный следующий нагрузочный сценарий.
+- Географический exit, брокер, ISP и удалённый сервер могут завершить настоящий
+  поток. Исправления ownership/таймаутов не доказывают причину каждого EOF,
+  `reconnecting`, остановки видео или звонка.
+- Полная физическая Chrome/Safari страница с API и декодированными ресурсами,
+  работа фоновой вкладки, нормальный Quit, upgrade/rollback, sleep/wake,
+  Discord voice/stream и native Windows должны квалифицироваться отдельно.
+  Установка `f4251985` и кандидат этого аудита не смешиваются в отчёте.
+- Статический просмотр и unit/regression suites не являются математическим
+  доказательством отсутствия всех багов. Здесь перечислены фактические
+  причинные пути, исправленные классы отказов и непройденные product gates.

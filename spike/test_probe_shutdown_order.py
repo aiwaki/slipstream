@@ -1,5 +1,6 @@
 """Workers must finish using the broker before its socket is removed."""
 import asyncio
+import threading
 import pytest
 import tproxy
 
@@ -7,6 +8,7 @@ import tproxy
 @pytest.mark.parametrize('listener_finishes', [False, True])
 def test_worker_quiesces_before_broker_close(monkeypatch, listener_finishes):
     events = []
+    monkeypatch.setattr(tproxy, '_shutdown_started', threading.Event())
     class Listener:
         async def __aenter__(self): return self
         async def __aexit__(self, *args): return False
@@ -34,6 +36,67 @@ def test_worker_quiesces_before_broker_close(monkeypatch, listener_finishes):
             before_auxiliary_close=quiesce)
     assert asyncio.run(run())
     assert events.index('discovery_drained') < events.index('worker_finished') < events.index('broker_closed')
+
+
+@pytest.mark.parametrize('listener_raises', [False, True])
+@pytest.mark.parametrize('drained', [False, True])
+def test_unexpected_listener_completion_clears_pf_and_drains_connections(
+    monkeypatch, listener_raises, drained
+):
+    events = []
+    failure = OSError('injected accept loop failure')
+    terminal = threading.Event()
+    monkeypatch.setattr(tproxy, '_shutdown_started', terminal)
+
+    class Listener:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): events.append('listener_context_closed')
+        async def serve_forever(self):
+            if listener_raises:
+                raise failure
+        def close(self): events.append('listener_closed')
+        async def wait_closed(self): events.append('listener_wait_closed')
+
+    async def cancel_discovery(): events.append('discovery_drained')
+    async def drain(timeout):
+        events.append('connections_drained')
+        return drained
+    async def cancel_connections(): events.append('connections_cancelled')
+    def clear_pf():
+        # A transient pfctl failure must not bypass the ordered shutdown path.
+        if 'pf_retry' not in events:
+            events.append('pf_retry')
+            return False
+        events.append('pf_cleared')
+        return True
+
+    monkeypatch.setattr(tproxy, '_cancel_recent_parent_asset_recovery', cancel_discovery)
+    monkeypatch.setattr(tproxy, 'pf_teardown', clear_pf)
+    monkeypatch.setattr(tproxy, 'wait_for_connections_to_drain', drain)
+    monkeypatch.setattr(tproxy, 'cancel_active_connections', cancel_connections)
+
+    async def run():
+        shutdown = asyncio.Event()
+        def before_stop():
+            assert terminal.is_set()
+            assert shutdown.is_set()
+        if listener_raises:
+            with pytest.raises(OSError) as raised:
+                await tproxy.serve_until_shutdown(Listener(), shutdown, before_stop=before_stop)
+            assert raised.value is failure
+        else:
+            assert await tproxy.serve_until_shutdown(
+                Listener(), shutdown, before_stop=before_stop
+            ) is drained
+        assert not [task for task in asyncio.all_tasks()
+                    if task is not asyncio.current_task() and not task.done()]
+
+    asyncio.run(run())
+    assert 'pf_cleared' in events, events
+    assert events.index('pf_retry') < events.index('pf_cleared') < events.index('listener_closed')
+    assert events.index('listener_wait_closed') < events.index('connections_drained')
+    assert events.index('connections_drained') < events.index('listener_context_closed')
+    assert ('connections_cancelled' in events) == (not drained)
 
 
 def test_quiesce_disables_admission_before_worker_wait(monkeypatch):

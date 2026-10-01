@@ -14,7 +14,7 @@ support notes here.
 | Contribution workflow | [../CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Private vulnerability reporting and security scope | [../SECURITY.md](../SECURITY.md) |
 | Current evidence checkpoint and next verified action | [CURRENT_STATE.md](CURRENT_STATE.md) |
-| 2026-09-05 whole-project audit prompt, fixes, tests, and limits | [CODEBASE_AUDIT_2026-09-05.md](CODEBASE_AUDIT_2026-09-05.md) |
+| Whole-project audit ledger, including the 2026-10-01 bugs/races pass | [CODEBASE_AUDIT_2026-09-05.md](CODEBASE_AUDIT_2026-09-05.md) |
 | Current implementation order | [ROADMAP.md](ROADMAP.md) |
 | Active routing invariants and decisions | [DECISIONS.md](DECISIONS.md) |
 | Operational checks and repeated user symptoms | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |

@@ -1,8 +1,8 @@
 //! Bounded runtime storage for the frozen route-circuit v1 reducer.
 
 use crate::route_circuit::{
-    reduce_route_circuit, CircuitConfig, CircuitDecision, CircuitEvent, CircuitState,
-    CircuitStates, RouteCircuitKey,
+    reduce_route_circuit, CircuitConfig, CircuitDecision, CircuitDecisionKind, CircuitEvent,
+    CircuitState, CircuitStates, RouteCircuitKey,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -96,7 +96,14 @@ impl RouteCircuitRegistry {
         let (states, decision) = reduce_route_circuit(&self.states, event, &self.circuit_config)?;
         self.states = states;
         if self.states.contains_key(&event.key) {
-            self.last_touched.insert(event.key.clone(), event.now_ms);
+            // Denied traffic cannot renew an abandoned half-open permit. Only
+            // admissions and recorded outcomes constitute backend activity.
+            if matches!(
+                decision.kind,
+                CircuitDecisionKind::Allow | CircuitDecisionKind::Record
+            ) {
+                self.last_touched.insert(event.key.clone(), event.now_ms);
+            }
         } else {
             self.last_touched.remove(&event.key);
         }

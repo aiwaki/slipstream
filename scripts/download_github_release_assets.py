@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 
 DEFAULT_ATTEMPTS = 4
 DEFAULT_DELAY_SECONDS = 2.0
+DEFAULT_TIMEOUT_SECONDS = 120.0
 
 
 def download_release_assets(
@@ -26,12 +28,14 @@ def download_release_assets(
     patterns: Sequence[str],
     attempts: int = DEFAULT_ATTEMPTS,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> None:
     if not repository or not tag or not patterns:
         raise ValueError("repository, tag, and at least one pattern are required")
-    if attempts < 1 or delay_seconds < 0:
+    if (attempts < 1 or not math.isfinite(delay_seconds) or delay_seconds < 0
+            or not math.isfinite(timeout_seconds) or timeout_seconds <= 0):
         raise ValueError("retry bounds are invalid")
     if output.exists() or output.is_symlink():
         raise ValueError("output path must not already exist")
@@ -47,7 +51,12 @@ def download_release_assets(
             command.extend(("--pattern", pattern))
         command.extend(("--dir", str(temporary)))
         try:
-            completed = runner(command, capture_output=True, text=True, check=False)
+            # subprocess.run kills and reaps the timed-out gh process before
+            # raising, so its partial directory can be removed before retry.
+            completed = runner(
+                command, capture_output=True, text=True, check=False,
+                timeout=timeout_seconds,
+            )
             downloaded = tuple(path.name for path in temporary.iterdir() if path.is_file())
             missing = tuple(
                 pattern
@@ -64,6 +73,8 @@ def download_release_assets(
                 last_detail = "release download omitted: " + ", ".join(missing)
             else:
                 last_detail = detail or "release download returned no assets"
+        except subprocess.TimeoutExpired:
+            last_detail = f"release download timed out after {timeout_seconds:g} seconds"
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
@@ -88,6 +99,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pattern", required=True, action="append")
     parser.add_argument("--attempts", type=int, default=DEFAULT_ATTEMPTS)
     parser.add_argument("--delay-seconds", type=float, default=DEFAULT_DELAY_SECONDS)
+    parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     return parser.parse_args(argv)
 
 
@@ -100,6 +112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         patterns=args.pattern,
         attempts=args.attempts,
         delay_seconds=args.delay_seconds,
+        timeout_seconds=args.timeout_seconds,
     )
     return 0
 

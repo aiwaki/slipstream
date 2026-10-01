@@ -528,30 +528,31 @@ async def _read_frame(reader):
 
 async def handle_pending_navigation_probe_client(reader, writer, runtime):
     try:
-        payload = await _read_frame(reader)
-        response = await asyncio.to_thread(runtime.handle, payload)
-    except (
-        asyncio.IncompleteReadError,
-        asyncio.TimeoutError,
-        PendingNavigationProbeRuntimeError,
-        struct.error,
-    ):
-        response = _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
-    except Exception:
-        response = _response(False, OPERATION_NONE, REASON_EFFECT_UNAVAILABLE)
-    encoded = json.dumps(
-        response,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("ascii")
-    try:
-        writer.write(encode_frame(encoded))
-        await asyncio.wait_for(
-            writer.drain(),
-            timeout=IPC_TIMEOUT_SECONDS,
-        )
-    except (asyncio.TimeoutError, ConnectionError, OSError):
-        pass
+        try:
+            payload = await _read_frame(reader)
+            response = await asyncio.to_thread(runtime.handle, payload)
+        except (
+            asyncio.IncompleteReadError,
+            asyncio.TimeoutError,
+            PendingNavigationProbeRuntimeError,
+            struct.error,
+        ):
+            response = _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
+        except Exception:
+            response = _response(False, OPERATION_NONE, REASON_EFFECT_UNAVAILABLE)
+        encoded = json.dumps(
+            response,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        try:
+            writer.write(encode_frame(encoded))
+            await asyncio.wait_for(
+                writer.drain(),
+                timeout=IPC_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            pass
     finally:
         writer.close()
         try:
@@ -808,7 +809,7 @@ async def start_owned_pending_navigation_probe_server(path, uid, gid, runtime):
                 "pending-navigation socket ownership verification failed"
             )
         await server.start_serving()
-    except Exception:
+    except BaseException:
         server.close()
         await server.wait_closed()
         try:
@@ -2147,7 +2148,8 @@ class LazyPendingNavigationProbeWorker:
         if self._stop.is_set() or not self._job_count():
             return False
         with self._lock:
-            if self._thread is not None:
+            # close() may finish while pending_jobs() runs outside this lock.
+            if self._stop.is_set() or self._thread is not None:
                 return False
             thread = self._thread_factory(
                 target=self._run,
@@ -2155,13 +2157,14 @@ class LazyPendingNavigationProbeWorker:
                 daemon=True,
             )
             self._thread = thread
-        try:
-            thread.start()
-        except BaseException:
-            with self._lock:
+            try:
+                # Publish only a joinable thread to close(). _run never needs
+                # this lock to start, and acquires it only on final cleanup.
+                thread.start()
+            except BaseException:
                 if self._thread is thread:
                     self._thread = None
-            raise
+                raise
         return True
 
     def active(self):

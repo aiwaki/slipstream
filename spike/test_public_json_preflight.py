@@ -67,6 +67,14 @@ def test_json_requires_enough_same_object_evidence():
     assert not inspect(response(b'{', length=2, extra=b'ETag: W/"same"\r\n')).proves_same_object_as(complete)
 
 
+def test_json_conflicting_strong_validators_override_common_prefix():
+    body = json.dumps({'items': ['common data'] * 500}).encode()
+    partial = inspect(response(body[:2048], length=len(body), extra=b'ETag: "first"\r\n'))
+    complete = inspect(response(body, extra=b'ETag: "second"\r\n'))
+    assert partial.prefix_digest == complete.prefix_digest
+    assert not partial.proves_same_object_as(complete)
+
+
 def test_ephemeral_json_request_is_anonymous_consumed_and_not_serializable():
     asset = probe.ephemeral_public_json_asset('https://api.example.net/feed?anonymous=1', 'api.example.net')
     request = asset.build_range_request()

@@ -301,13 +301,13 @@ impl DaemonLifecycleCoordinator {
                 }
                 coordinator
                     .completed_generation
-                    .store(ticket, Ordering::Release);
+                    .fetch_max(ticket, Ordering::AcqRel);
             }) {
             Ok(_) => true,
             Err(error) => {
                 eprintln!("daemon lifecycle administrator thread unavailable: {error}");
                 if self.generation.load(Ordering::Acquire) == ticket {
-                    self.completed_generation.store(ticket, Ordering::Release);
+                    self.completed_generation.fetch_max(ticket, Ordering::AcqRel);
                 }
                 false
             }
@@ -341,7 +341,10 @@ impl DaemonLifecycleCoordinator {
             .lock()
             .map_err(|_| "daemon lifecycle lock unavailable".to_string())?;
         let result = action();
-        self.completed_generation.store(ticket, Ordering::Release);
+        // A newer reservation may already have completed (for example, its
+        // thread could not be created). An older completion must not move the
+        // watermark backwards and make every later reconcile look pending.
+        self.completed_generation.fetch_max(ticket, Ordering::AcqRel);
         result
     }
 
@@ -3274,30 +3277,39 @@ fn ensure_private_append_file(path: &Path) -> std::io::Result<()> {
     set_mode(path, 0o600)
 }
 
-fn write_atomic_mode(path: &Path, content: &[u8], mode: u32) -> std::io::Result<()> {
+static ATOMIC_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn create_atomic_temporary(path: &Path, mode: u32) -> std::io::Result<(PathBuf, fs::File)> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("atomic file has no parent"))?;
     fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(
-        ".{}.tmp-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("private"),
-        std::process::id()
-    ));
+    // The status worker and tray can publish concurrently inside one process.
+    // PID alone aliases their files; exclusive creation also preserves a
+    // leftover file or symlink instead of truncating someone else's staging.
+    for _ in 0..64 {
+        let sequence = ATOMIC_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let tmp = parent.join(format!(
+            ".{}.tmp-{}-{sequence}",
+            path.file_name().and_then(|name| name.to_str()).unwrap_or("private"),
+            std::process::id(),
+        ));
+        match fs::OpenOptions::new().create_new(true).write(true).mode(mode).open(&tmp) {
+            Ok(file) => return Ok((tmp, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "atomic staging paths are occupied"))
+}
+
+fn write_atomic_mode(path: &Path, content: &[u8], mode: u32) -> std::io::Result<()> {
+    let (tmp, mut file) = create_atomic_temporary(path, mode)?;
     let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(mode)
-            .open(&tmp)?;
         file.write_all(content)?;
+        file.set_permissions(fs::Permissions::from_mode(mode))?;
         file.sync_all()?;
-        set_mode(&tmp, mode)?;
-        fs::rename(&tmp, path)?;
-        set_mode(path, mode)
+        fs::rename(&tmp, path)
     })();
     let _ = fs::remove_file(&tmp);
     result
@@ -3369,12 +3381,13 @@ fn sync_private_executable(source: &Path, target: &Path) -> std::io::Result<bool
         set_mode(target, 0o700)?;
         return Ok(false);
     }
-    let tmp = parent.join(format!(".{GEPH_RUNTIME_BIN}.tmp-{}", std::process::id()));
+    let (tmp, mut destination) = create_atomic_temporary(target, 0o700)?;
     let result = (|| {
-        fs::copy(source, &tmp)?;
-        set_mode(&tmp, 0o700)?;
-        fs::rename(&tmp, target)?;
-        set_mode(target, 0o700)
+        let mut source = fs::File::open(source)?;
+        std::io::copy(&mut source, &mut destination)?;
+        destination.set_permissions(fs::Permissions::from_mode(0o700))?;
+        destination.sync_all()?;
+        fs::rename(&tmp, target)
     })();
     let _ = fs::remove_file(&tmp);
     result.map(|_| true)
@@ -4079,7 +4092,19 @@ fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPat
     Ok(geph_launch_agent_paths(&config_dir, &home))
 }
 
+static GEPH_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
+
+fn with_geph_lifecycle<T>(action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let _guard = GEPH_LIFECYCLE_LOCK.lock()
+        .map_err(|_| "Geph lifecycle lock unavailable".to_string())?;
+    action()
+}
+
 fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
+    with_geph_lifecycle(|| geph_launch_agent_disable_locked(app))
+}
+
+fn geph_launch_agent_disable_locked(app: &AppHandle) -> Result<(), String> {
     let paths = geph_launch_agent_paths_for_app(app)?;
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
     geph_launch_agent_bootout(&uid, &paths.plist)
@@ -4101,19 +4126,28 @@ fn remove_owned_geph_runtime(config_dir: &Path) -> Result<(), String> {
 }
 
 fn geph_launch_agent_uninstall(app: &AppHandle) -> Result<(), String> {
-    let paths = geph_launch_agent_paths_for_app(app)?;
-    geph_launch_agent_disable(app)?;
-    remove_owned_geph_runtime(&paths.config_dir)?;
-    keychain_delete();
-    Ok(())
+    with_geph_lifecycle(|| {
+        let paths = geph_launch_agent_paths_for_app(app)?;
+        geph_launch_agent_disable_locked(app)?;
+        remove_owned_geph_runtime(&paths.config_dir)?;
+        keychain_delete();
+        Ok(())
+    })
 }
 
 /// Install or refresh the user LaunchAgent that owns Geph independently of the
 /// tray process. Returns false when Geph is intentionally disabled or no account
 /// secret has been configured yet.
 fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool, String> {
+    // Tray actions and the background resume watcher otherwise race across
+    // read-config, stage files, bootout and bootstrap. Re-read policy only
+    // after serializing the entire runtime transaction (not just each write).
+    with_geph_lifecycle(|| ensure_geph_launch_agent_locked(app, force_restart))
+}
+
+fn ensure_geph_launch_agent_locked(app: &AppHandle, force_restart: bool) -> Result<bool, String> {
     if !geph_enabled(app) {
-        geph_launch_agent_disable(app)?;
+        geph_launch_agent_disable_locked(app)?;
         return Ok(false);
     }
     let resume_intent = quit_resume_intent_path(app)?;
@@ -4124,7 +4158,7 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
         // A manually disabled root service and a Quit-stopped service are both
         // authoritative. Never recreate a Geph-only sidecar while the exact
         // root interception owner is stopped or its state is unprovable.
-        geph_launch_agent_disable(app)?;
+        geph_launch_agent_disable_locked(app)?;
         return Ok(false);
     }
     let Some(secret) = geph_secret(app) else {
@@ -5574,6 +5608,52 @@ exit 0
     }
 
     #[test]
+    fn geph_runtime_mutations_are_serialized_across_threads() {
+        let running = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8).map(|_| {
+            let running = running.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                super::with_geph_lifecycle(|| {
+                    assert_eq!(running.fetch_add(1, std::sync::atomic::Ordering::AcqRel), 0);
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    assert_eq!(running.fetch_sub(1, std::sync::atomic::Ordering::AcqRel), 1);
+                    Ok(())
+                }).unwrap();
+            })
+        }).collect();
+        for worker in workers { worker.join().unwrap(); }
+        // A failed transaction must release the same owner for a retry.
+        assert!(super::with_geph_lifecycle(|| Err::<(), _>("injected".into())).is_err());
+        assert!(super::with_geph_lifecycle(|| Ok(())).is_ok());
+    }
+
+    #[test]
+    fn concurrent_atomic_writers_do_not_share_temporary_files() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("geph-config.yaml");
+        let barrier = Arc::new(std::sync::Barrier::new(16));
+        let writers: Vec<_> = (0u8..16).map(|value| {
+            let target = target.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let payload = vec![value; 32 * 1024];
+                barrier.wait();
+                super::write_atomic_mode(&target, &payload, 0o600)
+            })
+        }).collect();
+        for writer in writers {
+            assert!(writer.join().unwrap().is_ok(), "a concurrent writer lost its staging file");
+        }
+        let bytes = std::fs::read(&target).unwrap();
+        assert_eq!(bytes.len(), 32 * 1024);
+        assert!(bytes[0] < 16 && bytes.iter().all(|byte| *byte == bytes[0]));
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+
+    #[test]
     fn terminal_operation_claim_is_mutually_exclusive_and_release_is_owner_scoped() {
         let owner = AtomicU8::new(TerminalOperation::Idle as u8);
 
@@ -5628,6 +5708,21 @@ exit 0
             &owner,
             TerminalOperation::Uninstalling
         ));
+    }
+
+    #[test]
+    fn old_exclusive_completion_does_not_leave_reconciliation_stuck() {
+        let coordinator = DaemonLifecycleCoordinator::default();
+        coordinator.run_exclusive(|| {
+            // A newer spawn reservation can fail to create its thread while
+            // this older action holds the lock. Its failure path marks that
+            // reservation completed without taking the lifecycle lock.
+            let newer = coordinator.generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+            coordinator.completed_generation.store(newer, std::sync::atomic::Ordering::Release);
+            Ok(())
+        }).unwrap();
+        let reconciled = coordinator.reconcile(|| Ok("ready")).unwrap();
+        assert_eq!(reconciled, Some("ready"));
     }
 
     #[test]
