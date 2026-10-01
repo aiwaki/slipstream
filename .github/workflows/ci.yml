@@ -227,7 +227,8 @@ jobs:
         run: python3 -m pytest -q spike/test_traffic_contracts.py
 
       - name: Daemon unit tests
-        run: python3 -m pytest -q spike
+        timeout-minutes: 10
+        run: python3 -m pytest -vv -o faulthandler_timeout=60 spike
 
       - name: Qualify deterministic exact-host TCP fallback and QUIC v1/v2 observation matrix
         run: |

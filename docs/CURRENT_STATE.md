@@ -11,32 +11,45 @@ file.
 ## Current Checkpoint
 
 
-2026-10-01 bugs/races audit source ready; candidate build/CI next:
-- Physical AUD-17, branch codex/codebase-audit-20260905, PR376 OPEN/CLEAN.
-  Audit base dcf4bcb0 canonical build and exact CI36760899622 /
-  Windows36760899617 SUCCESS. These do not qualify the later audit diff.
-- Three subagents + root completed recovery/core, transport/DNS/Geph,
-  lifecycle/updater/Windows-source, IPC/CDP/browser companion, connection-race,
-  build/release helpers and all 11 Telegram vendor modules; independent reviews
-  closed permit eviction/TTL and Telegram cleanup regressions in the new patch.
-  Exact coverage, RED/GREEN and limits: CODEBASE_AUDIT_2026-09-05.md Oct1 section;
-  symptom-to-code links updated in DIAGNOSTIC_MAP.md. No no-bugs-everywhere claim.
-- Integration baseline Python2841 PASS +288subtests (known Scapy warning);
-  app all-target Rust366 PASS/1ignored, Clippy-Dwarnings PASS; core45,
-  evaluation41/effect40 PASS, companion35 PASS. Later focused tests: permits124,
-  shutdown23, connection ownership17, downloader7+4subtests, Telegram31 /
-  independent40+5subtests and shutdown3. Counts overlap; do not add them.
-  Evidence output/code-audit-20261001/, output/transport-*, output/telegram-*,
-  output/circuit-*, output/lifecycle-*, output/connection-race-*, output/downloader-*.
-- Installed last verified f4251985; verify:local-install53692 PASS is historical.
-  Its physical browser/API/dynamic-image result FAILED. This audit has not
-  installed/restarted anything or opened a native authorization prompt.
-- NEXT commit source/docs (preserve user's AGENTS.md), canonical local build,
-  exact PR CI; record results. Physical Chrome/Safari, normal Quit/update,
-  sleep/wake, Discord voice/stream and native Windows are separate open gates.
-  Do not repeat unchanged broad suites; use focused tests after the baseline.
-  Never replay consumed replacement36622; all private/app backups and learning
-  remain retained. Do not claim user-visible reconnecting repaired by unit tests.
+2026-10-01 bugs/races audit: shutdown/IPC follow-up GREEN, ready for source commit/build/CI:
+- Physical AUD-17 / codex/codebase-audit-20260905 / PR376 OPEN. Audit base
+  dcf4bcb0 had green canonical build and CI36760899622/Windows36760899617.
+  Main audit source44b245b4 pushed; canonical build3889 terminal0 PASS.
+- Three subagents + root covered recovery/core, transport/DNS/Geph, lifecycle,
+  updater/Windows-source, IPC/CDP/companions, connection ownership, build/release
+  helpers and all11 Telegram vendor modules. Exact coverage, causes, RED/GREEN
+  and limits in CODEBASE_AUDIT_2026-09-05.md Oct1 section; DIAGNOSTIC_MAP updated.
+- Reusable integration baseline Python2841+288subtests PASS (before late edits);
+  app all-target Rust366 PASS/1ignored + Clippy; core45/evaluation41/effect40,
+  companion35 PASS. Later scoped permits124, shutdown23, connection17,
+  downloader7+4subtests, Telegram31/independent40+5subtests. Counts overlap.
+- CI36882233560 CANCELLED deliberately after daemon test hang. Local exact-shape
+  pytest spike reproduced missing PF mock in two old amain tests. Fixed mocks;
+  real-loopback review also fixed drain order across Python3.13.14/.15,
+  terminal admission, cancellation bookkeeping and abandoned transport abort.
+  Telegram restart now reclaims clients before joining listener task. Owned IPC
+  close is coalesced/shielded; per-server authority fences late state/effects.
+  CI now emits test names/stack after60s and fails daemon step after10min.
+- FINAL daemon-only snapshot:2134 PASS+8subtests,40.69s; build/docs/CI-scope75
+  PASS+32subtests. output/code-audit-20261001/daemon-ci-parity-green.log and
+  followup-build-docs.log. Follow-up IPC79, lifecycle45, Telegram5x34 PASS;
+  outer timing flake separately RED/GREEN (runtime10ms unchanged). All agents done.
+- source44 CI packaged build/Chromium/Windows adapter passed before cancellation;
+  Windows36882233650 x64/ARM64 SUCCESS. No full source44 functional CI PASS.
+  dependency36882233444 FAILED: Chromium integrity-only and Geph exceptions
+  expired2026-09-30; Geph9blocking expired_exception/3informational. App complete
+  vulnerability report absent. No exceptions extended. Report3b82b009 is PR merge
+  checkout for head44b245b4/base7e196a71. Evidence dependency-artifacts/ and
+  dependency-failed.log under output/code-audit-20261001/.
+- Installed last verified f4251985; historical verify:local-install53692 PASS,
+  physical API/dynamic-image qualification FAILED. This audit has not installed,
+  restarted services or opened native authorization. Do not claim reconnects fixed.
+- NEXT commit reviewed follow-up, canonical rebuild and fresh functional CI;
+  keep dependency gate red pending reviewed remediation. Physical Chrome/Safari,
+  normal Quit/update, sleep/wake, Discord voice/stream and workstation behavior
+  remain separate gates. Do not repeat unchanged broad Rust suites.
+  Preserve user AGENTS.md, all backups and learning. Never replay consumed
+  replacement36622. Source fixes are not an absence-of-all-bugs guarantee.
 
 ### Previous candidate checkpoint (superseded by audit above)
 

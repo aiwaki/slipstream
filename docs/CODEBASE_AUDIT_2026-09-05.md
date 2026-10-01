@@ -2339,7 +2339,7 @@ CI36760899622 прошли. Они не являются доказательс�
 | Lifecycle/platform | macOS coordinator/quit/start/reconcile/resume, Geph runtime staging; updater journal/watchdog/recovery/launchd; daemon startup/shutdown/PF/status, install guard и Python policy activation | Изменения системной службы не выполнялись. Native Quit/upgrade/rollback остаются отдельными gates |
 | Lifecycle/platform | Windows service operation lock, controller/host/worker, lifecycle state, direct connector/ingress, route changes, packet egress/admission, userspace ownership | Просмотр исходников; без native Windows execution. EOF semantics frozen v1 не изменялись |
 | Root/integration | Pending/semantic IPC, browser worker и CDP, Chromium/Safari companion, native messaging/Safari bridge, diagnostics, Status client/listener и provenance; connection-race IO/probe ownership, targeted release/artifact tooling | Проверена навигационная идентичность в JS harness, не физические браузерные аккаунты/профили |
-| Transport + независимый recovery reviewer | Все 11 production Python modules в `vendor/tg-ws-proxy/proxy`: raw WebSocket/FakeTLS, bridges, pools, domain refresher, server/client shutdown, config/balancer/helpers | Изменено 6 modules; LICENSE и upstream VERSION1.8.1 сохранены, локальный diff описан в `vendor/tg-ws-proxy/LOCAL_CHANGES.md`. Frozen daemon ещё требует новой сборки |
+| Transport + независимый recovery reviewer | Все 11 production Python modules в `vendor/tg-ws-proxy/proxy`: raw WebSocket/FakeTLS, bridges, pools, domain refresher, server/client shutdown, config/balancer/helpers | Изменено 6 modules; LICENSE и upstream VERSION1.8.1 сохранены, локальный diff описан в `vendor/tg-ws-proxy/LOCAL_CHANGES.md`. Frozen daemon пересобран и канонически проверен на source44b245b4; следующий shutdown diff требует свежего доказательства |
 | Повторный независимый review | Transport проверил новые permits, root IPC/CDP/MV3; root проверил updater/atomic files/build locking и интеграцию | Найденные на review ошибки новой реализации исправлены до фиксации результата |
 
 ### Подтверждённые дефекты и исправления
@@ -2408,6 +2408,67 @@ Discord/YouTube/Telegram в Geph и не меняют внешнюю сетев�
   через `collect_submodules('proxy')`; отдельного TG SOURCE/hash manifest нет.
   Все эти scoped числа
   пересекаются с общей базой, их нельзя суммировать.
+
+### Проверка сборки и зависимости после source44b245b4
+
+- Source `44b245b49b936605cc03885692b55209d50e5976`: `npm run build:local`
+  завершён успешно; `verify_macos_app_bundle.py` подтвердил fresh/staged/bundled
+  daemon и подпись. Артефакт `app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app`,
+  журнал `output/code-audit-20261001/canonical-build.log`. Установка `not_run`.
+- CI36882233650: native Windows x64/ARM64 PASS. CI36882233560: packaged build,
+  Chromium webRequest contract и Windows adapter PASS, но daemon unit step
+  завис. Отдельный локальный запуск `pytest spike` с faulthandler воспроизвёл
+  ожидание в старом `test_amain_uses_backend_gate_before_starting_monitor`.
+  Поздняя правка shutdown впервые довела неполный mock до настоящего PF cleanup;
+  прежний общий snapshot был выполнен до этой правки. Это не новый зелёный
+  полный прогон. Журнал `output/code-audit-20261001/daemon-ci-parity.log`.
+- Dependency audit36882233444: FAIL. App Chromium integrity-only policy и
+  Geph exceptions истекли `2026-09-30`. Девять Geph findings стали blocking
+  именно как `expired_exception`, три остались informational. Все 12 совпадают
+  с отчётом 5 сентября по package/version и advisory ID/aliases; это не девять
+  новых уязвимостей текущего diff. Исключения не продлевались и gate не ослаблялся.
+  App scanner не создал полный итоговый report из-за ошибки policy validation:
+  отсутствие иных новых app findings **не доказано**.
+- В Geph два исключения `rustls-webpki` признают остаточный риск проверки TLS;
+  их нельзя описывать как недостижимые. Следующий dependency шаг — совместимое
+  обновление графа и повторная проверка оставшихся достижимых advisories. Для
+  Chromium integrity-only не заменяет сканирование уязвимостей.
+- Свидетельства: `output/code-audit-20261001/dependency-failed.log` и
+  `dependency-artifacts/`. Report source `3b82b009e1836c9bfca430a012dd3aae9d14d50c`
+  — merge checkout PR376 (head44b245b4, base7e196a71), а не другой локальный build.
+
+### Дополнительные границы, найденные при проверке CI
+
+| Причина | Исправление | Проверка |
+|---|---|---|
+| Старые `amain` mocks обрывали listener, но оставляли настоящий PF teardown; безопасный retry не мог завершиться без root | Mocks явно задают успешный PF cleanup и полный listener lifecycle; проверяется PF-before-close | Bounded RED без системного PF: `lifecycle-amain-ci-red.log`; два caller tests GREEN |
+| `Server.close` / отмена `serve_forever` ждёт accepted transports в Python 3.13.14, а 3.13.15 закрывает их до grace | Terminal admission guard; PF teardown → bounded drain/cancel → listener close/wait | Реальные TCP streams, legacy wrapper, сохранение grace: `lifecycle-real-listener-drain-{red,green}.log` |
+| Повторная отмена handler во время `wait_closed` пропускала освобождение счётчика; истечение close deadline оставляло transport живым | Bookkeeping в nested finally; abort только при отмене/истечении прежнего 1 s deadline | Два event-driven RED и настоящий loopback с backpressure RED; итог45 PASS: `lifecycle-close-final-focused-green.log` |
+| Telegram restart ожидал завершения listener task до отмены клиентов, которые удерживали этот же listener | Explicit client cleanup перед join listener task, независимо от patch release Python | Real TCP stop/cancel/restart, две семантики close: RED1/PASS5, затем 5×34 PASS; `transport-ci-hang/listener-restart-*` |
+| Отмена закрытия IPC оставляла socket, повторный close преждевременно возвращался; отмена handler до первого шага теряла writer | Общая shielded cleanup task, принадлежащие серверу clients/writers, deadline/abort writer cleanup | Настоящие Unix sockets и repeated cancellation; `code-audit-20261001/owned-ipc-{shutdown,prestart}-red.log` |
+| Поток `runtime.handle` мог применить результат после закрытия/смены серверного сеанса | Per-owner authority допускает state/effects атомарно; revoke запрещает новые commits, уже допущенные effects завершаются до освобождения listener для преемника | Поздний parse не меняет replay state и не мешает successor; admitted effect удерживает ownership. Ещё4 RED; все IPC79 PASS: `owned-ipc-shutdown-green.log` |
+| Telegram cleanup test зависел от 300 ms планирования ещё до входа в проверяемый close | Event barrier перед проверяемой границей и внешний 3 s safety budget; runtime10ms и closed/aborted assertions сохранены | Та же остановка event loop на350ms: RED→GREEN, 5×4 PASS; `transport-ci-hang/stuck-writer-scheduler-*`. Принадлежность единственного раннего CI F этому тесту не доказана |
+
+Нюанс серверного lifecycle подтверждён по официальному исходному коду
+[CPython 3.13.14](https://github.com/python/cpython/blob/v3.13.14/Lib/asyncio/base_events.py#L380-L385)
+и [3.13.15](https://github.com/python/cpython/blob/v3.13.15/Lib/asyncio/base_events.py#L380-L386).
+CI теперь печатает имя каждого теста и stack после60s ожидания; сам daemon-test
+step имеет fail bound10min. Это не повышение runtime deadlines и не замена
+тестирования. Полный CI36882233560 отменён после воспроизведения зависания;
+его частичные успехи не выдаются за завершённый функциональный gate.
+
+Синхронный injected effect, уже допущенный IPC authority, нельзя безопасно
+принудительно остановить. Закрытие ждёт его завершения, сохраняя ownership;
+если такой effect зависнет навсегда, ложного сообщения об успешной quiescence
+не будет. Read/parse worker до допуска может завершиться позднее, но его effect
+и запись replay-state после revoke отвергаются.
+
+Финальная проверка после этих правок: отдельно `pytest -vv -o
+faulthandler_timeout=30 spike` — **2134 passed + 8 subtests**, 40,69 s;
+`test_documentation.py`, `test_build_config.py`, `test_ci_scope.py` —
+**75 passed + 32 subtests**. Артефакты `daemon-ci-parity-green.log` и
+`followup-build-docs.log` в `output/code-audit-20261001/`. Ранее неизменённые
+Rust/JS suites используются как база, эти числа не суммируются с ней.
 
 ### Остаточные границы
 

@@ -78,6 +78,9 @@ flowchart TD
 | Анонимный браузер не передал доказательство при живом CDP | `browser_probe.rs::websocket_read_json`: незавершённое сообщение между idle polls | Фрагмент через паузу 400 ms сохраняется; незавершённое сообщение по общему deadline завершается ошибкой |
 | Вкладка неожиданно обновляется после перехода на другую страницу того же сайта | Companion: идентичность навигации до/после native reply | JS tests для Chrome/Safari: старый ответ не обновляет новую навигацию; MV3 restart сохраняет допустимый сигнал из session storage |
 | Quit, запуск или обновление оставляет старое состояние | IPC server/task cleanup; coordinator watermark; updater flock; atomic staging | IPC cancellation tests, Rust lifecycle/updater tests, параллельные build-stage fixtures |
+| Выход зависает на живом соединении или обрывает его раньше grace | `serve_until_shutdown`, `handle`; порядок PF teardown, запрета новых потоков, drain/cancel и `Server.close` | `test_probe_shutdown_order.py`: реальные TCP streams и обе семантики Python 3.13; тестовый PF всегда подменён |
+| Перезапуск Telegram-слушателя не завершается | `_run` в `vendor/tg-ws-proxy/proxy/tg_ws_proxy.py`: клиенты должны закрыться до ожидания listener task | `test_telegram_transport_lifecycle.py`: настоящий loopback, stop/cancel/restart без зависимости от неявного `close_clients` |
+| Закрытый внутренний broker оставляет socket или старый результат | Owned IPC server, coalesced close, принадлежность client tasks и допуск эффекта конкретному владельцу | `test_owned_ipc_shutdown.py`: настоящие Unix sockets, отмена до первого шага, повторная отмена и запоздавший результат |
 
 Подробные причины, RED/GREEN и пределы покрытия записаны в
 [журнале аудита](CODEBASE_AUDIT_2026-09-05.md#2026-10-01-повторный-аудит-багов-и-гонок).

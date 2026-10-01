@@ -132,7 +132,13 @@ def test_cancelled_refill_reclaims_successful_unconsumed_connections(monkeypatch
 
 
 @pytest.mark.parametrize('mode', ['cancel', 'stop', 'restart_stop'])
-def test_proxy_shutdown_drains_listener_and_client_tasks(monkeypatch, mode):
+@pytest.mark.parametrize('auto_close_clients', [True, False])
+def test_proxy_shutdown_drains_listener_and_client_tasks(monkeypatch, mode, auto_close_clients):
+    if not auto_close_clients:
+        # Some supported Python releases join accepted transports when
+        # serve_forever is cancelled without proactively closing them. Use a
+        # real Server and real TCP clients, disabling only that implicit close.
+        monkeypatch.setattr(asyncio.Server, 'close_clients', lambda self: None)
     async def scenario():
         entered, finished = asyncio.Event(), asyncio.Event()
         async def client(reader, writer, secret):
@@ -151,6 +157,7 @@ def test_proxy_shutdown_drains_listener_and_client_tasks(monkeypatch, mode):
         baseline = asyncio.all_tasks()
         stop = asyncio.Event()
         monkeypatch.setattr(runtime, 'LISTENER_RESTART_DELAY', .001)
+        monkeypatch.setattr(runtime, 'LISTENER_CHECK_INTERVAL', .002)
         run = asyncio.create_task(runtime._run(stop))
         writer = None
         try:
@@ -348,7 +355,9 @@ def test_stuck_writer_shutdown_is_bounded(monkeypatch, kind):
         def __init__(self):
             super().__init__()
             self.aborted = False
+            self.close_entered = asyncio.Event()
         async def wait_closed(self):
+            self.close_entered.set()
             await asyncio.Future()
         def abort(self):
             self.aborted = True
@@ -373,13 +382,19 @@ def test_stuck_writer_shutdown_is_bounded(monkeypatch, kind):
             other.feed_eof()
             operation = bridge._bridge_tcp_reencrypt(reader, writer, other, Writer(), 'test', None)
         task = asyncio.create_task(operation)
-        done, _ = await asyncio.wait([task], timeout=.3)
-        if not done:
-            task.cancel()
+        try:
+            # A busy runner can delay bridge startup before close_writer even
+            # starts its own deadline. Synchronize on the actual stuck close,
+            # then use a generous outer watchdog, not a scheduler-speed test.
+            await asyncio.wait_for(writer.close_entered.wait(), timeout=3)
+            done, _ = await asyncio.wait([task], timeout=3)
+            assert done, 'close waited indefinitely for a non-responsive transport'
+            await task
+            assert writer.closed and writer.aborted
+        finally:
+            if not task.done():
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        assert done, 'close waited indefinitely for a non-responsive transport'
-        await task
-        assert writer.closed and writer.aborted
     asyncio.run(scenario())
 
 

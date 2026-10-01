@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
 import json
 import os
@@ -454,7 +454,7 @@ class PendingNavigationProbeRuntime:
             REASON_ACCEPTED if accepted else REASON_RESULT_REJECTED,
         )
 
-    def handle(self, payload):
+    def handle(self, payload, *, authority=None):
         try:
             request = _parse_request(payload)
         except PendingNavigationProbeRuntimeError:
@@ -472,15 +472,24 @@ class PendingNavigationProbeRuntime:
             "operation",
             "launch_id",
         }:
-            return self._claim(launch_id)
+            result = (self._claim(launch_id) if authority is None
+                      else authority.run(self._claim, launch_id))
+            return result if result is not None else _response(
+                False, OPERATION_CLAIM, REASON_EFFECT_UNAVAILABLE)
         if operation == OPERATION_SUBMIT and set(request) == {
             "schema_version",
             "operation",
             "launch_id",
             "result",
         }:
-            return self._submit(request["result"], launch_id)
+            result = (self._submit(request["result"], launch_id) if authority is None
+                      else authority.run(self._submit, request["result"], launch_id))
+            return result if result is not None else _response(
+                False, OPERATION_SUBMIT, REASON_EFFECT_UNAVAILABLE)
         return _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
+
+    def handle_owned(self, payload, authority):
+        return self.handle(payload, authority=authority)
 
     def state_size(self):
         now_monotonic = self._monotonic_clock()
@@ -526,11 +535,15 @@ async def _read_frame(reader):
     )
 
 
-async def handle_pending_navigation_probe_client(reader, writer, runtime):
+async def handle_pending_navigation_probe_client(reader, writer, runtime, *, authority=None):
     try:
         try:
             payload = await _read_frame(reader)
-            response = await asyncio.to_thread(runtime.handle, payload)
+            owned_handle = getattr(runtime, "handle_owned", None)
+            if authority is not None and owned_handle is not None:
+                response = await asyncio.to_thread(owned_handle, payload, authority)
+            else:
+                response = await asyncio.to_thread(runtime.handle, payload)
         except (
             asyncio.IncompleteReadError,
             asyncio.TimeoutError,
@@ -556,9 +569,13 @@ async def handle_pending_navigation_probe_client(reader, writer, runtime):
     finally:
         writer.close()
         try:
-            await writer.wait_closed()
-        except (ConnectionError, OSError):
-            pass
+            await asyncio.wait_for(writer.wait_closed(), timeout=IPC_TIMEOUT_SECONDS)
+        except (asyncio.CancelledError, asyncio.TimeoutError, ConnectionError, OSError) as error:
+            transport = getattr(writer, "transport", None)
+            if transport is not None:
+                transport.abort()
+            if isinstance(error, asyncio.CancelledError):
+                raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -628,20 +645,100 @@ async def _refuse_active_socket(path):
     raise OSError("pending-navigation socket is already active")
 
 
+class _RuntimeAuthority:
+    """Fence one socket incarnation's state/effects across worker threads."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._loop = asyncio.get_running_loop()
+        self._drained = self._loop.create_future()
+        self._revoked = False
+        self._active = 0
+
+    def run(self, effect, *args):
+        with self._lock:
+            if self._revoked:
+                return None
+            self._active += 1
+        try:
+            return effect(*args)
+        finally:
+            with self._lock:
+                self._active -= 1
+                if self._revoked and not self._active:
+                    self._loop.call_soon_threadsafe(self._complete_drain)
+
+    def _complete_drain(self):
+        if not self._drained.done():
+            self._drained.set_result(None)
+
+    def revoke(self):
+        with self._lock:
+            self._revoked = True
+            if not self._active:
+                self._complete_drain()
+
+    async def wait_closed(self):
+        await self._drained
+
+
 @dataclass
 class OwnedPendingNavigationProbeServer:
     server: asyncio.AbstractServer
     path: str
     identity: UnixSocketIdentity
     _closed: bool = False
+    _closing: bool = False
+    _clients: dict = field(default_factory=dict, repr=False)
+    _authority: _RuntimeAuthority = field(default_factory=_RuntimeAuthority, repr=False)
+    _close_task: asyncio.Task = field(default=None, repr=False)
 
-    async def close(self):
-        if self._closed:
+    def accept_client(self, reader, writer, runtime):
+        if self._closing:
+            writer.close()
             return
-        self._closed = True
+        task = asyncio.create_task(handle_pending_navigation_probe_client(
+            reader, writer, runtime, authority=self._authority))
+        self._clients[task] = writer
+        task.add_done_callback(self._client_done)
+
+    def _client_done(self, task):
+        writer = self._clients.pop(task, None)
+        if writer is not None:
+            # External cancellation may precede the handler's first step.
+            writer.close()
+        if not task.cancelled():
+            task.exception()
+
+    async def _finish_close(self):
+        clients = tuple(self._clients.items())
+        for task, writer in clients:
+            # A task cancelled before its first step never runs its finally.
+            writer.close()
+            task.cancel()
+        await asyncio.gather(*(task for task, _ in clients), return_exceptions=True)
+        # Already-admitted effects own the incarnation until they finish.
+        # Keep the rejecting listener bound so a successor cannot replace it.
+        await self._authority.wait_closed()
         self.server.close()
         await self.server.wait_closed()
         remove_owned_socket(self.path, self.identity)
+        self._closed = True
+
+    async def close(self):
+        if self._close_task is None:
+            self._closing = True
+            self._authority.revoke()
+            self._close_task = asyncio.create_task(self._finish_close())
+        cancelled = False
+        while not self._close_task.done():
+            try:
+                await asyncio.shield(self._close_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        self._close_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 @dataclass
@@ -785,12 +882,16 @@ async def start_owned_pending_navigation_probe_server(path, uid, gid, runtime):
                 "unable to remove stale pending-navigation socket"
             )
 
+    owned = None
+
+    def accept_client(reader, writer):
+        if owned is None:
+            writer.close()
+            return
+        owned.accept_client(reader, writer, runtime)
+
     server = await asyncio.start_unix_server(
-        lambda reader, writer: handle_pending_navigation_probe_client(
-            reader,
-            writer,
-            runtime,
-        ),
+        accept_client,
         path=path,
         limit=MAX_IPC_BYTES + 4,
         start_serving=False,
@@ -808,16 +909,20 @@ async def start_owned_pending_navigation_probe_server(path, uid, gid, runtime):
             raise OSError(
                 "pending-navigation socket ownership verification failed"
             )
+        owned = OwnedPendingNavigationProbeServer(server, path, identity)
         await server.start_serving()
     except BaseException:
-        server.close()
-        await server.wait_closed()
-        try:
-            remove_owned_socket(path, identity)
-        except UnboundLocalError:
-            pass
+        if owned is not None:
+            await owned.close()
+        else:
+            server.close()
+            await server.wait_closed()
+            try:
+                remove_owned_socket(path, identity)
+            except UnboundLocalError:
+                pass
         raise
-    return OwnedPendingNavigationProbeServer(server, path, identity)
+    return owned
 
 
 class PendingNavigationProbeWorkerClient:

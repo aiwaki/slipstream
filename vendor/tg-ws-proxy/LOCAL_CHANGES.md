@@ -16,7 +16,9 @@ The October 2026 transport audit adds:
 - Explicit ownership of pool refill and socket-close tasks; shutdown drains
   completed but unconsumed connections and survives repeated cancellation.
 - Listener/client/pool cleanup on normal stop, listener restart, and task
-  cancellation; stopped CF-domain refresh generations cannot publish late data.
+  cancellation; listener restart drains accepted clients before joining
+  `serve_forever`, whose cancellation can itself wait for those transports.
+  Stopped CF-domain refresh generations cannot publish late data.
 
 Regression checks use fixtures and loopback sockets only:
 

@@ -4251,6 +4251,12 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
         async def serve_forever(self):
             raise RuntimeError("stop test server")
 
+        def close(self):
+            calls.append(("listener_closed",))
+
+        async def wait_closed(self):
+            calls.append(("listener_waited",))
+
     async def start_server(*_args, **_kwargs):
         return Server()
 
@@ -4285,6 +4291,9 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
         "pf_setup_if_ready",
         lambda port: calls.append(("pf_gate", port)) or False,
     )
+    monkeypatch.setattr(
+        tproxy, "pf_teardown", lambda: calls.append(("pf_cleared",)) or True,
+    )
 
     with pytest.raises(RuntimeError, match="stop test server"):
         asyncio.run(tproxy.amain(1080, voice=False))
@@ -4296,6 +4305,8 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     assert monitor[:3] == ("monitor", 1080, False)
     assert isinstance(monitor[3], float)
     assert monitor[3] > 0
+    assert calls.index(("pf_cleared",)) < calls.index(("listener_closed",))
+    assert calls.index(("listener_closed",)) < calls.index(("listener_waited",))
 
 
 def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
@@ -4310,6 +4321,12 @@ def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
 
         async def serve_forever(self):
             raise RuntimeError("stop test server")
+
+        def close(self):
+            calls.append(("listener_closed",))
+
+        async def wait_closed(self):
+            calls.append(("listener_waited",))
 
     async def start_server(*_args, **_kwargs):
         return Server()
@@ -4343,6 +4360,9 @@ def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
         "_start_network_monitor",
         lambda *_args, **_kwargs: None,
     )
+    monkeypatch.setattr(
+        tproxy, "pf_teardown", lambda: calls.append(("pf_cleared",)) or True,
+    )
 
     with pytest.raises(RuntimeError, match="stop test server"):
         asyncio.run(tproxy.amain(1080, voice=False))
@@ -4351,6 +4371,9 @@ def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
     assert calls == [
         ("startup_status",),
         ("status", "dormant", "utun7", None),
+        ("pf_cleared",),
+        ("listener_closed",),
+        ("listener_waited",),
     ]
 
 
@@ -4410,10 +4433,10 @@ def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
         "enter",
         "auxiliary_closed",
         "pf_cleared",
-        "listener_closed",
-        "listener_waited",
         ("drain", 3.5),
         "connections_closed",
+        "listener_closed",
+        "listener_waited",
         "exit",
     ]
 

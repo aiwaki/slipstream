@@ -644,11 +644,19 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
             if stop_task is not None and stop_task in done:
                 break
 
+            # Cancelling serve_forever may itself await Server.wait_closed(),
+            # which waits for accepted transports on supported Python releases.
+            # Drain our clients before joining the listener task, rather than
+            # depending on a particular patch release's implicit close_clients.
+            server.close()
+            clients = list(_client_tasks)
+            for task in clients:
+                task.cancel()
+            await asyncio.gather(*clients, return_exceptions=True)
             for waiter in waiters:
                 await _quiet_cancel(waiter)
             log.warning(
                 "Listening socket died, restarting server")
-            server.close()
             try:
                 await server.wait_closed()
             except Exception:

@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 import socket
@@ -93,7 +93,7 @@ class SemanticRouteSignalRuntime:
         while len(state) > self._max_entries:
             state.popitem(last=False)
 
-    def handle(self, payload):
+    def handle(self, payload, *, authority=None):
         try:
             signal = parse_semantic_route_signal(payload)
         except SemanticSignalError as error:
@@ -114,6 +114,17 @@ class SemanticRouteSignalRuntime:
         except Exception:
             return _response(False, ACTION_NONE, REASON_CONTEXT_UNAVAILABLE)
 
+        arguments = (signal, now_ms, now_mono, route_class, backend_ready)
+        if authority is None:
+            return self._apply_signal(*arguments)
+        result = authority.run(self._apply_signal, *arguments)
+        return result if result is not None else _response(
+            False, ACTION_NONE, REASON_CONTEXT_UNAVAILABLE)
+
+    def handle_owned(self, payload, authority):
+        return self.handle(payload, authority=authority)
+
+    def _apply_signal(self, signal, now_ms, now_mono, route_class, backend_ready):
         with self._lock:
             self._prune_locked(now_mono)
             signal_id_seen = signal.signal_id in self._seen_signal_ids
@@ -199,11 +210,15 @@ async def _read_frame(reader):
     )
 
 
-async def handle_semantic_signal_client(reader, writer, runtime):
+async def handle_semantic_signal_client(reader, writer, runtime, *, authority=None):
     try:
         try:
             payload = await _read_frame(reader)
-            response = await asyncio.to_thread(runtime.handle, payload)
+            owned_handle = getattr(runtime, "handle_owned", None)
+            if authority is not None and owned_handle is not None:
+                response = await asyncio.to_thread(owned_handle, payload, authority)
+            else:
+                response = await asyncio.to_thread(runtime.handle, payload)
         except asyncio.TimeoutError:
             response = _response(False, ACTION_NONE, REASON_READ_TIMEOUT)
         except (asyncio.IncompleteReadError, struct.error):
@@ -228,9 +243,13 @@ async def handle_semantic_signal_client(reader, writer, runtime):
     finally:
         writer.close()
         try:
-            await writer.wait_closed()
-        except (ConnectionError, OSError):
-            pass
+            await asyncio.wait_for(writer.wait_closed(), timeout=IPC_WRITE_TIMEOUT_SECONDS)
+        except (asyncio.CancelledError, asyncio.TimeoutError, ConnectionError, OSError) as error:
+            transport = getattr(writer, "transport", None)
+            if transport is not None:
+                transport.abort()
+            if isinstance(error, asyncio.CancelledError):
+                raise
 
 
 @dataclass(frozen=True)
@@ -299,20 +318,100 @@ async def _refuse_active_socket(path):
     raise OSError("semantic signal socket is already active")
 
 
+class _RuntimeAuthority:
+    """Fence one socket incarnation's state/effects across worker threads."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._loop = asyncio.get_running_loop()
+        self._drained = self._loop.create_future()
+        self._revoked = False
+        self._active = 0
+
+    def run(self, effect, *args):
+        with self._lock:
+            if self._revoked:
+                return None
+            self._active += 1
+        try:
+            return effect(*args)
+        finally:
+            with self._lock:
+                self._active -= 1
+                if self._revoked and not self._active:
+                    self._loop.call_soon_threadsafe(self._complete_drain)
+
+    def _complete_drain(self):
+        if not self._drained.done():
+            self._drained.set_result(None)
+
+    def revoke(self):
+        with self._lock:
+            self._revoked = True
+            if not self._active:
+                self._complete_drain()
+
+    async def wait_closed(self):
+        await self._drained
+
+
 @dataclass
 class OwnedSemanticSignalServer:
     server: asyncio.AbstractServer
     path: str
     identity: UnixSocketIdentity
     _closed: bool = False
+    _closing: bool = False
+    _clients: dict = field(default_factory=dict, repr=False)
+    _authority: _RuntimeAuthority = field(default_factory=_RuntimeAuthority, repr=False)
+    _close_task: asyncio.Task = field(default=None, repr=False)
 
-    async def close(self):
-        if self._closed:
+    def accept_client(self, reader, writer, runtime):
+        if self._closing:
+            writer.close()
             return
-        self._closed = True
+        task = asyncio.create_task(handle_semantic_signal_client(
+            reader, writer, runtime, authority=self._authority))
+        self._clients[task] = writer
+        task.add_done_callback(self._client_done)
+
+    def _client_done(self, task):
+        writer = self._clients.pop(task, None)
+        if writer is not None:
+            # External cancellation may precede the handler's first step.
+            writer.close()
+        if not task.cancelled():
+            task.exception()
+
+    async def _finish_close(self):
+        clients = tuple(self._clients.items())
+        for task, writer in clients:
+            # A task cancelled before its first step never runs its finally.
+            writer.close()
+            task.cancel()
+        await asyncio.gather(*(task for task, _ in clients), return_exceptions=True)
+        # Already-admitted effects own the incarnation until they finish.
+        # Keep the rejecting listener bound so a successor cannot replace it.
+        await self._authority.wait_closed()
         self.server.close()
         await self.server.wait_closed()
         remove_owned_socket(self.path, self.identity)
+        self._closed = True
+
+    async def close(self):
+        if self._close_task is None:
+            self._closing = True
+            self._authority.revoke()
+            self._close_task = asyncio.create_task(self._finish_close())
+        cancelled = False
+        while not self._close_task.done():
+            try:
+                await asyncio.shield(self._close_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        self._close_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 @dataclass
@@ -450,12 +549,16 @@ async def start_owned_semantic_signal_server(path, uid, gid, runtime):
         if not remove_owned_socket(path, identity):
             raise OSError("unable to remove stale semantic signal socket")
 
+    owned = None
+
+    def accept_client(reader, writer):
+        if owned is None:
+            writer.close()
+            return
+        owned.accept_client(reader, writer, runtime)
+
     server = await asyncio.start_unix_server(
-        lambda reader, writer: handle_semantic_signal_client(
-            reader,
-            writer,
-            runtime,
-        ),
+        accept_client,
         path=path,
         limit=MAX_SIGNAL_BYTES + FRAME_HEADER_BYTES,
         start_serving=False,
@@ -471,13 +574,17 @@ async def start_owned_semantic_signal_server(path, uid, gid, runtime):
             or stat.S_IMODE(record.st_mode) != 0o600
         ):
             raise OSError("semantic signal socket ownership verification failed")
+        owned = OwnedSemanticSignalServer(server, path, identity)
         await server.start_serving()
     except BaseException:
-        server.close()
-        await server.wait_closed()
-        try:
-            remove_owned_socket(path, identity)
-        except UnboundLocalError:
-            pass
+        if owned is not None:
+            await owned.close()
+        else:
+            server.close()
+            await server.wait_closed()
+            try:
+                remove_owned_socket(path, identity)
+            except UnboundLocalError:
+                pass
         raise
-    return OwnedSemanticSignalServer(server, path, identity)
+    return owned

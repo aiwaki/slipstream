@@ -14690,8 +14690,8 @@ def pf_teardown():
 async def wait_for_connections_to_drain(timeout=SHUTDOWN_DRAIN_SECONDS):
     """Give already-accepted streams a bounded chance to finish.
 
-    PF is cleared and the listening socket is closed before this runs, so the
-    count can only fall. A deadline keeps launchd stop/uninstall deterministic
+    PF is cleared and terminal intent rejects new streams before this runs, so
+    the count can only fall. A deadline keeps launchd stop/uninstall deterministic
     when a browser leaves an idle keep-alive connection open indefinitely.
     """
     loop = asyncio.get_running_loop()
@@ -14774,11 +14774,14 @@ async def serve_until_shutdown(
         # hole for every redirected application.
         while not pf_teardown():
             await asyncio.sleep(0.1)
-        server.close()
-        await server.wait_closed()
+        # Closing Server cancels serve_forever: 3.13.14 waits for clients there,
+        # while 3.13.15 closes them immediately. Preserve the accepted-stream
+        # grace period first; terminal intent already rejects new admissions.
         drained = await wait_for_connections_to_drain(drain_timeout)
         if not drained:
             await cancel_active_connections()
+        server.close()
+        await server.wait_closed()
         if serving in done:
             # An accept-loop failure still owns PF and accepted streams. Finish
             # the same teardown before propagating its error to the supervisor.
@@ -18437,6 +18440,16 @@ def note_local_stream_stall(host, strategy_name, now=None):
     return True
 
 
+def _abort_closing_transport(writer):
+    """Release a transport whose orderly close has been abandoned."""
+    abort = getattr(getattr(writer, "transport", None), "abort", None)
+    if callable(abort):
+        try:
+            abort()
+        except Exception:
+            pass
+
+
 async def _close_stream_writer(writer):
     try:
         writer.close()
@@ -18447,7 +18460,12 @@ async def _close_stream_writer(writer):
         return
     try:
         await asyncio.wait_for(wait_closed(), timeout=1.0)
-    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError, TypeError):
+    except asyncio.CancelledError:
+        _abort_closing_transport(writer)
+        raise
+    except asyncio.TimeoutError:
+        _abort_closing_transport(writer)
+    except (ConnectionError, OSError, RuntimeError, TypeError):
         pass
 
 
@@ -20869,6 +20887,9 @@ async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writ
 
 async def handle(reader, writer):
     global _conn_count
+    if _shutdown_started.is_set():
+        await _close_stream_writer(writer)
+        return
     task = asyncio.current_task()
     if task is not None:
         _connection_tasks.add(task)
@@ -20876,10 +20897,12 @@ async def handle(reader, writer):
     try:
         await _handle_impl(reader, writer)
     finally:
-        await _close_stream_writer(writer)
-        _conn_count -= 1
-        if task is not None:
-            _connection_tasks.discard(task)
+        try:
+            await _close_stream_writer(writer)
+        finally:
+            _conn_count -= 1
+            if task is not None:
+                _connection_tasks.discard(task)
 
 
 async def _handle_impl(reader, writer):
