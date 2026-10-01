@@ -51,6 +51,26 @@
   not repeat broad discovery when the checkpoint and current source have
   already settled the question.
 
+## Change-Scoped Verification
+
+- Treat the latest green full suite as a reusable baseline. After it passes,
+  rerun only the narrowest tests that cover code, contracts, build inputs, or
+  documentation changed since that baseline.
+- Do not repeat an unchanged full suite, protected qualification, browser
+  matrix, or soak merely for reassurance. Repeat a broad gate only when the
+  intervening diff has broad impact, changes shared dependencies/contracts,
+  invalidates earlier evidence, the focused tests cannot cover the risk, or the
+  release policy explicitly requires a fresh exact-SHA result.
+- Record both the reused baseline and the exact focused verification so a
+  resumed agent does not spend time or account-backed attempts proving
+  unchanged behavior again.
+- After a Tauri app build, use `scripts/verify_macos_app_bundle.py` (normally
+  through the npm build scripts) as the single fresh/staged/bundled boundary.
+  Before workstation installation or physical browser validation, require that
+  canonical verifier; after installation use `npm run verify:local-install` to
+  bind the attestation to fresh StatusV2 and the live launchd service. Do not
+  repeatedly reconstruct this proof with ad-hoc hash commands.
+
 ## Routing Invariants
 
 - Discord and YouTube/googlevideo stay on local bypass. Never route them through

@@ -138,7 +138,7 @@ fn v2_status_for_tray(status: &StatusV2) -> Value {
     let geph = backends.and_then(|backends| backends.geph.as_ref());
     let telegram = backends.and_then(|backends| backends.telegram.as_ref());
     let recovery = status.recovery.as_ref();
-    json!({
+    let mut projected = json!({
         "schema_version": STATUS_SCHEMA_V2,
         "state": daemon.and_then(|daemon| daemon.state.as_deref()).unwrap_or("off"),
         "version": daemon.and_then(|daemon| daemon.version.as_deref()).unwrap_or("unknown"),
@@ -167,7 +167,11 @@ fn v2_status_for_tray(status: &StatusV2) -> Value {
             "count": recovery.and_then(|recovery| recovery.count).unwrap_or(0),
         },
         "canaries": status.canaries.as_ref().map(|canaries| serde_json::to_value(canaries).expect("StatusV2 canaries must serialize")).unwrap_or_else(|| json!({})),
-    })
+    });
+    if let Some(diagnostics) = daemon.and_then(|daemon| daemon.relay_diagnostics.as_ref()) {
+        projected["relay_diagnostics"] = json!(diagnostics);
+    }
+    projected
 }
 
 #[cfg(test)]
@@ -253,6 +257,61 @@ mod tests {
     use serde_json::json;
 
     const STATUS_V2_V1: &str = include_str!("../../../contracts/status-v2-v1.json");
+
+    #[test]
+    fn relay_diagnostics_projects_only_fixed_public_counts() {
+        let status = status_for_tray(json!({
+            "schema_version": 2,
+            "daemon": {
+                "state": "active", "updated_at": 100.0,
+                "relay_diagnostics": {
+                    "schema_version": 1, "available": true,
+                    "counter_saturated": false,
+                    "counters": {"upstream_eof": 2, "local_partial_record_watchdog": 3,
+                                 "authorized_retry": 4, "private.example": 5},
+                    "recent": [{"host": "private.example", "reason": "upstream_eof"}],
+                    "url": "https://private.example/path?token=secret",
+                },
+            },
+        }));
+        assert_eq!(status["state"], "active");
+        assert_eq!(status["relay_diagnostics"]["counters"]["upstream_eof"], 2);
+        assert_eq!(
+            status["relay_diagnostics"]["counters"]["local_partial_record_watchdog"],
+            3
+        );
+        assert_eq!(
+            status["relay_diagnostics"]["counters"]["authorized_retry"],
+            4
+        );
+        assert_eq!(
+            status["relay_diagnostics"]["counters"]
+                .as_object()
+                .unwrap()
+                .len(),
+            12
+        );
+        assert!(status["relay_diagnostics"].get("recent").is_none());
+        assert!(!status.to_string().contains("private.example"));
+        assert!(!status.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn relay_diagnostics_invalid_field_keeps_the_status_readable() {
+        for diagnostics in [
+            json!("private.example"),
+            json!({"counters": {"upstream_eof": -1}}),
+        ] {
+            let raw = json!({
+                "schema_version": 2,
+                "daemon": {"state": "active", "updated_at": 100.0,
+                           "relay_diagnostics": diagnostics},
+            });
+            let status = status_from_raw(&raw.to_string(), 101.0).unwrap();
+            assert_eq!(status["state"], "active");
+            assert!(status.get("relay_diagnostics").is_none());
+        }
+    }
 
     #[test]
     fn shared_status_v2_fixture_preserves_the_existing_tray_projection() {

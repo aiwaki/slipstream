@@ -153,16 +153,19 @@ def _normalize_domain_pool(domains: List[str]) -> List[str]:
     return normalized
 
 
-def refresh_cfproxy_domains() -> None:
+def refresh_cfproxy_domains(stop=None) -> None:
     if proxy_config.cfproxy_user_domains:
         return
 
     fetched = _fetch_cfproxy_domain_list()
     pool = _normalize_domain_pool(fetched)
-    if len(pool) >= _CFPROXY_MIN_VALID_DOMAINS:
-        balancer.update_domains_list(pool)
-        log.info("CF proxy domain pool updated from GitHub (%d domains)", len(pool))
-        return
+    with _refresh_lock:
+        if stop is not None and stop.is_set():
+            return
+        if len(pool) >= _CFPROXY_MIN_VALID_DOMAINS:
+            balancer.update_domains_list(pool)
+            log.info("CF proxy domain pool updated from GitHub (%d domains)", len(pool))
+            return
 
     if fetched:
         log.warning(
@@ -178,22 +181,31 @@ def refresh_cfproxy_domains() -> None:
 
 
 _refresh_stop: threading.Event = threading.Event()
+_refresh_lock = threading.Lock()
 
 
 def start_cfproxy_domain_refresh() -> None:
     global _refresh_stop
-    _refresh_stop.set()
-    _refresh_stop = threading.Event()
-    stop = _refresh_stop
-
-    balancer.update_domains_list(CFPROXY_DEFAULT_DOMAINS)
+    with _refresh_lock:
+        _refresh_stop.set()
+        _refresh_stop = threading.Event()
+        stop = _refresh_stop
+        balancer.update_domains_list(CFPROXY_DEFAULT_DOMAINS)
 
     def _loop():
-        refresh_cfproxy_domains()
-        while not stop.wait(timeout=3600):
-            refresh_cfproxy_domains()
+        while not stop.is_set():
+            refresh_cfproxy_domains(stop)
+            if stop.wait(timeout=3600):
+                break
 
     threading.Thread(target=_loop, daemon=True, name='cfproxy-domains-refresh').start()
+
+
+def stop_cfproxy_domain_refresh() -> None:
+    # An in-flight blocking fetch can finish naturally, but it cannot publish
+    # into the next owner generation or schedule another refresh after shutdown.
+    with _refresh_lock:
+        _refresh_stop.set()
 
 
 def parse_dc_ip_list(dc_ip_list: List[str]) -> Dict[int, str]:

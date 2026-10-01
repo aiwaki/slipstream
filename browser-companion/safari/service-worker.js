@@ -9,6 +9,7 @@ const webRequest =
 const storageSession =
   globalThis.browser?.storage?.session ?? globalThis.chrome?.storage?.session;
 const core = globalThis.SlipstreamServiceWorkerCore;
+const navigationTracker = core.createTabNavigationTracker();
 const CONTAINING_APP_ID = "dev.slipstream.Slipstream-Safari-Companion";
 const incompleteResponseTracker =
   core.createIncompleteResponseTracker(storageSession);
@@ -45,6 +46,7 @@ if (
 ) {
   webRequest.onBeforeRequest.addListener(
     (details) => {
+      const navigation = navigationTracker.begin(details);
       incompleteResponseTracker
         .remember(details, Date.now())
         .then((remembered) => {
@@ -61,6 +63,7 @@ if (
                 }))
               )
               .then(({ candidate, tab }) => {
+                if (!navigationTracker.isCurrent(navigation)) return null;
                 const randomBytes = new Uint8Array(16);
                 crypto.getRandomValues(randomBytes);
                 return core.buildPendingNavigationSignal(
@@ -101,9 +104,11 @@ if (
   );
   webRequest.onErrorOccurred.addListener(
     (details) => {
+      const navigation = navigationTracker.capture(details);
       incompleteResponseTracker
         .take(details)
         .then((candidate) => {
+          // Persisted evidence survives worker suspension; reload authority does not.
           const randomBytes = new Uint8Array(16);
           crypto.getRandomValues(randomBytes);
           return core.buildIncompleteResponseSignal(
@@ -130,7 +135,8 @@ if (
           setTimeout(() => {
             Promise.resolve(tabs.get(details.tabId))
               .then((tab) => {
-                if (core.tabStillOnSignalHost(tab, signal)) {
+                if (navigationTracker.isCurrent(navigation) &&
+                  core.tabStillOnSignalHost(tab, signal)) {
                   return tabs.reload(details.tabId);
                 }
                 return undefined;

@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
 import json
 import os
@@ -16,6 +16,7 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import threading
 import time
 
@@ -276,9 +277,14 @@ def _valid_positive_int(value):
 def _validate_job(job, now_unix_ms):
     if not isinstance(job, dict):
         return None
-    if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
+    if set(job) in (_ROUTE_PREFLIGHT_JOB_FIELDS, _ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_hosts"}):
         try:
-            parsed = route_preflight.parse_route_preflight_job_v1(
+            parser = (route_preflight.parse_route_preflight_job_v4
+                      if job.get("schema_version") == 4 else route_preflight.parse_route_preflight_job_v3
+                      if job.get("schema_version") == 3 else route_preflight.parse_route_preflight_job_v2
+                      if job.get("schema_version") == 2
+                      else route_preflight.parse_route_preflight_job_v1)
+            parsed = parser(
                 json.dumps(job, separators=(",", ":"), sort_keys=True)
             )
         except (TypeError, ValueError, route_preflight.RoutePreflightError):
@@ -318,7 +324,7 @@ def _validate_job(job, now_unix_ms):
 
 
 def _job_expiry_unix_ms(job):
-    if set(job) == _ROUTE_PREFLIGHT_JOB_FIELDS:
+    if set(job) in (_ROUTE_PREFLIGHT_JOB_FIELDS, _ROUTE_PREFLIGHT_JOB_FIELDS | {"asset_hosts"}):
         return job["deadline_unix_ms"]
     return job["expires_at_unix_ms"]
 
@@ -448,7 +454,7 @@ class PendingNavigationProbeRuntime:
             REASON_ACCEPTED if accepted else REASON_RESULT_REJECTED,
         )
 
-    def handle(self, payload):
+    def handle(self, payload, *, authority=None):
         try:
             request = _parse_request(payload)
         except PendingNavigationProbeRuntimeError:
@@ -466,15 +472,24 @@ class PendingNavigationProbeRuntime:
             "operation",
             "launch_id",
         }:
-            return self._claim(launch_id)
+            result = (self._claim(launch_id) if authority is None
+                      else authority.run(self._claim, launch_id))
+            return result if result is not None else _response(
+                False, OPERATION_CLAIM, REASON_EFFECT_UNAVAILABLE)
         if operation == OPERATION_SUBMIT and set(request) == {
             "schema_version",
             "operation",
             "launch_id",
             "result",
         }:
-            return self._submit(request["result"], launch_id)
+            result = (self._submit(request["result"], launch_id) if authority is None
+                      else authority.run(self._submit, request["result"], launch_id))
+            return result if result is not None else _response(
+                False, OPERATION_SUBMIT, REASON_EFFECT_UNAVAILABLE)
         return _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
+
+    def handle_owned(self, payload, authority):
+        return self.handle(payload, authority=authority)
 
     def state_size(self):
         now_monotonic = self._monotonic_clock()
@@ -520,38 +535,47 @@ async def _read_frame(reader):
     )
 
 
-async def handle_pending_navigation_probe_client(reader, writer, runtime):
+async def handle_pending_navigation_probe_client(reader, writer, runtime, *, authority=None):
     try:
-        payload = await _read_frame(reader)
-        response = await asyncio.to_thread(runtime.handle, payload)
-    except (
-        asyncio.IncompleteReadError,
-        asyncio.TimeoutError,
-        PendingNavigationProbeRuntimeError,
-        struct.error,
-    ):
-        response = _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
-    except Exception:
-        response = _response(False, OPERATION_NONE, REASON_EFFECT_UNAVAILABLE)
-    encoded = json.dumps(
-        response,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("ascii")
-    try:
-        writer.write(encode_frame(encoded))
-        await asyncio.wait_for(
-            writer.drain(),
-            timeout=IPC_TIMEOUT_SECONDS,
-        )
-    except (asyncio.TimeoutError, ConnectionError, OSError):
-        pass
+        try:
+            payload = await _read_frame(reader)
+            owned_handle = getattr(runtime, "handle_owned", None)
+            if authority is not None and owned_handle is not None:
+                response = await asyncio.to_thread(owned_handle, payload, authority)
+            else:
+                response = await asyncio.to_thread(runtime.handle, payload)
+        except (
+            asyncio.IncompleteReadError,
+            asyncio.TimeoutError,
+            PendingNavigationProbeRuntimeError,
+            struct.error,
+        ):
+            response = _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
+        except Exception:
+            response = _response(False, OPERATION_NONE, REASON_EFFECT_UNAVAILABLE)
+        encoded = json.dumps(
+            response,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        try:
+            writer.write(encode_frame(encoded))
+            await asyncio.wait_for(
+                writer.drain(),
+                timeout=IPC_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            pass
     finally:
         writer.close()
         try:
-            await writer.wait_closed()
-        except (ConnectionError, OSError):
-            pass
+            await asyncio.wait_for(writer.wait_closed(), timeout=IPC_TIMEOUT_SECONDS)
+        except (asyncio.CancelledError, asyncio.TimeoutError, ConnectionError, OSError) as error:
+            transport = getattr(writer, "transport", None)
+            if transport is not None:
+                transport.abort()
+            if isinstance(error, asyncio.CancelledError):
+                raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,20 +645,100 @@ async def _refuse_active_socket(path):
     raise OSError("pending-navigation socket is already active")
 
 
+class _RuntimeAuthority:
+    """Fence one socket incarnation's state/effects across worker threads."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._loop = asyncio.get_running_loop()
+        self._drained = self._loop.create_future()
+        self._revoked = False
+        self._active = 0
+
+    def run(self, effect, *args):
+        with self._lock:
+            if self._revoked:
+                return None
+            self._active += 1
+        try:
+            return effect(*args)
+        finally:
+            with self._lock:
+                self._active -= 1
+                if self._revoked and not self._active:
+                    self._loop.call_soon_threadsafe(self._complete_drain)
+
+    def _complete_drain(self):
+        if not self._drained.done():
+            self._drained.set_result(None)
+
+    def revoke(self):
+        with self._lock:
+            self._revoked = True
+            if not self._active:
+                self._complete_drain()
+
+    async def wait_closed(self):
+        await self._drained
+
+
 @dataclass
 class OwnedPendingNavigationProbeServer:
     server: asyncio.AbstractServer
     path: str
     identity: UnixSocketIdentity
     _closed: bool = False
+    _closing: bool = False
+    _clients: dict = field(default_factory=dict, repr=False)
+    _authority: _RuntimeAuthority = field(default_factory=_RuntimeAuthority, repr=False)
+    _close_task: asyncio.Task = field(default=None, repr=False)
 
-    async def close(self):
-        if self._closed:
+    def accept_client(self, reader, writer, runtime):
+        if self._closing:
+            writer.close()
             return
-        self._closed = True
+        task = asyncio.create_task(handle_pending_navigation_probe_client(
+            reader, writer, runtime, authority=self._authority))
+        self._clients[task] = writer
+        task.add_done_callback(self._client_done)
+
+    def _client_done(self, task):
+        writer = self._clients.pop(task, None)
+        if writer is not None:
+            # External cancellation may precede the handler's first step.
+            writer.close()
+        if not task.cancelled():
+            task.exception()
+
+    async def _finish_close(self):
+        clients = tuple(self._clients.items())
+        for task, writer in clients:
+            # A task cancelled before its first step never runs its finally.
+            writer.close()
+            task.cancel()
+        await asyncio.gather(*(task for task, _ in clients), return_exceptions=True)
+        # Already-admitted effects own the incarnation until they finish.
+        # Keep the rejecting listener bound so a successor cannot replace it.
+        await self._authority.wait_closed()
         self.server.close()
         await self.server.wait_closed()
         remove_owned_socket(self.path, self.identity)
+        self._closed = True
+
+    async def close(self):
+        if self._close_task is None:
+            self._closing = True
+            self._authority.revoke()
+            self._close_task = asyncio.create_task(self._finish_close())
+        cancelled = False
+        while not self._close_task.done():
+            try:
+                await asyncio.shield(self._close_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        self._close_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 @dataclass
@@ -778,12 +882,16 @@ async def start_owned_pending_navigation_probe_server(path, uid, gid, runtime):
                 "unable to remove stale pending-navigation socket"
             )
 
+    owned = None
+
+    def accept_client(reader, writer):
+        if owned is None:
+            writer.close()
+            return
+        owned.accept_client(reader, writer, runtime)
+
     server = await asyncio.start_unix_server(
-        lambda reader, writer: handle_pending_navigation_probe_client(
-            reader,
-            writer,
-            runtime,
-        ),
+        accept_client,
         path=path,
         limit=MAX_IPC_BYTES + 4,
         start_serving=False,
@@ -801,16 +909,20 @@ async def start_owned_pending_navigation_probe_server(path, uid, gid, runtime):
             raise OSError(
                 "pending-navigation socket ownership verification failed"
             )
+        owned = OwnedPendingNavigationProbeServer(server, path, identity)
         await server.start_serving()
-    except Exception:
-        server.close()
-        await server.wait_closed()
-        try:
-            remove_owned_socket(path, identity)
-        except UnboundLocalError:
-            pass
+    except BaseException:
+        if owned is not None:
+            await owned.close()
+        else:
+            server.close()
+            await server.wait_closed()
+            try:
+                remove_owned_socket(path, identity)
+            except UnboundLocalError:
+                pass
         raise
-    return OwnedPendingNavigationProbeServer(server, path, identity)
+    return owned
 
 
 class PendingNavigationProbeWorkerClient:
@@ -1131,7 +1243,13 @@ class DirectHeadlessBrowserWorkerLauncher:
                     timeout=3.0,
                     check=False,
                 )
-            except (OSError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired as error:
+                # Fixed labels only: never expose the command, path or stderr.
+                target = "bundle" if "--deep" in command else "helper"
+                raise PendingNavigationProbeRuntimeError(
+                    f"browser_worker_signature_{target}_timeout"
+                ) from error
+            except OSError as error:
                 raise PendingNavigationProbeRuntimeError(
                     "browser_worker_signature_unavailable"
                 ) from error
@@ -1700,7 +1818,17 @@ class PendingNavigationBrowserWorkerLauncher:
                 ValueError,
                 plistlib.InvalidFileException,
                 PendingNavigationProbeRuntimeError,
-            ):
+            ) as error:
+                # Keep diagnostics bounded: never include plist contents, paths,
+                # environment values or arbitrary exception messages.
+                reason = type(error).__name__
+                if isinstance(error, OSError):
+                    reason += f":errno={error.errno}"
+                elif isinstance(error, PendingNavigationProbeRuntimeError):
+                    code = str(error)
+                    if re.fullmatch(r"[a-z_]{1,80}", code):
+                        reason += ":" + code
+                print("browser-worker stale cleanup failed: " + reason, file=sys.stderr)
                 return False
         if remove_root:
             try:
@@ -1839,7 +1967,7 @@ class PendingNavigationBrowserWorkerLauncher:
                 return
             self._sleep(0.05)
         raise PendingNavigationProbeRuntimeError(
-            "browser_worker_cleanup_failed"
+            "browser_worker_cleanup_failed_job_still_loaded"
         )
 
     def _cleanup_launch(self, target, paths, pid, identity):
@@ -1859,18 +1987,33 @@ class PendingNavigationBrowserWorkerLauncher:
                 # already-validated Chrome process tree and private profile.
                 # Keep the job loaded until that bounded cleanup has exited;
                 # bootout first would bypass the worker's owned cleanup.
-                self._wait_for_exit(
+                exit_code = self._wait_for_exit(
                     target,
                     pid,
                     identity,
                     timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
                 )
-                if self._read_worker_error(
-                    paths.stderr,
-                    identity,
-                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                # Successful natural exit already proves worker-owned cleanup.
+                # It may race SIGTERM after the exact PID/UID validation above.
+                worker_error = self._read_worker_error(paths.stderr, identity)
+                # The owned broker can disappear while shutdown waits for this
+                # exact worker. socket_unavailable is emitted only by IPC:
+                # claim runs before Chrome exists; submission errors propagate
+                # only after submit_before_cleanup has successfully drained it.
+                # Do not accept a signal, arbitrary exit, ownership error, or
+                # chrome/profile cleanup failure as this expected shutdown race.
+                clean_shutdown_error = exit_code == 1 and worker_error in {
+                    _BROWSER_WORKER_TERMINATION_ERROR, "socket_unavailable",
+                }
+                if exit_code != 0 and not clean_shutdown_error:
+                    # Only the bounded enum parsed by _read_worker_error is
+                    # exposed; never raw stderr, paths or worker request data.
+                    print(
+                        f"browser-worker cleanup exit: code={exit_code} "
+                        f"reason={worker_error}", file=sys.stderr,
+                    )
                     raise PendingNavigationProbeRuntimeError(
-                        "browser_worker_cleanup_failed"
+                        "browser_worker_cleanup_failed_exit"
                     )
         self._run(("/bin/launchctl", "bootout", target))
         try:
@@ -2110,7 +2253,8 @@ class LazyPendingNavigationProbeWorker:
         if self._stop.is_set() or not self._job_count():
             return False
         with self._lock:
-            if self._thread is not None:
+            # close() may finish while pending_jobs() runs outside this lock.
+            if self._stop.is_set() or self._thread is not None:
                 return False
             thread = self._thread_factory(
                 target=self._run,
@@ -2118,13 +2262,14 @@ class LazyPendingNavigationProbeWorker:
                 daemon=True,
             )
             self._thread = thread
-        try:
-            thread.start()
-        except BaseException:
-            with self._lock:
+            try:
+                # Publish only a joinable thread to close(). _run never needs
+                # this lock to start, and acquires it only on final cleanup.
+                thread.start()
+            except BaseException:
                 if self._thread is thread:
                     self._thread = None
-            raise
+                raise
         return True
 
     def active(self):

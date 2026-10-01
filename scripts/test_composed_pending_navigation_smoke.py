@@ -114,6 +114,76 @@ class ComposedPendingNavigationSmokeTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(smoke._cpu_seconds(value), expected)
 
+    def test_idle_cpu_stops_after_one_normal_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            runtime = Path(raw_directory) / "runtime"
+            with (
+                mock.patch.object(smoke.os, "environ", _ci_environment()),
+                mock.patch.object(smoke, "PRODUCTION_WORKER_RUNTIME", runtime),
+                mock.patch.object(smoke, "_assert_broker_socket"),
+                mock.patch.object(smoke, "_worker_profiles", return_value=()),
+                mock.patch.object(smoke, "_worker_processes", return_value=()),
+                mock.patch.object(
+                    smoke,
+                    "_daemon_cpu_seconds",
+                    side_effect=(0.0, 0.5),
+                ),
+                mock.patch.object(smoke.time, "sleep") as sleep,
+            ):
+                report = smoke.assert_worker_idle(os.getuid(), 4242)
+
+        self.assertEqual(report["daemon_cpu_delta_ms"], 500)
+        self.assertEqual(report["daemon_cpu_samples_ms"], (500,))
+        self.assertEqual(report["sample_count"], 1)
+        self.assertEqual(report["total_observation_ms"], 3000)
+        self.assertEqual(sleep.call_count, 1)
+
+    def test_idle_cpu_rechecks_one_transient_startup_burst(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            runtime = Path(raw_directory) / "runtime"
+            with (
+                mock.patch.object(smoke.os, "environ", _ci_environment()),
+                mock.patch.object(smoke, "PRODUCTION_WORKER_RUNTIME", runtime),
+                mock.patch.object(smoke, "_assert_broker_socket"),
+                mock.patch.object(smoke, "_worker_profiles", return_value=()),
+                mock.patch.object(smoke, "_worker_processes", return_value=()),
+                mock.patch.object(
+                    smoke,
+                    "_daemon_cpu_seconds",
+                    side_effect=(0.0, 1.02, 1.02, 1.32),
+                ),
+                mock.patch.object(smoke.time, "sleep") as sleep,
+            ):
+                report = smoke.assert_worker_idle(os.getuid(), 4242)
+
+        self.assertEqual(report["daemon_cpu_delta_ms"], 300)
+        self.assertEqual(report["daemon_cpu_samples_ms"], (1020, 300))
+        self.assertEqual(report["sample_count"], 2)
+        self.assertEqual(report["total_observation_ms"], 6000)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_idle_cpu_rejects_sustained_busy_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            runtime = Path(raw_directory) / "runtime"
+            with (
+                mock.patch.object(smoke.os, "environ", _ci_environment()),
+                mock.patch.object(smoke, "PRODUCTION_WORKER_RUNTIME", runtime),
+                mock.patch.object(smoke, "_assert_broker_socket"),
+                mock.patch.object(smoke, "_worker_profiles", return_value=()),
+                mock.patch.object(smoke, "_worker_processes", return_value=()),
+                mock.patch.object(
+                    smoke,
+                    "_daemon_cpu_seconds",
+                    side_effect=(0.0, 1.01, 1.01, 2.03),
+                ),
+                mock.patch.object(smoke.time, "sleep"),
+            ):
+                with self.assertRaisesRegex(
+                    smoke.ComposedQualificationError,
+                    "sustained excessive CPU",
+                ):
+                    smoke.assert_worker_idle(os.getuid(), 4242)
+
     def test_worker_diagnostics_is_bounded_to_owned_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
             root = Path(raw_directory)

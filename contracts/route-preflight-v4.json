@@ -1,0 +1,24 @@
+{
+  "schema_version": 4,
+  "name": "Anonymous dynamic image and public GET discovery",
+  "max_deadline_ms": 20000,
+  "max_payload_bytes": 2048,
+  "asset_hosts_max": 4,
+  "asset_url_max": 1024,
+  "candidate_routes": ["owned_geph"],
+  "asset_kinds": ["", "image", "public_json"],
+  "admission": "Fresh failures select exact unknown unprotected hosts under an already learned parent. The disposable owned browser uses no user profile, cookies, headers or storage.",
+  "discovery": "Images retain V3 DOM discovery. Public JSON candidates must correlate Fetch/XHR GET request and HTTP200 application/json response with the same request ID and URL. At most64 pending request IDs; select largest declared bounded object; URLs stay transient. No interactions or login.",
+  "proof": "Discovery grants no route. Anonymous identity GET probes require bounded unambiguous Content-Length, complete JSON object/array, and equal length plus strong validator or fixed-prefix binding. Independent system, app-DNS and two local-strategy failures must precede owned completion; any complete local response vetoes Geph.",
+  "legacy": "V1/V2/V3 parsers remain strict; V3 does not accept asset_kind or JSON discovery. Range200 JSON remains unknown.",
+  "vectors": [
+    {"url":"https://api.example.net/items", "kind":"public_json", "valid":true},
+    {"url":"https://api.example.net/image.png", "kind":"image", "valid":true},
+    {"url":"", "kind":"", "valid":true},
+    {"url":"https://api.example.net/items", "kind":"", "valid":false},
+    {"url":"", "kind":"public_json", "valid":false},
+    {"url":"https://api.example.net/items", "kind":"post", "valid":false},
+    {"url":"http://api.example.net/items", "kind":"public_json", "valid":false},
+    {"url":"https://127.0.0.1/items", "kind":"public_json", "valid":false}
+  ]
+}

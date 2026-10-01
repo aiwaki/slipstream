@@ -11,6 +11,7 @@ import logging
 
 from typing import Optional, Tuple
 from .stats import stats
+from .raw_websocket import close_writer
 
 
 log = logging.getLogger('tg-mtproto-proxy')
@@ -176,6 +177,8 @@ class FakeTlsStream:
             if rtype != TLS_RECORD_APPDATA:
                 return b''
 
+            if rec_len == 0:
+                continue
             data = await self._reader.read(min(rec_len, 65536))
             if not data:
                 return b''
@@ -238,8 +241,7 @@ async def proxy_to_masking_domain(reader, writer, initial_data: bytes,
                 pass
             finally:
                 try:
-                    dst.close()
-                    await dst.wait_closed()
+                    await close_writer(dst)
                 except Exception:
                     pass
 
@@ -251,6 +253,6 @@ async def proxy_to_masking_domain(reader, writer, initial_data: bytes,
         pass
     finally:
         try:
-            up_writer.close()
+            await close_writer(up_writer)
         except Exception:
             pass

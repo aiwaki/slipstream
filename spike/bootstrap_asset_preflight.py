@@ -11,11 +11,14 @@ from enum import Enum
 import hashlib
 from html.parser import HTMLParser
 import ipaddress
+import json
 import re
 import time
 from urllib.parse import quote, urljoin, urlsplit
 
 from http_response_completion import (
+    HttpContentDecodeOutcome,
+    decode_http_response_content,
     http_response_body,
     http_response_complete,
     http_response_incomplete,
@@ -57,9 +60,75 @@ class RangeProbeOutcome(str, Enum):
     DEADLINE_EXCEEDED = "deadline_exceeded"
 
 
+class RootDocumentOutcome(str, Enum):
+    """Whether one bounded root reply is safe to scan for bootstrap assets."""
+
+    COMPLETE = "complete"
+    INCONCLUSIVE = "inconclusive"
+    UNSCANNABLE = "unscannable"
+
+
+@dataclass(frozen=True, slots=True)
+class RootDocumentInspection:
+    """One-shot root-document result; asset paths remain ephemeral."""
+
+    outcome: RootDocumentOutcome
+    assets: tuple = ()
+
+
+def response_has_full_selected_representation(
+    response,
+    *,
+    stream_closed,
+    truncated,
+    requested_range_end=MAX_RANGE_END,
+):
+    """Return whether a ranged root reply contains its whole representation.
+
+    A server may ignore ``Range`` and return an ordinary complete response.
+    When it does honor the request with 206, semantic use is safe only when the
+    encoded response body is the entire selected representation, not a valid
+    but prefix-only gzip member whose decoded text happens to look decisive.
+    """
+
+    if (
+        not isinstance(response, bytes)
+        or not isinstance(requested_range_end, int)
+        or isinstance(requested_range_end, bool)
+        or requested_range_end < 0
+        or requested_range_end > MAX_RANGE_END
+    ):
+        return False
+    parsed_head = _response_head(response)
+    if parsed_head is None:
+        return False
+    status, headers = parsed_head
+    if status != 206:
+        return True
+    range_descriptor = _content_range(headers, requested_range_end)
+    if range_descriptor is None:
+        return False
+    range_end, total_length = range_descriptor
+    expected_body_length = range_end + 1
+    if (
+        total_length != expected_body_length
+        or not _range_length_consistent(headers, expected_body_length)
+    ):
+        return False
+    encoded_body = http_response_body(
+        response,
+        stream_closed=stream_closed,
+        truncated=truncated,
+    )
+    return (
+        encoded_body is not None
+        and len(encoded_body) == expected_body_length
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RangeProbeEvidence:
-    """Non-sensitive proof metadata for one exact ranged JS object.
+    """Non-sensitive proof metadata for one exact ranged script or image object.
 
     The request target and response bytes never enter this value.  A strong
     validator is hashed, as is a fixed-size entity prefix used only when an
@@ -72,12 +141,14 @@ class RangeProbeEvidence:
     validator_digest: str = ""
     prefix_digest: str = ""
     received_body_bytes: int = 0
+    object_kind: str = "range"
 
     def proves_same_object_as(self, other):
         if not isinstance(other, RangeProbeEvidence):
             return False
         if (
-            self.outcome is not RangeProbeOutcome.INCOMPLETE
+            self.object_kind != other.object_kind
+            or self.outcome is not RangeProbeOutcome.INCOMPLETE
             or other.outcome is not RangeProbeOutcome.COMPLETE
             or self.total_length is None
             or self.total_length != other.total_length
@@ -85,8 +156,10 @@ class RangeProbeEvidence:
             or self.range_end != other.range_end
         ):
             return False
-        if self.validator_digest and self.validator_digest == other.validator_digest:
-            return True
+        if self.validator_digest and other.validator_digest:
+            # A shared banner/prefix cannot override explicit evidence that
+            # two routes returned different strong-validator representations.
+            return self.validator_digest == other.validator_digest
         return bool(
             self.prefix_digest
             and self.prefix_digest == other.prefix_digest
@@ -96,9 +169,10 @@ class RangeProbeEvidence:
 class EphemeralBootstrapAsset:
     """An exact host plus a deliberately non-serializable request target."""
 
-    __slots__ = ("_exact_host", "_host_header", "_request_target")
+    __slots__ = ("_exact_host", "_host_header", "_request_target", "_discovery_priority")
 
-    def __init__(self, *, exact_host, host_header, request_target):
+    def __init__(self, *, exact_host, host_header, request_target, discovery_priority=0):
+        self._discovery_priority = 1 if discovery_priority == 1 else 0
         self._exact_host = exact_host
         self._host_header = host_header
         self._request_target = request_target
@@ -108,6 +182,11 @@ class EphemeralBootstrapAsset:
         """Return the only value that may be used as a routing/cache key."""
 
         return self._exact_host
+
+    @property
+    def discovery_priority(self):
+        """Document hint only; never authority to select a route."""
+        return self._discovery_priority
 
     def build_range_request(self, *, range_end=DEFAULT_RANGE_END):
         """Consume the target and build one transient identity range GET."""
@@ -122,7 +201,7 @@ class EphemeralBootstrapAsset:
             f"GET {self._request_target} HTTP/1.1\r\n"
             f"Host: {self._host_header}\r\n"
             "User-Agent: SlipstreamBootstrapPreflight/1\r\n"
-            "Accept: application/javascript,text/javascript,*/*;q=0.1\r\n"
+            "Accept: */*\r\n"
             "Accept-Encoding: identity\r\n"
             f"Range: bytes=0-{range_end}\r\n"
             "Cache-Control: no-cache\r\n"
@@ -147,6 +226,186 @@ class EphemeralBootstrapAsset:
         raise TypeError("ephemeral bootstrap targets must not be serialized")
 
 
+class EphemeralPublicJsonAsset(EphemeralBootstrapAsset):
+    """Anonymous GET only; distinct from the frozen ranged image/JS contract."""
+
+    __slots__ = ()
+
+    def build_range_request(self, **kwargs):
+        # Keep the transport interface, but explicitly omit Range: JSON origins
+        # commonly ignore it. No browser headers or credentials are copied.
+        request = super().build_range_request(**kwargs)
+        return request.replace(b"Accept: */*\r\n", b"Accept: application/json\r\n").replace(
+            f"Range: bytes=0-{kwargs.get('range_end', DEFAULT_RANGE_END)}\r\n".encode(), b""
+        )
+
+
+def ephemeral_public_json_asset(url, expected_host):
+    candidate = _normalize_https_url(url)
+    if candidate is None or candidate[0] != expected_host:
+        return None
+    return EphemeralPublicJsonAsset(exact_host=candidate[0], host_header=candidate[1],
+        request_target=candidate[2], discovery_priority=1)
+
+
+def _reject_json_constant(_value):
+    raise ValueError("nonstandard_json_constant")
+
+
+def inspect_public_json_response(response, *, stream_closed, idle_timed_out,
+                                 truncated, deadline, clock=time.monotonic):
+    """Full identity JSON with an unambiguous, bounded Content-Length.
+
+    This opt-in contract never changes inspect_range_response. Framing proves
+    truncation; an object/array parse additionally rejects a complete error page.
+    Routes must still independently establish all local failures and same-object
+    owned completion. Request URLs and JSON values never enter the evidence.
+    """
+    unknown = RangeProbeEvidence(RangeProbeOutcome.UNKNOWN, object_kind="public_json")
+    def finish(value):
+        return _evidence_before_deadline(value, deadline, clock)
+    if not _deadline_open(deadline, clock):
+        return RangeProbeEvidence(RangeProbeOutcome.DEADLINE_EXCEEDED, object_kind="public_json")
+    if (not isinstance(response, bytes) or len(response) > MAX_RANGE_RESPONSE_BYTES
+            or truncated):
+        return finish(unknown)
+    head = _response_head(response)
+    if head is None:
+        return finish(unknown)
+    status, headers = head
+    lengths = headers.get("content-length", ())
+    types = headers.get("content-type", ())
+    if (status != 200 or not _identity_encoded(headers)
+            or headers.get("transfer-encoding") or headers.get("content-range")
+            or len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit()
+            or len(types) != 1 or types[0].split(";", 1)[0].strip().lower() != "application/json"):
+        return finish(unknown)
+    try:
+        total = int(lengths[0])
+    except ValueError:
+        return finish(unknown)
+    if not 0 < total <= MAX_RANGE_END + 1:
+        return finish(unknown)
+    body = response.split(b"\r\n\r\n", 1)[1]
+    if len(body) > total:
+        return finish(unknown)
+    outcome = RangeProbeOutcome.UNKNOWN
+    if len(body) == total:
+        try:
+            decoded = json.loads(body, parse_constant=_reject_json_constant)
+        except (ValueError, UnicodeError, RecursionError):
+            return finish(unknown)
+        if not isinstance(decoded, (dict, list)):
+            return finish(unknown)
+        outcome = RangeProbeOutcome.COMPLETE
+    elif stream_closed or idle_timed_out:
+        outcome = RangeProbeOutcome.INCOMPLETE
+    if outcome is RangeProbeOutcome.UNKNOWN:
+        return finish(unknown)
+    prefix, received = _entity_prefix_binding(response, headers,
+        stream_closed=stream_closed, truncated=False)
+    return finish(RangeProbeEvidence(outcome, total_length=total, range_end=total-1,
+        validator_digest=_strong_validator_digest(headers), prefix_digest=prefix,
+        received_body_bytes=received, object_kind="public_json"))
+
+
+def inspect_critical_bootstrap_assets(
+    root_url,
+    response,
+    *,
+    stream_closed,
+    truncated,
+    deadline,
+    clock=time.monotonic,
+    max_assets=MAX_CRITICAL_ASSETS,
+    requested_range_end=MAX_RANGE_END,
+    allow_document_path=False,
+):
+    """Inspect one complete root for scripts and explicitly critical images.
+
+    A ranged response is scannable only when it contains the entire selected
+    representation (``bytes 0-(total-1)/total``).  Identity and exactly one
+    complete gzip member are accepted.  A proper prefix-only 206, malformed
+    range metadata, unsafe coding, inconsistent framing, or an exhausted
+    inspection deadline remains explicitly inconclusive so callers cannot
+    publish a false healthy-root cache entry.
+    """
+
+    if not _deadline_open(deadline, clock):
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    if (
+        not isinstance(response, bytes)
+        or len(response) > MAX_ROOT_RESPONSE_BYTES
+        or not isinstance(max_assets, int)
+        or isinstance(max_assets, bool)
+        or max_assets < 0
+        or max_assets > MAX_CRITICAL_ASSETS
+        or not isinstance(requested_range_end, int)
+        or isinstance(requested_range_end, bool)
+        or requested_range_end < 0
+        or requested_range_end > MAX_RANGE_END
+    ):
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    normalized_root = _normalize_https_url(
+        root_url, require_root=not allow_document_path,
+    )
+    if normalized_root is None:
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    parsed_head = _response_head(response)
+    if parsed_head is None:
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    status, headers = parsed_head
+    if status == 206:
+        if not response_has_full_selected_representation(
+            response,
+            stream_closed=stream_closed,
+            truncated=truncated,
+            requested_range_end=requested_range_end,
+        ):
+            return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    elif status != 200:
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    if not _html_content(headers):
+        return RootDocumentInspection(RootDocumentOutcome.UNSCANNABLE)
+    decoded = decode_http_response_content(
+        response,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=False,
+        deadline=deadline,
+        max_input_bytes=MAX_ROOT_RESPONSE_BYTES,
+        max_output_bytes=MAX_ROOT_RESPONSE_BYTES,
+        clock=clock,
+    )
+    if decoded.outcome is not HttpContentDecodeOutcome.COMPLETE:
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    body = decoded.body
+    if not body:
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+
+    parser = _CriticalAssetParser(normalized_root[3], max_assets=max_assets)
+    decoded = body.decode("utf-8", "replace")
+    for offset in range(0, len(decoded), 16_384):
+        if not _deadline_open(deadline, clock):
+            return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+        parser.feed(decoded[offset : offset + 16_384])
+    parser.close()
+    if not _deadline_open(deadline, clock):
+        return RootDocumentInspection(RootDocumentOutcome.INCONCLUSIVE)
+    return RootDocumentInspection(
+        RootDocumentOutcome.COMPLETE,
+        tuple(
+            EphemeralBootstrapAsset(
+                exact_host=candidate[0],
+                host_header=candidate[1],
+                request_target=candidate[2],
+                discovery_priority=candidate[3],
+            )
+            for candidate in parser.candidates
+        )
+    )
+
+
 def extract_critical_bootstrap_assets(
     root_url,
     response,
@@ -156,58 +415,21 @@ def extract_critical_bootstrap_assets(
     deadline,
     clock=time.monotonic,
     max_assets=MAX_CRITICAL_ASSETS,
+    requested_range_end=MAX_RANGE_END,
 ):
-    """Extract a few critical JS targets from one complete HTTPS root page.
+    """Return assets only from a proven-complete root representation."""
 
-    The return values are one-shot, non-serializable objects.  The function is
-    fail-closed for non-HTML, compressed, partial, oversized, or expired input.
-    """
-
-    if not _deadline_open(deadline, clock):
-        return ()
-    if (
-        not isinstance(response, bytes)
-        or len(response) > MAX_ROOT_RESPONSE_BYTES
-        or not isinstance(max_assets, int)
-        or isinstance(max_assets, bool)
-        or max_assets < 0
-        or max_assets > MAX_CRITICAL_ASSETS
-    ):
-        return ()
-    normalized_root = _normalize_https_url(root_url, require_root=True)
-    if normalized_root is None:
-        return ()
-    parsed_head = _response_head(response)
-    if parsed_head is None:
-        return ()
-    status, headers = parsed_head
-    if status != 200 or not _identity_encoded(headers) or not _html_content(headers):
-        return ()
-    body = http_response_body(
+    inspection = inspect_critical_bootstrap_assets(
+        root_url,
         response,
         stream_closed=stream_closed,
         truncated=truncated,
+        deadline=deadline,
+        clock=clock,
+        max_assets=max_assets,
+        requested_range_end=requested_range_end,
     )
-    if body is None or len(body) > MAX_ROOT_RESPONSE_BYTES:
-        return ()
-
-    parser = _CriticalAssetParser(normalized_root[3], max_assets=max_assets)
-    decoded = body.decode("utf-8", "replace")
-    for offset in range(0, len(decoded), 16_384):
-        if not _deadline_open(deadline, clock):
-            return ()
-        parser.feed(decoded[offset : offset + 16_384])
-    parser.close()
-    if not _deadline_open(deadline, clock):
-        return ()
-    return tuple(
-        EphemeralBootstrapAsset(
-            exact_host=candidate[0],
-            host_header=candidate[1],
-            request_target=candidate[2],
-        )
-        for candidate in parser.candidates
-    )
+    return inspection.assets
 
 
 def classify_range_response(
@@ -276,7 +498,7 @@ def inspect_range_response(
     if (
         status != 206
         or not _identity_encoded(headers)
-        or not _javascript_content(headers)
+        or not _bootstrap_object_content(headers)
         or range_descriptor is None
     ):
         return _evidence_before_deadline(
@@ -372,10 +594,10 @@ class _CriticalAssetParser(HTMLParser):
             if candidate is not None:
                 self._base_url = candidate[3]
             return
-        if len(self.candidates) >= self._max_assets:
+        if not self._max_assets:
             return
-
         raw_url = None
+        priority = 0
         if lowered_tag == "script" and _is_javascript_script(attributes):
             raw_url = attributes.get("src")
         elif lowered_tag == "link":
@@ -383,14 +605,30 @@ class _CriticalAssetParser(HTMLParser):
             resource_as = attributes.get("as", "").strip().lower()
             if "modulepreload" in rel or ("preload" in rel and resource_as == "script"):
                 raw_url = attributes.get("href")
+            elif "preload" in rel and resource_as == "image":
+                raw_url = attributes.get("href")
+                priority = 1
+        elif (lowered_tag == "img"
+              and attributes.get("fetchpriority", "").strip().lower() == "high"):
+            raw_url = attributes.get("src")
+            priority = 1
         if not raw_url:
             return
 
         candidate = _normalize_https_url(raw_url, base_url=self._base_url)
-        if candidate is None or candidate[3] in self._seen:
+        if candidate is None or candidate[:3] in self._seen:
             return
-        self._seen.add(candidate[3])
-        self.candidates.append(candidate[:3])
+        # Keep only the bounded best candidates, while still inspecting the
+        # complete bounded HTML. A body hero must not disappear merely because
+        # four head scripts appeared first. Equal priorities retain DOM order.
+        if len(self.candidates) >= self._max_assets:
+            if priority <= self.candidates[-1][3]:
+                return
+            removed = self.candidates.pop()
+            self._seen.remove((removed[0], removed[1], removed[2]))
+        self._seen.add(candidate[:3])
+        self.candidates.append((*candidate[:3], priority))
+        self.candidates.sort(key=lambda item: -item[3])
 
 
 def _is_javascript_script(attributes):
@@ -398,6 +636,15 @@ def _is_javascript_script(attributes):
         return False
     script_type = attributes.get("type", "").strip().lower().split(";", 1)[0]
     return not script_type or script_type == "module" or script_type in _JAVASCRIPT_TYPES
+
+
+def ephemeral_dynamic_asset(url, expected_host):
+    """Convert a bound, anonymous browser hint; it conveys no route proof."""
+    candidate = _normalize_https_url(url)
+    if candidate is None or candidate[0] != expected_host:
+        return None
+    return EphemeralBootstrapAsset(exact_host=candidate[0], host_header=candidate[1],
+                                   request_target=candidate[2], discovery_priority=1)
 
 
 def _normalize_https_url(raw_url, *, base_url=None, require_root=False):
@@ -504,12 +751,14 @@ def _html_content(headers):
     return media_type in ("text/html", "application/xhtml+xml")
 
 
-def _javascript_content(headers):
+def _bootstrap_object_content(headers):
     values = headers.get("content-type", ())
     if len(values) != 1:
         return False
     media_type = values[0].split(";", 1)[0].strip().lower()
-    return media_type in _JAVASCRIPT_TYPES
+    return media_type in _JAVASCRIPT_TYPES or media_type in {
+        "image/webp", "image/png", "image/jpeg", "image/avif", "image/gif",
+    }
 
 
 def _content_range(headers, requested_range_end):

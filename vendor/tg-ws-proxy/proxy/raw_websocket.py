@@ -10,6 +10,8 @@ from typing import List, Optional, Tuple
 from .config import proxy_config
 
 log = logging.getLogger('tg-mtproto-proxy')
+CLOSE_TIMEOUT = 1.0
+MAX_UPGRADE_HEADERS = 64 * 1024
 
 
 _st_BB = struct.Struct('>BB')
@@ -66,8 +68,21 @@ def set_sock_opts(transport, buffer_size):
         pass
 
 
+async def close_writer(writer):
+    """Release TCP even if TLS shutdown or a cancelled drain never finishes."""
+    writer.close()
+    try:
+        await asyncio.wait_for(writer.wait_closed(), CLOSE_TIMEOUT)
+    except BaseException as exc:
+        abort = getattr(writer.transport, 'abort', None)
+        if abort is not None:
+            abort()
+        if not isinstance(exc, Exception):
+            raise
+
+
 class RawWebSocket:
-    __slots__ = ('reader', 'writer', '_closed')
+    __slots__ = ('reader', 'writer', '_closed', '_fragmented')
 
     OP_BINARY = 0x2
     OP_CLOSE = 0x8
@@ -79,6 +94,7 @@ class RawWebSocket:
         self.reader = reader
         self.writer = writer
         self._closed = False
+        self._fragmented = False
 
     @staticmethod
     async def connect(host: str, domain: str, timeout: float = 10.0,
@@ -87,84 +103,94 @@ class RawWebSocket:
         if sni is None:
             sni = domain
 
+        deadline = asyncio.get_running_loop().time() + timeout
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, 443, ssl=_ssl_ctx,
                                     server_hostname=sni),
             timeout=min(timeout, 10))
         
-        set_sock_opts(writer.transport, proxy_config.buffer_size)
-
-        ws_key = base64.b64encode(os.urandom(16)).decode()
-
-        req = (
-            f'GET {path} HTTP/1.1\r\n'
-            f'Host: {domain}\r\n'
-            f'Upgrade: websocket\r\n'
-            f'Connection: Upgrade\r\n'
-            f'Sec-WebSocket-Key: {ws_key}\r\n'
-            f'Sec-WebSocket-Version: 13\r\n'
-            f'Sec-WebSocket-Protocol: binary\r\n'
-            f'\r\n'
-        )
-
-        writer.write(req.encode())
-        await writer.drain()
-
-        response_lines: list[str] = []
         try:
+            set_sock_opts(writer.transport, proxy_config.buffer_size)
+
+            ws_key = base64.b64encode(os.urandom(16)).decode()
+
+            req = (
+                f'GET {path} HTTP/1.1\r\n'
+                f'Host: {domain}\r\n'
+                f'Upgrade: websocket\r\n'
+                f'Connection: Upgrade\r\n'
+                f'Sec-WebSocket-Key: {ws_key}\r\n'
+                f'Sec-WebSocket-Version: 13\r\n'
+                f'Sec-WebSocket-Protocol: binary\r\n'
+                f'\r\n'
+            )
+
+            writer.write(req.encode())
+            await asyncio.wait_for(
+                writer.drain(), max(0.0, deadline - asyncio.get_running_loop().time()))
+
+            response_lines: list[str] = []
+            header_bytes = 0
             while True:
-                line = await asyncio.wait_for(reader.readline(),
-                                              timeout=timeout)
-                if line in (b'\r\n', b'\n', b''):
+                line = await asyncio.wait_for(
+                    reader.readline(), max(0.0, deadline - asyncio.get_running_loop().time()))
+                header_bytes += len(line)
+                if header_bytes > MAX_UPGRADE_HEADERS:
+                    raise WsHandshakeError(0, 'response headers too large')
+                if not line:
+                    raise WsHandshakeError(0, 'incomplete response headers')
+                if line in (b'\r\n', b'\n'):
                     break
                 response_lines.append(
                     line.decode('utf-8', errors='replace').strip())
-        except asyncio.TimeoutError:
-            writer.close()
+
+            if not response_lines:
+                raise WsHandshakeError(0, 'empty response')
+
+            first_line = response_lines[0]
+            parts = first_line.split(' ', 2)
+            try:
+                status_code = int(parts[1]) if len(parts) >= 2 else 0
+            except ValueError:
+                status_code = 0
+
+            if status_code == 101:
+                return RawWebSocket(reader, writer)
+
+            headers: dict[str, str] = {}
+            for hl in response_lines[1:]:
+                if ':' in hl:
+                    k, v = hl.split(':', 1)
+                    headers[k.strip().lower()] = v.strip()
+
+            raise WsHandshakeError(status_code, first_line, headers,
+                                    location=headers.get('location'))
+
+        except BaseException:
+            await close_writer(writer)
             raise
 
-        if not response_lines:
-            writer.close()
-            raise WsHandshakeError(0, 'empty response')
-
-        first_line = response_lines[0]
-        parts = first_line.split(' ', 2)
-        try:
-            status_code = int(parts[1]) if len(parts) >= 2 else 0
-        except ValueError:
-            status_code = 0
-
-        if status_code == 101:
-            return RawWebSocket(reader, writer)
-
-        headers: dict[str, str] = {}
-        for hl in response_lines[1:]:
-            if ':' in hl:
-                k, v = hl.split(':', 1)
-                headers[k.strip().lower()] = v.strip()
-
-        writer.close()
-        raise WsHandshakeError(status_code, first_line, headers,
-                                location=headers.get('location'))
-
     async def send(self, data: bytes):
-        if self._closed:
-            raise ConnectionError("WebSocket closed")
-        frame = self._build_frame(self.OP_BINARY, data, mask=True)
-        self.writer.write(frame)
-        await self.writer.drain()
+        await self.send_batch([data])
 
     async def send_batch(self, parts: List[bytes]):
         if self._closed:
             raise ConnectionError("WebSocket closed")
-        for part in parts:
-            self.writer.write(
-                self._build_frame(self.OP_BINARY, part, mask=True))
-        await self.writer.drain()
+        try:
+            for part in parts:
+                self.writer.write(
+                    self._build_frame(self.OP_BINARY, part, mask=True))
+            await self.writer.drain()
+        except BaseException:
+            # Includes the initial relay handshake before a bridge owns the
+            # connection. A partial send cannot be safely replayed.
+            self._closed = True
+            await close_writer(self.writer)
+            raise
 
     async def recv(self) -> Optional[bytes]:
         while not self._closed:
-            opcode, payload = await self._read_frame()
+            fin, opcode, payload = await self._read_frame()
 
             if opcode == self.OP_CLOSE:
                 self._closed = True
@@ -193,25 +219,37 @@ class RawWebSocket:
                 continue
 
             if opcode in (0x1, 0x2):
-                return payload
-            continue
+                if self._fragmented:
+                    raise ConnectionError("New WebSocket message before final continuation")
+                self._fragmented = not fin
+                if payload:
+                    return payload
+                continue
+            if opcode == 0x0:
+                if not self._fragmented:
+                    raise ConnectionError("Unexpected WebSocket continuation")
+                self._fragmented = not fin
+                # MTProto consumes a byte stream; preserve each fragment without
+                # accumulating the whole WebSocket message in memory.
+                if payload:
+                    return payload
+                continue
+            raise ConnectionError("Unsupported WebSocket opcode")
         return None
 
     async def close(self):
-        if self._closed:
-            return
+        was_closed = self._closed
         self._closed = True
         try:
-            self.writer.write(
-                self._build_frame(self.OP_CLOSE, b'', mask=True))
-            await self.writer.drain()
+            if not was_closed:
+                self.writer.write(
+                    self._build_frame(self.OP_CLOSE, b'', mask=True))
+                await asyncio.wait_for(self.writer.drain(), CLOSE_TIMEOUT)
         except Exception:
             pass
-        try:
-            self.writer.close()
-            await self.writer.wait_closed()
-        except Exception:
-            pass
+        finally:
+            # Peer CLOSE and cancellation still require local TCP cleanup.
+            await close_writer(self.writer)
 
     _WS_CLOSE_REASONS = {
         1000: 'normal', 1001: 'going_away', 1002: 'protocol_error',
@@ -251,8 +289,9 @@ class RawWebSocket:
             return _st_BBH4s.pack(fb, 0x80 | 126, length, mask_key) + masked
         return _st_BBQ4s.pack(fb, 0x80 | 127, length, mask_key) + masked
 
-    async def _read_frame(self) -> Tuple[int, bytes]:
+    async def _read_frame(self) -> Tuple[bool, int, bytes]:
         hdr = await self.reader.readexactly(2)
+        fin = bool(hdr[0] & 0x80)
         opcode = hdr[0] & 0x0F
         length = hdr[1] & 0x7F
         if length == 126:
@@ -262,6 +301,6 @@ class RawWebSocket:
         if hdr[1] & 0x80:
             mask_key = await self.reader.readexactly(4)
             payload = await self.reader.readexactly(length)
-            return opcode, _xor_mask(payload, mask_key)
+            return fin, opcode, _xor_mask(payload, mask_key)
         payload = await self.reader.readexactly(length)
-        return opcode, payload
+        return fin, opcode, payload

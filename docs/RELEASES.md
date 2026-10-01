@@ -32,12 +32,68 @@ capabilities of the downloadable build.
 
 The `.23` installer itself is transactional. After signature and bundle
 validation, a separately signed non-AppKit watchdog durably records a
-same-volume staged app and verified sibling backup before replacement. It
-accepts the successor only when exact path, version, process identity, tray
-startup, owned daemon, and advancing heartbeat agree. Otherwise it restores
-the exact previous bundle. The journal and user LaunchAgent are owner-private,
-restart-safe, and removed only after a terminal acknowledgement or recorded
-rollback; neither path uses `open` or activates the app.
+same-volume staged app and verified sibling backup before replacement. The
+published successor checks exact path, version, process identity, tray startup,
+owned daemon and advancing heartbeat. It does not contain the AUD-30 payload
+gate described below.
+
+The AUD-30 candidate additionally requires fresh complete public payloads
+through explicit IPv4/IPv6 local proxy and transparent HTTPS. The proof is bound
+to the attested daemon PID and digest, expires after five seconds, and is
+consumed under the lifecycle lock. A probe has a twelve-second budget; failed
+or unavailable traffic leaves the successor unacknowledged within the existing
+sixty-second watchdog window. A remote outage can cause a conservative rollback
+and is not itself proof of a defective update. The journal and user LaunchAgent
+are owner-private, restart-safe, and removed only after a terminal
+acknowledgement or recorded rollback; neither path uses `open` or activates the
+app. Real current-preparer acceptance and both rollback cases passed in
+CI35505371770; this is not installed or signed-feed transition evidence.
+
+Legacy migration remains a release gate: the published `.23` preparer omits
+`AbandonProcessGroup`, and its watchdog launches both successor and restored
+tray into its own process group. Candidate-preparer qualification uses the
+corrected LaunchAgent and therefore cannot prove either terminal tray survives
+an update initiated by the shipped `.23` preparer. Fixing only successor startup
+would not cover restoration of the unchanged old tray. The public transition
+must qualify both outcomes through the legacy preparation path before shipping.
+The exact published source also selects its helper from the old installed target
+(`target/Contents/MacOS/slipstream-update-watchdog`), copies it into runtime, and
+records that old helper's hash. A helper placed only inside a new archive cannot
+replace the transaction owner. Qualification/repair must therefore include an
+external migration entry point or a demonstrated compatible legacy transition;
+new-successor-only detachment cannot prove early-launch-failure rollback.
+The pinned .23 tray source also predates the --quit command. Its old menu exit
+leaves the daemon and Geph alive. An external migration launcher cannot assume
+modern Quit IPC; it needs authenticated candidate admission and exact old-tray
+PID/UID/birth/executable ownership before stopping that tray, with no name-wide
+termination or mutations of unrelated network services.
+Exact-source analysis is recorded in output/aud30-traffic-gate/legacy23-causal-boundary.json
+(source6ba71ef7, SHAab48e76d); it is not a live migration pass.
+Disposable CI36016073363 now reproduces both failures using that pinned preparer
+and the published previous bundle: accepted successor identity disappears;
+rollback records old_relaunched but leaves no distinct live restored tray.
+Current-preparer acceptance passes in the same run. Artifacts are preserved in
+output/legacy23-ci-36016073363/. This confirms the missing terminal-liveness gate;
+it is not signed-feed coverage or evidence of a completed migration repair.
+
+To build a diagnostic driver with that exact historical preparer, run
+`python3 scripts/materialize_legacy_update_driver.py`, then
+`cargo build --locked --example prepare_legacy23_update` in `app-tauri/src-tauri`.
+The source commit must exist locally; materialization verifies its full SHA-256
+before writing and refuses existing generated inputs. The generated entry point
+retains all current disposable-runner guards. Its provenance manifest is at
+`app-tauri/src-tauri/examples/legacy23_generated/provenance.json`.
+Use this driver only on disposable CI, with the pinned published previous
+bundle and the existing transaction harness. A compilation pass does not qualify
+legacy migration. The harness records the selected driver name and SHA-256,
+with coverage `selected-preparer-previous-watchdog-not-signed-feed`. CI retains
+historical source provenance alongside the results and runs separate legacy
+accept/rollback cases. These are not signed-feed migration qualification; a
+failed legacy update must not be relabelled as a successful update because
+current-driver cases succeed. Historical diagnostic mode instead explicitly
+requires the known terminal-tray-loss defect, as described below. Older a49f224 reports still contain the current-preparer label;
+use their matrix driver and provenance to distinguish the historical cases.
+
 
 After a preview is published and its remote tag, state, identity, asset set and
 digests are verified, the immediately preceding preview is marked as archival
@@ -48,6 +104,80 @@ commit, channel, name, local artifacts, remote asset set and digests all match;
 it then retries the archival finalizer without rebuilding or replacing files.
 Drafts, tag-only collisions and mismatched publications remain fail-closed. The
 previous tag and verified artifacts remain unchanged.
+
+Migration core qualification (CI36018610119, source58c576d): candidate-owned
+watchdog acceptance, timeout rollback, and OS spawn-refusal rollback all passed
+with actual packaged trays on disposable macOS. Helper digest matches candidate;
+terminal bundle tree and live tray identity survive watchdog cleanup in all
+three. The spawn-refusal case has no successor PID and restores the old tray.
+Artifacts are retained under output/migration-ci-36018610119/. Public signed
+archive admission and safe external stopping of the old .23 tray remain open;
+these results do not qualify the public migration entry point.
+
+## Disposable packaged transaction qualification
+
+`scripts/packaged_update_transaction_smoke.py` exercises the actual bundled
+watchdog and tray using the non-shipping Rust example `prepare_packaged_update`.
+It must run as the console user on disposable macOS GitHub Actions with
+`SLIPSTREAM_DISPOSABLE_CI=1`, a freshly qualified active daemon, no running tray,
+and no existing update watchdog. Never set those flags on a workstation.
+Build the driver with `cargo build --locked --example prepare_packaged_update`
+from `app-tauri/src-tauri`. Supply distinct, canonically verified previous and
+candidate `.app` bundles; the candidate version must match the driver's build.
+
+Run the Python harness with `--previous-bundle`, `--candidate-bundle`, `--driver`
+and `--case accept`. The harness copies the previous bundle into `RUNNER_TEMP`,
+archives the candidate, and calls the production transaction preparer. Only the
+real successor can ACK; the harness never fabricates a receipt. The terminal tree
+must equal the exact candidate, and the accepted PID/birth/UID/path must survive.
+
+In a separate freshly provisioned case, use `--case rollback`. After observing
+`successor_launched`, the harness sends SIGSTOP only after revalidating the exact
+successor PID, birth time, UID and executable. The unmodified sixty-second
+watchdog deadline must restore the full previous tree, remove stage/backup,
+persist the matching rollback record and leave a distinct restored tray alive.
+The runner teardown owns final tray/daemon cleanup; evidence stays in the printed
+private work directory even on failure. Do not run another case over the tray
+left by the first one.
+
+The CI `packaged-update-transaction` matrix provisions separate clean macOS
+runners through `provision_packaged_update_smoke.py`. The previous published
+preview.23 archive is pinned by SHA-256; the candidate and non-shipping driver
+come from the same current-run build. The required packaged lifecycle context
+includes the matrix outcome. Provisioning validates clean global state before
+installation, runs the transaction as the original console user, then removes
+only qualification-owned processes/runtime and requires the PF snapshot restored.
+
+A third isolated case, `--case traffic_failure`, first proves complete traffic
+for both public objects on all three qualification paths, then stalls resolution
+of both reviewed delivery hosts only on the disposable runner. The successor remains unsignalled and alive;
+the daemon must stay active with advancing heartbeat through the ACK deadline.
+The real watchdog must still restore the old tree and a surviving tray. Cleanup
+restores both scoped resolver fixtures in reverse order as well as the
+qualification-owned runtime.
+
+A fourth isolated case, `--case primary_unavailable`, stalls only the primary
+media.discordapp.net host after the same six-transfer baseline. The independent
+cdn.discordapp.com object must allow the real successor to acknowledge and
+survive with the exact candidate tree. Every injected resolver must observe a
+query; acceptance without exercising the fault is not a qualifying pass.
+
+These are packaged replacement/acceptance/timeout-rollback checks, not signed
+feed discovery, notification delivery, actual media sessions or a public version
+transition. The driver uses the current production preparer; a published old
+application initiating an update through its own shipped preparer remains a
+separate compatibility gate. The driver compile and harness unit tests do not
+constitute a passed packaged run. AUD-30 requires all four real cases before
+that gate is complete.
+
+The accept runner additionally executes `qualify_watchdog_startup_failure.py`
+against the exact candidate's packaged helper. Isolated journal fixtures cover
+OS spawn refusal and child exit before identity capture. A real helper process
+must restore the old fixture bytes, launch that fixture exactly once, preserve
+terminal failure evidence and remove active transaction residue. This gate
+uses neither a fake ACK nor a mocked helper. Its fixture processes are not the
+real tray and it does not load a LaunchAgent or qualify signed-feed migration.
+It complements rather than replaces the four packaged application cases.
 
 ## Legacy App Releases
 
@@ -329,3 +459,94 @@ gh attestation verify Slipstream-macos-arm64.zip \
 
 Do not repurpose or move an existing release tag. A corrected artifact requires
 a new preview tag or a new patch version.
+
+
+### AUD-30 redundant payload fault coverage
+
+`primary_unavailable` retains active daemon/heartbeat and stalls only
+media.discordapp.net resolution; the actual successor must ACK and survive
+watchdog cleanup using the independent cdn.discordapp.com object where needed.
+`traffic_failure` stalls both reviewed hostnames and requires an unsignalled live
+successor to reach the ACK deadline, then verifies old-tray restoration and
+survival. Both cases require all six baseline transfers (both objects on all
+three routes) to pass before injecting the fault. Each resolver must receive a
+query. Partial fixture startup and cleanup failures restore all registered
+resolvers in reverse order, retaining cleanup errors. These mutations are only
+permitted by the existing disposable macOS CI guard; never on the workstation.
+
+### External migration admission (implementation boundary)
+
+The external launcher uses `VerifiedLegacyMigration` to download the
+exact official archive for a canonical preview newer than .23. Admission uses
+the launcher's compile-time packaged updater key; callers cannot supply a trust
+key or archive URL. Signature verification precedes bounded archive inspection,
+which requires matching identity/version and a regular, nonempty executable
+watchdog. The archive and version stay private, and admission performs no filesystem or
+process mutation. The constructor is wired to the CLI described below. Unit
+rejection checks and the shared downloader do not prove a successful live
+signed-feed migration.
+
+The admitted archive can now prepare a running legacy tray by its exact PID.
+Preparation records PID/UID/birth identity and verifies the kernel executable
+path. It leaves the tray running until the candidate watchdog owns the durable
+journal. In Prepared phase that watchdog rechecks executable hash and live
+identity, sends only SIGTERM to the bound PID and verifies exit before renames.
+Timeout or unverifiable identity defers replacement. This avoids stopping the
+tray before potentially failing preparation, and does not rely on the external
+launcher's path matching the normal tray initiator wait. The packaged running-tray boundary has passed the isolated qualification
+described below. It does not qualify the complete public signed CLI path.
+
+### External launcher entry (not release-qualified)
+
+The candidate executable implements `--migrate-legacy VERSION SIGNATURE_FILE
+TARGET_EXE PID` before Tauri and single-instance forwarding. Input paths must be
+absolute. The signature is read from a bounded regular non-symlink file. The
+archive URL and trust key cannot be supplied by the caller. Canonical user state
+and LaunchAgents paths come from the current UID's home directory. Successful
+preparation prints the journal path and exits; that exit does not imply updater
+acceptance. Missing/invalid arguments fail without starting an ordinary tray.
+This source entry is pending signed-feed end-to-end qualification; do not treat
+CLI parsing, compilation, or the isolated transaction tests as release approval.
+
+Running-old-tray migration qualification passed in CI36022169923
+(head4cad0fd, merge98871aaf): accept, rollback and startup_failure. Each real
+published .23 tray survives missing-input preflight, then exits by SIGTERM from
+the candidate watchdog. Success acknowledges the exact candidate tree with a
+surviving successor; both failures restore the exact previous tree with a
+surviving restored tray. All three cleanup reports are empty. Detailed results
+are in output/running-migration-ci-36022169923/. This qualifies the running-tray
+transaction boundary only; public signed CLI success is still unproven.
+
+Historical matrix cases now use `--expect-legacy-defect` only with the pinned
+legacy driver, accept/rollback cases and previous-bundle watchdog provenance.
+They must observe the successor alive, complete the expected transaction (and
+exact nonce/old_relaunched record for rollback), confirm absence of both the original successor and any restored tray, and verify
+the terminal bundle. Rollback requires the exact previous tree. Historical
+accept requires only the observed root-directory mode loss (0755 to0700), with
+all other metadata and content identical to the candidate.
+Inspection errors, surviving trays, preparation failures, wrong tree/nonce and
+cleanup errors still fail. The actual bundle hash is recorded even in the
+expected historical-defect case. Report coverage is
+`pinned-legacy-defect-reproduction-not-update-success`. A green diagnostic means
+the old defect was reproduced, never that the old updater works. Migration and
+current-preparer cases retain their live-survivor assertions unchanged.
+
+The public positive transition requires an official signed preview newer than
+`.23`; the live release inventory checked on 2026-09-24 had no such archive
+(`output/migration-release-inventory.json`). Keep the production key, immutable
+URL and monotonic version guards intact. Shared collector fixtures verify
+signature acceptance and tamper rejection separately from this release gate.
+
+CI36025040811 additionally passed all current and running-migration transaction
+cases plus browser/lifecycle gates. The historical rollback diagnostic passed;
+historical accept reached the terminal tree check but failed equality. Pinned
+`.23` extraction keeps the root at0700 and does not restore archive directory
+modes. This is a candidate explanation, pending the per-file diagnostic evidence
+added in b830c17; do not dismiss arbitrary tree differences as the known defect.
+
+CI36027438904 historical accept diagnostics confirm the root mode is the sole
+bundle difference: archive0755 becomes0700; every other entry matches. Evidence
+is `output/qualification-36027438904/*legacy*accept*/**/tree-mismatch.json`.
+The historical diagnostic now requires this exact metadata defect alongside
+terminal process loss, and rejects additional changes or a different root mode.
+Corrected current/migration paths still require canonical full-tree equality.

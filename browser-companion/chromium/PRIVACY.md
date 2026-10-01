@@ -45,8 +45,11 @@ itself.
 ## Retention
 
 Browser-side correlation state is kept only in extension memory or
-`storage.session`, is bounded by short expiry windows, and is removed on
-completion, redirect, expiry, or browser-session end. Visible page text is not
+`storage.session`, with at most 128 pending records and a five-minute validity
+window. Records are removed on completion, redirect, or browser-session end;
+expired records are purged on the next tracker operation, including after a
+service-worker restart. A suspended worker cannot execute cleanup until it
+wakes. Visible page text is not
 stored. The local Slipstream application may retain a temporary exact-host
 routing result for its bounded route TTL; it does not receive the page text or
 full URL.
