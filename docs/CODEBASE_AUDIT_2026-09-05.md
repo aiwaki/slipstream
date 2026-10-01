@@ -2339,7 +2339,7 @@ CI36760899622 прошли. Они не являются доказательс�
 | Lifecycle/platform | macOS coordinator/quit/start/reconcile/resume, Geph runtime staging; updater journal/watchdog/recovery/launchd; daemon startup/shutdown/PF/status, install guard и Python policy activation | Изменения системной службы не выполнялись. Native Quit/upgrade/rollback остаются отдельными gates |
 | Lifecycle/platform | Windows service operation lock, controller/host/worker, lifecycle state, direct connector/ingress, route changes, packet egress/admission, userspace ownership | Просмотр исходников; без native Windows execution. EOF semantics frozen v1 не изменялись |
 | Root/integration | Pending/semantic IPC, browser worker и CDP, Chromium/Safari companion, native messaging/Safari bridge, diagnostics, Status client/listener и provenance; connection-race IO/probe ownership, targeted release/artifact tooling | Проверена навигационная идентичность в JS harness, не физические браузерные аккаунты/профили |
-| Transport + независимый recovery reviewer | Все 11 production Python modules в `vendor/tg-ws-proxy/proxy`: raw WebSocket/FakeTLS, bridges, pools, domain refresher, server/client shutdown, config/balancer/helpers | Изменено 6 modules; LICENSE и upstream VERSION1.8.1 сохранены, локальный diff описан в `vendor/tg-ws-proxy/LOCAL_CHANGES.md`. Frozen daemon пересобран и канонически проверен на source44b245b4; следующий shutdown diff требует свежего доказательства |
+| Transport + независимый recovery reviewer | Все 11 production Python modules в `vendor/tg-ws-proxy/proxy`: raw WebSocket/FakeTLS, bridges, pools, domain refresher, server/client shutdown, config/balancer/helpers | Изменено 6 modules; LICENSE и upstream VERSION1.8.1 сохранены, локальный diff описан в `vendor/tg-ws-proxy/LOCAL_CHANGES.md`. Frozen daemon пересобран и канонически проверен на source7ebfe978 с последующими shutdown/IPC исправлениями |
 | Повторный независимый review | Transport проверил новые permits, root IPC/CDP/MV3; root проверил updater/atomic files/build locking и интеграцию | Найденные на review ошибки новой реализации исправлены до фиксации результата |
 
 ### Подтверждённые дефекты и исправления
@@ -2363,7 +2363,7 @@ CI36760899622 прошли. Они не являются доказательс�
 | Atomic file writers одного PID делили temp path; diagnostics писал через существующий symlink | `create_new` уникального staging, запись/permissions/fsync через собственный FD, затем rename; diagnostics использует тот же helper | Concurrent16 writers RED, diagnostics symlink RED; `lifecycle-atomic-red.log`, `code-audit-20261001/diagnostics-red.log` |
 | Geph resume watcher мог пересечься с disable/uninstall; старое lifecycle completion уменьшало watermark нового поколения | Полная Geph mutation transaction сериализована; completed_generation использует `fetch_max` | Thread serialization и out-of-order completion tests; `lifecycle-coordinator-red.log` и общий app GREEN |
 | Две daemon builds удаляли общий freeze output или восстанавливали чужой staging | Один checkout flock удерживается через exec и вложенный freeze; inherited FD проверяется по inode/owner, lock file не удаляется | Concurrent build fixture RED, GREEN4: `build-stage-concurrency-*.log`; shell syntax PASS |
-| Неожиданный выход accept loop обходил PF-first shutdown и не публиковал terminal intent | Любой terminal event останавливает monitors; quiesce → PF teardown → listener close → drain/cancel; исходная ошибка возвращается supervisor | Четыре teardown RED и четыре terminal-intent RED; GREEN23: `lifecycle-shutdown-related-green.log` |
+| Неожиданный выход accept loop обходил PF-first shutdown и не публиковал terminal intent | Любой terminal event останавливает monitors; quiesce → PF teardown → drain/cancel → listener close/wait; исходная ошибка возвращается supervisor | Четыре teardown RED и четыре terminal-intent RED; GREEN23: `lifecycle-shutdown-related-green.log` |
 | Ограниченное число попыток скачивания релиза не ограничивало зависший первый subprocess | Deadline каждой попытки (120 s по умолчанию, настраивается); TimeoutExpired проходит cleanup/retry после kill/reap | Два RED; GREEN7 + 4 subtests и caller contract1: `downloader-timeout-green.log`, `downloader-callers-green.log`; реальные локальные sleep-processes, без сети |
 | Caller отменял connection race во время loser cleanup: winner уже вынут из карты, но не возвращён; отмена первого close пропускала остальные writers | Единственный shielded cleanup owner завершается даже при повторной отмене; все writers закрываются до await; winner возвращается после cleanup или закрывается локально | Два event-driven RED; GREEN17 adapter/probe и независимый root rerun17: `connection-race-ownership-*.log`, `code-audit-20261001/connection-owner-review.log` |
 | Telegram WebSocket терял continuation bytes; пустые WebSocket/FakeTLS fragments считались EOF | Сохраняется byte stream через continuation/control frames; пустые records не завершают transport | `test_telegram_transport_lifecycle.py`, RED в `transport-telegram-red.log`, `transport-telegram-more-red.log`; GREEN31 с existing utils |
@@ -2469,6 +2469,45 @@ faulthandler_timeout=30 spike` — **2134 passed + 8 subtests**, 40,69 s;
 **75 passed + 32 subtests**. Артефакты `daemon-ci-parity-green.log` и
 `followup-build-docs.log` в `output/code-audit-20261001/`. Ранее неизменённые
 Rust/JS suites используются как база, эти числа не суммируются с ней.
+
+### Проверка окончательного source7ebfe978
+
+- `7ebfe978fdf87acfe5decbee14662f580eef6c8f` зафиксирован и отправлен в PR376.
+  `npm run build:local` PASS; канонический verifier подтвердил fresh/staged/bundled
+  chain и подпись. Артефакт находится в
+  `app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app`; журнал
+  `output/code-audit-20261001/canonical-followup-build.log`. Installed `not_run`.
+  Daemon SHA-256 `12fa024dd48460fca0afb1c670258930e143a1e452ea59f7592d016e0b768ca6`;
+  bundle tree SHA-256 `4ee1659c8f792ed8d4061d700fa8eb34d9b18ea8b62dd184f3d1f05362b924b3`.
+- Windows CI36886930506: x64/ARM64 PASS. Functional CI36886930564: **PASS**,
+  18 jobs прошли, четыре release-only jobs пропущены согласно PR workflow.
+  Source7ebfe978 проверен в merge checkout `c3dbf3d5` с base7e196a71.
+  Dependency36886930758 повторно FAIL на неизменённых expired policies;
+  `dependency-followup-failed.log` сохранён. Исключения не продлевались.
+- Проверены отчёты всех девяти packaged update cases: семь актуальных/migration
+  сценариев завершились с точным ожидаемым bundle tree; два legacy — ожидаемое
+  воспроизведение старых дефектов, не успешное обновление старой версии. Временные
+  транзакции удалены. `followup-transaction-summary.json` и `followup-ci-artifacts/`.
+- Packaged lifecycle report PASS: управляемая страница получила CSS, JavaScript,
+  image и ready callback без ручной перезагрузки; active worker/original capture
+  очищены при uninstall, installed state отсутствует, внешний sentinel сохранён,
+  global PF не изменён. Sleep/wake здесь моделируется explicit marker, не физическим
+  сном. `followup-lifecycle-evidence/packaged-lifecycle.log`. Этот CI fixture
+  не доказывает успешную загрузку публичных сайтов в текущей сети пользователя.
+- Отдельный read-only review реальных IPC callbacks не нашёл цикла ожиданий
+  между owner close, worker quiesce и event loop. Callbacks планируют работу без
+  ожидания её завершения; проверки PID ограничивают каждую из максимум трёх
+  команд пятью секундами. Это не общий wall-clock bound для locks/filesystem.
+  Уже запущенные confirmation threads остаются под собственными token/PID/relay
+  guards; закрытие IPC не отменяет их. Полные связи исходников —
+  `output/code-audit-20261001/owned-ipc-wiring-review.md`. Код при review не менялся.
+- Read-only dependency triage уточнил следующий объём: SQLite-only pruning и
+  совместимое SQLx обновление; отдельные миграции AWS/Hyper/Rustls и
+  Mizaru/blind-RSA, с удалением старых веток из target graph. Две WebPKI
+  name-constraint находки остаются достижимыми. Chromium требует доказанной
+  vulnerability coverage; смена хеша, pin или даты её не заменяет. Полная таблица
+  девяти findings: `output/code-audit-20261001/dependency-next-step.md`.
+  Это план по сохранённым reports/исходникам, не выполненная миграция или свежий scan.
 
 ### Остаточные границы
 

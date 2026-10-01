@@ -11,10 +11,13 @@ file.
 ## Current Checkpoint
 
 
-2026-10-01 bugs/races audit: shutdown/IPC follow-up GREEN, ready for source commit/build/CI:
+2026-10-01 bugs/races audit: source7ebfe978 functional CI/build GREEN; dependency gate RED:
 - Physical AUD-17 / codex/codebase-audit-20260905 / PR376 OPEN. Audit base
   dcf4bcb0 had green canonical build and CI36760899622/Windows36760899617.
-  Main audit source44b245b4 pushed; canonical build3889 terminal0 PASS.
+  Main audit44b245b4 + shutdown/IPC follow-up7ebfe978 pushed. Canonical
+  follow-up build49103 terminal0 PASS; fresh/staged/bundled chain and signature
+  verified. Artifact app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app;
+  output/code-audit-20261001/canonical-followup-build.log. Installed not_run.
 - Three subagents + root covered recovery/core, transport/DNS/Geph, lifecycle,
   updater/Windows-source, IPC/CDP/companions, connection ownership, build/release
   helpers and all11 Telegram vendor modules. Exact coverage, causes, RED/GREEN
@@ -33,7 +36,9 @@ file.
 - FINAL daemon-only snapshot:2134 PASS+8subtests,40.69s; build/docs/CI-scope75
   PASS+32subtests. output/code-audit-20261001/daemon-ci-parity-green.log and
   followup-build-docs.log. Follow-up IPC79, lifecycle45, Telegram5x34 PASS;
-  outer timing flake separately RED/GREEN (runtime10ms unchanged). All agents done.
+  outer timing flake separately RED/GREEN (runtime10ms unchanged). Independent
+  review of actual IPC callbacks found no close/quiesce/mainloop cycle; separately
+  scheduled confirmations retain their token/PID/relay guards. All agents done.
 - source44 CI packaged build/Chromium/Windows adapter passed before cancellation;
   Windows36882233650 x64/ARM64 SUCCESS. No full source44 functional CI PASS.
   dependency36882233444 FAILED: Chromium integrity-only and Geph exceptions
@@ -44,8 +49,18 @@ file.
 - Installed last verified f4251985; historical verify:local-install53692 PASS,
   physical API/dynamic-image qualification FAILED. This audit has not installed,
   restarted services or opened native authorization. Do not claim reconnects fixed.
-- NEXT commit reviewed follow-up, canonical rebuild and fresh functional CI;
-  keep dependency gate red pending reviewed remediation. Physical Chrome/Safari,
+- Exact7eb functional CI36886930564 SUCCESS (18jobs passed/4release-only skipped),
+  watch73474 terminal0; tested merge c3dbf3d5 has head7ebfe978/base7e196a71.
+  Windows36886930506 x64/ARM64 SUCCESS. Retained 9 updater reports: seven current/
+  migration terminal trees exact, two known legacy defect diagnostics; all
+  transactions removed. Packaged lifecycle: controlled CSS/JS/image ready without
+  reload, worker/uninstall cleanup clean, external sentinel/global PF preserved.
+  Reports under output/code-audit-20261001/followup-{ci-artifacts,lifecycle-evidence}.
+  Dependency36886930758 FAILED on unchanged expired policies; failure log retained.
+- NEXT remediate dependency graph/Chromium scan coverage before release/install;
+  dependency-next-step.md contains bounded read-only triage, not completed fixes.
+  Final documentation-only checkpoint reuses source7eb tests/build/CI; no runtime
+  change and no reason to repeat unchanged broad suites manually. Physical Chrome/Safari,
   normal Quit/update, sleep/wake, Discord voice/stream and workstation behavior
   remain separate gates. Do not repeat unchanged broad Rust suites.
   Preserve user AGENTS.md, all backups and learning. Never replay consumed
