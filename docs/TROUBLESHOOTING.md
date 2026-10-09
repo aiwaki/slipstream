@@ -1,5 +1,23 @@
 # Troubleshooting
 
+## Uninstall reports browser-worker `ipc_unavailable`
+
+During service shutdown the broker may stop listening before its owned Unix
+socket inode disappears. The worker then exits with `ipc_unavailable` rather
+than `socket_unavailable`. This result occurs either before Chrome starts or
+after the worker has completed its Chrome/profile cleanup; a cleanup error
+overrides the IPC error. The stale-worker launcher accepts only exit code 1
+with that exact bounded reason after validating the job, executable, user and
+stderr ownership, and still requires launchd absence before removing artifacts.
+Other exit codes, signals, ownership errors and Chrome/profile cleanup failures
+remain failures. Do not delete the runtime manually to hide such an error.
+
+The 2026-10-09 heavy lifecycle CI failure reproduced this ordering after an
+earlier successful run of identical runtime code. The targeted Rust test uses a
+real closed Unix listener; Python tests cover accepted cleanup and rejected
+signal/resource-failure paths. These local checks do not replace the packaged
+active-worker uninstall gate or installed-app qualification.
+
 This page keeps operational checks short and current.
 
 ## Routing Model

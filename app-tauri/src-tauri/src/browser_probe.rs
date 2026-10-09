@@ -2998,6 +2998,48 @@ mod tests {
     }
 
     #[test]
+    fn stopped_broker_preserves_cleanup_before_ipc_failure() {
+        // launchd can stop the broker while its owned socket inode remains.
+        // Exercise the real transport error, not a substitute error string.
+        let root = tempfile::Builder::new()
+            .prefix("ss-ipc-stop-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = root.path().join("broker.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        let uid = fs::symlink_metadata(&socket).unwrap().uid();
+        drop(listener);
+        assert!(socket_metadata(&socket, uid).is_ok());
+
+        for cleanup_error in [
+            None,
+            Some("chrome_cleanup_failed"),
+            Some("profile_cleanup_failed"),
+        ] {
+            let events = RefCell::new(Vec::new());
+            let result = submit_before_cleanup(
+                || {
+                    events.borrow_mut().push("submit");
+                    ipc_request(&socket, uid, "submit", &json!({}))
+                },
+                || {
+                    events.borrow_mut().push("cleanup");
+                    match cleanup_error {
+                        Some(code) => Err(error(code)),
+                        None => Ok(()),
+                    }
+                },
+            );
+            assert_eq!(
+                result.err().unwrap().0,
+                cleanup_error.unwrap_or("ipc_unavailable")
+            );
+            assert_eq!(*events.borrow(), ["submit", "cleanup"]);
+        }
+    }
+
+    #[test]
     fn host_and_ci_origin_are_narrow() {
         assert!(canonical_host("unknown.example"));
         for invalid in [

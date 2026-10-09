@@ -10,6 +10,31 @@ file.
 
 ## Current Checkpoint
 
+2026-10-09 continuation: active-worker uninstall race reproduced and corrected:
+- Live PR376 remains OPEN DRAFT at ef369e7b on the physical AUD-17 checkout;
+  base7e196a71. Its docs-only functional run37952956411 FAILED the heavy packaged
+  lifecycle gate at active-worker-uninstall with exit1/ipc_unavailable. The same
+  runtime passed run37950115727; that earlier pass does not settle this race.
+  Failed mergef3571eae report retained in output/continuation-20261009/
+  docs-head-lifecycle-evidence/packaged-lifecycle.log. Dependency gate stays RED.
+- A closed broker can leave a validated socket inode. Rust emits ipc_unavailable
+  before Chrome starts or after submit_before_cleanup has completed. Python stale
+  cleanup wrongly rejected that exact exit1 result. Accept it with the existing
+  PID/UID/executable/stderr/absence checks; signals, ownership and resource-cleanup
+  errors remain failures. Regression1 RED/11 PASS before fix; scoped Python82 and
+  uninstall15 PASS, Rust browser-probe43 PASS including a real refused Unix socket
+  and cleanup-error precedence. Logs worker-disconnect-*.log in the same directory.
+- Geph0.4.3 forward-port/SQLx SQLite-only work is isolated in managed worktree
+  /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905,
+  branch codex/geph-043-remediation based on existing PR383. RSA removal remains
+  output-only investigation, not a production fix. Chromium advisory adapter is
+  also under review; current pin and coverage policy are unchanged.
+- Correct-project graph index is unavailable (project not found); bounded direct
+  searches used. No workstation installation, external settings or learning reset.
+- NEXT review/commit the lifecycle fix and qualify the exact packaged CI; finish
+  dependency remediation before release/install and physical-browser qualification.
+  Preserve user AGENTS.md, all backups/output and the unconsumed transaction rule.
+
 2026-10-09 DNS retirement / Telegram update (candidate source, not installed):
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 remains OPEN
   DRAFT; starting HEAD b468d891. Live CI36889846833 and Windows36889847029 PASS;
