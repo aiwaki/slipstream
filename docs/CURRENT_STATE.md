@@ -40,6 +40,10 @@ file.
 - All14 upstream module input hashes, VERSION and unchanged LICENSE verified.
   Python-only OSV query found0 findings across14 runtime pins; this does not
   replace the full product dependency audit or its unresolved coverage gap.
+- One bounded real RFC8484 lookup for example.com passed independently through
+  both fixed-IP TLS endpoints (Cloudflare/Google), about0.9s each. Evidence:
+  output/continuation-20261009/public-dns-probe.json. This is current endpoint
+  reachability only, not physical-browser or sustained-network qualification.
 - Read-only launchctl found no system/dev.slipstream.tproxy service during this
   continuation. No install, restart or native authorization performed. Historical
   installed identity below is stale; do not infer current app state from it.
@@ -48,8 +52,23 @@ file.
   SQLx SQLite-only upgrade is a further candidate. RSA Marvin and Chromium generic-
   PURL coverage remain unresolved; no exceptions extended. Details/evidence:
   output/continuation-20261009/dependency-refresh.md. Geph/Chromium not changed.
-- NEXT canonical bundle build and verifier, then record exact source/PR evidence. Release/install remains gated
-  on the dependency audit and separate physical-browser/Telegram qualification.
+- Source5c7d1e4b pushed to PR376. Frozen archive contains all18 required DNS/H2/
+  async modules and certifi roots; retired xbox_dns absent; frozen --help exit0.
+  Canonical local build64373 terminal0 PASS: fresh/staged/bundled daemon matches,
+  ad-hoc signature valid, installed not_run. Bundle at app-tauri/src-tauri/target/
+  release/bundle/macos/Slipstream.app; canonical-build.log and canonical-verification.json
+  under output/continuation-20261009/. Functional CI37950115727 SUCCESS:18 passed,
+  4 release-only skipped; mergecadebf8a binds head5c7d1e4b/base7e196a71.
+  Windows37950115691 SUCCESS on x64/ARM64. Dependency37950115827 FAILED on the same
+  Geph/expired Chromium coverage policies; no exception extended.
+- Seven retained current/migration update reports have exact expected terminal
+  trees and removed transactions, including startup/traffic failure and rollback.
+  Packaged browser and heavy lifecycle jobs passed. Evidence: ci-final.json,
+  tested-merge.json, update-summary.json, update-evidence/ and lifecycle-evidence/
+  under output/continuation-20261009/. Controlled CI is not a workstation soak.
+- NEXT remediate the existing dependency gate before release/install; then perform
+  separate physical-browser/Telegram qualification. This final documentation-only
+  checkpoint reuses source5c7d1e4b tests/build/CI; do not rebuild unchanged code.
   Preserve user AGENTS.md, output, backups and learning; no old transaction replay.
 
 ### Previous audit baseline (reusable where unchanged)

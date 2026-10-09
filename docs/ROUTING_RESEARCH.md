@@ -24,6 +24,10 @@ bounded framing/deadline reader as the existing deadline path. Sixteen loopback
 cases cover full fixed/chunked responses, wrong ID/type, DNS/HTTP truncation and
 HTTP errors; both previously failing cases pass. This is local protocol evidence,
 not a claim that public resolver endpoints are reachable on every user's network.
+A bounded direct query for `example.com` also passed against each production
+endpoint on this workstation (about 0.9 seconds each), with verified TLS and no
+resolver-setting change. That observation is retained in
+`output/continuation-20261009/public-dns-probe.json`; it is not a stability soak.
 
 The official tg-ws-proxy 1.11.1 archive (commit 18175fb4) replaces the 1.8.1 base,
 with all earlier local ownership/byte-stream fixes reconciled. Upstream's media
