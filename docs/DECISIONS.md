@@ -332,3 +332,15 @@ tests. Workstation source qualification must use inspected session/database test
 filters and an explicit network-denying sandbox; it must not invoke either test
 or read/change user account state. Universal metadata is graph evidence, not an
 x86_64 execution test or installed-product qualification.
+
+The 2026-10-09 all-library run did not meet that offline boundary. Although
+`test_clib` hard-codes an empty Secret, its default cache namespace already
+existed and its WAL/SHM metadata changed during the run. The auth path reads a
+cached `auth_token` before using the configured credentials; an empty Secret
+therefore does not prove absence of prior account-token use. Exact cache-row
+changes are unknown without a pre-run snapshot; the follow-up inspected only
+metadata, not credentials or database contents. This call path does not overwrite
+Slipstream's Keychain secret or app settings, which use separate storage. Preserve
+the shared cache and retain exact private paths/digests only in local evidence.
+Any future external-smoke execution requires a disposable cache and separately
+reviewed broker behavior; it cannot be counted as offline source qualification.

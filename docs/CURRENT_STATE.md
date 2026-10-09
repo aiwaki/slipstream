@@ -16,10 +16,15 @@ policy exception change.
   push never gets bootstrap. Source transition 0.3.9-r5→0.4.3-r1 PASS, policy unchanged.
 - Offline qualification: exact session module 9 tests and database module 2 tests
   PASS under sandbox deny network + deny file writes outside evidence directory.
-  Separate upstream all-lib 36 PASS was NOT offline: test_clib contacted public
-  brokers with its hard-coded empty Secret, and resolve_baidu_via_alidns contacted
-  public DNS. No user's credentials were used; possible default empty-Secret cache
-  was observed read-only and preserved. Do not repeat those external smoke tests.
+  Separate upstream all-lib 36 PASS was NOT offline: test_clib started a client
+  configured with an empty Secret and contacted public brokers;
+  resolve_baidu_via_alidns contacted public DNS. Source and metadata confirm that
+  the existing shared empty-Secret cache was accessed and its WAL/SHM changed
+  during the run. Authentication reads a cached auth_token before using configured
+  credentials, so prior account-token use and exact cache-row changes cannot be
+  excluded. This call path does not overwrite Slipstream's Keychain secret or app
+  settings. The cache was preserved; the later inspection read metadata only,
+  not credentials or database contents. Do not repeat those external smoke tests.
 - Python source/SBOM guards 24 PASS+19subtests; CI/build-contract 62 PASS+27subtests.
   Arm64/x86_64 locked metadata: 421/422 production dependencies, union 422 plus root.
   MySQL/PostgreSQL SQLx and rsa 0.9.10 absent; SQLx 0.8.6 SQLite-only on both targets.
