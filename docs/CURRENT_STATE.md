@@ -11,8 +11,8 @@ file.
 ## Current Checkpoint
 
 2026-10-09 continuation: active-worker uninstall race reproduced and corrected:
-- Live PR376 remains OPEN DRAFT at ef369e7b on the physical AUD-17 checkout;
-  base7e196a71. Its docs-only functional run37952956411 FAILED the heavy packaged
+- Live PR376 remains OPEN DRAFT; source ecf344aa is pushed on the physical AUD-17
+  checkout, base7e196a71. Earlier docs-only ef369e7b run37952956411 FAILED the heavy packaged
   lifecycle gate at active-worker-uninstall with exit1/ipc_unavailable. The same
   runtime passed run37950115727; that earlier pass does not settle this race.
   Failed mergef3571eae report retained in output/continuation-20261009/
@@ -24,15 +24,44 @@ file.
   errors remain failures. Regression1 RED/11 PASS before fix; scoped Python82 and
   uninstall15 PASS, Rust browser-probe43 PASS including a real refused Unix socket
   and cleanup-error precedence. Logs worker-disconnect-*.log in the same directory.
+- Independent review found no additional issue in the cleanup patch. Canonical
+  build77973 terminal0 PASS, fresh/staged/bundled daemon and signature verified;
+  installed not_run. Exact ecf344aa functional CI37967269003 SUCCESS: active-worker
+  uninstall, browser and update/error recovery gates passed; Windows37967269088
+  SUCCESS on x64/ARM64. Dependency37967269077 remains FAIL. Canonical identity is in
+  worker-disconnect-canonical-verification.json; retained CI reports and logs are
+  in worker-disconnect-evidence/. Legacy update cases reproduce known old defects,
+  not successful legacy updates. The seven current/migration cases passed.
 - Geph0.4.3 forward-port/SQLx SQLite-only work is isolated in managed worktree
   /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905,
-  branch codex/geph-043-remediation based on existing PR383. RSA removal remains
-  output-only investigation, not a production fix. Chromium advisory adapter is
-  also under review; current pin and coverage policy are unchanged.
+  branch codex/geph-043-remediation; source07a3d871 plus docs-only d2856d8a are pushed
+  to existing PR383 (automation/geph-0.4.3). All11 r5 literal changes preserved; builder accepts
+  only root Cargo.toml additionally and rechecks crate identity after edits.
+  Functional CI37967349938 SUCCESS (5 pass/8 source-only skips); dependency37967349940
+  FAIL. Local real session9/SQLite2 pass under OS network/write restrictions; fresh
+  423-package audit retains2 RSA blockers/1 informational. No exception extended.
+  Earlier upstream all-lib test was not offline: it touched an existing shared
+  empty-Secret cache; prior cached-token use cannot be excluded. Slipstream secret
+  and settings are not overwritten by that call path. Metadata-only follow-up
+  retained the cache; the later sandboxed tests are the offline evidence.
+- RSA removal remains output-only, not a production fix: legacy/wire6 and AWS-LC
+  prototype9 checks pass. Independent review requires RNG fail-stop containment,
+  production wire/key/token ownership, ABI and crypto review before integration.
+  See output/continuation-20261009/rsa-{migration,composition-review}.md.
+- Standalone Chromium advisory evaluator and offline CI contracts added; current
+  runtime pin, dependency gate and exception policy unchanged. Evaluator27 PASS
+  +38subtests; final focused CI/build/evaluator93 PASS+70subtests. Independent review
+  covered origin/immutable inputs/ranges/freshness. Full403375-record candidate
+  evaluation selects7216:5775 not_affected,1441 unknown,0 affected; latest247 CVEs
+  present, overall FAIL. Unknowns cannot authorize installation. See RELEASES.md
+  and output/dependency-remediation-20261009/chromium-adapter-contract.md.
+  These tooling/docs-only edits reuse the exact ecf344aa runtime/build/E2E evidence;
+  no unchanged broad suite or app build was rerun.
 - Correct-project graph index is unavailable (project not found); bounded direct
   searches used. No workstation installation, external settings or learning reset.
-- NEXT review/commit the lifecycle fix and qualify the exact packaged CI; finish
-  dependency remediation before release/install and physical-browser qualification.
+- NEXT finish dependency remediation (reviewed RSA backend and complete Chromium
+  advisory/component coverage) before release/install and physical-browser/Telegram
+  qualification. Source DNS/TG update and lifecycle fix are verified but not installed.
   Preserve user AGENTS.md, all backups/output and the unconsumed transaction rule.
 
 2026-10-09 DNS retirement / Telegram update (candidate source, not installed):

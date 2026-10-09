@@ -223,6 +223,9 @@ jobs:
       - name: Project continuity contract
         run: python3 scripts/check_project_state.py
 
+      - name: Chromium advisory evaluator contracts (offline)
+        run: python3 -m pytest -q scripts/test_chromium_advisory_audit.py
+
       - name: Core traffic contracts
         run: python3 -m pytest -q spike/test_traffic_contracts.py
 

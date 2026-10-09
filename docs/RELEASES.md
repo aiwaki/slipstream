@@ -279,6 +279,44 @@ source merge; it expires on 2026-08-27 and does not authorize publishing
 Geph's Hyper 0.14 AWS client until upstream provides a fixed 0.3-compatible
 graph.
 
+### Standalone Chromium advisory evaluator
+
+[`scripts/chromium_advisory_audit.py`](../scripts/chromium_advisory_audit.py)
+investigates advisory coverage for an exact CfT `chrome-headless-shell` version,
+platform, archive URL and digest. It is not integrated into release acceptance;
+the dependency gate, production pin and exception policy remain unchanged.
+
+Provide a reviewed SOURCE contract and the full midnight ZIP from the
+[official CVEProject release](https://github.com/CVEProject/cvelistV5/releases/latest).
+The evaluator fetches metadata from fixed official CfT, CVEProject and Chrome
+Releases endpoints, retains their raw bytes, verifies the baseline hash/size,
+and checks the latest desktop announcement's complete CVE list:
+
+```sh
+python3 scripts/chromium_advisory_audit.py \
+  --source path/to/reviewed-SOURCE.json \
+  --baseline path/to/full-midnight-baseline.zip \
+  --refresh-official-metadata output/chromium-advisories/metadata \
+  --output output/chromium-advisories/report.json
+```
+
+Official refresh requires `curl`; each metadata transfer has a total deadline.
+The CVE baseline must be at most 24 hours old. CfT/feed update and announcement
+publication dates may be older when unchanged; future dates beyond five minutes
+of clock tolerance are rejected.
+Local replay uses `--cft`, `--release` and `--feed` instead of refresh; it always
+returns overall `status=fail` because supplied files do not prove origin,
+while `evaluation_status` separately describes range evaluation. Unknown,
+affected, malformed, stale or incomplete evidence fails closed with exit 1.
+
+The 2026-10-09 candidate evaluation for CfT `155.0.8059.39` selected 7,216 records:
+5,775 not_affected, zero affected and **1,441 unknown**. All 247 announcement CVEs
+were present, but unresolved legacy/component/ADP ranges kept the result FAIL.
+This is neither a safe-release assertion nor qualification of that uninstalled
+candidate. No platform/headless exemption is inferred. Further NVD applicability
+and exact component-version mapping require separate review before integration.
+Focused tests: `python3 -m pytest scripts/test_chromium_advisory_audit.py -q`.
+
 ## Geph Dependency Artifacts
 
 | File | Purpose |
