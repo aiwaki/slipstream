@@ -49,7 +49,7 @@ file.
   production wire/key/token ownership, ABI and crypto review before integration.
   See output/continuation-20261009/rsa-{migration,composition-review}.md.
 - Standalone Chromium advisory evaluator and offline CI contracts added; current
-  runtime pin, dependency gate and exception policy unchanged. Evaluator27 PASS
+  dependency gate and exception policy unchanged. Evaluator27 PASS
   +38subtests; final focused CI/build/evaluator93 PASS+70subtests. Independent review
   covered origin/immutable inputs/ranges/freshness. Full403375-record candidate
   evaluation selects7216:5775 not_affected,1441 unknown,0 affected; latest247 CVEs
@@ -57,11 +57,22 @@ file.
   and output/dependency-remediation-20261009/chromium-adapter-contract.md.
   These tooling/docs-only edits reuse the exact ecf344aa runtime/build/E2E evidence;
   no unchanged broad suite or app build was rerun.
+- Follow-up candidate: bundled headless pin155.0.8059.39 replaces151 in source,
+  Rust identity and materializer assertions. Exact retained archive materialized;
+  version, manifest and license payloads verified. Python18 PASS+31subtests and
+  Rust browser-probe43 PASS. Prior runtime saved under output/dependency-remediation-
+  20261009/chromium-previous-runtime-151. Canonical local build60224 terminal0 PASS;
+  fresh/staged/bundled daemon and signature verified, installed not_run. See
+  output/continuation-20261009/chromium155-canonical-verification.json. Packaged
+  browser/composed lifecycle on155 still requires exact-source CI; the local smoke
+  harness is disposable-CI-only and was not run by impersonating CI on this Mac.
+  GUI Chrome pins and audit policy unchanged; 1441 unknown advisories still block.
+  RSA compatibility and NVD applicability remain isolated output-only experiments.
 - Correct-project graph index is unavailable (project not found); bounded direct
   searches used. No workstation installation, external settings or learning reset.
-- NEXT finish dependency remediation (reviewed RSA backend and complete Chromium
-  advisory/component coverage) before release/install and physical-browser/Telegram
-  qualification. Source DNS/TG update and lifecycle fix are verified but not installed.
+- NEXT qualify the new Chromium155 bundle, then finish dependency remediation
+  (reviewed RSA backend and complete Chromium advisory/component coverage) before
+  release/install and physical-browser/Telegram qualification. Source DNS/TG update and lifecycle fix are verified but not installed.
   Preserve user AGENTS.md, all backups/output and the unconsumed transaction rule.
 
 2026-10-09 DNS retirement / Telegram update (candidate source, not installed):

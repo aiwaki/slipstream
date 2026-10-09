@@ -53,9 +53,9 @@ const BROWSER_COMPARE_MAX_DEADLINE_MS: u64 = 20_000;
 const OWNED_GEPH_ROUTE: &str = "owned_geph";
 const OWNED_GEPH_PORT_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT";
 const DOM_CLASSIFICATION_COMMAND_ID: u64 = 4;
-const PINNED_HEADLESS_RUNTIME_VERSION: &str = "151.0.7922.77";
+const PINNED_HEADLESS_RUNTIME_VERSION: &str = "155.0.8059.39";
 const PINNED_HEADLESS_RUNTIME_ARCHIVE_SHA256: &str =
-    "44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e";
+    "b3e093c06001c41e68decbc8dd4a62f9efe4bf4e4dd247a686ea531863448d75";
 const PINNED_HEADLESS_RUNTIME_MANIFEST: &str = "manifest.json";
 const DOM_CLASSIFIER: &str = concat!(
     include_str!("../../../browser-companion/chromium/detector.js"),
@@ -3206,7 +3206,7 @@ mod tests {
             runtime.parent().unwrap().file_name(),
             Some(OsStr::new("chromium-headless-shell"))
         );
-        assert_eq!(PINNED_HEADLESS_RUNTIME_VERSION, "151.0.7922.77");
+        assert_eq!(PINNED_HEADLESS_RUNTIME_VERSION, "155.0.8059.39");
     }
 
     #[test]

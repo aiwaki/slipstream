@@ -284,7 +284,7 @@ graph.
 [`scripts/chromium_advisory_audit.py`](../scripts/chromium_advisory_audit.py)
 investigates advisory coverage for an exact CfT `chrome-headless-shell` version,
 platform, archive URL and digest. It is not integrated into release acceptance;
-the dependency gate, production pin and exception policy remain unchanged.
+this evaluator does not modify the dependency gate, runtime pin or exception policy.
 
 Provide a reviewed SOURCE contract and the full midnight ZIP from the
 [official CVEProject release](https://github.com/CVEProject/cvelistV5/releases/latest).

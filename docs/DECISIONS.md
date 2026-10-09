@@ -39,6 +39,21 @@ runtime dependencies are included in the frozen daemon build. Loopback protocol
 and error-path tests qualify implementation boundaries; live Telegram media
 and the installed bundle require separate qualification.
 
+## Bundled headless Chromium refresh — 2026-10-09
+
+The app-owned `chrome-headless-shell` runtime is pinned to CfT155.0.8059.39,
+mac-arm64, with one exact archive URL, SHA-256 and size in
+`vendor/chromium-headless-shell/SOURCE.json`. The Rust worker identity must match
+that contract. Preserve the archive's license and canonical manifest; do not
+reuse an older materialized tree or disable the browser sandbox.
+
+This updates the bundled worker engine only. Separately pinned full Chrome GUI
+qualification fixtures retain their existing LaunchServices/MV3 contract below;
+they are not substitutes for testing the new bundled engine. A newer browser and
+passing build do not resolve incomplete advisory coverage. The standalone
+CVE evaluator remains outside release acceptance, and the dependency gate stays
+closed until its source/component coverage requirements are met.
+
 ## Owned reviewed geo routes retain their exit during cooldown
 
 When Geph is explicitly enabled and the exact owned listener is selected, both
