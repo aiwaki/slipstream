@@ -1,3 +1,4 @@
+import gzip
 import json
 import pickle
 
@@ -10,9 +11,12 @@ from bootstrap_asset_preflight import (
     EphemeralBootstrapAsset,
     RangeProbeEvidence,
     RangeProbeOutcome,
+    RootDocumentOutcome,
     classify_range_response,
     extract_critical_bootstrap_assets,
+    inspect_critical_bootstrap_assets,
     inspect_range_response,
+    response_has_full_selected_representation,
 )
 
 
@@ -113,6 +117,7 @@ def test_extracts_only_bounded_critical_javascript_targets_in_document_order():
     ]
     request = assets[1].build_range_request()
     assert b"GET /entry.js HTTP/1.1" in request
+    assert b"Accept-Encoding: identity\r\n" in request
     assert b"Range: bytes=0-65535" in request
 
 
@@ -170,7 +175,7 @@ def test_rejects_credentials_non_https_non_default_ports_and_oversized_urls():
         ),
     ],
 )
-def test_root_page_must_be_complete_bounded_identity_https_html(
+def test_root_page_must_be_complete_bounded_https_html_with_supported_encoding(
     root, response_kwargs, mutator
 ):
     response = mutator(_response(b'<script src="/entry.js"></script>'))
@@ -187,6 +192,192 @@ def test_root_page_must_be_complete_bounded_identity_https_html(
         )
         == ()
     )
+
+
+def test_complete_gzip_root_extracts_assets_after_bounded_decode():
+    body = (
+        b'<script type="module" src="https://cdn.example/entry.js"></script>'
+        b'<link rel="modulepreload" href="https://cdn.example/vendor.js">'
+    )
+    response = _response(
+        gzip.compress(body, mtime=0),
+        headers=("Content-Encoding: gzip",),
+    )
+
+    inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/",
+        response,
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: 0.0,
+    )
+
+    assert inspection.outcome is RootDocumentOutcome.COMPLETE
+    assert [asset.exact_host for asset in inspection.assets] == [
+        "cdn.example",
+        "cdn.example",
+    ]
+
+
+def test_gzip_root_rejects_prefix_range_corruption_overflow_and_deadline():
+    body = b'<script src="https://cdn.example/entry.js"></script>'
+    compressed = gzip.compress(body, mtime=0)
+    full = _response(
+        compressed,
+        status="206 Partial Content",
+        headers=(
+            "Content-Encoding: gzip",
+            f"Content-Range: bytes 0-{len(compressed) - 1}/{len(compressed)}",
+        ),
+    )
+    prefix = full.replace(
+        f"/{len(compressed)}\r\n".encode(),
+        f"/{len(compressed) + 1}\r\n".encode(),
+    )
+    corrupt = _response(
+        compressed[:-1],
+        headers=("Content-Encoding: gzip",),
+    )
+    overflow = _response(
+        gzip.compress(b"x" * (262_144 + 1), mtime=0),
+        headers=("Content-Encoding: gzip",),
+    )
+    arguments = dict(
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: 0.0,
+        requested_range_end=len(compressed) + 1,
+    )
+
+    complete = inspect_critical_bootstrap_assets(
+        "https://app.example/", full, **arguments
+    )
+    assert complete.outcome is RootDocumentOutcome.COMPLETE
+    assert [asset.exact_host for asset in complete.assets] == ["cdn.example"]
+    for response in (prefix, corrupt, overflow):
+        inspection = inspect_critical_bootstrap_assets(
+            "https://app.example/", response, **arguments
+        )
+        assert inspection.outcome is RootDocumentOutcome.INCONCLUSIVE
+        assert inspection.assets == ()
+
+    ticks = iter((0.0, 0.0, 0.0, 1.0))
+    expired = inspect_critical_bootstrap_assets(
+        "https://app.example/",
+        _response(compressed, headers=("Content-Encoding: gzip",)),
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: next(ticks),
+    )
+    assert expired.outcome is RootDocumentOutcome.INCONCLUSIVE
+    assert expired.assets == ()
+
+
+def test_full_representation_206_emits_assets_but_prefix_206_is_inconclusive():
+    body = (
+        b'<script type="module" src="https://cdn.example/entry.js"></script>'
+        b'<link rel="modulepreload" href="https://cdn.example/vendor.js">'
+    )
+    full = _response(
+        body,
+        status="206 Partial Content",
+        headers=(f"Content-Range: bytes 0-{len(body) - 1}/{len(body)}",),
+    )
+    partial = _response(
+        body,
+        status="206 Partial Content",
+        headers=(
+            f"Content-Range: bytes 0-{len(body) - 1}/{len(body) + 100}",
+        ),
+    )
+    arguments = dict(
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: 0.0,
+        requested_range_end=len(body) + 100,
+    )
+
+    full_inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/", full, **arguments
+    )
+    partial_inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/", partial, **arguments
+    )
+
+    representation_arguments = {
+        key: arguments[key]
+        for key in ("stream_closed", "truncated", "requested_range_end")
+    }
+    assert response_has_full_selected_representation(
+        full, **representation_arguments
+    )
+    assert not response_has_full_selected_representation(
+        partial, **representation_arguments
+    )
+    assert full_inspection.outcome is RootDocumentOutcome.COMPLETE
+    assert [asset.exact_host for asset in full_inspection.assets] == [
+        "cdn.example",
+        "cdn.example",
+    ]
+    assert (
+        partial_inspection.outcome
+        is RootDocumentOutcome.INCONCLUSIVE
+    )
+    assert partial_inspection.assets == ()
+
+
+@pytest.mark.parametrize(
+    "content_range",
+    [
+        "bytes 1-10/11",
+        "bytes 0-10/*",
+        "bytes 0-10/10",
+        "bytes 0-999/1000",
+        "not-a-range",
+    ],
+)
+def test_malformed_or_out_of_bound_root_206_is_inconclusive(content_range):
+    body = b'<script src="https://cdn.example/entry.js"></script>'
+    response = _response(
+        body,
+        status="206 Partial Content",
+        headers=(f"Content-Range: {content_range}",),
+    )
+
+    inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/",
+        response,
+        stream_closed=True,
+        truncated=False,
+        deadline=1.0,
+        clock=lambda: 0.0,
+        requested_range_end=len(body) + 100,
+    )
+
+    assert inspection.outcome is RootDocumentOutcome.INCONCLUSIVE
+    assert inspection.assets == ()
+
+
+def test_expired_root_inspection_is_inconclusive_not_healthy():
+    response = _response(
+        b'<script src="https://cdn.example/entry.js"></script>'
+    )
+
+    inspection = inspect_critical_bootstrap_assets(
+        "https://app.example/",
+        response,
+        stream_closed=True,
+        truncated=False,
+        deadline=0.0,
+        clock=lambda: 0.0,
+    )
+
+    assert inspection.outcome is RootDocumentOutcome.INCONCLUSIVE
+    assert inspection.assets == ()
 
 
 def test_partial_truncated_and_expired_root_pages_do_not_emit_targets():
@@ -301,7 +492,7 @@ def test_declared_body_shortfall_requires_eof_or_idle_timeout():
 def test_direct_and_geph_evidence_must_bind_the_same_js_object():
     direct = _inspect(
         _range_response(
-            b"x" * 2_048,
+            b"x" * (16 * 1_024),
             declared_length=65_536,
             content_range="bytes 0-65535/1210087",
         ),
@@ -321,9 +512,46 @@ def test_direct_and_geph_evidence_must_bind_the_same_js_object():
 
     assert isinstance(direct, RangeProbeEvidence)
     assert direct.outcome is RangeProbeOutcome.INCOMPLETE
+    assert direct.received_body_bytes == 16 * 1_024
     assert complete.outcome is RangeProbeOutcome.COMPLETE
     assert direct.proves_same_object_as(complete)
     assert not direct.proves_same_object_as(other)
+
+
+@pytest.mark.parametrize('media_type', ['application/javascript', 'image/webp'])
+def test_conflicting_strong_etags_cannot_be_overridden_by_common_prefix(media_type):
+    # Two deployments can have the same license/banner or image header and
+    # total size, but are still explicitly different representations.
+    direct_wire = _range_response(
+        b'x' * 2048, declared_length=4096, content_range='bytes 0-4095/8192',
+    ).replace(b'application/javascript', media_type.encode())
+    owned_wire = _range_response(
+        b'x' * 2048 + b'y' * 2048, content_range='bytes 0-4095/8192',
+    ).replace(b'"fixture-v1"', b'"fixture-v2"').replace(
+        b'application/javascript', media_type.encode())
+    direct, owned = _inspect(direct_wire), _inspect(owned_wire)
+    assert direct.outcome is RangeProbeOutcome.INCOMPLETE
+    assert owned.outcome is RangeProbeOutcome.COMPLETE
+    assert direct.prefix_digest == owned.prefix_digest
+    assert direct.validator_digest != owned.validator_digest
+    assert not direct.proves_same_object_as(owned)
+
+
+@pytest.mark.parametrize('etag_change', [
+    None, b'', b'ETag: W/"fixture-v1"\r\n',
+])
+def test_object_binding_preserves_matching_etag_or_unversioned_prefix(etag_change):
+    complete_wire = _range_response(b'x' * 4096, content_range='bytes 0-4095/8192')
+    if etag_change is not None:
+        complete_wire = complete_wire.replace(b'ETag: "fixture-v1"\r\n', etag_change)
+    partial_wire = complete_wire[:-2048]
+    assert _inspect(partial_wire).proves_same_object_as(_inspect(complete_wire))
+    # An equal validator never overrides a wrong range or encoded response.
+    for invalid in (
+        complete_wire.replace(b'0-4095/8192', b'0-4095/8193'),
+        complete_wire.replace(b'\r\n\r\n', b'\r\nContent-Encoding: gzip\r\n\r\n'),
+    ):
+        assert not _inspect(partial_wire).proves_same_object_as(_inspect(invalid))
 
 
 def test_content_range_and_declared_framing_must_agree():
@@ -392,3 +620,60 @@ def test_shared_deadline_prevents_late_complete_result():
         deadline=1.0,
         clock=lambda: 1.0,
     ) is RangeProbeOutcome.DEADLINE_EXCEEDED
+
+
+def test_critical_image_after_script_budget_is_not_lost():
+    html = ''.join(f'<script src="/script{i}.js"></script>' for i in range(20))
+    html += '<img fetchpriority="high" src="https://cdn.example/hero.webp?version=private">'
+    assets = _assets(html)
+    assert len(assets) == MAX_CRITICAL_ASSETS
+    assert assets[0].exact_host == 'cdn.example'
+    assert assets[0].discovery_priority == 1
+    assert b'GET /hero.webp?version=private HTTP/1.1' in assets[0].build_range_request()
+    assert 'private' not in repr(assets[0])
+
+
+def test_image_preload_deduplicates_and_does_not_admit_ordinary_images():
+    assets = _assets('''
+      <img src="https://ordinary.example/photo.webp">
+      <link rel="preload" as="image" href="https://cdn.example/hero.webp">
+      <img fetchpriority="high" src="https://cdn.example/hero.webp">
+      <img fetchpriority="high" src="http://unsafe.example/hero.webp">
+    ''')
+    assert len(assets) == 1
+    assert assets[0].exact_host == 'cdn.example'
+    request = assets[0].build_range_request()
+    assert b'Accept: */*\r\n' in request
+    assert b'Range: bytes=0-65535\r\n' in request
+
+
+def test_validated_public_redirect_document_resolves_relative_critical_image():
+    response = _response(b'<img fetchpriority="high" src="images/hero.webp">')
+    args = dict(stream_closed=True, truncated=False, deadline=1.0, clock=lambda: 0.0)
+    assert inspect_critical_bootstrap_assets(
+        'https://app.example/en/home', response, **args).outcome is RootDocumentOutcome.UNSCANNABLE
+    inspection = inspect_critical_bootstrap_assets(
+        'https://app.example/en/home', response, allow_document_path=True, **args)
+    assert inspection.outcome is RootDocumentOutcome.COMPLETE
+    assert b'GET /en/images/hero.webp HTTP/1.1' in inspection.assets[0].build_range_request()
+
+
+def test_zero_asset_budget_accepts_no_scripts_or_critical_images():
+    assert not _assets('<script src="/a.js"></script><img fetchpriority="high" src="/a.webp">', max_assets=0)
+
+
+@pytest.mark.parametrize('media_type', ['image/webp', 'image/png', 'image/jpeg', 'image/avif', 'image/gif'])
+def test_image_range_preserves_complete_and_incomplete_object_evidence(media_type):
+    body = b'public-image-payload' * 100
+    wire = _range_response(body).replace(b'application/javascript', media_type.encode())
+    complete = _inspect(wire)
+    partial = _inspect(wire[:-100])
+    assert complete.outcome is RangeProbeOutcome.COMPLETE
+    assert partial.outcome is RangeProbeOutcome.INCOMPLETE
+    assert partial.proves_same_object_as(complete)
+
+
+@pytest.mark.parametrize('media_type', ['text/html', 'application/json', 'application/octet-stream'])
+def test_generic_payload_cannot_be_image_route_proof(media_type):
+    wire = _range_response(b'not an image').replace(b'application/javascript', media_type.encode())
+    assert _inspect(wire).outcome is RangeProbeOutcome.UNKNOWN

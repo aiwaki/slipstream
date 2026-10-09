@@ -860,3 +860,21 @@ def test_compressed_http2_stream_is_not_called_incomplete():
     assert result.interrupted
     assert not result.content_encoding_is_identity
     assert not result.incomplete
+
+
+def test_probe_sends_redirect_target_over_http2():
+    sock = FakeHttp2ServerSocket()
+    result = probe_http2_response(
+        sock, 'example.com', deadline=time.monotonic() + 2,
+        max_bytes=65536, bounded_range=False, request_target='/en?lang=en')
+    assert result.complete
+    assert (b':path', b'/en?lang=en') in sock.request_headers
+
+
+@pytest.mark.parametrize('target', ['//other.example/', '/en\r\nInjected: yes', '/en#fragment', 'https://other.example/'])
+def test_probe_rejects_unsafe_redirect_target(target):
+    sock = FakeHttp2ServerSocket()
+    with pytest.raises(ValueError):
+        probe_http2_response(sock, 'example.com', deadline=time.monotonic() + 2,
+                             max_bytes=65536, bounded_range=False, request_target=target)
+    assert not sock.request_headers

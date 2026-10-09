@@ -446,6 +446,7 @@ fn run_connector(
     }
     emit(
         &events,
+        &control,
         WindowsDirectConnectorEvent::Connected {
             request_id: plan.request_id.clone(),
             session_id: plan.session_id,
@@ -467,7 +468,7 @@ fn run_connector(
         if let Some((payload, written)) = outbound.front_mut() {
             match stream.write(&payload[*written..]) {
                 Ok(0) => {
-                    emit_reset(&plan, &events, "remote closed while writing")?;
+                    emit_reset(&plan, &events, &control, "remote closed while writing")?;
                     return Ok(());
                 }
                 Ok(bytes) => {
@@ -478,7 +479,7 @@ fn run_connector(
                 }
                 Err(error) if is_transient(&error) => {}
                 Err(_) => {
-                    emit_reset(&plan, &events, "stream write failed")?;
+                    emit_reset(&plan, &events, &control, "stream write failed")?;
                     return Ok(());
                 }
             }
@@ -488,6 +489,7 @@ fn run_connector(
             Ok(0) => {
                 emit(
                     &events,
+                    &control,
                     WindowsDirectConnectorEvent::BackendClosed {
                         request_id: plan.request_id.clone(),
                         session_id: plan.session_id,
@@ -515,7 +517,7 @@ fn run_connector(
             }
             Err(error) if is_transient(&error) => {}
             Err(_) => {
-                emit_reset(&plan, &events, "stream read failed")?;
+                emit_reset(&plan, &events, &control, "stream read failed")?;
                 return Ok(());
             }
         }
@@ -523,6 +525,7 @@ fn run_connector(
         if !first_payload_observed && Instant::now() >= first_payload_deadline {
             emit(
                 &events,
+                &control,
                 WindowsDirectConnectorEvent::FirstPayloadDeadline {
                     request_id: plan.request_id.clone(),
                     session_id: plan.session_id,
@@ -546,7 +549,7 @@ fn connect_numeric(
         }
         let now = Instant::now();
         if now >= deadline {
-            emit_connect_failed(plan, events, "connect deadline exceeded")?;
+            emit_connect_failed(plan, events, control, "connect deadline exceeded")?;
             return Ok(None);
         }
         let timeout = deadline.saturating_duration_since(now);
@@ -557,14 +560,14 @@ fn connect_numeric(
                 if emit_cancel_if_requested(plan, control, events)? {
                     return Ok(None);
                 }
-                emit_connect_failed(plan, events, "connect deadline exceeded")?;
+                emit_connect_failed(plan, events, control, "connect deadline exceeded")?;
                 return Ok(None);
             }
             Err(error) => {
                 if emit_cancel_if_requested(plan, control, events)? {
                     return Ok(None);
                 }
-                emit_connect_failed(plan, events, connect_reason(&error))?;
+                emit_connect_failed(plan, events, control, connect_reason(&error))?;
                 return Ok(None);
             }
         }
@@ -595,6 +598,7 @@ fn emit_cancel_if_requested(
     };
     emit(
         events,
+        control,
         WindowsDirectConnectorEvent::Cancelled {
             request_id: plan.request_id.clone(),
             session_id: plan.session_id,
@@ -607,10 +611,12 @@ fn emit_cancel_if_requested(
 fn emit_connect_failed(
     plan: &WindowsDirectConnectorPlan,
     events: &SyncSender<WindowsDirectConnectorEvent>,
+    control: &AtomicU8,
     reason: &str,
 ) -> Result<(), WindowsDirectConnectorNativeError> {
     emit(
         events,
+        control,
         WindowsDirectConnectorEvent::ConnectFailed {
             request_id: plan.request_id.clone(),
             session_id: plan.session_id,
@@ -622,10 +628,12 @@ fn emit_connect_failed(
 fn emit_reset(
     plan: &WindowsDirectConnectorPlan,
     events: &SyncSender<WindowsDirectConnectorEvent>,
+    control: &AtomicU8,
     reason: &str,
 ) -> Result<(), WindowsDirectConnectorNativeError> {
     emit(
         events,
+        control,
         WindowsDirectConnectorEvent::StreamReset {
             request_id: plan.request_id.clone(),
             session_id: plan.session_id,
@@ -636,12 +644,28 @@ fn emit_reset(
 
 fn emit(
     events: &SyncSender<WindowsDirectConnectorEvent>,
+    control: &AtomicU8,
     event: WindowsDirectConnectorEvent,
 ) -> Result<(), WindowsDirectConnectorNativeError> {
-    events.try_send(event).map_err(|error| match error {
-        TrySendError::Full(_) => WindowsDirectConnectorNativeError::EventQueueFull,
-        TrySendError::Disconnected(_) => WindowsDirectConnectorNativeError::EventSinkClosed,
-    })
+    let mut pending = event;
+    loop {
+        match events.try_send(pending) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Full(event)) => {
+                // Terminal events must follow queued payload instead of being
+                // lost at EOF/reset. Explicit shutdown still releases a worker
+                // whose caller has stopped draining events (including Drop).
+                if control.load(Ordering::Acquire) != CONTROL_RUNNING {
+                    return Err(WindowsDirectConnectorNativeError::EventQueueFull);
+                }
+                pending = event;
+                thread::sleep(STREAM_POLL_INTERVAL);
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                return Err(WindowsDirectConnectorNativeError::EventSinkClosed);
+            }
+        }
+    }
 }
 
 fn emit_payload(
@@ -788,6 +812,77 @@ impl From<WindowsDirectConnectorNativeError> for WindowsDirectDataPlaneEffectErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_event_survives_a_full_payload_queue() {
+        let (sender, receiver) = sync_channel(1);
+        sender
+            .send(WindowsDirectConnectorEvent::Payload {
+                request_id: "request-1".into(),
+                session_id: 1,
+                bytes: vec![1],
+            })
+            .unwrap();
+        let (started_tx, started_rx) = sync_channel(1);
+        let (done_tx, done_rx) = sync_channel(1);
+        let worker = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = emit(
+                &sender,
+                &AtomicU8::new(CONTROL_RUNNING),
+                WindowsDirectConnectorEvent::BackendClosed {
+                    request_id: "request-1".into(),
+                    session_id: 1,
+                },
+            );
+            done_tx.send(result).unwrap();
+        });
+        started_rx.recv().unwrap();
+        let early_result = done_rx.recv_timeout(Duration::from_millis(50));
+        // Drain before assertions so even a broken implementation cannot leave
+        // the test worker blocked or detached after a panic.
+        receiver.recv().unwrap();
+        let terminal = receiver.recv_timeout(Duration::from_secs(1));
+        worker.join().unwrap();
+        assert_eq!(early_result, Err(RecvTimeoutError::Timeout));
+        assert!(matches!(
+            terminal,
+            Ok(WindowsDirectConnectorEvent::BackendClosed { .. })
+        ));
+        assert_eq!(done_rx.recv().unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn terminal_queue_backpressure_can_be_interrupted_by_shutdown() {
+        let (sender, _receiver) = sync_channel(1);
+        sender
+            .send(WindowsDirectConnectorEvent::Payload {
+                request_id: "request-1".into(),
+                session_id: 1,
+                bytes: vec![1],
+            })
+            .unwrap();
+        let control = Arc::new(AtomicU8::new(CONTROL_RUNNING));
+        let worker_control = Arc::clone(&control);
+        let (done_tx, done_rx) = sync_channel(1);
+        let worker = thread::spawn(move || {
+            let result = emit(
+                &sender,
+                &worker_control,
+                WindowsDirectConnectorEvent::BackendClosed {
+                    request_id: "request-1".into(),
+                    session_id: 1,
+                },
+            );
+            done_tx.send(result).unwrap();
+        });
+        set_control(&control, CONTROL_SHUTDOWN);
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            Err(WindowsDirectConnectorNativeError::EventQueueFull)
+        );
+        worker.join().unwrap();
+    }
 
     #[test]
     fn closed_connector_bookkeeping_is_bounded_and_drops_payload_markers() {

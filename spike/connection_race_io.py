@@ -130,12 +130,41 @@ async def open_candidate_connection(candidate, port):
     )
 
 
-async def _close_quietly(connection):
+def _close_writer_quietly(connection):
     try:
-        await connection.close()
+        connection.writer.close()
     except Exception:
-        # writer.close() has already run; cleanup must not mask the race result.
+        # Cleanup must not mask the race result or skip another owned writer.
         pass
+
+
+async def _wait_closed_quietly(connection):
+    try:
+        await connection.writer.wait_closed()
+    except Exception:
+        pass
+
+
+async def _close_quietly(connection):
+    _close_writer_quietly(connection)
+    await _wait_closed_quietly(connection)
+
+
+async def _await_owned_cleanup(cleanup):
+    """Retain the cleanup owner until it finishes, even after repeated cancel."""
+    task = asyncio.ensure_future(cleanup)
+    cancellation = None
+    while True:
+        try:
+            result = await asyncio.shield(task)
+            break
+        except asyncio.CancelledError as error:
+            if task.cancelled():
+                raise
+            cancellation = error
+    if cancellation is not None:
+        raise cancellation
+    return result
 
 
 class _RaceSession:
@@ -154,6 +183,7 @@ class _RaceSession:
         self._cancelled_candidates = set()
         self._connections = {}
         self._resolver_started = False
+        self._shutdown_task = None
 
     def _track(self, coroutine, kind, candidate_id="", at_ms=None):
         operation = _Operation(
@@ -341,21 +371,35 @@ class _RaceSession:
         return connection
 
     async def shutdown(self):
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(self._shutdown_owned())
+        await _await_owned_cleanup(self._shutdown_task)
+
+    async def _shutdown_owned(self):
         tasks = tuple(self._pending)
         for task in tasks:
-            task.cancel()
+            # COMMAND_CANCEL may already have put a losing dialer in its
+            # finally block. A second cancel would interrupt that cleanup.
+            if not task.done() and not task.cancelling():
+                task.cancel()
+        connections = list(self._connections.values())
+        # Release every known transport before any async dialer/close cleanup.
+        for connection in connections:
+            _close_writer_quietly(connection)
+        self._connections.clear()
         if tasks:
             outcomes = await asyncio.gather(*tasks, return_exceptions=True)
             for outcome in outcomes:
                 if isinstance(outcome, _TaskOutcome) and outcome.connection is not None:
-                    await _close_quietly(outcome.connection)
+                    _close_writer_quietly(outcome.connection)
+                    connections.append(outcome.connection)
         self._pending.clear()
         self._candidate_tasks.clear()
         self._wake_tasks.clear()
-        connections = tuple(self._connections.values())
-        self._connections.clear()
-        for connection in connections:
-            await _close_quietly(connection)
+        await asyncio.gather(
+            *(_wait_closed_quietly(connection) for connection in connections),
+            return_exceptions=True,
+        )
 
 
 def _validate_target(host, port):
@@ -414,6 +458,13 @@ async def open_connection_race(
             connection = session.take_connection(
                 transition.state.winner_candidate_id
             )
-        return ConnectionRaceIoResult(transition, connection)
     finally:
-        await session.shutdown()
+        try:
+            await session.shutdown()
+        except BaseException:
+            # The winner is only transferred by the return below. Cancellation
+            # during loser cleanup still leaves this frame responsible for it.
+            if connection is not None:
+                await _await_owned_cleanup(_close_quietly(connection))
+            raise
+    return ConnectionRaceIoResult(transition, connection)

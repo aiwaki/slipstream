@@ -360,7 +360,7 @@
           "key": {
             "service_group": "openai",
             "route_class": "geo_exit",
-            "backend_id": "xbox_dns"
+            "backend_id": "fixture_backend"
           },
           "resolver": {
             "outcome": "success",
@@ -412,7 +412,7 @@
           "key": {
             "service_group": "openai",
             "route_class": "geo_exit",
-            "backend_id": "xbox_dns"
+            "backend_id": "fixture_backend"
           },
           "state": {
             "phase": "closed",

@@ -167,30 +167,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/candidate-app"
           ditto -x -k dist-candidate/Slipstream-macos-arm64.zip "$RUNNER_TEMP/candidate-app"
           app="$RUNNER_TEMP/candidate-app/Slipstream.app"
-          test -d "$app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
-            = slipstream
-          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
-          helper="$app/Contents/MacOS/slipstream-browser-probe"
-          test -x "$helper"
-          /usr/bin/lipo "$helper" -verify_arch arm64
-          /usr/bin/codesign --verify --strict "$helper"
-          if /usr/bin/otool -L "$helper" | /usr/bin/grep -E \
-            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-            echo "browser-probe helper links a GUI framework" >&2
-            exit 1
-          fi
-          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
-          test -x "$watchdog"
-          /usr/bin/lipo "$watchdog" -verify_arch arm64
-          /usr/bin/codesign --verify --strict "$watchdog"
-          if /usr/bin/otool -L "$watchdog" | /usr/bin/grep -E \
-            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
-            echo "update watchdog links a GUI framework" >&2
-            exit 1
-          fi
-          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
-          /usr/bin/codesign --verify --deep --strict "$app"
+          python3 scripts/verify_macos_app_bundle.py --app-bundle "$app"
           version="$(tr -d '[:space:]' < VERSION)"
           source_tree="$(git rev-parse "$GITHUB_SHA^{tree}")"
           source_archive_sha256="$(git archive --format=tar "$GITHUB_SHA" | shasum -a 256 | awk '{print $1}')"

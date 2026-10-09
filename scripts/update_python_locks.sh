@@ -3,6 +3,8 @@ set -euo pipefail
 
 readonly root="$(cd "$(dirname "$0")/.." && pwd)"
 readonly pip_tools_version="7.5.3"
+# pip-tools uses pip's private resolver API; keep a supported pair.
+readonly pip_version="26.0.1"
 python="${PYTHON:-python3}"
 
 python_minor="$($python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
@@ -19,6 +21,7 @@ trap 'rm -rf "$lock_env"' EXIT
 "$lock_env/venv/bin/python" -m pip install \
   --quiet \
   --disable-pip-version-check \
+  "pip==$pip_version" \
   "pip-tools==$pip_tools_version"
 
 cd "$root"

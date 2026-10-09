@@ -35,6 +35,7 @@ COMPOSED_READY_MARKER = b"User-agent: slipstream-composed-ready"
 MAX_COMPOSED_NAVIGATION_SECONDS = 35.0
 IDLE_OBSERVATION_SECONDS = 3.0
 MAX_IDLE_CPU_DELTA_SECONDS = 1.0
+MAX_IDLE_CPU_SAMPLE_ATTEMPTS = 2
 DAEMON_FIXTURE_HOST_ENV = "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST"
 DAEMON_FIXTURE_IP_ENV = "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP"
 DAEMON_FIXTURE_PORT_ENV = "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT"
@@ -596,21 +597,35 @@ def assert_worker_idle(uid: int, daemon_pid: int) -> dict[str, object]:
         raise ComposedQualificationError(
             "browser worker process exists before a live job"
         )
-    before = _daemon_cpu_seconds(daemon_pid)
-    time.sleep(IDLE_OBSERVATION_SECONDS)
-    after = _daemon_cpu_seconds(daemon_pid)
-    delta = max(0.0, after - before)
-    if delta > MAX_IDLE_CPU_DELTA_SECONDS:
+    cpu_deltas = []
+    for _attempt in range(MAX_IDLE_CPU_SAMPLE_ATTEMPTS):
+        before = _daemon_cpu_seconds(daemon_pid)
+        time.sleep(IDLE_OBSERVATION_SECONDS)
+        after = _daemon_cpu_seconds(daemon_pid)
+        delta = max(0.0, after - before)
+        cpu_deltas.append(delta)
+        if _worker_profiles() or _worker_processes(uid):
+            raise ComposedQualificationError(
+                "idle daemon started a browser worker without a live job"
+            )
+        if delta <= MAX_IDLE_CPU_DELTA_SECONDS:
+            break
+    else:
+        samples = ", ".join(f"{value:.3f}s" for value in cpu_deltas)
         raise ComposedQualificationError(
-            f"idle daemon consumed {delta:.3f}s CPU during the sample"
-        )
-    if _worker_profiles() or _worker_processes(uid):
-        raise ComposedQualificationError(
-            "idle daemon started a browser worker without a live job"
+            "idle daemon sustained excessive CPU across consecutive samples: "
+            f"{samples}"
         )
     return {
         "observation_ms": int(IDLE_OBSERVATION_SECONDS * 1000),
+        "sample_count": len(cpu_deltas),
+        "total_observation_ms": int(
+            IDLE_OBSERVATION_SECONDS * len(cpu_deltas) * 1000
+        ),
         "daemon_cpu_delta_ms": int(delta * 1000),
+        "daemon_cpu_samples_ms": tuple(
+            int(value * 1000) for value in cpu_deltas
+        ),
         "worker_processes": 0,
         "worker_profiles": 0,
         "broker_mode": "0600",

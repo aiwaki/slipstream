@@ -21,7 +21,7 @@ auto-updates the whole bundle.
   `.github/workflows/build-geph.yml`). Empty in the repo.
 - `src-tauri/icons/` — app `.icns` + menu-bar mark PNGs (run `./make-icons.sh`).
 
-## Build (needs Rust, Node, Python 3, and Xcode command-line tools)
+## Build (needs Rust, Node, Python 3.13, and Xcode command-line tools)
 
 ```bash
 cd app-tauri
@@ -31,8 +31,15 @@ npm run build:local             # -> src-tauri/target/release/bundle/{macos,dmg}
 ```
 
 `npm run tauri dev` for a live tray during development. `npm run build:local`
-uses `src-tauri/tauri.local.conf.json` and skips updater artifact signing.
-`npm run build` is the release path and requires `TAURI_SIGNING_PRIVATE_KEY`.
+rebuilds and stages the frozen daemon, uses
+`src-tauri/tauri.local.conf.json`, skips updater artifact signing, and verifies
+the complete fresh/staged/bundled daemon chain plus the final app bundle. Run
+`npm run verify:local-install` after installation to compare the exact built
+and installed app trees, validate the unprivileged install evidence, and bind
+the attested daemon PID to a fresh StatusV2 heartbeat and the live launchd
+service. If `python3.13` is not on `PATH`, set `SLIPSTREAM_PYTHON_313` to its
+exact executable path. `npm run build` is the release path and requires
+`TAURI_SIGNING_PRIVATE_KEY`.
 
 ## Auto-updater keys
 

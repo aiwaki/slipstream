@@ -71,6 +71,73 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _verify_runtime_permissions(output: Path) -> None:
+    # Installation changes the artifact owner to root, while the browser
+    # observer runs as the console user. Build-user os.access() is insufficient.
+    for path in (output, *sorted(output.rglob("*"))):
+        metadata = path.lstat()
+        mode = stat.S_IMODE(metadata.st_mode)
+        relative = path.relative_to(output).as_posix()
+        if mode & 0o7022:
+            raise ValueError(f"headless-shell prerequisite has unsafe permissions: {relative}")
+        if stat.S_ISDIR(metadata.st_mode):
+            required = 0o555
+        elif stat.S_ISREG(metadata.st_mode):
+            required = 0o444
+            if relative == "chrome-headless-shell" or mode & 0o111:
+                required |= 0o111
+        else:
+            raise ValueError(f"headless-shell prerequisite has unsupported type: {relative}")
+        if mode & required != required:
+            raise ValueError(
+                "headless-shell prerequisite is not accessible after root ownership: "
+                f"{relative}"
+            )
+
+
+def verify_existing(output: Path) -> dict:
+    """Read-only prerequisite check; never fetch, repair or execute the runtime."""
+    source = load_source()
+    if output.is_symlink() or not output.is_dir():
+        raise ValueError("headless-shell runtime directory is missing or symlinked")
+    for name in sorted(REQUIRED | {"manifest.json"}):
+        path = output / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"headless-shell prerequisite is not a regular file: {name}")
+    executable = output / "chrome-headless-shell"
+    if not os.access(executable, os.X_OK):
+        raise ValueError("headless-shell prerequisite is not executable")
+    _verify_runtime_permissions(output)
+    manifest_path = output / "manifest.json"
+    if manifest_path.stat().st_size > 16 * 1024:
+        raise ValueError("headless-shell manifest is oversized")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("headless-shell manifest is not an object")
+    expected = {
+        "schema_version": 1,
+        "component": source["component"],
+        "version": source["version"],
+        "platform": source["platform"],
+        "archive_url": source["archive"]["url"],
+        "archive_length": source["archive"]["length"],
+        "archive_sha256": source["archive"]["sha256"],
+        "license": source["license_path"],
+    }
+    for key, value in expected.items():
+        if type(manifest.get(key)) is not type(value) or manifest[key] != value:
+            raise ValueError(f"headless-shell manifest does not match pinned source: {key}")
+    digest = manifest.get("executable_sha256")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or _hash(executable) != digest
+    ):
+        raise ValueError("headless-shell source executable SHA-256 mismatch")
+    return manifest
+
+
 def materialize(output: Path, archive_override: Path | None = None) -> dict:
     source = load_source()
     archive_contract = source["archive"]
@@ -87,7 +154,19 @@ def materialize(output: Path, archive_override: Path | None = None) -> dict:
                         context=_download_tls_context(),
                     ) as response:
                         with archive.open("wb") as destination:
-                            shutil.copyfileobj(response, destination)
+                            remaining = archive_contract["length"]
+                            while True:
+                                # Bound transfer by the reviewed source, not a
+                                # remote Content-Length or eventual EOF. Read
+                                # one sentinel byte to detect excess, but never
+                                # write oversized content to the staging disk.
+                                block = response.read(min(64 * 1024, remaining + 1))
+                                if not block:
+                                    break
+                                if len(block) > remaining:
+                                    raise ValueError("headless-shell archive length mismatch")
+                                destination.write(block)
+                                remaining -= len(block)
                     last_error = None
                     break
                 except (OSError, urllib.error.URLError) as exc:
@@ -103,6 +182,7 @@ def materialize(output: Path, archive_override: Path | None = None) -> dict:
             raise ValueError("headless-shell archive SHA-256 mismatch")
         stage = temporary_path / "stage"
         stage.mkdir()
+        executable_members = {PurePosixPath("chrome-headless-shell")}
         with zipfile.ZipFile(archive) as bundle:
             names = bundle.namelist()
             roots = {PurePosixPath(name).parts[0] for name in names if name}
@@ -112,13 +192,26 @@ def materialize(output: Path, archive_override: Path | None = None) -> dict:
                 relative = PurePosixPath(info.filename)
                 if relative.is_absolute() or ".." in relative.parts:
                     raise ValueError("unsafe path in headless-shell archive")
+                if (
+                    not info.is_dir()
+                    and info.create_system == 3
+                    and (info.external_attr >> 16) & 0o111
+                ):
+                    executable_members.add(PurePosixPath(*relative.parts[1:]))
             bundle.extractall(stage)
         extracted = stage / "chrome-headless-shell-mac-arm64"
         missing = sorted(name for name in REQUIRED if not (extracted / name).is_file())
         if missing:
             raise ValueError("headless-shell archive is incomplete: " + ", ".join(missing))
-        executable = extracted / "chrome-headless-shell"
-        executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+        # ZipFile extraction drops Unix modes and inherits the caller's umask.
+        # Recreate a read-only-to-other-users resource tree whose executables
+        # remain runnable after the installer assigns root ownership. Honor
+        # reviewed archive executable entries, including any nested helpers,
+        # without carrying write permissions or special bits from the archive.
+        for path in (extracted, *sorted(extracted.rglob("*"))):
+            relative = PurePosixPath(path.relative_to(extracted).as_posix())
+            mode = 0o755 if path.is_dir() or relative in executable_members else 0o644
+            path.chmod(mode)
         parent = output.parent
         parent.mkdir(parents=True, exist_ok=True)
         staged_output = parent / f".{output.name}.staging-{os.getpid()}"
@@ -136,9 +229,11 @@ def materialize(output: Path, archive_override: Path | None = None) -> dict:
             "executable_sha256": _hash(staged_output / "chrome-headless-shell"),
             "license": source["license_path"],
         }
-        (staged_output / "manifest.json").write_text(
+        manifest_path = staged_output / "manifest.json"
+        manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        manifest_path.chmod(0o644)
         if output.exists():
             shutil.rmtree(output)
         staged_output.rename(output)
@@ -149,7 +244,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args(argv)
+    if args.verify_only:
+        if args.archive is not None:
+            parser.error("--verify-only cannot be combined with --archive")
+        try:
+            manifest = verify_existing(args.output)
+        except (OSError, ValueError) as error:
+            print(f"Chromium prerequisite verification failed: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(manifest, sort_keys=True))
+        return 0
     print(json.dumps(materialize(args.output, args.archive), sort_keys=True))
     return 0
 
