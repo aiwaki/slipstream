@@ -1,3 +1,41 @@
+# Geph 0.4.3 remediation candidate — 2026-10-09
+
+Physical worktree: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`.
+Branch `codex/geph-043-remediation`, base PR383 head
+`dda910710f1e85df82ca1b1acbd34f95ac5c064a`. Prepared for a fast-forward update
+of the existing PR383; no vendor release, installation, account qualification or
+policy exception change.
+
+- SOURCE retains all 11 r5 literal edits with new sequential whole-file hashes for
+  the canonical 0.4.3 archive. Two additional edits pin SQLx exactly 0.8.6 with
+  `default-features=false`, SQLite/runtime-tokio only, and add database regression
+  tests. Canonical extract reproduces session/database/manifest/lock exactly.
+- Source builder additionally admits only root `Cargo.toml` as a hash-bound edit;
+  `Cargo.lock`, build.rs, nested manifests and .cargo paths remain rejected.
+  CI classifier/workflows are unchanged; PR source bootstrap keeps product/audits,
+  push never gets bootstrap. Source transition 0.3.9-r5→0.4.3-r1 PASS, policy unchanged.
+- Offline qualification: exact session module 9 tests and database module 2 tests
+  PASS under sandbox deny network + deny file writes outside evidence directory.
+  Separate upstream all-lib 36 PASS was NOT offline: test_clib contacted public
+  brokers with its hard-coded empty Secret, and resolve_baidu_via_alidns contacted
+  public DNS. No user's credentials were used; possible default empty-Secret cache
+  was observed read-only and preserved. Do not repeat those external smoke tests.
+- Python source/SBOM guards 24 PASS+19subtests; CI/build-contract 62 PASS+27subtests.
+  Arm64/x86_64 locked metadata: 421/422 production dependencies, union 422 plus root.
+  MySQL/PostgreSQL SQLx and rsa 0.9.10 absent; SQLx 0.8.6 SQLite-only on both targets.
+- Fresh pinned OSV 2.3.8 scan 2026-10-09: 423 packages, 3 advisories, 2 BLOCKING
+  (rsa 0.8.2 CVE-2023-49092 and CVE-2026-21895; expired prior exceptions), 1 informational
+  (bincode 1.3.3 unmaintained). No exceptions extended. RSA remains a separate task.
+- Evidence in `output/geph-043-remediation/`: candidate-receipt.json binds this
+  dirty candidate's hashes; metadata/inventory, SPDX, fresh audit, guarded extract,
+  test logs, offline sandbox and patch. SBOM base commit is not a release attestation.
+- Parent review verified all 11 prior literal replacements are unchanged and the
+  new manifest path remains exact and hash-bound, with post-edit identity checking.
+- NEXT exact source CI and remaining RSA remediation. No release/install while RSA
+  dependency blockers and product qualification remain.
+
+## Historical checkpoints below (not the current worktree identity)
+
 # Geph r5 source continuation — 2026-09-30
 
 This vendor branch is codex/geph-stream-error-isolation, PR382, based on

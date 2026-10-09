@@ -307,3 +307,28 @@ With the correction, both EOF and malformed-response cases must return an error,
 drain pending accounting, leave early_dead unset, and transfer bytes on a
 pre-existing stream. This fixes a causal mechanism, not proof that every observed
 application disconnect has this cause.
+
+
+## 2026-10-09: Geph 0.4.3 reviewed source candidate
+
+Retain every r5 session-isolation/reserve edit when updating the canonical Geph
+crate: automation discovery alone has no local source edits. Each transferred
+replacement remains literal and bound to sequential complete-file hashes. Pin
+SQLx to exactly 0.8.6 with default features disabled and only SQLite/runtime-tokio;
+Geph's existing cache schema and wake-on-write behavior are qualified separately.
+
+The source-edit contract may additionally name exactly root `Cargo.toml`, with the
+same before/after hashes and single-match rule as Rust source. Revalidate the crate
+name/version after applying edits so dependency repairs cannot rewrite identity.
+This does not permit
+Cargo.lock, build scripts, nested manifests or arbitrary configuration files. The
+existing source-only CI path, both dependency audits and immutable release gates
+are unchanged. RSA findings remain blocking; version upgrades do not extend their
+expired exceptions.
+
+`cargo --offline` limits Cargo downloads, not runtime networking. Upstream
+`tests::test_clib` and `china::tests::resolve_baidu_via_alidns` are external smoke
+tests. Workstation source qualification must use inspected session/database test
+filters and an explicit network-denying sandbox; it must not invoke either test
+or read/change user account state. Universal metadata is graph evidence, not an
+x86_64 execution test or installed-product qualification.

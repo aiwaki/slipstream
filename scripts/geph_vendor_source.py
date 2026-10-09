@@ -110,7 +110,7 @@ def load_source_contract(path: Path) -> dict:
         if not isinstance(edit, dict):
             raise ValueError("invalid Geph source edit")
         _require_exact_keys(edit, {"path", "before_sha256", "after_sha256", "before", "after"}, "Geph source edit")
-        if not isinstance(edit["path"], str) or not re.fullmatch(r"src/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\.rs", edit["path"]):
+        if not isinstance(edit["path"], str) or not re.fullmatch(r"(?:Cargo\.toml|src/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\.rs)", edit["path"]):
             raise ValueError("invalid Geph source edit path")
         for field in ("before_sha256", "after_sha256"):
             if not isinstance(edit[field], str) or not SHA256_PATTERN.fullmatch(edit[field]):
@@ -567,6 +567,8 @@ def materialize_source(
     _verify_manifest(root, summary["version"])
     shutil.copyfile(cargo_lock_path, root / "Cargo.lock")
     apply_source_edits(root, load_source_contract(source_path).get("source_edits", []))
+    # Dependency-only manifest edits cannot rewrite the attested crate identity.
+    _verify_manifest(root, summary["version"])
     return root
 
 
