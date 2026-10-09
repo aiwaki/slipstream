@@ -10,70 +10,78 @@ file.
 
 ## Current Checkpoint
 
-2026-10-09 continuation: active-worker uninstall race reproduced and corrected:
-- Live PR376 remains OPEN DRAFT; source ecf344aa is pushed on the physical AUD-17
-  checkout, base7e196a71. Earlier docs-only ef369e7b run37952956411 FAILED the heavy packaged
-  lifecycle gate at active-worker-uninstall with exit1/ipc_unavailable. The same
-  runtime passed run37950115727; that earlier pass does not settle this race.
-  Failed mergef3571eae report retained in output/continuation-20261009/
-  docs-head-lifecycle-evidence/packaged-lifecycle.log. Dependency gate stays RED.
-- A closed broker can leave a validated socket inode. Rust emits ipc_unavailable
-  before Chrome starts or after submit_before_cleanup has completed. Python stale
-  cleanup wrongly rejected that exact exit1 result. Accept it with the existing
-  PID/UID/executable/stderr/absence checks; signals, ownership and resource-cleanup
-  errors remain failures. Regression1 RED/11 PASS before fix; scoped Python82 and
-  uninstall15 PASS, Rust browser-probe43 PASS including a real refused Unix socket
-  and cleanup-error precedence. Logs worker-disconnect-*.log in the same directory.
-- Independent review found no additional issue in the cleanup patch. Canonical
-  build77973 terminal0 PASS, fresh/staged/bundled daemon and signature verified;
-  installed not_run. Exact ecf344aa functional CI37967269003 SUCCESS: active-worker
-  uninstall, browser and update/error recovery gates passed; Windows37967269088
-  SUCCESS on x64/ARM64. Dependency37967269077 remains FAIL. Canonical identity is in
-  worker-disconnect-canonical-verification.json; retained CI reports and logs are
-  in worker-disconnect-evidence/. Legacy update cases reproduce known old defects,
-  not successful legacy updates. The seven current/migration cases passed.
-- Geph0.4.3 forward-port/SQLx SQLite-only work is isolated in managed worktree
+2026-10-10 continuation: source DNS/TG update and Chromium155 qualified in CI;
+production dependency gate and workstation qualification remain open.
+- Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
+  runtime baseline32d21973, base7e196a71. Preserve the user's AGENTS.md edits
+  and all private output/backups. No workstation installation or learning reset.
+- Source5c7d1e4b retires app-owned Xbox DNS and imports tg-ws-proxy1.11.1 with
+  retained local fixes. Daemon2186+8subtests, Telegram62 and real TLS/DNS16 PASS;
+  source/ecf344aa then fixes the reproduced active-worker uninstall race. The
+  validated closed IPC socket accepts only exact exit1/ipc_unavailable after
+  cleanup; ownership/signal/resource errors still fail. Focused82+15Python and
+  43Rust checks PASS. Earlier green run37950115727 did not settle the later race.
+- Canonical Chromium155 build60224 terminal0 PASS; fresh/staged/bundled daemon,
+  exact archive/runtime identity and signature verified; installed not_run.
+  Exact32d21973 functional CI37972704681 SUCCESS (18 pass/4 release-only skips),
+  Windows37972704719 SUCCESS; dependency37972704688 FAIL. Tested merge50cc4a35
+  parents bind base7e196a71 and head32d21973. Retained10 small artifact ZIPs match
+  GitHub digests;11 result JSONs agree with job logs. Evidence/summary.json under
+  output/continuation-20261009/chromium155-evidence/.
+- Packaged E2E:3 current/migration activations and4 exact rollbacks;2 legacy
+  controls intentionally reproduce old defects, not successful updates. Active
+  worker uninstall proves owned process/profile/service absence and preserves
+  external PF sentinel/global PF. Composed original→worker→original navigation
+  completes CSS/JS/image/ready without extension/manual reload. Hidden155 worker
+  has sandbox enabled, no visible LaunchServices/CG windows or frontmost change.
+  These disposable-CI tests do not prove installed Chrome/Safari, real Telegram,
+  sustained Discord/YouTube, sleep/wake or mixed-load behavior on this Mac.
+- Geph0.4.3 candidate remains isolated in managed worktree
   /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905,
-  branch codex/geph-043-remediation; source07a3d871 plus docs-only d2856d8a are pushed
-  to existing PR383 (automation/geph-0.4.3). All11 r5 literal changes preserved; builder accepts
-  only root Cargo.toml additionally and rechecks crate identity after edits.
-  Functional CI37967349938 SUCCESS (5 pass/8 source-only skips); dependency37967349940
-  FAIL. Local real session9/SQLite2 pass under OS network/write restrictions; fresh
-  423-package audit retains2 RSA blockers/1 informational. No exception extended.
-  Earlier upstream all-lib test was not offline: it touched an existing shared
-  empty-Secret cache; prior cached-token use cannot be excluded. Slipstream secret
-  and settings are not overwritten by that call path. Metadata-only follow-up
-  retained the cache; the later sandboxed tests are the offline evidence.
-- RSA removal remains output-only, not a production fix: legacy/wire6 and AWS-LC
-  prototype9 checks pass. Independent review requires RNG fail-stop containment,
-  production wire/key/token ownership, ABI and crypto review before integration.
-  See output/continuation-20261009/rsa-{migration,composition-review}.md.
-- Standalone Chromium advisory evaluator and offline CI contracts added; current
-  dependency gate and exception policy unchanged. Evaluator27 PASS
-  +38subtests; final focused CI/build/evaluator93 PASS+70subtests. Independent review
-  covered origin/immutable inputs/ranges/freshness. Full403375-record candidate
-  evaluation selects7216:5775 not_affected,1441 unknown,0 affected; latest247 CVEs
-  present, overall FAIL. Unknowns cannot authorize installation. See RELEASES.md
-  and output/dependency-remediation-20261009/chromium-adapter-contract.md.
-  These tooling/docs-only edits reuse the exact ecf344aa runtime/build/E2E evidence;
-  no unchanged broad suite or app build was rerun.
-- Follow-up candidate: bundled headless pin155.0.8059.39 replaces151 in source,
-  Rust identity and materializer assertions. Exact retained archive materialized;
-  version, manifest and license payloads verified. Python18 PASS+31subtests and
-  Rust browser-probe43 PASS. Prior runtime saved under output/dependency-remediation-
-  20261009/chromium-previous-runtime-151. Canonical local build60224 terminal0 PASS;
-  fresh/staged/bundled daemon and signature verified, installed not_run. See
-  output/continuation-20261009/chromium155-canonical-verification.json. Packaged
-  browser/composed lifecycle on155 still requires exact-source CI; the local smoke
-  harness is disposable-CI-only and was not run by impersonating CI on this Mac.
-  GUI Chrome pins and audit policy unchanged; 1441 unknown advisories still block.
-  RSA compatibility and NVD applicability remain isolated output-only experiments.
-- Correct-project graph index is unavailable (project not found); bounded direct
-  searches used. No workstation installation, external settings or learning reset.
-- NEXT qualify the new Chromium155 bundle, then finish dependency remediation
-  (reviewed RSA backend and complete Chromium advisory/component coverage) before
-  release/install and physical-browser/Telegram qualification. Source DNS/TG update and lifecycle fix are verified but not installed.
-  Preserve user AGENTS.md, all backups/output and the unconsumed transaction rule.
+  branch codex/geph-043-remediation; source07a3d871/docsd2856d8a on PR383
+  (automation/geph-0.4.3). All11 local patches retained, SQLite-only SQLx0.8.6.
+  Functional CI37967349938 SUCCESS; dependency37967349940 FAIL with2 RSA blockers
+  and1 informational finding across423 packages. No exception extended.
+  Prior upstream all-lib run was not network-isolated and touched an existing
+  empty-Secret shared cache; prior cached-token use cannot be excluded. Cache
+  preserved; no account/all-lib runs repeated. Later9 session/2SQLite tests use
+  OS network denial and evidence-only writes. Do not call Cargo offline isolation.
+- Output-only RSA prototype:18 PASS (9 compatibility),36 actual-Mizaru cache tuples,
+  6 exact OpenSSL signature matches, independent9 PASS. Review fixed same-key
+  SPKI/PKCS1 binding and strict algorithm-parameter admission. Async byte-owned
+  pending state passes6 tests and independent6 with no native handles across
+  await/unsafe Send. Actual client adapter/callsite/SQLite/ABI integration remains
+  open. See output/continuation-20261009/rsa-migration/{compatibility-report.md,
+  async-integration-plan.md,async-independent-review.md}.
+- Actual AWS-LC entropy EIO aborts the process. Eight child fixtures pass; a
+  disposable native launchd policy fixture observes successor readiness43.630s
+  after bootstrap, not a10s guarantee. Earlier
+  40s deadline failed; both unique services and all observed PIDs are absent.
+  This does not prove Geph SOCKS/traffic/cache recovery or persistent-failure
+  containment. No active app job, account or network settings were changed.
+- Standalone Chromium evaluator is investigation tooling only. Initial official
+  snapshot selected7216/403375 records,1441unknown/0affected,247 release CVEs
+  present, overallFAIL. Subsequent local grammar replay:5764not_affected,
+  1452unknown,0affected;378 unknown→not_affected and389 reverse transitions.
+  Its inputs are unchanged/hash-bound but local provenance is unverified. A
+  stricter numeric guard exposed V8-name false unknowns and missed rNNN revisions.
+  Correction:8RED→33tests PASS, independent33+16cases PASS. Full immutable replay
+  now6102not_affected/1114unknown/0affected,349 unknown→not_affected and11 reverse;
+  all7216 record hashes and input hashes match. OverallFAIL/local-unverified;
+  see chromium-v8-full-{replay,delta}.json in the same evidence directory.
+  No release acceptance, exception or source-authority policy was relaxed.
+- Exact official/binary inventory maps CfT155 to Chromium3ff7ac5a and
+  V8 15.5.35.20; FFmpeg is a pinned fork, not an inferred8.0 CPE. NVD8-record
+  prototype and ADP252 classification clear0 advisories; conflicting/malformed
+  claims and defaultStatus unknown remain unknown. Evidence is under
+  output/dependency-remediation-20261009/. No blind subtraction of cohorts.
+- Correct-project graph unavailable (project not found); bounded direct searches
+  used. Reuse exact32d21973 runtime/build/E2E baseline for tooling/docs-only edits.
+- NEXT production RSA and complete Chromium advisory/component coverage before
+  release/install. Evaluator/docs-only correction accompanies this checkpoint;
+  run canonical
+  installed verification and physical-browser/Telegram checks only after gates
+  allow installation; preserve the unconsumed transaction rule.
 
 2026-10-09 DNS retirement / Telegram update (candidate source, not installed):
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 remains OPEN

@@ -117,6 +117,99 @@ class ChromiumAuditTests(unittest.TestCase):
                 cna["affected"][0]["versions"] = [{"status": "affected", "version": "n/a"}]
                 self.assertEqual(audit.evaluate_record(r, FIXED), "unknown")
 
+    def test_legacy_fault_clauses_preserve_explicit_chrome_boundaries(self):
+        # Description/affected-field projections of the retained official CVEs;
+        # no ID allowlist and no component or platform exemption.
+        cases = [
+            ("CVE-2015-8480", "47.0.2526.73", "The VideoFramePool::PoolImpl::CreateFrame function in media/base/video_frame_pool.cc in Google Chrome before 47.0.2526.73 does not initialize memory for a video-frame data structure, which might allow remote attackers to cause a denial of service (out-of-bounds memory access) or possibly have unspecified other impact by leveraging improper interaction with the vp3_h_loop_filter_c function in libavcodec/vp3dsp.c in FFmpeg.", "n/a"),
+            ("CVE-2015-1271", "44.0.2403.89", "PDFium, as used in Google Chrome before 44.0.2403.89, does not properly handle certain out-of-memory conditions, which allows remote attackers to cause a denial of service (heap-based buffer overflow) or possibly have unspecified other impact via a crafted PDF document that triggers a large memory allocation.", "n/a"),
+            ("CVE-2013-2848", "27.0.1453.93", "The XSS Auditor in Google Chrome before 27.0.1453.93 might allow remote attackers to obtain sensitive information via unspecified vectors.", "n/a"),
+            ("CVE-2017-5025", "56.0.2924.76", "FFmpeg in Google Chrome prior to 56.0.2924.76 for Linux, Windows and Mac, failed to perform proper bounds checking, which allowed a remote attacker to potentially exploit heap corruption via a crafted video file.", "Google Chrome prior to 56.0.2924.76 for Linux, Windows and Mac"),
+            ("CVE-2016-1664", "50.0.2661.94", "The HistoryController::UpdateForCommit function in content/renderer/history_controller.cc in Google Chrome before 50.0.2661.94 mishandles the interaction between subframe forward navigations and other forward navigations, which allows remote attackers to spoof the address bar via a crafted web site.", "n/a"),
+        ]
+        for ident, boundary, description, legacy in cases:
+            with self.subTest(cve=ident):
+                r = record(ident); cna = r["containers"]["cna"]
+                cna["descriptions"][0]["value"] = description
+                cna["affected"] = [{"product": legacy, "vendor": "n/a", "versions": [{"status": "affected", "version": legacy}]}]
+                self.assertEqual(audit.evaluate_record_detail(r, "0.0.0.0"), ("affected", "explicit-fixed-boundary:" + boundary))
+                self.assertEqual(audit.evaluate_record(r, boundary), "not_affected")
+                self.assertEqual(audit.evaluate_record(r, FIXED), "not_affected")
+
+    def test_legacy_clause_extensions_reject_qualifications_and_extra_versions(self):
+        for suffix in ("; Chrome 156 remains affected.", " in subsequent releases.",
+                       " and all later Chrome builds.", " in future milestones.",
+                       " in FFmpeg 2.4.6.", " except on Mac.", " in version 156.",
+                       " on Mac earlier than 156.", " and M156 on Mac.",
+                       " and 156 has the same defect.", " in Chrome 155.",
+                       " from M156 onward.", "; the same defect persists starting with 156.",
+                       ", including M156.", ", with affected builds extending beyond M156.",
+                       " using 16 byte packets."):
+            for clause in ("allowed execution", "does not properly check bounds"):
+                with self.subTest(suffix=suffix, clause=clause):
+                    r = record(); cna = r["containers"]["cna"]
+                    cna["descriptions"][0]["value"] = "Google Chrome before 155 " + clause + suffix
+                    cna["affected"][0]["versions"] = [{"status": "affected", "version": "n/a"}]
+                    self.assertEqual(audit.evaluate_record(r, FIXED), "unknown")
+        for malformed in ("Google Chrome before 155, , allowed execution.",
+                          "Google Chrome before 155, , does not properly check bounds.",
+                          "Google Chrome before 155 does not properly xyzzy.",
+                          "Google Chrome before 155, when optional mode is used, does not properly check bounds.",
+                          "Google Chrome before 155 and other products, does not properly check bounds."):
+            with self.subTest(malformed=malformed):
+                r = record(); r["containers"]["cna"]["descriptions"][0]["value"] = malformed
+                r["containers"]["cna"]["affected"][0]["versions"] = [{"status": "affected", "version": "n/a"}]
+                self.assertEqual(audit.evaluate_record(r, FIXED), "unknown")
+
+    def test_cve_reference_digits_are_not_an_extra_version(self):
+        r = record(); cna = r["containers"]["cna"]
+        cna["descriptions"][0]["value"] = f"Google Chrome before {FIXED} does not properly check bounds, a different vulnerability than CVE-2015-1231."
+        self.assertEqual(audit.evaluate_record(r, FIXED), "not_affected")
+
+    def test_v8_engine_identity_is_not_an_extra_version(self):
+        for prefix in ("Use after free in V8 in ", "Google V8, as used in ",
+                       "V8 API in ", "Type confusion in V8 Turbofan in ",
+                       "Use after free in V8 Internationalization in ",
+                       "V8 JavaScript engine in "):
+            with self.subTest(prefix=prefix):
+                r = record(); cna = r["containers"]["cna"]
+                cna["descriptions"][0]["value"] = prefix + f"Google Chrome before {FIXED} allowed execution."
+                self.assertEqual(audit.evaluate_record(r, "154.0.0.0"), "affected")
+                self.assertEqual(audit.evaluate_record(r, FIXED), "not_affected")
+
+    def test_v8_context_does_not_hide_versions_or_source_revisions(self):
+        for description in (
+                "Use after free in version V8 in Google Chrome before 155 allowed execution.",
+                "Use after free from v8 onward in Google Chrome before 155 allowed execution.",
+                "Use after free in V8 in Google Chrome before 155 allowed execution from v8 onward.",
+                "Use after free in V8 in Google Chrome before 155 allowed execution, including V8.",
+                "Google V8, as used in Google Chrome before 155 allowed execution in V8 version 15.5.35.21.",
+                "V8 API in Google Chrome before 155 allowed execution until r1697596.",
+                "Google V8 before r3560, as used in Google Chrome before 155 allowed execution.",
+                "Use after free in V8.1 in Google Chrome before 155 allowed execution.",
+                "Google Chrome before 155 allowed execution after WebKit r53607.",
+                "Google Chrome before 155 allowed execution through R59950."):
+            with self.subTest(description=description):
+                r = record(); cna = r["containers"]["cna"]
+                cna["descriptions"][0]["value"] = description
+                cna["affected"][0]["versions"] = [{"status": "affected", "version": "n/a"}]
+                self.assertEqual(audit.evaluate_record(r, FIXED), "unknown")
+
+    def test_legacy_clauses_cannot_skip_product_range_or_adp_guards(self):
+        for mutation in (lambda c: c["affected"][0].update(product="FFmpeg"),
+                         lambda c: c["affected"][0].update(defaultStatus="affected"),
+                         lambda c: c["affected"][0]["versions"][0].update(lessThan="156.0.0.0"),
+                         lambda c: c["affected"][0]["versions"][0].update(status="unaffected"),
+                         lambda c: c["affected"][0]["versions"][0].update(changes=[])):
+            with self.subTest(mutation=mutation):
+                r = record(); cna = r["containers"]["cna"]
+                cna["descriptions"][0]["value"] = f"Google Chrome before {FIXED} does not properly check bounds."
+                mutation(cna)
+                self.assertEqual(audit.evaluate_record(r, FIXED), "unknown")
+        r = record(); r["containers"]["cna"]["descriptions"][0]["value"] = f"Google Chrome before {FIXED} might allow remote attackers to read data."
+        r["containers"]["adp"] = [{"affected": [{"product": "Chrome", "versions": [{"version": "all", "status": "affected"}]}]}]
+        self.assertEqual(audit.evaluate_record_detail(r, FIXED), ("unknown", "supplemental-chromium-range-requires-review"))
+
     def test_missing_product_identity_with_chrome_advisory_never_disappears(self):
         for affected in ([], [{"versions": [{"status": "affected", "version": "n/a"}]}]):
             with self.subTest(affected=affected), tempfile.TemporaryDirectory() as tmp:

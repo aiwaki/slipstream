@@ -315,7 +315,21 @@ were present, but unresolved legacy/component/ADP ranges kept the result FAIL.
 This is neither a safe-release assertion nor qualification of that uninstalled
 candidate. No platform/headless exemption is inferred. Further NVD applicability
 and exact component-version mapping require separate review before integration.
-Focused tests: `python3 -m pytest scripts/test_chromium_advisory_audit.py -q`.
+
+A later local replay on the same immutable snapshot adds finite legacy fault
+clauses while rejecting unaccounted version numbers and source revisions. V8 is
+recognized only in a reviewed engine-name context immediately before the exact
+Chrome boundary; a bare `v8` or another occurrence is still ambiguous. Product,
+range, supplemental-provider and provenance rules are unchanged. The final replay
+has **6,102 not_affected, zero affected and 1,114 unknown**. It remains overall
+FAIL with `unverified-local-inputs`; it is not a fresh online audit. The interim
+stricter guard produced 1,452 unknowns; the final correction moves 349 to
+not_affected and 11 back to unknown. Counts come from full record-by-record replay,
+not subtraction of a hand-picked cohort. All 7,216 raw hashes and metadata hashes
+match the retained baseline. Private evidence: `output/dependency-remediation-20261009/chromium-v8-full-{replay,delta}.json`. Thirty-three focused tests and
+16 independent adversarial cases pass. No release exception was changed.
+
+Focused tests: `python3 -m unittest discover -s scripts -p test_chromium_advisory_audit.py`.
 
 ## Geph Dependency Artifacts
 

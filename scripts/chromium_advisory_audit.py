@@ -28,6 +28,20 @@ VERSION = re.compile(r"\d+\.\d+\.\d+\.\d+")
 PRIOR_BOUNDARY = re.compile(
     r"(?:Google Chrome|Chromium)(?: on(?: [A-Za-z ,/]+)?)? (?:prior to|before) "
     r"(\d+\.\d+\.\d+\.\d+|M\d+|\d+)(?!\d|\.\d)")
+V8_ENGINE_CONTEXT = re.compile(
+    r"(?:^|\bin )(?P<engine>(?:Google )?V8)"
+    r"(?:(?: (?:API|Turbofan|Internationalization|JavaScript engine))? in |, as used in )$",
+    re.I)
+FAULT_CLAUSE = (
+    r"(?:allowed|allows|allow)\b|does not properly (?:handle|check|canonicalize|determine|restrict|"
+    r"choose|consider|initialize|compile|select|constrain|use|perform|prevent|enforce|process|manage|"
+    r"maintain|implement|provide|track|interact|validate|address|parse|mitigate|render|isolate|"
+    r"present|draw|decode|copy|execute|follow|support|limit|deserialize|set|load|display)\b|"
+    r"does not (?:ensure|prevent|initialize|use|validate|perform|verify|force|check|replace|display|"
+    r"cancel|implement|require|ignore|consider|block|apply|disable|process|anticipate|prompt|monitor)\b|"
+    r"mishandles (?:the|a|an|certain|some)\b|failed to (?:perform|check|validate)\b|"
+    r"(?:might|could) allow (?:remote attackers|local users|a remote attacker)\b"
+)
 CVE_ID = re.compile(r"CVE-\d{4}-\d{4,}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 MAX_AGE = timedelta(hours=24)
@@ -269,11 +283,41 @@ def evaluate_record_detail(record: dict, pinned_version: str) -> tuple[str, str]
     affected = cna.get("affected", [])
     if len(boundaries) != 1:
         return "unknown", "no-unique-explicit-chromium-fixed-boundary"
-    all_boundaries = set(re.findall(r"(?:prior to|before)\s+(M?\d+(?:\.\d+)*)", english))
-    if all_boundaries != boundaries or re.search(r"\b(?:all|later|subsequent|newer) versions\b|\band (?:later|newer)\b", english, re.I):
+    all_boundaries = re.findall(
+        r"(?:prior to|before|through|until|after|since|up to|earlier than|older than|newer than|"
+        r"later than|at least|at most)\s+(M?\d+(?:\.\d+)*)", english, re.I)
+    fixed = next(iter(boundaries))
+    # A fault verb after the first threshold must not hide another affected
+    # interval, an exception, or a shared-prefix platform/component version.
+    # Sentence punctuation after a version is not part of its numeric token.
+    # An unaccounted bare major is just as ambiguous as a four-part version.
+    # Mask only a V8 engine name immediately introducing a matched Chrome
+    # boundary. Bare v8, version V8, other occurrences, and V8 revision ranges
+    # remain numbers. This recognizes a component name, not a safety exemption.
+    remainder = english
+    for match in reversed(boundary_matches):
+        engine = V8_ENGINE_CONTEXT.search(english[:match.start()])
+        if engine:
+            start, end = engine.span("engine")
+            remainder = remainder[:start] + " " * (end - start) + remainder[end:]
+    # Other standalone numbers conservatively block evaluation, even when
+    # they could describe byte counts or examples. Include rNNN revisions.
+    remainder = PRIOR_BOUNDARY.sub(" ", remainder)
+    remainder = CVE_ID.sub(" ", remainder)
+    unaccounted_number = re.search(r"(?<![\w.])(?:M|v|r)?\d+(?:\.\d+)*(?!\w|\.\d)", remainder, re.I)
+    qualifications = (
+        r"\b(?:and|or)\s+(?:M?\d|all versions|later versions|newer versions)|"
+        r"\b(?:all|later|subsequent|newer|future)(?: (?:Google Chrome|Chrome|Chromium))? "
+        r"(?:versions?|releases?|milestones?|builds?)\b|\band (?:later|newer)\b|"
+        r"\b(?:except|excluding)\b|\b(?:versions?|releases?|milestones?|builds?)\s+M?\d|"
+        r"\b(?:Google Chrome|Chrome|Chromium)\s+(?:version\s+)?M?\d"
+    )
+    if (all_boundaries != [fixed] * len(boundary_matches)
+            or unaccounted_number
+            or re.search(qualifications, english, re.I)):
         return "unknown", "additional-or-open-ended-version-boundary"
     platform = r"(?:Linux|Windows|Mac|OS X|Android|ChromeOS)"
-    suffix = rf"(?: (?:for|on) {platform}(?:,? (?:and )?{platform})*)?[, ]+(?:allowed|allows|allow)\b"
+    suffix = rf"(?: (?:for|on) {platform}(?:,? (?:and )?{platform})*)?,? (?:{FAULT_CLAUSE})"
     if any(not re.match(suffix, english[match.end():]) for match in boundary_matches):
         return "unknown", "unsupported-fixed-boundary-clause"
     if not isinstance(affected, list) or not affected:
@@ -287,7 +331,6 @@ def evaluate_record_detail(record: dict, pinned_version: str) -> tuple[str, str]
         affected = core_products
     elif not all(unspecified_product(item) for item in affected):
         return "unknown", "component-advisory-without-chromium-product-range"
-    fixed = next(iter(boundaries))
     normalized_fixed = fixed if VERSION.fullmatch(fixed) else fixed.removeprefix("M") + ".0.0.0"
     # Legacy prose may mention different Android/desktop thresholds after one
     # shared prefix. Do not silently apply the first threshold to every build.

@@ -50,6 +50,53 @@ removing five old findings, with 11 local Geph patches still needing forward-por
 and qualification; RSA and generic Chromium coverage remain separate work.
 No workstation installation or service restart was performed for this evidence.
 
+## 2026-10-09 dependency-remediation experiments
+
+The Geph0.4.3 source candidate now preserves all11 existing local patches and
+uses SQLite-only SQLx0.8.6. Its isolated session/SQLite tests and functional CI
+pass, but the fresh423-package inventory still contains two RSA blockers and
+one informational bincode finding. No exception was extended. Source and shipped
+binary qualification remain separate; no replacement Geph binary was installed.
+
+An output-only public-client RSA adapter uses pinned AWS-LC primitives, not a
+new PSS codec. Eighteen prototype tests (nine compatibility),36 cache tuples read by actual
+mizaru2 0.2.21, six exact OpenSSL signature comparisons and nine independent
+focused checks pass. Review found and fixed two prototype defects: equal
+mathematical keys encoded as SPKI/PKCS1 were wrongly rejected, and the backend
+SPKI parser admitted algorithm parameters rejected by the old parser. Key
+binding now uses public n/e while Merkle/cache identity retains original
+response DER; the legacy algorithm/NULL admission rule remains explicit.
+The2049-bit test preserves valid signature/cache interoperability, not the old
+encoder's broken rounded-bit operation. A byte-owned async pending operation
+then passed six focused and six independent checks: native handles do not cross
+await, and cancellation clears owned inverse/message buffers before deallocation.
+No unsafe Send/Sync is used. These output-only mock boundaries do not establish
+real auth/bandwidth callsite trust, SQLite publication, caller-token lifetime,
+scheduler performance or both shipped ABIs. A client-only wire adapter is the
+next separate integration step; production dependencies are unchanged.
+
+Actual OS-entropy failure produces AWS-LC SIGABRT, not a recoverable Rust error.
+Eight offline child cases established that boundary. A separate disposable user
+launchd job with the current KeepAlive/ThrottleInterval10/Background policy
+restarted after one injected failure and produced a healthy, identity-checked
+successor after43.630s from bootstrap. An earlier40s deadline failed. Therefore
+ThrottleInterval10 must never be described as a10s readiness guarantee. Both
+jobs and all observed PIDs were proven absent after cleanup; active app jobs,
+accounts and network settings were untouched. This is native policy-fixture
+evidence, not a Geph launcher, SOCKS, credential-cache, persistent-failure or
+traffic-restoration qualification. Private reproducible evidence is under
+`output/continuation-20261009/rsa-migration/`, including the independent review.
+
+The CfT155.0.8059.39 archive is mapped to its exact Chromium commit and
+V8 15.5.35.20 using official CfT, ChromiumDash, Gitiles and retained binary
+evidence. FFmpeg is an exact pinned Chromium fork whose README says Version:N/A;
+its RELEASE=8.0.git is not an interchangeable NVD CPE version. No feature
+absence is inferred from a missing dylib or a license notice. A separately
+reviewed eight-record NVD prototype preserves AND/OR/negate, environmental
+prerequisites and unknown component inventory. Neither component mapping nor
+that sample clears corpus-wide advisory unknowns. Retained source/provenance
+and reproduction are under `output/dependency-remediation-20261009/`.
+
 ## 2026-08-31 continuous root and address/object authority boundary
 
 Cold production-shaped diagnostics moved the causal boundary earlier than
