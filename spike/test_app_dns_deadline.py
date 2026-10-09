@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-import xbox_dns
+import app_dns
 
 
 class Clock:
@@ -95,7 +95,7 @@ class RawSocket:
 
 
 def dns_packet():
-    query = xbox_dns.build_a_query("example.com", 0x1234)
+    query = app_dns.build_a_query("example.com", 0x1234)
     return (
         struct.pack("!HHHHHH", 0x1234, 0x8180, 1, 1, 0, 0)
         + query[12:] + b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4)
@@ -119,10 +119,10 @@ def harness(monkeypatch):
     context = Context()
     sockets = []
     calls = []
-    monkeypatch.setattr(xbox_dns.time, "monotonic", clock)
-    monkeypatch.setattr(xbox_dns, "_tls_context", lambda: context)
-    monkeypatch.setattr(xbox_dns.secrets, "randbits", lambda bits: 0x1234)
-    monkeypatch.setattr(xbox_dns, "_cache", xbox_dns.OrderedDict())
+    monkeypatch.setattr(app_dns.time, "monotonic", clock)
+    monkeypatch.setattr(app_dns, "_tls_context", lambda: context)
+    monkeypatch.setattr(app_dns.secrets, "randbits", lambda bits: 0x1234)
+    monkeypatch.setattr(app_dns, "_cache", app_dns.OrderedDict())
 
     def socket_factory(family, kind):
         calls.append((family, kind))
@@ -130,9 +130,9 @@ def harness(monkeypatch):
             pytest.fail("unexpected socket or extra endpoint attempt")
         return sockets.pop(0)
 
-    monkeypatch.setattr(xbox_dns.socket, "socket", socket_factory)
+    monkeypatch.setattr(app_dns.socket, "socket", socket_factory)
     monkeypatch.setattr(
-        xbox_dns.socket, "getaddrinfo",
+        app_dns.socket, "getaddrinfo",
         lambda *a, **kw: pytest.fail("bounded path must not use system DNS"),
     )
     return clock, context, sockets, calls
@@ -147,17 +147,17 @@ def test_shared_deadline_shrinks_across_endpoints_and_each_real_stream_io(harnes
                        connect_cost=1, send_cost=1, recv_cost=1)
     sockets.extend([first, second])
 
-    assert xbox_dns.resolve("Example.COM.", timeout=8, deadline=1000) == ["203.0.113.42"]
+    assert app_dns.resolve("Example.COM.", timeout=8, deadline=1000) == ["203.0.113.42"]
     assert first.timeouts == [8]
     assert second.timeouts == [6, 5, 4, 3]
-    assert first.addresses == [("111.88.96.50", 443)]
-    assert second.addresses == [("111.88.96.51", 443)]
-    assert context.calls == [{"server_side": False, "server_hostname": "xbox-dns.ru"}]
-    assert calls == [(xbox_dns.socket.AF_INET, xbox_dns.socket.SOCK_STREAM)] * 2
-    assert second.sent.startswith(b"POST /dns-query HTTP/1.1\r\nHost: xbox-dns.ru\r\n")
-    assert second.sent.endswith(xbox_dns.build_a_query("example.com", 0x1234))
+    assert first.addresses == [("1.1.1.1", 443)]
+    assert second.addresses == [("8.8.8.8", 443)]
+    assert context.calls == [{"server_side": False, "server_hostname": "dns.google"}]
+    assert calls == [(app_dns.socket.AF_INET, app_dns.socket.SOCK_STREAM)] * 2
+    assert second.sent.startswith(b"POST /dns-query HTTP/1.1\r\nHost: dns.google\r\n")
+    assert second.sent.endswith(app_dns.build_a_query("example.com", 0x1234))
     assert first.closed == second.closed == 1
-    assert xbox_dns.resolve("example.com", timeout=8, deadline=110) == ["203.0.113.42"]
+    assert app_dns.resolve("example.com", timeout=8, deadline=110) == ["203.0.113.42"]
     assert len(calls) == 2
 
 
@@ -166,10 +166,10 @@ def test_caller_deadline_wins_over_timeout_and_does_not_start_next_endpoint(harn
     first = RawSocket(clock, connect_cost=2, connect_error=True)
     sockets.append(first)
 
-    assert xbox_dns.resolve("example.com", timeout=8, deadline=102) == []
+    assert app_dns.resolve("example.com", timeout=8, deadline=102) == []
     assert first.timeouts == [2]
     assert first.closed == 1
-    assert not xbox_dns._cache
+    assert not app_dns._cache
 
 
 @pytest.mark.parametrize("phase", ["connect", "send", "recv"])
@@ -179,9 +179,9 @@ def test_cancellation_stops_subsequent_io_and_does_not_cache(harness, phase):
     first = RawSocket(clock, [response()], cancel_on=phase, event=event)
     sockets.append(first)
 
-    assert xbox_dns.resolve("example.com", timeout=8, deadline=110, cancel_event=event) == []
+    assert app_dns.resolve("example.com", timeout=8, deadline=110, cancel_event=event) == []
     assert first.closed == 1
-    assert not xbox_dns._cache
+    assert not app_dns._cache
     if phase == "connect":
         assert not first.sent
     if phase != "recv":
@@ -194,13 +194,13 @@ def test_inactive_lookup_does_not_return_cached_success_or_open_socket(harness, 
     event = threading.Event()
     if cancelled:
         event.set()
-    xbox_dns._cache["example.com"] = (("203.0.113.42",), 200)
-    before = xbox_dns._cache.copy()
+    app_dns._cache["example.com"] = (("203.0.113.42",), 200)
+    before = app_dns._cache.copy()
 
-    assert xbox_dns.resolve("example.com", deadline=110 if cancelled else 100,
+    assert app_dns.resolve("example.com", deadline=110 if cancelled else 100,
                             cancel_event=event) == []
     assert not calls
-    assert xbox_dns._cache == before
+    assert app_dns._cache == before
 
 
 def test_cancel_only_path_has_one_timeout_budget(harness):
@@ -208,9 +208,9 @@ def test_cancel_only_path_has_one_timeout_budget(harness):
     first = RawSocket(clock, connect_cost=3, connect_error=True)
     sockets.append(first)
 
-    assert xbox_dns.resolve("example.com", cancel_event=threading.Event()) == []
-    assert first.timeouts == [xbox_dns.XBOX_DOH_TIMEOUT]
-    assert not xbox_dns._cache
+    assert app_dns.resolve("example.com", cancel_event=threading.Event()) == []
+    assert first.timeouts == [app_dns.APP_DOH_TIMEOUT]
+    assert not app_dns._cache
 
 
 def test_dripping_response_cannot_renew_deadline(harness):
@@ -218,11 +218,11 @@ def test_dripping_response_cannot_renew_deadline(harness):
     first = RawSocket(clock, [bytes([byte]) for byte in response()], recv_cost=1)
     sockets.append(first)
 
-    assert xbox_dns.resolve("example.com", timeout=3, deadline=110) == []
+    assert app_dns.resolve("example.com", timeout=3, deadline=110) == []
     assert first.recv_count == 3
     assert first.timeouts == [3, 3, 3, 2, 1]
     assert first.closed == 1
-    assert not xbox_dns._cache
+    assert not app_dns._cache
 
 
 def test_complete_chunked_body_is_decoded_only_once(harness, monkeypatch):
@@ -234,15 +234,15 @@ def test_complete_chunked_body_is_decoded_only_once(harness, monkeypatch):
     )
     first = RawSocket(clock, [message[:90], message[90:]])
     sockets.append(first)
-    decode = xbox_dns.http_response_completion.http_response_body
+    decode = app_dns.http_response_completion.http_response_body
     decoded = []
 
     def record_decode(*args, **kwargs):
         decoded.append(args[0])
         return decode(*args, **kwargs)
 
-    monkeypatch.setattr(xbox_dns.http_response_completion, "http_response_body", record_decode)
-    assert xbox_dns.resolve("example.com", deadline=110) == ["203.0.113.42"]
+    monkeypatch.setattr(app_dns.http_response_completion, "http_response_body", record_decode)
+    assert app_dns.resolve("example.com", deadline=110) == ["203.0.113.42"]
     assert decoded == [message]
     assert first.closed == 1
 
@@ -267,7 +267,7 @@ def test_rejects_unusable_http_or_dns_response_and_closes_both_endpoints(harness
     second = RawSocket(clock, [message])
     sockets.extend([first, second])
 
-    assert xbox_dns.resolve("example.com", deadline=110) == []
+    assert app_dns.resolve("example.com", deadline=110) == []
     assert first.closed == second.closed == 1
     assert len(calls) == 2
 
@@ -275,8 +275,8 @@ def test_rejects_unusable_http_or_dns_response_and_closes_both_endpoints(harness
 @pytest.mark.parametrize("oversized_headers", [False, True])
 def test_response_limits_fail_closed_without_unbounded_read(harness, monkeypatch, oversized_headers):
     clock, _context, sockets, _calls = harness
-    monkeypatch.setattr(xbox_dns, "XBOX_DOH_MAX_RESPONSE", 48)
-    monkeypatch.setattr(xbox_dns, "XBOX_DOH_MAX_HEADERS", 128)
+    monkeypatch.setattr(app_dns, "APP_DOH_MAX_RESPONSE", 48)
+    monkeypatch.setattr(app_dns, "APP_DOH_MAX_HEADERS", 128)
     message = (
         b"HTTP/1.1 200 OK\r\nX-Pad: " + b"x" * 200
         if oversized_headers else response(b"x" * 49)
@@ -285,7 +285,7 @@ def test_response_limits_fail_closed_without_unbounded_read(harness, monkeypatch
     second = RawSocket(clock, [message])
     sockets.extend([first, second])
 
-    assert xbox_dns.resolve("example.com", deadline=110) == []
+    assert app_dns.resolve("example.com", deadline=110) == []
     assert first.closed == second.closed == 1
     assert first.recv_count == second.recv_count == 1
 
@@ -296,9 +296,9 @@ def test_response_limits_fail_closed_without_unbounded_read(harness, monkeypatch
 ])
 def test_invalid_budget_is_inert(harness, timeout, deadline):
     _clock, _context, _sockets, calls = harness
-    assert xbox_dns.resolve("example.com", timeout=timeout, deadline=deadline) == []
+    assert app_dns.resolve("example.com", timeout=timeout, deadline=deadline) == []
     assert not calls
-    assert not xbox_dns._cache
+    assert not app_dns._cache
 
 
 def test_tls_constructor_failure_closes_raw_socket(harness, monkeypatch):
@@ -311,5 +311,5 @@ def test_tls_constructor_failure_closes_raw_socket(harness, monkeypatch):
         raise ValueError("simulated TLS constructor failure")
 
     monkeypatch.setattr(context, "wrap_bio", fail)
-    assert xbox_dns.resolve("example.com", deadline=110) == []
+    assert app_dns.resolve("example.com", deadline=110) == []
     assert first.closed == second.closed == 1

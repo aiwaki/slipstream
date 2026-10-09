@@ -27,7 +27,7 @@ def local_state(monkeypatch, reset_smart_dns_state):
 def winner(**changes):
     fields = dict(
         host=HOST, exact_address=ORIGINAL, address=SELECTED,
-        strategy_name="split64", via_xbox_dns=False, capability="a" * 32,
+        strategy_name="split64", via_app_dns=False, capability="a" * 32,
         deadline_monotonic=tproxy.time.monotonic() + 5,
     )
     fields.update(changes)
@@ -39,13 +39,13 @@ def stored_claim(**changes):
     return tproxy._bootstrap_local_route_claim(HOST, ORIGINAL, tproxy.time.monotonic() + 10)
 
 
-@pytest.mark.parametrize("strategy,xbox", [("split64", False), ("split16", False), ("plain", True)])
-def test_local_winner_claim_keeps_exact_address_and_strategy(strategy, xbox):
+@pytest.mark.parametrize("strategy,app_dns", [("split64", False), ("split16", False), ("plain", True)])
+def test_local_winner_claim_keeps_exact_address_and_strategy(strategy, app_dns):
     now = tproxy.time.monotonic()
-    claim = stored_claim(strategy_name=strategy, via_xbox_dns=xbox)
+    claim = stored_claim(strategy_name=strategy, via_app_dns=app_dns)
     assert claim.host == HOST and claim.exact_address == ORIGINAL
     assert claim.address == SELECTED and claim.strategy_name == strategy
-    assert claim.via_xbox_dns is xbox
+    assert claim.via_app_dns is app_dns
     assert 0 < claim.deadline_monotonic - now <= 4.1
     assert tproxy._bootstrap_local_route_claim(HOST, SELECTED, now + 10) is None
     assert tproxy._bootstrap_local_route_claim("unrelated.example.com", ORIGINAL, now + 10) is None
@@ -56,7 +56,7 @@ def test_local_winner_claim_keeps_exact_address_and_strategy(strategy, xbox):
     {"host": "discord.com"}, {"address": "127.0.0.1"},
     {"exact_address": "10.0.0.1"}, {"address": "::1"},
     {"strategy_name": "fake5"}, {"strategy_name": "plain"},
-    {"via_xbox_dns": True}, {"capability": "not-a-private-epoch"},
+    {"via_app_dns": True}, {"capability": "not-a-private-epoch"},
     {"deadline_monotonic": 0}, {"deadline_monotonic": float("inf")},
     {"deadline_monotonic": True},
 ])
@@ -228,7 +228,7 @@ def test_handler_uses_local_winner_without_geph_or_a_second_strategy(monkeypatch
     monkeypatch.setattr(tproxy, "dial_strategy", dial)
     monkeypatch.setattr(tproxy, "relay_local_stream", relay)
     monkeypatch.setattr(tproxy, "_try_unknown_owned_geph_route", forbidden)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", forbidden)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", forbidden)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", forbidden)
     monkeypatch.setattr(tproxy, "runtime_route_circuit_record_result", lambda *a, **k: None)
     monkeypatch.setattr(tproxy, "_register_pending_navigation_relay", lambda *a, **k: None)

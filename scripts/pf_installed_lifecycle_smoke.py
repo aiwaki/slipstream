@@ -50,7 +50,7 @@ INSTALLED_PF_ADAPTER = INSTALL_DIR / "pf_adapter.py"
 INSTALLED_PRIMES = INSTALL_DIR / "primes.py"
 INSTALLED_ROUTING_POLICY = INSTALL_DIR / "routing_policy.py"
 INSTALLED_ROUTING_RECOVERY = INSTALL_DIR / "routing_recovery.py"
-INSTALLED_XBOX_DNS = INSTALL_DIR / "xbox_dns.py"
+INSTALLED_APP_DNS = INSTALL_DIR / "app_dns.py"
 INSTALLED_FROZEN_DAEMON = INSTALL_DIR / "slipstreamd"
 INSTALL_ATTESTATION_DIR = Path(
     "/Library/Application Support/dev.slipstream.tray"
@@ -361,7 +361,7 @@ def script_target() -> LifecycleTarget:
             INSTALLED_PRIMES,
             INSTALLED_ROUTING_POLICY,
             INSTALLED_ROUTING_RECOVERY,
-            INSTALLED_XBOX_DNS,
+            INSTALLED_APP_DNS,
         ),
         attested_installed_path=INSTALLED_DAEMON,
         attestation_source_path=SOURCE_DAEMON,

@@ -356,8 +356,8 @@ mod tests {
             "environment": {
                 "proxy": {"state": "active", "kind": "pac"},
                 "dns": {
-                    "state": "xbox_dns",
-                    "providers": "xbox_dns",
+                    "state": "configured",
+                    "providers": "",
                     "resolution_state": "ok",
                 },
                 "pf": {"applied": true, "enabled": true, "rules_loaded": true},

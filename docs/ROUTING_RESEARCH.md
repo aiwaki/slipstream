@@ -1,9 +1,50 @@
 # Routing Research Notes
 
-Updated: 2026-08-31
+Updated: 2026-10-09
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-10-09 provider retirement and Telegram transport update
+
+The user reported Xbox DNS blocked and requested its removal. The application
+no longer recognizes its resolver addresses or queries its endpoint. Generic
+recovery uses independent, verified Cloudflare/Google RFC8484 connections under
+the existing local proof sequence. Equal system/app DNS answers still require
+an actual plain transport observation; they do not bypass proof stages.
+Unversioned temporary geo overlays cannot establish current DNS provenance and
+are discarded on load; new records carry evidence version 2. Local strategy
+learning and external network settings remain outside this migration.
+
+A separate reviewer exercised both production DNS reader entry points against a
+real loopback TLS/RFC8484 peer with a fixture CA and verified resolver SNI. This
+found two acceptance bugs in the ordinary reader: incomplete HTTP Content-Length
+and DNS TC=1 could still return addresses. The ordinary path now uses the same
+bounded framing/deadline reader as the existing deadline path. Sixteen loopback
+cases cover full fixed/chunked responses, wrong ID/type, DNS/HTTP truncation and
+HTTP errors; both previously failing cases pass. This is local protocol evidence,
+not a claim that public resolver endpoints are reachable on every user's network.
+
+The official tg-ws-proxy 1.11.1 archive (commit 18175fb4) replaces the 1.8.1 base,
+with all earlier local ownership/byte-stream fixes reconciled. Upstream's media
+404 handling is verified through real loopback H2 into all three native MTProto
+framing modes, without replaying the failed POST. New H2 ownership regressions
+also reproduced repeated-cancellation cleanup loss, late connect/dispatch during
+shutdown, a stranded lane permit, and unowned preflight work. Local fixes keep
+one owned close operation, reject late dispatch and finish release before
+propagating cancellation. The existing close deadline still bounds TLS cleanup.
+The source/provenance and detailed patch inventory live in
+[LOCAL_CHANGES.md](../vendor/tg-ws-proxy/LOCAL_CHANGES.md).
+
+The update adds HTTPX 0.28.1 and five transitive packages to all three
+hash-locked Python dependency sets. Existing pins are unchanged. A direct OSV
+query of all 14 locked Python runtime packages returned no findings on 2026-10-09
+(`output/continuation-20261009/python-runtime-osv.json`); that limited check is
+not the full product dependency audit. The unchanged Geph/Chromium gate remains
+unresolved. Read-only refresh identified existing PR383 / Geph 0.4.3 as a candidate
+removing five old findings, with 11 local Geph patches still needing forward-port
+and qualification; RSA and generic Chromium coverage remain separate work.
+No workstation installation or service restart was performed for this evidence.
 
 ## 2026-08-31 continuous root and address/object authority boundary
 

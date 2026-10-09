@@ -1,5 +1,4 @@
 import os
-import ssl
 import logging
 import base64
 import struct
@@ -8,6 +7,7 @@ import socket as _socket
 
 from typing import List, Optional, Tuple
 from .config import proxy_config
+from .utils import create_ssl_context
 
 log = logging.getLogger('tg-mtproto-proxy')
 CLOSE_TIMEOUT = 1.0
@@ -23,9 +23,8 @@ _st_BBQ4s = struct.Struct('>BBQ4s')
 _st_H = struct.Struct('>H')
 _st_Q = struct.Struct('>Q')
 
-_ssl_ctx = ssl.create_default_context()
-_ssl_ctx.check_hostname = False
-_ssl_ctx.verify_mode = ssl.CERT_NONE
+_ssl_ctx = create_ssl_context()
+_ssl_ctx_fronting = create_ssl_context(check_hostname=False)
 
 
 class WsHandshakeError(Exception):
@@ -82,7 +81,10 @@ async def close_writer(writer):
 
 
 class RawWebSocket:
-    __slots__ = ('reader', 'writer', '_closed', '_fragmented')
+    __slots__ = ('reader', 'writer', '_closed', '_fragmented', '_fragment_bytes')
+
+    OP_CONT = 0x0
+    MAX_MESSAGE_LEN = 16 * 1024 * 1024
 
     OP_BINARY = 0x2
     OP_CLOSE = 0x8
@@ -95,18 +97,21 @@ class RawWebSocket:
         self.writer = writer
         self._closed = False
         self._fragmented = False
+        self._fragment_bytes = 0
 
     @staticmethod
     async def connect(host: str, domain: str, timeout: float = 10.0,
                       path: str = '/apiws', *,
-                      sni: Optional[str] = None) -> 'RawWebSocket':
+                      sni: Optional[str] = None, secure=True) -> 'RawWebSocket':
+        ssl_context = _ssl_ctx_fronting if sni else _ssl_ctx
         if sni is None:
             sni = domain
 
         deadline = asyncio.get_running_loop().time() + timeout
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, 443, ssl=_ssl_ctx,
-                                    server_hostname=sni),
+            (asyncio.open_connection(host, 443, ssl=ssl_context,
+                                     server_hostname=sni) if secure
+             else asyncio.open_connection(host, 80)),
             timeout=min(timeout, 10))
         
         try:
@@ -201,7 +206,7 @@ class RawWebSocket:
                     self.writer.write(self._build_frame(
                         self.OP_CLOSE,
                         payload[:2] if payload else b'', mask=True))
-                    await self.writer.drain()
+                    await asyncio.wait_for(self.writer.drain(), CLOSE_TIMEOUT)
                 except Exception:
                     pass
                 return None
@@ -221,6 +226,7 @@ class RawWebSocket:
             if opcode in (0x1, 0x2):
                 if self._fragmented:
                     raise ConnectionError("New WebSocket message before final continuation")
+                self._fragment_bytes = len(payload)
                 self._fragmented = not fin
                 if payload:
                     return payload
@@ -228,6 +234,9 @@ class RawWebSocket:
             if opcode == 0x0:
                 if not self._fragmented:
                     raise ConnectionError("Unexpected WebSocket continuation")
+                self._fragment_bytes += len(payload)
+                if self._fragment_bytes > self.MAX_MESSAGE_LEN:
+                    raise ConnectionError("WebSocket message too large")
                 self._fragmented = not fin
                 # MTProto consumes a byte stream; preserve each fragment without
                 # accumulating the whole WebSocket message in memory.
@@ -298,6 +307,8 @@ class RawWebSocket:
             length = _st_H.unpack(await self.reader.readexactly(2))[0]
         elif length == 127:
             length = _st_Q.unpack(await self.reader.readexactly(8))[0]
+        if length > self.MAX_MESSAGE_LEN:
+            raise ConnectionError(f"WS frame too large: {length} bytes")
         if hdr[1] & 0x80:
             mask_key = await self.reader.readexactly(4)
             payload = await self.reader.readexactly(length)

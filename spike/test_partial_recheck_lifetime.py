@@ -7,14 +7,14 @@ import tproxy as t
 def isolated(monkeypatch):
     for name in ('_local_partial_stalls', '_local_partial_recheck_until',
                  '_local_zero_payload_failures', '_auto_geph_candidates',
-                 '_xbox_dns_candidates', '_xbox_dns_attempts'):
+                 '_app_dns_candidates', '_app_dns_attempts'):
         monkeypatch.setattr(t, name, {})
 
 
 def test_recheck_survives_proof_expiry_while_local_ladder_remains():
     host = 'recheck-expiry.example'
     t._record_partial_tls_stall_evidence(host, t.AUTO_GEPH_STAGE_SYSTEM, 1000)
-    t._note_xbox_dns_attempt(host, 1000)
+    t._note_app_dns_attempt(host, 1000)
     t._prune_local_partial_stalls(1301)
     assert host not in t._local_partial_stalls
     assert t.unknown_recovery_stage(host, now=1301) == t.UNKNOWN_RECOVERY_LOCAL_LADDER

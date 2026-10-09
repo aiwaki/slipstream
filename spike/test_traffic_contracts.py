@@ -241,8 +241,8 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_dead", {})
     monkeypatch.setattr(tproxy, "_strat_cache", {})
     monkeypatch.setattr(tproxy, "_strat_scores", {})
-    monkeypatch.setattr(tproxy, "_xbox_dns_candidates", {})
-    monkeypatch.setattr(tproxy, "_xbox_dns_attempts", {})
+    monkeypatch.setattr(tproxy, "_app_dns_candidates", {})
+    monkeypatch.setattr(tproxy, "_app_dns_attempts", {})
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
     monkeypatch.setattr(tproxy, "_server_first_closes", {})
     monkeypatch.setattr(tproxy, "_transport_incomplete_client_first_evidence", {})
@@ -363,7 +363,7 @@ def request_only_non_learning_snapshot():
 def seed_complete_unknown_zero_payload_proof(host, now):
     tproxy._local_zero_payload_failures[host] = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
@@ -578,7 +578,7 @@ def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
     """A first-flight-only route can be retried before any server byte is exposed."""
     isolate_runtime_state(monkeypatch)
     host = "temporarily-blocked.example"
-    response = b"Xbox DNS local recovery payload"
+    response = b"app-owned DNS local recovery payload"
     client, expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     calls = []
@@ -587,8 +587,8 @@ def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
         calls.append((ip, port, first_flight))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 
-    async def healthy_xbox(actual_host, port, head, body, **_kwargs):
-        calls.append(("xbox", actual_host, port, head + body))
+    async def healthy_app_dns(actual_host, port, head, body, **_kwargs):
+        calls.append(("app_dns", actual_host, port, head + body))
         return "198.51.100.31", probed_upstream_response(response)
 
     async def no_backend(name, *args, **kwargs):
@@ -596,7 +596,7 @@ def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.31", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_direct)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", healthy_app_dns)
     monkeypatch.setattr(
         tproxy,
         "runtime_route_circuit_allows",
@@ -622,7 +622,7 @@ def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
 
     assert calls == [
         ("203.0.113.31", 443, expected_first_flight),
-        ("xbox", host, 443, expected_first_flight),
+        ("app_dns", host, 443, expected_first_flight),
     ]
     assert bytes(writer.payload) == response
 
@@ -1292,8 +1292,8 @@ def test_probe_evidence_distinguishes_timeout_from_cancellation():
     )
 
 
-def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch):
-    """An exhausted Xbox DNS stage must continue locally in the same retry."""
+def test_unknown_app_dns_failure_advances_to_local_ladder_without_geph(monkeypatch):
+    """An exhausted app-owned DNS stage must continue locally in the same retry."""
     isolate_runtime_state(monkeypatch)
     host = "partial-http2.example"
     local_ip = "198.51.100.42"
@@ -1301,9 +1301,9 @@ def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch)
     client, expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     calls = []
-    tproxy._mark_xbox_dns_candidate(host)
+    tproxy._mark_app_dns_candidate(host)
 
-    async def failed_xbox(
+    async def failed_app_dns(
         actual_host,
         port,
         head,
@@ -1312,7 +1312,7 @@ def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch)
         attempt_summary=None,
         **_kwargs,
     ):
-        calls.append(("xbox", actual_host, port, head + body))
+        calls.append(("app_dns", actual_host, port, head + body))
         attempt_summary["attempted"] = 1
         attempt_summary["outcomes"] = {
             "198.51.100.41": tproxy.ROUTE_PROBE_CLOSED,
@@ -1332,7 +1332,7 @@ def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch)
         await forbidden_backend(name, *args, **kwargs)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.41", 443))
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", failed_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", failed_app_dns)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(tproxy, "dial_strategy", local_strategy)
     monkeypatch.setattr(
@@ -1348,10 +1348,10 @@ def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch)
 
     asyncio.run(run_handler(client, writer))
 
-    assert [call[0] for call in calls] == ["xbox", "dns", "local"]
+    assert [call[0] for call in calls] == ["app_dns", "dns", "local"]
     assert bytes(writer.payload) == response
-    assert not tproxy._xbox_dns_candidate_active(host)
-    assert tproxy._xbox_dns_attempted_recently(host)
+    assert not tproxy._app_dns_candidate_active(host)
+    assert tproxy._app_dns_attempted_recently(host)
     assert (
         tproxy.unknown_recovery_stage(host)
         == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
@@ -1386,7 +1386,7 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
         calls.append(("system", ip, port, first_flight))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 
-    async def failed_xbox(
+    async def failed_app_dns(
         actual_host,
         port,
         head,
@@ -1394,7 +1394,7 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
         *,
         attempt_summary=None,
     ):
-        calls.append(("xbox", actual_host, port, head + body))
+        calls.append(("app_dns", actual_host, port, head + body))
         if attempt_summary is not None:
             attempt_summary["attempted"] = 1
             attempt_summary["outcomes"] = {
@@ -1418,7 +1418,7 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.61", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_system)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", failed_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", failed_app_dns)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
     monkeypatch.setattr(tproxy, "dial_strategy", failed_local)
@@ -1437,7 +1437,7 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
 
     assert [call[0] for call in calls] == [
         "system",
-        "xbox",
+        "app_dns",
         "dns",
         "local",
         "local",
@@ -1485,7 +1485,7 @@ def test_unknown_exact_proof_uses_one_shot_geph_during_network_noise(
         calls.append(("system", ip, port, first_flight))
         return tproxy.SYSTEM_PROBE_CLOSED, None
 
-    async def failed_xbox(
+    async def failed_app_dns(
         actual_host,
         port,
         head,
@@ -1493,7 +1493,7 @@ def test_unknown_exact_proof_uses_one_shot_geph_during_network_noise(
         *,
         attempt_summary=None,
     ):
-        calls.append(("xbox", actual_host, port, head + body))
+        calls.append(("app_dns", actual_host, port, head + body))
         if attempt_summary is not None:
             attempt_summary["attempted"] = 1
             attempt_summary["outcomes"] = {
@@ -1517,7 +1517,7 @@ def test_unknown_exact_proof_uses_one_shot_geph_during_network_noise(
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.62", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_system)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", failed_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", failed_app_dns)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
     monkeypatch.setattr(tproxy, "dial_strategy", failed_local)
@@ -1536,7 +1536,7 @@ def test_unknown_exact_proof_uses_one_shot_geph_during_network_noise(
 
     assert [call[0] for call in calls] == [
         "system",
-        "xbox",
+        "app_dns",
         "dns",
         "local",
         "local",
@@ -1561,7 +1561,7 @@ def test_unknown_one_shot_geph_without_payload_is_not_reused(monkeypatch):
     now = time.monotonic()
     stages = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
@@ -1615,7 +1615,7 @@ def test_late_one_shot_handoff_retains_exactly_one_successor(monkeypatch):
     now = time.monotonic()
     stages = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
@@ -2488,7 +2488,7 @@ def test_successor_uses_owned_geph_before_local_recovery(monkeypatch):
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.63", 443))
     monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", unexpected_local)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", unexpected_local)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", unexpected_local)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", unexpected_local)
     monkeypatch.setattr(tproxy, "dial_strategy", unexpected_local)
     monkeypatch.setattr(tproxy, "_geph_up", True)
@@ -2617,7 +2617,7 @@ def test_candidate_request_becomes_spent_one_shot_when_noise_arrives_mid_dial(
     now = time.monotonic()
     tproxy._local_zero_payload_failures[host] = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
@@ -2678,7 +2678,7 @@ def test_unknown_one_shot_proof_is_consumed_before_backend_wait(monkeypatch):
     now = time.monotonic()
     stages = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
@@ -3115,7 +3115,7 @@ def test_unknown_bounded_route_timeouts_never_authorize_owned_geph(monkeypatch):
     async def failed_system(_ip, _port, _first_flight, **_kwargs):
         return tproxy.SYSTEM_PROBE_TIMEOUT, None
 
-    async def timed_out_xbox(
+    async def timed_out_app_dns(
         _actual_host,
         _port,
         _head,
@@ -3146,7 +3146,7 @@ def test_unknown_bounded_route_timeouts_never_authorize_owned_geph(monkeypatch):
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.62", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_system)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", timed_out_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", timed_out_app_dns)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
     monkeypatch.setattr(tproxy, "dial_strategy", timed_out_local)
@@ -3192,8 +3192,8 @@ def test_unknown_first_server_payload_forbids_route_replay(monkeypatch):
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", healthy_system)
     monkeypatch.setattr(
         tproxy,
-        "_try_xbox_dns_local_connect",
-        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+        "_try_app_dns_local_connect",
+        lambda *args, **kwargs: no_backend("app-owned DNS", *args, **kwargs),
     )
     monkeypatch.setattr(
         tproxy,
@@ -3253,8 +3253,8 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
     monkeypatch.setattr(tproxy, "note_server_first_route_close", record_close)
     monkeypatch.setattr(
         tproxy,
-        "_try_xbox_dns_local_connect",
-        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+        "_try_app_dns_local_connect",
+        lambda *args, **kwargs: no_backend("app-owned DNS", *args, **kwargs),
     )
     monkeypatch.setattr(
         tproxy,
@@ -3361,7 +3361,7 @@ def test_expired_direct_stream_enters_local_recovery_without_geph(monkeypatch):
     async def local_route(*_args, **_kwargs):
         assert exact_writer.closed
         return "8.8.8.8", probed_upstream_response(response)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", local_route)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", local_route)
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response
@@ -3640,7 +3640,7 @@ def test_handler_resumes_same_held_exact_after_request_only_declines(
     )
     monkeypatch.setattr(
         tproxy,
-        "_try_xbox_dns_local_connect",
+        "_try_app_dns_local_connect",
         forbidden_fallback,
     )
     monkeypatch.setattr(tproxy, "resolve_connection_ips", forbidden_fallback)
@@ -3668,7 +3668,7 @@ def test_hard_preflight_failure_continues_local_recovery_same_request(
     isolate_runtime_state(monkeypatch)
     host = "hard-preflight-close.example"
     direct_response = b"discarded direct TLS bytes"
-    recovered_response = b"Xbox DNS local recovery payload"
+    recovered_response = b"app-owned DNS local recovery payload"
     client, expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     exact_writer = CaptureWriter()
@@ -3692,8 +3692,8 @@ def test_hard_preflight_failure_continues_local_recovery_same_request(
             kwargs["local_recovery_deadline_monotonic"],
         )
 
-    async def healthy_xbox(actual_host, port, head, body, **_kwargs):
-        calls.append(("xbox", actual_host, port, head + body))
+    async def healthy_app_dns(actual_host, port, head, body, **_kwargs):
+        calls.append(("app_dns", actual_host, port, head + body))
         return "198.51.100.31", probed_upstream_response(recovered_response)
 
     async def no_backend(name, *args, **kwargs):
@@ -3702,7 +3702,7 @@ def test_hard_preflight_failure_continues_local_recovery_same_request(
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.31", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
     monkeypatch.setattr(tproxy, "_run_initial_route_preflight", hard_preflight)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", healthy_app_dns)
     monkeypatch.setattr(
         tproxy,
         "runtime_route_circuit_allows",
@@ -3728,7 +3728,7 @@ def test_hard_preflight_failure_continues_local_recovery_same_request(
 
     assert calls == [
         ("preflight", host, "203.0.113.31"),
-        ("xbox", host, 443, expected_first_flight),
+        ("app_dns", host, 443, expected_first_flight),
     ]
     assert exact_writer.closed
     assert bytes(writer.payload) == recovered_response
@@ -3756,7 +3756,7 @@ def test_hard_local_recovery_requires_three_parallel_closed_stages(monkeypatch):
                 release.set()
         await release.wait()
 
-    async def closed_xbox(
+    async def closed_app_dns(
         _host,
         _port,
         _head,
@@ -3797,7 +3797,7 @@ def test_hard_local_recovery_requires_three_parallel_closed_stages(monkeypatch):
     async def local_dns(_host, _fallback):
         return ["198.51.100.81"]
 
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", closed_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", closed_app_dns)
     monkeypatch.setattr(tproxy, "_race_probe_addresses", closed_race)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(
@@ -3822,7 +3822,7 @@ def test_hard_local_recovery_requires_three_parallel_closed_stages(monkeypatch):
     assert result.proof_complete
     assert set(tproxy._local_zero_payload_failures[host]) == {
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         *(f"strategy:{strategy['name']}" for strategy in strategies),
     }
     assert tproxy._auto_geph_learning_candidate_proven(host)
@@ -3838,7 +3838,7 @@ def test_hard_local_recovery_local_payload_cancels_other_stages(monkeypatch):
     )
     cancelled = 0
 
-    async def healthy_xbox(*_args, attempt_summary=None, **_kwargs):
+    async def healthy_app_dns(*_args, attempt_summary=None, **_kwargs):
         await asyncio.sleep(0)
         return "198.51.100.90", probed_upstream_response(response)
 
@@ -3853,7 +3853,7 @@ def test_hard_local_recovery_local_payload_cancels_other_stages(monkeypatch):
     async def local_dns(_host, _fallback):
         return ["198.51.100.91"]
 
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", healthy_app_dns)
     monkeypatch.setattr(tproxy, "_race_probe_addresses", blocked_race)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(
@@ -3874,7 +3874,7 @@ def test_hard_local_recovery_local_payload_cancels_other_stages(monkeypatch):
     )
 
     assert result.raced is not None
-    assert result.via_xbox_dns
+    assert result.via_app_dns
     assert not result.proof_complete
     assert cancelled == 2
     assert host not in tproxy._local_zero_payload_failures
@@ -3893,7 +3893,7 @@ def test_hard_local_recovery_keeps_shared_resolver_alive_after_local_winner(
     resolver_release = asyncio.Event()
     resolver_cancelled = False
 
-    async def healthy_xbox(*_args, **_kwargs):
+    async def healthy_app_dns(*_args, **_kwargs):
         return "198.51.100.92", probed_upstream_response(b"local winner")
 
     async def local_dns(_host, _fallback):
@@ -3905,7 +3905,7 @@ def test_hard_local_recovery_keeps_shared_resolver_alive_after_local_winner(
             raise
         return ["198.51.100.93"]
 
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", healthy_app_dns)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(
         tproxy,
@@ -3931,7 +3931,7 @@ def test_hard_local_recovery_keeps_shared_resolver_alive_after_local_winner(
     result = asyncio.run(scenario())
 
     assert result.raced is not None
-    assert result.via_xbox_dns
+    assert result.via_app_dns
     assert not resolver_cancelled
 
 
@@ -3958,9 +3958,9 @@ def test_hard_local_recovery_closes_simultaneous_losing_payloads(monkeypatch):
         upstreams.append(upstream)
         return upstream
 
-    async def healthy_xbox(*_args, **_kwargs):
+    async def healthy_app_dns(*_args, **_kwargs):
         await enter_stage()
-        return "198.51.100.94", response(b"xbox")
+        return "198.51.100.94", response(b"app_dns")
 
     async def healthy_race(*_args, **_kwargs):
         await enter_stage()
@@ -3970,7 +3970,7 @@ def test_hard_local_recovery_closes_simultaneous_losing_payloads(monkeypatch):
     async def local_dns(_host, _fallback):
         return ["198.51.100.95"]
 
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", healthy_app_dns)
     monkeypatch.setattr(tproxy, "_race_probe_addresses", healthy_race)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(
@@ -3991,7 +3991,7 @@ def test_hard_local_recovery_closes_simultaneous_losing_payloads(monkeypatch):
     )
 
     assert result.raced is not None
-    assert result.via_xbox_dns
+    assert result.via_app_dns
     winner_writer = result.raced[1][1]
     assert len(upstreams) == 3
     assert not winner_writer.closed
@@ -4017,7 +4017,7 @@ def test_hard_local_recovery_unclear_stage_never_publishes_proof(
         for name in tproxy.GENERAL_STRATS[:2]
     )
 
-    async def closed_xbox(
+    async def closed_app_dns(
         *_args,
         attempt_summary=None,
         **_kwargs,
@@ -4041,7 +4041,7 @@ def test_hard_local_recovery_unclear_stage_never_publishes_proof(
     async def local_dns(_host, _fallback):
         return ["198.51.100.101"]
 
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", closed_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", closed_app_dns)
     monkeypatch.setattr(tproxy, "_race_probe_addresses", mixed_race)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(
@@ -4086,8 +4086,8 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
     monkeypatch.setattr(
         tproxy,
-        "_try_xbox_dns_local_connect",
-        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+        "_try_app_dns_local_connect",
+        lambda *args, **kwargs: no_backend("app-owned DNS", *args, **kwargs),
     )
     monkeypatch.setattr(
         tproxy,
@@ -4159,7 +4159,7 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
         assert callable(activity.on_downstream_idle)
         assert activity.pending_navigation_eligible
         assert not activity.downstream_idle_retry
-        assert not tproxy._xbox_dns_candidate_active(
+        assert not tproxy._app_dns_candidate_active(
             host,
             now=activity.last_downstream_at,
         )
@@ -4215,8 +4215,8 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
     monkeypatch.setattr(tproxy, "relay_local_stream", handshake_idle)
     monkeypatch.setattr(
         tproxy,
-        "_try_xbox_dns_local_connect",
-        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+        "_try_app_dns_local_connect",
+        lambda *args, **kwargs: no_backend("app-owned DNS", *args, **kwargs),
     )
     monkeypatch.setattr(
         tproxy,
@@ -4232,7 +4232,7 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response
-    assert tproxy._xbox_dns_candidate_active(host, now=signal_times[0])
+    assert tproxy._app_dns_candidate_active(host, now=signal_times[0])
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
@@ -4299,7 +4299,7 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
     assert len(confirmations) == 1
     assert confirmations[0][:3] == (host, "1.1.1.1", "plain")
     assert clean_eof_advances == []
-    assert not tproxy._xbox_dns_candidate_active(host)
+    assert not tproxy._app_dns_candidate_active(host)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -4432,7 +4432,7 @@ def test_unknown_zero_byte_server_close_arms_next_retry_recovery(monkeypatch):
             track_unknown=True,
         )
     )
-    assert tproxy._xbox_dns_candidate_active(host)
+    assert tproxy._app_dns_candidate_active(host)
 
 
 def test_healthy_low_volume_exact_stream_does_not_feed_recovery(monkeypatch):
@@ -4474,7 +4474,7 @@ def test_healthy_low_volume_exact_stream_does_not_feed_recovery(monkeypatch):
                 track_unknown=True,
             )
         )
-    assert not tproxy._xbox_dns_candidate_active(host)
+    assert not tproxy._app_dns_candidate_active(host)
 
 
 def test_local_handler_races_addresses_inside_one_strategy_without_geph(
@@ -5554,7 +5554,7 @@ def test_incomplete_unknown_local_evidence_does_not_promote_to_geph(monkeypatch)
     )
     monkeypatch.setattr(tproxy, "dial_strategy", failed_strategy)
     monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
-    monkeypatch.setattr(tproxy, "xbox_dns_resolve_async", lambda _host: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(tproxy, "app_dns_resolve_async", lambda _host: asyncio.sleep(0, result=[]))
     monkeypatch.setattr(tproxy, "DEAD_TTL", 0)
 
     for _ in range(2):
@@ -5613,7 +5613,7 @@ def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypat
 
 
 @pytest.mark.parametrize("stage", [
-    tproxy.UNKNOWN_RECOVERY_XBOX_DNS,
+    tproxy.UNKNOWN_RECOVERY_APP_DNS,
     tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER,
 ])
 def test_failed_local_strategy_reenters_independent_preflight(monkeypatch, stage):
@@ -5651,9 +5651,9 @@ def test_failed_local_strategy_reenters_independent_preflight(monkeypatch, stage
     monkeypatch.setattr(tproxy, "_unknown_recovery_stage_for_attempt",
                         lambda *_args: stage)
     tproxy._local_partial_stalls[host] = {"local:tlsrec": time.monotonic()}
-    async def local_xbox(*_args, **_kwargs):
-        assert stage == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
-        local_attempts.append("xbox")
+    async def local_app_dns(*_args, **_kwargs):
+        assert stage == tproxy.UNKNOWN_RECOVERY_APP_DNS
+        local_attempts.append("app_dns")
         return "1.1.1.2", probed_upstream_response(recovered)
 
     async def local_strategy(*_args, **_kwargs):
@@ -5664,7 +5664,7 @@ def test_failed_local_strategy_reenters_independent_preflight(monkeypatch, stage
     async def addresses(*_args):
         return ["1.1.1.2"]
 
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", local_xbox)
+    monkeypatch.setattr(tproxy, "_try_app_dns_local_connect", local_app_dns)
     monkeypatch.setattr(tproxy, "dial_strategy", local_strategy)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", addresses)
     asyncio.run(run_handler(client, writer))

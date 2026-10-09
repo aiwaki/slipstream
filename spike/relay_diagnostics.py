@@ -29,7 +29,7 @@ REASONS = (
     "internal_error",
     "unknown",
 )
-STAGES = ("system_plain", "xbox_plain", "local_strategy", "geph", "unknown")
+STAGES = ("system_plain", "app_dns_plain", "local_strategy", "geph", "unknown")
 RECOVERY = (
     "not_attempted",
     "local_ladder_advanced",

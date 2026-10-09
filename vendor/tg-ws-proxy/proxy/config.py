@@ -70,8 +70,16 @@ class ProxyConfig:
     fallback_cfproxy: bool = True
     cfproxy_user_domains: List[str] = field(default_factory=list)
     cfproxy_worker_domains: List[str] = field(default_factory=list)
+    cfproxy_h2_media: bool = True
+    disable_secure: bool = False
     fake_tls_domain: str = ''
     proxy_protocol: bool = False
+    force_test_dc: bool = False
+
+    @property
+    def h2_enabled(self) -> bool:
+        return (self.cfproxy_h2_media and self.fallback_cfproxy
+                and not self.disable_secure and not self.force_test_dc)
 
 
 proxy_config = ProxyConfig()
@@ -220,11 +228,11 @@ def parse_dc_ip_list(dc_ip_list: List[str]) -> Dict[int, str]:
         dc_s, ip_s = entry.split(':', 1)
         try:
             dc_n = int(dc_s)
-            _socket.inet_aton(ip_s)
+            _socket.inet_pton(_socket.AF_INET, ip_s)
         except (ValueError, OSError):
             err = ValueError(f"Invalid --dc-ip {entry!r}")
             err.entry = entry
             err.kind = "invalid"
-            raise err
+            raise err from None
         dc_redirects[dc_n] = ip_s
     return dc_redirects

@@ -3,6 +3,42 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Retirement of Xbox DNS — 2026-10-09
+
+Xbox DNS is no longer an application provider. Slipstream must not query its
+endpoints, identify it as a Smart DNS backend, or revive that backend from old
+status/canary state. This supersedes provider-specific references in older
+entries below; their routing proof requirements remain in force.
+
+The generic exact-host local fallback now uses `spike/app_dns.py`: verified
+RFC8484 requests to the existing Cloudflare/Google resolver endpoints over
+app-owned connections, without the system resolver or its cache. Its stage is
+`app_dns` (`app_dns_plain` in relay observations). This is independent DNS
+resolution, not a guarantee of a different destination IP or a working route.
+The exact system destination and at least two distinct local strategies still
+need their own qualifying observations before an eligible host may acquire
+verified owned-Geph authority. DNS failure, cancellation, or merely visiting a
+stage cannot supply that proof. Discord and YouTube remain excluded.
+
+Old unversioned temporary Geph overlays have no DNS-proof provenance and are
+not loaded. New overlays use evidence version 2 and must pass the full current
+proof before persistence. This invalidates only temporary discovered overlays;
+local strategy learning and user data are retained. External DNS, proxy, PAC
+and VPN configuration is neither edited nor reset. A user-configured resolver
+remains external state even when it is the retired provider.
+
+## Bundled Telegram proxy update — 2026-10-09
+
+The vendored base is tg-ws-proxy 1.11.1, pinned by upstream commit and archive
+hash in `vendor/tg-ws-proxy/SOURCE.json`. Slipstream's existing byte-preserving
+WebSocket, deadline, cancellation and connection-ownership fixes remain local
+patches, described in `LOCAL_CHANGES.md`. The upstream experimental H2 media
+fallback and its verified TLS policy are retained; it does not route Telegram
+through Geph or change the system network configuration. Hash-locked HTTPX
+runtime dependencies are included in the frozen daemon build. Loopback protocol
+and error-path tests qualify implementation boundaries; live Telegram media
+and the installed bundle require separate qualification.
+
 ## Owned reviewed geo routes retain their exit during cooldown
 
 When Geph is explicitly enabled and the exact owned listener is selected, both
@@ -181,7 +217,7 @@ AUD-16's diagnostic-only restriction, not the generic unknown-host policy.
 
 - A valid incomplete critical range plus at least six seconds of measured
   encrypted-ingress silence may start three parallel local observations:
-  app-owned Xbox DNS/plain and exact-system-IP split64/split16. They reuse the
+  app-owned DNS/plain and exact-system-IP split64/split16. They reuse the
   same transient request, share one eight-second DNS/connect/TLS/read budget,
   and drain under the already-admitted child lease. No system DNS is changed.
 - Geph authority requires all three observations to be valid incomplete objects

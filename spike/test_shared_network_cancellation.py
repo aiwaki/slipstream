@@ -33,7 +33,7 @@ async def cancel(task):
         await task
 
 
-@pytest.mark.parametrize("resolver", ("doh", "xbox_dns"))
+@pytest.mark.parametrize("resolver", ("doh", "app_dns"))
 @pytest.mark.parametrize("cancel_owner", (False, True))
 def test_cancelled_dns_waiter_does_not_poison_shared_lookup(
     monkeypatch, resolver, cancel_owner
@@ -166,7 +166,7 @@ def test_cancelled_recovery_initiator_keeps_restart_drain_until_worker_finishes(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("resolver", ("doh", "xbox_dns"))
+@pytest.mark.parametrize("resolver", ("doh", "app_dns"))
 def test_shared_dns_failure_releases_entry_for_later_retry(monkeypatch, resolver):
     async def scenario():
         work = BlockingWork(asyncio.get_running_loop(), OSError("lookup failed"))
@@ -191,7 +191,7 @@ def test_shared_dns_failure_releases_entry_for_later_retry(monkeypatch, resolver
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("resolver", ("doh", "xbox_dns"))
+@pytest.mark.parametrize("resolver", ("doh", "app_dns"))
 def test_shared_dns_submit_failure_does_not_publish_inflight_work(monkeypatch, resolver):
     class ClosedPool:
         def submit(self, *args):

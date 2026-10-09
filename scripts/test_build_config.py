@@ -1694,6 +1694,8 @@ chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
                 "certifi",
                 "cryptography",
                 "h2",
+                "httpx",
+                "httpcore",
                 "hpack",
                 "hyperframe",
                 "scapy",
@@ -1702,6 +1704,8 @@ chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
                 "certifi",
                 "cryptography",
                 "h2",
+                "httpx",
+                "httpcore",
                 "hpack",
                 "hyperframe",
                 "pytest",
@@ -1711,6 +1715,8 @@ chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
                 "certifi",
                 "cryptography",
                 "h2",
+                "httpx",
+                "httpcore",
                 "hpack",
                 "hyperframe",
                 "pyinstaller",
@@ -1810,6 +1816,8 @@ chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
         updater = ROOT / "scripts/update_python_locks.sh"
         text = updater.read_text(encoding="utf-8")
         self.assertIn('pip_tools_version="7.5.3"', text)
+        self.assertIn('pip_version="26.0.1"', text)
+        self.assertIn('"pip==$pip_version"', text)
         self.assertIn('python_minor" != "3.13"', text)
         self.assertIn("--generate-hashes", text)
         self.assertIn("--allow-unsafe", text)

@@ -1,11 +1,10 @@
-"""Bounded, direct RFC 8484 lookup for Slipstream's local Xbox DNS fallback.
+"""Bounded, direct RFC 8484 lookup for Slipstream's local app-owned DNS fallback.
 
-This module never changes macOS DNS configuration. It connects to the resolver's
-published IP addresses with verified TLS for ``xbox-dns.ru`` and is called only
-for an exact host after the ordinary local route has shown a real failure.
+This module never changes macOS DNS configuration. It connects to public
+resolvers by fixed IP with verified TLS, independently of the system resolver
+and cache. Only an exact host with prior local failure reaches this fallback.
 """
 from collections import OrderedDict
-import http.client
 import math
 import os
 import secrets
@@ -19,17 +18,17 @@ from bootstrap_tls_stream import BootstrapTlsStream
 import http_response_completion
 
 
-XBOX_DOH_ENDPOINTS = (
-    ("111.88.96.50", "xbox-dns.ru"),
-    ("111.88.96.51", "xbox-dns.ru"),
+APP_DOH_ENDPOINTS = (
+    ("1.1.1.1", "cloudflare-dns.com"),
+    ("8.8.8.8", "dns.google"),
 )
-XBOX_DOH_PATH = "/dns-query"
-XBOX_DOH_TIMEOUT = 3.0
-XBOX_DOH_TTL = 300.0
-XBOX_DOH_NEGATIVE_TTL = 30.0
-XBOX_DOH_CACHE_MAX = 512
-XBOX_DOH_MAX_RESPONSE = 64 * 1024
-XBOX_DOH_MAX_HEADERS = 8 * 1024
+APP_DOH_PATH = "/dns-query"
+APP_DOH_TIMEOUT = 3.0
+APP_DOH_TTL = 300.0
+APP_DOH_NEGATIVE_TTL = 30.0
+APP_DOH_CACHE_MAX = 512
+APP_DOH_MAX_RESPONSE = 64 * 1024
+APP_DOH_MAX_HEADERS = 8 * 1024
 SYSTEM_CA_BUNDLE = "/etc/ssl/cert.pem"
 
 _cache = OrderedDict()
@@ -44,18 +43,6 @@ def _tls_context():
     except Exception:
         pass
     return ssl.create_default_context()
-
-
-class _DirectHttpsConnection(http.client.HTTPSConnection):
-    """HTTPSConnection with a fixed IP but a verified DNS hostname/SNI."""
-
-    def __init__(self, connect_ip, server_name, timeout):
-        self._connect_ip = connect_ip
-        super().__init__(server_name, 443, timeout=timeout, context=_tls_context())
-
-    def connect(self):
-        raw = socket.create_connection((self._connect_ip, self.port), self.timeout)
-        self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
 
 
 def _normalize_host(host):
@@ -138,33 +125,17 @@ def parse_a_response(packet, query_id):
 
 
 def _query_endpoint(connect_ip, server_name, host, timeout):
-    query_id = secrets.randbits(16)
-    query = build_a_query(host, query_id)
-    connection = _DirectHttpsConnection(connect_ip, server_name, timeout)
+    # Both ordinary async lookups and shared-deadline probes require the same
+    # complete HTTP framing, untruncated DNS answer and verified TLS identity.
     try:
-        connection.request(
-            "POST",
-            XBOX_DOH_PATH,
-            body=query,
-            headers={
-                "Accept": "application/dns-message",
-                "Content-Type": "application/dns-message",
-            },
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            return []
+        return _query_endpoint_bounded(
+            connect_ip, server_name, host, time.monotonic() + timeout, None,
         )
-        response = connection.getresponse()
-        if response.status != 200:
-            return []
-        content_type = (response.getheader("content-type") or "").lower()
-        if "application/dns-message" not in content_type:
-            return []
-        packet = response.read(XBOX_DOH_MAX_RESPONSE + 1)
-        if len(packet) > XBOX_DOH_MAX_RESPONSE:
-            return []
-        return parse_a_response(packet, query_id)
-    except (OSError, ValueError, http.client.HTTPException, ssl.SSLError):
+    except (TypeError, ValueError, OSError):
         return []
-    finally:
-        connection.close()
 
 
 def _deadline_remaining(deadline, cancel_event):
@@ -198,7 +169,7 @@ def _query_endpoint_bounded(connect_ip, server_name, host, deadline, cancel_even
         )
         stream.do_handshake()
         request = (
-            f"POST {XBOX_DOH_PATH} HTTP/1.1\r\n"
+            f"POST {APP_DOH_PATH} HTTP/1.1\r\n"
             f"Host: {server_name}\r\n"
             "Accept: application/dns-message\r\n"
             "Content-Type: application/dns-message\r\n"
@@ -210,7 +181,7 @@ def _query_endpoint_bounded(connect_ip, server_name, host, deadline, cancel_even
         stream.sendall(request)
         response = b""
         headers_checked = False
-        max_input = XBOX_DOH_MAX_HEADERS + 4 + XBOX_DOH_MAX_RESPONSE
+        max_input = APP_DOH_MAX_HEADERS + 4 + APP_DOH_MAX_RESPONSE
         while True:
             _deadline_remaining(deadline, cancel_event)
             chunk = stream.recv(min(4096, max_input + 1 - len(response)))
@@ -220,10 +191,10 @@ def _query_endpoint_bounded(connect_ip, server_name, host, deadline, cancel_even
                 return []
             boundary = response.find(b"\r\n\r\n")
             if boundary < 0:
-                if not chunk or len(response) > XBOX_DOH_MAX_HEADERS:
+                if not chunk or len(response) > APP_DOH_MAX_HEADERS:
                     return []
                 continue
-            if boundary > XBOX_DOH_MAX_HEADERS:
+            if boundary > APP_DOH_MAX_HEADERS:
                 return []
             if not headers_checked:
                 parsed = http_response_completion._parse_headers(response[:boundary])
@@ -251,7 +222,7 @@ def _query_endpoint_bounded(connect_ip, server_name, host, deadline, cancel_even
                 )
                 _deadline_remaining(deadline, cancel_event)
                 if (
-                    packet is None or len(packet) > XBOX_DOH_MAX_RESPONSE
+                    packet is None or len(packet) > APP_DOH_MAX_RESPONSE
                     or len(packet) < 12 or packet[2] & 0x02  # DNS TC flag
                 ):
                     return []
@@ -285,7 +256,7 @@ def _resolve_bounded(host, timeout, deadline, cancel_event):
                 _cache.move_to_end(host)
                 return list(cached[0])
         ips = []
-        for connect_ip, server_name in XBOX_DOH_ENDPOINTS:
+        for connect_ip, server_name in APP_DOH_ENDPOINTS:
             _deadline_remaining(deadline, cancel_event)
             ips = _query_endpoint_bounded(
                 connect_ip, server_name, host, deadline, cancel_event,
@@ -295,10 +266,10 @@ def _resolve_bounded(host, timeout, deadline, cancel_event):
                 break
         with _cache_lock:
             _deadline_remaining(deadline, cancel_event)
-            ttl = XBOX_DOH_TTL if ips else XBOX_DOH_NEGATIVE_TTL
+            ttl = APP_DOH_TTL if ips else APP_DOH_NEGATIVE_TTL
             _cache[host] = (tuple(ips), time.monotonic() + ttl)
             _cache.move_to_end(host)
-            while len(_cache) > XBOX_DOH_CACHE_MAX:
+            while len(_cache) > APP_DOH_CACHE_MAX:
                 _cache.popitem(last=False)
         return ips
     except (OSError, TypeError, ValueError):
@@ -306,8 +277,8 @@ def _resolve_bounded(host, timeout, deadline, cancel_event):
         return []
 
 
-def resolve(host, timeout=XBOX_DOH_TIMEOUT, *, deadline=None, cancel_event=None):
-    """Resolve an exact hostname through Xbox DNS without touching system DNS."""
+def resolve(host, timeout=APP_DOH_TIMEOUT, *, deadline=None, cancel_event=None):
+    """Resolve an exact hostname through app-owned DNS without touching system DNS."""
     host = _normalize_host(host)
     if not host:
         return []
@@ -321,15 +292,15 @@ def resolve(host, timeout=XBOX_DOH_TIMEOUT, *, deadline=None, cancel_event=None)
             return list(cached[0])
 
     ips = []
-    for connect_ip, server_name in XBOX_DOH_ENDPOINTS:
+    for connect_ip, server_name in APP_DOH_ENDPOINTS:
         ips = _query_endpoint(connect_ip, server_name, host, timeout)
         if ips:
             break
 
     with _cache_lock:
-        ttl = XBOX_DOH_TTL if ips else XBOX_DOH_NEGATIVE_TTL
+        ttl = APP_DOH_TTL if ips else APP_DOH_NEGATIVE_TTL
         _cache[host] = (tuple(ips), now + ttl)
         _cache.move_to_end(host)
-        while len(_cache) > XBOX_DOH_CACHE_MAX:
+        while len(_cache) > APP_DOH_CACHE_MAX:
             _cache.popitem(last=False)
     return ips

@@ -74,6 +74,29 @@ def test_upstream_close_does_not_skip_transport_cleanup():
     asyncio.run(scenario())
 
 
+def test_peer_close_response_has_bounded_drain(monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(raw, 'CLOSE_TIMEOUT', .01)
+        reader, writer = asyncio.StreamReader(), Writer()
+        reader.feed_data(b'\x88\x00')
+        writer.block_drain = True
+        ws = raw.RawWebSocket(reader, writer)
+        task = asyncio.create_task(ws.recv())
+        try:
+            await asyncio.wait_for(writer.drain_entered.wait(), 1)
+            done, _ = await asyncio.wait([task], timeout=1)
+            assert done, 'peer CLOSE reply escaped the shutdown deadline'
+            assert await task is None
+            await ws.close()
+            assert writer.closed
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await ws.close()
+    asyncio.run(scenario())
+
+
 def test_cancelled_upgrade_closes_connected_writer(monkeypatch):
     async def scenario():
         writer = Writer()
@@ -109,6 +132,7 @@ def test_cancelled_refill_reclaims_successful_unconsumed_connections(monkeypatch
     async def scenario():
         instance = pool._WsPool() if kind == 'direct' else pool._CfWorkerPool()
         monkeypatch.setattr(pool.proxy_config, 'pool_size', 2)
+        monkeypatch.setattr(pool._CfWorkerPool, 'PER_DC_LIMIT', 2)
         sibling_ready = asyncio.Event()
         writer = Writer()
         ws = raw.RawWebSocket(asyncio.StreamReader(), writer)
@@ -119,9 +143,9 @@ def test_cancelled_refill_reclaims_successful_unconsumed_connections(monkeypatch
             if calls == 1:
                 await asyncio.Future()
             sibling_ready.set()
-            return ws
+            return ws if kind == 'direct' else (ws, 'unused')
         monkeypatch.setattr(instance, '_connect_one', connect)
-        args = ((2, False), 'unused', ['unused']) if kind == 'direct' else ((2, 'unused'), 'unused')
+        args = ((2, False, False), 'unused', ['unused']) if kind == 'direct' else (2, 'unused', ['unused'])
         task = asyncio.create_task(instance._refill(*args))
         await sibling_ready.wait()
         task.cancel()
@@ -225,6 +249,30 @@ def test_empty_websocket_fragments_do_not_signal_stream_eof():
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize('case', ['frame', 'fragmented', 'separate_messages'])
+def test_upstream_websocket_size_cap_preserves_streaming_semantics(monkeypatch, case):
+    async def scenario():
+        monkeypatch.setattr(raw.RawWebSocket, 'MAX_MESSAGE_LEN', 4)
+        reader = asyncio.StreamReader()
+        if case == 'frame':
+            # No payload is sent: an oversized frame must fail before reading
+            # or allocating the advertised body.
+            reader.feed_data(b'\x82\x7f' + (5).to_bytes(8, 'big'))
+        elif case == 'fragmented':
+            reader.feed_data(b'\x02\x03one\x80\x03two')
+        else:
+            reader.feed_data(b'\x82\x03one\x82\x03two')
+        ws = raw.RawWebSocket(reader, Writer())
+        if case != 'frame':
+            assert await ws.recv() == b'one'
+        if case == 'separate_messages':
+            assert await ws.recv() == b'two'
+        else:
+            with pytest.raises(ConnectionError, match='too large'):
+                await asyncio.wait_for(ws.recv(), timeout=1)
+    asyncio.run(scenario())
+
+
 def test_empty_fake_tls_record_does_not_signal_stream_eof():
     fake_tls = importlib.import_module(_NAME + '.fake_tls')
     async def scenario():
@@ -257,10 +305,11 @@ def test_pool_reset_closes_idle_and_cancels_pending_refill(monkeypatch, kind):
     async def scenario():
         instance = pool._WsPool() if kind == 'direct' else pool._CfWorkerPool()
         monkeypatch.setattr(pool.proxy_config, 'pool_size', 1)
-        key = (2, False) if kind == 'direct' else (2, 'unused')
+        key = (2, False, False) if kind == 'direct' else 2
         idle_writer = Writer()
         from collections import deque
-        instance._idle[key] = deque([(raw.RawWebSocket(asyncio.StreamReader(), idle_writer), 0)])
+        entry = (raw.RawWebSocket(asyncio.StreamReader(), idle_writer), 0)
+        instance._idle[key] = deque([entry if kind == 'direct' else (*entry, 'unused')])
         entered, finished = asyncio.Event(), asyncio.Event()
         async def connect(*args):
             entered.set()
@@ -269,13 +318,43 @@ def test_pool_reset_closes_idle_and_cancels_pending_refill(monkeypatch, kind):
             finally:
                 finished.set()
         monkeypatch.setattr(instance, '_connect_one', connect)
-        args = ((3, False), 'unused', ['unused']) if kind == 'direct' else ((3, 'unused'), 'unused')
+        args = ((3, False, False), 'unused', ['unused']) if kind == 'direct' else (3, 'unused', ['unused'])
         instance._schedule_refill(*args)
         await entered.wait()
         await instance.reset()
         assert finished.is_set()
         assert idle_writer.closed
         assert not instance._tasks and not instance._idle and not instance._refilling
+    asyncio.run(scenario())
+
+
+def test_idle_rotation_reclaims_dead_socket_and_owns_replacement_tasks(monkeypatch):
+    from collections import deque
+    import time
+    async def scenario():
+        instance = pool._WsPool()
+        monkeypatch.setattr(pool.proxy_config, 'pool_size', 2)
+        key = (2, False, False)
+        dead_writer = Writer()
+        dead_reader = asyncio.StreamReader()
+        dead_reader.feed_eof()
+        instance._idle[key] = deque([(raw.RawWebSocket(dead_reader, dead_writer), time.monotonic())])
+        replacement_writers = []
+        async def connect(*args):
+            writer = Writer()
+            replacement_writers.append(writer)
+            return raw.RawWebSocket(asyncio.StreamReader(), writer)
+        monkeypatch.setattr(instance, '_connect_one', connect)
+        instance._schedule_refill(key, 'unused', ['unused'])
+        try:
+            await instance._refilling[key]
+            assert dead_writer.closed
+            assert len(instance._idle[key]) == len(replacement_writers) == 2
+            assert key in instance._rotating
+        finally:
+            await instance.close()
+        assert all(writer.closed for writer in replacement_writers)
+        assert not instance._tasks and not instance._idle and not instance._rotating
     asyncio.run(scenario())
 
 
@@ -335,12 +414,15 @@ def test_immediate_shutdown_owns_expired_socket_before_close_task_starts(monkeyp
     import time
     async def scenario():
         instance = pool._WsPool() if kind == 'direct' else pool._CfWorkerPool()
-        monkeypatch.setattr(pool.proxy_config, 'pool_size', 0)
-        key = (2, False) if kind == 'direct' else (2, 'unused')
+        monkeypatch.setattr(pool.proxy_config, 'pool_size', 1)
+        monkeypatch.setattr(pool.proxy_config, 'dc_redirects', {2: 'unused'})
+        monkeypatch.setattr(instance, '_schedule_refill', lambda *args: None)
+        key = (2, False, False) if kind == 'direct' else 2
         writer = Writer()
         ws = raw.RawWebSocket(asyncio.StreamReader(), writer)
-        instance._idle[key] = deque([(ws, time.monotonic() - 200)])
-        args = (2, False, 'unused', []) if kind == 'direct' else (2, 'unused', 'unused')
+        entry = (ws, time.monotonic() - 200)
+        instance._idle[key] = deque([entry if kind == 'direct' else (*entry, 'unused')])
+        args = (2, False) if kind == 'direct' else (2, 'unused', ['unused'])
         assert await instance.get(*args) is None
         await instance.close()
         assert writer.closed
@@ -404,6 +486,7 @@ def test_cancelled_pool_shutdown_drains_unclaimed_and_idle_sockets(monkeypatch, 
     async def scenario():
         monkeypatch.setattr(raw, 'CLOSE_TIMEOUT', .01)
         monkeypatch.setattr(pool.proxy_config, 'pool_size', 3)
+        monkeypatch.setattr(pool._CfWorkerPool, 'PER_DC_LIMIT', 3)
         instance = pool._WsPool() if kind == 'direct' else pool._CfWorkerPool()
         baseline = asyncio.all_tasks()
         writers = [Writer() for _ in range(3)]
@@ -417,11 +500,13 @@ def test_cancelled_pool_shutdown_drains_unclaimed_and_idle_sockets(monkeypatch, 
                 await asyncio.Future()
             if calls == 3:
                 connected.set()
-            return raw.RawWebSocket(asyncio.StreamReader(), writers[calls - 2])
+            ws = raw.RawWebSocket(asyncio.StreamReader(), writers[calls - 2])
+            return ws if kind == 'direct' else (ws, 'unused')
         monkeypatch.setattr(instance, '_connect_one', connect)
-        idle_key = (4, False) if kind == 'direct' else (4, 'unused')
-        instance._idle[idle_key] = deque([(raw.RawWebSocket(asyncio.StreamReader(), writers[2]), 0)])
-        args = ((2, False), 'unused', ['unused']) if kind == 'direct' else ((2, 'unused'), 'unused')
+        idle_key = (4, False, False) if kind == 'direct' else 4
+        entry = (raw.RawWebSocket(asyncio.StreamReader(), writers[2]), 0)
+        instance._idle[idle_key] = deque([entry if kind == 'direct' else (*entry, 'unused')])
+        args = ((2, False, False), 'unused', ['unused']) if kind == 'direct' else (2, 'unused', ['unused'])
         instance._schedule_refill(*args)
         await connected.wait()
         shutdown = asyncio.create_task(instance.close())
@@ -499,7 +584,7 @@ def test_repeated_proxy_cancellation_still_drains_pools(monkeypatch):
         _, client_writer = await asyncio.open_connection('127.0.0.1', server.sockets[0].getsockname()[1])
         await entered.wait()
         idle_writer = Writer()
-        pool.ws_pool._idle[(2, False)] = deque([(raw.RawWebSocket(asyncio.StreamReader(), idle_writer), 0)])
+        pool.ws_pool._idle[(2, False, False)] = deque([(raw.RawWebSocket(asyncio.StreamReader(), idle_writer), 0)])
         try:
             run.cancel()
             await cleaning.wait()
@@ -513,4 +598,49 @@ def test_repeated_proxy_cancellation_still_drains_pools(monkeypatch):
             client_writer.close()
             await client_writer.wait_closed()
             await pool.ws_pool.close()
+    asyncio.run(scenario())
+
+
+def test_repeated_proxy_cancellation_drains_new_media_h2_pool(monkeypatch):
+    async def scenario():
+        closing, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        class MediaPool:
+            async def close(self):
+                closing.set()
+                await release.wait()
+                finished.set()
+            def log_stats(self):
+                pass
+            def log_flow(self, now):
+                pass
+        monkeypatch.setattr(runtime, 'CfH2Pool', MediaPool)
+        monkeypatch.setattr(runtime.balancer, 'update_domains_list', lambda domains: None)
+        for name, value in [('host', '127.0.0.1'), ('port', 0),
+                            ('fallback_cfproxy', True), ('cfproxy_h2_media', True),
+                            ('disable_secure', False), ('force_test_dc', False),
+                            ('dc_redirects', {}), ('cfproxy_worker_domains', []),
+                            ('cfproxy_user_domains', ['fixture.invalid'])]:
+            monkeypatch.setattr(runtime.proxy_config, name, value)
+        baseline = asyncio.all_tasks()
+        run = asyncio.create_task(runtime._run(asyncio.Event()))
+        try:
+            for _ in range(100):
+                if runtime._server_instance is not None:
+                    break
+                await asyncio.sleep(.002)
+            assert runtime._server_instance is not None
+            run.cancel()
+            await asyncio.wait_for(closing.wait(), 1)
+            run.cancel()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await run
+            assert finished.is_set()
+            assert runtime.cf_h2_pool is None and runtime._server_instance is None
+            assert not [t for t in asyncio.all_tasks() - baseline if not t.done()]
+        finally:
+            release.set()
+            if not run.done():
+                run.cancel()
+            await asyncio.gather(run, return_exceptions=True)
     asyncio.run(scenario())

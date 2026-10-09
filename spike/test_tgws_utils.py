@@ -1,4 +1,5 @@
 import sys
+import ssl
 from pathlib import Path
 
 
@@ -26,3 +27,13 @@ def test_log_limited_summarizes_suppressed_messages(monkeypatch):
         "failed: first",
         "failed: third (suppressed 1 similar messages)",
     ]
+
+
+def test_upstream_tls_contexts_verify_chains_and_default_hostname():
+    # Fronting needs a distinct HTTP hostname; it must still authenticate the
+    # certificate chain, as the updated upstream does for both TLS contexts.
+    ordinary = utils.create_ssl_context()
+    fronted = utils.create_ssl_context(check_hostname=False)
+    assert ordinary.check_hostname and not fronted.check_hostname
+    assert ordinary.verify_mode == fronted.verify_mode == ssl.CERT_REQUIRED
+    assert ordinary.get_ca_certs() and fronted.get_ca_certs()

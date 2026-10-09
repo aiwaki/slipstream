@@ -18,9 +18,9 @@ from test_tproxy_doh import (
 
 HOST = "critical-child.example"
 EXACT_IP = "1.1.1.1"
-XBOX_IP = "4.2.2.2"
+APP_DNS_IP = "4.2.2.2"
 CAPABILITY = "c" * 32
-STAGES = (tproxy.AUTO_GEPH_STAGE_XBOX_DNS, *tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES)
+STAGES = (tproxy.AUTO_GEPH_STAGE_APP_DNS, *tproxy.ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES)
 Outcome = tproxy.bootstrap_asset_preflight.RangeProbeOutcome
 
 
@@ -62,7 +62,7 @@ def isolated_recovery(monkeypatch, reset_smart_dns_state):
 
     for name in (
         "_browser_navigation_provenance_accepted", "save_auto_geph",
-        "_commit_preflight_owned_geph_proof", "system_resolve", "xbox_dns_resolve",
+        "_commit_preflight_owned_geph_proof", "system_resolve", "app_dns_resolve",
     ):
         monkeypatch.setattr(tproxy, name, forbidden)
     monkeypatch.setattr(tproxy.socket, "create_connection", forbidden)
@@ -85,7 +85,7 @@ def asset(host=HOST):
 
 def run_blocking(
     *, direct=None, local_probe=None, geph_probe=None,
-    xbox_resolver=None, cancel_event=None, host=HOST,
+    app_dns_resolver=None, cancel_event=None, host=HOST,
 ):
     target = asset(host)
     result = tproxy._bootstrap_asset_preflight_blocking(
@@ -93,7 +93,7 @@ def run_blocking(
         direct_probe=(lambda *_args: observation()) if direct is None else direct,
         local_probe=(lambda *_args: observation()) if local_probe is None else local_probe,
         geph_probe=(lambda *_args: observation(Outcome.COMPLETE)) if geph_probe is None else geph_probe,
-        xbox_resolver=(lambda *_args, **_kwargs: [XBOX_IP]) if xbox_resolver is None else xbox_resolver,
+        app_dns_resolver=(lambda *_args, **_kwargs: [APP_DNS_IP]) if app_dns_resolver is None else app_dns_resolver,
         exact_address=EXACT_IP, proof_capability=CAPABILITY, cancel_event=cancel_event,
     )
     with pytest.raises(RuntimeError, match="forgotten"):
@@ -198,8 +198,9 @@ def test_reader_composition_encrypted_drips_at_absolute_deadline_never_qualify_s
 
 
 @pytest.mark.parametrize("final_deadline", (120.0, 109.0))
+@pytest.mark.parametrize("resolved_ip", (APP_DNS_IP, EXACT_IP))
 def test_local_orchestrator_starts_three_concurrent_same_request_workers(
-    isolated_recovery, final_deadline,
+    isolated_recovery, final_deadline, resolved_ip,
 ):
     request = b"GET /synthetic.js HTTP/1.1\r\n\r\n"
     cancelled = threading.Event()
@@ -209,7 +210,7 @@ def test_local_orchestrator_starts_three_concurrent_same_request_workers(
 
     def resolve(host, **kwargs):
         dns_calls.append((host, kwargs))
-        return ["127.0.0.1", XBOX_IP]
+        return ["127.0.0.1", resolved_ip]
 
     def local(ip, host, actual_request, deadline, final, strategy, event):
         calls.append((ip, host, actual_request, deadline, final, strategy, event, threading.get_ident()))
@@ -218,13 +219,13 @@ def test_local_orchestrator_starts_three_concurrent_same_request_workers(
 
     results = tproxy._bootstrap_local_object_observations(
         HOST, EXACT_IP, request, final_deadline,
-        cancel_event=cancelled, local_probe=local, xbox_resolver=resolve,
+        cancel_event=cancelled, local_probe=local, app_dns_resolver=resolve,
     )
     deadline = min(108.0, final_deadline - 3.0)
     assert tuple(stage for stage, _ip, _obs in results) == STAGES
     assert len(calls) == len({call[-1] for call in calls}) == 3
     assert {(call[0], call[5]) for call in calls} == {
-        (XBOX_IP, tproxy.PLAIN_STRATEGY), (EXACT_IP, "split64"), (EXACT_IP, "split16"),
+        (resolved_ip, tproxy.PLAIN_STRATEGY), (EXACT_IP, "split64"), (EXACT_IP, "split16"),
     }
     for _ip, host, actual, observed_deadline, final, _strategy, event, _tid in calls:
         assert host == HOST and actual is request and event is cancelled
@@ -255,7 +256,7 @@ def test_local_orchestrator_drains_owned_workers_after_cancellation():
             tproxy._bootstrap_local_object_observations,
             HOST, EXACT_IP, b"request", 120.0,
             cancel_event=cancelled, local_probe=local,
-            xbox_resolver=lambda *_args, **_kwargs: [XBOX_IP],
+            app_dns_resolver=lambda *_args, **_kwargs: [APP_DNS_IP],
         )
         try:
             assert entered.wait(2.0)
@@ -376,7 +377,7 @@ def test_admitted_child_commits_before_held_parent_releases_without_browser_retr
 
     monkeypatch.setattr(tproxy, "_bootstrap_local_range_probe", local)
     monkeypatch.setattr(tproxy, "_bootstrap_diagnostic_owned_pid", owner)
-    monkeypatch.setattr(tproxy, "xbox_dns_resolve", lambda *_args, **_kwargs: [XBOX_IP])
+    monkeypatch.setattr(tproxy, "app_dns_resolve", lambda *_args, **_kwargs: [APP_DNS_IP])
     monkeypatch.setattr(tproxy, "_commit_preflight_owned_geph_proof", observe_commit)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
 
@@ -518,7 +519,7 @@ def test_same_origin_parent_returns_fresh_committed_claim_without_browser_retry(
 
     monkeypatch.setattr(tproxy, "_new_direct_route_preflight_job", create_job)
     monkeypatch.setattr(tproxy, "_bootstrap_local_range_probe", local)
-    monkeypatch.setattr(tproxy, "xbox_dns_resolve", lambda *_args, **_kwargs: [XBOX_IP])
+    monkeypatch.setattr(tproxy, "app_dns_resolve", lambda *_args, **_kwargs: [APP_DNS_IP])
     monkeypatch.setattr(tproxy, "_commit_preflight_owned_geph_proof", observe_geph_commit)
     monkeypatch.setattr(tproxy, "_commit_bootstrap_local_winner", observe_local_commit)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
@@ -548,7 +549,7 @@ def test_same_origin_parent_returns_fresh_committed_claim_without_browser_retry(
     claim = asyncio.run(scenario())
     assert len(root_calls) == len(direct_requests) == 1
     assert set(local_calls) == {
-        (XBOX_IP, tproxy.PLAIN_STRATEGY), (EXACT_IP, "split64"), (EXACT_IP, "split16"),
+        (APP_DNS_IP, tproxy.PLAIN_STRATEGY), (EXACT_IP, "split64"), (EXACT_IP, "split16"),
     }
     assert len(committed_capabilities) == 1
     assert claim.host == host
@@ -568,7 +569,7 @@ def test_same_origin_parent_returns_fresh_committed_claim_without_browser_retry(
         assert (claim.exact_address, claim.address, claim.strategy_name) == (
             EXACT_IP, EXACT_IP, "split64",
         )
-        assert not claim.via_xbox_dns
+        assert not claim.via_app_dns
         assert claim.capability == committed_capabilities[0]
         assert not geph_requests
         assert order == [("local_commit", True), ("parent_released", None)]
@@ -602,8 +603,8 @@ def test_any_complete_local_response_vetoes_geph_and_only_matching_object_select
     assert winner is not None
     assert (winner.host, winner.exact_address, winner.capability) == (HOST, EXACT_IP, CAPABILITY)
     assert winner.strategy_name == strategy
-    assert winner.via_xbox_dns is (strategy == tproxy.PLAIN_STRATEGY)
-    assert winner.address == (XBOX_IP if strategy == tproxy.PLAIN_STRATEGY else EXACT_IP)
+    assert winner.via_app_dns is (strategy == tproxy.PLAIN_STRATEGY)
+    assert winner.address == (APP_DNS_IP if strategy == tproxy.PLAIN_STRATEGY else EXACT_IP)
     assert winner.deadline_monotonic == 125.0
 
 
@@ -758,10 +759,10 @@ def test_local_diagnostic_actual_result_exports_ordered_stage_states(
     assert diagnostic.local == expected
     assert f"decision={decision} " in record
     assert record.endswith(
-        "local_xbox=incomplete_eof local_split64=incomplete_idle_timeout "
+        "local_app_dns=incomplete_eof local_split64=incomplete_idle_timeout "
         f"local_split16={last_state}"
     )
-    for private_value in (EXACT_IP, XBOX_IP, "same-object", "/assets/", "synthetic=transient"):
+    for private_value in (EXACT_IP, APP_DNS_IP, "same-object", "/assets/", "synthetic=transient"):
         assert private_value not in record
 
 
@@ -771,7 +772,7 @@ def test_local_diagnostic_omits_stages_that_never_started(monkeypatch, isolated_
     diagnostic, record = capture_local_diagnostic(monkeypatch, isolated_recovery, result)
     assert diagnostic.local == ()
     assert "decision=direct_complete " in record
-    assert "local_xbox=" not in record
+    assert "local_app_dns=" not in record
     assert "local_split64=" not in record
     assert "local_split16=" not in record
 
@@ -799,12 +800,12 @@ def test_local_diagnostic_rejects_hostile_tuple_members(monkeypatch, isolated_re
         ),
     )
     _diagnostic, record = capture_local_diagnostic(monkeypatch, isolated_recovery, result)
-    assert record.endswith("local_xbox=unknown local_split64=unknown local_split16=complete")
+    assert record.endswith("local_app_dns=unknown local_split64=unknown local_split16=complete")
     assert "synthetic" not in record and "forged" not in record and "\n" not in record
 
 
 @pytest.mark.parametrize("local", [
-    "local_xbox=complete\nsecret=synthetic-value",
+    "local_app_dns=complete\nsecret=synthetic-value",
     ["complete", "complete", "complete"],
     ("complete", "complete"),
     HostileLocalTuple(("complete", "complete", "complete")),
@@ -818,14 +819,14 @@ def test_local_diagnostic_omits_malformed_container(monkeypatch, isolated_recove
     _diagnostic, record = capture_local_diagnostic(monkeypatch, isolated_recovery, result)
     assert "decision=local_recovery_inconclusive " in record
     assert record.endswith("geph=not_started")
-    assert "local_xbox=" not in record and "synthetic" not in record and "\n" not in record
+    assert "local_app_dns=" not in record and "synthetic" not in record and "\n" not in record
 
 
 @pytest.mark.parametrize("failure,guard,state", [
     ("incomplete", "direct_same_object", "incomplete_idle_timeout"),
     ("unknown", "direct_same_object", "invalid"),
     ("mismatch", "direct_same_object", "complete"),
-    ("xbox", "xbox_same_object", "complete"),
+    ("app_dns", "app_dns_same_object", "complete"),
     ("split64", "split64_same_object", "complete"),
     ("split16", "split16_same_object", "complete"),
     ("deadline", "probe_deadline", "complete"),
@@ -837,7 +838,7 @@ def test_comparison_diagnostic_reports_first_refusal_without_proof(
     monkeypatch, isolated_recovery, failure, guard, state,
 ):
     clock = isolated_recovery
-    stage = {"xbox": tproxy.PLAIN_STRATEGY}.get(failure, failure)
+    stage = {"app_dns": tproxy.PLAIN_STRATEGY}.get(failure, failure)
 
     def local(_ip, _host, _request, _deadline, _final, strategy, _event):
         return observation(validator="other-object" if strategy == stage else "same-object")

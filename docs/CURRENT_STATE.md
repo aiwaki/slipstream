@@ -10,6 +10,49 @@ file.
 
 ## Current Checkpoint
 
+2026-10-09 DNS retirement / Telegram update (candidate source, not installed):
+- Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 remains OPEN
+  DRAFT; starting HEAD b468d891. Live CI36889846833 and Windows36889847029 PASS;
+  dependency36889846940 FAILED. Reuse the unchanged Oct1 Rust/runtime baseline
+  below except where the new DNS provider, vendor or dependency changes apply.
+- User retired xbox-dns.ru. Runtime migrated to neutral app-owned
+  RFC8484 DNS with independent cache/connections, preserving the existing exact-
+  host proof and protected-local exclusions. Old unversioned temporary Geph
+  overlays are rejected; local strategy learning and external DNS are preserved.
+- tg-ws-proxy1.11.1 imported from upstream18175fb4 with source archive/module
+  provenance; local Oct1 transport fixes retained. HTTPX0.28.1 added to all three
+  generated hash locks; prior pins unchanged. Lock generator pip-tools7.5.3 now
+  pairs with supported pip26.0.1 (latest pip broke its private resolver API).
+- Three subagents completed DNS retirement, Telegram upstream integration/protocol
+  tests, and independent H2 ownership review. Independent real TLS/RFC8484 tests
+  found/fixed incomplete HTTP-body and DNS-TC acceptance. Ordinary and deadline
+  DNS paths now share the strict reader. Global socket fixture interference fixed.
+- H2 ownership13 regressions (12 RED then GREEN) cover repeated cancellation,
+  close/reconnect/trace/channel-handoff races, permits and unfinished preflight.
+  Telegram combined62 PASS; real TLS/RFC8484 matrix16 PASS. Prior local WS and
+  lifecycle fixes retained; peer CLOSE drain now shares the bounded close deadline.
+- FINAL daemon2186 PASS+8subtests,42.93s; build/docs66 PASS+5subtests; Python
+  contracts/docs126 PASS; Rust shared contracts14, tray status8/diagnostic1,
+  Windows no-network contract10 PASS. Existing broad Rust baseline reused.
+  Logs output/continuation-20261009/{daemon-final,build-docs-final,rust-*,
+  contracts-docs,windows-contract}.log; focused logs output/tgws-update-20261009/
+  and output/dns-provider-retirement-*.log. One Scapy FFDH deprecation warning.
+- All14 upstream module input hashes, VERSION and unchanged LICENSE verified.
+  Python-only OSV query found0 findings across14 runtime pins; this does not
+  replace the full product dependency audit or its unresolved coverage gap.
+- Read-only launchctl found no system/dev.slipstream.tproxy service during this
+  continuation. No install, restart or native authorization performed. Historical
+  installed identity below is stale; do not infer current app state from it.
+- Dependency refresh: existing PR383 Geph0.4.3 removes5 old blockers; all11 r5
+  source patches have one literal match but require new hashes and qualification.
+  SQLx SQLite-only upgrade is a further candidate. RSA Marvin and Chromium generic-
+  PURL coverage remain unresolved; no exceptions extended. Details/evidence:
+  output/continuation-20261009/dependency-refresh.md. Geph/Chromium not changed.
+- NEXT canonical bundle build and verifier, then record exact source/PR evidence. Release/install remains gated
+  on the dependency audit and separate physical-browser/Telegram qualification.
+  Preserve user AGENTS.md, output, backups and learning; no old transaction replay.
+
+### Previous audit baseline (reusable where unchanged)
 
 2026-10-01 bugs/races audit: source7ebfe978 functional CI/build GREEN; dependency gate RED:
 - Physical AUD-17 / codex/codebase-audit-20260905 / PR376 OPEN. Audit base

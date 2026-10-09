@@ -7197,8 +7197,8 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
                 },
                 "system_proxy": {"state": "off", "kind": ""},
                 "system_dns": {
-                    "state": "xbox_dns",
-                    "providers": "xbox_dns",
+                    "state": "configured",
+                    "providers": "",
                     "managed_by_slipstream": false,
                     "resolution_checks": {"state": "ok"}
                 },

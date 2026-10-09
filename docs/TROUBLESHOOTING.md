@@ -12,7 +12,7 @@ Use local bypass for DPI/SNI interference:
 
 YouTube media hosts under `googlevideo.com` use `direct_first`: an unmodified
 TLS first flight is always attempted before a bounded local desync fallback.
-They remain protected from Geph, Smart DNS, app-owned Xbox DNS, and generic
+They remain protected from Geph, Smart DNS, app-owned DNS, and generic
 unknown-host promotion.
 
 Use Geph only for services that need a foreign exit because the service rejects
@@ -457,8 +457,8 @@ complete-response check. One bounded system/plain server-first close remains
 ambiguous and inert. A second matching close, including a short compressed
 response or an ambiguous response between 32 KiB and 512 KiB, may run one
 bounded HTTP-framing probe against the first public system-selected IP. It no
-longer waits for the same user-visible failure to repeat through Xbox DNS and
-two local strategies. Xbox DNS remains the next local fallback, while opaque
+longer waits for the same user-visible failure to repeat through app-owned DNS and
+two local strategies. App-owned DNS remains the next local fallback, while opaque
 byte count and repetition cannot select Geph or learn a route. A visible
 network-wide unknown-host failure blocks this early probe. A complete response
 ends the incident. Only a strictly proven local body shortfall
@@ -1054,22 +1054,26 @@ Every combination is valid: a user may have an external VPN, custom DNS, both,
 or neither. Slipstream must not require or infer any one of them, and its owned
 Geph backend is optional rather than a substitute for the user's environment.
 
-This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
-of the user's working setup, but Slipstream should not silently enable or remove
-them. A direct fallback reuses the exact destination selected before PF and
+This includes user-managed DNS services. Since 2026-10-09 Xbox DNS is removed
+from Slipstream's providers and Smart DNS detection, but a user-configured system
+resolver is still external state: Slipstream must not silently replace it. A direct fallback reuses the exact destination selected before PF and
 lets macOS route the new plain connection without changing external state. If a
 full-tunnel VPN owns the default `utun*` route, Slipstream instead clears only
 its own anchor and stays dormant. Split/per-app VPN equivalence is a separate
 qualification boundary and is not inferred from full-tunnel behavior.
 
-Slipstream's on-demand Xbox DNS fallback is separate from that external state:
+The app-owned fallback uses Cloudflare/Google RFC8484 endpoints, independently
+of system DNS and its cache. Old temporary overlays without the current DNS
+proof version are re-evaluated; ordinary local-strategy learning is retained.
+
+Slipstream's on-demand app-owned DNS fallback is separate from that external state:
 after a local failure for one generic hostname, it can make one verified DoH
 query and try the returned address locally. It never changes the system resolver
 configuration. Recovery is ordered and bounded for every eligible unknown TLS
 hostname; it is not a per-site list:
 
 1. Preserve the exact destination selected by the user's current system route.
-2. After evidence of a failed generic stream, try app-owned Xbox DNS locally.
+2. After evidence of a failed generic stream, try app-owned DNS locally.
 3. If that route also fails, continue through the local DoH/strategy ladder.
 4. Only after the exact host exhausts system, app DNS, and at least two distinct
    local strategies without receiving a server byte, confirm a real payload
@@ -1091,7 +1095,7 @@ close is intentionally treated as ambiguous. The generic local relay records
 that the client closed first before stopping its now-undeliverable upstream read.
 Two client-first closes after a long downstream silence for the same generic host
 schedule that exact local DNS retry. This is process-local, expires automatically,
-and does not route the host through Geph. If Xbox DNS produces the same broken
+and does not route the host through Geph. If app-owned DNS produces the same broken
 route or its stream later stalls, the host advances to the local strategy ladder
 instead of returning immediately to the first system route. The retry can still
 use the same IP when resolvers agree, so recovery is evidence-gated rather than a
@@ -1115,10 +1119,10 @@ upstream reset or incomplete TLS record inside the first 32 KiB and 10 seconds
 is exact host-and-stage evidence; an orderly short server-first EOF requires
 two observations for the same host and stage inside five minutes. A larger,
 later, client-first, or otherwise healthy completion clears provisional state.
-This advances only the existing system, app-owned Xbox DNS, and local-strategy
+This advances only the existing system, app-owned DNS, and local-strategy
 sequence. It is not a per-site rule and one early close cannot select Geph.
 
-When the exact system destination, app-owned Xbox DNS route, and at least two
+When the exact system destination, app-owned DNS route, and at least two
 distinct local strategies each complete at least one TLS record but leave the
 next syntactically valid framed record incomplete beyond the idle bound,
 Slipstream can run one stronger confirmation for that exact unknown host. A
@@ -1268,7 +1272,7 @@ failure plus a successful Geph probe. That result cannot prove that a foreign
 exit is needed.
 
 For a repeated exact-host local stall, Slipstream may make one local retry via a
-Slipstream-issued Xbox DNS query, then continue through distinct local
+Slipstream-issued encrypted DNS query, then continue through distinct local
 strategies. It never changes the system resolver.
 
 ### The route learns but the initiating request still fails
@@ -1285,7 +1289,7 @@ learned route hides the defect:
 1. The absolute recovery deadline begins when the client connection is
    accepted and remains the same through preflight, app-owned DNS, local
    strategies, Geph readiness, first payload, and downstream drain.
-2. After a hard system transport failure, app-owned Xbox DNS and exactly two
+2. After a hard system transport failure, app-owned DNS and exactly two
    distinct local strategies run in parallel. A local payload wins; Geph is
    admissible only if every stage explicitly reports `closed` for this request.
 3. `timeout`, `pending`, `failed`, cancellation, connect ambiguity, or a

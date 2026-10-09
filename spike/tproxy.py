@@ -128,7 +128,7 @@ from routing_policy import (
     match_policy as _match_policy,
     normalize_host,
 )
-from xbox_dns import resolve as xbox_dns_resolve
+from app_dns import resolve as app_dns_resolve
 
 
 class _ScapyMacNoiseFilter(logging.Filter):
@@ -207,7 +207,7 @@ _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # de-dup keeps the app responsive under a browser's connection burst.
 _POOL = ThreadPoolExecutor(max_workers=64, thread_name_prefix="slip")
 _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH)
-_xbox_dns_inflight = {}        # host -> asyncio.Future (on-demand resolver only)
+_app_dns_inflight = {}        # host -> asyncio.Future (on-demand resolver only)
 # Negative cache: a host that failed the whole ladder is "dead" for a cooldown,
 # during which it gets ONE fast-fail attempt instead of 7 — stops retry-storms
 # from a persistently-blocked host (e.g. Telegram DC sockets hammering forever).
@@ -407,13 +407,6 @@ GITHUB_HOSTS = (
     "objects.githubusercontent.com",
     "raw.githubusercontent.com",
     "gist.githubusercontent.com",
-)
-
-XBOX_DNS_SERVERS = (
-    "111.88.96.50",
-    "111.88.96.51",
-    "2a00:ab00:1233:26::50",
-    "2a00:ab00:1233:26::51",
 )
 
 ROUTE_POLICY_TABLE = (
@@ -2340,7 +2333,7 @@ AUTO_GEPH_PARTIAL_STRATEGIES = 2
 AUTO_GEPH_ZERO_PAYLOAD_WINDOW = 5 * 60.0
 AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES = 2
 AUTO_GEPH_STAGE_SYSTEM = "system"
-AUTO_GEPH_STAGE_XBOX_DNS = "xbox_dns"
+AUTO_GEPH_STAGE_APP_DNS = "app_dns"
 AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
 PLAIN_STRATEGY = "plain"
 SYSTEM_PROBE_PAYLOAD = "payload"
@@ -2536,14 +2529,14 @@ class _HardLocalRecoveryStageResult:
     attempted: int
     outcomes: dict
     strategy_name: object = None
-    via_xbox_dns: bool = False
+    via_app_dns: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class _HardLocalRecoveryResult:
     raced: object = None
     strategy_name: object = None
-    via_xbox_dns: bool = False
+    via_app_dns: bool = False
     proof_complete: bool = False
 
 
@@ -2824,7 +2817,7 @@ class _BootstrapLocalWinner:
     exact_address: str
     address: str
     strategy_name: str
-    via_xbox_dns: bool
+    via_app_dns: bool
     capability: str
     deadline_monotonic: float
 
@@ -2868,19 +2861,20 @@ _auto_geph_last_status = {
 }
 _auto_geph_lock = threading.RLock()
 _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
+AUTO_GEPH_STATE_VERSION = 2  # independent public DoH proof; reject legacy provider evidence
 GEPH_FAIL_LOG_TTL = 60.0
 _geph_fail_log = {}           # (host, reason) -> last log monotonic
 
-# Xbox DNS is an app-owned, on-demand resolver backend. It never modifies
+# The independent DNS fallback is an app-owned, on-demand backend. It never modifies
 # macOS DNS: an exact unknown host reaches it only after a local failure/stall.
-XBOX_DNS_CANDIDATE_TTL = 10 * 60.0
-_xbox_dns_candidates = {}     # host -> monotonic expiry
-XBOX_DNS_ATTEMPT_TTL = 10 * 60.0
-_xbox_dns_attempts = {}       # host -> monotonic expiry after Xbox DNS is exhausted
+APP_DNS_CANDIDATE_TTL = 10 * 60.0
+_app_dns_candidates = {}     # host -> monotonic expiry
+APP_DNS_ATTEMPT_TTL = 10 * 60.0
+_app_dns_attempts = {}       # host -> monotonic expiry after app-owned DNS is exhausted
 UNKNOWN_RECOVERY_SYSTEM = "system"
-UNKNOWN_RECOVERY_XBOX_DNS = "xbox_dns"
+UNKNOWN_RECOVERY_APP_DNS = "app_dns"
 UNKNOWN_RECOVERY_LOCAL_LADDER = "local_ladder"
-XBOX_DNS_STATE_MAX = 4096
+APP_DNS_STATE_MAX = 4096
 _clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
 _server_first_closes = {}     # (host, stage) -> deque[(monotonic, probe_ip, kind)]
 _server_first_repeat_stages = {}  # (host, stage) -> (expiry, original_probe_ip)
@@ -3381,13 +3375,9 @@ def system_dns_status_from_scutil(raw):
         if server and server not in servers:
             servers.append(server)
 
-    providers = []
-    if any(server in XBOX_DNS_SERVERS for server in servers):
-        providers.append("xbox_dns")
-
     return {
-        "state": "xbox_dns" if providers else ("configured" if servers else "unknown"),
-        "providers": ",".join(providers),
+        "state": "configured" if servers else "unknown",
+        "providers": "",
         "servers": servers[:8],
         "managed_by_slipstream": False,
     }
@@ -3481,7 +3471,9 @@ def current_system_dns_status(now=None):
 
 
 def smart_dns_available():
-    return current_system_dns_status().get("state") == "xbox_dns"
+    # A user's resolver configuration is not proof of a geo-exit backend.
+    # No supported Smart DNS provider remains; preserve the read-only contract.
+    return False
 
 
 def _smart_dns_mark_ok(group, now=None):
@@ -3512,19 +3504,13 @@ def smart_dns_route_enabled(host, now=None):
 
 
 def smart_dns_status_snapshot(now=None):
-    now = time.time() if now is None else now
-    dns = current_system_dns_status()
-    groups = sorted(
-        group for group, until in _smart_dns_ok_until.items()
-        if until > now
-    )
     return {
-        "state": "ready" if groups else ("available" if dns.get("state") == "xbox_dns" else "off"),
-        "providers": dns.get("providers", ""),
-        "enabled_groups": groups,
-        "last_failure_host": _smart_dns_last_failure["host"],
-        "last_failure_reason": _smart_dns_last_failure["reason"],
-        "last_failure_at": _smart_dns_last_failure["ts"],
+        "state": "off",
+        "providers": "",
+        "enabled_groups": [],
+        "last_failure_host": "",
+        "last_failure_reason": "",
+        "last_failure_at": 0.0,
         "managed_by_slipstream": False,
     }
 
@@ -4004,8 +3990,16 @@ def load_auto_geph():
     try:
         with open(_AUTO_GEPH_PATH) as f:
             raw_data = json.load(f)
-        if isinstance(raw_data, dict):
-            for raw_host, raw_expiry in raw_data.items():
+        # Legacy host->expiry state has no DNS-stage provenance. Its evidence
+        # may refer to the retired provider, so require a fresh local proof.
+        # Strategy winners are a separate cache and are intentionally retained.
+        if (
+            isinstance(raw_data, dict)
+            and type(raw_data.get("__v__")) is int
+            and raw_data.get("__v__") == AUTO_GEPH_STATE_VERSION
+            and isinstance(raw_data.get("routes"), dict)
+        ):
+            for raw_host, raw_expiry in raw_data["routes"].items():
                 host = normalize_host(raw_host)
                 try:
                     expiry = float(raw_expiry)
@@ -4025,20 +4019,24 @@ def load_auto_geph():
             os.chmod(_AUTO_GEPH_PATH, 0o600)
     except OSError:
         pass
-    if loaded != raw_data:
+    if raw_data != {"__v__": AUTO_GEPH_STATE_VERSION, "routes": loaded}:
         save_auto_geph()
 
 
 def save_auto_geph():
     try:
-        _atomic_write_json(_AUTO_GEPH_PATH, _auto_geph, mode=0o600)
+        _atomic_write_json(
+            _AUTO_GEPH_PATH,
+            {"__v__": AUTO_GEPH_STATE_VERSION, "routes": _auto_geph},
+            mode=0o600,
+        )
     except Exception:
         pass
 
 
 # A successful foreign-exit payload alone is never routing evidence. Runtime
 # learning is enabled only after an exact unknown host has exhausted the system
-# and Xbox-DNS stages plus multiple local strategies.
+# and app-owned DNS stages plus multiple local strategies.
 AUTO_GEPH_ENABLED = True
 
 
@@ -5659,7 +5657,7 @@ def _bootstrap_local_range_probe(
 
 def _bootstrap_local_object_observations(
     host, exact_address, request, final_deadline, *,
-    cancel_event=None, local_probe=None, xbox_resolver=None,
+    cancel_event=None, local_probe=None, app_dns_resolver=None,
 ):
     """Finish three independent local stages without another client connection.
 
@@ -5674,7 +5672,7 @@ def _bootstrap_local_object_observations(
     if time.monotonic() >= deadline or not _auto_geph_base_host_allowed(host):
         return ()
     local_probe = _bootstrap_local_range_probe if local_probe is None else local_probe
-    xbox_resolver = xbox_dns_resolve if xbox_resolver is None else xbox_resolver
+    app_dns_resolver = app_dns_resolve if app_dns_resolver is None else app_dns_resolver
 
     def observe(stage):
         try:
@@ -5682,8 +5680,8 @@ def _bootstrap_local_object_observations(
                 return stage, "", None
             ip = exact_address
             strategy = stage
-            if stage == AUTO_GEPH_STAGE_XBOX_DNS:
-                addresses = xbox_resolver(
+            if stage == AUTO_GEPH_STAGE_APP_DNS:
+                addresses = app_dns_resolver(
                     host, timeout=min(3.0, max(0.0, deadline - time.monotonic())),
                     deadline=deadline, cancel_event=cancel_event,
                 )
@@ -5704,7 +5702,7 @@ def _bootstrap_local_object_observations(
         except Exception:
             return stage, "", None
 
-    stages = (AUTO_GEPH_STAGE_XBOX_DNS, *ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES)
+    stages = (AUTO_GEPH_STAGE_APP_DNS, *ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES)
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix="bootstrap-local") as pool:
         workers = [pool.submit(observe, stage) for stage in stages]
         return tuple(worker.result() for worker in workers)
@@ -6923,7 +6921,7 @@ def _prune_local_partial_stalls(now):
 
 def _valid_auto_geph_stage(stage):
     return bool(
-        stage in {AUTO_GEPH_STAGE_SYSTEM, AUTO_GEPH_STAGE_XBOX_DNS}
+        stage in {AUTO_GEPH_STAGE_SYSTEM, AUTO_GEPH_STAGE_APP_DNS}
         or (
             stage.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
             and stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):] in GENERAL_STRATS
@@ -6939,7 +6937,7 @@ def _local_route_evidence_complete(observations, strategy_count):
     }
     return bool(
         AUTO_GEPH_STAGE_SYSTEM in observations
-        and AUTO_GEPH_STAGE_XBOX_DNS in observations
+        and AUTO_GEPH_STAGE_APP_DNS in observations
         and len(local_strategies) >= strategy_count
     )
 
@@ -7232,8 +7230,8 @@ def _record_partial_tls_stall_evidence(host, stage, now):
         # foreign-exit decisions still require fresh independent evidence.
         _local_partial_recheck_until[h] = now + max(
             AUTO_GEPH_PARTIAL_STALL_WINDOW,
-            XBOX_DNS_CANDIDATE_TTL,
-            XBOX_DNS_ATTEMPT_TTL,
+            APP_DNS_CANDIDATE_TTL,
+            APP_DNS_ATTEMPT_TTL,
         )
         _partial_route_recheck_pending(h, now)
         observations = _local_partial_stalls.setdefault(h, {})
@@ -8563,7 +8561,7 @@ def _bootstrap_asset_preflight_blocking(
     proof_capability=None,
     cancel_event=None,
     local_probe=None,
-    xbox_resolver=None,
+    app_dns_resolver=None,
 ):
     """Compare one transient critical asset without retaining its URL target."""
     h = normalize_host(getattr(asset, "exact_host", ""))
@@ -8702,7 +8700,7 @@ def _bootstrap_asset_preflight_blocking(
             local_observations = _bootstrap_local_object_observations(
                 h, selected_ip, request, final_deadline,
                 cancel_event=cancel_event, local_probe=local_probe,
-                xbox_resolver=xbox_resolver,
+                app_dns_resolver=app_dns_resolver,
             )
             if time.monotonic() >= final_deadline or (
                 cancel_event is not None and cancel_event.is_set()
@@ -8726,15 +8724,15 @@ def _bootstrap_asset_preflight_blocking(
                         "local_recovery_complete", diagnostic_direct, "not_started",
                         _BootstrapLocalWinner(
                             h, selected_ip, ip,
-                            PLAIN_STRATEGY if stage == AUTO_GEPH_STAGE_XBOX_DNS else stage,
-                            stage == AUTO_GEPH_STAGE_XBOX_DNS,
+                            PLAIN_STRATEGY if stage == AUTO_GEPH_STAGE_APP_DNS else stage,
+                            stage == AUTO_GEPH_STAGE_APP_DNS,
                             proof_capability, final_deadline,
                         ),
                         diagnostic_local=local_diagnostic(),
                     )
             if (
                 tuple(stage for stage, _ip, _obs in local_observations)
-                != (AUTO_GEPH_STAGE_XBOX_DNS, *ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES)
+                != (AUTO_GEPH_STAGE_APP_DNS, *ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES)
                 or not all(_bootstrap_failed_object(obs) for _stage, _ip, obs in local_observations)
             ):
                 return without_proof(
@@ -8814,7 +8812,7 @@ def _bootstrap_asset_preflight_blocking(
             )
             or not all(
                 not comparison_refuses(
-                    {AUTO_GEPH_STAGE_XBOX_DNS: "xbox_same_object",
+                    {AUTO_GEPH_STAGE_APP_DNS: "app_dns_same_object",
                      "split64": "split64_same_object", "split16": "split16_same_object"}
                     .get(stage, "local_same_object"),
                     not _decode_bootstrap_range_probe_observation(obs)[0].proves_same_object_as(geph_evidence),
@@ -9857,7 +9855,7 @@ _BOOTSTRAP_DIAGNOSTIC_GEPH = frozenset({
 })
 _BOOTSTRAP_DIAGNOSTIC_COMPARISON = frozenset({
     "invalid_evidence", "direct_same_object", "local_same_object",
-    "xbox_same_object", "split64_same_object", "split16_same_object",
+    "app_dns_same_object", "split64_same_object", "split16_same_object",
     "probe_deadline", "job_deadline", "authority", "owner_changed",
     "owner_deadline", "backend_not_ready", "cancelled", "network_wide",
 })
@@ -9949,7 +9947,7 @@ def _enqueue_bootstrap_asset_diagnostic(diagnostic):
         if type(local) is tuple and len(local) == 3:
             record += " " + " ".join(
                 f"local_{name}={allowed(value, _BOOTSTRAP_DIAGNOSTIC_DIRECT)}"
-                for name, value in zip(("xbox", "split64", "split16"), local)
+                for name, value in zip(("app_dns", "split64", "split16"), local)
             )
         _enqueue_route_preflight_root_diagnostic_record(record)
     except Exception:
@@ -10045,7 +10043,7 @@ class _BootstrapLocalRouteClaim:
     exact_address: str
     address: str
     strategy_name: str
-    via_xbox_dns: bool
+    via_app_dns: bool
     capability: str
     expires_at_monotonic: float
     deadline_monotonic: float
@@ -10068,11 +10066,11 @@ def _store_bootstrap_local_route(winner):
         and isinstance(selected, ipaddress.IPv4Address) and selected.is_global
         and str(original) == winner.exact_address
         and str(selected) == winner.address
-        and type(winner.via_xbox_dns) is bool
+        and type(winner.via_app_dns) is bool
         and (
-            (winner.strategy_name == PLAIN_STRATEGY and winner.via_xbox_dns)
+            (winner.strategy_name == PLAIN_STRATEGY and winner.via_app_dns)
             or (winner.strategy_name in ROUTE_PREFLIGHT_BOOTSTRAP_LOCAL_STRATEGIES
-                and not winner.via_xbox_dns)
+                and not winner.via_app_dns)
         )
         and isinstance(winner.capability, str)
         and re.fullmatch(r"[0-9a-f]{32}", winner.capability)
@@ -10084,7 +10082,7 @@ def _store_bootstrap_local_route(winner):
     expiry = now + _BOOTSTRAP_LOCAL_ROUTE_TTL
     entry = _BootstrapLocalRouteClaim(
         _BOOTSTRAP_LOCAL_ROUTE, winner.host, winner.exact_address,
-        winner.address, winner.strategy_name, winner.via_xbox_dns,
+        winner.address, winner.strategy_name, winner.via_app_dns,
         winner.capability, expiry, expiry,
     )
     key = (winner.host, winner.exact_address)
@@ -10121,7 +10119,7 @@ def _bootstrap_local_route_claim(host, address, deadline_monotonic):
             return None
         return _BootstrapLocalRouteClaim(
             entry.marker, entry.host, entry.exact_address, entry.address,
-            entry.strategy_name, entry.via_xbox_dns, entry.capability,
+            entry.strategy_name, entry.via_app_dns, entry.capability,
             entry.expires_at_monotonic, deadline,
         )
 
@@ -10148,7 +10146,7 @@ async def _dial_bootstrap_local_route(claim, host, address, port, head, body):
         and current.exact_address == claim.exact_address
         and current.address == claim.address
         and current.strategy_name == claim.strategy_name
-        and current.via_xbox_dns == claim.via_xbox_dns
+        and current.via_app_dns == claim.via_app_dns
         and current.capability == claim.capability
         and current.expires_at_monotonic == claim.expires_at_monotonic
     ):
@@ -11648,10 +11646,10 @@ def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=
     if failing >= AUTO_GEPH_NET_BAD:
         return
     # A low-content local storm is ambiguous. Give this exact unknown host one
-    # local retry through app-owned Xbox DNS; it never changes system DNS and
+    # local retry through app-owned DNS; it never changes system DNS and
     # never implies that the host needs a foreign exit.
-    if not _xbox_dns_attempted_recently(h, now):
-        _mark_xbox_dns_candidate(h, now)
+    if not _app_dns_attempted_recently(h, now):
+        _mark_app_dns_candidate(h, now)
 
 
 CANARY_SPECS = (
@@ -14917,7 +14915,7 @@ def _script_runtime_payload(source_file):
             os.path.join(source_dir, "semantic_route_signal_runtime.py"),
             "semantic_route_signal_runtime.py",
         ),
-        (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
+        (os.path.join(source_dir, "app_dns.py"), "app_dns.py"),
     )
     missing = [src for src, _ in payload if not os.path.isfile(src)]
     if missing:
@@ -16495,12 +16493,12 @@ async def doh_resolve_async(host):
     return await _shared_dns_resolve(host, doh_resolve, _doh_inflight)
 
 
-async def xbox_dns_resolve_async(host):
-    """Resolve one fallback host through app-owned Xbox DNS without system DNS."""
+async def app_dns_resolve_async(host):
+    """Resolve one fallback host through app-owned DNS without system DNS."""
     host = normalize_host(host)
     if not host:
         return []
-    return await _shared_dns_resolve(host, xbox_dns_resolve, _xbox_dns_inflight)
+    return await _shared_dns_resolve(host, app_dns_resolve, _app_dns_inflight)
 
 
 def system_resolve(host, port=443):
@@ -16736,14 +16734,14 @@ def note_clean_eof_stream_stall(
     strategy_name,
     activity,
     *,
-    via_xbox_dns=False,
+    via_app_dns=False,
     now=None,
 ):
     """Handle repeated client-first clean EOF stalls without a route escape.
 
     This is deliberately narrower than an abnormal transport failure: it needs
     two exact-host observations in a bounded window and can only select the
-    app-owned Xbox DNS/plain-TLS retry for a generic unknown host.  An Xbox
+    app-owned DNS/plain-TLS retry for a generic unknown host.  An app-owned DNS
     retry needs the same repeated signal before it is cleared, so one ordinary
     keep-alive EOF cannot discard a recovery that may have worked.  This never
     learns a Geph route.
@@ -16756,11 +16754,11 @@ def note_clean_eof_stream_stall(
         return False
     if not _repeated_clean_eof_stream_stall(h, activity, now):
         return False
-    if via_xbox_dns:
+    if via_app_dns:
         _record_strategy_result(h, strategy_name, False)
         if _strat_cache.get(h) == strategy_name:
             _strat_cache.pop(h, None)
-        _mark_xbox_dns_exhausted(h, now)
+        _mark_app_dns_exhausted(h, now)
         return True
     return note_local_stream_stall(h, strategy_name, now=now)
 
@@ -17090,9 +17088,9 @@ def _advance_transport_idle_retry(host, stage, now=None):
     ):
         return False
     if stage == AUTO_GEPH_STAGE_SYSTEM:
-        _mark_xbox_dns_candidate(h, now)
-    elif stage == AUTO_GEPH_STAGE_XBOX_DNS:
-        _mark_xbox_dns_exhausted(h, now)
+        _mark_app_dns_candidate(h, now)
+    elif stage == AUTO_GEPH_STAGE_APP_DNS:
+        _mark_app_dns_exhausted(h, now)
     else:
         strategy_name = stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
         _record_strategy_result(h, strategy_name, False)
@@ -18287,10 +18285,10 @@ def note_server_first_route_close(
                 runner=transport_runner,
             )
     if stage == AUTO_GEPH_STAGE_SYSTEM:
-        _mark_xbox_dns_candidate(h, now)
+        _mark_app_dns_candidate(h, now)
         return True
-    if stage == AUTO_GEPH_STAGE_XBOX_DNS:
-        _mark_xbox_dns_exhausted(h, now)
+    if stage == AUTO_GEPH_STAGE_APP_DNS:
+        _mark_app_dns_exhausted(h, now)
         return True
 
     strategy_name = stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
@@ -18300,56 +18298,56 @@ def note_server_first_route_close(
     return True
 
 
-def _mark_xbox_dns_candidate(host, now=None):
+def _mark_app_dns_candidate(host, now=None):
     h = normalize_host(host)
     if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
         return False
     now = time.monotonic() if now is None else now
-    _xbox_dns_candidates[h] = now + XBOX_DNS_CANDIDATE_TTL
-    _prune_xbox_dns_state(_xbox_dns_candidates, now)
+    _app_dns_candidates[h] = now + APP_DNS_CANDIDATE_TTL
+    _prune_app_dns_state(_app_dns_candidates, now)
     return True
 
 
-def _note_xbox_dns_attempt(host, now=None):
+def _note_app_dns_attempt(host, now=None):
     h = normalize_host(host)
     if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
         return False
     now = time.monotonic() if now is None else now
-    _xbox_dns_attempts[h] = now + XBOX_DNS_ATTEMPT_TTL
-    _prune_xbox_dns_state(_xbox_dns_attempts, now)
+    _app_dns_attempts[h] = now + APP_DNS_ATTEMPT_TTL
+    _prune_app_dns_state(_app_dns_attempts, now)
     return True
 
 
-def _prune_xbox_dns_state(state, now):
+def _prune_app_dns_state(state, now):
     for stale, expiry in list(state.items()):
         if expiry <= now:
             state.pop(stale, None)
-    while len(state) > XBOX_DNS_STATE_MAX:
+    while len(state) > APP_DNS_STATE_MAX:
         state.pop(next(iter(state)))
 
 
-def _xbox_dns_attempted_recently(host, now=None):
+def _app_dns_attempted_recently(host, now=None):
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
-    expiry = _xbox_dns_attempts.get(h, 0.0)
+    expiry = _app_dns_attempts.get(h, 0.0)
     if expiry > now:
         return True
-    _xbox_dns_attempts.pop(h, None)
+    _app_dns_attempts.pop(h, None)
     return False
 
 
-def _xbox_dns_candidate_active(host, now=None):
+def _app_dns_candidate_active(host, now=None):
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
-    expiry = _xbox_dns_candidates.get(h, 0.0)
+    expiry = _app_dns_candidates.get(h, 0.0)
     if expiry > now:
         return True
-    _xbox_dns_candidates.pop(h, None)
+    _app_dns_candidates.pop(h, None)
     return False
 
 
-def _clear_xbox_dns_candidate(host):
-    _xbox_dns_candidates.pop(normalize_host(host), None)
+def _clear_app_dns_candidate(host):
+    _app_dns_candidates.pop(normalize_host(host), None)
 
 
 def unknown_recovery_stage(host, now=None):
@@ -18357,18 +18355,18 @@ def unknown_recovery_stage(host, now=None):
     h = normalize_host(host)
     if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
         return UNKNOWN_RECOVERY_SYSTEM
-    if _xbox_dns_attempted_recently(h, now):
+    if _app_dns_attempted_recently(h, now):
         return UNKNOWN_RECOVERY_LOCAL_LADDER
-    if _xbox_dns_candidate_active(h, now):
-        return UNKNOWN_RECOVERY_XBOX_DNS
+    if _app_dns_candidate_active(h, now):
+        return UNKNOWN_RECOVERY_APP_DNS
     return UNKNOWN_RECOVERY_SYSTEM
 
 
 def _unknown_recovery_stage_for_attempt(host, repeat_stage=None, now=None):
     if repeat_stage == AUTO_GEPH_STAGE_SYSTEM:
         return UNKNOWN_RECOVERY_SYSTEM
-    if repeat_stage == AUTO_GEPH_STAGE_XBOX_DNS:
-        return UNKNOWN_RECOVERY_XBOX_DNS
+    if repeat_stage == AUTO_GEPH_STAGE_APP_DNS:
+        return UNKNOWN_RECOVERY_APP_DNS
     if repeat_stage is not None:
         return UNKNOWN_RECOVERY_LOCAL_LADDER
     return unknown_recovery_stage(host, now=now)
@@ -18410,11 +18408,11 @@ def _strategy_order_for_attempt(host, repeat_stage=None):
     ]
 
 
-def _mark_xbox_dns_exhausted(host, now=None):
-    """Advance one generic host from Xbox DNS to the local strategy ladder."""
-    if not _note_xbox_dns_attempt(host, now):
+def _mark_app_dns_exhausted(host, now=None):
+    """Advance one generic host from app-owned DNS to the local strategy ladder."""
+    if not _note_app_dns_attempt(host, now):
         return False
-    _clear_xbox_dns_candidate(host)
+    _clear_app_dns_candidate(host)
     return True
 
 
@@ -18422,8 +18420,8 @@ def note_local_stream_stall(host, strategy_name, now=None):
     """Demote only the exact generic strategy after a partial stream stall.
 
     A partial TLS response is not proof that a service needs a foreign exit.
-    The first failure selects an app-owned Xbox DNS lookup; a later strategy
-    failure remains on the local ladder after Xbox DNS has been exhausted.
+    The first failure selects an app-owned DNS lookup; a later strategy
+    failure remains on the local ladder after app-owned DNS has been exhausted.
     Protected local groups stay entirely outside this recovery path, and no
     host is learned for Geph here.
     """
@@ -18435,8 +18433,8 @@ def note_local_stream_stall(host, strategy_name, now=None):
     _record_strategy_result(h, strategy_name, False)
     if _strat_cache.get(h) == strategy_name:
         _strat_cache.pop(h, None)
-    if not _xbox_dns_attempted_recently(h, now):
-        _mark_xbox_dns_candidate(h, now)
+    if not _app_dns_attempted_recently(h, now):
+        _mark_app_dns_candidate(h, now)
     return True
 
 
@@ -19660,7 +19658,7 @@ async def _race_probe_addresses(
     ), attempted
 
 
-async def _try_xbox_dns_local_connect(
+async def _try_app_dns_local_connect(
     host,
     port,
     head,
@@ -19669,10 +19667,10 @@ async def _try_xbox_dns_local_connect(
     attempt_summary=None,
     timeout_ms=None,
 ):
-    """Try the app-owned Xbox DNS answer locally, never through Geph."""
+    """Try the app-owned DNS answer locally, never through Geph."""
     if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
         return None
-    ips = await xbox_dns_resolve_async(host)
+    ips = await app_dns_resolve_async(host)
     plain = STRAT_BY_NAME["plain"]
     outcomes = {}
     raced, attempted = await _race_probe_addresses(
@@ -19738,7 +19736,7 @@ async def _hard_local_strategy_stage(
     )
 
 
-async def _hard_local_xbox_stage(
+async def _hard_local_app_dns_stage(
     host,
     port,
     head,
@@ -19750,15 +19748,15 @@ async def _hard_local_xbox_stage(
     remaining = evidence_deadline - time.monotonic()
     if remaining <= 0:
         return _HardLocalRecoveryStageResult(
-            AUTO_GEPH_STAGE_XBOX_DNS,
+            AUTO_GEPH_STAGE_APP_DNS,
             None,
             0,
             {},
             strategy_name="plain",
-            via_xbox_dns=True,
+            via_app_dns=True,
         )
     try:
-        raced = await _try_xbox_dns_local_connect(
+        raced = await _try_app_dns_local_connect(
             host,
             port,
             head,
@@ -19771,12 +19769,12 @@ async def _hard_local_xbox_stage(
     except Exception:
         raced = None
     return _HardLocalRecoveryStageResult(
-        AUTO_GEPH_STAGE_XBOX_DNS,
+        AUTO_GEPH_STAGE_APP_DNS,
         raced,
         int(summary.get("attempted") or 0),
         summary.get("outcomes") or {},
         strategy_name="plain",
-        via_xbox_dns=True,
+        via_app_dns=True,
     )
 
 
@@ -19793,7 +19791,7 @@ async def _try_hard_local_recovery(
     """Race exact current-attempt local proof under one client deadline.
 
     This path is admitted only after an independent hard transport failure.
-    Xbox DNS and exactly two distinct local strategies may run concurrently.
+    app-owned DNS and exactly two distinct local strategies may run concurrently.
     A local payload wins immediately. Owned Geph is authorized only when all
     three stages explicitly close after sending the replay-safe ClientHello;
     timeout, cancellation, dial failure, or an incomplete result is unclear.
@@ -19819,7 +19817,7 @@ async def _try_hard_local_recovery(
     resolver_task = asyncio.create_task(resolve_connection_ips(host, dst_ip))
     tasks = {
         asyncio.create_task(
-            _hard_local_xbox_stage(
+            _hard_local_app_dns_stage(
                 host,
                 port,
                 head,
@@ -19875,7 +19873,7 @@ async def _try_hard_local_recovery(
                 # synchronously close every losing stream before returning the
                 # sole live route to the caller.
                 ready_winners.sort(
-                    key=lambda item: (not item.via_xbox_dns, item.stage)
+                    key=lambda item: (not item.via_app_dns, item.stage)
                 )
                 winner = ready_winners[0]
                 for losing_stage in ready_winners[1:]:
@@ -19908,7 +19906,7 @@ async def _try_hard_local_recovery(
         return _HardLocalRecoveryResult(
             raced=winner.raced,
             strategy_name=winner.strategy_name,
-            via_xbox_dns=winner.via_xbox_dns,
+            via_app_dns=winner.via_app_dns,
         )
     if len(stage_results) != 1 + AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES:
         return _HardLocalRecoveryResult()
@@ -19929,11 +19927,11 @@ async def _try_hard_local_recovery(
         AUTO_GEPH_STAGE_SYSTEM,
         now=observed_at,
     )
-    _mark_xbox_dns_candidate(host)
+    _mark_app_dns_candidate(host)
     candidate_ready = False
     for stage in sorted(
         stage_results,
-        key=lambda item: (not item.via_xbox_dns, item.stage),
+        key=lambda item: (not item.via_app_dns, item.stage),
     ):
         candidate_ready = bool(
             note_zero_payload_route_failure(
@@ -19943,8 +19941,8 @@ async def _try_hard_local_recovery(
             )
             or candidate_ready
         )
-        if stage.via_xbox_dns:
-            _mark_xbox_dns_exhausted(host)
+        if stage.via_app_dns:
+            _mark_app_dns_exhausted(host)
         else:
             _record_strategy_result(host, stage.strategy_name, False)
     return _HardLocalRecoveryResult(
@@ -21353,7 +21351,7 @@ async def _handle_impl(reader, writer):
     chosen = dst_ip
     chosen_name = None
     via_system_exact = False
-    via_xbox_dns = False
+    via_app_dns = False
     qualified_local_claim = None
     allow_unknown_geph_this_request = True
     partial_retry_stage = None
@@ -21370,7 +21368,7 @@ async def _handle_impl(reader, writer):
                 return
             chosen = qualified_local_claim.address
             chosen_name = qualified_local_claim.strategy_name
-            via_xbox_dns = qualified_local_claim.via_xbox_dns
+            via_app_dns = qualified_local_claim.via_app_dns
     if (result is None and is_tls and host and route_class == ROUTE_UNKNOWN
             and unknown_stage != UNKNOWN_RECOVERY_SYSTEM):
         with _auto_geph_lock:
@@ -21462,7 +21460,7 @@ async def _handle_impl(reader, writer):
                 return
             chosen = qualified_local_claim.address
             chosen_name = qualified_local_claim.strategy_name
-            via_xbox_dns = qualified_local_claim.via_xbox_dns
+            via_app_dns = qualified_local_claim.via_app_dns
         elif (
             isinstance(
                 preflight_claim,
@@ -21485,9 +21483,9 @@ async def _handle_impl(reader, writer):
             if hard_recovery.raced is not None:
                 chosen, result = hard_recovery.raced
                 chosen_name = hard_recovery.strategy_name
-                via_xbox_dns = hard_recovery.via_xbox_dns
+                via_app_dns = hard_recovery.via_app_dns
                 _record_strategy_result(host, chosen_name, True)
-                if not via_xbox_dns:
+                if not via_app_dns:
                     remember_strategy(host, chosen_name)
                 unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
             elif hard_recovery.proof_complete:
@@ -21559,8 +21557,8 @@ async def _handle_impl(reader, writer):
                 )
             else:
                 allow_unknown_geph_this_request = False
-            _mark_xbox_dns_candidate(host)
-            unknown_stage = UNKNOWN_RECOVERY_XBOX_DNS
+            _mark_app_dns_candidate(host)
+            unknown_stage = UNKNOWN_RECOVERY_APP_DNS
 
     # Adaptive strategy ladder (auto-sweep / self-tuning). Try strategies in
     # order — cached winner for this host first — across up to a couple of real
@@ -21570,29 +21568,29 @@ async def _handle_impl(reader, writer):
         result is None
         and is_tls
         and host
-        and unknown_stage == UNKNOWN_RECOVERY_XBOX_DNS
+        and unknown_stage == UNKNOWN_RECOVERY_APP_DNS
     ):
-        xbox_summary = {}
-        xbox = await _try_xbox_dns_local_connect(
+        app_dns_summary = {}
+        app_dns = await _try_app_dns_local_connect(
             host,
             dst_port,
             head,
             body,
-            attempt_summary=xbox_summary,
+            attempt_summary=app_dns_summary,
         )
-        if xbox:
-            chosen, result = xbox
+        if app_dns:
+            chosen, result = app_dns
             chosen_name = "plain"
-            via_xbox_dns = True
+            via_app_dns = True
             _record_strategy_result(host, chosen_name, True)
         else:
-            xbox_closed = _probe_attempts_confirm_zero_payload(
-                xbox_summary.get("outcomes") or {},
-                int(xbox_summary.get("attempted") or 0),
+            app_dns_closed = _probe_attempts_confirm_zero_payload(
+                app_dns_summary.get("outcomes") or {},
+                int(app_dns_summary.get("attempted") or 0),
             )
-            if xbox_closed:
-                note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_XBOX_DNS)
-                _mark_xbox_dns_exhausted(host)
+            if app_dns_closed:
+                note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_APP_DNS)
+                _mark_app_dns_exhausted(host)
             else:
                 allow_unknown_geph_this_request = False
             unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
@@ -21628,7 +21626,7 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
-    # De-poison only after the dedicated Xbox-DNS stage has failed or was
+    # De-poison only after the dedicated app-owned DNS stage has failed or was
     # already exhausted: resolve the SNI over DoH/system DNS -> LIST of real
     # IPs (fallback dst_ip). Some CDN edges are bad while neighbors work.
     real_ips = [dst_ip]
@@ -21810,8 +21808,8 @@ async def _handle_impl(reader, writer):
     if route_class == ROUTE_UNKNOWN:
         if via_system_exact:
             observed_stage = AUTO_GEPH_STAGE_SYSTEM
-        elif via_xbox_dns:
-            observed_stage = AUTO_GEPH_STAGE_XBOX_DNS
+        elif via_app_dns:
+            observed_stage = AUTO_GEPH_STAGE_APP_DNS
         elif chosen_name in GENERAL_STRATS:
             observed_stage = f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{chosen_name}"
     _register_pending_navigation_relay(
@@ -21835,7 +21833,7 @@ async def _handle_impl(reader, writer):
             diagnostic_host=host,
             diagnostic_stage=(
                 "system_plain" if via_system_exact
-                else "xbox_plain" if via_xbox_dns
+                else "app_dns_plain" if via_app_dns
                 else "local_strategy"
             ),
         )
@@ -21894,8 +21892,8 @@ async def _handle_impl(reader, writer):
             _clear_protected_local_server_first_closes(host, chosen_name)
 
     # A partial local stream stall demotes only the exact generic strategy. It
-    # teaches the next client retry to use app-owned Xbox DNS locally. Only
-    # after Xbox and distinct local strategies show the same one-record stall
+    # teaches the next client retry to use app-owned DNS locally. Only
+    # after app-owned DNS and distinct local strategies show the same one-record stall
     # may a separate owned-Geph payload proof learn a temporary exact overlay.
     # Protected and direct groups never enter this path.
     if is_tls and host:
@@ -21911,17 +21909,17 @@ async def _handle_impl(reader, writer):
                         strategy_name=chosen_name,
                     )
                 note_local_stream_stall(host, chosen_name)
-            elif via_xbox_dns:
+            elif via_app_dns:
                 if activity.partial_tls_record_stalled:
                     confirmation_scheduled = note_partial_tls_stall(
                         host,
-                        AUTO_GEPH_STAGE_XBOX_DNS,
+                        AUTO_GEPH_STAGE_APP_DNS,
                         now=t0 + duration,
                     )
                 _record_strategy_result(host, chosen_name, False)
                 if _strat_cache.get(host) == chosen_name:
                     _strat_cache.pop(host, None)
-                _mark_xbox_dns_exhausted(host)
+                _mark_app_dns_exhausted(host)
             else:
                 note_local_stream_stall(host, chosen_name)
                 if (
@@ -21945,7 +21943,7 @@ async def _handle_impl(reader, writer):
                 host,
                 chosen_name,
                 activity,
-                via_xbox_dns=via_xbox_dns,
+                via_app_dns=via_app_dns,
                 now=t0 + duration,
             )
         elif activity.server_ended_first:

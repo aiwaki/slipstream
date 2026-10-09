@@ -173,7 +173,7 @@ jobs:
             spike/semantic_route_signal.py \
             spike/semantic_route_signal_runtime.py \
             spike/tproxy.py \
-            spike/xbox_dns.py \
+            spike/app_dns.py \
             spike/test_recovery.py \
             spike/test_route_policy_activation.py \
             spike/test_route_policy_activation_adapter.py \
@@ -190,7 +190,7 @@ jobs:
             spike/test_baseline_startup.py \
             spike/test_bootstrap_asset_preflight.py \
             spike/test_tproxy_doh.py \
-            spike/test_xbox_dns.py \
+            spike/test_app_dns.py \
             scripts/pf_anchor_smoke.py \
             scripts/pf_installed_lifecycle_smoke.py \
             scripts/composed_pending_navigation_smoke.py \
