@@ -9,6 +9,17 @@ This branch is a separate review candidate; never restore it with a force push
 onto the bot branch. No vendor release, installation, account qualification or
 policy exception change.
 
+- Exact fbd3d7e6 CI38158619460: product/checks and Chromium contract PASS;
+  overall FAILURE because packaged-app-build requests unpublished
+  geph-vendor-0.4.3-r1 and receives404 before download/verification. Four SBOM
+  script/test files are outside the precise source-bootstrap allowlist; removing
+  only shared converter files would not restore bootstrap. No CI exception was
+  broadened. Dedicated output/source-owned-sbom/ci-scope-review.json records
+  the backwards-compatible tooling prerequisite option. Earlier eb388c92
+  source-bootstrap pass remains historical, not current packaging qualification.
+  Dependency38158619508 still fails with two RSA blockers and incomplete app
+  coverage. Production source-owned advisory/notice and release gates remain.
+
 - Oct11 source-owned SPDX support is now implemented in this draft PR384.
   Shared strict Cargo identity checks from root source c3846615 are retained;
   registry conversion is extracted unchanged. Embedded generation requires an
