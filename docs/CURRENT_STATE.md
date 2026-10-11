@@ -1,4 +1,4 @@
-# Geph 0.4.3 remediation candidate — 2026-10-09
+# Geph 0.4.3 remediation candidate — 2026-10-11
 
 Physical worktree: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`.
 Branch `codex/geph-043-remediation`, retained qualified source `07a3d871`
@@ -8,6 +8,50 @@ scheduled updater replaced PR383's `automation/geph-0.4.3` branch with
 This branch is a separate review candidate; never restore it with a force push
 onto the bot branch. No vendor release, installation, account qualification or
 policy exception change.
+
+- SQLite cancellation fix: SOURCE3420708f changes only existing edit12's output
+  and hash (13 edits remain). If a caller is cancelled after SQLite accepts SQL,
+  its write can still commit while the former success-only EVENT notification
+  is skipped. The pre-await drop guard in db_write/db_remove notifies on every
+  exit; readers still check database state. Ordering relies on max_connections(1)
+  and pinned SQLx0.8.6 worker Ping before returning the connection to its pool.
+  RED reproduced missing wakeup;8 cases PASS on the exact dedicated materialized
+  source after locked no-run34.35s, with OS network/private-cache denial. The
+  original11 runtime cases were not repeated. Independent review adds two passing
+  cases: rollback/re-arm and notification to eight readers.21 source/materializer
+  tests PASS. No account,
+  broker, unfiltered all-lib execution or installed-causality claim.
+  Evidence in the root AUD-17 checkout:
+  output/continuation-20261009/rsa-migration/source-contract-candidate/
+  sqlite-cancellation-qualification/{integration-receipt,parent-integration-review}.json
+  (integration4d2da1fd); independent receipt8e6657dd. Parent verifies exact JSON
+  delta, unchanged lock, embedded file, compiled binary and9 build/test logs.
+  Root0.4.3 runner whitelist now19;0.3.9 remains9. The matching isolated runner
+  and workflow are now present in this dedicated branch; the unfiltered all-lib
+  command and its asserting workflow test are removed.16 helper/config checks
+  PASS, including OS denial with controlled files, and the exact source resolves
+  all19 allowed names. Root evidence geph-synthetic-runner-bridge/receipt.json
+  (be2c312f) binds the four transferred files and unchanged SOURCE/lock/policy.
+  No vendor-release workflow or additional Geph binary was run for that bridge.
+- The isolated RSA prototype is still NOT activated. Original SOURCEcd82b7ea/
+  lock9fd68248 now has both ARM debug and cold Intel debug compile evidence;
+  Intel Rust1.99.0 took109.162s,421 rebuilt artifact records,780 emitted files.
+  No binary/account execution. ARM used1.97.1/reused dependencies; no release
+  reproducibility claim. A separate output-only SQLite-v2 SOURCEc384d259 has two
+  identical materializations with only database.rs changed,16 edits unchanged.
+  Old prototype evidence remains immutable; exact RSA-v2 compile not repeated.
+  Native cc/cmake builder inventory identifies AWS-LC5.7.0 and SQLite3.46.0 plus
+  ring/blake3/tracing-oslog; collector1 positive/13 negative checks PASS.
+  Native advisory applicability and absent applicable upstream ISC notices
+  remain open, as do full Chromium coverage and installed qualification.
+  Root research and receipts retain details; do not treat Cargo-only OSV as
+  complete native coverage or broaden release-policy exceptions.
+- Live checkpoint81d7c133 CI38160979511 is terminal: product/checks and Chromium
+  PASS, packaging404 for unpublished0.4.3-r1; dependency38160979535 remains FAIL.
+  Base7e196a71 and both draft PR heads reconciled. These earlier checks remain
+  reusable only for unchanged code; the current SQLite delta has focused proof
+  above. Next: source-owned/native
+  advisory/notice and release qualification. No install while those gates are open.
 
 - Exact fbd3d7e6 CI38158619460: product/checks and Chromium contract PASS;
   overall FAILURE because packaged-app-build requests unpublished

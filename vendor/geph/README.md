@@ -34,7 +34,9 @@ shared multiplexed session. Upstream otherwise signals `early_dead`, dropping
 existing tunnels with the failed new request. Revision 5 also isolates per-stream response read and parse errors; actual mux
 death and failure to allocate a mux stream retain upstream handling. The offline two-stream regression
 fails on unmodified0.3.9 and requires the existing stream to remain usable after
-the new tunnel times out. The vendor build runs library tests before packaging.
+the new tunnel times out. The vendor build compiles the library tests without
+running them, then executes only reviewed exact synthetic cases under macOS
+network/private-file denial. It never executes the unfiltered upstream suite.
 
 Revision 4 additionally opens one reserve tunnel on a distinct live session
 when the preferred opening stalls for350ms or fails. Both attempts share the
@@ -48,6 +50,16 @@ Revision 5 prevents EOF or a malformed response on one new stream from
 retiring an otherwise live shared session. The regression keeps an existing
 stream open, injects each response failure, and requires continued data transfer
 and drained opening accounting. Transport death remains supervised by mux liveness.
+
+The 0.4.3 candidate also corrects a SQLite cancellation race. A submitted SQL
+statement can commit after its caller is cancelled; a notification placed only
+after a successful await is then lost. The drop guard in `db_write` and
+`db_remove` wakes readers on success, error and cancellation. Readers still
+check committed state. This depends on the one-connection pool and SQLx0.8.6's
+worker-drain-before-return ordering; changing either requires requalification.
+Eight embedded regressions cover queue/worker cancellation, early notification,
+commit-before-resume, SQL errors/rollback and removal. This does not promise
+rollback on cancellation or establish the cause of an installed network stall.
 
 The daemon supervises only Slipstream's owned copy. Geph remains limited to
 geo-exit routes; local bypass groups such as Discord and YouTube never use it.
