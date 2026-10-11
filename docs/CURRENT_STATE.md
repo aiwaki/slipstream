@@ -13,10 +13,14 @@ file.
 2026-10-11 continuation: source DNS/TG update and Chromium155 qualified in CI;
 production dependency gate and workstation qualification remain open.
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
-  latest full CI source c3846615; this checkpoint adds the review-branch guard.
-  Runtime baseline32d21973, base7e196a71.
+  latest full green CI source c3846615; review-branch guard e6bcfcd1 is pushed.
+  Its exact functional CI38151198776 exposed a live-log rotation race; the
+  focused correction below supersedes only that launcher portion of the baseline.
+  Runtime baseline32d21973, base7e196a71. Exact e6 Windows38151198793 SUCCESS;
+  packaged/browser/lifecycle/update jobs passed, product-checks alone failed the
+  rotation test. Dependency38151198828 remains FAILURE.
   Exactc384 CI38146258751 SUCCESS (18 pass/4 release-only skips), Windows38146258725
-  SUCCESS; dependency38146258709 FAILURE. Runtime unchanged since32d21973.
+  SUCCESS; dependency38146258709 FAILURE. Runtime baseline32d21973 is reused except for the scoped live-log correction below.
   Preserve the user's AGENTS.md edits and all private output/backups. No workstation installation or learning reset.
 - Source5c7d1e4b retires app-owned Xbox DNS and imports tg-ws-proxy1.11.1 with
   retained local fixes. Oct11 upstream recheck confirms1.11.1 remains the latest
@@ -133,6 +137,31 @@ production dependency gate and workstation qualification remain open.
   absent, including from the full490-package lock. The exact transitive
   geph5-misc-rpc→patched broker edge is verified. This is metadata, not compilation
   or runtime qualification. Evidence metadata-qualification/final-receipt.json.
+  Independent review verifies28 receipt hashes,256 prior files and all407 archives.
+  Final renamed candidate now passes one native debug arm64 compile in143.35s;
+  3 embedded libraries/root lib+bin and misc-rpc rebuilt,412 dependency artifacts
+  reused. Binary4c4b0860; no execution.407 extracted registry trees/18325 files
+  match locked archive bytes. Parent verifies22 evidence hashes and final binary.
+  Source-equivalence receipt422baece maps all51 Rust files:43 identical and8 only
+  remove13 exact test-only spans;4 manifest changes/2 local lock renames explained.
+  Reuse prior11 synthetic tests; no new harness or all-lib execution. This does not
+  retrospectively prove compiler provenance for the reused dependency artifacts.
+  Intel compile, release/native inventory, production source-owned SBOM and
+  installed tests stay open.
+  Evidence rsa-migration/source-contract-candidate/{native-compile-qualification,
+  source-equivalence-qualification}/ and source-contract-native-compile-parent-review.json.
+- Output-only whole-Geph source inventory preserves407 registry coordinates and
+  four source-owned identities. One public OSV batch411 queries returned only
+  bincode1.3.3/RUSTSEC-2025-0141 (unmaintained):407 exact registry,3 ancestry-only,
+  1 native commit query. The latter four are not complete modified/native coverage.
+  Retained687 named notice files;31 registry archives lack a matching named notice,
+  not a claim of missing declarations in all other files. No fake Cargo identities,
+  policy exemption or production activation. Evidence rsa-migration/source-owned-inventory/.
+  Collector now reads notices from the same verified in-memory archive and rejects
+  absolute/traversal/escaping paths. Six path cases pass; local recollection leaves
+  inventory and all411 query mappings byte-identical. No public query repeated.
+  Post-fix peer verifies18 receipt hashes and real snapshot-swap/path cases;
+  source-owned-inventory-postfix-review.json binds the corrected collector.
 - Bot branch overwrite reproduced with the actual workflow against bare Git.
   Existing version branch now remains an immutable review handoff, lookup errors
   fail closed, new branch push requires atomic absence, and PR descriptions stay
@@ -140,15 +169,32 @@ production dependency gate and workstation qualification remain open.
   A lost PR is recovered without changing its existing branch; GitHub lookup
   errors fail closed. Fix is a candidate until merged; the dedicated human branch avoids the current
   main workflow's overwrite path. Evidence geph-branch-handoff-evidence.json.
+- Scoped launcher fix bounds each log snapshot before taking its tail. BSD tail
+  on a growing file had reproduced an oversized archive; read/tail/archive failure
+  now preserves the live log and previous archive. Four deterministic scenarios
+  plus real live-writer/PID continuity pass. Full app crate focused cargo tests:
+  12 PASS/0ignored/220filtered,10.12s (82.78s including compile). Receipt/log:
+  geph-log-rotation-cargo{.json,.log}; independent cause/RED review in
+  ci38151198776-peer/review.json. Copy-truncate remains best-effort: concurrent
+  lines after the snapshot can be lost. No claim of lossless logging or reconnect repair.
+- Vendor CI no longer executes all upstream Geph library tests. The new helper
+  separately compiles no-run, then lists/runs only reviewed exact cases under
+  macOS network/private-home denial with owned scratch writes and group cleanup.
+  Unknown version, missing case, sandbox failure or zero/ignored tests fail closed.
+  15 runner/workflow tests PASS, including real OS EPERM and process cleanup;
+  independent static review has no blockers. Evidence geph-synthetic-runner-evidence.json.
+  Compile orchestration was mocked in these tests; this is not actual new Geph
+  execution. Cargo build scripts are outside the runtime sandbox; retained-log
+  caps apply after process exit. Separate CI evidence stays outside release artifacts.
 - Read-only local check found no system/dev.slipstream.tproxy service or app at
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
 - Correct-project graph unavailable (project not found); bounded direct searches
-  used. Reuse exact32d21973 runtime/build/E2E baseline for tooling/docs-only edits.
-- NEXT qualify the self-contained RSA candidate native build, then
-  source-bound SBOM/advisory/notices and complete Chromium component coverage.
-  Remove unrestricted Geph all-lib from the vendor publish workflow before merge
-  (the current helper PR does not run it). No release/install while these gates
+  used. Reuse exact32d21973 runtime/build/E2E baseline except the scoped launcher fix.
+- NEXT verify exact CI for the scoped launcher/isolated-runner commit, then
+  source-bound production SBOM/advisories/notices and complete Chromium coverage.
+  The self-contained RSA candidate has native debug compile/source-equivalence
+  evidence; Intel build and release qualification remain separate. No release/install while these gates
   remain open. Run canonical installed verification and physical-browser/Telegram checks only after gates
   allow installation; preserve the unconsumed transaction rule.
 

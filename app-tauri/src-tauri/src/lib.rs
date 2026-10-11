@@ -3421,6 +3421,9 @@ fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
     )
 }
 
+// Bound the copy to the size observed before reading: BSD tail can otherwise
+// include concurrent appends. The completion marker preserves head failures across
+// the POSIX pipeline, so a failed snapshot never authorizes truncating the live log.
 fn geph_launcher_script_with_log_limits(
     paths: &GephLaunchAgentPaths,
     log_max_bytes: u64,
@@ -3456,14 +3459,16 @@ fn geph_launcher_script_with_log_limits(
          \x20 case \"$size\" in ''|*[!0-9]*) return 0 ;; esac\n\
          \x20 [ \"$size\" -le \"$log_max_bytes\" ] && return 0\n\
          \x20 archive=\"${{path}}{GEPH_LOG_ARCHIVE_SUFFIX}\"\n\
-         \x20 tmp=\"${{archive}}.tmp.$$\"\n\
-         \x20 if /usr/bin/tail -c \"$log_retain_bytes\" \"$path\" > \"$tmp\" 2>/dev/null; then\n\
-         \x20\x20 /bin/chmod 600 \"$tmp\" 2>/dev/null || true\n\
-         \x20\x20 /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null || true\n\
-         \x20\x20 : > \"$path\"\n\
-         \x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20 tmp_dir=$(/usr/bin/mktemp -d \"${{archive}}.tmp.XXXXXXXX\") || return 0\n\
+         \x20 tmp=\"${{tmp_dir}}/tail\"\n\
+         \x20 if ( /usr/bin/head -c \"$size\" \"$path\" && : > \"${{tmp_dir}}/complete\" ) 2>/dev/null | /usr/bin/tail -c \"$log_retain_bytes\" > \"$tmp\" 2>/dev/null; then\n\
+         \x20\x20 if [ -f \"${{tmp_dir}}/complete\" ] && /bin/chmod 600 \"$tmp\" 2>/dev/null && /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null; then\n\
+         \x20\x20\x20 : > \"$path\"\n\
+         \x20\x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20\x20 fi\n\
          \x20 fi\n\
-         \x20 /bin/rm -f \"$tmp\" 2>/dev/null || true\n\
+         \x20 /bin/rm -f \"$tmp\" \"${{tmp_dir}}/complete\" 2>/dev/null || true\n\
+         \x20 /bin/rmdir \"$tmp_dir\" 2>/dev/null || true\n\
          \x20 return 0\n\
          }}\n\
          uid=$(/usr/bin/id -u)\n\
@@ -7982,6 +7987,102 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
     }
 
     #[test]
+    fn geph_log_compaction_bounds_a_growing_snapshot_and_preserves_failed_copies() {
+        use std::io::Write;
+        use std::os::unix::fs::MetadataExt;
+
+        for case in ["growth", "read-error", "tail-error", "archive-error"] {
+            let dir = std::env::temp_dir().join(format!(
+                "slipstream-geph-log-snapshot-{}-{case}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let paths = geph_launch_agent_paths(&dir.join("config"), &dir.join("home"));
+            std::fs::create_dir_all(&paths.runtime_dir).unwrap();
+            let original = vec![b'A'; 8192];
+            std::fs::write(&paths.stdout_log, &original).unwrap();
+            let inode = std::fs::metadata(&paths.stdout_log).unwrap().ino();
+            let mut writer = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&paths.stdout_log)
+                .unwrap();
+            let archive = super::geph_log_archive_path(&paths.stdout_log);
+            std::fs::write(&archive, b"previous good archive").unwrap();
+            let script = geph_launcher_script_with_log_limits(&paths, 4096, 512, 1, 1);
+            // Run only the real compaction function, without a listener or Geph process.
+            let mut script = script.split("\nuid=").next().unwrap().to_owned();
+            match case {
+                "growth" => {
+                    // Append after stat's snapshot. An unbounded tail would retain the
+                    // new B bytes instead of the snapshot's A bytes.
+                    let late = dir.join("late");
+                    std::fs::write(&late, vec![b'B'; 8192]).unwrap();
+                    assert!(script.contains("case \"$size\""));
+                    script = script.replace(
+                        "case \"$size\"",
+                        &format!(
+                            "/bin/cat {} >> \"$path\"\n case \"$size\"",
+                            shell_quote(&late.to_string_lossy())
+                        ),
+                    );
+                }
+                "read-error" => {
+                    let command = "/usr/bin/head -c \"$size\" \"$path\"";
+                    assert!(script.contains(command));
+                    script = script.replace(command, "/usr/bin/false");
+                }
+                "tail-error" => {
+                    let command = "/usr/bin/tail -c \"$log_retain_bytes\"";
+                    assert!(script.contains(command));
+                    script = script.replace(command, "/usr/bin/false");
+                }
+                "archive-error" => {
+                    let command = "/bin/mv -f \"$tmp\" \"$archive\"";
+                    assert!(script.contains(command));
+                    script = script.replace(command, "/usr/bin/false");
+                }
+                _ => unreachable!(),
+            }
+            script.push_str("\ncompact_log \"$stdout_log\"\n");
+            let status = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .status()
+                .unwrap();
+            assert!(status.success(), "{case}");
+            assert_eq!(std::fs::metadata(&paths.stdout_log).unwrap().ino(), inode);
+            if case == "growth" {
+                assert_eq!(std::fs::read(&archive).unwrap(), vec![b'A'; 512]);
+                assert!(std::fs::read(&paths.stdout_log).unwrap().is_empty());
+                writer.write_all(b"writer continues after rotation").unwrap();
+                assert_eq!(
+                    std::fs::read(&paths.stdout_log).unwrap(),
+                    b"writer continues after rotation"
+                );
+            } else {
+                assert_eq!(
+                    std::fs::read(&paths.stdout_log).unwrap(),
+                    original,
+                    "{case}"
+                );
+                assert_eq!(
+                    std::fs::read(&archive).unwrap(),
+                    b"previous good archive",
+                    "{case}"
+                );
+            }
+            assert!(std::fs::read_dir(&paths.config_dir).unwrap().all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp.")
+            }));
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn geph_launcher_rotates_live_logs_without_replacing_the_geph_pid() {
         let dir = std::env::temp_dir().join(format!(
             "slipstream-geph-log-rotation-test-{}",
@@ -7993,9 +8094,11 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
         let paths = geph_launch_agent_paths(&config_dir, &home);
         std::fs::create_dir_all(&paths.runtime_dir).unwrap();
         std::fs::write(&paths.config, "test: true\n").unwrap();
+        let pid_record = paths.runtime_dir.join("fixture.pid");
         std::fs::write(
             &paths.executable,
-            "#!/bin/sh\n\
+            format!(
+                "#!/bin/sh\n/usr/bin/printf '%s\\n' \"$$\" > {}\n\
              i=0\n\
              while [ \"$i\" -lt 300 ]; do\n\
              \x20 /usr/bin/printf 'stdout-line-that-forces-rotation-%04d\\n' \"$i\"\n\
@@ -8003,6 +8106,8 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
              \x20 i=$((i + 1))\n\
              done\n\
              /bin/sleep 2\n",
+                shell_quote(&pid_record.to_string_lossy())
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&paths.executable, std::fs::Permissions::from_mode(0o700))
@@ -8017,10 +8122,16 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
         .unwrap();
         std::fs::set_permissions(&paths.launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
 
-        let status = std::process::Command::new(&paths.launcher)
-            .status()
-            .unwrap();
-        assert!(status.success());
+        let mut child = std::process::Command::new(&paths.launcher).spawn().unwrap();
+        let launcher_pid = child.id();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(&pid_record).unwrap().trim(),
+            launcher_pid.to_string()
+        );
+        assert!(std::fs::read_to_string(&paths.ownership)
+            .unwrap()
+            .contains(&format!("\"pid\":{launcher_pid},")));
         std::thread::sleep(std::time::Duration::from_millis(1100));
 
         for path in [&paths.stdout_log, &paths.stderr_log] {

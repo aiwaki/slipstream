@@ -84,6 +84,84 @@ malformed ranges and component dependencies remain separate obstacles.
 Exact page/index/record bindings and remaining branches are recorded in
 `output/dependency-remediation-20261009/nvd-chrome-applicability-155/HANDOFF.md`.
 
+## 2026-10-11 final RSA source assembly and public inventory
+
+The unactivated self-contained candidate passes locked offline metadata for both
+macOS targets (410 ARM/411 Intel packages) under OS network/private-path denial.
+A single native arm64 debug compile passes in143.35 seconds; the three embedded
+libraries, Geph library/binary and patched-broker caller misc-rpc were rebuilt.
+412 prior dependency artifacts were reused. All407 current extracted registry
+source trees match18,325 members of lock-bound archives. This does not establish
+retrospective compiler provenance for the reused artifacts. No binary ran.
+
+Exact source comparison binds all51 final Rust files to the previously tested
+composition:43 byte-identical files and eight files with only13 documented
+test-only removals; four manifest changes and two local lock identity renames are
+fully accounted for. The previous eleven synthetic tests remain the runtime
+baseline; a proposed new three-case harness was not executed and is superseded
+by this bounded reuse. Queued SQLite cancellation remains unqualified. Evidence:
+`output/continuation-20261009/rsa-migration/source-contract-candidate/`
+`native-compile-qualification/` and `source-equivalence-qualification/`.
+
+A separate output-only inventory distinguishes407 exact registry packages from
+the modified Geph root and three source-owned packages. One public OSV batch on
+October11 queried407 registry coordinates, three upstream ancestors and one
+source-bound native AWS-LC commit. The only result is bincode1.3.3's informational
+[RUSTSEC-2025-0141](https://rustsec.org/advisories/RUSTSEC-2025-0141.html), which
+reports discontinued maintenance. Ancestor queries are not coverage of modified
+source, and the native commit query is not a full native-component inventory.
+No production SPDX identity, audit coverage requirement or exception was changed.
+
+Archive collection preserves687 named license/notice files.31 registry archives
+have no file matching the license/notice filename check; declarations within
+README/source are not ruled out. The derivatives' missing upstream ISC notices
+remain open. Evidence and scope-specific query mapping are under
+`output/continuation-20261009/rsa-migration/source-owned-inventory/`. These results
+do not qualify publication, installation, physical browsers or live traffic.
+
+Review found a verify/reopen race in that output-only notice collector: it hashed
+archive bytes, then reopened the cache path for extraction. Extraction now uses
+the same verified in-memory snapshot, with absolute/traversal/containment checks.
+Six focused path cases pass; recollection preserves the exact inventory and all
+query mappings. No OSV query was repeated. The earlier peer report describes the
+old collector and must not be presented as approval of the corrected source.
+A separate post-fix peer report verifies18 hashes, six actual path-helper cases
+and a synthetic cache-path replacement against the actual extraction block. The
+replacement cannot change the already verified BytesIO payload. This remains
+local research tooling, not a hostile same-UID filesystem isolation boundary.
+
+## 2026-10-11 live log rotation and isolated vendor fixtures
+
+Exact e6bcfcd1 CI38151198776 exposed a real log-rotation race. On macOS, a controlled
+append made `tail -c 262144` return786432 bytes. Reading an actively growing path
+did not guarantee the intended archive bound. The launcher now reads at most the
+size observed by `stat`, then keeps its tail. A private completion marker carries
+read success across the POSIX pipeline; failed read, tail, permissions or archive
+replacement does not authorize truncating the live log. The existing copy-truncate
+strategy preserves its inode and open append writer. It can still discard lines
+written between snapshot and truncation; it is not lossless log transport.
+
+The old generator fails the deterministic growth case. Four scenarios cover growth
+and read/tail/archive errors; a real shell writer verifies unchanged exec PID and
+ownership. A focused test run of the full application crate passes12 tests with
+zero ignored in10.12 seconds (82.78 including compilation). This updates only the
+launcher portion of the earlier runtime baseline. No real Geph account, network
+session or installed-app traffic ran. Evidence: `output/continuation-20261009/`
+`geph-log-rotation-cargo.log` and `ci38151198776-peer/review.json`.
+
+The vendor workflow also contained an unsafe all-library execution path, including
+upstream account/network tests. It now compiles with `--no-run`, binds exactly one
+owned libtest executable, and lists/runs only reviewed version-specific cases under
+macOS sandbox network/private-home denial. Runtime variables are minimized, writes
+are confined to owned fixtures, and the owned process group is cleaned after success,
+failure or timeout. Unknown versions, absent cases, missing sandbox or zero/ignored
+results fail closed. Fifteen helper/workflow checks pass, with actual OS denial and
+process-cleanup tests; compilation orchestration is mocked. Build scripts/fetching
+remain in the separate build phase, not the runtime sandbox. Log limits bound
+retained output after exit, not instantaneous disk use. Separate CI evidence never
+enters the release artifact glob. This change does not turn fixture checks into
+live-account, physical-browser or full product qualification.
+
 ## 2026-10-09 provider retirement and Telegram transport update
 
 The user reported Xbox DNS blocked and requested its removal. The application
