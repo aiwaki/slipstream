@@ -44,6 +44,33 @@ class CiScopeTests(unittest.TestCase):
         self.assertFalse(ci_scope.classify_paths(paths + ["spike/tproxy.py"],
             event_name="pull_request").geph_bootstrap)
 
+    def test_embedded_source_tests_preserve_exact_bootstrap_boundaries(self):
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock",
+                 "scripts/geph_vendor_source.py", "scripts/test_geph_source_edits.py",
+                 "scripts/test_geph_embedded_source.py",
+                 "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
+        self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request"),
+                         ci_scope.CiScope(True, True, False))
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)
+        for missing in ("vendor/geph/SOURCE.json", "scripts/test_geph_source_edits.py",
+                        "scripts/test_ci_scope.py"):
+            with self.subTest(missing=missing):
+                self.assertFalse(ci_scope.classify_paths(
+                    [path for path in paths if path != missing],
+                    event_name="pull_request").geph_bootstrap)
+        for extra in ("spike/tproxy.py", "app-tauri/src-tauri/src/lib.rs",
+                      "app-tauri/src-tauri/Cargo.toml", ".github/workflows/ci.yml",
+                      "security/dependency-audit-policy.json"):
+            with self.subTest(extra=extra):
+                self.assertFalse(ci_scope.classify_paths(
+                    [*paths, extra], event_name="pull_request").geph_bootstrap)
+        helper_only = ["scripts/geph_vendor_source.py", "scripts/test_geph_source_edits.py",
+                       "scripts/test_geph_embedded_source.py"]
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                self.assertEqual(ci_scope.classify_paths(helper_only, event_name=event),
+                                 ci_scope.CiScope(False, True, False))
+
     def test_existing_source_edit_revision_without_lock_change(self):
         paths = ["vendor/geph/SOURCE.json", "vendor/geph/README.md", "docs/CURRENT_STATE.md", "docs/DECISIONS.md",
                  "scripts/ci_scope.py", "scripts/test_ci_scope.py"]

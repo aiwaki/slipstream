@@ -24,6 +24,7 @@ GEPH_BOOTSTRAP_ALLOWED = frozenset(
         "vendor/geph/README.md",
         "scripts/geph_vendor_source.py",
         "scripts/test_geph_source_edits.py",
+        "scripts/test_geph_embedded_source.py",
         # Both TLS graphs may need one coordinated source-only repair. All
         # dependency audits still run; no packaged binary is promoted here.
         "app-tauri/src-tauri/Cargo.lock",

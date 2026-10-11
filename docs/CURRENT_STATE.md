@@ -1,10 +1,35 @@
 # Geph 0.4.3 remediation candidate — 2026-10-09
 
 Physical worktree: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`.
-Branch `codex/geph-043-remediation`, base PR383 head
-`dda910710f1e85df82ca1b1acbd34f95ac5c064a`. Prepared for a fast-forward update
-of the existing PR383; no vendor release, installation, account qualification or
+Branch `codex/geph-043-remediation`, retained qualified source `07a3d871`
+(checkpoint `d2856d8a`), now preserved on its own remote branch. On 2026-10-11 the
+scheduled updater replaced PR383's `automation/geph-0.4.3` branch with
+`0a20407ee6bfba1dfc240d44176bee4f667feee4`, dropping the reviewed changes.
+This branch is a separate review candidate; never restore it with a force push
+onto the bot branch. No vendor release, installation, account qualification or
 policy exception change.
+
+- Optional embedded-source schema is prepared but NOT activated in production
+  SOURCE/Cargo.lock/LICENSE. It admits exactly the reviewed Mizaru client,
+  owned RSA backend and broker derivative with bounded source/manifest/notice
+  bytes, fixed identities/dependency edges and per-file/descriptor hashes.
+  The existing legacy source contract remains valid. Source metadata retains
+  actual upstream ISC declarations; it does not fabricate upstream notices or
+  establish licensing clearance.
+- Materialization now uses one SOURCE snapshot and rechecks the copied lock.
+  An independently reproduced archive replacement race is fixed by hashing the
+  private archive snapshot used for extraction; the destination is exclusively
+  created with mode 0700, without trusting archive root permissions. Path,
+  symlink, duplicate and case-collision inputs fail closed.
+- Source tests 35 PASS, legacy Geph SBOM tests 3 PASS; CI scope tests 10 PASS
+  retain the exact PR-only source bootstrap and mandatory source-edit test pair.
+  Independent 14 tests and
+  the original archive-race replay PASS. Receipt
+  `output/geph-embedded-source-receipt.json` and root checkout evidence
+  `output/continuation-20261009/rsa-migration/source-contract-independent-review.json`
+  bind the exact inputs. Production local-package SBOM/advisory/notice integration
+  and two-target native qualification remain open; no account or Cargo all-lib
+  tests were run for this source-contract change.
 
 - SOURCE retains all 11 r5 literal edits with new sequential whole-file hashes for
   the canonical 0.4.3 archive. Two additional edits pin SQLx exactly 0.8.6 with
