@@ -24,6 +24,7 @@ DATA_LICENSE = "CC0-1.0"
 DOCUMENT_SPDX_ID = "SPDXRef-DOCUMENT"
 ROOT_SPDX_ID = "SPDXRef-Package-slipstream"
 GENERATOR = "slipstream-release-sbom-1"
+CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 SOURCE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REQUIREMENT_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)")
@@ -187,7 +188,51 @@ def _reachable_cargo_package_ids(metadata: dict, path: Path) -> set[str]:
     return reachable
 
 
-def _cargo_components(metadata_path: Path, lock_path: Path) -> list[Component]:
+def _is_owned_core(package: dict, root_package: dict, repo: Path, lock: Path) -> bool:
+    """Recognize only the reviewed core bundled in the root Git source package.
+
+    This is not a generic path-dependency exemption. Its registry dependencies
+    remain in the reachable graph and are inventoried individually.
+    """
+    if package.get("name") != "slipstream-core" or package.get("source") is not None:
+        return False
+    repo = repo.resolve(strict=True)
+    app_manifest = repo / "app-tauri/src-tauri/Cargo.toml"
+    core_manifest = repo / "crates/slipstream-core/Cargo.toml"
+    for item, expected, name in (
+        (root_package, app_manifest, "slipstream"),
+        (package, core_manifest, "slipstream-core"),
+    ):
+        if (item.get("manifest_path") != str(expected)
+                or expected.resolve(strict=True) != expected
+                or item.get("source") is not None or item.get("name") != name):
+            return False
+        manifest = tomllib.loads(expected.read_text(encoding="utf-8"))
+        declared = manifest.get("package", {})
+        if declared.get("name") != name or declared.get("version") != item.get("version"):
+            return False
+        if name == "slipstream-core" and (
+            declared.get("publish") is not False or declared.get("license") != "MIT"
+        ):
+            return False
+    app = tomllib.loads(app_manifest.read_text(encoding="utf-8"))
+    dependency = app.get("dependencies", {}).get("slipstream-core")
+    if not isinstance(dependency, dict) or dependency.get("path") != "../../crates/slipstream-core":
+        return False
+    if any(key in dependency for key in ("git", "registry", "registry-index", "package")):
+        return False
+    locked = tomllib.loads(lock.read_text(encoding="utf-8"))
+    entries = [entry for entry in locked.get("package", [])
+               if entry.get("name") == "slipstream-core"]
+    return len(entries) == 1 and (
+        entries[0].get("version") == package.get("version")
+        and "source" not in entries[0] and "checksum" not in entries[0]
+    )
+
+
+def _cargo_components(
+    metadata_path: Path, lock_path: Path, *, first_party_root: Path | None = None,
+) -> list[Component]:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     if not isinstance(metadata, dict):
         raise ValueError(f"{metadata_path} must contain a Cargo metadata object")
@@ -218,17 +263,24 @@ def _cargo_components(metadata_path: Path, lock_path: Path) -> list[Component]:
             )
         if source is not None and not isinstance(source, str):
             raise ValueError(f"invalid Cargo source for {name} {version}")
+        if first_party_root is not None and _is_owned_core(
+            package, packages_by_id.get(metadata["resolve"]["root"], {}),
+            first_party_root, lock_path,
+        ):
+            continue
+        # A crates.io PURL is a provenance claim. Local forks, Git dependencies
+        # and other registries need their own reviewed source-bound inventory;
+        # preserving an upstream name/version does not make them that release.
+        # The application's own root and dev-only nodes are excluded above.
+        if source != CRATES_IO_SOURCE:
+            raise ValueError(f"unsupported Cargo source for {name} {version}")
         checksum_value = checksums.get((name, version, source))
-
-        if isinstance(source, str) and source.startswith("registry+"):
-            download_location = (
-                f"https://crates.io/api/v1/crates/{quote(name, safe='')}/"
-                f"{quote(version, safe='')}/download"
-            )
-        elif isinstance(source, str) and source.startswith("git+"):
-            download_location = source.removeprefix("git+")
-        else:
-            download_location = "NOASSERTION"
+        if checksum_value is None:
+            raise ValueError(f"Cargo package has no matching locked checksum: {name} {version}")
+        download_location = (
+            f"https://crates.io/api/v1/crates/{quote(name, safe='')}/"
+            f"{quote(version, safe='')}/download"
+        )
 
         components.append(
             Component(
@@ -312,6 +364,7 @@ def collect_components(
     geph_source_file: Path,
     tg_ws_proxy_version_file: Path,
     chromium_headless_shell_source_file: Path | None = None,
+    first_party_root: Path = Path(__file__).resolve().parent.parent,
 ) -> list[Component]:
     geph_version = _require_version_file(geph_version_file, "Geph")
     geph_source = geph_vendor_source.load_source_contract(geph_source_file)
@@ -357,7 +410,7 @@ def collect_components(
         if chromium_source.get("license_path") != "LICENSE.headless_shell":
             raise ValueError("Chromium headless-shell license path is invalid")
     components = [
-        *_cargo_components(cargo_metadata, cargo_lock),
+        *_cargo_components(cargo_metadata, cargo_lock, first_party_root=first_party_root),
         *_npm_components(npm_lock),
         *_python_components(python_lock),
         Component(
@@ -489,6 +542,11 @@ def build_spdx_document(
         "primaryPackagePurpose": "APPLICATION",
         "homepage": f"https://github.com/{repository}",
         "sourceInfo": f"Git commit {source_commit}; target {target}",
+        "comment": (
+            "The root Git source includes first-party crates/slipstream-core; "
+            "that local module is not a crates.io release. Its third-party "
+            "runtime/build dependencies are inventoried separately."
+        ),
         "externalRefs": [
             {
                 "referenceCategory": "PACKAGE-MANAGER",

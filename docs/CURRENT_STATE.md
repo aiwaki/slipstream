@@ -10,10 +10,12 @@ file.
 
 ## Current Checkpoint
 
-2026-10-10 continuation: source DNS/TG update and Chromium155 qualified in CI;
+2026-10-11 continuation: source DNS/TG update and Chromium155 qualified in CI;
 production dependency gate and workstation qualification remain open.
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
-  runtime baseline32d21973, base7e196a71. Preserve the user's AGENTS.md edits
+  current pushed HEAD9e6c20c7, runtime baseline32d21973, base7e196a71.
+  Exact9e6 CI37983480222 and Windows37983480164 SUCCESS; dependency37983480172
+  FAILURE, independently rechecked live. Preserve the user's AGENTS.md edits
   and all private output/backups. No workstation installation or learning reset.
 - Source5c7d1e4b retires app-owned Xbox DNS and imports tg-ws-proxy1.11.1 with
   retained local fixes. Daemon2186+8subtests, Telegram62 and real TLS/DNS16 PASS;
@@ -50,9 +52,17 @@ production dependency gate and workstation qualification remain open.
   6 exact OpenSSL signature matches, independent9 PASS. Review fixed same-key
   SPKI/PKCS1 binding and strict algorithm-parameter admission. Async byte-owned
   pending state passes6 tests and independent6 with no native handles across
-  await/unsafe Send. Actual client adapter/callsite/SQLite/ABI integration remains
-  open. See output/continuation-20261009/rsa-migration/{compatibility-report.md,
-  async-integration-plan.md,async-independent-review.md}.
+  await/unsafe Send. Actual client-only adapter6 and independent6 PASS. Its27
+  registry archives match lock hashes; one public OSV batch returned0 findings,
+  not full native/Geph coverage. Minimal both-macOS graph preserves retained
+  versions/checksums. Real Geph callsite composition exposed unused derive_more
+  and missing ed25519-dalek/std feature dependencies; output-only corrections
+  compile successfully (locked no-run59.85s). Exact11 synthetic auth/BW/SQLite
+  tests then exposed an incorrect mock nanorpc envelope; that run is invalid as
+  behavior proof and retained RED. Correcting the fixture and cause-specific
+  assertions before rerun. No accounts/all-lib/network allowed. Production
+  SOURCE/lock remain unchanged. Evidence: output/continuation-20261009/rsa-migration/
+  {client-runtime-audit/,geph-minimal-lock-review/,geph-callsite-composition/}.
 - Actual AWS-LC entropy EIO aborts the process. Eight child fixtures pass; a
   disposable native launchd policy fixture observes successor readiness43.630s
   after bootstrap, not a10s guarantee. Earlier
@@ -75,6 +85,23 @@ production dependency gate and workstation qualification remain open.
   prototype and ADP252 classification clear0 advisories; conflicting/malformed
   claims and defaultStatus unknown remain unknown. Evidence is under
   output/dependency-remediation-20261009/. No blind subtraction of cohorts.
+- NVD Chrome query retained14 pages/6922 unique records.840 of1114 unknown CVEs
+  found; unchanged research evaluator gives418 FALSE witnesses/422 UNKNOWN;
+  274 absent remain unknown. Full source/page/record bindings verified. Clears0
+  advisories;104 corroborated primary/ADP cases are a bounded next research slice.
+  Evidence output/dependency-remediation-20261009/nvd-chrome-applicability-155/.
+- Uncommitted SBOM guard rejects path/Git/other-registry misidentification and
+  missing locked checksums (7 original RED cases). Exact owned slipstream-core
+  is included in root Git source only after manifest/path/lock checks; transitive
+  registry dependencies remain. Fresh locked/offline app metadata passes346arm64/
+  348Intel packages, all checksummed.13 scoped SBOM tests/17 first-party negative
+  cases and12 release-manifest tests PASS; independent review46 release-validator
+  tests and9 mutations of actual metadata PASS (sbom-source-peer-review.json).
+  Legacy sourceInfo remains compatible; explanatory root comment is additive.
+  Preserve user AGENTS.md; tooling/research checkpoint accompanies the scoped provenance fix.
+- Read-only local check found no system/dev.slipstream.tproxy service or app at
+  /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
+  whole-disk absence. Preserved backups were not restored; no install/restart.
 - Correct-project graph unavailable (project not found); bounded direct searches
   used. Reuse exact32d21973 runtime/build/E2E baseline for tooling/docs-only edits.
 - NEXT production RSA and complete Chromium advisory/component coverage before

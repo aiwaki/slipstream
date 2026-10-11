@@ -1,9 +1,78 @@
 # Routing Research Notes
 
-Updated: 2026-10-09
+Updated: 2026-10-11
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-10-10 client RSA composition and source inventory
+
+The client-only Mizaru adapter passes six contract tests and six independent
+checks against the actual published Mizaru 0.2.21 signing/verification oracle.
+Both AccountLevel encodings and old cache tuples retain their wire format.
+Epoch, configured root, raw response DER and the request's mathematical key are
+bound before verified credentials can be published. The separate byte-owned
+pending-state tests remain the ownership baseline; these are not live-account
+or installed-app results. Frozen source, receipts and reviews are under
+`output/continuation-20261009/rsa-migration/`.
+
+Its macOS arm64 runtime/build closure has 27 registry packages and two local
+prototypes. All 27 cached archives match their locked checksums. One public OSV
+batch at 2026-10-09T20:18:56Z returned no advisory IDs for those 27 versions and
+the declared native AWS-LC commit. This does not prove complete native advisory
+coverage or audit the entire Geph graph. Actual aggregate AWS-LC notices must
+be preserved; the published Mizaru crate declares ISC but omits the original
+copyright/license notice. The prototypes remain unpublished and uninstalled.
+
+An output-only composition uses the real Geph auth/bandwidth functions,
+broker-protocol serialization and SQLite paths. Locked metadata for both macOS
+targets accepts a minimal graph with every retained registry version/checksum
+unchanged. Compilation then found an integration defect: removing RSA also
+removed transitively enabled features of an unused direct `derive_more`
+dependency. That unused edge is removed in the revised experimental graph;
+the original compiler failure is retained. A second compile failure exposed
+implicit `signature/std` support previously supplied by RSA. Explicit
+`ed25519-dalek/std` enables the needed error integration without default or
+legacy verification features. Offline resolution preserves all 485 prior
+package identities/checksums and adds five required codec packages. Locked
+no-run compilation passes. The first exact synthetic test run then exposed an
+invalid mock nanorpc envelope, so its negative passes are not accepted as
+behavior evidence; the corrected fixture must establish cause-specific errors.
+No live account or network call is part of this composition.
+
+The source-inventory review also found a production tooling defect:
+`make_release_sbom._cargo_components` could label path/Git/other-registry
+dependencies as crates.io releases and emit them without a matching locked
+checksum. The shared app/Geph generator now rejects those unbound sources.
+Seven negative cases failed before the fix. Independent review then caught a
+regression: the strict guard also rejected the application's own core module.
+The exact repository-owned `slipstream-core` is now aggregated into the root Git
+source package only after binding its actual manifest, version, non-publishable
+MIT declaration, dependency path and source-less lock entry. Its third-party
+transitive dependencies remain in the graph. Seventeen negative bindings reject
+foreign paths, links, alternate identities and lock mismatches. Thirteen scoped
+SBOM tests and twelve release-manifest tests pass. Fresh locked app metadata for
+arm64 and Intel accepts 346 and 348 registry components, respectively, all with
+matching checksums; no false core crates.io identity is emitted. The historical
+root sourceInfo format remains valid; an additive comment explains ownership.
+Actual prototype metadata remains rejected without an explicit source contract.
+Independent review passes 46 release-validator tests and nine mutations of the
+actual metadata. Root and dev-only exclusions remain. This guard does not yet implement the explicit source-bound inventory
+needed to distribute the three local/modified Geph packages. No audit exception
+or package-count requirement was relaxed.
+
+A bounded NVD Google Chrome CPE query completed 14 pages with 6,922 unique
+records, stable advertised totals and retained response hashes. It is a complete
+enumeration of that query, not an atomic NVD snapshot or a complete component
+inventory. Of the retained Chromium evaluator's 1,114 unknowns, 840 appear in
+the query: the unchanged applicability prototype returns 418 FALSE and 422
+UNKNOWN witnesses. The other 274 remain unknown; absence from this query is
+not evidence of safety. No advisory is cleared. For 104 simple primary/ADP
+cases the representations agree; another 47 require explicit treatment of
+alternative Fedora/Debian OS branches. Conflicting affected assertions,
+malformed ranges and component dependencies remain separate obstacles.
+Exact page/index/record bindings and remaining branches are recorded in
+`output/dependency-remediation-20261009/nvd-chrome-applicability-155/HANDOFF.md`.
 
 ## 2026-10-09 provider retirement and Telegram transport update
 
