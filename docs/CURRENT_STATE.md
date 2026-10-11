@@ -9,6 +9,26 @@ This branch is a separate review candidate; never restore it with a force push
 onto the bot branch. No vendor release, installation, account qualification or
 policy exception change.
 
+- Oct11 source-owned SPDX support is now implemented in this draft PR384.
+  Shared strict Cargo identity checks from root source c3846615 are retained;
+  registry conversion is extracted unchanged. Embedded generation requires an
+  explicit physical materialized root, exact manifests/lock/metadata and file
+  bytes. Verification binds the exact three source-owned packages and18 files
+  to SOURCE, descriptor hashes and repository commit, without registry PURLs.
+  Standard SPDX package verification codes use per-file SHA1; SHA256 separately
+  binds source bytes. Declared licenses do not claim notice clearance.
+  Focused23 tests PASS (10 new); actual output-only candidate CLI generate/verify
+  PASS with411 packages/407 registry dependencies. Old verifier first accepted
+  a changed file checksum and invented Cargo PURL; RED evidence is retained.
+  Parent verifies11 receipt hashes, recomputes3 verification codes and rejects
+  6 independent mutations. Evidence: output/source-owned-sbom/{receipt.json,
+  parent-review.json,candidate-execution.json}. Production SOURCE/lock/license/
+  policy/workflow remain unchanged. Verify does not recompute full registry
+  reachability, and source-owned advisory coverage/notices remain open. No build,
+  account execution, release or installation occurred for this change.
+  Next: qualify source-owned advisory/notice coverage before activating the RSA
+  candidate; reuse unchanged runtime evidence rather than running all-lib tests.
+
 - Optional embedded-source schema is prepared but NOT activated in production
   SOURCE/Cargo.lock/LICENSE. It admits exactly the reviewed Mizaru client,
   owned RSA backend and broker derivative with bounded source/manifest/notice

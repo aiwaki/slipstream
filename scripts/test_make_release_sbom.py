@@ -280,6 +280,169 @@ cryptography==46.0.5 \\
             self.assertEqual(chromium.checksum_algorithm, "SHA256")
             self.assertEqual(chromium.checksum_value, "ff" * 32)
 
+    def test_rejects_nonregistry_runtime_packages_instead_of_claiming_crates_io(self) -> None:
+        sources = (
+            None,  # A local fork can keep a published name and version.
+            "git+https://example.invalid/serde#" + "b" * 40,
+            "registry+https://example.invalid/crates.io-index",
+            "unrecognized+https://example.invalid/index",
+        )
+        for source in sources:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as tmp:
+                inputs = self._write_inputs(Path(tmp))
+                metadata_path = inputs["cargo_metadata"]
+                metadata = json.loads(metadata_path.read_text())
+                dependency = metadata["packages"][1]
+                old_id = dependency["id"]
+                new_id = (source or "path+file:///local/serde") + "#serde@1.0.228"
+                dependency.update(id=new_id, source=source)
+                for node in metadata["resolve"]["nodes"]:
+                    if node["id"] == old_id:
+                        node["id"] = new_id
+                    node["dependencies"] = [
+                        new_id if item == old_id else item
+                        for item in node["dependencies"]
+                    ]
+                    for edge in node["deps"]:
+                        if edge["pkg"] == old_id:
+                            edge["pkg"] = new_id
+                metadata_path.write_text(json.dumps(metadata))
+
+                with self.assertRaisesRegex(ValueError, "unsupported Cargo source"):
+                    make_release_sbom.collect_components(**inputs)
+
+    def test_rejects_runtime_registry_package_without_matching_locked_checksum(self) -> None:
+        for change in ("missing-checksum", "different-source", "different-version"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                inputs = self._write_inputs(Path(tmp))
+                lock_path = inputs["cargo_lock"]
+                lock = lock_path.read_text()
+                if change == "missing-checksum":
+                    lock = lock.replace('checksum = "' + "a" * 64 + '"\n', "")
+                elif change == "different-source":
+                    lock = lock.replace(
+                        "registry+https://github.com/rust-lang/crates.io-index",
+                        "registry+https://example.invalid/index", 1,
+                    )
+                else:
+                    lock = lock.replace('version = "1.0.228"', 'version = "1.0.227"', 1)
+                lock_path.write_text(lock)
+                with self.assertRaisesRegex(ValueError, "matching locked checksum"):
+                    make_release_sbom.collect_components(**inputs)
+
+    def test_local_dev_only_package_does_not_enter_runtime_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            inputs = self._write_inputs(Path(tmp))
+            metadata_path = inputs["cargo_metadata"]
+            metadata = json.loads(metadata_path.read_text())
+            metadata["packages"][2]["source"] = None
+            metadata_path.write_text(json.dumps(metadata))
+            components = make_release_sbom.collect_components(**inputs)
+            self.assertIn("serde", [component.name for component in components])
+            self.assertNotIn("gtk", [component.name for component in components])
+
+    def _add_owned_core(self, repo: Path, inputs: dict) -> tuple[dict, Path, Path]:
+        # Model the actual app -> core -> registry graph, not a name-only stub.
+        repo = repo.resolve()
+        app_manifest = repo / "app-tauri/src-tauri/Cargo.toml"
+        core_manifest = repo / "crates/slipstream-core/Cargo.toml"
+        app_manifest.parent.mkdir(parents=True)
+        core_manifest.parent.mkdir(parents=True)
+        app_manifest.write_text(
+            '[package]\nname="slipstream"\nversion="' + VERSION + '"\n'
+            '[dependencies]\nslipstream-core={path="../../crates/slipstream-core"}\n'
+        )
+        core_manifest.write_text(
+            '[package]\nname="slipstream-core"\nversion="0.1.0"\n'
+            'publish=false\nlicense="MIT"\n'
+        )
+        inputs["first_party_root"] = repo
+        with inputs["cargo_lock"].open("a") as handle:
+            handle.write('\n[[package]]\nname="slipstream-core"\nversion="0.1.0"\n')
+        metadata = json.loads(inputs["cargo_metadata"].read_text())
+        metadata["packages"][0]["manifest_path"] = str(app_manifest)
+        core_id = core_manifest.parent.as_uri() + "#slipstream-core@0.1.0"
+        metadata["packages"].append({
+            "id": core_id, "name": "slipstream-core", "version": "0.1.0",
+            "source": None, "manifest_path": str(core_manifest), "license": "MIT",
+        })
+        root = metadata["resolve"]["nodes"][0]
+        serde_id = metadata["packages"][1]["id"]
+        root["dependencies"][0] = core_id
+        root["deps"][0]["pkg"] = core_id
+        metadata["resolve"]["nodes"].append({
+            "id": core_id, "dependencies": [serde_id],
+            "deps": [{"pkg": serde_id, "dep_kinds": [{"kind": None, "target": None}]}],
+        })
+        inputs["cargo_metadata"].write_text(json.dumps(metadata))
+        return metadata, app_manifest, core_manifest
+
+    def test_owned_core_is_root_source_and_keeps_transitive_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            inputs = self._write_inputs(Path(tmp))
+            self._add_owned_core(Path(tmp), inputs)
+            components = make_release_sbom.collect_components(**inputs)
+            self.assertIn("serde", [item.name for item in components])
+            self.assertNotIn("slipstream-core", [item.name for item in components])
+            # Geph/shared callers have no implicit first-party exception.
+            with self.assertRaisesRegex(ValueError, "unsupported Cargo source"):
+                make_release_sbom._cargo_components(inputs["cargo_metadata"], inputs["cargo_lock"])
+
+    def test_owned_core_requires_exact_source_binding(self) -> None:
+        for change in (
+            "foreign-core", "foreign-root", "version", "publish", "license",
+            "path", "git", "lock-source", "lock-version", "lock-missing",
+            "lock-duplicate", "symlink", "ancestor-symlink", "root-source",
+            "root-name", "other-local",
+        ):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                inputs = self._write_inputs(Path(tmp))
+                metadata, app, core = self._add_owned_core(Path(tmp), inputs)
+                if change == "foreign-core":
+                    metadata["packages"][-1]["manifest_path"] = "/foreign/Cargo.toml"
+                elif change == "foreign-root":
+                    metadata["packages"][0]["manifest_path"] = "/foreign/Cargo.toml"
+                elif change == "version":
+                    metadata["packages"][-1]["version"] = "0.2.0"
+                elif change == "publish":
+                    core.write_text(core.read_text().replace("publish=false", "publish=true"))
+                elif change == "license":
+                    core.write_text(core.read_text().replace('license="MIT"', 'license="ISC"'))
+                elif change == "path":
+                    app.write_text(app.read_text().replace("../../crates/slipstream-core", "../../foreign"))
+                elif change == "git":
+                    app.write_text(app.read_text().replace('path="', 'git="https://example.invalid",path="'))
+                elif change == "lock-source":
+                    with inputs["cargo_lock"].open("a") as handle:
+                        handle.write('source="registry+https://github.com/rust-lang/crates.io-index"\n')
+                elif change == "lock-version":
+                    lock = inputs["cargo_lock"]
+                    lock.write_text(lock.read_text().replace('version="0.1.0"', 'version="0.2.0"'))
+                elif change == "lock-missing":
+                    lock = inputs["cargo_lock"]
+                    lock.write_text(lock.read_text().replace('\n[[package]]\nname="slipstream-core"\nversion="0.1.0"\n', ""))
+                elif change == "lock-duplicate":
+                    with inputs["cargo_lock"].open("a") as handle:
+                        handle.write('\n[[package]]\nname="slipstream-core"\nversion="0.1.0"\n')
+                elif change == "symlink":
+                    other = core.with_name("other.toml")
+                    core.rename(other)
+                    core.symlink_to(other)
+                elif change == "ancestor-symlink":
+                    directory = core.parent
+                    other = directory.with_name("other")
+                    directory.rename(other)
+                    directory.symlink_to(other, target_is_directory=True)
+                elif change == "root-source":
+                    metadata["packages"][0]["source"] = make_release_sbom.CRATES_IO_SOURCE
+                elif change == "root-name":
+                    metadata["packages"][0]["name"] = "other-app"
+                elif change == "other-local":
+                    metadata["packages"][1]["source"] = None
+                inputs["cargo_metadata"].write_text(json.dumps(metadata))
+                with self.assertRaisesRegex(ValueError, "unsupported Cargo source"):
+                    make_release_sbom.collect_components(**inputs)
+
     def test_document_validates_against_release_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             document = self._document(Path(tmp))
@@ -296,6 +459,16 @@ cryptography==46.0.5 \\
 
             self.assertEqual(summary["format"], "SPDX-2.3")
             self.assertEqual(summary["dependency_count"], 7)
+            root_package = next(item for item in document["packages"]
+                                if item["SPDXID"] == make_release_sbom.ROOT_SPDX_ID)
+            self.assertIn("first-party crates/slipstream-core", root_package["comment"])
+            # Previously generated releases lack the explanatory comment.
+            del root_package["comment"]
+            make_release_sbom.validate_spdx_document(
+                document, version=VERSION, tag=TAG, repository=REPOSITORY,
+                source_commit=SOURCE_COMMIT, source_date_epoch=SOURCE_DATE_EPOCH,
+                target=TARGET,
+            )
             self.assertEqual(
                 document["creationInfo"]["created"],
                 make_release_sbom.utc_timestamp(SOURCE_DATE_EPOCH),
