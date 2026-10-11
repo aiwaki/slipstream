@@ -1201,6 +1201,7 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --target "$SLIPSTREAM_TAURI_TARGET" \
             --evaluation-date "$(date -u +%F)" \
+            --evidence-dir "$RUNNER_TEMP/dependency-audit-evidence/release-candidate" \
             --output "$candidate/dependency-audit.json"
           python3 scripts/dependency_audit.py verify \
             --report "$candidate/dependency-audit.json" \
@@ -1222,6 +1223,30 @@ jobs:
             --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --app-tree "$bundle/macos/Slipstream.app"
+
+      - id: dependency-audit-candidate-evidence
+        name: Check for retained dependency scan evidence
+        if: always()
+        run: |
+          set -eu
+          evidence_dir="$RUNNER_TEMP/dependency-audit-evidence/release-candidate"
+          if [ -d "$evidence_dir" ] && [ ! -L "$evidence_dir" ]; then
+            for evidence_file in "$evidence_dir"/*; do
+              if [ -f "$evidence_file" ] && [ ! -L "$evidence_file" ]; then
+                echo "available=true" >> "$GITHUB_OUTPUT"
+                break
+              fi
+            done
+          fi
+
+      - name: Retain dependency scan inputs and raw result
+        if: always() && steps.dependency-audit-candidate-evidence.outputs.available == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-audit-raw-candidate-aarch64-apple-darwin-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-audit-evidence/release-candidate/
+          if-no-files-found: error
+          retention-days: 14
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -10,8 +10,8 @@ file.
 
 ## Current Checkpoint
 
-2026-10-11 continuation: source DNS/TG update and Chromium155 qualified in CI;
-production dependency gate and workstation qualification remain open.
+2026-10-11 continuation: DNS/TG/runtime baseline qualified; latest audit changes
+expose historical vendor-evidence and candidate-release packaging gates.
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
   latest full green CI source188323a8, base7e196a71; functional38154253014 SUCCESS
   (18 pass/4 release-only skips), Windows38154253099 SUCCESS. Tested merge6e0adc00
@@ -23,6 +23,17 @@ production dependency gate and workstation qualification remain open.
   Dependency38154253038 remains FAILURE (Geph0.3.9:10 blocking/3 informational;
   the unchanged app policy rejects incomplete coverage). No exception extended.
   Preserve the user's AGENTS.md edits and all private output/backups. No workstation installation or learning reset.
+- Latest source bfa052f2: functional38158749251 FAILURE at packaged-app-build;
+  product/checks, Chromium contract and Windows38158749235 SUCCESS. The strict
+  audit verifier rejects published geph-vendor-0.3.9-r5 because its historical
+  report lacks scanned_packages. Original raw OSV was deleted, is absent from
+  release assets, and retained same-count raw has different rustls coordinates;
+  no honest offline reconstruction is available. No fabricated evidence or
+  compatibility waiver. Current packaging is NOT qualified by the earlier188
+  pass; that baseline remains usable only for unchanged runtime behavior.
+  Dependency38158749250 still fails with the same Geph/app policy findings.
+  Evidence: output/continuation-20261009/vendor-audit-consumer-review/review.json
+  and audit-identity-ci-{status.json,build.log,failed.log}.
 - Source5c7d1e4b retires app-owned Xbox DNS and imports tg-ws-proxy1.11.1 with
   retained local fixes. Oct11 upstream recheck confirms1.11.1 remains the latest
   published release; later main commits are not silently included. Daemon2186+8subtests, Telegram62 and real TLS/DNS16 PASS;
@@ -50,7 +61,7 @@ production dependency gate and workstation qualification remain open.
   branch codex/geph-043-remediation; source07a3d871/docsd2856d8a retained locally
   and on its dedicated remote. PR383 bot branch was force-replaced on Oct11 by
   0a20407e, losing the qualified changes; do not use its head as equivalent.
-  The preserved candidate is now draft PR384 at eb388c92 on codex/geph-043-remediation. All11 local patches
+  The preserved candidate is draft PR384, source fbd3d7e6 (checkpoint81d7c133), on codex/geph-043-remediation. All11 local patches
   retained, SQLite-only SQLx0.8.6.
   Exact eb388c92 source-bootstrap CI38149115689 SUCCESS (packaged jobs skipped);
   dependency38149115634 FAIL with2 Geph RSA blockers/1 informational/423 packages,
@@ -191,6 +202,13 @@ production dependency gate and workstation qualification remain open.
   sets, not a recomputed full registry graph. Evidence in that worktree's
   output/source-owned-sbom/. Production SOURCE/lock/license/policy unchanged;
   source-owned advisory assessment and notice clearance remain open.
+  Exact fbd3d7e6 functional38158619460 FAILURE: product/checks and Chromium
+  contract pass; packaged build requests unpublished geph-vendor-0.4.3-r1 and
+  gets404 before download/verification. Four added SBOM script/test paths are
+  outside the precise source-bootstrap allowlist. Do not broaden it for green CI.
+  Dependency38158619508 retains two RSA blockers and incomplete app coverage.
+  Dedicated output/source-owned-sbom/ci-scope-review.json records options;
+  a backwards-compatible tooling prerequisite can be qualified separately.
 - Bot branch overwrite reproduced with the actual workflow against bare Git.
   Existing version branch now remains an immutable review handoff, lookup errors
   fail closed, new branch push requires atomic absence, and PR descriptions stay
@@ -215,13 +233,25 @@ production dependency gate and workstation qualification remain open.
   Compile orchestration was mocked in these tests; this is not actual new Geph
   execution. Cargo build scripts are outside the runtime sandbox; retained-log
   caps apply after process exit. Separate CI evidence stays outside release artifacts.
+- New scan evidence path preserves exact SPDX/policy snapshots, a verified
+  private scanner copy identity, bounded raw output and an evaluator/report-bound
+  receipt on successful and rejected runs. Raw links/FIFOs/directories stay
+  outside the upload tree. All four CI scan sites retain diagnostic artifacts
+  independently of failure, outside release payloads.81 focused tests plus7
+  independent CLI negatives PASS; eight source/policy/workflow bindings verified.
+  Evidence: output/continuation-20261009/{raw-audit-evidence/,
+  audit-evidence-final-tests.log,audit-evidence-parent-review.json}. Policy unchanged.
+  This is synthetic local qualification; real CI/upload remains pending.14-day
+  retention is not permanent release evidence, and historical raw is still lost.
 - Read-only local check found no system/dev.slipstream.tproxy service or app at
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
 - Correct-project graph unavailable (project not found); bounded direct searches
   used. Reuse exact188323a8 functional/E2E CI; no unchanged broad rerun is needed.
-- NEXT reconcile focused audit/SPDX CI, then source-owned production advisory/
-  notice and complete Chromium coverage. Reuse exact188 runtime/E2E baseline.
+- NEXT verify CI failure-path evidence upload, then source-owned production
+  advisory/notice and complete Chromium coverage. A new
+  qualified vendor artifact is required: historical count-only evidence cannot
+  be upgraded from SPDX alone. Reuse exact188 only for unchanged runtime/E2E.
   The self-contained RSA candidate has native debug compile/source-equivalence
   evidence; Intel build and release qualification remain separate. No release/install while these gates
   remain open. Run canonical installed verification and physical-browser/Telegram checks only after gates

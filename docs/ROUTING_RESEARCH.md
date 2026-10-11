@@ -5,6 +5,57 @@ Updated: 2026-10-11
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
 
+## 2026-10-11 retained scanner evidence
+
+The audit CLI has an optional --evidence-dir boundary for new scans. A fresh
+private directory retains input snapshots, exact bounded scanner output and a
+receipt, including failure states. Scanner verification/execution use one owned
+copy; report generation reads the same policy/SPDX snapshots as the scanner.
+This preserves evidence when JSON parsing, inventory validation or policy rejects
+a run, rather than deleting the raw result in finally. The legacy invocation
+remains compatible; historical missing evidence is not reconstructed.
+
+All four workflow scan sites opt in and upload diagnostic evidence separately
+from release assets even after audit failure. Collection is skipped when the
+scan never produced a directory. Retention is14 days, not permanent published
+release evidence; durable release archival remains an open contract change.
+Receipts bind hashes and observed/evaluation times but are not independent
+provenance attestations. Runner loss or kill may leave only a started receipt;
+missing terminal evidence never establishes a successful audit. No exception,
+bootstrap allowlist or release-asset schema is expanded.
+
+Focused audit/consumer/workflow/scope/docs verification:81 PASS, plus7 independent
+negative CLI cases. Fake scanners are real local subprocesses; malformed UTF-8,
+timeout/partial output, signal exits, swapped originals, invalid file types and
+existing paths are distinguished. Retained raw is capped at64MiB after scanner
+exit, not a runtime disk quota or same-UID sandbox. Parent verifies eight file
+bindings and unchanged policies. Evidence: output/continuation-20261009/
+{audit-evidence-final-tests.log,audit-evidence-parent-review.json,
+raw-audit-evidence/implementation-review.json}.
+
+## 2026-10-11 historical audit consumer and candidate packaging
+
+The new identity guard exposes a real migration boundary. PR376 bfa052f2 CI
+38158749251 passes product tests but rejects the published Geph0.3.9-r5 audit
+because it has no scanned_packages. The historical scanner wrapper removed raw
+OSV JSON in finally, and none of the eight release assets contains it. The only
+retained484-package raw has rustls0.23.43; the authenticated r5 SPDX has0.23.45.
+Rebuilding the claimed scan inventory from SPDX would invent scanner evidence.
+The report remains rejected; publishing a newly qualified vendor is a separate
+requirement, including current advisory policy and attestation. Evidence:
+output/continuation-20261009/vendor-audit-consumer-review/review.json.
+
+PR384 fbd3d7e6 CI38158619460 has a different packaging failure: four SBOM script
+and test paths are outside the narrow vendor-source bootstrap. Normal packaging
+requests geph-vendor-0.4.3-r1 and receives404 before downloading or verifying any
+binary. Product checks pass; the vendor is not published. Restoring only the two
+shared SBOM files would not restore bootstrap and could reintroduce false Cargo
+identities through the old converter. No workflow exemption was expanded. A
+backwards-compatible tooling prerequisite on the published vendor is the clean
+separation option, subject to its own packaging qualification. Dedicated evidence:
+output/source-owned-sbom/ci-scope-review.json. Prior green runtime evidence does
+not prove either current packaging path is green.
+
 ## 2026-10-11 audit identity and derivative notice boundaries
 
 A local replay of `dependency_audit.py` found that matching package counts did
@@ -821,7 +872,7 @@ outcome, never from visual incompleteness, a status code, or elapsed time alone.
 | 2026-07-08 | Unblock-Pro DNS/hosts/proxy mutations | Rejected | Do not mutate `/etc/hosts`, system DNS, system proxy, PAC, or external VPN configuration. | Detect and warn only. |
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
 | 2026-07-08 | Install hygiene ideas | Adopted where safe | Safe-copy and binary-format validation are useful for daemon install reliability. | Keep monitoring real reinstall logs for locked-file edge cases. |
-| 2026-07-08 | `xbox-dns.ru` external DNS | Active | User-managed resolver settings remain external state that Slipstream never enables or rewrites. Separately, the daemon may make a direct, verified DoH query for one failed generic hostname. | Keep the direct backend exact-host, local-only, and independent from system resolver settings. |
+| 2026-07-08 | `xbox-dns.ru` external DNS | Retired 2026-10-09; historical evidence only | User-managed resolver settings remain external state that Slipstream never enables or rewrites. Separately, the daemon may make a direct, verified DoH query for one failed generic hostname. | Keep the direct backend exact-host, local-only, and independent from system resolver settings. |
 | 2026-07-09 | Darkware Zapret UI | Reference only | Borrow the compact MenuBarExtra-style status layout, not its manual strategy workflow. | Redesign tray diagnostics as short status rows with details behind a button. |
 | 2026-07-09 | Darkware Zapret system mutations | Rejected | Do not copy system SOCKS proxy toggles or broad sudoers `NOPASSWD` service control. | Keep Slipstream-owned state scoped to its daemon, pf rules, and status files. |
 | 2026-07-09 | Darkware Zapret bruteforce probe | Backlog | Headless re-sweep can borrow the temporary-proxy probing idea without exposing a picker. | Consider only for autonomous local-bypass recovery. |
