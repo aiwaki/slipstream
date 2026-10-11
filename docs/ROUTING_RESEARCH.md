@@ -5,6 +5,40 @@ Updated: 2026-10-11
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
 
+## 2026-10-11 audit identity and derivative notice boundaries
+
+A local replay of `dependency_audit.py` found that matching package counts did
+not establish matching package identities. One registry package and three
+source-owned packages correctly failed when the latter were omitted or reported
+with an unsupported ecosystem. Four unrelated registry coordinates, or registry
+identities invented for the local packages, nevertheless passed both report
+generation and verification. This is an integrity defect in the wrapper's
+coverage checks; it is not evidence that the pinned OSV scanner fabricated
+results. The correction compares canonical SPDX and scanned identities and
+retains advisory-free package identities for later verification. Modified source
+packages must not inherit registry coverage from their ancestors.
+
+Twenty-one audit/identity and21 consumer tests pass. Independent review found a
+PyPI/GitHub normalization mismatch with reviewed policy exceptions; consistent
+canonical comparison fixes four failing roundtrips and preserves eight negative
+cases. Replay of retained real SPDX/OSV pairs accepts their362/484 package
+identities while retaining existing blocking findings. Cross-pairing other SPDX
+files with the same counts but different rustls versions now fails. No scanner
+or network query was repeated. Old reports lacking scanned identities must be
+rebuilt from their original raw results before passing verification.
+
+The bounded ISC review retains the complete Mizaru0.2.21 and broker-protocol0.4.3
+archives, their declared licenses and referenced Git tree. Forty file bindings
+and five API blob/tree links verify. Neither archive supplies the applicable
+full notice. Both mark their commit `dirty:true`; seven broker Rust files match
+that commit, while Mizaru source and the original manifests differ. The tree's
+absence of notice-named files is not an exhaustive all-history/content search.
+The upstream README's generic MPL/ISC description supplies neither missing
+attribution nor license clearance. Evidence stays under
+`output/continuation-20261009/rsa-migration/isc-notice-provenance/` and
+`source-owned-audit-coverage-review/`; no production license, waiver or source
+descriptor was changed by these investigations.
+
 ## 2026-10-10 client RSA composition and source inventory
 
 The client-only Mizaru adapter passes six contract tests and six independent

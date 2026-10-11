@@ -13,14 +13,15 @@ file.
 2026-10-11 continuation: source DNS/TG update and Chromium155 qualified in CI;
 production dependency gate and workstation qualification remain open.
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
-  latest full green CI source c3846615; review-branch guard e6bcfcd1 is pushed.
-  Its exact functional CI38151198776 exposed a live-log rotation race; the
-  focused correction below supersedes only that launcher portion of the baseline.
-  Runtime baseline32d21973, base7e196a71. Exact e6 Windows38151198793 SUCCESS;
-  packaged/browser/lifecycle/update jobs passed, product-checks alone failed the
-  rotation test. Dependency38151198828 remains FAILURE.
-  Exactc384 CI38146258751 SUCCESS (18 pass/4 release-only skips), Windows38146258725
-  SUCCESS; dependency38146258709 FAILURE. Runtime baseline32d21973 is reused except for the scoped live-log correction below.
+  latest full green CI source188323a8, base7e196a71; functional38154253014 SUCCESS
+  (18 pass/4 release-only skips), Windows38154253099 SUCCESS. Tested merge6e0adc00
+  binds those exact parents. Product checks:700 Python,119 contract,2188 daemon
+  plus8 subtests,231 Rust PASS/1ignored. Exact e6bcfcd1 CI38151198776 first exposed
+  the live-log race; the scoped correction below now passes the full CI too.
+  Ten small artifact ZIPs match GitHub digests;12 job logs and11 result JSONs
+  agree. Evidence: output/continuation-20261009/log-runner-ci-evidence/summary.json.
+  Dependency38154253038 remains FAILURE (Geph0.3.9:10 blocking/3 informational;
+  the unchanged app policy rejects incomplete coverage). No exception extended.
   Preserve the user's AGENTS.md edits and all private output/backups. No workstation installation or learning reset.
 - Source5c7d1e4b retires app-owned Xbox DNS and imports tg-ws-proxy1.11.1 with
   retained local fixes. Oct11 upstream recheck confirms1.11.1 remains the latest
@@ -162,6 +163,34 @@ production dependency gate and workstation qualification remain open.
   inventory and all411 query mappings byte-identical. No public query repeated.
   Post-fix peer verifies18 receipt hashes and real snapshot-swap/path cases;
   source-owned-inventory-postfix-review.json binds the corrected collector.
+- Exact derivative notice review verifies both complete published archives
+  (17 files),40 artifact bindings and5 GitHub blob/tree links. Both manifests
+  declare ISC but no applicable full notice was recovered. The referenced tree
+  has290 entries and no notice-named file; its dirty:true provenance matters:
+  seven broker Rust files match, Mizaru source and original manifests differ.
+  Generic upstream README wording is not a replacement notice. This is bounded
+  evidence, not all-history absence or license clearance. Reportf22a71c7 under
+  rsa-migration/isc-notice-provenance/; no new network query or code execution.
+- Source-inventory review reproduced an audit identity gap: a same-count list
+  of unrelated or false registry coordinates passed the old count-only report
+  check. The correction now compares canonical SPDX/scanner identities and
+  retains scanned_packages for later verification. Old count-only reports need
+  rebuilding from retained raw OSV; no policy is relaxed.21 audit/identity and21
+  consumer tests PASS. Independent review found/fixed asymmetric PyPI/GitHub
+  exception normalization:4 RED→GREEN roundtrips and8 negative cases pass.
+  Correct retained pairs (362 app/484 Geph) preserve their classifications;
+  different same-count pairs with wrong rustls versions are now rejected.
+  This does not claim OSV fabricated results or existing advisories disappeared.
+  Evidence: rsa-migration/source-owned-audit-coverage-review/normalization-peer/.
+- Dedicated draft PR384 sourcefbd3d7e6 adds source-owned SPDX generation and
+  verification.23 focused tests PASS; the actual output-only candidate has411
+  packages (407 registry + root +3 embedded),18 exact files. Parent verifies11
+  receipt hashes,3 standard SPDX verification codes and6 rejected mutations.
+  No invented Cargo PURL or archive checksum; source digest, descriptor and
+  commit bind each embedded package. Verify proves the exact3/18 source-owned
+  sets, not a recomputed full registry graph. Evidence in that worktree's
+  output/source-owned-sbom/. Production SOURCE/lock/license/policy unchanged;
+  source-owned advisory assessment and notice clearance remain open.
 - Bot branch overwrite reproduced with the actual workflow against bare Git.
   Existing version branch now remains an immutable review handoff, lookup errors
   fail closed, new branch push requires atomic absence, and PR descriptions stay
@@ -190,9 +219,9 @@ production dependency gate and workstation qualification remain open.
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
 - Correct-project graph unavailable (project not found); bounded direct searches
-  used. Reuse exact32d21973 runtime/build/E2E baseline except the scoped launcher fix.
-- NEXT verify exact CI for the scoped launcher/isolated-runner commit, then
-  source-bound production SBOM/advisories/notices and complete Chromium coverage.
+  used. Reuse exact188323a8 functional/E2E CI; no unchanged broad rerun is needed.
+- NEXT reconcile focused audit/SPDX CI, then source-owned production advisory/
+  notice and complete Chromium coverage. Reuse exact188 runtime/E2E baseline.
   The self-contained RSA candidate has native debug compile/source-equivalence
   evidence; Intel build and release qualification remain separate. No release/install while these gates
   remain open. Run canonical installed verification and physical-browser/Telegram checks only after gates
