@@ -1623,10 +1623,14 @@ chmod +x "$root/spike/dist/slipstreamd/slipstreamd"
             ),
             2,
         )
-        self.assertLess(
-            workflow.index("scripts/geph_vendor_source.py prepare"),
-            workflow.index("gh pr create"),
-        )
+        # Existing reviewed refs can recover a missing PR without regenerating
+        # their source; the new-candidate path must still prepare before push.
+        candidate = workflow[workflow.index("scripts/geph_vendor_source.py prepare"):
+                             workflow.index("\n  build:")]
+        candidate_stages = [candidate.index(stage) for stage in (
+            "scripts/geph_vendor_source.py prepare", "git commit -m",
+            "git push --force-with-lease", "gh pr create")]
+        self.assertEqual(candidate_stages, sorted(candidate_stages))
         self.assertLess(
             workflow.index(
                 "scripts/geph_vendor_source.py retire-h2-transition-exception"

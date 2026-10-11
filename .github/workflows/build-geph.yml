@@ -202,6 +202,24 @@ jobs:
           set -euo pipefail
           version="${{ needs.resolve.outputs.version }}"
           branch="automation/geph-${version}"
+          remote_ref="refs/heads/$branch"
+          remote_oid="$(git ls-remote --heads origin "$remote_ref" | awk '{print $1}')"
+          if [ -n "$remote_oid" ]; then
+            # An opened version branch belongs to review. It may contain human
+            # fixes or qualification evidence that discovery must not replace.
+            echo "Preserving existing review branch $branch at $remote_oid"
+            existing_pr="$(gh api --method GET "repos/${{ github.repository }}/pulls" \
+              --paginate -f "head=${{ github.repository_owner }}:$branch" -f base=main -f state=all \
+              --jq ".[] | select(.head.repo.full_name == \"${{ github.repository }}\" and .head.ref == \"$branch\") | .number")"
+            if [ -z "$existing_pr" ]; then
+              gh pr create --repo "${{ github.repository }}" --base main --head "$branch" \
+                --title "vendor: geph5-client $version source contract" \
+                --body "Restored review for the existing source candidate at $remote_oid. No regeneration or branch update was performed; existing source changes and qualification evidence are preserved."
+            else
+              echo "Preserving existing PR $existing_pr and its description"
+            fi
+            exit 0
+          fi
           curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
             "${{ needs.resolve.outputs.crate_url }}" -o /tmp/geph5-client.crate
           python3 scripts/geph_vendor_source.py prepare \
@@ -225,13 +243,9 @@ jobs:
             exit 0
           fi
           git commit -m "vendor: geph5-client $version source contract"
-          remote_ref="refs/heads/$branch"
-          remote_oid="$(git ls-remote --heads origin "$remote_ref" | awk '{print $1}')"
-          if [ -n "$remote_oid" ]; then
-            git push --force-with-lease="$remote_ref:$remote_oid" origin "HEAD:$remote_ref"
-          else
-            git push origin "HEAD:$remote_ref"
-          fi
+          # Empty expected OID means create only if the remote ref is still absent.
+          # A branch created after the lookup must fail, never become our lease.
+          git push --force-with-lease="$remote_ref:" origin "HEAD:$remote_ref"
           body="$(cat <<EOF
           Automated Geph source-contract update.
 
@@ -244,7 +258,7 @@ jobs:
           EOF
           )"
           if gh pr view "$branch" --repo "${{ github.repository }}" --json number >/dev/null 2>&1; then
-            gh pr edit "$branch" --repo "${{ github.repository }}" --body "$body"
+            echo "Preserving existing PR description for $branch"
           else
             gh pr create \
               --repo "${{ github.repository }}" \

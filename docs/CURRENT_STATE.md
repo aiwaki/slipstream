@@ -13,12 +13,14 @@ file.
 2026-10-11 continuation: source DNS/TG update and Chromium155 qualified in CI;
 production dependency gate and workstation qualification remain open.
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
-  current pushed HEAD9e6c20c7, runtime baseline32d21973, base7e196a71.
-  Exact9e6 CI37983480222 and Windows37983480164 SUCCESS; dependency37983480172
-  FAILURE, independently rechecked live. Preserve the user's AGENTS.md edits
-  and all private output/backups. No workstation installation or learning reset.
+  latest full CI source c3846615; this checkpoint adds the review-branch guard.
+  Runtime baseline32d21973, base7e196a71.
+  Exactc384 CI38146258751 SUCCESS (18 pass/4 release-only skips), Windows38146258725
+  SUCCESS; dependency38146258709 FAILURE. Runtime unchanged since32d21973.
+  Preserve the user's AGENTS.md edits and all private output/backups. No workstation installation or learning reset.
 - Source5c7d1e4b retires app-owned Xbox DNS and imports tg-ws-proxy1.11.1 with
-  retained local fixes. Daemon2186+8subtests, Telegram62 and real TLS/DNS16 PASS;
+  retained local fixes. Oct11 upstream recheck confirms1.11.1 remains the latest
+  published release; later main commits are not silently included. Daemon2186+8subtests, Telegram62 and real TLS/DNS16 PASS;
   source/ecf344aa then fixes the reproduced active-worker uninstall race. The
   validated closed IPC socket accepts only exact exit1/ipc_unavailable after
   cleanup; ownership/signal/resource errors still fail. Focused82+15Python and
@@ -40,10 +42,15 @@ production dependency gate and workstation qualification remain open.
   sustained Discord/YouTube, sleep/wake or mixed-load behavior on this Mac.
 - Geph0.4.3 candidate remains isolated in managed worktree
   /Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905,
-  branch codex/geph-043-remediation; source07a3d871/docsd2856d8a on PR383
-  (automation/geph-0.4.3). All11 local patches retained, SQLite-only SQLx0.8.6.
-  Functional CI37967349938 SUCCESS; dependency37967349940 FAIL with2 RSA blockers
-  and1 informational finding across423 packages. No exception extended.
+  branch codex/geph-043-remediation; source07a3d871/docsd2856d8a retained locally
+  and on its dedicated remote. PR383 bot branch was force-replaced on Oct11 by
+  0a20407e, losing the qualified changes; do not use its head as equivalent.
+  The preserved candidate is now draft PR384 at eb388c92 on codex/geph-043-remediation. All11 local patches
+  retained, SQLite-only SQLx0.8.6.
+  Exact eb388c92 source-bootstrap CI38149115689 SUCCESS (packaged jobs skipped);
+  dependency38149115634 FAIL with2 Geph RSA blockers/1 informational/423 packages,
+  and the unchanged app policy rejects its expired integrity-only entry. Earlier
+  runtime CI37967349938 remains valid. No exception extended.
   Prior upstream all-lib run was not network-isolated and touched an existing
   empty-Secret shared cache; prior cached-token use cannot be excluded. Cache
   preserved; no account/all-lib runs repeated. Later9 session/2SQLite tests use
@@ -57,10 +64,16 @@ production dependency gate and workstation qualification remain open.
   not full native/Geph coverage. Minimal both-macOS graph preserves retained
   versions/checksums. Real Geph callsite composition exposed unused derive_more
   and missing ed25519-dalek/std feature dependencies; output-only corrections
-  compile successfully (locked no-run59.85s). Exact11 synthetic auth/BW/SQLite
-  tests then exposed an incorrect mock nanorpc envelope; that run is invalid as
-  behavior proof and retained RED. Correcting the fixture and cause-specific
-  assertions before rerun. No accounts/all-lib/network allowed. Production
+  compile successfully. Exact11 synthetic auth/BW/SQLite tests then exposed an
+  incorrect mock nanorpc envelope; invalid run preserved RED. Correct envelope
+  plus specific error/RPC/cache oracles now pass11/0failed/36filtered in32.37s,
+  including real30s auth timeout; final locked no-run34.37s PASS. Lock94db8764
+  preserves485 identities/checksums and adds5 required codec packages. Test source
+  hash8699e7a6; final-execution-evidence.json binds sources/lock/sandbox. Independent
+  fixture review confirms12 artifact hashes and correct mock envelopes/oracles.
+  Limits: WrongLevel checks first cached level/distinct blind, BW proves at least
+  one key-mismatch retry, queued SQLite cancellation remains unqualified.
+  No accounts/all-lib/network allowed. Production
   SOURCE/lock remain unchanged. Evidence: output/continuation-20261009/rsa-migration/
   {client-runtime-audit/,geph-minimal-lock-review/,geph-callsite-composition/}.
 - Actual AWS-LC entropy EIO aborts the process. Eight child fixtures pass; a
@@ -90,7 +103,7 @@ production dependency gate and workstation qualification remain open.
   274 absent remain unknown. Full source/page/record bindings verified. Clears0
   advisories;104 corroborated primary/ADP cases are a bounded next research slice.
   Evidence output/dependency-remediation-20261009/nvd-chrome-applicability-155/.
-- Uncommitted SBOM guard rejects path/Git/other-registry misidentification and
+- Sourcec3846615 SBOM guard rejects path/Git/other-registry misidentification and
   missing locked checksums (7 original RED cases). Exact owned slipstream-core
   is included in root Git source only after manifest/path/lock checks; transitive
   registry dependencies remain. Fresh locked/offline app metadata passes346arm64/
@@ -99,15 +112,44 @@ production dependency gate and workstation qualification remain open.
   tests and9 mutations of actual metadata PASS (sbom-source-peer-review.json).
   Legacy sourceInfo remains compatible; explanatory root comment is additive.
   Preserve user AGENTS.md; tooling/research checkpoint accompanies the scoped provenance fix.
+- Geph optional embedded-source materializer is independently reviewed in its
+  worktree; production SOURCE/lock/license are unchanged. Exact three packages,
+  bounded file/descriptor hashes and manifest edges are enforced. A real archive
+  verify/reopen race was reproduced and fixed with one private hashed snapshot;
+  root0700, SOURCE snapshot and copied-lock checks also pass.35 source tests,
+  3 Geph SBOM tests and14 independent tests PASS. Honest local SBOM/advisory and
+  notice coverage remain necessary before activating the RSA replacement.
+  Self-contained output candidate SOURCEcd82b7ea/lock9fd68248 preserves all13
+  prior edits plus3 consolidated RSA edits, reaching the16-edit limit. Two clean
+  materializations produce69 identical files;12 Rust files pass syntax parsing.
+  The tested490-package lock changes only two local identities;486 registry
+  versions/checksums remain unchanged. Both derivative archives are hash-checked;
+  missing upstream ISC notice remains explicit. No production activation.
+  Evidence rsa-migration/source-contract-candidate/{README.md,receipt.json}.
+  Locked offline metadata under OS network/private-read denial now passes both
+  Mac targets:410 ARM/411 Intel normal/build packages, each4 local;407 registry
+  archives in the union match lock checksums.18 embedded files match SOURCE and
+  all256 prior candidate files remain unchanged. Old RSA/brs/registry Mizaru are
+  absent, including from the full490-package lock. The exact transitive
+  geph5-misc-rpc→patched broker edge is verified. This is metadata, not compilation
+  or runtime qualification. Evidence metadata-qualification/final-receipt.json.
+- Bot branch overwrite reproduced with the actual workflow against bare Git.
+  Existing version branch now remains an immutable review handoff, lookup errors
+  fail closed, new branch push requires atomic absence, and PR descriptions stay
+  intact.8 local Git happy/error/race/recovery cases plus3 existing workflow checks PASS.
+  A lost PR is recovered without changing its existing branch; GitHub lookup
+  errors fail closed. Fix is a candidate until merged; the dedicated human branch avoids the current
+  main workflow's overwrite path. Evidence geph-branch-handoff-evidence.json.
 - Read-only local check found no system/dev.slipstream.tproxy service or app at
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
 - Correct-project graph unavailable (project not found); bounded direct searches
   used. Reuse exact32d21973 runtime/build/E2E baseline for tooling/docs-only edits.
-- NEXT production RSA and complete Chromium advisory/component coverage before
-  release/install. Evaluator/docs-only correction accompanies this checkpoint;
-  run canonical
-  installed verification and physical-browser/Telegram checks only after gates
+- NEXT qualify the self-contained RSA candidate native build, then
+  source-bound SBOM/advisory/notices and complete Chromium component coverage.
+  Remove unrestricted Geph all-lib from the vendor publish workflow before merge
+  (the current helper PR does not run it). No release/install while these gates
+  remain open. Run canonical installed verification and physical-browser/Telegram checks only after gates
   allow installation; preserve the unconsumed transaction rule.
 
 2026-10-09 DNS retirement / Telegram update (candidate source, not installed):

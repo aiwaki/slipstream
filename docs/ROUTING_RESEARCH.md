@@ -36,9 +36,19 @@ implicit `signature/std` support previously supplied by RSA. Explicit
 legacy verification features. Offline resolution preserves all 485 prior
 package identities/checksums and adds five required codec packages. Locked
 no-run compilation passes. The first exact synthetic test run then exposed an
-invalid mock nanorpc envelope, so its negative passes are not accepted as
-behavior evidence; the corrected fixture must establish cause-specific errors.
-No live account or network call is part of this composition.
+invalid mock nanorpc envelope; its negative passes are not accepted as behavior
+evidence. After aligning success/error envelopes with the pinned nanorpc code,
+all eleven exact auth/bandwidth/SQLite cases pass in 32.37 seconds. Negative
+cases require the intended error, the expected RPC counts and an empty cache;
+the real 30-second timeout must reach signing first. Bandwidth success requires
+five consumed tokens verified by the old oracle and an empty table afterward.
+This is a real-source composition using synthetic peers, not live-account,
+external-network, packaged recovery or ABI proof on both architectures.
+Independent fixture review verifies twelve artifact hashes and the real error
+paths without rerunning unchanged tests. The WrongLevel case checks the first
+cached Free tuple and fresh blinding; bandwidth mismatch proves at least one
+worker retry, not all five. Cancellation of an already queued SQLite command
+remains unqualified. See `geph-callsite-composition/independent-fixture-review.json`.
 
 The source-inventory review also found a production tooling defect:
 `make_release_sbom._cargo_components` could label path/Git/other-registry
@@ -3493,3 +3503,26 @@ all independent object proof requirements remain. Focused42 tests passed.
 Evidence: output/geph-stream-isolation-20260930/selection-fairness-{red,green}.log.
 This does not establish the earlier browser terminal-error cause or repair an
 already delivered partial response. Installed behavior remains unqualified.
+
+
+### Geph review-branch overwrite — 2026-10-11
+
+The scheduled vendor updater read the current `automation/geph-<version>` remote
+OID immediately before `push --force-with-lease`. That lease protected only a
+later race; it explicitly authorized replacement of already-reviewed human
+commits. PR383 changed from `d2856d8a` to bot `0a20407e` with a different source
+tree, losing the retained session/database qualification work. The qualified
+local branch survived and was published separately as
+`codex/geph-043-remediation`; no force restoration of the bot branch was used.
+
+The corrected discovery workflow treats an existing version branch as a review
+handoff and stops before source preparation. Lookup failures fail closed. A new
+branch is pushed only under an atomic expected-absent lease, so concurrent
+creation cannot replace another writer. Existing PR descriptions are preserved.
+The new test executes the actual workflow shell against local bare Git remotes:
+new branch, existing human work, lookup errors, creation race, existing PR
+description, contaminated Git environment and missing-PR recovery all pass.
+PR recovery queries the exact repository/head across all returned pages and
+changes only metadata, never the preserved branch; API errors fail closed. The old workflow first reproduced human-commit loss.
+This is repository automation coverage, not application traffic qualification.
+Evidence: `output/continuation-20261009/geph-branch-handoff-evidence.json`.
