@@ -99,8 +99,8 @@ class SyntheticRunnerTests(unittest.TestCase):
         self.assertIn("python3 scripts/run_geph_synthetic_tests.py", workflow)
         self.assertIn('--source-root "$source_root"', workflow)
 
-    def test_reviewed_versions_execute_exact_nine_and_eleven_only(self):
-        for version, count in (("0.3.9", 9), ("0.4.3", 11)):
+    def test_reviewed_versions_execute_exact_nine_and_nineteen_only(self):
+        for version, count in (("0.3.9", 9), ("0.4.3", 19)):
             with self.subTest(version=version):
                 self.evidence = self.root / version
                 result = self.orchestration(version)

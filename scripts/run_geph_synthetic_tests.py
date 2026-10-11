@@ -34,7 +34,18 @@ SQLITE_TESTS = (
     "database::slipstream_sqlite_tests::sqlite_cache_preserves_existing_schema_and_binary_values",
     "database::slipstream_sqlite_tests::sqlite_lazy_schema_waiter_observes_write",
 )
-ALLOWLIST = {"0.3.9": SESSION_TESTS, "0.4.3": SESSION_TESTS + SQLITE_TESTS}
+SQLITE_CANCELLATION_TESTS = (
+    "database::slipstream_sqlite_cancellation_tests::queued_cancel_releases_middle_waiter_and_preserves_cache",
+    "database::slipstream_sqlite_cancellation_tests::running_cancel_hands_connection_to_next_writer_without_stale_lock",
+    "database::slipstream_sqlite_cancellation_tests::cancelled_submitted_write_wakes_existing_cache_waiter",
+    "database::slipstream_sqlite_cancellation_tests::cancelled_before_acquire_does_not_publish_or_strand_waiter",
+    "database::slipstream_sqlite_cancellation_tests::cancelled_after_commit_before_caller_resume_wakes_waiter",
+    "database::slipstream_sqlite_cancellation_tests::sql_error_wakes_only_for_committed_retry",
+    "database::slipstream_sqlite_cancellation_tests::sql_rollback_wakes_only_for_committed_retry",
+    "database::slipstream_sqlite_cancellation_tests::cancelled_remove_notifies_after_native_side_effect_commit",
+)
+ALLOWLIST = {"0.3.9": SESSION_TESTS,
+             "0.4.3": SESSION_TESTS + SQLITE_TESTS + SQLITE_CANCELLATION_TESTS}
 SANDBOX = Path("/usr/bin/sandbox-exec")
 
 

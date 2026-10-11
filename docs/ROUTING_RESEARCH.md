@@ -5,6 +5,98 @@ Updated: 2026-10-11
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
 
+## 2026-10-11 SQLite cancellation and dependency qualification
+
+The output-owned Geph 0.4.3 fixture reproduces a missed cache notification:
+cancel the `db_write` caller after the SQLite worker accepts its statement, let
+the native worker commit, and independently read the exact committed bytes.
+An already parked `db_read_or_wait` still times out because cancellation skips
+the notification after `.execute(...).await`. `db_remove` has the same boundary.
+This is a demonstrated code defect, not an established cause of the user's
+historical reconnecting incidents. The pinned 0.3.9 archive has the same static
+await-then-notify pattern; its runtime and installed behavior were not tested.
+
+The minimal correction creates `NotifyCacheWaitersOnDrop` before the await in
+both mutations. Success, SQL error and cancellation all wake existing waiters;
+the reader still checks actual database state. No detached write or rollback
+guarantee is introduced. Ordering depends on the existing single-connection
+pool and SQLx 0.8.6: returning its pool lease waits for the SQLite worker's queued
+Ping to drain submitted statements. A reader awakened early therefore waits
+behind that statement. A future pool-size/SQLx change must requalify this rule.
+
+The original missed-notification case is RED without the guard. Eight focused
+cases pass with it: queued cancellation, executing cancellation and successor
+progress, an already parked reader, cancellation before acquire, cancellation
+after commit but before caller resume, SQL ABORT, SQL ROLLBACK, and cancelled
+remove. They check committed bytes, rejected/absent state and subsequent retry,
+including a blocked-worker early-notification boundary. An intermediate fixture
+incorrectly awaited an independent read while its manually polled waiter held
+the pool lease; the retained correction polls both concurrently. That fixture
+failure did not require a production change. Independent review adds two passing
+cases: rollback/re-arm after cancellation and notification to eight readers.
+Runtime tests deny network and private cache access at the OS boundary, use only
+owned scratch state, and never run the upstream all-lib suite or an account.
+Evidence under `output/continuation-20261009/rsa-migration/source-contract-candidate/`:
+`sqlite-cancellation-qualification/final-receipt.json` (d3fd8426) and
+`sqlite-cancellation-independent/final-receipt.json` (8e6657dd). The exact branch
+integration and its verification are recorded separately in CURRENT_STATE.
+
+The dedicated source contract now embeds the guard and eight tests in its
+existing database edit (SOURCE3420708f,13 edits unchanged). Exact materialization
+passes the locked no-run build and all eight new cases; the previous eleven
+runtime cases are reused. Its future vendor workflow also imports the root's
+isolated runner, removing the old unfiltered all-lib command. Nineteen exact
+0.4.3 cases are selected;0.3.9 remains at nine. Sixteen helper/workflow checks
+and the dedicated contract/name bridge pass. Root's older materializer still
+does not accept the dedicated Cargo.toml edit; no validation rule was relaxed.
+Evidence: `sqlite-cancellation-qualification/integration-receipt.json` (4d2da1fd)
+and `output/continuation-20261009/geph-synthetic-runner-bridge/receipt.json` (be2c312f).
+
+The unchanged RSA prototype SOURCE cd82b7ea/lock9fd68248 now also passes an Intel
+debug compile. Only the x86_64 standard library was added to the existing rustup
+stable Rust 1.99.0 toolchain, from its verified official manifest; compiler,
+default toolchain and existing targets were preserved. One empty-target offline
+compile took109.162s under OS network/private-cache denial:421 non-fresh compiler
+records,780 hash-bound emitted files, Mach-O x86_64 binary db1c5956. No binary or
+test was executed. Parent review checks19 evidence and4 input receipt bindings.
+ARM used Rust1.97.1 and reused dependencies, so these are two explicit debug
+build boundaries, not a reproducible universal release or installed qualification.
+Evidence: `intel-compile-rust1990/{final-receipt,parent-review}.json`. Earlier
+missing-target preflight evidence is retained separately.
+
+Native inventory traces normal/build dependency edges on both targets and the
+actual ARM artifact records. The five cc/cmake builders are aws-lc-sys0.45.0
+(AWS-LC5.7.0), libsqlite3-sys0.30.1 (SQLite3.46.0), ring0.17.14, blake3 1.8.7 and
+tracing-oslog0.3.0. A guessed OpenSSL/BoringSSL version is not assigned to ring;
+openssl-sys is in the full lock but not either reachable target graph. All
+selected archive members are read from the same checksum-verified in-memory
+archive. Peer review verifies26 file bindings and5 archives/19 members. The
+collector now rejects ambiguous identities, mismatched source/lock/metadata,
+new unreviewed builders and duplicate/missing compiler artifact pairs; one
+unchanged positive and13 mutations pass, preserving inventory27f95baa exactly.
+Evidence: `rsa-migration/native-component-review/{inventory,collector-guard-review}.json`.
+This bounded builder inventory is not exhaustive system-framework or compiler
+provenance evidence for reused ARM objects.
+
+SQLite's [upstream CVE analysis](https://www.sqlite.org/cves.html) lists fixes
+newer than the bundled3.46.0. Fixed-version gaps alone do not establish that
+every later bug affects this older source. Reviewed production SQL uses literals
+and bound data in database/route-cache/BW-token/logging; no arbitrary-SQL or FTS5
+query entry point was found. FTS5 is compiled in, and a hostile/corrupt same-user
+cache remains a distinct unqualified boundary. SQLx's extension map is empty in
+the reviewed app configuration. None of this clears the native release gate.
+Exact source/callsite and primary-document bindings are in
+`native-component-review/sqlite-applicability.json` (3dbb2951).
+
+Separately, eight exact Chromium records are manually adjudicated not affected
+for the pinned CfT155 archive using the official July23,2024 desktop fix release,
+CNA descriptions and whole-tree NVD witnesses: CVE-2024-6989/6991/6994/6997/6998/
+7000/7003/7005. Independent review verifies42 input hashes; ten negative tests
+reject missing, mismatched and wrong-platform evidence. The iOS-qualified6988
+and Android-qualified6995 remain unknown. These decisions do not modify the
+retained1114-unknown report, the general parser, policy or release gate. Evidence:
+`output/dependency-remediation-20261009/chromium-primary-cohort-10/parent-review.json`.
+
 ## 2026-10-11 retained scanner evidence
 
 The audit CLI has an optional --evidence-dir boundary for new scans. A fresh

@@ -12,6 +12,32 @@ file.
 
 2026-10-11 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- New concrete Geph SQLite cancellation defect reproduced: submitted SQL can
+  commit after caller cancellation while the old success-only notification is
+  skipped, stranding an already waiting reader. Drop guard before write/remove
+  await passes8 scoped cases; two independent cases pass for rollback/re-arm
+  and notification to eight readers. Correctness relies on max_connections(1)
+  and pinned SQLx0.8.6 worker
+  drain ordering. No account/all-lib/private-cache/network execution or claim
+  that this caused historical reconnecting. Dedicated SOURCE3420708f incorporates
+  the guard and8 embedded cases in existing edit12 (13 edits unchanged). Exact
+  dedicated materialization/locked no-run34.35s and the8 cases PASS under OS
+  denial;51 source files remain unchanged after execution.21 source/materializer
+  and11 runner Python checks PASS. Root0.4.3 allowlist expands11→19,0.3.9 stays9;
+  root's older materializer is not claimed compatible with the dedicated source.
+  Evidence under
+  rsa-migration/source-contract-candidate/{sqlite-cancellation-qualification,
+  sqlite-cancellation-independent}/final-receipt.json (d3fd8426/8e6657dd), plus
+  sqlite-cancellation-qualification/{integration-receipt,parent-integration-review}.json
+  (integration4d2da1fd; parent verifies exact contract delta/lock/binary/9 logs).
+  Output-only sibling source-contract-candidate-sqlite-v2 SOURCEc384d259 keeps
+  the16-edit limit; two materializations match and onlydatabase.rs differs from
+  old cd82. Old source/evidence untouched; no exact RSA-v2 compile or activation.
+  Dedicated workflow now carries the same isolated runner; its old unfiltered
+  all-lib command and asserting test are removed.16 helper/workflow checks PASS,
+  exact dedicated source resolves all19 allowed names. Evidence
+  output/continuation-20261009/geph-synthetic-runner-bridge/receipt.json (be2c312f).
+  This does not execute a vendor release or qualify the installed app.
 - Physical AUD-17 checkout / codex/codebase-audit-20260905 / PR376 OPEN DRAFT;
   latest full green CI source188323a8, base7e196a71; functional38154253014 SUCCESS
   (18 pass/4 release-only skips), Windows38154253099 SUCCESS. Tested merge6e0adc00
@@ -88,7 +114,8 @@ expose historical vendor-evidence and candidate-release packaging gates.
   hash8699e7a6; final-execution-evidence.json binds sources/lock/sandbox. Independent
   fixture review confirms12 artifact hashes and correct mock envelopes/oracles.
   Limits: WrongLevel checks first cached level/distinct blind, BW proves at least
-  one key-mismatch retry, queued SQLite cancellation remains unqualified.
+  one key-mismatch retry. The later SQLite cancellation investigation above
+  qualifies8 additional synthetic boundaries; installed behavior remains open.
   No accounts/all-lib/network allowed. Production
   SOURCE/lock remain unchanged. Evidence: output/continuation-20261009/rsa-migration/
   {client-runtime-audit/,geph-minimal-lock-review/,geph-callsite-composition/}.
@@ -158,8 +185,16 @@ expose historical vendor-evidence and candidate-release packaging gates.
   remove13 exact test-only spans;4 manifest changes/2 local lock renames explained.
   Reuse prior11 synthetic tests; no new harness or all-lib execution. This does not
   retrospectively prove compiler provenance for the reused dependency artifacts.
-  Intel compile, release/native inventory, production source-owned SBOM and
-  installed tests stay open.
+  Later Intel debug compile of unchanged SOURCEcd82b7ea/lock9fd68248 passes in
+  109.162s with an empty target directory and explicit Rust1.99.0:421 rebuilt
+  compiler records,780 emitted files, x86_64 Mach-O db1c5956. Only verified Intel
+  std was added to existing stable; compiler/default/existing targets unchanged.
+  OS network/private-cache denial applies; binary/tests not executed. Parent
+  verifies19 evidence/4 input receipts. ARM used1.97.1 and reused dependencies;
+  no universal release/provenance equivalence is inferred. Evidence
+  intel-compile-rust1990/{final-receipt,parent-review}.json (3d8ddacb/1b20d581).
+  New SQLite source changes require their own scoped build bridge. Release/native
+  advisory and installed tests stay open; source-owned SBOM support is below.
   Evidence rsa-migration/source-contract-candidate/{native-compile-qualification,
   source-equivalence-qualification}/ and source-contract-native-compile-parent-review.json.
 - Output-only whole-Geph source inventory preserves407 registry coordinates and
@@ -174,6 +209,21 @@ expose historical vendor-evidence and candidate-release packaging gates.
   inventory and all411 query mappings byte-identical. No public query repeated.
   Post-fix peer verifies18 receipt hashes and real snapshot-swap/path cases;
   source-owned-inventory-postfix-review.json binds the corrected collector.
+- Native inventory verifies5 cc/cmake builders: AWS-LC5.7.0, SQLite3.46.0 and
+  package-owned ring/blake3/tracing-oslog C or assembly. Both target graphs and
+  exact ARM artifact pairs are bound; peer verifies26 files/5 archives/19 members.
+  Corrected collector passes1 positive/13 negative mutations, preserving exact
+  inventory27f95baa. This is bounded builder coverage, not all system libraries
+  or retrospective provenance for reused ARM objects. SQLite primary-source
+  fix gaps/callsite assessment3dbb2951 does not clear native advisories or hostile
+  cache input. Evidence rsa-migration/native-component-review/; details in
+  ROUTING_RESEARCH.md. No release policy or dependency change.
+- Chromium bounded primary cohort:8 exact CVEs adjudicated not affected for
+  pinned CfT155; independent42 input bindings/10 negative tests checked.
+  CVE-2024-6988/6995 remain unknown due platform-qualified CNA claims. This
+  does not rewrite the1114-unknown baseline, general parser or acceptance policy.
+  Evidence output/dependency-remediation-20261009/chromium-primary-cohort-10/
+  parent-review.json; all other Chromium/native/notice release gates remain.
 - Exact derivative notice review verifies both complete published archives
   (17 files),40 artifact bindings and5 GitHub blob/tree links. Both manifests
   declare ISC but no applicable full notice was recovered. The referenced tree
@@ -251,9 +301,12 @@ expose historical vendor-evidence and candidate-release packaging gates.
   Evidence: output/continuation-20261009/audit-evidence-ci/{verified,offline-replay}.json.
   Retention14days is not permanent release evidence; historical raw remains lost.
   c5d4ebe0 product/Chromium/Windows adapter checks PASS; standalone Windows
-  CI38161448184 PASS on both targets. Functional38161448210 packaged build
-  still fails the historical vendor audit guard; remaining aggregate status
-  was finishing at checkpoint. No new installed/browser qualification.
+  CI38161448184 PASS on both targets. Checkpoint273ec7bd terminal CI38162108409
+  confirms product/checks, Chromium and Windows adapter PASS; package/lifecycle
+  FAIL at the historical vendor guard. Windows38162108448 both targets PASS;
+  dependency38162108480 FAIL. Dedicated81d7c133 CI38160979511 product/checks and
+  Chromium PASS, packaging404; dependency38160979535 remains FAIL. Exact heads
+  and base7e196a71 reconciled. No new installed/browser qualification.
 - Read-only local check found no system/dev.slipstream.tproxy service or app at
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
@@ -263,8 +316,10 @@ expose historical vendor-evidence and candidate-release packaging gates.
   New Linux audit evidence is qualified; macOS release evidence remains separate. A new
   qualified vendor artifact is required: historical count-only evidence cannot
   be upgraded from SPDX alone. Reuse exact188 only for unchanged runtime/E2E.
-  The self-contained RSA candidate has native debug compile/source-equivalence
-  evidence; Intel build and release qualification remain separate. No release/install while these gates
+  The self-contained RSA candidate has both native debug compile/source-equivalence
+  boundaries; release qualification remains separate. Exact dedicated SQLite
+  source and safe runner bridges are qualified; keep failure-path audit evidence.
+  No release/install while these gates
   remain open. Run canonical installed verification and physical-browser/Telegram checks only after gates
   allow installation; preserve the unconsumed transaction rule.
 
