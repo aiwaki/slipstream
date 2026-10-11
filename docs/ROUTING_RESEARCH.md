@@ -33,6 +33,18 @@ bindings and unchanged policies. Evidence: output/continuation-20261009/
 {audit-evidence-final-tests.log,audit-evidence-parent-review.json,
 raw-audit-evidence/implementation-review.json}.
 
+Exact c5d4ebe0 dependency CI38161448151 exercises real Linux scan/upload failure
+paths: both retained evidence uploads succeed while both audits remain rejected.
+Four downloaded ZIP digests match GitHub metadata; merge4d30a694 binds exact
+base7e196a71/headc5d4ebe0. Receipt/evaluator/input hashes match. An offline replay
+reproduces the app incomplete-coverage error and Geph484 packages/10 blockers/
+3 informational findings; its regenerated report SHA256 matches the receipt.
+OSV normalizes source.path to an absolute runner-temp input path despite a
+relative argument; raw is retained unmodified. This is diagnostic evidence, not
+an anonymity guarantee. macOS build/release callsites remain synthetically
+checked, not executed by these two Linux jobs. Evidence in
+output/continuation-20261009/audit-evidence-ci/{verified,offline-replay}.json.
+
 ## 2026-10-11 historical audit consumer and candidate packaging
 
 The new identity guard exposes a real migration boundary. PR376 bfa052f2 CI

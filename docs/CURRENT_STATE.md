@@ -241,15 +241,26 @@ expose historical vendor-evidence and candidate-release packaging gates.
   independent CLI negatives PASS; eight source/policy/workflow bindings verified.
   Evidence: output/continuation-20261009/{raw-audit-evidence/,
   audit-evidence-final-tests.log,audit-evidence-parent-review.json}. Policy unchanged.
-  This is synthetic local qualification; real CI/upload remains pending.14-day
-  retention is not permanent release evidence, and historical raw is still lost.
+  Exact source c5d4ebe0 dependency CI38161448151 confirms both Linux failure-path
+  uploads SUCCESS despite rejected audits. Tested merge4d30a694 parents bind
+  base7e196a71/headc5d4ebe0. Four ZIPs match GitHub digests; both raw receipts
+  match actual evaluator/input hashes. Offline replay reproduces the app coverage
+  rejection and Geph484 packages/10blockers/3info; regenerated Geph report matches
+  its recorded SHA256. OSV expands the relative input to an absolute runner-temp
+  path in raw JSON. Real macOS build/release evidence paths remain unrun.
+  Evidence: output/continuation-20261009/audit-evidence-ci/{verified,offline-replay}.json.
+  Retention14days is not permanent release evidence; historical raw remains lost.
+  c5d4ebe0 product/Chromium/Windows adapter checks PASS; standalone Windows
+  CI38161448184 PASS on both targets. Functional38161448210 packaged build
+  still fails the historical vendor audit guard; remaining aggregate status
+  was finishing at checkpoint. No new installed/browser qualification.
 - Read-only local check found no system/dev.slipstream.tproxy service or app at
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
 - Correct-project graph unavailable (project not found); bounded direct searches
   used. Reuse exact188323a8 functional/E2E CI; no unchanged broad rerun is needed.
-- NEXT verify CI failure-path evidence upload, then source-owned production
-  advisory/notice and complete Chromium coverage. A new
+- NEXT source-owned production advisory/notice and complete Chromium coverage.
+  New Linux audit evidence is qualified; macOS release evidence remains separate. A new
   qualified vendor artifact is required: historical count-only evidence cannot
   be upgraded from SPDX alone. Reuse exact188 only for unchanged runtime/E2E.
   The self-contained RSA candidate has native debug compile/source-equivalence
