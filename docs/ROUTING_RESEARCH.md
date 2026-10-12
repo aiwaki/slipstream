@@ -1,9 +1,141 @@
 # Routing Research Notes
 
-Updated: 2026-10-11
+Updated: 2026-10-12
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-10-12 tg-ws-proxy 1.11.2 import and failure-path checks
+
+The official release is [v1.11.2](https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.11.2),
+commit `307a384ab7f522e34bb1a045884d0bd90f40bee5`, published October 11.
+Its source archive SHA-256 is
+`db9048b56faaf64f43f1a4f4833e45ad4ba8a7b1ee27c8ed5f7f4467db7326d1`.
+The source contract now pins all 15 imported Python modules. No GUI, updater,
+deployment code or release binary is imported; Python dependency locks stay
+unchanged. `LOCAL_CHANGES.md` records reconciliation with the existing local
+deadline, cancellation and socket-ownership fixes. The local `pool.py` is
+unchanged because its tracked cleanup already covers upstream close/reset.
+
+The update reconnects a silent H2 connection after its last active request
+times out, preserving active neighbours and already-ended buffered replies.
+It batches H2 I/O while respecting peer frame/flow-control limits, refreshes
+retry budgets for new reply identities, accepts the documented plaintext
+padding range, and locates packet boundaries using already-decrypted bytes.
+The Windows Proactor guard is confined to the Telegram proxy's own thread and
+event loop; on macOS it returns without modifying loop internals.
+
+| Evidence | Result | Boundary |
+|---|---|---|
+| Existing protocol, lifecycle and TLS suite | 62 PASS | Retained local behaviour, including cancellation and ownership |
+| New scoped regressions | 21 PASS | Four concurrent roughly 1 MiB H2 round trips, timeout/reconnect, framing, padding, masking and replay |
+| Selected upstream cases | 11 PASS plus 30 subtests; 2 replay cases PASS | Real reencryption/splitter and recovery-cancellation behaviour |
+| Previous local source controls | 3 expected failures | Old code reproduces silent-H2 reuse, padding rejection and exhausted reply budget |
+| Packaging and frozen CA cases | 7 PASS | Source inventory/import closure, spec wiring and owned CA selection/missing-file rejection |
+| Independent H2/event-loop review | 21 PASS | Active-sibling/ended-response isolation, flow control, cancellation and mocked Windows guard under OS network denial |
+| Actual PyInstaller discovery and certifi hook | 15 modules plus CA data found | Collection only; no frozen daemon build |
+
+Evidence lives under `output/tg-ws-proxy-1112/`. The final receipt `5cfd1df7`
+binds the archive, source, test logs and peer report `436e1edb`; parent verification
+checks all 77 file bindings and 20 peer source hashes. Some earlier test runs
+did not capture their full environment; the receipt states that limit.
+These checks do not prove installed-app operation, a real Windows Proactor,
+live Telegram media availability, or a historical cause of Codex reconnecting.
+The frozen daemon and installed bundle still require their canonical gates.
+
+## 2026-10-12 native SQLite and bounded Chromium qualification
+
+The detached Geph candidate keeps SQLx 0.8.6 and its single-worker ordering,
+switching its feature to `sqlite-unbundled` with an exact, app-owned SQLite
+3.53.2 static library. Existing registry versions/checksums are unchanged;
+eleven build dependencies are added for generated bindings. A separate OSV
+batch returns no known findings for those eleven coordinates. This is not
+native SQLite advisory clearance or a full Geph audit.
+
+The official amalgamation archive and its C/header bytes are retained with
+upstream checksum evidence. On ARM, compilation under OS network/private-read
+denial passes: native compile 15.14s and locked/offline Geph no-run 436.6s.
+Eleven exact cases pass: eight cancellation regressions, two existing database
+schema/waiter cases and one qualification-only SQLx runtime identity check.
+The latter reports SQLite 3.53.2 and the exact upstream source ID. The actual
+libsqlite3-sys rlib embeds a byte-identical copy of our compiled sqlite3.o;
+the tested Geph binary has no host SQLite dylib import. All 51 seed source files
+and the dedicated SOURCE/lock remain unchanged. The added identity test is
+explicitly outside the production source contract.
+
+The negative probes expose an important boundary. The actual sys build script
+rejects a missing owned header; a matching rlib producer rejects a missing
+static archive. However, a direct rustc executable probe with `-l static=sqlite3`
+and an empty owned search directory succeeds by loading `/usr/lib/libsqlite3.dylib`.
+Retain that result: flags alone do not prove library identity. The pinned sys
+build script also tries pkg-config even when LIB_DIR is set. Production needs
+`SQLITE3_NO_PKG_CONFIG=1`, exact owned input preflight, feature-closure checks,
+and binding of C/header -> archive -> each Geph slice -> final binary/SBOM.
+The registry wrapper and native SQLite must remain separate inventory entries.
+ARM debug evidence does not qualify Intel, a universal release or an installation.
+
+Native evidence: `output/sqlite-native-upgrade/static3532-candidate/`
+(`final-receipt.json` beefc1ed). Integration boundaries are recorded in
+`output/continuation-20261009/rsa-migration/sqlite-native-production-integration-review.md`.
+No production source, lock, native SBOM or workflow was activated by this experiment.
+
+The output-only Chromium adjudicator was independently challenged before any
+release use. Three V1 false-clearance cases were reproduced: an unfixed-issue
+prefix, a reverted-fix paragraph and ignored additional CNA configuration.
+V2 replaces permissive extraction with complete positive release grammar and
+rejects unhandled CNA/ADP claims. Its 70 regressions and four independent cases
+pass; retained and extended 104-record replays both yield 8 not-affected / 96
+unknown. All original claim and NVD evidence remains bound to each decision.
+
+V3 accepts only two additionally reviewed desktop-release forms: an optional
+dot in a slash patch-version shorthand and one exact Extended Stable sentence
+agreeing with the upper Mac/Windows Stable version. No CVE allowlist is added.
+Its 113 regressions and 13 independent cases pass under OS network denial.
+Thirty newly retained official desktop posts permit just three further research
+decisions: CVE-2024-8362/8636/9123. Extended replay is 11 not-affected / 93 unknown;
+retained replay remains 8/96. Parent review verifies 20 sealed files, the peer
+receipt, all 157/189 replay input bindings, unchanged original claims/NVD and
+exactly those three additions. Other release formats and inconsistent fix
+counts remain unknown. This does not change the immutable 7,216-record report,
+production policy or the closed release gate.
+
+Chromium evidence: `output/dependency-remediation-20261009/chromium-primary-evidence-replay/`
+(`v2-final-receipt.json` b58838f5, `v3-final-receipt.json` d65ebea7,
+`parent-v3-verification.json`), with independent review under
+`output/chromium-primary-evidence-peer-review/`.
+
+## 2026-10-12 official dependency chain and exact CI boundary
+
+Terminal CI for root6a4f8424 and dedicateda0022dd9 passes product/checks and
+Chromium contracts. The actual package leaf errors remain distinct: the root
+cannot validate historical Geph0.3.9-r5 without its missing scanned-package
+identities; the dedicated branch receives404 for unpublished0.4.3-r1. Neither
+the aggregate lifecycle failure nor these dependency errors demonstrate a new
+runtime regression. The exact-head PR/status/log bindings are retained in
+`output/continuation-20261009/sqlite-current-package-failure-summary.json`
+(f28068bc). Earlier unchanged runtime/E2E evidence remains separate.
+
+An updated, bounded official-source check finds the same published Geph client
+and broker0.4.3/Mizaru0.2.21 archives and no applicable full ISC notices. The
+new upstream55dcced4 tree and five hash-matching manifest/README blobs also
+retain the old RSA dependency chain. New blind-rsa-signatures/RSA releases are
+not assumed to satisfy the current Geph constraints or resolve the advisory.
+The old exact archive investigation is reused; a new full historical scan was
+not performed.32 retained artifact bindings pass parent verification.
+
+The minimal notice action is a prepared upstream clarification for the exact
+published archives, including their dirty provenance. It has not been sent;
+the user's authorization is pending. If the answer supplies applicable notices,
+the executable source and lock can remain unchanged while exact source/SBOM
+notice evidence is updated. An independent client-protocol implementation is
+a larger fallback: `geph5-misc-rpc` also depends on the broker and exposes its
+types through client config/control/exit/tunnel paths. The dependency-closed
+scope touches nine production consumer files and one test-only file. Neither
+alternative independently clears Chromium, native, release or installed gates.
+Evidence and unsent draft:
+`output/continuation-20261009/rsa-migration/official-chain-20261012/`
+(`report.json`68f77164, `parent-verification.json`, `proposal.md`,
+`replacement-scope.json`, `upstream-issue-draft.md`).
 
 ## 2026-10-11 SQLite cancellation and dependency qualification
 

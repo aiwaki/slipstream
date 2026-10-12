@@ -27,9 +27,9 @@ local strategy learning and user data are retained. External DNS, proxy, PAC
 and VPN configuration is neither edited nor reset. A user-configured resolver
 remains external state even when it is the retired provider.
 
-## Bundled Telegram proxy update — 2026-10-09
+## Bundled Telegram proxy update — 2026-10-12
 
-The vendored base is tg-ws-proxy 1.11.1, pinned by upstream commit and archive
+The vendored base is tg-ws-proxy 1.11.2, pinned by upstream commit and archive
 hash in `vendor/tg-ws-proxy/SOURCE.json`. Slipstream's existing byte-preserving
 WebSocket, deadline, cancellation and connection-ownership fixes remain local
 patches, described in `LOCAL_CHANGES.md`. The upstream experimental H2 media
@@ -38,6 +38,11 @@ through Geph or change the system network configuration. Hash-locked HTTPX
 runtime dependencies are included in the frozen daemon build. Loopback protocol
 and error-path tests qualify implementation boundaries; live Telegram media
 and the installed bundle require separate qualification.
+
+The 1.11.2 import retains upstream H2 batching and last-active-stream timeout
+recovery. Its Windows self-pipe guard applies to the Telegram proxy's dedicated
+event loop; it returns without changing macOS loops. Upstream GUI, auto-updater
+and worker deployment code remain outside the vendored runtime scope.
 
 ## Bundled headless Chromium refresh — 2026-10-09
 

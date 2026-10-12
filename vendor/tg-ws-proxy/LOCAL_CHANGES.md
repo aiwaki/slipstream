@@ -1,19 +1,49 @@
 # Slipstream local changes
 
 The upstream component is `Flowseal/tg-ws-proxy`; `VERSION` records the upstream
-base version (currently 1.11.1). The upstream `LICENSE` is retained unchanged.
+base version (currently 1.11.2). The upstream `LICENSE` is retained unchanged.
 This directory contains local Slipstream changes and is not an unmodified
 upstream release. The enclosing Slipstream commit identifies the actual sources.
+
+## Upstream update, 2026-10-12
+
+The imported stable release is
+[v1.11.2](https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.11.2), commit
+`307a384ab7f522e34bb1a045884d0bd90f40bee5`. `SOURCE.json` pins the official
+archive and the original hashes of all 15 Python modules. The new
+`event_loop.py` guards the Windows Proactor wakeup socket; it is a no-op on
+macOS. GUI, updater, deployment and release binaries remain outside the import.
+
+The update batches H2 I/O and WebSocket masking, reuses a verified H2 TLS
+context, and reconnects a silent H2 connection when its last active request
+times out. It preserves other active requests and completed buffered replies.
+New reply identities refresh the media retry budget while retaining backoff
+and maximum replay age. Plaintext MTProto packets accept up to 256 padding
+bytes, with the decoded packet size limit unchanged. The splitter now uses
+the already decrypted bytes solely to locate ciphertext packet boundaries.
+
+The frozen runtime selects `certifi/cacert.pem` under PyInstaller's bundle root;
+certificate-chain verification, hostname policy and system trust loading are
+unchanged. No new Python dependencies or external network settings are added.
+
+The upstream CF worker shutdown changes overlap the stronger local lifecycle.
+`pool.py` is retained byte for byte from the previous Slipstream version:
+tracked parallel connectors, unclaimed socket reclamation and cancellation-safe
+draining already cover upstream's close/reset fix. Listener shutdown also keeps
+its local shared cleanup path, which already closes the CF worker pool. All
+other upstream runtime changes are imported with the prior local patches.
 
 ## Upstream update, 2026-10-09
 
 The imported stable release is
 [v1.11.1](https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.11.1), commit
-`18175fb4fe567cf6aef61f9d883eff010c9e66a8`. [SOURCE.json](SOURCE.json) records
-the exact official source archive hash and original hashes of all 14 imported
-Python modules. Those hashes describe the upstream input, before local patches;
-the enclosing Slipstream commit identifies the final patched tree. No upstream
-GUI, binary release assets, worker deployment, or updater is imported.
+`18175fb4fe567cf6aef61f9d883eff010c9e66a8`. The source contract for that import,
+retained in Git history, recorded the exact official source archive hash and
+original hashes of all 14 imported Python modules. Those hashes described the
+upstream input before local patches; the enclosing Slipstream commit identified
+the final patched tree. No upstream GUI, binary release assets, worker
+deployment, or updater was imported. The current [SOURCE.json](SOURCE.json)
+records the subsequent 1.11.2 import and its 15 modules.
 
 Since the previous 1.8.1 base, upstream added direct WebSocket pool rotation and
 retry backoff, revised CF-worker selection, and HTTP/2 multiplexing for media.
@@ -47,10 +77,9 @@ The October 1 transport audit added:
   `serve_forever`, whose cancellation can itself wait for those transports.
   Stopped CF-domain refresh generations cannot publish late data.
 
-Each fix was reconciled against the new upstream rather than replaced by the
-new files wholesale:
+Each fix was reconciled against both upstream updates:
 
-| Boundary | 1.11.1 and retained Slipstream behavior |
+| Boundary | Retained Slipstream behavior |
 |---|---|
 | WebSocket fragments | Upstream now assembles continuations and bounds messages to 16 MiB. Slipstream keeps byte-stream delivery and empty-fragment handling, adding that same frame/message cap before oversized allocation. |
 | Fake TLS EOF | Upstream still returns empty application records; the local skip preserves the stream until a real EOF. |
@@ -64,7 +93,7 @@ new files wholesale:
 Regression checks use fixtures and loopback sockets only:
 
 ```sh
-spike/.venv/bin/python -m pytest spike/test_telegram_transport_lifecycle.py spike/test_telegram_h2_transport.py spike/test_telegram_h2_ownership.py spike/test_tgws_utils.py -q
+spike/.venv/bin/python -m pytest spike/test_telegram_transport_lifecycle.py spike/test_telegram_h2_transport.py spike/test_telegram_h2_ownership.py spike/test_telegram_upstream_1112.py spike/test_tgws_utils.py -q
 ```
 
 The blocking CF-domain fetch is allowed to finish after stop, but cannot publish
@@ -74,6 +103,9 @@ HTTP 404 delivery as native MTProto `-404` without replay in all three supported
 framing modes. Separate deterministic ownership tests cover overlapping close,
 repeated cancellation, preflight shutdown, request-capacity release and failed
 connection setup/reconnect.
+The 1.11.2 checks add large parallel H2 payloads, reconnect after a silent last
+stream while keeping an ended response, ciphertext framing boundaries, padding
+validation, masking boundaries, and replay budget/backoff/age checks.
 They do not establish live Telegram media availability or performance.
 
 `spike/slipstreamd.spec` collects the complete `proxy` package from this directory.

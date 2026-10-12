@@ -1,31 +1,32 @@
 {
   "upstream_repository": "https://github.com/Flowseal/tg-ws-proxy",
-  "upstream_version": "1.11.1",
-  "upstream_tag": "v1.11.1",
-  "upstream_commit": "18175fb4fe567cf6aef61f9d883eff010c9e66a8",
-  "archive_url": "https://codeload.github.com/Flowseal/tg-ws-proxy/tar.gz/18175fb4fe567cf6aef61f9d883eff010c9e66a8",
-  "archive_sha256": "8cdcb126aea8836d11a3b4fbbca17dc398ffcc46f0db13c14479456e9b974e64",
+  "upstream_version": "1.11.2",
+  "upstream_tag": "v1.11.2",
+  "upstream_commit": "307a384ab7f522e34bb1a045884d0bd90f40bee5",
+  "archive_url": "https://codeload.github.com/Flowseal/tg-ws-proxy/tar.gz/307a384ab7f522e34bb1a045884d0bd90f40bee5",
+  "archive_sha256": "db9048b56faaf64f43f1a4f4833e45ad4ba8a7b1ee27c8ed5f7f4467db7326d1",
   "import_scope": [
     "LICENSE",
     "proxy/*.py"
   ],
   "license_sha256": "2a98256df06052c3b132cf522e356da90ade2f749b6f7435f7cdafd1d9123fa2",
   "upstream_files_sha256": {
-    "proxy/__init__.py": "d8fba4a6956dbd2ce369f6bfc3950cf51d6ca18d1268dd42b1df3b03b9f4da82",
+    "proxy/__init__.py": "9105fa8e044378ecc490613010d9656fbdacf2f9a405f1f54fd043c6553ae2f4",
     "proxy/_aes.py": "5b07f23c1d65140fb933e2c31d42817012d2ff4b60664f69146fe2554d54d528",
     "proxy/balancer.py": "3d4330488b968e146286b14790c0814eae3efe5d0f26206572369ca6368eed24",
-    "proxy/bridge.py": "fbe95fb5d2ebfbbcc53e667628646cf1e652abe70b0c09ef9dc4cc2fb3ab8312",
-    "proxy/cf_h2.py": "462b1f798a92b0f3f069f5825012e7c81a910a03ed943350d7909ce77fd79f34",
+    "proxy/bridge.py": "f857f231472a605df07c9fb5cf4f5661230400c24a1bc46baf9f535f326c5979",
+    "proxy/cf_h2.py": "9c2c2b63add1a2568ef472ca9631c55e81a581fbadcc67c322c42fe46ec8b054",
     "proxy/config.py": "7d3b83a72d9d91db397a19c25cb5a3b5211f8c5aaf52235b7e03e0bc7293c6be",
+    "proxy/event_loop.py": "8b6cb6eca73d2e88721b0414c9eedcabeb5c24d79ae9135e792b3b5410ec040b",
     "proxy/fake_tls.py": "ce4ce10990117f96522558bc38f2798630b4b736854fd0bf738ba886332b9cb9",
-    "proxy/h2_transport.py": "722a20f0091d6ea4457eaab2c41829d180fb1831afdd0fc2d14a1f12984492b9",
+    "proxy/h2_transport.py": "3cf17bb062cd09cdc028fd44f1706fc03243ed3b7348162135242a8e4c07fcf9",
     "proxy/network_debug.py": "4a4d014c764439df076d15cbbaae819411fd0c5da0cf7fb9b3a630bf0ddeca2d",
-    "proxy/pool.py": "6f7f5da3d8dd55ceed6714e0c8db932d765e7096b72f12348e05af241dd50090",
-    "proxy/raw_websocket.py": "32c9f456ab3e7b06820261e3c4088e5c8ec4c15329ec280f521c960db54cb673",
+    "proxy/pool.py": "5d41504da70b5da36a4533c11f4f3e49491feefa89437d8d05042d8ba296011d",
+    "proxy/raw_websocket.py": "a5cf8a4c3f783744166c82632440929b3739bef4afdeb67f701b2a7ab60eefa5",
     "proxy/stats.py": "4a54b09e384d77677e48bef81ac0ecfc201278ec5462aafd7ce4a5edd91270a7",
-    "proxy/tg_ws_proxy.py": "2d76d8c7cfaf4382cc900886ab00475a4b120e19f83e3a98a29f6ab4266f66f2",
-    "proxy/utils.py": "0d2bc192da984132b545874aecd422808fceb1347889fd5971360f06d54d748f"
+    "proxy/tg_ws_proxy.py": "88001618657b97c861ba441ee08284e4954ee7b7959625b91e19a3ec627d46ac",
+    "proxy/utils.py": "7a9cd428b3bc97a8b14899eb5e37b395dfa5547e66c4a29d578b5ddbc486ffbd"
   },
   "local_changes": "LOCAL_CHANGES.md",
-  "previous_upstream_commit": "4f9edf3072454dcb18831e65e7cfdb68f7046a61"
+  "previous_upstream_commit": "18175fb4fe567cf6aef61f9d883eff010c9e66a8"
 }
