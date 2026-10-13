@@ -845,6 +845,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("releases/tags/$tag", geph)
         self.assertIn("verify_geph_release.py verify-metadata", geph)
         self.assertIn('--expected-tag "$tag"', geph)
+        metadata_call = geph.split("verify_geph_release.py verify-metadata", 1)[1].split('          tag_ref=', 1)[0]
+        self.assertIn("--source vendor/geph/SOURCE.json", metadata_call)
         self.assertLess(
             geph.index("verify_geph_release.py verify-metadata"),
             geph.index("scripts/download_github_release_assets.py"),
@@ -898,12 +900,19 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("verify_geph_release.py verify-attestations", geph)
         self.assertIn('--provenance-json "$provenance_json"', geph)
         self.assertIn('--spdx-json "$spdx_attestation_json"', geph)
+        attestation_call = geph.split("verify_geph_release.py verify-attestations", 1)[1].split("          /usr/bin/lipo", 1)[0]
+        self.assertIn("--source vendor/geph/SOURCE.json", attestation_call)
+        self.assertIn('--native-output-root "$geph_workspace/native-evidence"', geph)
+        self.assertIn('--native-sqlite-archive "$geph_workspace/sqlite.zip"', geph)
+        self.assertIn('["native_evidence"]["receipt_path"]', geph)
+        self.assertIn('["native_evidence"]["artifacts_root"]', geph)
+        self.assertNotIn("rm -rf", geph)
         self.assertIn("-verify_arch arm64 x86_64", geph)
         self.assertLess(
             geph.index("scripts/dependency_audit.py verify"),
             geph.index("gh attestation verify"),
         )
-        copy_index = geph.index("cp /tmp/geph/geph5-client")
+        copy_index = geph.index('cp "$geph_release/geph5-client"')
         for verifier in (
             "verify_geph_release.py verify-metadata",
             "scripts/verify_geph_release.py verify-assets",
@@ -915,6 +924,180 @@ class BuildConfigTests(unittest.TestCase):
             "-verify_arch arm64 x86_64",
         ):
             self.assertLess(geph.index(verifier), copy_index)
+
+    def test_packaged_geph_consumer_conditionally_materializes_native_evidence(self) -> None:
+        import sys
+        import textwrap
+
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        step = workflow.split("      - name: Fetch and verify the recorded Geph build\n", 1)[1].split(
+            "      - name: Materialize pinned Chromium headless shell\n", 1)[0]
+        shell = "\n".join(line[10:] for line in step.split("        run: |\n", 1)[1].splitlines())
+        shell = shell.replace("${{ github.repository }}", "aiwaki/slipstream").replace("/usr/bin/lipo", "lipo")
+        driver = textwrap.dedent(r'''
+            import json, os, sys
+            from pathlib import Path
+            name, args = Path(sys.argv[0]).name, sys.argv[1:]
+            native = os.environ["GEPH_FIXTURE_NATIVE"] == "true"
+            source = json.loads(Path("vendor/geph/SOURCE.json").read_text())
+            state_path = Path("fixture-state.json")
+            state = json.loads(state_path.read_text()) if state_path.exists() else {}
+            with Path("commands.jsonl").open("a") as log:
+                log.write(json.dumps({"name": name, "args": args}) + "\n")
+            def value(flag):
+                return args[args.index(flag) + 1]
+            def done(stage, result=None):
+                state_path.write_text(json.dumps(state))
+                if os.environ.get("GEPH_FIXTURE_FAIL") == stage:
+                    raise SystemExit("controlled refusal at " + stage)
+                if result is not None:
+                    print(json.dumps(result))
+            def reviewed_source():
+                assert value("--source") == "vendor/geph/SOURCE.json"
+            if name == "gh":
+                if args[0] == "api":
+                    endpoint = args[-1]
+                    if "/git/ref/tags/" in endpoint:
+                        print(json.dumps({"object": {"type": "commit", "sha": "a" * 40}}))
+                    elif "/contents/" in endpoint:
+                        assert endpoint.endswith("?ref=" + "a" * 40)
+                        print('{"historical":true}')
+                    else:
+                        assert "/releases/tags/" in endpoint
+                        print("{}")
+                else:
+                    assert args[:2] == ["attestation", "verify"]
+                    assert value("--signer-digest") == value("--source-digest") == "a" * 40
+                    assert value("--source-ref") == "refs/heads/main"
+                    assert "--deny-self-hosted-runners" in args
+                    if "--format" in args:
+                        print("{}")
+            elif name == "curl":
+                url = args[args.index("-o") - 1]
+                assert url in (source["crate"]["url"], source["native_sqlite"]["archive"]["url"])
+                Path(value("-o")).write_text(url)
+            elif name == "lipo":
+                assert Path(args[0]).read_bytes() == b"fixture universal binary"
+            elif name == "geph_vendor_source.py":
+                reviewed_source()
+                if args[0] == "verify":
+                    result = {"release_tag": "geph-vendor-0.4.3-r1"}
+                    if native:
+                        result["native_sqlite"] = "d" * 64
+                    done("source", result)
+                else:
+                    assert native and args[0] == "extract"
+                    assert Path(value("--crate")).read_text() == source["crate"]["url"]
+                    assert Path(value("--native-sqlite-archive")).read_text() == source["native_sqlite"]["archive"]["url"]
+                    materialized = Path(value("--output")) / "independently-materialized-source"
+                    materialized.mkdir(parents=True)
+                    (materialized / "marker").write_text("independent source")
+                    state["source_root"] = str(materialized)
+                    done("materialize", {"root": str(materialized)})
+            elif name == "download_github_release_assets.py":
+                patterns = [args[i + 1] for i, arg in enumerate(args) if arg == "--pattern"]
+                expected = {"geph5-client", "geph5-client.LICENSE", "geph5-client.VERSION", "geph5-client.SOURCE.json",
+                            "geph5-client.Cargo.lock", "geph5-client.spdx.json", "geph5-client-dependency-audit.json", "SHA256SUMS"}
+                if native:
+                    expected.add("geph5-client-native-sqlite-evidence.tar")
+                assert len(patterns) == len(expected) and set(patterns) == expected
+                release = Path(value("--output"))
+                release.mkdir()
+                for asset in expected:
+                    (release / asset).write_bytes(b"fixture universal binary" if asset == "geph5-client" else b"fixture asset")
+                state["release"] = str(release)
+                done("download")
+            elif name == "verify_geph_release.py":
+                reviewed_source()
+                if args[0] == "verify-assets":
+                    assert value("--release-dir") == state["release"]
+                    result = {"asset_count": 9 if native else 8}
+                    if native:
+                        requested = Path(value("--native-output-root"))
+                        assert not requested.exists()
+                        proof_root = requested / "returned-proof-root"
+                        proof_root.mkdir(parents=True)
+                        receipt = proof_root / "returned-release-proof.json"
+                        receipt.write_text("{}")
+                        state.update(native_receipt=str(receipt), native_artifacts=str(proof_root))
+                        result["native_evidence"] = {"receipt_path": str(receipt), "artifacts_root": str(proof_root)}
+                    else:
+                        assert "--native-output-root" not in args
+                    done("assets", result)
+                else:
+                    done("attestations" if args[0] == "verify-attestations" else "metadata", {})
+            elif name == "make_geph_vendor_sbom.py":
+                reviewed_source()
+                if native:
+                    assert value("--native-receipt") == state["native_receipt"]
+                    assert value("--native-artifacts-root") == state["native_artifacts"]
+                    assert value("--source-root") == state["source_root"]
+                    assert (Path(value("--source-root")) / "marker").read_text() == "independent source"
+                else:
+                    assert not {"--source-root", "--native-receipt", "--native-artifacts-root"}.intersection(args)
+                done("spdx", {})
+            elif name == "dependency_audit.py":
+                assert json.loads(Path(value("--policy")).read_text()) == {"historical": True}
+                assert value("--source-commit") == "a" * 40
+                done("audit", {})
+            else:
+                raise AssertionError((name, args))
+        ''')
+        scenarios = [(False, ""), (True, ""), *[(True, stage) for stage in (
+            "assets", "materialize", "spdx", "audit", "attestations")]]
+        for native, failure in scenarios:
+            with self.subTest(native=native, failure=failure), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                (root / "scripts").mkdir()
+                (root / "bin").mkdir()
+                runner = root / "runner temp"
+                runner.mkdir()
+                source = {"crate": {"url": "https://static.crates.io/crates/geph5-client/geph5-client-0.4.3.crate"}}
+                if native:
+                    source["native_sqlite"] = {"archive": {"url": "https://sqlite.org/2026/sqlite-amalgamation-3530200.zip"}}
+                source_path = root / "vendor/geph/SOURCE.json"
+                source_path.parent.mkdir(parents=True)
+                source_path.write_text(json.dumps(source))
+                for name in ("geph_vendor_source.py", "download_github_release_assets.py", "verify_geph_release.py",
+                             "make_geph_vendor_sbom.py", "dependency_audit.py"):
+                    (root / "scripts" / name).write_text(driver)
+                (root / "bin/python3").symlink_to(Path(sys.executable).resolve())
+                for name in ("gh", "curl", "lipo"):
+                    executable = root / "bin" / name
+                    executable.write_text(f"#!{sys.executable}\n" + driver)
+                    executable.chmod(0o755)
+                binary = root / "app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin"
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(b"stale binary must not survive")
+                env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}", RUNNER_TEMP=str(runner),
+                           GEPH_FIXTURE_NATIVE=str(native).lower(), GEPH_FIXTURE_FAIL=failure)
+                result = subprocess.run(["/bin/bash", "-c", shell], cwd=root, env=env,
+                                        capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 1 if failure else 0, result.stderr)
+                calls = [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
+                workspaces = list(runner.glob("geph-consumer.*"))
+                self.assertEqual(len(workspaces), 1)
+                workspace = workspaces[0]
+                self.assertEqual(workspace.stat().st_mode & 0o777, 0o700)
+                self.assertTrue((workspace / "release/geph5-client").is_file())
+                self.assertTrue((workspace / "verified-assets.json").is_file())
+                if failure:
+                    self.assertIn("controlled refusal at " + failure, result.stderr)
+                    self.assertFalse(binary.exists())
+                    self.assertFalse(any(call["name"] == "lipo" for call in calls))
+                else:
+                    self.assertEqual(binary.read_bytes(), b"fixture universal binary")
+                    report = json.loads((workspace / "verified-assets.json").read_text())
+                    self.assertEqual(report["asset_count"], 9 if native else 8)
+                    attestations = [call for call in calls if call["name"] == "gh" and call["args"][:2] == ["attestation", "verify"]]
+                    self.assertEqual(len(attestations), 10 if native else 9)
+                downloads = [call for call in calls if call["name"] == "curl"]
+                if native and failure != "assets":
+                    self.assertEqual(len(downloads), 2)
+                    self.assertTrue((workspace / "geph5-client.crate").is_file())
+                    self.assertTrue((workspace / "sqlite.zip").is_file())
+                else:
+                    self.assertEqual(downloads, [])
 
     def test_every_geph_release_download_uses_the_bounded_helper(self) -> None:
         workflows = tuple((ROOT / ".github/workflows").glob("*.yml"))

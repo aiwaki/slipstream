@@ -1,5 +1,39 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Conditional app consumer implemented (SOURCE still inactive): native nine
+  assets versus legacy eight, fresh private workspace, independently materialized
+  source and verifier-returned native receipt/root. All historical policy and
+  identity/attestation gates precede binary copy. Two focused BuildConfig cases
+  PASS, including seven shell scenarios with mocked external services. Read-only
+  independent review found no actionable defect (9fabee09), both source hashes
+  parent-verified. Evidence: output/sqlite-native-integration/consumer-workflow-review/.
+  Full metadata657 baseline is reused; no Geph rebuild or install this turn.
+  Producer workflow and native synthetic compile sandbox remain pending
+  (design in ROUTING_RESEARCH).
+- Offline cache preparation is implemented in scripts/seal_geph_cargo_cache.py:
+  frozen full SOURCE/lock, every locked registry archive checked while streaming,
+  selected whole sparse-index records only, fresh physical output and exact
+  final file inventory. Existing/failed outputs are never deleted.25 focused
+  tests PASS; independent peer found an extra-config injection gap, retained
+  causal RED, and confirmed the correction with7 tiny controls. No compiler,
+  Cargo resolution or network call. Actual v2 metadata:512 packages/453 names;
+  retained cache has38 missing exact archives and is rejected before output.
+  Evidence: output/sqlite-native-integration/{cache-seal,cache-seal-peer}/.
+  The index is opaque and unauthenticated; offline Cargo fetch/resolve and
+  producer integration are still required. Do not recompile successful Geph
+  artifacts merely to repeat their existing proof.
+- Three more scoped FTS5 fixes verified against exact actual v2 960f4039:
+  CVE-2025-7709, CVE-2019-9936 and CVE-2019-9937 code_fixed. FTS5 is enabled;
+  this is source-fix/binary-binding evidence, not runtime exploit qualification.
+  Parent verifies310 inputs/outputs, zero mismatches; receipt75d208f2 under
+  output/sqlite-native-integration/next-enabled-applicability-20261013/.
+  The immutable81-unknown census is unchanged; general native audit stays open.
+- Exact c0e67587d CI38394964903 is terminal: product/checks and Chromium PASS;
+  package HTTP404 for unpublished0.4.3-r1. Dependency38394965112 rejects expired
+  app integrity-only policy and reports Geph2 blocking/2 informational across
+  423 packages,0 exceptions. Logs/API retained in output/sqlite-native-integration/
+  ci/c0e67587d/. No CI rerun requested.
+
 - Fresh actual v2 attempt3 PASS 2026-10-13 11:53:13 UTC from eb91da9dd.
   PID81015/exec30920 are terminal; do not poll or restart. Both production
   architectures, jobs 1, elapsed653s, sampled owned-tree peak 1058.19MiB; verified

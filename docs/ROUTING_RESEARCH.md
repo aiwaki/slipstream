@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-08-22
+Updated: 2026-10-13
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -8,6 +8,62 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 ## Findings Index
 
 ### Geph native SQLite contract — 2026-10-13
+
+The app consumer now conditionally handles the native nine-asset release. Its
+mode comes from reviewed SOURCE; the existing eight-asset release remains
+supported. Metadata and attestation checks also receive SOURCE. Every attempt
+gets a fresh physical private workspace, retained on failure. Native asset
+verification returns the unpacked receipt/root; SPDX receives those paths plus
+independently downloaded and verified Geph/SQLite source archives. Historical
+policy, exact tag/signer/source identity and all attestations precede binary
+copy. Static peer review found no actionable defect in this diff. Two focused
+BuildConfig tests passed, including actual shell execution for legacy/native
+success and five refusals before binary copy; external commands and verifiers
+were local fixtures, not a signed release. Review receipt 9fabee09 and its exact
+diff are retained in `output/sqlite-native-integration/consumer-workflow-review/`.
+
+`scripts/seal_geph_cargo_cache.py` now prepares a fresh Cargo home from reviewed
+SOURCE, lock and a fetched cache. It copies every crates.io archive in the full
+lock through a bounded stream and checks the lock checksum, then copies whole
+opaque sparse-index records for only the required names. No extracted source,
+Git cache, credentials or Cargo config is reused. Both input and output paths
+reject symlinks; existing output is never replaced, and failed partial output
+is retained without a successful seal. Per-file/aggregate limits bound archive
+and index copying. A peer's retained RED showed that extra output config could
+previously survive sealing; the final check now requires exactly the expected
+owned tree.25 focused tests and7 independent tiny controls PASS. These are local
+synthetic file tests, not Cargo resolution. Actual v2 SOURCE/lock validates as
+512 registry packages/453 index names; the retained production cache is missing
+38 exact archives and fails before any output is created. Those measurements
+are distinct from the historical436-archive production proof. Evidence lives in
+`output/sqlite-native-integration/{cache-seal,cache-seal-peer}/`.
+
+The seal explicitly labels sparse metadata unauthenticated and offline Cargo
+resolution unperformed. Before compilation, a fresh all-lock dependency fetch,
+sealing and `cargo fetch --locked --offline` must qualify the supported cache
+layout; no target-only cache or unverified Cargo home can stand in for that gate.
+The cache helper is not yet connected to the producer workflow.
+
+Producer workflow integration is still pending. Native compilation needs a
+separate online dependency-fetch phase followed by a fresh verified Cargo cache
+and a fixed OS network-deny sandbox. Cargo offline mode alone does not restrict
+build scripts. The synthetic runner's current compile step inherits environment;
+its runtime allowlist/sandbox does not cover compilation. The native path must
+use explicit physical tools, clean environment, verified host native receipt,
+offline metadata/feature checks, and a network-denial control before compiling.
+Preserve the existing runtime allowlist, and never strip a binary after its
+native proof is sealed. None of these pending steps authorize release activation.
+
+A further scoped source review binds CVE-2025-7709, CVE-2019-9936 and
+CVE-2019-9937 to actual v2 universal960f4039 as `not_affected / code_fixed`.
+The exact C retains the 64-bit tombstone allocation, length guard before key
+comparison, and owned doclist copy respectively. FTS5 is enabled: 291 FTS5
+symbols/owned live link rows occur in each architecture. This is static
+verification of the specific fixes against primary patches and the existing
+source-to-binary proof, not exploit execution or general clearance. Parent
+verified all310 receipt inputs/outputs with no mismatch (75d208f2), retained in
+`output/sqlite-native-integration/next-enabled-applicability-20261013/`.
+The original census and previous scoped overlays remain unchanged.
 
 Native descriptor v2 adds a mandatory reviewed `producer_helper_sha256` to
 SOURCE. A producer checks that independent pin before creating output and after

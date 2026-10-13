@@ -541,12 +541,20 @@ jobs:
           tag="$(python3 -c \
             'import json,sys; print(json.load(sys.stdin)["release_tag"])' \
             <<< "$source_summary")"
-          release_metadata="$(mktemp "$RUNNER_TEMP/geph-release.XXXXXX")"
+          geph_workspace="$(mktemp -d "$RUNNER_TEMP/geph-consumer.XXXXXX")"
+          geph_workspace="$(cd "$geph_workspace" && pwd -P)"
+          geph_release="$geph_workspace/release"
+          release_metadata="$geph_workspace/release.json"
+          asset_report="$geph_workspace/verified-assets.json"
+          native_sqlite="$(python3 -c \
+            'import json,sys; print("true" if "native_sqlite" in json.load(sys.stdin) else "false")' \
+            <<< "$source_summary")"
           gh api "repos/${{ github.repository }}/releases/tags/$tag" \
             > "$release_metadata"
           python3 scripts/verify_geph_release.py verify-metadata \
             --metadata "$release_metadata" \
-            --expected-tag "$tag"
+            --expected-tag "$tag" \
+            --source vendor/geph/SOURCE.json
           tag_ref="$(gh api \
             "repos/${{ github.repository }}/git/ref/tags/$tag")"
           tag_type="$(python3 -c \
@@ -563,38 +571,71 @@ jobs:
             echo "recorded Geph tag does not resolve to a full commit"
             exit 1
           }
-          rm -rf /tmp/geph
           mkdir -p app-tauri/src-tauri/binaries
           rm -f \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          download_args=(
+            --pattern geph5-client
+            --pattern geph5-client.LICENSE
+            --pattern geph5-client.VERSION
+            --pattern geph5-client.SOURCE.json
+            --pattern geph5-client.Cargo.lock
+            --pattern geph5-client.spdx.json
+            --pattern geph5-client-dependency-audit.json
+            --pattern SHA256SUMS
+          )
+          asset_args=(
+            --release-dir "$geph_release"
+            --metadata "$release_metadata"
+            --expected-tag "$tag"
+            --source vendor/geph/SOURCE.json
+            --cargo-lock vendor/geph/Cargo.lock
+            --version-file vendor/geph/VERSION
+            --license vendor/geph/LICENSE
+          )
+          sbom_args=(
+            --source vendor/geph/SOURCE.json
+            --version-file vendor/geph/VERSION
+            --cargo-lock vendor/geph/Cargo.lock
+            --repository "${{ github.repository }}"
+            --source-commit "$tag_commit"
+            --target macos-universal
+            --sbom "$geph_release/geph5-client.spdx.json"
+          )
+          if [ "$native_sqlite" = true ]; then
+            download_args+=(--pattern geph5-client-native-sqlite-evidence.tar)
+            asset_args+=(--native-output-root "$geph_workspace/native-evidence")
+          fi
           python3 scripts/download_github_release_assets.py \
             --repo "${{ github.repository }}" \
             --tag "$tag" \
-            --output /tmp/geph \
-            --pattern geph5-client \
-            --pattern geph5-client.LICENSE \
-            --pattern geph5-client.VERSION \
-            --pattern geph5-client.SOURCE.json \
-            --pattern geph5-client.Cargo.lock \
-            --pattern geph5-client.spdx.json \
-            --pattern geph5-client-dependency-audit.json \
-            --pattern SHA256SUMS
+            --output "$geph_release" \
+            "${download_args[@]}"
           python3 scripts/verify_geph_release.py verify-assets \
-            --release-dir /tmp/geph \
-            --metadata "$release_metadata" \
-            --expected-tag "$tag" \
-            --source vendor/geph/SOURCE.json \
-            --cargo-lock vendor/geph/Cargo.lock \
-            --version-file vendor/geph/VERSION \
-            --license vendor/geph/LICENSE
-          python3 scripts/make_geph_vendor_sbom.py verify \
-            --source vendor/geph/SOURCE.json \
-            --version-file vendor/geph/VERSION \
-            --cargo-lock vendor/geph/Cargo.lock \
-            --repository "${{ github.repository }}" \
-            --source-commit "$tag_commit" \
-            --target macos-universal \
-            --sbom /tmp/geph/geph5-client.spdx.json
+            "${asset_args[@]}" > "$asset_report"
+          if [ "$native_sqlite" = true ]; then
+            # Independently materialize reviewed source; bundle files are proof,
+            # never the authority for the SQLite archive or source inventory.
+            crate_url="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["crate"]["url"])')"
+            sqlite_url="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["native_sqlite"]["archive"]["url"])')"
+            curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+              "$crate_url" -o "$geph_workspace/geph5-client.crate"
+            curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+              "$sqlite_url" -o "$geph_workspace/sqlite.zip"
+            python3 scripts/geph_vendor_source.py extract \
+              --source vendor/geph/SOURCE.json \
+              --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock \
+              --crate "$geph_workspace/geph5-client.crate" \
+              --native-sqlite-archive "$geph_workspace/sqlite.zip" \
+              --output "$geph_workspace/source" \
+              > "$geph_workspace/materialized-source.json"
+            source_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root"])' "$geph_workspace/materialized-source.json")"
+            native_receipt="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_evidence"]["receipt_path"])' "$asset_report")"
+            native_artifacts="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_evidence"]["artifacts_root"])' "$asset_report")"
+            sbom_args+=(--source-root "$source_root" --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+          fi
+          python3 scripts/make_geph_vendor_sbom.py verify "${sbom_args[@]}"
           historical_policy="$(mktemp \
             "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
           gh api \
@@ -606,8 +647,8 @@ jobs:
           test -s "$historical_policy"
           python3 -m json.tool "$historical_policy" >/dev/null
           python3 scripts/dependency_audit.py verify \
-            --report /tmp/geph/geph5-client-dependency-audit.json \
-            --sbom /tmp/geph/geph5-client.spdx.json \
+            --report "$geph_release/geph5-client-dependency-audit.json" \
+            --sbom "$geph_release/geph5-client.spdx.json" \
             --policy "$historical_policy" \
             --source-commit "$tag_commit" \
             --target macos-universal \
@@ -617,8 +658,8 @@ jobs:
             "$RUNNER_TEMP/geph-provenance.XXXXXX")"
           spdx_attestation_json="$(mktemp \
             "$RUNNER_TEMP/geph-spdx-attestation.XXXXXX")"
-          for artifact in /tmp/geph/*; do
-            if [ "$artifact" = /tmp/geph/SHA256SUMS ]; then
+          for artifact in "$geph_release"/*; do
+            if [ "$artifact" = "$geph_release/SHA256SUMS" ]; then
               gh attestation verify "$artifact" \
                 --repo "${{ github.repository }}" \
                 --signer-workflow "$signer_workflow" \
@@ -639,7 +680,7 @@ jobs:
                 --deny-self-hosted-runners >/dev/null
             fi
           done
-          gh attestation verify /tmp/geph/geph5-client \
+          gh attestation verify "$geph_release/geph5-client" \
             --repo "${{ github.repository }}" \
             --signer-workflow "$signer_workflow" \
             --signer-digest "$tag_commit" \
@@ -649,12 +690,13 @@ jobs:
             --deny-self-hosted-runners \
             --format json > "$spdx_attestation_json"
           python3 scripts/verify_geph_release.py verify-attestations \
-            --release-dir /tmp/geph \
+            --release-dir "$geph_release" \
             --provenance-json "$provenance_json" \
-            --spdx-json "$spdx_attestation_json"
-          /usr/bin/lipo /tmp/geph/geph5-client \
+            --spdx-json "$spdx_attestation_json" \
+            --source vendor/geph/SOURCE.json
+          /usr/bin/lipo "$geph_release/geph5-client" \
             -verify_arch arm64 x86_64
-          cp /tmp/geph/geph5-client \
+          cp "$geph_release/geph5-client" \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           /usr/bin/lipo \
