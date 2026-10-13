@@ -42,6 +42,26 @@ file.
 
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- Dedicated2f0cbc1fd adds conditional native app-consumer workflow and offline
+  full-lock cache preparation. Consumer2 focused tests (7 shell scenarios) PASS;
+  independent static review9fabee09 found no actionable defect. Cache25 focused
+  tests and7 independent peer controls PASS after fixing a demonstrated extra
+  output-config injection race; original RED retained. Parent verifies16 cache
+  implementation receipt bindings (a0a734dd), source peer d77529b3 and310 scoped
+  FTS5 review bindings (75d208f2). CVE-2025-7709/2019-9936/9937 code_fixed in
+  exact v2; no general native clearance. Real512-package/453-name lock validates;
+  current retained cache lacks38 archives and refuses before output creation.
+  No new compile, Cargo resolution, client/account traffic or install. Full
+  metadata657 baseline reused. Exact c0e67587d CI38394964903 product/checks and
+  Chromium PASS; package404unpublished0.4.3-r1; dependency38394965112 retains
+  expired app policy and Geph2 blocking/2 informational. New2f0cbc1fd CI pending.
+  Next: connect cache prep and OS-denied native compile/synthetic runtime path
+  to producer workflow, then machine-enforced native advisory coverage. Source
+  activation remains blocked by those gates. See dedicated CURRENT_STATE and
+  output/sqlite-native-integration/{cache-seal,cache-seal-peer,
+  consumer-workflow-review,next-enabled-applicability-20261013}/.
+  Root CRG graph source remains current (only docs changed since7b898ac6);
+  new search0.35s/34.39MiB, no lingering CRG/indexer/compiler process observed.
 - Dedicated c0e67587d records actual v2 attempt3 PASS11:53:13 UTC; PID81015/exec30920 terminal.
   Both architectures, jobs1,653s, peak1058.19MiB, OS network denied. Preserved
   56-file proof completion674afe7e under dedicated output/native-producer/
