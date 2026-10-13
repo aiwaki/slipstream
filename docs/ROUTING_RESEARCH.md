@@ -9,6 +9,21 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 ### Geph native SQLite contract — 2026-10-13
 
+The first actual production-feature ARM compile completed in3m30s, then proof
+collection stopped before sealing: Apple ld emits opaque non-UTF8 bytes in
+literal-string rows. The retained16,071,743-byte map (5505268c) fails the old
+whole-file UTF8 parser at byte5,992,970. Producer discovery now decodes only the
+single required `# Path` value; linked proof uses lossless surrogateescape.
+Exact paths, architecture, owned archive/member, SQLite symbols and their Mach-O
+addresses remain required. Corrupted required names still reject.24 builder,
+34 producer,21 bundle,12 native-consumer and8 native-SPDX checks pass after the
+correction. Read-only actual ARM map/rlib/binary replays pass; neither replay
+rewrites old receipts or qualifies a final release. A new two-target producer
+attempt is required because native receipts bind the exact helper source hash.
+Failure and review evidence: `output/native-producer/real-inputs/attempt1-failure/`
+and `output/native-producer-review/link-map-opaque/`.
+
+
 The optional native SQLite tooling in this candidate does not activate a new
 Geph source contract or change the installed application. It prepares the
 previously qualified static SQLite candidate for a release pipeline which can

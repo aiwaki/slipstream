@@ -280,6 +280,34 @@ class ProducerCommandDriverTests(unittest.TestCase):
         self.mutate = mutate
         with self.assertRaisesRegex(ValueError, "differs from Cargo"): self.build()
 
+    def test_map_binary_accepts_real_linker_opaque_literal_string_bytes(self):
+        binary = self.write(self.root / "geph5-client", b"same executable")
+        linked = self.write(self.root / "hashed-geph", binary.read_bytes())
+        # Bounded line from the real production ARM linker map, 2026-10-13.
+        literal = b"0x100BC7EC8\t0x00000004\t[  3] literal string: \x01-\xc0\n"
+        path = self.write(self.root / "map", b"# Path: " + str(linked).encode() + b"\n# Symbols:\n" + literal)
+        self.assertEqual(producer.map_binary(path, binary, self.root), linked)
+
+    def test_synthetic_pipeline_retains_real_linker_opaque_literal_bytes(self):
+        def mutate(stage, value):
+            if stage == "rustc":
+                with value["map"].open("ab") as handle:
+                    handle.write(b"0x100BC7EC8\t0x00000004\t[  3] literal string: \x01-\xc0\n")
+        self.mutate = mutate
+        self.assertEqual(self.build()["scope"], "linked-macos-universal")
+
+    def test_map_binary_rejects_invalid_utf8_path(self):
+        binary = self.write(self.root / "geph5-client", b"same executable")
+        path = self.write(self.root / "map", b"# Path: " + str(binary).encode() + b"\xc0\n")
+        with self.assertRaises(UnicodeDecodeError):
+            producer.map_binary(path, binary, self.root)
+
+    def test_map_binary_rejects_duplicate_path(self):
+        binary = self.write(self.root / "geph5-client", b"same executable")
+        path = self.write(self.root / "map", (b"# Path: " + str(binary).encode() + b"\n") * 2)
+        with self.assertRaisesRegex(ValueError, "exactly one binary"):
+            producer.map_binary(path, binary, self.root)
+
     def test_link_map_path_outside_owned_release_rejected(self):
         def mutate(stage, value):
             if stage == "rustc":

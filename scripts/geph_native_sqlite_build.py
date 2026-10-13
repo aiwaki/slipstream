@@ -386,7 +386,10 @@ def _link_evidence(native_proof: dict, root: Path, files: dict, binary_build_pat
     directory = Path(native_proof["build_directory"])
     if sorted(links) != sorted(["rustc-link-lib=static=sqlite3", "rustc-link-search=" + str(directory)]):
         raise ValueError("sys build requested unexpected linker input/search path")
-    text = data["link_map"].decode("utf-8")
+    # Apple ld can emit non-UTF8 bytes in opaque "literal string" symbol rows.
+    # Preserve them losslessly: dropping/replacing bytes could turn a corrupt
+    # required path or SQLite symbol into an apparently matching identity.
+    text = data["link_map"].decode("utf-8", errors="surrogateescape")
     if not isinstance(binary_build_path, str) or not Path(binary_build_path).is_absolute() or not isinstance(rlib_build_path, str) or not Path(rlib_build_path).is_absolute():
         raise ValueError("link build paths must be absolute")
     if text.splitlines().count("# Path: " + binary_build_path) != 1:

@@ -210,6 +210,39 @@ class NativeBuildEvidenceTests(unittest.TestCase):
             self.update_linked_file("link_map", bad)
             with self.assertRaises(ValueError): self.verify()
 
+    def test_real_apple_map_non_utf8_literal_row_preserves_linkage(self):
+        # Exact bounded row from the retained ARM map (SHA256 5505268c...),
+        # line 45193: Apple ld prints opaque literal bytes in the symbol name.
+        literal = b"0x100BC7EC8\t0x00000004\t[  3] literal string: \x01-\xc0\n"
+        original = (self.root / self.target / "map").read_bytes()
+        self.update_linked_file("link_map", original + literal)
+        proof = self.verify()
+        self.assertEqual(proof["scope"], build.LINKED_SCOPE)
+        self.assertEqual(proof["identity"]["sqlite_identity_addresses"]["_sqlite3_sourceid"], 4112)
+
+    def test_non_utf8_corruption_cannot_normalize_owned_map_paths(self):
+        original = (self.root / self.target / "map").read_bytes()
+        for old, replacement, error in (
+            (b"/geph\n", b"/geph\xff\n", "identify target binary"),
+            (b"# Arch: arm64", b"# Arch: arm64\xff", "architecture mismatch"),
+            (b"sys.rlib(sqlite3.o)", b"sys.rlib\xff(sqlite3.o)", "exact sys rlib"),
+            (b"sys.rlib(sqlite3.o)", b"sys.rlib(sqlite3\xff.o)", "exact sys rlib"),
+        ):
+            with self.subTest(replacement=replacement):
+                self.assertIn(old, original)
+                self.update_linked_file("link_map", original.replace(old, replacement))
+                with self.assertRaisesRegex(ValueError, error):
+                    self.verify()
+
+    def test_non_utf8_corruption_cannot_normalize_required_map_symbols(self):
+        original = (self.root / self.target / "map").read_bytes()
+        for symbol in (b"_sqlite3_libversion", b"_sqlite3_sourceid"):
+            for replacement in (symbol + b"\xff", symbol[:8] + b"\xff" + symbol[8:]):
+                with self.subTest(replacement=replacement):
+                    self.update_linked_file("link_map", original.replace(symbol, replacement))
+                    with self.assertRaisesRegex(ValueError, "SQLite identity symbol"):
+                        self.verify()
+
     def test_unrecognized_map_member_preserves_exact_bounded_diagnostics(self):
         proof = json.loads(self.linked_paths[self.target].read_text())
         original = (self.root / proof["files"]["link_map"]["path"]).read_bytes()

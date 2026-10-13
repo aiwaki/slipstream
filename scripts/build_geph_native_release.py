@@ -181,11 +181,13 @@ def cargo_artifacts(log_path: Path, metadata: dict, source: dict, source_root: P
 
 
 def map_binary(path: Path, cargo_binary: Path, release_root: Path) -> Path:
-    lines = native.read_regular(path, MAX_LOG).decode("utf-8").splitlines()
-    paths = [line.removeprefix("# Path: ") for line in lines if line.startswith("# Path: ")]
+    # Apple ld emits arbitrary literal-string bytes in symbol rows. Only the
+    # structural path is text; never decode unrelated symbol payloads.
+    lines = native.read_regular(path, MAX_LOG).split(b"\n")
+    paths = [line.removeprefix(b"# Path: ") for line in lines if line.startswith(b"# Path: ")]
     if len(paths) != 1:
         raise ValueError("link map must identify exactly one binary")
-    linked = inside(release_root, paths[0])
+    linked = inside(release_root, paths[0].decode("utf-8"))
     if native.read_regular(linked, link.MAX_BYTES) != native.read_regular(cargo_binary, link.MAX_BYTES):
         raise ValueError("link map executable differs from Cargo executable")
     return linked

@@ -13,17 +13,30 @@
   32 consumer and 8 documentation cases PASS. Separate peer replays cover
   process cancellation, partial second target, four snapshot/extraction races,
   happy native binding and the explicit build-jobs control. The real offline
-  production-feature build started at 09:43:56 UTC, producer PID 60479;
-  do not start another copy. State/argv/env/input hashes are in
-  output/native-producer/real-inputs/{build-status,build-command,preparation-manifest}.json.
-  Output is /private/tmp/slipstream-native-production-788x15x3/build; persistent
-  outer logs are beside build-status.json. Reviewed SOURCE8b59fe86 is output-only:
+  production-feature attempt1 ended exit1 at09:47:42 UTC after ARM compile
+  PASS3m30s. Apple linker map contains opaque non-UTF8 literal rows; producer
+  and common verifier assumed whole-file UTF8. No Intel or final release proof.
+  PID60479 is finished. Original /private/tmp/slipstream-native-production-788x15x3/build
+  and persistent output/native-producer/real-inputs/attempt1-failure/ are retained;
+  failure receipt4fef9841 binds map5505268c (16071743 bytes) and actual cargo logs.
+  Both parsers are corrected: producer57dfee45/shared helper194c2104.
+  Producer34, helper24, bundle21, native-consumer12 and native-SPDX8 cases PASS;
+  actual ARM map/rlib/binary replays PASS without rewriting old receipts.
+  Attempt2 started10:05:43 UTC, PID64493, exec session62244; do not duplicate.
+  Output /private/tmp/slipstream-native-production-788x15x3/build-map-bytes.
+  Resume from output/native-producer/real-inputs/attempt2/ status/argv/manifest.
+  Manifest c51fbe93 binds freshly verified input/tools/cache; source stays frozen.
+  Old receipts stay immutable. Reviewed SOURCE8b59fe86 remains output-only,
   13 existing edits plus sqlite-unbundled, no qualification-only Rust tests.
-  Both real metadata closures and 436 registry archive checksums are verified;
-  build runs with OS network/private-read denial and --jobs2 on this 8GiB Mac.
-  Native helper ce2a52ce and producer ef7fe741 are frozen during the build.
-  Actual compiled targets, transport/SBOM replay, conditional workflow wiring,
-  native advisory coverage and producer/helper compatibility remain open.
+  Both metadata closures/436 registry archives are verified; build used OS
+  network/private-read denial and --jobs2 on this8GiB Mac. Native advisory
+  coverage and producer/helper compatibility remain open; report+35 bindings:
+  output/sqlite-native-integration/native-advisory-review/ (receipt b2cfd257).
+  Exact7f5a7671c CI38378920630 product/checks and Chromium PASS; package and
+  dependency gates remain red: package HTTP404 for unpublished0.4.3-r1;
+  app audit rejects expired integrity-only policy; Geph audit reports2 blocking
+  and2 informational findings across423 packages. Exact logs retained in
+  dedicated output/sqlite-native-integration/ci/7f5a7671c/.
 - Exact2297aaaaf CI38371930625 reduced the657-test metadata failure to one
   captured Xcode15.4/ld1053 row: the exact archive path is followed by `[5]`
   before `(sqlite3.o)`. The parser now accepts that observed numeric annotation
