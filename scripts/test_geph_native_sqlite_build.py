@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 from pathlib import Path
 import struct
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import geph_native_sqlite as native
 import geph_native_sqlite_build as build
@@ -130,6 +132,111 @@ class NativeBuildEvidenceTests(unittest.TestCase):
 
     def verify(self):
         return build.verify_linked_target(self.descriptor, self.linked_paths[self.target], self.root, SOURCE_SHA, LOCK_SHA)
+
+    def v2_fixture(self, pin="1" * 64):
+        # Synthetic H1 provenance, independently selected by the trusted fixture
+        # descriptor. No historical helper code is imported or executed.
+        self.descriptor.update(schema_version=2, producer_helper_sha256=pin)
+        descriptor_hash = native.descriptor_sha256(self.descriptor)
+        for target in native.TARGETS:
+            path = self.native_paths[target]
+            proof = json.loads(path.read_text())
+            proof.update(descriptor_sha256=descriptor_hash, helper_sha256=pin)
+            self.json(path, proof)
+            linked = json.loads(self.linked_paths[target].read_text())
+            linked.update(descriptor_sha256=descriptor_hash,
+                          native_receipt=build._record(self.root, path))
+            self.json(self.linked_paths[target], linked)
+
+    def test_v2_new_verifier_accepts_independently_pinned_old_helper(self):
+        self.v2_fixture()
+        newer = self.write(self.root / "new-verifier.py", b"synthetic H2 bytes")
+        with mock.patch.object(build, "__file__", str(newer)):
+            proof = build.verify_release_evidence(self.descriptor, self.release(), self.root, SOURCE_SHA, LOCK_SHA)
+        self.assertEqual(proof["scope"], "linked-macos-universal")
+
+    def test_v1_keeps_current_helper_mismatch_rejection(self):
+        newer = self.write(self.root / "new-verifier.py", b"synthetic H2 bytes")
+        with mock.patch.object(build, "__file__", str(newer)), self.assertRaisesRegex(ValueError, "helper_sha256 mismatch"):
+            self.verify()
+
+    def test_v2_receipt_cannot_select_helper_and_mixed_target_helpers_fail(self):
+        self.v2_fixture()
+        path = self.native_paths[native.TARGETS[1]]
+        proof = json.loads(path.read_text())
+        proof["helper_sha256"] = "3" * 64
+        self.json(path, proof)
+        linked_path = self.linked_paths[native.TARGETS[1]]
+        linked = json.loads(linked_path.read_text())
+        linked["native_receipt"] = build._record(self.root, path)
+        self.json(linked_path, linked)
+        with self.assertRaisesRegex(ValueError, "helper_sha256 mismatch"):
+            build.verify_release_evidence(self.descriptor, self.release(), self.root, SOURCE_SHA, LOCK_SHA)
+
+    def test_v2_missing_pin_cannot_fall_back_to_receipt_or_current_helper(self):
+        self.descriptor["schema_version"] = 2
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_v2_wrong_build_pin_rejected_before_output_or_compiler(self):
+        self.descriptor.update(schema_version=2, producer_helper_sha256="1" * 64)
+        with mock.patch.object(build.subprocess, "run") as command, self.assertRaisesRegex(ValueError, "producer helper"):
+            build.build_native(self.descriptor, self.root / "missing-source", self.root,
+                               self.target, SOURCE_SHA, self.root / "missing-lock", {})
+        command.assert_not_called()
+
+    def test_loaded_helper_replacement_rejected_even_with_matching_new_pin(self):
+        helper = self.write(self.root / "loaded-helper.py", Path(build.__file__).read_bytes())
+        spec = importlib.util.spec_from_file_location("native_helper_h1", helper)
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        helper.write_bytes(helper.read_bytes() + b"\n# replaced after import\n")
+        for schema in (1, 2):
+            descriptor = copy.deepcopy(self.descriptor)
+            if schema == 2:
+                descriptor.update(schema_version=2, producer_helper_sha256=build.sha(helper.read_bytes()))
+            with self.subTest(schema=schema), mock.patch.object(loaded.subprocess, "run") as command:
+                with mock.patch.object(native, "verify_materialized") as materialize:
+                    with self.assertRaisesRegex(ValueError, "producer helper changed after module load"):
+                        loaded.build_native(descriptor, self.root / "missing-source", self.root,
+                                            self.target, SOURCE_SHA, self.root / "missing-lock", {})
+                    materialize.assert_not_called()
+                command.assert_not_called()
+
+    def synthetic_native_build(self, *, mutate=False):
+        source = self.root / "synthetic-source"
+        for name, data in source_contents().items():
+            self.write(source / native.PATH / name, data)
+        lock = self.write(source / "Cargo.lock", LOCK)
+        helper = self.write(self.root / "synthetic-builder.py", Path(build.__file__).read_bytes())
+        self.descriptor.update(schema_version=2, producer_helper_sha256=build.sha(helper.read_bytes()))
+        out = self.root / "synthetic-native-output"
+        out.mkdir()
+        tools = {name: self.write(self.root / ("tool-" + name), b"synthetic tool") for name in ("clang", "ar")}
+        for tool in tools.values(): tool.chmod(0o755)
+        sdk = self.root / "synthetic-sdk"
+        self.write(sdk / "SDKSettings.json", b"{}")
+        tools["sdk"] = sdk
+        self.native_commands = []
+        def compiler(command, **kwargs):
+            self.native_commands.append(command)
+            if command[0] == str(tools["clang"]):
+                self.write(out / self.target / "sqlite3.o", macho(self.target))
+            else:
+                self.write(out / self.target / "libsqlite3.a", ar(macho(self.target)))
+                if mutate: helper.write_bytes(b"synthetic H2")
+        with mock.patch.object(build, "__file__", str(helper)), mock.patch.object(build.subprocess, "run", side_effect=compiler):
+            return build.build_native(self.descriptor, source, out, self.target, SOURCE_SHA, lock, tools)
+
+    def test_v2_synthetic_native_build_records_actual_reviewed_pin(self):
+        proof = self.synthetic_native_build()
+        self.assertEqual(proof["helper_sha256"], self.descriptor["producer_helper_sha256"])
+
+    def test_v2_helper_mutation_during_compile_rejected_before_receipt(self):
+        with self.assertRaisesRegex(ValueError, "producer helper"):
+            self.synthetic_native_build(mutate=True)
+        self.assertEqual(len(self.native_commands), 2)
+        self.assertFalse((self.root / "synthetic-native-output" / self.target / "native-build.json").exists())
 
     def update_linked_file(self, name, content):
         path = self.linked_paths[self.target]

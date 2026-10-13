@@ -95,7 +95,8 @@ class ProducerCommandDriverTests(unittest.TestCase):
             tools["sdk"] = {"path": str(self.paths["sdk"]), "settings_sha256": link.sha(b"{}")}
             proof = {"schema_version": 1, "scope": link.NATIVE_SCOPE, "target": target,
                 "descriptor_sha256": native.descriptor_sha256(self.descriptor),
-                "source_sha256": link.sha(self.source_path.read_bytes()), "lock_sha256": self.source["lock_sha256"],
+                "source_sha256": link.sha(Path(command[command.index("--source") + 1]).read_bytes()),
+                "lock_sha256": self.source["lock_sha256"],
                 "helper_sha256": link.sha(Path(link.__file__).read_bytes()), "tools": tools,
                 "commands": link._commands(self.descriptor, target, directory, tools),
                 "environment": {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "ZERO_AR_DATE": "1", "TMPDIR": str(directory / "tmp")},
@@ -145,6 +146,41 @@ class ProducerCommandDriverTests(unittest.TestCase):
             return producer.build_release(source_path=self.source_path, version_path=self.version,
                 lock_path=self.lock, crate_path=self.crate, native_archive=self.native_zip,
                 output=self.output, cargo_home=self.cargo_home, tools=self.paths, **kwargs)
+
+    def use_v2(self, pin=None):
+        self.descriptor.update(schema_version=2,
+            producer_helper_sha256=pin or link.sha(Path(link.__file__).read_bytes()))
+        self.source_path.write_text(json.dumps(self.source))
+
+    def test_v2_synthetic_full_pipeline_uses_reviewed_current_helper(self):
+        self.use_v2()
+        self.assertEqual(self.build()["scope"], "linked-macos-universal")
+
+    def test_v2_wrong_pin_stops_before_output_and_all_commands(self):
+        self.use_v2("1" * 64)
+        with self.assertRaisesRegex(ValueError, "producer helper"):
+            self.build()
+        self.assertFalse(self.output.exists())
+        self.assertFalse(self.calls)
+
+    def test_v2_source_replacement_after_preflight_keeps_frozen_authority(self):
+        self.use_v2()
+        reviewed = self.source_path.read_bytes()
+        replaced = json.loads(reviewed)
+        replaced["native_sqlite"]["producer_helper_sha256"] = "0" * 64
+        mkdir = Path.mkdir
+        replacements = []
+        def swap_after_preflight(path, *args, **kwargs):
+            result = mkdir(path, *args, **kwargs)
+            if path == self.output:
+                self.source_path.write_text(json.dumps(replaced))
+                replacements.append(path)
+            return result
+        with mock.patch.object(Path, "mkdir", swap_after_preflight):
+            proof = self.build()
+        self.assertEqual(replacements, [self.output])
+        self.assertEqual((self.output / "inputs/SOURCE.json").read_bytes(), reviewed)
+        self.assertEqual(proof["source_sha256"], link.sha(reviewed))
 
     def test_synthetic_both_targets_full_pipeline_and_sanitized_commands(self):
         with mock.patch.dict(os.environ, {"RUSTFLAGS": "-C link-arg=bad", "CARGO_BUILD_RUSTC_WRAPPER": "/bad",

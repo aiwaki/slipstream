@@ -200,5 +200,44 @@ class NativeReleaseConsumerTests(unittest.TestCase):
                     release_dir=self.release, provenance_json=provenance, spdx_json=spdx)
 
 
+class NativeV2ConsumerCompatibilityTests(unittest.TestCase):
+    """Synthetic H1 producer proof consumed with a different verifier identity."""
+
+    def setUp(self):
+        fixture = native_fixture.binary_fixture
+        original = fixture.descriptor
+        self.build = fixture.build
+        self.producer_hash = hashlib.sha256(Path(self.build.__file__).read_bytes()).hexdigest()
+
+        def pinned_descriptor():
+            return original() | {'schema_version': 2, 'producer_helper_sha256': self.producer_hash}
+
+        self.consumer = NativeReleaseConsumerTests()
+        self.addCleanup(self.consumer.doCleanups)
+        with mock.patch.object(fixture, 'descriptor', side_effect=pinned_descriptor):
+            self.consumer.setUp()
+
+    def test_new_verifier_accepts_pinned_producer_through_assets_bundle_and_spdx(self):
+        other = self.consumer.case.root / 'new-verifier-identity.py'
+        other.write_bytes(Path(self.build.__file__).read_bytes() + b'\n# newer verifier identity\n')
+        self.assertNotEqual(hashlib.sha256(other.read_bytes()).hexdigest(), self.producer_hash)
+        with mock.patch.object(self.build, '__file__', str(other)):
+            result = self.consumer.verify()
+            self.assertEqual(result['asset_count'], 9)
+            document = json.loads((self.consumer.release / 'geph5-client.spdx.json').read_text())
+            self.assertEqual(self.consumer.case.verify(document)['package_count'], 3)
+        attested = release_verifier.verify_attestation_results(**self.consumer.attestations())
+        self.assertEqual(attested['provenance_subject_count'], 9)
+
+    def test_rehashed_downloaded_source_cannot_select_another_producer(self):
+        source = self.consumer.release / 'geph5-client.SOURCE.json'
+        value = json.loads(source.read_text())
+        value['native_sqlite']['producer_helper_sha256'] = 'f' * 64
+        source.write_text(json.dumps(value))
+        self.consumer.refresh_inventory()
+        with self.assertRaisesRegex(ValueError, 'reviewed'):
+            self.consumer.verify()
+
+
 if __name__ == '__main__':
     unittest.main()

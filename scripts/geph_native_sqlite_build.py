@@ -63,6 +63,12 @@ def _read(path: Path, limit=MAX_BYTES) -> bytes:
     return native.read_regular(Path(path), limit)
 
 
+# Record at module initialization, not on the first producer call. A long-lived
+# importer must not label already-loaded H1 code with an on-disk replacement H2.
+# This assumes a trusted Python loader/process; it is not code attestation.
+_LOADED_HELPER_SHA256 = sha(_read(Path(__file__).resolve(), 1024 * 1024))
+
+
 def _record(root: Path, path: Path) -> dict:
     payload = _read(path)
     return {"path": str(path.relative_to(root)), "size": len(payload), "sha256": sha(payload)}
@@ -248,10 +254,21 @@ def _commands(descriptor, target, directory, tools):
             [tools["ar"]["path"], "rcs", str(directory / "libsqlite3.a"), str(directory / "sqlite3.o")]]
 
 
+def require_producer_helper(descriptor: dict) -> str:
+    """Require module-load/file coherence and the independent reviewed pin."""
+    native.validate_descriptor(descriptor)
+    actual = sha(_read(Path(__file__).resolve(), 1024 * 1024))
+    if actual != _LOADED_HELPER_SHA256:
+        raise ValueError("native producer helper changed after module load")
+    if descriptor["schema_version"] == 2 and actual != descriptor["producer_helper_sha256"]:
+        raise ValueError("native producer helper differs from reviewed descriptor pin")
+    return actual
+
+
 def build_native(descriptor: dict, source_root: Path, output_root: Path, target: str,
                  source_sha256: str, lock_path: Path, tools: dict) -> dict:
     """Snapshot checked source; build once in a fresh per-target directory."""
-    native.validate_descriptor(descriptor)
+    helper_sha256 = require_producer_helper(descriptor)
     _digest(source_sha256)
     if target not in descriptor["targets"]:
         raise ValueError("unreviewed target")
@@ -278,9 +295,11 @@ def build_native(descriptor: dict, source_root: Path, output_root: Path, target:
     if tool_records != {**{name: _tool(Path(tools[name])) for name in ("clang", "ar")},
                         "sdk": {"path": str(sdk), "settings_sha256": sha(_read(sdk / "SDKSettings.json", 1024 * 1024))}}:
         raise ValueError("toolchain changed during native build")
+    if require_producer_helper(descriptor) != helper_sha256:
+        raise ValueError("native producer helper changed during build")
     receipt = {"schema_version": 1, "scope": NATIVE_SCOPE, "target": target,
                "descriptor_sha256": native.descriptor_sha256(descriptor), "source_sha256": source_sha256,
-               "lock_sha256": sha(lock), "helper_sha256": sha(_read(Path(__file__).resolve())),
+               "lock_sha256": sha(lock), "helper_sha256": helper_sha256,
                "tools": tool_records, "commands": commands,
                "environment": env, "build_directory": str(directory),
                "files": {name: _record(root, directory / name) for name in
@@ -302,7 +321,10 @@ def verify_native_build(descriptor: dict, receipt_path: Path, artifacts_root: Pa
         raise ValueError("not a native archive receipt")
     for name, expected in (("descriptor_sha256", native.descriptor_sha256(descriptor)),
                            ("source_sha256", source_sha256), ("lock_sha256", lock_sha256),
-                           ("helper_sha256", sha(_read(Path(__file__).resolve())))):
+                           # v2 trusts the independently reviewed SOURCE pin;
+                           # a newer verifier must not rewrite historical proof.
+                           ("helper_sha256", descriptor["producer_helper_sha256"]
+                            if descriptor["schema_version"] == 2 else sha(_read(Path(__file__).resolve())))):
         _digest(expected)
         if receipt[name] != expected:
             raise ValueError(f"native receipt {name} mismatch")

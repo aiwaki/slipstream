@@ -51,10 +51,14 @@ def _digest(value: object, label: str) -> None:
 
 
 def validate_descriptor(value: object) -> None:
-    _keys(value, {"schema_version", "version", "source_id", "path", "archive", "files",
-                  "compile_definitions", "linkage", "targets", "wrapper"}, "descriptor")
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+    version = value.get("schema_version") if isinstance(value, dict) else None
+    if type(version) is not int or version not in (1, 2):
         raise ValueError("native SQLite schema version is invalid")
+    _keys(value, {"schema_version", "version", "source_id", "path", "archive", "files",
+                  "compile_definitions", "linkage", "targets", "wrapper"}
+          | ({"producer_helper_sha256"} if version == 2 else set()), "descriptor")
+    if version == 2:
+        _digest(value["producer_helper_sha256"], "producer helper")
     version = value["version"]
     if not isinstance(version, str) or not re.fullmatch(r"3\.(?:0|[1-9][0-9]?)\.(?:0|[1-9][0-9]?)", version):
         raise ValueError("native SQLite version is invalid")

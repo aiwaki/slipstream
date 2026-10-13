@@ -9,6 +9,37 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 ### Geph native SQLite contract — 2026-10-13
 
+Native descriptor v2 adds a mandatory reviewed `producer_helper_sha256` to
+SOURCE. A producer checks that independent pin before creating output and after
+native compilation. It also binds the on-disk helper to the fingerprint captured
+at module initialization, rejecting replacement after import even when a new pin
+matches the replacement file. The outer producer snapshots authoritative SOURCE
+once before output creation and stages those same bytes. A newer consumer checks
+the original SOURCE pin, not its own helper file or an identity selected by the
+downloaded receipt. V1 keeps its existing current-helper verification; v1 proof
+is never relabeled as v2. This assumes a trusted Python loader/process and
+compiler/linker, not protection against arbitrary in-process code execution.
+
+The retained v1 production attempt2 completed both ARM and Intel targets and the
+final universal byte checks at 10:13:04 UTC. The 24-file bundle roundtrip, native
+SPDX generation, altered-binary and truncated-archive rejection checks passed.
+Independent peer review also passed. Parent verification of peer/census bindings
+found three expected current-source differences; all three historical hashes
+and lengths match commit `86b2e266c`. These are historical proofs, not a fresh v2
+build: all original receipts and artifacts remain immutable. The v2 fixture
+consumer covers the complete nine-asset/bundle/SPDX path with a synthetic
+attestation, not a signed published release. A fresh actual v2 producer build,
+pipeline activation and native advisory applicability remain open.
+
+The advisory census is complete as an enumeration of retained upstream/NVD/OSV/
+CNA results: 301 CVEs, 92 native/ambiguous groups, and 81 exact-source unknowns.
+Unknown does not mean confirmed vulnerability. Binary applicability has not
+been evaluated and the advisory gate stays open. Private receipts are retained
+under `output/native-producer-review/` and
+`output/sqlite-native-integration/native-advisory-census-20261013/`.
+
+Earlier parser investigation and proof boundaries:
+
 The first actual production-feature ARM compile completed in3m30s, then proof
 collection stopped before sealing: Apple ld emits opaque non-UTF8 bytes in
 literal-string rows. The retained16,071,743-byte map (5505268c) fails the old
@@ -18,8 +49,8 @@ Exact paths, architecture, owned archive/member, SQLite symbols and their Mach-O
 addresses remain required. Corrupted required names still reject.24 builder,
 34 producer,21 bundle,12 native-consumer and8 native-SPDX checks pass after the
 correction. Read-only actual ARM map/rlib/binary replays pass; neither replay
-rewrites old receipts or qualifies a final release. A new two-target producer
-attempt is required because native receipts bind the exact helper source hash.
+rewrites old receipts or qualifies a final release. This led to the two-target
+attempt2 described above; it does not establish a v2 producer build.
 Failure and review evidence: `output/native-producer/real-inputs/attempt1-failure/`
 and `output/native-producer-review/link-map-opaque/`.
 

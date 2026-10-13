@@ -1,5 +1,46 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- SOURCE-pinned producer-helper compatibility is implemented but inactive.
+  Native descriptor v2 requires the independently reviewed helper SHA; the
+  producer rejects the wrong pin before output/compiler, freezes SOURCE bytes,
+  and checks module-load/file coherence before and after compilation. Newer
+  consumers retain original v2 proof without reading a pin from its receipt;
+  v1 remains strict. Independent review found the after-import replacement
+  race; its retained RED is now covered for both schema versions. 125 distinct
+  scoped cases pass (124-case native/bundle/SPDX/consumer run plus the updated
+  37-case producer run replacing its prior 36-case subset). SOURCE swap after
+  preflight passes with frozen authority; an initial fixture-path failure is
+  retained separately. Logs: output/native-producer-review/helper-compatibility/.
+  No new Geph compilation, SOURCE/workflow activation or installation.
+  Next: qualify a fresh actual v2 build without altering any v1 receipts, then
+  conditional pipeline integration and native advisory applicability.
+  Memory/tool note: codebase-memory-mcp is disabled after a 52GiB incident.
+  Do not restart it. Root checkout has a qualified on-demand crg-safe graph;
+  this worktree requires its own explicit physical --repo if indexed. Use
+  bounded direct reads for the known pending files; no heavy parallel jobs.
+
+- Actual attempt2 PASS2026-10-13 10:13:04 UTC; PID64493/exec62244 finished.
+  ARM production compile181.31s; Intel226s; both linked seals and final lipo/
+  verifier pass. Final universal40,061,456bytes SHA c3c640c3; receipt b1ef8f1f.
+  Persistent109-file/172.6MB clone in output/native-producer/real-inputs/attempt2/
+  build-evidence is byte-verified; completion058f0f21. No Geph/client/account
+  execution. Source/workflow remain inactive; this is not installed E2E.
+  Actual24-file proof bundle150,730,240bytes roundtrip PASS; generated/verified
+  SPDX435 packages with native SQLite3.53.2 separate from Rust wrapper.
+  Independent wrong-binary and truncated-bundle controls both reject. Parent
+  postbuild receipt bd8d071f binds12 inputs/code/artifacts. Independent build
+  review PASS (5f96c715). Parent verified1291/1294 peer+census current bindings;
+  the three edited helpers match historical86b2 exactly (08945643). Initial
+  current-tree mismatch receipt328d1885 is retained, not rewritten as PASS.
+  Census566df9a9 finishes enumeration:301 CVEs/92 native-or-ambiguous groups,
+  81 exact-source unknowns, binary applicability unevaluated; audit gate OPEN.
+  Older attempts/receipts unchanged.
+  Exact86b2e266c CI38381206722 product/checks and Chromium PASS. Package still
+  HTTP404unpublished0.4.3-r1; dependency38381206760 reports expired app policy
+  and Geph2 blocking/2 informational findings. Terminal logs retained under
+  output/sqlite-native-integration/ci/86b2e266c/; no rerun.
+  Next action and v2 compatibility scope are in the newer checkpoint above.
+
 - Exact012da0fc1 CI38374565990 is terminal: product/checks and Chromium PASS,
   including the Xcode15 metadata/linker fixture. Package stops at HTTP404 for
   unpublished Geph0.4.3-r1. Evidence: output/sqlite-native-integration/ci/012da0fc1/.
@@ -22,7 +63,8 @@
   Both parsers are corrected: producer57dfee45/shared helper194c2104.
   Producer34, helper24, bundle21, native-consumer12 and native-SPDX8 cases PASS;
   actual ARM map/rlib/binary replays PASS without rewriting old receipts.
-  Attempt2 started10:05:43 UTC, PID64493, exec session62244; do not duplicate.
+  Attempt2 started10:05:43 UTC and finished10:13:04 UTC; PID64493/exec62244 are
+  terminal. Do not poll or duplicate this historical v1 build.
   Output /private/tmp/slipstream-native-production-788x15x3/build-map-bytes.
   Resume from output/native-producer/real-inputs/attempt2/ status/argv/manifest.
   Manifest c51fbe93 binds freshly verified input/tools/cache; source stays frozen.

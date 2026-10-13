@@ -89,6 +89,22 @@ class NativeSqliteSourceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     native.validate_descriptor(value)
 
+    def test_v2_descriptor_requires_reviewed_helper_pin_and_binds_it(self):
+        value = copy.deepcopy(self.descriptor)
+        value.update(schema_version=2, producer_helper_sha256="a" * 64)
+        native.validate_descriptor(value)
+        first = native.descriptor_sha256(value)
+        value["producer_helper_sha256"] = "b" * 64
+        self.assertNotEqual(native.descriptor_sha256(value), first)
+        for pin in (None, True, 1, "", "A" * 64, "a" * 63, "a" * 64 + "\n"):
+            with self.subTest(pin=pin), self.assertRaises(ValueError):
+                native.validate_descriptor({**value, "producer_helper_sha256": pin})
+        for changed in ({k: v for k, v in value.items() if k != "producer_helper_sha256"},
+                        {**value, "schema_version": 1}, {**value, "schema_version": 3},
+                        {**value, "schema_version": True}, {**value, "extra": "unknown"}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                native.validate_descriptor(changed)
+
     def test_archive_bytes_and_length_must_match(self):
         self.archive.write_bytes(self.archive.read_bytes() + b"x")
         with self.assertRaisesRegex(ValueError, "archive size/hash"):

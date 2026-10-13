@@ -220,6 +220,14 @@ def build_release(*, source_path: Path, version_path: Path, lock_path: Path,
     libclang_bytes = native.read_regular(libclang, link.MAX_BYTES)
     sdk_settings = native.read_regular(sdk / "SDKSettings.json", 1024 * 1024)
     no_cargo_config(output, cargo_home)
+    # Freeze the authoritative SOURCE bytes before any output or compiler work.
+    # Re-reading the caller's file for staging could race this pin preflight.
+    source_bytes = native.read_regular(Path(source_path), vendor.MAX_SOURCE_BYTES)
+    source = vendor._json_object(source_bytes, "Geph source contract")
+    vendor._validate_source_contract(source)
+    if "native_sqlite" not in source:
+        raise ValueError("reviewed native SQLite SOURCE is required")
+    link.require_producer_helper(source["native_sqlite"])
     output.mkdir(mode=0o700)  # Refuse reused, partial or symlink output.
     snapshots = output / "inputs"
     snapshots.mkdir()
@@ -227,12 +235,14 @@ def build_release(*, source_path: Path, version_path: Path, lock_path: Path,
                               ("VERSION", version_path, 1024), ("Cargo.lock", lock_path, MAX_METADATA),
                               ("geph.crate", crate_path, vendor.MAX_CRATE_BYTES),
                               ("sqlite.zip", native_archive, native.MAX_ARCHIVE_BYTES)):
-        (snapshots / name).write_bytes(native.read_regular(Path(path), limit))
+        (snapshots / name).write_bytes(source_bytes if name == "SOURCE.json"
+                                      else native.read_regular(Path(path), limit))
     input_records = [link._record(output, path) for path in sorted(snapshots.iterdir())]
     source = vendor.load_source_contract(snapshots / "SOURCE.json")
     if "native_sqlite" not in source:
         raise ValueError("reviewed native SQLite SOURCE is required")
     descriptor, source_hash = source["native_sqlite"], link.sha((snapshots / "SOURCE.json").read_bytes())
+    link.require_producer_helper(descriptor)
     source_root = vendor.materialize_source(source_path=snapshots / "SOURCE.json",
         version_path=snapshots / "VERSION", cargo_lock_path=snapshots / "Cargo.lock",
         crate_path=snapshots / "geph.crate", native_sqlite_archive=snapshots / "sqlite.zip",
