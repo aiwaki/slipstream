@@ -1,5 +1,23 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Optional native SQLite source/build/SPDX tooling is implemented, reviewed and
+  inactive.69 focused source/materializer/SPDX cases and16 native-builder cases
+  PASS. The latter includes a real tiny clang/ar -> Rust rlib -> Apple linker
+  fixture, not a Geph rebuild; universal cases use explicit synthetic slices.
+  The retained actual ARM Geph binary passes read-only parser compatibility.
+  Review fixed duplicate Rust-local symbol rejection, legacy Cargo `sqlite`
+  misclassification and a wrapper URL mismatch with the shared Cargo converter.
+  Object-only, one-target, mixed-map/binary and altered universal evidence fail.
+  Source receipt a122bd43 and builder-result.json bind the final files; official
+  retained SQLite3.53.2 archive materializes with unchanged C/header hashes.
+  Independent final-live four-scenario replay4402f167 passes with every reviewed
+  file matching current bytes; earlier peer snapshots remain immutable. Parent
+  verifies60 retained bindings and85 distinct native test identities;8 docs tests
+  PASS. Evidence: output/sqlite-native-integration/. SOURCE3420708f, lockdc8ec61a,
+  VERSION/LICENSE and build-geph workflow remain unchanged. See the native
+  contract section in ROUTING_RESEARCH for proof boundaries and the next gate:
+  actual producer/consumer integration, both target builds and native advisory
+  coverage before production activation. No installation or runtime/E2E claim.
 - Strict dependency-audit identity/raw-evidence bridge from root66e294910 is
   integrated. Previously, the evaluator accepted411 unrelated scanner rows, or
   fabricated registry identities for the three source-owned packages, against
@@ -11,7 +29,7 @@
   policy bindings. Evidence: output/sqlite-native-integration/audit-identity/
   receipt.json (a075a608), parent-audit-verification.json one directory above.
   No real scanner, account, build, release or install was run for this bridge.
-  Native source/materializer/linkage helpers are being reviewed separately;
+  Native source/materializer/linkage helper results are recorded above;
   SOURCE3420708f, lockdc8ec61a and release workflow remain unchanged.
 
 Physical worktree: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`.

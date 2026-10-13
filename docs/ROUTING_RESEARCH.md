@@ -7,6 +7,42 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 ## Findings Index
 
+### Geph native SQLite contract — 2026-10-13
+
+The optional native SQLite tooling in this candidate does not activate a new
+Geph source contract or change the installed application. It prepares the
+previously qualified static SQLite candidate for a release pipeline which can
+verify the actual native library instead of inferring it from Cargo features.
+
+| Boundary | Code | Required evidence / rejection |
+|---|---|---|
+| Native source | `scripts/geph_native_sqlite.py`, `geph_vendor_source.py` | Exact official archive snapshot, bounded C/header files, version/source ID, retained header notice, reviewed compile definitions and genuine registry wrapper checksum. Symlink/path replacement, duplicate archive members and mismatched source bytes reject. |
+| Native archive | `geph_native_sqlite_build.build_native` / `verify_native_build` | Fresh per-target compiler output, explicit tool identities/arguments/environment, exact owned object inside the static archive. This proves only the native archive. |
+| Linked target | `seal_linked_target` / `verify_linked_target` | Resolved unbundled features, actual sys build directives, Rust rlib metadata/codegen members and byte-identical SQLite object, linker-map identity symbols matching the Mach-O global symbols, exact version/source ID bytes, no dynamic SQLite import. |
+| Final universal | `verify_release_evidence` | Both target receipts and byte-identical corresponding slices in the actual final universal artifact. One target, an archive-only receipt, rehashed changed slices and post-proof strip/sign mutations reject. |
+| Native inventory | `make_geph_vendor_sbom.py` | Separate SQLite source package/files and static-link relationship, raw SOURCE and final-binary/receipt hashes. Keep `libsqlite3-sys` as its genuine Cargo registry component. Generation and verification require the final universal evidence. |
+| Advisory coverage | `dependency_audit.py` | Exact scanner package identities and original result binding. Source-owned/native packages cannot inherit the Rust wrapper's coverage or invented registry coordinates. Separate reviewed native applicability remains required. |
+
+69 focused source/materializer/SPDX cases and16 builder cases pass. The builder
+suite invokes real clang/ar, rustc and the Apple linker on a tiny fixture; its
+Cargo metadata/sys stdout and universal slices are explicitly synthetic. It
+does not qualify a Geph release. The actual retained ARM Geph test executable
+was parsed read-only. That check exposed legitimate duplicate Rust local
+symbols; the parser now enforces uniqueness/global definition only for the two
+SQLite identity symbols. Independent review also reproduced and fixed a Cargo
+crate named `sqlite` being mistaken for native SQLite, and an expected wrapper
+URL inconsistent with the real shared Cargo converter. Negative evidence is
+retained alongside successful replays in `output/sqlite-native-integration/`.
+
+These checks establish input/output coherence under trusted compiler/linker
+execution. They do not cryptographically prove every relocated instruction or
+replace release attestations. SDK evidence records the physical path and
+SDKSettings hash, not the entire SDK tree. The production SOURCE, lock, version,
+license and workflow are unchanged. Next integrate the producer and release
+consumer, qualify both actual target artifacts and final bytes, and finish
+native/source-owned advisory coverage; do not publish or install from fixture
+results. Existing unchanged Geph runtime tests remain reusable.
+
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
 | 2026-08-22 | Sequential protected workflows duplicate account authentication | Root cause proven; single-session release gate in preparation | Exact main `c8c4c425e0488479686d76265b5eec3db133d202` passed CI `32589384708`, audit `32589384714`, and standalone owned-Geph run `32590027895`. Readiness `32590146466` then created a second ephemeral Keychain/config/process on a different hosted runner. Its first `get_connect_token` and one bounded retry both returned the already-classified daily rate limit before SafariDriver or any matrix browser started; artifact `9480105795` contains only exit marker `125`. Passing a Geph cache/token between runners would persist reusable authentication material and is rejected. The safe composition keeps one Geph lifecycle process inside `release-readiness.yml`, runs the existing deterministic Chromium semantic gate and fixed Safari/Chrome matrix before releasing it, proves cleanup, then runs the independent invisibility soak. Separate qualification and readiness proofs share one exact protected workflow attempt. | Merge only after local/PR verification, obtain a fresh exact-main candidate, and dispatch one combined readiness run. Do not run the explicit standalone diagnostic on a UTC day reserved for release qualification. |

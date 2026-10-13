@@ -16,6 +16,8 @@ import tempfile
 import tomllib
 from pathlib import Path, PurePosixPath
 
+import geph_native_sqlite
+
 
 SCHEMA_VERSION = 1
 CRATE_NAME = "geph5-client"
@@ -129,7 +131,8 @@ def _validate_source_contract(source: dict) -> None:
             "lock_sha256",
             "release_revision",
         } | ({"source_edits"} if "source_edits" in source else set())
-        | ({"embedded_packages"} if "embedded_packages" in source else set()),
+        | ({"embedded_packages"} if "embedded_packages" in source else set())
+        | ({"native_sqlite"} if "native_sqlite" in source else set()),
         "Geph source contract",
     )
     schema_version = source["schema_version"]
@@ -179,6 +182,8 @@ def _validate_source_contract(source: dict) -> None:
                 raise ValueError("invalid Geph source edit text")
     if "embedded_packages" in source:
         _validate_embedded_packages(source["embedded_packages"])
+    if "native_sqlite" in source:
+        geph_native_sqlite.validate_descriptor(source["native_sqlite"])
 
 
 def _canonical_digest(value: dict) -> str:
@@ -344,6 +349,9 @@ def _verify_source_contract_files(
         raise ValueError("Geph source contract and VERSION disagree")
     if hash_file(cargo_lock_path) != source["lock_sha256"]:
         raise ValueError("Geph Cargo.lock does not match the source contract")
+    if "native_sqlite" in source:
+        geph_native_sqlite.verify_wrapper_lock(
+            source["native_sqlite"], cargo_lock_path.read_bytes(), source["lock_sha256"])
     if expected_version is not None and version != expected_version:
         raise ValueError("reviewed Geph version is not the requested upstream version")
     if expected_crate_sha256 is not None:
@@ -366,6 +374,8 @@ def _verify_source_contract_files(
             package["name"]: package["sha256"]
             for package in source.get("embedded_packages", {}).get("packages", [])
         },
+        **({"native_sqlite": geph_native_sqlite.descriptor_sha256(source["native_sqlite"])}
+           if "native_sqlite" in source else {}),
     }
 
 
@@ -852,11 +862,14 @@ def _verify_embedded_root_edges(root: Path) -> None:
 
 
 def materialize_source(
-    *, source_path: Path, version_path: Path, cargo_lock_path: Path, crate_path: Path, output: Path
+    *, source_path: Path, version_path: Path, cargo_lock_path: Path, crate_path: Path, output: Path,
+    native_sqlite_archive: Path | None = None,
 ) -> Path:
     # Parse and bind one SOURCE snapshot; never verify one set of descriptors
     # and then re-read potentially replaced embedded bytes before materializing.
     source, source_sha256 = _source_contract_snapshot(source_path)
+    if ("native_sqlite" in source) != (native_sqlite_archive is not None):
+        raise ValueError("native SQLite SOURCE and explicit archive must be supplied together")
     summary = _verify_source_contract_files(
         source=source, source_sha256=source_sha256,
         version_path=version_path,
@@ -875,6 +888,8 @@ def materialize_source(
     if "embedded_packages" in source:
         _verify_embedded_root_edges(root)
         _materialize_embedded_packages(root, source["embedded_packages"])
+    if "native_sqlite" in source:
+        geph_native_sqlite.materialize(source["native_sqlite"], native_sqlite_archive, root)
     return root
 
 
@@ -919,6 +934,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     extract.add_argument("--cargo-lock", required=True, type=Path)
     extract.add_argument("--crate", required=True, type=Path)
     extract.add_argument("--output", required=True, type=Path)
+    extract.add_argument("--native-sqlite-archive", type=Path)
     return parser.parse_args(argv)
 
 
@@ -964,6 +980,7 @@ def main(argv: list[str] | None = None) -> int:
             cargo_lock_path=args.cargo_lock,
             crate_path=args.crate,
             output=args.output,
+            native_sqlite_archive=args.native_sqlite_archive,
         )
         result = {"root": str(root)}
     print(json.dumps(result, sort_keys=True))

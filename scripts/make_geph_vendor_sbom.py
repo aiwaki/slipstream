@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import geph_vendor_source
+import geph_native_sqlite
 from make_release_sbom import (
     DATA_LICENSE,
     DOCUMENT_SPDX_ID,
@@ -49,7 +50,7 @@ def _embedded_descriptors(source: dict) -> list[dict]:
 
 def _source_digest(source_sha256: str | None) -> str:
     if not isinstance(source_sha256, str) or not geph_vendor_source.SHA256_PATTERN.fullmatch(source_sha256):
-        raise ValueError("embedded Geph SBOM requires the exact SOURCE file SHA256")
+        raise ValueError("source-owned/native Geph SBOM requires the exact SOURCE file SHA256")
     return source_sha256
 
 
@@ -294,12 +295,94 @@ def _namespace(
 
 def _root_source_info(source: dict, source_commit: str, source_sha256: str | None = None) -> str:
     crate = source["crate"]
-    suffix = f"; SOURCE sha256 {_source_digest(source_sha256)}" if source.get("embedded_packages") else ""
+    suffix = f"; SOURCE sha256 {_source_digest(source_sha256)}" if source.get("embedded_packages") or source.get("native_sqlite") else ""
     return (
         f"Slipstream commit {source_commit}; exact crates.io archive sha256 "
         f"{crate['sha256']}; Cargo.lock sha256 {source['lock_sha256']}; "
         f"features {','.join(source['features'])}; targets {','.join(source['targets'])}{suffix}"
     )
+
+
+def _native_inventory(
+    source: dict, packages: list[dict], source_sha256: str | None, *,
+    source_root: Path | None, cargo_lock: Path | None,
+    native_receipt: Path | None, native_artifacts_root: Path | None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Build native inventory only after the actual universal linkage is verified."""
+    descriptor = source.get("native_sqlite")
+    if descriptor is None:
+        if native_receipt is not None or native_artifacts_root is not None:
+            raise ValueError("native build evidence supplied without native SQLite SOURCE")
+        return [], [], []
+    geph_native_sqlite.validate_descriptor(descriptor)
+    source_sha256 = _source_digest(source_sha256)
+    if any(item is None for item in (source_root, cargo_lock, native_receipt, native_artifacts_root)):
+        raise ValueError("native SQLite SBOM requires materialized source, lock and universal linked build evidence")
+    contents = geph_native_sqlite.verify_materialized(descriptor, source_root)
+    lock_bytes = geph_native_sqlite.read_regular(cargo_lock, geph_vendor_source.MAX_SOURCE_BYTES)
+    geph_native_sqlite.verify_wrapper_lock(descriptor, lock_bytes, source["lock_sha256"])
+    if geph_native_sqlite.read_regular(source_root / "Cargo.lock", geph_vendor_source.MAX_SOURCE_BYTES) != lock_bytes:
+        raise ValueError("native SQLite materialized lock disagrees with SOURCE")
+    # Object-build receipts cannot prove a Rust wrapper or final release used
+    # those bytes. The release verifier must check both linked target slices
+    # and their identity in the actual final (post-strip) universal binary.
+    import geph_native_sqlite_build
+    verifier = getattr(geph_native_sqlite_build, "verify_release_evidence", None)
+    if verifier is None:
+        raise ValueError("native SQLite universal linked build proof is not implemented")
+    proof = verifier(descriptor=descriptor, receipt_path=native_receipt,
+                     artifacts_root=native_artifacts_root, source_sha256=source_sha256,
+                     lock_sha256=source["lock_sha256"])
+    receipt_digest = proof.get("receipt_sha256")
+    binary_digest = proof.get("final_binary_sha256")
+    if (proof.get("scope") != "linked-macos-universal" or proof.get("targets") != source["targets"]
+            or not isinstance(receipt_digest, str) or not geph_native_sqlite.SHA256.fullmatch(receipt_digest)
+            or not isinstance(binary_digest, str) or not geph_native_sqlite.SHA256.fullmatch(binary_digest)):
+        raise ValueError("native SQLite proof does not establish final universal linkage")
+    wrapper = descriptor["wrapper"]
+    wrappers = [item for item in packages if item.get("name") == wrapper["name"]]
+    if len(wrappers) != 1:
+        raise ValueError("native SQLite SBOM must retain exactly one genuine registry wrapper")
+    wrapper_package = wrappers[0]
+    expected_component = _cargo_registry_component(
+        {"name": wrapper["name"], "version": wrapper["version"],
+         "source": "registry+https://github.com/rust-lang/crates.io-index"},
+        _cargo_lock_checksums(cargo_lock, payload=lock_bytes),
+    )
+    if (wrapper_package.get("SPDXID") != expected_component.spdx_id
+            or wrapper_package.get("versionInfo") != wrapper["version"]
+            or wrapper_package.get("downloadLocation") != expected_component.download_location
+            or wrapper_package.get("checksums") != [{"algorithm": "SHA256", "checksumValue": wrapper["sha256"]}]
+            or wrapper_package.get("externalRefs") != [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": expected_component.purl}]):
+        raise ValueError("native SQLite SBOM registry wrapper identity/checksum is invalid")
+    descriptor_digest = geph_native_sqlite.descriptor_sha256(descriptor)
+    package_id = "SPDXRef-Package-native-sqlite-" + descriptor_digest
+    files, relationships, sha1s = [], [], []
+    for entry in descriptor["files"]:
+        relative = descriptor["path"] + "/" + entry["path"]
+        sha1 = hashlib.sha1(contents[entry["path"]]).hexdigest()
+        sha1s.append(sha1)
+        file_id = "SPDXRef-File-" + hashlib.sha256((descriptor_digest + "\0" + relative).encode()).hexdigest()
+        files.append({"SPDXID": file_id, "fileName": "./" + relative,
+                      "checksums": [{"algorithm": "SHA1", "checksumValue": sha1}, {"algorithm": "SHA256", "checksumValue": entry["sha256"]}],
+                      "licenseConcluded": "NOASSERTION", "licenseInfoInFiles": ["blessing"],
+                      "copyrightText": "NOASSERTION"})
+        relationships.append({"spdxElementId": package_id, "relationshipType": "CONTAINS", "relatedSpdxElement": file_id})
+    relationships.append({"spdxElementId": wrapper_package["SPDXID"], "relationshipType": "STATIC_LINK", "relatedSpdxElement": package_id})
+    native_package = {
+        "SPDXID": package_id, "name": "sqlite", "versionInfo": descriptor["version"],
+        "downloadLocation": descriptor["archive"]["url"], "filesAnalyzed": True,
+        "checksums": [{"algorithm": "SHA256", "checksumValue": descriptor["archive"]["sha256"]}],
+        "packageVerificationCode": {"packageVerificationCodeValue": hashlib.sha1("".join(sorted(sha1s)).encode("ascii")).hexdigest()},
+        "licenseConcluded": "NOASSERTION", "licenseDeclared": "blessing", "licenseInfoFromFiles": ["blessing"],
+        "copyrightText": "NOASSERTION", "primaryPackagePurpose": "LIBRARY", "homepage": "https://sqlite.org/",
+        "sourceInfo": json.dumps({"kind": "slipstream-native-sqlite", "source_sha256": source_sha256,
+                                  "descriptor_sha256": descriptor_digest, "sqlite_source_id": descriptor["source_id"],
+                                  "native_receipt_sha256": receipt_digest, "final_binary_sha256": binary_digest,
+                                  "targets": proof["targets"]}, sort_keys=True, separators=(",", ":")),
+        "licenseComments": "Original blessing retained in the verified SQLite header; native advisory review is a separate gate.",
+    }
+    return [native_package], files, relationships
 
 
 def build_spdx_document(
@@ -311,6 +394,8 @@ def build_spdx_document(
     source: dict,
     components: list[Component],
     source_sha256: str | None = None,
+    source_root: Path | None = None, cargo_lock: Path | None = None,
+    native_receipt: Path | None = None, native_artifacts_root: Path | None = None,
 ) -> dict:
     if not SOURCE_COMMIT_PATTERN.fullmatch(source_commit):
         raise ValueError("source commit must be a full lowercase Git object ID")
@@ -340,6 +425,12 @@ def build_spdx_document(
     }
     owned_packages, files, file_relationships = _source_owned_inventory(source, source_commit, source_sha256)
     packages = [_component_package(component) for component in components] + owned_packages
+    native_packages, native_files, native_relationships = _native_inventory(
+        source, packages, source_sha256, source_root=source_root, cargo_lock=cargo_lock,
+        native_receipt=native_receipt, native_artifacts_root=native_artifacts_root)
+    packages.extend(native_packages)
+    files.extend(native_files)
+    file_relationships.extend(native_relationships)
     relationships = [
         {
             "spdxElementId": DOCUMENT_SPDX_ID,
@@ -395,6 +486,8 @@ def validate_spdx_document(
     source: dict,
     source_date_epoch: int | None = None,
     source_sha256: str | None = None,
+    source_root: Path | None = None, cargo_lock: Path | None = None,
+    native_receipt: Path | None = None, native_artifacts_root: Path | None = None,
 ) -> dict:
     if not isinstance(data, dict):
         raise ValueError("Geph SBOM must be a JSON object")
@@ -450,6 +543,33 @@ def validate_spdx_document(
         raise ValueError("Geph SBOM crate checksum is invalid")
 
     expected_owned, expected_files, expected_file_relationships = _source_owned_inventory(source, source_commit, source_sha256)
+    expected_native, native_files, native_relationships = _native_inventory(
+        source, packages, source_sha256, source_root=source_root, cargo_lock=cargo_lock,
+        native_receipt=native_receipt, native_artifacts_root=native_artifacts_root)
+    def is_native_package(item: dict) -> bool:
+        if item["SPDXID"].startswith("SPDXRef-Package-native-"):
+            return True
+        try:
+            info = json.loads(item.get("sourceInfo", "{}"))
+            if isinstance(info, dict) and info.get("kind") == "slipstream-native-sqlite":
+                return True
+        except (TypeError, ValueError):
+            pass
+        if item.get("name") != "sqlite":
+            return False
+        # A genuine Cargo crate named sqlite is a separate registry identity;
+        # do not regress legacy documents that have no native descriptor.
+        version = item.get("versionInfo")
+        if not isinstance(version, str):
+            return True
+        cargo_ref = {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+                     "referenceLocator": _purl("cargo", "sqlite", version)}
+        return item.get("externalRefs") != [cargo_ref]
+    actual_native = [item for item in packages if is_native_package(item)]
+    if actual_native != expected_native:
+        raise ValueError("Geph SBOM native SQLite package set/content disagrees with source/build evidence")
+    expected_files.extend(native_files)
+    expected_file_relationships.extend(native_relationships)
     owned_names = {item["name"] for item in expected_owned}
     actual_owned = [item for item in packages if item["SPDXID"].startswith("SPDXRef-Package-source-") or item.get("name") in owned_names]
     if sorted(actual_owned, key=lambda item: item["SPDXID"]) != sorted(expected_owned, key=lambda item: item["SPDXID"]):
@@ -502,8 +622,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         item.add_argument("--repository", required=True)
         item.add_argument("--source-commit", required=True)
         item.add_argument("--target", default=VENDOR_TARGET)
+        item.add_argument("--source-root", type=Path, help="Required for native verification or source-owned generation: exact materialized crate root")
+        item.add_argument("--native-receipt", type=Path, help="Required for native SOURCE: final universal linked-build receipt")
+        item.add_argument("--native-artifacts-root", type=Path)
         if command == "generate":
-            item.add_argument("--source-root", type=Path, help="Required for embedded SOURCE: exact materialized crate root")
             item.add_argument("--output", required=True, type=Path)
             item.add_argument("--source-date-epoch", required=True, type=int)
             item.add_argument(
@@ -539,6 +661,8 @@ def main(argv: list[str] | None = None) -> int:
             target=args.target,
             source=source, source_sha256=source_sha256,
             components=components,
+            source_root=args.source_root, cargo_lock=args.cargo_lock,
+            native_receipt=args.native_receipt, native_artifacts_root=args.native_artifacts_root,
         )
         result = validate_spdx_document(
             document,
@@ -547,6 +671,8 @@ def main(argv: list[str] | None = None) -> int:
             source_date_epoch=args.source_date_epoch,
             target=args.target,
             source=source, source_sha256=source_sha256,
+            source_root=args.source_root, cargo_lock=args.cargo_lock,
+            native_receipt=args.native_receipt, native_artifacts_root=args.native_artifacts_root,
         )
         write_json_atomic(args.output, document)
     else:
@@ -557,6 +683,8 @@ def main(argv: list[str] | None = None) -> int:
             source_commit=args.source_commit,
             target=args.target,
             source=source, source_sha256=source_sha256,
+            source_root=args.source_root, cargo_lock=args.cargo_lock,
+            native_receipt=args.native_receipt, native_artifacts_root=args.native_artifacts_root,
         )
     print(json.dumps(result, sort_keys=True))
     return 0
