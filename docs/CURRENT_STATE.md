@@ -42,6 +42,28 @@ file.
 
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- Dedicated520bea685 implements separate native SQLite advisory scan/verify and
+  conditional producer/consumer wiring, leaving production policy/SOURCE inactive.
+  Exact registry/native SPDXID partitions, original+scanner-projection hashes,
+  independently verified native linkage and complete census/alias coverage.
+  Actual v2 proof435 packages =434 registry+1 native;301 groups/92 native/
+  209 exclusions,6 adjudicated and86 unresolved (75 unknown+11 census-only),
+  expected FAIL. No actual434-package OSV scan yet; research candidate stays
+  private/output-only and must be made publishable before policy adoption.
+  Helper20 tests PASS; bridge49 focused baseline+11 checks after causal fix PASS;
+  workflow4 tests/28 shell scenarios, YAML+7 syntax checks and dedicated docs8 PASS.
+  Fixed Bash3 empty-array/nounset regression and native receipt snapshot outside
+  proof-root. Real tiny-proof tests reach inert scanner and reject receipt
+  mutation; independent peer0a5b1d7f has no open findings. Parent187 retained
+  bindings verify, including historical cb815 source snapshot. Evidence in
+  dedicated output/sqlite-native-integration/native-{advisory-validator,
+  audit-candidate,audit-bridge,audit-workflow,audit-bridge-review}/.
+  Exact5b3 CI38403655112 product/checks/Windows/Chromium PASS; package still404
+  unpublished0.4.3-r1. Dependency38403655193 expired app policy andGeph2blocking/
+  2informational/423packages. Logs retained; no broad rerun/build/install.
+  Next: actual pinned scanner on434 registry projection, remaining native source
+  applicability reviews; source activation, native CI runtime, release/installed
+  browser qualification remain open. New520bea685 CI pending.
 - Dedicated5b3f0ede6 integrates conditional native producer and host synthetic
   compile path; SOURCE/lock/helper pins unchanged/inactive. Fresh full-lock
   fetch -> sealed cache -> OS-denied offline fetch/producer/jobs1 -> runtime
