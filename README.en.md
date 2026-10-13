@@ -37,6 +37,10 @@ extension.
 > method: page loading, video, and calls may still fail. The public build may
 > lag behind fixes in the repository; access to every website is not guaranteed.
 
+**Development is active.** Fixes for incomplete page loading, connection recovery,
+and the Telegram proxy update are being tested in separate PRs. These changes
+are not yet in the downloadable build. [Work in progress and release blockers](docs/ROADMAP.md#development-status).
+
 ## Installation
 
 Currently available **for macOS 13 or later on Apple silicon**. We plan to expand to

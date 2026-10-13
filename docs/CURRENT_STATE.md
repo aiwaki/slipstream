@@ -1,3 +1,42 @@
+# Publication checkpoint — 2026-10-13
+
+This documentation update is based on main
+`7e196a71a307f470cadf6519d5e753dd7e1b27ac`. PR #382 has merged and
+`geph-vendor-0.3.9-r5` was published on 2026-09-30; the old NEXT below is
+historical. The latest public app remains `v0.1.9-preview.23`, published on
+2026-08-24. Internal vendor releases do not update the downloadable app.
+
+- [PR #376](https://github.com/aiwaki/slipstream/pull/376), remote head
+  `35284416b6b835aad9c3ae035f009605c31288f3`, remains a draft. It contains
+  recovery/lifecycle fixes, removal of the app-owned xbox-dns.ru provider,
+  and the tg-ws-proxy 1.11.2 update. Product checks pass; packaging and
+  dependency gates do not. These changes are not in the published app.
+- [PR #384](https://github.com/aiwaki/slipstream/pull/384), remote head
+  `ebdf6b8bded404a67098d43128b2406e4bcdbba4`, remains a separate draft.
+  [CI 38414401897](https://github.com/aiwaki/slipstream/actions/runs/38414401897)
+  passes product/checks, Windows adapter and Chromium checks. Packaging requests
+  the unpublished `geph-vendor-0.4.3-r1` and receives HTTP 404; the lifecycle
+  failure is downstream of that missing package.
+  [Audit 38414402007](https://github.com/aiwaki/slipstream/actions/runs/38414402007)
+  fails the expired app policy and two Geph dependency findings.
+- Local native-dependency review continues in the dedicated Geph checkout.
+  Its output-only candidate has 31 adjudicated native groups and 61 unresolved;
+  it is not activated in production SOURCE/lock/policy and is not release proof.
+- Source tests and retained regressions are reusable evidence, not a substitute
+  for installed-app behavior. Normal browser use, update/Quit, sustained
+  Discord/YouTube, sleep/wake and mixed load remain separate product gates.
+- This publication changes documentation only. It changes no release tag,
+  dependency policy, executable, workstation service, or routing behavior.
+  Required main checks must pass through the existing documentation-only path;
+  no branch protection or release requirement is waived.
+
+Next action: isolate the tested Telegram transport update from the larger audit. Keep the
+app release blocked until dependency and packaged-app requirements pass.
+The AUD-17 working checkpoint remains in its Developer checkout; reconcile
+current PR heads and CI there before resuming implementation.
+
+## Previous checkpoints (historical; not current actions)
+
 # Geph r5 source continuation — 2026-09-30
 
 This vendor branch is codex/geph-stream-error-isolation, PR382, based on
