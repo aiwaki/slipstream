@@ -1557,7 +1557,7 @@ def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
             launcher.launch()
 
 
-def test_console_worker_launcher_cleans_only_exact_stale_runtime():
+def test_console_worker_launcher_cleans_only_exact_stale_runtime(capsys):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-",
         dir="/tmp",
@@ -1632,6 +1632,8 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime():
             str(executable),
             probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
         ]
+        assert "browser_worker_runtime_unowned" in capsys.readouterr().err
+
         payload["EnvironmentVariables"]["CI"] = "true"
         paths.plist.write_bytes(plistlib.dumps(payload))
         paths.plist.chmod(0o600)
@@ -1644,7 +1646,21 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime():
         assert paths.directory.exists()
 
 
-def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
+@pytest.mark.parametrize("exit_code,worker_error,expected_clean", [
+    (1, "worker_terminated", True),
+    (1, "socket_unavailable", True),
+    (2, "socket_unavailable", False),
+    (-15, "socket_unavailable", False),
+    (1, "socket_unowned", False),
+    (1, "ipc_unavailable", True),
+    (2, "ipc_unavailable", False),
+    (-15, "ipc_unavailable", False),
+    (0, "", True),
+    (1, "", False),
+    (1, "chrome_cleanup_failed", False),
+    (1, "profile_cleanup_failed", False),
+])
+def test_console_worker_launcher_stops_one_exact_stale_loaded_job(exit_code, worker_error, expected_clean):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-loaded-",
         dir="/tmp",
@@ -1691,7 +1707,7 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                     )
                 if state["running"]:
                     return completed(command, stdout="pid = 4242\n")
-                return completed(command, stdout="last exit code = 1\n")
+                return completed(command, stdout=f"last exit code = {exit_code}\n")
             if command[:2] == ("/bin/ps", "-p"):
                 return completed(
                     command,
@@ -1702,8 +1718,11 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                 )
             if command[:2] == ("/bin/launchctl", "kill"):
                 state["running"] = False
+                # A validated worker can finish its own successful cleanup
+                # between the process check and delivery of SIGTERM.
                 state["paths"].stderr.write_text(
-                    "slipstream browser probe failed: worker_terminated\n"
+                    f"slipstream browser probe failed: {worker_error}\n"
+                    if worker_error else ""
                 )
                 state["paths"].stderr.chmod(0o600)
                 return completed(command)
@@ -1720,7 +1739,12 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
             sleep=lambda _seconds: None,
         )
         state["paths"] = launcher._prepare_launch(identity, label)
-        assert launcher.cleanup_stale(remove_root=True)
+        assert launcher.cleanup_stale(remove_root=True) is expected_clean
+        if not expected_clean:
+            assert runtime_root.exists()
+            assert not any(command[:2] == ("/bin/launchctl", "bootout")
+                           for command in state["commands"])
+            return
         assert not runtime_root.exists()
         assert not state["running"]
         assert any(

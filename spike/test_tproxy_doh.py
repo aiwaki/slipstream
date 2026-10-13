@@ -17912,3 +17912,16 @@ def test_uninstaller_rejects_gui_worker_pin(tmp_path, monkeypatch):
     assert tproxy._installed_browser_worker_from_launchd(
         expected_uid=os.getuid()
     ) is None
+
+
+@pytest.mark.parametrize("failed_component", ["attestation", "semantic", "pending", "worker"])
+def test_daemon_artifact_cleanup_identifies_failed_component(monkeypatch, tmp_path, capsys, failed_component):
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "_remove_install_attestation_artifacts", lambda: failed_component != "attestation")
+    monkeypatch.setattr(tproxy.semantic_route_signal_runtime, "remove_stale_owned_socket", lambda *_: failed_component != "semantic")
+    monkeypatch.setattr(tproxy.pending_navigation_probe_runtime, "remove_stale_owned_socket", lambda *_: failed_component != "pending")
+    monkeypatch.setattr(tproxy.pending_navigation_probe_runtime, "cleanup_stale_browser_worker_runtime", lambda **_: failed_component != "worker")
+    monkeypatch.setattr(tproxy, "_installed_browser_worker_from_launchd", lambda: None)
+    assert not tproxy._remove_daemon_status_artifacts()
+    expected = {"attestation": "install attestation", "semantic": "semantic socket", "pending": "pending-navigation socket", "worker": "browser-worker runtime"}
+    assert "daemon artifacts: " + expected[failed_component] in capsys.readouterr().err

@@ -1,3 +1,45 @@
+# Telegram update and browser-worker uninstall repair — 2026-10-13
+
+PR #386 includes tg-ws-proxy 1.8.1 -> 1.11.2 from reviewed AUD-17 source
+`35284416b`, retaining local connection ownership, cancellation, framing, and
+bounded-close fixes. HTTPX and hash-locked dependencies are included. Published
+main `a24fd398c` was merged; its intervening changes are documentation only.
+
+- Reused Telegram baseline: 90 focused protocol/packaging tests passed in
+  5.02 seconds on `ab27a5333`; the Telegram paths have not changed since.
+  That head passed product checks, packaging, Chromium contracts, and packaged
+  browser qualification in CI 38423785527. Lifecycle failed during active-worker
+  uninstall with the umbrella message `daemon status could not be removed`.
+- A confirmed existing worker-exit classification defect is now repaired:
+  natural exit 0 and exit 1 with `socket_unavailable` / `ipc_unavailable` are
+  accepted after exact ownership/PID checks. The broker may already be stopped;
+  Rust propagates submission failure only after owned Chrome/profile cleanup.
+  Signals, ownership errors, and Chrome/profile cleanup failures still fail.
+  Job bootout, absence, and runtime ownership checks remain mandatory.
+- Regression matrix before repair: 3 failed / 9 passed. After repair: all 49
+  runtime-module tests passed; 14 daemon cleanup/uninstall tests passed; all 30
+  browser-worker Rust tests passed, including a real stopped Unix socket and
+  cleanup-failure precedence. Independent source review found no actionable issue.
+  Rust unit tests used one build job and a test-only TAURI_CONFIG with bundle
+  resources/externalBin disabled: no packaged app was built or qualified locally.
+- Component diagnostics now distinguish status errno, install attestation,
+  semantic socket, pending-navigation socket, and worker runtime failures.
+  CI retains the existing lifecycle stdout/stderr as one artifact even on failure;
+  pipefail still preserves the smoke failure. Thirty focused CI/config tests
+  and 27 subtests passed. Evidence: `output/uninstall-recovery/`.
+- This is a bounded prerequisite repair, not a claim that CI's opaque failure
+  has been fully explained. The old log lacks a component/error classification;
+  the next exact-head packaged lifecycle run must confirm the repaired behavior.
+  Routing, Geph, Chromium versions, dependency policies, and the installer
+  transaction order/budgets are unchanged. No workstation app/service was changed.
+- Audit 38423785690 separately failed the expired app policy and existing Geph
+  findings. Keep these release gates enforced; no new installer is published.
+
+Next: push the focused repair, inspect exact-head required CI and lifecycle
+artifacts, then continue the actual dependency/package release blockers.
+
+## Previous README publication checkpoint (historical)
+
 # README publication checkpoint — 2026-10-13
 
 This documentation-only change starts from published main
