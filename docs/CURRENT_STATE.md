@@ -1,3 +1,28 @@
+# Telegram public source update — 2026-10-13
+
+This isolated candidate is based on main `7e196a71` and carries the Telegram
+transport from reviewed AUD-17 source `35284416b`. It updates tg-ws-proxy from
+1.8.1 to 1.11.2, retaining local connection ownership, cancellation, framing and
+bounded-close fixes. HTTPX and its hash-locked dependencies are included.
+
+- Only the Telegram vendor, its tests, Python dependency inputs/locks and lock
+  generator are changed. Daemon callers and PyInstaller specification must remain
+  identical to the base. Routing, Geph, Chromium and release policies are unchanged.
+- Exact-tree focused protocol and packaging tests: 90 passed in 5.02 seconds
+  using a fresh Python 3.13.15 environment installed from the hash-locked test
+  requirements. Loopback TLS/H2 and failure/cancellation paths are included.
+  Daemon integration functions are AST-identical to base; the complete daemon,
+  PyInstaller specification, Geph metadata, audit policies and CI workflow are
+  byte-identical. Imported source paths match `35284416b` exactly.
+  Documentation: 8 tests passed; continuity check passed. Local evidence:
+  `output/telegram-public-validation/`. Exact-head CI remains separate.
+- This is source work, not a published or installed app. Existing dependency,
+  packaged-app and release qualification gates still apply. Live Telegram and
+  installed-app behavior have not been checked for this candidate.
+- Next: publish the isolated PR and assess its exact-head required CI.
+
+## Previous checkpoints (historical; not current actions)
+
 # Geph r5 source continuation — 2026-09-30
 
 This vendor branch is codex/geph-stream-error-isolation, PR382, based on
