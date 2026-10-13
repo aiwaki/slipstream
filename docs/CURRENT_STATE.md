@@ -1,4 +1,18 @@
-# Geph 0.4.3 remediation candidate — 2026-10-11
+# Geph 0.4.3 remediation candidate — 2026-10-13
+
+- Strict dependency-audit identity/raw-evidence bridge from root66e294910 is
+  integrated. Previously, the evaluator accepted411 unrelated scanner rows, or
+  fabricated registry identities for the three source-owned packages, against
+  the actual411-package RSA candidate. Both false passes are retained as RED
+  evidence; the new evaluator rejects them and missing coverage.39 audit tests
+  plus10 Cargo SBOM compatibility tests PASS under verified OS network denial.
+  Three new cases keep native/source-owned coverage fail-closed without adding
+  registry identities or policy waivers. Parent verifies19 source/evidence/
+  policy bindings. Evidence: output/sqlite-native-integration/audit-identity/
+  receipt.json (a075a608), parent-audit-verification.json one directory above.
+  No real scanner, account, build, release or install was run for this bridge.
+  Native source/materializer/linkage helpers are being reviewed separately;
+  SOURCE3420708f, lockdc8ec61a and release workflow remain unchanged.
 
 Physical worktree: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`.
 Branch `codex/geph-043-remediation`, retained qualified source `07a3d871`
