@@ -30,6 +30,7 @@ on:
       - "scripts/run_geph_synthetic_tests.py"
       - "scripts/make_geph_vendor_sbom.py"
       - "security/geph-dependency-audit-policy.json"
+      - "security/geph-native-sqlite-advisories/**"
       - "vendor/geph/**"
 
 permissions:
@@ -242,6 +243,11 @@ jobs:
                 native_artifacts="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_evidence"]["artifacts_root"])' "$asset_report")"
                 sbom_args+=(--source-root "$source_root" --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
               fi
+              audit_native_args=(--vendored-transitive-dependencies full)
+              if [ "$native_sqlite" = true ]; then
+                audit_native_args+=(--source vendor/geph/SOURCE.json
+                  --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+              fi
               python3 scripts/make_geph_vendor_sbom.py verify "${sbom_args[@]}"
               historical_policy="$(mktemp \
                 "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
@@ -257,9 +263,9 @@ jobs:
                 --report "$geph_release/geph5-client-dependency-audit.json" \
                 --sbom "$geph_release/geph5-client.spdx.json" \
                 --policy "$historical_policy" \
+                "${audit_native_args[@]}" \
                 --source-commit "$tag_commit" \
-                --target macos-universal \
-                --vendored-transitive-dependencies full
+                --target macos-universal
               signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
               provenance_json="$(mktemp \
                 "$RUNNER_TEMP/geph-provenance.XXXXXX")"
@@ -306,8 +312,8 @@ jobs:
                 --report "$geph_release/geph5-client-dependency-audit.json" \
                 --sbom "$geph_release/geph5-client.spdx.json" \
                 --policy security/geph-dependency-audit-policy.json \
-                --source-commit "$tag_commit" --target macos-universal \
-                --vendored-transitive-dependencies full
+                "${audit_native_args[@]}" \
+                --source-commit "$tag_commit" --target macos-universal
             else
               rm -rf /tmp/geph-existing
               python3 scripts/download_github_release_assets.py \
@@ -628,6 +634,8 @@ jobs:
         run: |
           set -euo pipefail
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          audit_native_args=(--vendored-transitive-dependencies full)
+          audit_evidence_args=(--evaluation-date "$(date -u +%F)")
           sbom_args=(
             --source vendor/geph/SOURCE.json --version-file vendor/geph/VERSION
             --cargo-lock vendor/geph/Cargo.lock --repository "${{ github.repository }}"
@@ -637,6 +645,13 @@ jobs:
           if [ "${{ steps.source.outputs.native_sqlite }}" = true ]; then
             native_output="${{ steps.source.outputs.workspace }}/producer"
             version="$(cat vendor/geph/VERSION)"
+            audit_native_args+=(--source vendor/geph/SOURCE.json
+              --native-receipt "$native_output/evidence/native-release.json"
+              --native-artifacts-root "$native_output/evidence")
+            # Reviewed evidence is intentionally required before native activation.
+            # Keep raw scanner/evidence snapshots outside the release payload.
+            audit_evidence_args+=(--evidence-dir "${{ steps.source.outputs.workspace }}/dependency-audit-evidence"
+              --native-advisory-evidence security/geph-native-sqlite-advisories)
             sbom_args+=(
               --source-root "$native_output/source/geph5-client-$version"
               --native-receipt "$native_output/evidence/native-release.json"
@@ -656,22 +671,30 @@ jobs:
             --platform darwin-arm64 \
             --output /tmp/osv-scanner
           python3 scripts/dependency_audit.py scan \
+            "${audit_native_args[@]}" "${audit_evidence_args[@]}" \
             --scanner /tmp/osv-scanner \
             --platform darwin-arm64 \
             --sbom out/geph5-client.spdx.json \
             --policy security/geph-dependency-audit-policy.json \
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
-            --vendored-transitive-dependencies full \
-            --evaluation-date "$(date -u +%F)" \
             --output out/geph5-client-dependency-audit.json
           python3 scripts/dependency_audit.py verify \
+            "${audit_native_args[@]}" \
             --report out/geph5-client-dependency-audit.json \
             --sbom out/geph5-client.spdx.json \
             --policy security/geph-dependency-audit-policy.json \
             --source-commit "$GITHUB_SHA" \
-            --target macos-universal \
-            --vendored-transitive-dependencies full
+            --target macos-universal
+
+      - name: Retain native dependency audit evidence
+        if: always() && steps.source.outputs.native_sqlite == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-native-dependency-audit-${{ github.sha }}
+          path: ${{ steps.source.outputs.workspace }}/dependency-audit-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Assemble the internal release payload
         run: |

@@ -246,6 +246,15 @@ class BuildConfigTests(unittest.TestCase):
                 assert value("--policy") == "security/geph-dependency-audit-policy.json"
                 if args[0] in ("scan", "verify"):
                     assert value("--vendored-transitive-dependencies") == "full"
+                    assert value("--source") == "vendor/geph/SOURCE.json"
+                    assert Path(value("--native-receipt")).is_file()
+                    assert Path(value("--native-receipt")).parent == Path(value("--native-artifacts-root"))
+                    if args[0] == "scan":
+                        assert value("--native-advisory-evidence") == "security/geph-native-sqlite-advisories"
+                        assert Path(value("--evidence-dir")).name == "dependency-audit-evidence"
+                        assert not Path(value("--evidence-dir")).exists()
+                    else:
+                        assert "--evidence-dir" not in args and "--native-advisory-evidence" not in args
                     fail("audit")
                 if "--output" in args: write(value("--output"))
             elif name == "gh":
@@ -330,6 +339,19 @@ class BuildConfigTests(unittest.TestCase):
                     self.assertFalse((root / "out/geph5-client").exists())
                 self.assertNotIn("strip", command_names)
 
+    def test_native_audit_evidence_is_retained_after_failure_before_assembly(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()
+        audit = workflow.index("      - name: Build and audit the vendored dependency inventory")
+        retain = workflow.index("      - name: Retain native dependency audit evidence")
+        assembly = workflow.index("      - name: Assemble the internal release payload")
+        self.assertLess(audit, retain)
+        self.assertLess(retain, assembly)
+        step = workflow[retain:assembly]
+        self.assertIn("if: always() && steps.source.outputs.native_sqlite == 'true'", step)
+        self.assertIn("path: ${{ steps.source.outputs.workspace }}/dependency-audit-evidence/", step)
+        self.assertNotIn("path: out/", step)
+        self.assertIn("retention-days: 7", step)
+
     def test_geph_native_existing_release_requires_full_proof(self) -> None:
         import sys
         import textwrap
@@ -406,6 +428,9 @@ class BuildConfigTests(unittest.TestCase):
             elif name == "dependency_audit.py":
                 assert value("--source-commit") == "a" * 40
                 assert value("--vendored-transitive-dependencies") == "full"
+                assert value("--source") == "vendor/geph/SOURCE.json"
+                assert Path(value("--native-receipt")).name == "returned-receipt.json"
+                assert Path(value("--native-artifacts-root")).name == "returned-proof"
                 policy = json.loads(Path(value("--policy")).read_text())
                 fail("historical-audit" if policy.get("historical") else "current-audit")
             else: raise AssertionError((name, args))
@@ -1389,6 +1414,12 @@ class BuildConfigTests(unittest.TestCase):
             elif name == "dependency_audit.py":
                 assert json.loads(Path(value("--policy")).read_text()) == {"historical": True}
                 assert value("--source-commit") == "a" * 40
+                if native:
+                    assert value("--source") == "vendor/geph/SOURCE.json"
+                    assert value("--native-receipt") == state["native_receipt"]
+                    assert value("--native-artifacts-root") == state["native_artifacts"]
+                else:
+                    assert not {"--source", "--native-receipt", "--native-artifacts-root"}.intersection(args)
                 done("audit", {})
             else:
                 raise AssertionError((name, args))

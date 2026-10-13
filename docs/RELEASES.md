@@ -149,6 +149,40 @@ source merge; it expires on 2026-08-27 and does not authorize publishing
 Geph's Hyper 0.14 AWS client until upstream provides a fixed 0.3-compatible
 graph.
 
+### Native SQLite audit coverage (inactive until reviewed policy adoption)
+
+A native SQLite source contract requires audit report schema 2. Its SPDX package
+has no registry PURL and is validated by
+`scripts/geph_native_sqlite_advisories.py`; the genuine `libsqlite3-sys` wrapper
+keeps its registry identity and remains in the OSV scan. The scanner receives a
+deterministic projection that removes only the independently verified native
+package. The report binds both the full SPDX and projection hashes, and lists
+the exact SPDXIDs in the scanner, integrity-only and native partitions.
+Every other package without a supported PURL still fails closed.
+
+The optional `native_sqlite_review` policy section binds a retained advisory
+census and its complete alias groups to the exact SOURCE, SQLite archive,
+C/header files, compiler definitions, targets, native receipt and final binary.
+The consumer independently verifies that build proof and reconstructs the review
+result from trusted policy. Neither an omitted group nor an unreviewed
+`census_only` disposition can produce a passing native result. Review expiry is
+checked against both the report date and the current UTC date. Evidence roles
+record a human/source review; they do not automatically establish patch semantics.
+
+Native `scan` requires `--source`, `--native-receipt`,
+`--native-artifacts-root`, `--native-advisory-evidence` and a fresh
+`--evidence-dir`. Native `verify` requires the first three arguments. The
+producer retains bounded scanner inputs/results and reviewed evidence even on
+failure, separately from the release payload. Reviewed advisory files must be
+provided under `security/geph-native-sqlite-advisories/` before activation.
+These files become CI artifacts verbatim: review their contents for publication
+before pinning them. The private research candidate contains workstation paths
+and must not be copied into that directory unchanged; prepare and bind a
+publishable evidence set first. Size limits and hashes do not redact contents.
+This integration does not adopt the research candidate as production policy,
+activate native SOURCE, or qualify a newly built binary from an older receipt.
+Legacy report schema 1 and its acceptance rules remain unchanged.
+
 ## Geph Dependency Artifacts
 
 | File | Purpose |

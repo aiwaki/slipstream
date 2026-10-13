@@ -197,6 +197,7 @@ jobs:
             scripts/sync_version.py \
             scripts/make_appcast.py \
             scripts/dependency_audit.py \
+            scripts/geph_native_sqlite_advisories.py \
             scripts/make_release_manifest.py \
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
@@ -212,6 +213,7 @@ jobs:
             scripts/test_release_transport_matrix.py \
             scripts/test_make_appcast.py \
             scripts/test_dependency_audit.py \
+            scripts/test_geph_native_sqlite_advisories.py \
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \
@@ -635,6 +637,11 @@ jobs:
             native_artifacts="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_evidence"]["artifacts_root"])' "$asset_report")"
             sbom_args+=(--source-root "$source_root" --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
           fi
+          audit_native_args=(--vendored-transitive-dependencies full)
+          if [ "$native_sqlite" = true ]; then
+            audit_native_args+=(--source vendor/geph/SOURCE.json
+              --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+          fi
           python3 scripts/make_geph_vendor_sbom.py verify "${sbom_args[@]}"
           historical_policy="$(mktemp \
             "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
@@ -650,9 +657,9 @@ jobs:
             --report "$geph_release/geph5-client-dependency-audit.json" \
             --sbom "$geph_release/geph5-client.spdx.json" \
             --policy "$historical_policy" \
+            "${audit_native_args[@]}" \
             --source-commit "$tag_commit" \
-            --target macos-universal \
-            --vendored-transitive-dependencies full
+            --target macos-universal
           signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
           provenance_json="$(mktemp \
             "$RUNNER_TEMP/geph-provenance.XXXXXX")"

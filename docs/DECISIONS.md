@@ -3,6 +3,21 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Native SQLite must have separate advisory coverage — 2026-10-13
+
+An OSV result for the Rust wrapper cannot clear the C library linked into Geph.
+The native audit therefore requires an explicit reviewed policy tied to exact
+source and linkage evidence, with every retained advisory/alias group accounted
+for. Unknown applicability, affected code and census-only dispositions block
+release. No version-range inference, missing upstream record or wrapper scan
+may silently remove a native finding. Other packages without valid registry
+identities retain their existing rejection behavior.
+
+Build and research evidence may be tested as an output-only candidate before
+production adoption. Passing its schema/proof checks is distinct from passing
+its advisory result; a complete inventory with unresolved groups must fail.
+The release contract is documented in [RELEASES.md](RELEASES.md).
+
 > **P0 supersession scope (2026-08-13):** every historical row below that
 > describes a production Aqua/LaunchServices worker, installed Google Chrome,
 > extension-driven reload, or transport-idle browser admission is superseded by

@@ -1,5 +1,40 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Native advisory coverage is now implemented in scan/verify and conditional
+  producer/consumer workflows; production policy/SOURCE remain unchanged/inactive.
+  The native verifier binds exact source, linked proof, complete census aliases
+  and reviewed dispositions. OSV receives only the verified registry projection;
+  schema2 records original/projection hashes and exact SPDXID partitions. Unknown
+  and census-only native groups fail; legacy schema1/no-PURL rules are preserved.
+  Real retained v2 proof:435 packages =434 registry +1 native (wrapper scanned),
+  301 groups/92 native/209 exclusions;6 adjudicated,75 unknown+11 census-only =86
+  unresolved, expected FAIL. No real OSV scan of this434-package projection yet.
+  Candidate is output-only/private; publishable evidence and policy review are
+  required before adoption. See RELEASES.md and native-audit-candidate/report.md
+  under output/sqlite-native-integration/ (receipt b3dfe286).
+- Helper20 tests PASS under network denial; bridge49-test focused baseline plus
+  11 scoped checks after a concrete containment fix PASS. Peer found snapshot
+  receipt outside proof-root: retained causal RED, real tiny-proof scan reaches
+  the inert scanner after fix, receipt mutation rejects before report. Snapshot
+  hashes are checked against both independent live-proof validations. Final
+  bridge2e68397c, containment receipt dd1885a8; older cb815/f4d66 preserved.
+  Workflow4 tests/28 shell scenarios PASS, YAML+7 shell syntax checks PASS.
+  Causal macOS Bash3 empty-array/nounset failure fixed with common argument
+  arrays; native audit evidence now retained on failure after the audit step.
+  Workflow receipt6891021f. Parent verifies100 helper/candidate bindings and9
+  actual partition bindings (one historical source resolved to retained bytes).
+  Independent bridge review0a5b1d7f confirms the containment correction with no
+  open findings; parent verifies78 workflow/fix/peer bindings as well. Docs8 PASS.
+  Large build/proof and unchanged metadata657 suite not repeated.
+- Exact5b3f0ede6 CI38403655112 terminal: product/checks, Windows adapter and
+  Chromium PASS; package HTTP404unpublished0.4.3-r1. Dependency38403655193:
+  expired app policy andGeph2 blocking/2 informational/423 scanned. Logs retained
+  in output/sqlite-native-integration/ci/5b3f0ede6/. No rerun requested.
+- Next: actual pinned scanner qualification for the434-package projection and
+  remaining native applicability reviews. Native policy adoption/source activation,
+  actual native CI libtest, release/installed/browser gates remain open.
+
+
 - Conditional native producer and synthetic compile integration implemented;
   SOURCE/lock/helper pins remain inactive and unchanged. Fresh online full-lock
   fetch -> streamed cache seal -> OS-denied offline fetch -> explicit-tools
