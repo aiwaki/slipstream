@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from urllib.parse import unquote
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -122,7 +123,7 @@ def load_policy(path: Path) -> dict:
         for advisory_id in advisories:
             key = (
                 exception["ecosystem"],
-                exception["package"],
+                _canonical_package_name(exception["ecosystem"], exception["package"]),
                 exception["version"],
                 advisory_id,
             )
@@ -339,7 +340,8 @@ def _matching_exception(
     for exception in policy["exceptions"]:
         if (
             exception["ecosystem"] == package.get("ecosystem")
-            and exception["package"] == package.get("name")
+            and _canonical_package_name(exception["ecosystem"], exception["package"])
+            == _canonical_package_name(package["ecosystem"], package["name"])
             and exception["version"] == package.get("version")
             and advisory_set.intersection(exception["advisories"])
         ):
@@ -359,6 +361,93 @@ def _sbom_packages(path: Path) -> list[dict]:
     if not all(isinstance(package, dict) for package in packages):
         raise ValueError("release SBOM contains an invalid package")
     return packages
+
+
+def _canonical_package_name(ecosystem: str, name: str) -> str:
+    if ecosystem == "PyPI":
+        return re.sub(r"[-_.]+", "-", name).lower()
+    if ecosystem == "GitHub Actions":
+        return name.lower()
+    return name
+
+
+def _sbom_scan_identities(
+    packages: list[dict],
+) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]]]:
+    """Bind scanner coordinates to the package URLs that this generator emits.
+
+    Generic packages remain subject to the existing exact integrity-only policy.
+    Source-owned packages without registry identities require a separate review
+    contract; assigning them a registry coordinate here would falsify coverage.
+    """
+    ecosystems = {
+        "cargo": "crates.io", "pypi": "PyPI", "npm": "npm",
+        "github": "GitHub Actions", "generic": "",
+    }
+    ids: set[str] = set()
+    identities: set[tuple[str, str, str]] = set()
+    for package in packages:
+        spdx_id = package.get("SPDXID")
+        if not isinstance(spdx_id, str) or not spdx_id:
+            raise ValueError("release SBOM package identity is missing")
+        if spdx_id in ids:
+            raise ValueError("release SBOM contains a duplicate package identity")
+        ids.add(spdx_id)
+        references = package.get("externalRefs")
+        if not isinstance(references, list):
+            raise ValueError("release SBOM package purl is missing")
+        purls = [
+            ref for ref in references
+            if isinstance(ref, dict) and ref.get("referenceType") == "purl"
+        ]
+        if len(purls) != 1 or purls[0].get("referenceCategory") != "PACKAGE-MANAGER":
+            raise ValueError("release SBOM package must have exactly one package-manager purl")
+        locator = purls[0].get("referenceLocator")
+        if not isinstance(locator, str) or re.search(r"%(?![0-9A-Fa-f]{2})", locator):
+            raise ValueError("release SBOM package purl is invalid")
+        match = re.fullmatch(r"pkg:([a-z]+)/([^?#]+)@([^@?#]+)", locator)
+        if not match or match[1] not in ecosystems:
+            raise ValueError("release SBOM package purl type or syntax is unsupported")
+        package_type = match[1]
+        try:
+            name, version = (unquote(value, errors="strict") for value in match.group(2, 3))
+        except UnicodeDecodeError as exc:
+            raise ValueError("release SBOM package purl encoding is invalid") from exc
+        if any(not value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value) for value in (name, version)):
+            raise ValueError("release SBOM package purl coordinates are invalid")
+        if package_type == "github":
+            valid_name = re.fullmatch(r"[^/@]+/[^/@]+", name)
+        elif package_type == "npm":
+            valid_name = re.fullmatch(r"(?:@[^/@]+/)?[^/@]+", name)
+        else:
+            valid_name = re.fullmatch(r"[^/@]+", name)
+        if not valid_name:
+            raise ValueError("release SBOM package purl name is invalid")
+        ecosystem = ecosystems[package_type]
+        name = _canonical_package_name(ecosystem, name)
+        declared_name = package.get("name")
+        if (
+            package.get("versionInfo") != version
+            or not isinstance(declared_name, str)
+            or not declared_name
+            or (package_type != "github" and _canonical_package_name(ecosystem, declared_name) != name)
+        ):
+            raise ValueError("release SBOM package purl identity does not match package")
+        identity = (ecosystem, name, version)
+        if identity in identities:
+            raise ValueError("release SBOM contains duplicate package coordinates")
+        identities.add(identity)
+    return (
+        {identity for identity in identities if identity[0]},
+        {(name, version) for ecosystem, name, version in identities if not ecosystem},
+    )
+
+
+def _identity_evidence(identities: set[tuple[str, str, str]]) -> list[dict]:
+    return [
+        {"ecosystem": ecosystem, "name": name, "version": version}
+        for ecosystem, name, version in sorted(identities)
+    ]
 
 
 def _matching_integrity_only_policy(
@@ -425,7 +514,7 @@ def evaluate_osv_result(
     policy: dict,
     evaluated_on: date,
     sbom_path: Path,
-) -> tuple[list[dict], int, list[dict]]:
+) -> tuple[list[dict], int, list[dict], list[dict]]:
     results = result.get("results")
     if not isinstance(results, list):
         raise ValueError("OSV scanner result is missing results")
@@ -434,6 +523,7 @@ def evaluate_osv_result(
     integrity_only_seen: dict[tuple[str, str], dict] = {}
     findings_seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     sbom_packages = _sbom_packages(sbom_path)
+    expected_scanned, expected_integrity = _sbom_scan_identities(sbom_packages)
     for source in results:
         if not isinstance(source, dict) or not isinstance(source.get("packages"), list):
             raise ValueError("OSV scanner result contains an invalid package source")
@@ -484,6 +574,11 @@ def evaluate_osv_result(
                 for value in coordinates
             ):
                 raise ValueError("OSV scanner package coordinates are incomplete")
+            coordinates = (ecosystem, _canonical_package_name(ecosystem, name), version)
+            if coordinates in packages_seen:
+                raise ValueError("OSV scanner contains a duplicate package identity")
+            if coordinates not in expected_scanned:
+                raise ValueError("OSV scanner package identity does not match release SBOM")
             packages_seen.add(coordinates)
             for vulnerability in vulnerabilities:
                 if not isinstance(vulnerability, dict):
@@ -529,6 +624,8 @@ def evaluate_osv_result(
                         if evaluated_on > expiry:
                             finding["reason"] = "expired_exception"
                 findings.append(finding)
+    if packages_seen != expected_scanned or set(integrity_only_seen) != expected_integrity:
+        raise ValueError("OSV scanner package identities do not cover the release SBOM")
     findings.sort(
         key=lambda item: (
             item["package"]["ecosystem"],
@@ -541,7 +638,7 @@ def evaluate_osv_result(
         integrity_only_seen.values(),
         key=lambda item: (item["name"].lower(), item["version"], item["purl"]),
     )
-    return findings, len(packages_seen), integrity_only
+    return findings, len(packages_seen), integrity_only, _identity_evidence(packages_seen)
 
 
 def build_audit_report(
@@ -562,7 +659,7 @@ def build_audit_report(
         raise ValueError("release target is required")
     if vendored_transitive_dependencies not in VENDORED_TRANSITIVE_COVERAGE:
         raise ValueError("vendored transitive dependency coverage is invalid")
-    findings, packages_scanned, integrity_only = evaluate_osv_result(
+    findings, packages_scanned, integrity_only, scanned_identities = evaluate_osv_result(
         result=osv_result,
         policy=policy,
         evaluated_on=evaluated_on,
@@ -598,6 +695,7 @@ def build_audit_report(
             "sbom_sha256": hash_file(sbom_path),
         },
         "scanner": scanner,
+        "scanned_packages": scanned_identities,
         "schema_version": SCHEMA_VERSION,
         "source": {"commit": source_commit, "target": target},
         "status": "fail" if counts["blocking"] else "pass",
@@ -913,6 +1011,19 @@ def validate_audit_report(
         raise ValueError(
             "dependency audit package counts do not match the release SBOM"
         )
+    expected_scanned, expected_integrity = _sbom_scan_identities(sbom_packages)
+    evidence = report.get("scanned_packages")
+    if not isinstance(evidence, list):
+        raise ValueError(
+            "dependency audit scanned package identity evidence is missing; "
+            "rebuild the report from the original OSV result"
+        )
+    if evidence != _identity_evidence(expected_scanned) or len(evidence) != packages_scanned:
+        raise ValueError("dependency audit scanned package identity evidence does not match SBOM")
+    if policy_has_integrity_only and evidence_seen != expected_integrity:
+        raise ValueError("dependency audit integrity-only identities do not match SBOM")
+    if not policy_has_integrity_only and expected_integrity:
+        raise ValueError("dependency audit integrity-only identity evidence is missing")
     exceptions = {item["id"]: item for item in policy["exceptions"]}
     for finding in findings:
         if not isinstance(finding, dict):
@@ -926,6 +1037,13 @@ def validate_audit_report(
             for key in ("ecosystem", "name", "version")
         ):
             raise ValueError("dependency audit finding package is invalid")
+        finding_identity = (
+            package["ecosystem"],
+            _canonical_package_name(package["ecosystem"], package["name"]),
+            package["version"],
+        )
+        if finding_identity not in expected_scanned:
+            raise ValueError("dependency audit finding package identity does not match SBOM")
         advisory_id = finding.get("id")
         aliases = finding.get("aliases")
         if not isinstance(advisory_id, str) or not advisory_id:
@@ -944,7 +1062,7 @@ def validate_audit_report(
             raise ValueError("dependency audit exception does not match policy")
         if package != {
             "ecosystem": exception["ecosystem"],
-            "name": exception["package"],
+            "name": _canonical_package_name(exception["ecosystem"], exception["package"]),
             "version": exception["version"],
         }:
             raise ValueError("dependency audit exception package does not match policy")

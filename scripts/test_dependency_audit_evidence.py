@@ -36,7 +36,7 @@ class DependencyAuditEvidenceTests(unittest.TestCase):
         vulnerabilities = [{"id": "GHSA-test-blocking", "affected": []}] if mode == "blocking" else []
         payload = osv_result(({
             "ecosystem": "crates.io", "name": "serde",
-            "version": "" if mode == "identity" else "1",
+            "version": "" if mode == "identity" else "2" if mode == "identity-mismatch" else "1",
         }, vulnerabilities))
         if mode == "expired-policy":
             self.sbom_bytes = json.dumps({"packages": [sbom_package(
@@ -174,6 +174,15 @@ class DependencyAuditEvidenceTests(unittest.TestCase):
 
     def test_incomplete_coordinate_rejection_keeps_raw_but_no_report(self) -> None:
         raw = self._prepare("identity")
+        self.assertEqual(self._run()[0], 1)
+        receipt = self._assert_raw(raw, "complete")
+        self.assertEqual(receipt["status"], "error")
+        self.assertEqual(receipt["stage"], "audit")
+        self.assertNotIn("report", receipt)
+        self.assertFalse(self.output.exists())
+
+    def test_same_count_identity_rejection_keeps_raw_but_no_report(self) -> None:
+        raw = self._prepare("identity-mismatch")
         self.assertEqual(self._run()[0], 1)
         receipt = self._assert_raw(raw, "complete")
         self.assertEqual(receipt["status"], "error")

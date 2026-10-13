@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 
 import dependency_audit
 
@@ -74,7 +75,10 @@ def sbom_package(
             {
                 "referenceCategory": "PACKAGE-MANAGER",
                 "referenceType": "purl",
-                "referenceLocator": f"pkg:{ecosystem}/{name}@{version}",
+                "referenceLocator": (
+                    f"pkg:{ecosystem}/{quote(name, safe='/' if ecosystem in {'npm', 'github'} else '')}"
+                    f"@{quote(version, safe='')}"
+                ),
             }
         ],
     }
@@ -145,15 +149,13 @@ class DependencyAuditTests(unittest.TestCase):
                 for source in result["results"]
                 for entry in source["packages"]
             }
+            package_types = {
+                "crates.io": "cargo", "PyPI": "pypi", "npm": "npm",
+                "GitHub Actions": "github", "": "generic",
+            }
             sbom_packages = [
-                {
-                    "SPDXID": f"SPDXRef-Package-{index}",
-                    "name": name,
-                    "versionInfo": version,
-                }
-                for index, (_, name, version) in enumerate(
-                    sorted(packages), start=1
-                )
+                sbom_package(ecosystem=package_types[ecosystem], name=name, version=version)
+                for ecosystem, name, version in sorted(packages)
             ]
         sbom.write_text(
             json.dumps(
@@ -275,7 +277,7 @@ class DependencyAuditTests(unittest.TestCase):
 
             tampered = copy.deepcopy(report)
             tampered["findings"][0]["package"]["version"] = "0.39.5"
-            with self.assertRaisesRegex(ValueError, "exception package"):
+            with self.assertRaisesRegex(ValueError, "exception package|package identity"):
                 dependency_audit.validate_audit_report(
                     tampered,
                     policy_path=policy_path,
@@ -374,7 +376,7 @@ class DependencyAuditTests(unittest.TestCase):
             invalid_purl[0]["externalRefs"][0]["referenceLocator"] = (
                 "pkg:generic/not-chromium@151.0.7922.77"
             )
-            with self.assertRaisesRegex(ValueError, "purl does not match policy"):
+            with self.assertRaisesRegex(ValueError, "purl (?:identity does not match package|does not match policy)"):
                 self._build_report(
                     root,
                     self._chromium_result(),

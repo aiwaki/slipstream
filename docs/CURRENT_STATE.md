@@ -44,6 +44,20 @@ main `a24fd398c` was merged; its intervening changes are documentation only.
   including exact expired-policy rejection with raw retention and no new report.
   Independent source review, eight documentation tests and continuity checks pass.
   Keep all release gates enforced; no new installer is published.
+- A second audit defect accepted different scanner package coordinates when
+  the package count matched. The reviewed identity repair from `bfa052f2d` now
+  matches the exact SPDX package set and rejects omissions, substitutions and
+  duplicates, including normalized PyPI/GitHub aliases. RED:20 failures;
+  GREEN:78 focused audit/evidence/workflow/manifest/release tests and43 subtests.
+  Independent review PASS. The evaluator matches reviewed `c5d4ebe0e` exactly.
+- Compatibility is deliberately stricter: old reports without `scanned_packages`
+  are rejected, including the immutable Geph0.3.9-r5 report consumed by packaging.
+  Known retained raw OSV has rustls0.23.43, while exact r5 SPDX has0.23.45;
+  it cannot reconstruct that report. A new attested vendor or separately bound
+  fresh assessment is required; identities must not be synthesized from SPDX.
+  Expect this additional package gate failure until authentic evidence exists.
+  The green d0d4007 lifecycle remains runtime evidence, not qualification of this
+  stricter audit/package contract. No workstation app or dependency policy changed.
 
 Next: qualify and publish the app-audit evidence-retention repair, inspect its
 exact-head audit artifact, then address the actual dependency release blockers.
