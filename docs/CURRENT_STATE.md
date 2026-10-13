@@ -6,12 +6,36 @@
   and reviewed dispositions. OSV receives only the verified registry projection;
   schema2 records original/projection hashes and exact SPDXID partitions. Unknown
   and census-only native groups fail; legacy schema1/no-PURL rules are preserved.
-  Real retained v2 proof:435 packages =434 registry +1 native (wrapper scanned),
-  301 groups/92 native/209 exclusions;6 adjudicated,75 unknown+11 census-only =86
-  unresolved, expected FAIL. No real OSV scan of this434-package projection yet.
-  Candidate is output-only/private; publishable evidence and policy review are
-  required before adoption. See RELEASES.md and native-audit-candidate/report.md
-  under output/sqlite-native-integration/ (receipt b3dfe286).
+  Actual pinned OSV2.3.8 qualification now completes:435 SPDX packages =434
+  registry +1 native (wrapper scanned); complete90368-byte raw response,2 RSA
+  blocking findings with expired exceptions,2 unmaintained advisories,0 accepted
+  exceptions. Initial candidate-v2 retains86 unresolved native groups; expected
+  audit FAIL is emitted and verify refuses it. Guard6.48s/344.3MiB/3processes;
+  receipt483784f6, parent64 bindings PASS, independent reviewcb25f7b2.
+  Evidence: output/sqlite-native-integration/native-actual-scan-20261013/.
+  Static exact-version scanner trace sends registry coordinates to OSV; this
+  is not packet-capture proof. Local raw evidence includes an absolute source
+  path, and research census receipts are private. Qualification launched no Geph client.
+  Candidate/source/policy remain output-only/inactive; reviewed publishable
+  evidence is required before production adoption (see RELEASES.md).
+- Scoped native review resolves11 census-only decisions in fresh output-only
+  candidate-v3:9 exact CNA-rejected identities (five live OSV conflicts explicitly
+  resolved by current CNA authority and inspected derivative provenance), plus
+  CVE-2026-11822/11824 code_fixed in exact v2. The latter requires both the
+  szLeaf loader guard and separate LeafSeek bounds patch;8 full-function byte
+  comparisons cover both architectures. Rejection of duplicate52099 does not
+  clear29088;51298 has no independent SQLite-table corroboration. Peer corrected
+  a51302 timestamp claim: dateUpdated is not dateRejected; original evidence is
+  unchanged and rejected overlay-v2 is authoritative (97c6b111/2cc52682).
+  Source-fixed overlay03e29f8c/receiptcac5ad62; original301 groups/503 aliases,
+  92 native/209 exclusions, binding and cutoff/expiry unchanged. Native helper
+  and report builder now give17 adjudicated,75 unknown,0 census-only, expected
+  overall FAIL. Registry identities/findings/projection unchanged; exact real
+  raw OSV7d3bdafd reused offline, not rescanned. Evaluation0.944s/329.03MiB;
+  receipt0b9d2dd0 in native-audit-candidate-v3-20261013/; parent381 review and
+  integration bindings PASS. Independent source-fixed peer b36ce1569 and final
+  integration peer b5e6310c pass with no findings; all91 evidence catalogue
+  entries and exactly11 changed groups verified. Production policy stays inactive.
 - Helper20 tests PASS under network denial; bridge49-test focused baseline plus
   11 scoped checks after a concrete containment fix PASS. Peer found snapshot
   receipt outside proof-root: retained causal RED, real tiny-proof scan reaches
@@ -26,13 +50,18 @@
   Independent bridge review0a5b1d7f confirms the containment correction with no
   open findings; parent verifies78 workflow/fix/peer bindings as well. Docs8 PASS.
   Large build/proof and unchanged metadata657 suite not repeated.
-- Exact5b3f0ede6 CI38403655112 terminal: product/checks, Windows adapter and
-  Chromium PASS; package HTTP404unpublished0.4.3-r1. Dependency38403655193:
-  expired app policy andGeph2 blocking/2 informational/423 scanned. Logs retained
-  in output/sqlite-native-integration/ci/5b3f0ede6/. No rerun requested.
-- Next: actual pinned scanner qualification for the434-package projection and
-  remaining native applicability reviews. Native policy adoption/source activation,
-  actual native CI libtest, release/installed/browser gates remain open.
+- Exact520bea685 CI38409376434 terminal: product/checks, Windows adapter and
+  Chromium PASS; metadata830 tests/68.458s is the reusable full baseline. Package
+  stops at first release-tag lookup, HTTP404unpublished0.4.3-r1; lifecycle failure
+  is downstream. Dependency38409376242 retains expired app policy andGeph2
+  blocking/2 informational/423 scanned. Final JSON/failed/product logs retained
+  with -final suffix in output/sqlite-native-integration/ci/520bea685/; earlier
+  snapshots unchanged. No CI rerun or successful large Geph build repeated.
+- Next: review remaining75 native source-applicability unknowns, beginning with
+  the SQLite2/PHP and fork-specific product-identity rows; preserve the census
+  while resolving only exact reviewed groups. Native policy adoption/source
+  activation, actual native CI libtest, RSA/app-audit, release/installed/browser
+  gates remain open.
 
 
 - Conditional native producer and synthetic compile integration implemented;
