@@ -1,3 +1,84 @@
+# Telegram update and browser-worker uninstall repair — 2026-10-13
+
+PR #386 includes tg-ws-proxy 1.8.1 -> 1.11.2 from reviewed AUD-17 source
+`35284416b`, retaining local connection ownership, cancellation, framing, and
+bounded-close fixes. HTTPX and hash-locked dependencies are included. Published
+main `a24fd398c` was merged; its intervening changes are documentation only.
+
+- Reused Telegram baseline: 90 focused protocol/packaging tests passed in
+  5.02 seconds on `ab27a5333`; the Telegram paths have not changed since.
+  That head passed product checks, packaging, Chromium contracts, and packaged
+  browser qualification in CI 38423785527. Lifecycle failed during active-worker
+  uninstall with the umbrella message `daemon status could not be removed`.
+- A confirmed existing worker-exit classification defect is now repaired:
+  natural exit 0 and exit 1 with `socket_unavailable` / `ipc_unavailable` are
+  accepted after exact ownership/PID checks. The broker may already be stopped;
+  Rust propagates submission failure only after owned Chrome/profile cleanup.
+  Signals, ownership errors, and Chrome/profile cleanup failures still fail.
+  Job bootout, absence, and runtime ownership checks remain mandatory.
+- Regression matrix before repair: 3 failed / 9 passed. After repair: all 49
+  runtime-module tests passed; 14 daemon cleanup/uninstall tests passed; all 30
+  browser-worker Rust tests passed, including a real stopped Unix socket and
+  cleanup-failure precedence. Independent source review found no actionable issue.
+  Rust unit tests used one build job and a test-only TAURI_CONFIG with bundle
+  resources/externalBin disabled: no packaged app was built or qualified locally.
+- Component diagnostics now distinguish status errno, install attestation,
+  semantic socket, pending-navigation socket, and worker runtime failures.
+  CI retains the existing lifecycle stdout/stderr as one artifact even on failure;
+  pipefail still preserves the smoke failure. Thirty focused CI/config tests
+  and 27 subtests passed. Evidence: `output/uninstall-recovery/`.
+- CI 38430845049 passed on exact head `d0d4007`: product checks, package build,
+  Chromium contracts, packaged-browser qualification and packaged lifecycle.
+  The small lifecycle artifact confirms active-worker and original-capture
+  cleanup, absent installed state, clean uninstall, preserved sentinel connection
+  and state, and unchanged global PF. Reuse this unchanged runtime baseline.
+  The old generic failure log still cannot establish its precise failed component.
+  Routing, Geph, Chromium versions, dependency policies, and the installer
+  transaction order/budgets are unchanged. No workstation app/service was changed.
+- Audit 38430844955 separately failed the expired app policy and existing Geph
+  findings. App evaluation stops before producing its report and the old workflow
+  does not retain raw scan evidence on failure. The bounded repair now retains
+  exact app-audit inputs and scanner output without changing policy or expiry.
+  Artifact upload allows only four fixed evidence filenames; scanner stdout/stderr
+  and the executable are excluded. Thirty-five focused tests and 15 subtests pass,
+  including exact expired-policy rejection with raw retention and no new report.
+  Independent source review, eight documentation tests and continuity checks pass.
+  Keep all release gates enforced; no new installer is published.
+- A second audit defect accepted different scanner package coordinates when
+  the package count matched. The reviewed identity repair from `bfa052f2d` now
+  matches the exact SPDX package set and rejects omissions, substitutions and
+  duplicates, including normalized PyPI/GitHub aliases. RED:20 failures;
+  GREEN:78 focused audit/evidence/workflow/manifest/release tests and43 subtests.
+  Independent review PASS. The evaluator matches reviewed `c5d4ebe0e` exactly.
+- Compatibility is deliberately stricter: old reports without `scanned_packages`
+  are rejected, including the immutable Geph0.3.9-r5 report consumed by packaging.
+  Known retained raw OSV has rustls0.23.43, while exact r5 SPDX has0.23.45;
+  it cannot reconstruct that report. A new attested vendor or separately bound
+  fresh assessment is required; identities must not be synthesized from SPDX.
+  Expect this additional package gate failure until authentic evidence exists.
+  The green d0d4007 lifecycle remains runtime evidence, not qualification of this
+  stricter audit/package contract. No workstation app or dependency policy changed.
+
+Audit38435691158 on e61aad3 retained the intended four files; thirteen receipt,
+input/source/evaluator checks pass. The raw368-package inventory matches SPDX
+and exposes five blocking quinn-proto0.11.16 findings behind the policy error.
+CI38435691159 passes product/checks/Windows/Chromium; packaging now rejects the
+known immutable Geph report without scanned package identities.
+
+The next lock repair changes only quinn-proto version/checksum to0.11.18; all
+other547 packages and dependency edges remain unchanged. The verified registry
+archive matches the new checksum. Locked offline target metadata and five SBOM
+tests pass; the real SBOM helper emits the new coordinate. All five retained
+advisory affected ranges exclude0.11.18. This is not a fresh vulnerability scan
+or runtime qualification. Cargo metadata/SBOM includes this optional reqwest
+HTTP/3 chain, while the current cargo tree does not activate it; no active app
+runtime vulnerability is asserted from its SBOM presence alone.
+
+Next: publish the bounded lock repair and inspect fresh exact-head audit evidence.
+Chromium coverage and authentic Geph package evidence remain separate blockers.
+
+## Previous README publication checkpoint (historical)
+
 # README publication checkpoint — 2026-10-13
 
 This documentation-only change starts from published main

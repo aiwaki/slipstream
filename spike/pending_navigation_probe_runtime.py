@@ -16,6 +16,7 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import threading
 import time
 
@@ -1700,7 +1701,17 @@ class PendingNavigationBrowserWorkerLauncher:
                 ValueError,
                 plistlib.InvalidFileException,
                 PendingNavigationProbeRuntimeError,
-            ):
+            ) as error:
+                # Keep diagnostics bounded: never include plist contents, paths,
+                # environment values or arbitrary exception messages.
+                reason = type(error).__name__
+                if isinstance(error, OSError):
+                    reason += f":errno={error.errno}"
+                elif isinstance(error, PendingNavigationProbeRuntimeError):
+                    code = str(error)
+                    if re.fullmatch(r"[a-z_]{1,80}", code):
+                        reason += ":" + code
+                print("browser-worker stale cleanup failed: " + reason, file=sys.stderr)
                 return False
         if remove_root:
             try:
@@ -1839,7 +1850,7 @@ class PendingNavigationBrowserWorkerLauncher:
                 return
             self._sleep(0.05)
         raise PendingNavigationProbeRuntimeError(
-            "browser_worker_cleanup_failed"
+            "browser_worker_cleanup_failed_job_still_loaded"
         )
 
     def _cleanup_launch(self, target, paths, pid, identity):
@@ -1859,18 +1870,34 @@ class PendingNavigationBrowserWorkerLauncher:
                 # already-validated Chrome process tree and private profile.
                 # Keep the job loaded until that bounded cleanup has exited;
                 # bootout first would bypass the worker's owned cleanup.
-                self._wait_for_exit(
+                exit_code = self._wait_for_exit(
                     target,
                     pid,
                     identity,
                     timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
                 )
-                if self._read_worker_error(
-                    paths.stderr,
-                    identity,
-                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                # Successful natural exit already proves worker-owned cleanup.
+                # It may race SIGTERM after the exact PID/UID validation above.
+                worker_error = self._read_worker_error(paths.stderr, identity)
+                # The owned broker can disappear while shutdown waits for this
+                # exact worker. socket_unavailable/ipc_unavailable are IPC-only:
+                # claim runs before Chrome exists; submission errors propagate
+                # only after submit_before_cleanup has successfully drained it.
+                # Do not accept a signal, arbitrary exit, ownership error, or
+                # chrome/profile cleanup failure as this expected shutdown race.
+                clean_shutdown_error = exit_code == 1 and worker_error in {
+                    _BROWSER_WORKER_TERMINATION_ERROR, "socket_unavailable",
+                    "ipc_unavailable",
+                }
+                if exit_code != 0 and not clean_shutdown_error:
+                    # Only the bounded enum parsed by _read_worker_error is
+                    # exposed; never raw stderr, paths or worker request data.
+                    print(
+                        f"browser-worker cleanup exit: code={exit_code} "
+                        f"reason={worker_error}", file=sys.stderr,
+                    )
                     raise PendingNavigationProbeRuntimeError(
-                        "browser_worker_cleanup_failed"
+                        "browser_worker_cleanup_failed_exit"
                     )
         self._run(("/bin/launchctl", "bootout", target))
         try:

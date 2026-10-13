@@ -617,6 +617,20 @@ record is removed only after a successful release. If the installed uninstaller
 was already deleted, the tray uses the copy inside the application bundle. A
 partial install follows the same rollback.
 
+
+If removal reports `daemon status could not be removed`, inspect the preceding
+`daemon artifacts:` or `status artifact removal failed: errno=` message. The
+umbrella error also covers owned IPC sockets and browser-worker cleanup; it is
+not proof that deleting the status JSON itself failed. Worker diagnostics use
+bounded error codes rather than raw stderr, account data, or request payloads.
+
+An active browser worker can finish naturally or lose its broker during
+uninstall. After exact identity checks, exit 0 is clean; exit 1 is clean only
+for `worker_terminated`, `socket_unavailable`, or `ipc_unavailable`. The worker's
+Rust path gives Chrome/profile cleanup failures priority over an IPC failure.
+A signal, unknown exit, ownership error, or failed Chrome/profile cleanup still
+blocks removal. Accepted exits still require bootout and proof of job absence.
+
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
 state are never changed by this action.
