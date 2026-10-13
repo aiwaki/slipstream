@@ -42,6 +42,28 @@ file.
 
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- Dedicated5b3f0ede6 integrates conditional native producer and host synthetic
+  compile path; SOURCE/lock/helper pins unchanged/inactive. Fresh full-lock
+  fetch -> sealed cache -> OS-denied offline fetch/producer/jobs1 -> runtime
+  -> bundle/SPDX; native no-strip; existing-release9asset proof/independent
+  source/policy/attestation gates.21 shell scenarios,4 static contracts,6 shell
+  syntax/YAML checks PASS;4legacy shell bodies match2f0. Runner26 tests and
+  actual v2 ARM source/archive/tool preflight PASS; no actual native libtest run.
+  Independent workflow review9c21a98b no actionable finding. Parent verifies106
+  author/plan and11peer bindings. Actual cache512archives/453indexes PASS under
+  OS-denied full-lock fetch and dual-target metadata,17.539s/160.22MiB;966records
+  rehashed. Evidence6ee40408 at dedicated output/sqlite-native-integration/
+  cache-live-20261013/verification.json; original cache/build preserved.
+  Exact2f0 CI38399979673 product/checks/Windows/Chromium PASS; package404 for
+  unpublished0.4.3-r1. Dependency38399979669 expiredapp policy andGeph2blocking/
+  2informational/423packages; full logs retained. No unchanged full suite/rebuild.
+  Next verified action: native advisory identity partition in dependency_audit
+  scan/verify, preserving legacy no-PURL failclosed. Plan2334d7b0 in dedicated
+  output/sqlite-native-integration/native-audit-plan/:6scoped overlays leave
+  75source-applicability unknowns;9rejected+2source-fixed census-only rows still
+  need explicit production binding. First machine result must FAIL, not omit
+  native. SOURCE activation, actualnative CI runtime, audit, release/installed
+  qualification remain open. New exact5b3 CI pending; do not repeat green builds.
 - Dedicated2f0cbc1fd adds conditional native app-consumer workflow and offline
   full-lock cache preparation. Consumer2 focused tests (7 shell scenarios) PASS;
   independent static review9fabee09 found no actionable defect. Cache25 focused
