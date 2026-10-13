@@ -23,6 +23,7 @@ on:
       - ".github/workflows/build-geph.yml"
       - "scripts/dependency_audit.py"
       - "scripts/geph_vendor_source.py"
+      - "scripts/run_geph_synthetic_tests.py"
       - "scripts/make_geph_vendor_sbom.py"
       - "security/geph-dependency-audit-policy.json"
       - "vendor/geph/**"
@@ -202,6 +203,24 @@ jobs:
           set -euo pipefail
           version="${{ needs.resolve.outputs.version }}"
           branch="automation/geph-${version}"
+          remote_ref="refs/heads/$branch"
+          remote_oid="$(git ls-remote --heads origin "$remote_ref" | awk '{print $1}')"
+          if [ -n "$remote_oid" ]; then
+            # An opened version branch belongs to review. It may contain human
+            # fixes or qualification evidence that discovery must not replace.
+            echo "Preserving existing review branch $branch at $remote_oid"
+            existing_pr="$(gh api --method GET "repos/${{ github.repository }}/pulls" \
+              --paginate -f "head=${{ github.repository_owner }}:$branch" -f base=main -f state=all \
+              --jq ".[] | select(.head.repo.full_name == \"${{ github.repository }}\" and .head.ref == \"$branch\") | .number")"
+            if [ -z "$existing_pr" ]; then
+              gh pr create --repo "${{ github.repository }}" --base main --head "$branch" \
+                --title "vendor: geph5-client $version source contract" \
+                --body "Restored review for the existing source candidate at $remote_oid. No regeneration or branch update was performed; existing source changes and qualification evidence are preserved."
+            else
+              echo "Preserving existing PR $existing_pr and its description"
+            fi
+            exit 0
+          fi
           curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
             "${{ needs.resolve.outputs.crate_url }}" -o /tmp/geph5-client.crate
           python3 scripts/geph_vendor_source.py prepare \
@@ -225,13 +244,9 @@ jobs:
             exit 0
           fi
           git commit -m "vendor: geph5-client $version source contract"
-          remote_ref="refs/heads/$branch"
-          remote_oid="$(git ls-remote --heads origin "$remote_ref" | awk '{print $1}')"
-          if [ -n "$remote_oid" ]; then
-            git push --force-with-lease="$remote_ref:$remote_oid" origin "HEAD:$remote_ref"
-          else
-            git push origin "HEAD:$remote_ref"
-          fi
+          # Empty expected OID means create only if the remote ref is still absent.
+          # A branch created after the lookup must fail, never become our lease.
+          git push --force-with-lease="$remote_ref:" origin "HEAD:$remote_ref"
           body="$(cat <<EOF
           Automated Geph source-contract update.
 
@@ -244,7 +259,7 @@ jobs:
           EOF
           )"
           if gh pr view "$branch" --repo "${{ github.repository }}" --json number >/dev/null 2>&1; then
-            gh pr edit "$branch" --repo "${{ github.repository }}" --body "$body"
+            echo "Preserving existing PR description for $branch"
           else
             gh pr create \
               --repo "${{ github.repository }}" \
@@ -301,8 +316,10 @@ jobs:
           set -euo pipefail
           source_root="${{ steps.source.outputs.root }}"
           mkdir -p out /tmp/geph-metadata
-          # The reviewed contract can carry exact source edits and regression tests.
-          cargo test --manifest-path "$source_root/Cargo.toml" --locked --features aws_lambda --lib
+          # Compile without executing upstream account/network tests. Only exact
+          # reviewed fixtures run, with OS network and private-file denial.
+          python3 scripts/run_geph_synthetic_tests.py --source-root "$source_root" \
+            --evidence-dir "$RUNNER_TEMP/geph-synthetic-tests"
           IFS=',' read -ra targets <<< "$GEPH_TARGETS"
           bins=()
           for target in "${targets[@]}"; do
@@ -329,6 +346,15 @@ jobs:
           grep -aq aws_smithy out/geph5-client || {
             echo "aws_lambda feature is absent from the built binary"; exit 1;
           }
+
+      - name: Retain isolated synthetic test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-synthetic-tests-${{ needs.resolve.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/geph-synthetic-tests/*
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build and audit the vendored dependency inventory
         run: |
@@ -358,6 +384,7 @@ jobs:
             --target macos-universal \
             --vendored-transitive-dependencies full \
             --evaluation-date "$(date -u +%F)" \
+            --evidence-dir "$RUNNER_TEMP/dependency-audit-evidence/geph-build" \
             --output out/geph5-client-dependency-audit.json
           python3 scripts/dependency_audit.py verify \
             --report out/geph5-client-dependency-audit.json \
@@ -366,6 +393,30 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
             --vendored-transitive-dependencies full
+
+      - id: dependency-audit-geph-build-evidence
+        name: Check for retained dependency scan evidence
+        if: always()
+        run: |
+          set -eu
+          evidence_dir="$RUNNER_TEMP/dependency-audit-evidence/geph-build"
+          if [ -d "$evidence_dir" ] && [ ! -L "$evidence_dir" ]; then
+            for evidence_file in "$evidence_dir"/*; do
+              if [ -f "$evidence_file" ] && [ ! -L "$evidence_file" ]; then
+                echo "available=true" >> "$GITHUB_OUTPUT"
+                break
+              fi
+            done
+          fi
+
+      - name: Retain dependency scan inputs and raw result
+        if: always() && steps.dependency-audit-geph-build-evidence.outputs.available == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-audit-raw-geph-build-macos-universal-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-audit-evidence/geph-build/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Assemble the internal release payload
         run: |

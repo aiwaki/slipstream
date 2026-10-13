@@ -126,13 +126,17 @@ def _content_range_from_headers(headers):
     return start, end, total
 
 
-def _request_headers(host, *, bounded_range):
+def _request_headers(host, *, bounded_range, request_target="/"):
+    if (not isinstance(request_target, str) or not request_target.startswith("/")
+            or request_target.startswith("//") or len(request_target) > 2048
+            or any(ord(c) <= 32 or ord(c) >= 127 or c in "\\#" for c in request_target)):
+        raise ValueError("invalid probe request target")
     authority = host.encode("idna")
     headers = [
         (b":method", b"GET"),
         (b":scheme", b"https"),
         (b":authority", authority),
-        (b":path", b"/"),
+        (b":path", request_target.encode("ascii")),
         (b"user-agent", b"SlipstreamIncompleteResponse/1"),
         (b"accept", b"text/html,application/xhtml+xml"),
         (b"accept-encoding", b"identity"),
@@ -351,6 +355,7 @@ def probe_http2_response(
     max_bytes,
     bounded_range,
     monotonic=None,
+    request_target="/",
 ):
     """Read one HTTP/2 response without mistaking opaque TLS for completion."""
     clock = monotonic or time.monotonic
@@ -362,7 +367,7 @@ def probe_http2_response(
     stream_id = connection.get_next_available_stream_id()
     connection.send_headers(
         stream_id,
-        _request_headers(host, bounded_range=bounded_range),
+        _request_headers(host, bounded_range=bounded_range, request_target=request_target),
         end_stream=True,
     )
     tls_socket.sendall(connection.data_to_send())

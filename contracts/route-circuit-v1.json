@@ -37,7 +37,7 @@
         {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
         {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
         {"kind": "before_request", "key": {"service_group": "steam_store", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 2},
-        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "xbox_dns"}, "now_ms": 2},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "fixture_backend"}, "now_ms": 2},
         {"kind": "before_request", "key": {"service_group": "openai", "route_class": "direct_passthrough", "backend_id": "direct"}, "now_ms": 2}
       ],
       "expected_decisions": [

@@ -915,7 +915,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         asyncio.run(scenario())
     finally:
         tproxy._local_payload_idle_failures.pop("unknown.example", None)
-        tproxy._xbox_dns_candidates.pop("unknown.example", None)
+        tproxy._app_dns_candidates.pop("unknown.example", None)
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.clear()
@@ -1557,7 +1557,7 @@ def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
             launcher.launch()
 
 
-def test_console_worker_launcher_cleans_only_exact_stale_runtime():
+def test_console_worker_launcher_cleans_only_exact_stale_runtime(capsys):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-",
         dir="/tmp",
@@ -1632,6 +1632,8 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime():
             str(executable),
             probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
         ]
+        assert "browser_worker_runtime_unowned" in capsys.readouterr().err
+
         payload["EnvironmentVariables"]["CI"] = "true"
         paths.plist.write_bytes(plistlib.dumps(payload))
         paths.plist.chmod(0o600)
@@ -1644,7 +1646,21 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime():
         assert paths.directory.exists()
 
 
-def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
+@pytest.mark.parametrize("exit_code,worker_error,expected_clean", [
+    (1, "worker_terminated", True),
+    (1, "socket_unavailable", True),
+    (2, "socket_unavailable", False),
+    (-15, "socket_unavailable", False),
+    (1, "socket_unowned", False),
+    (1, "ipc_unavailable", True),
+    (2, "ipc_unavailable", False),
+    (-15, "ipc_unavailable", False),
+    (0, "", True),
+    (1, "", False),
+    (1, "chrome_cleanup_failed", False),
+    (1, "profile_cleanup_failed", False),
+])
+def test_console_worker_launcher_stops_one_exact_stale_loaded_job(exit_code, worker_error, expected_clean):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-loaded-",
         dir="/tmp",
@@ -1691,7 +1707,7 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                     )
                 if state["running"]:
                     return completed(command, stdout="pid = 4242\n")
-                return completed(command, stdout="last exit code = 1\n")
+                return completed(command, stdout=f"last exit code = {exit_code}\n")
             if command[:2] == ("/bin/ps", "-p"):
                 return completed(
                     command,
@@ -1702,8 +1718,11 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                 )
             if command[:2] == ("/bin/launchctl", "kill"):
                 state["running"] = False
+                # A validated worker can finish its own successful cleanup
+                # between the process check and delivery of SIGTERM.
                 state["paths"].stderr.write_text(
-                    "slipstream browser probe failed: worker_terminated\n"
+                    f"slipstream browser probe failed: {worker_error}\n"
+                    if worker_error else ""
                 )
                 state["paths"].stderr.chmod(0o600)
                 return completed(command)
@@ -1720,7 +1739,12 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
             sleep=lambda _seconds: None,
         )
         state["paths"] = launcher._prepare_launch(identity, label)
-        assert launcher.cleanup_stale(remove_root=True)
+        assert launcher.cleanup_stale(remove_root=True) is expected_clean
+        if not expected_clean:
+            assert runtime_root.exists()
+            assert not any(command[:2] == ("/bin/launchctl", "bootout")
+                           for command in state["commands"])
+            return
         assert not runtime_root.exists()
         assert not state["running"]
         assert any(
@@ -1899,3 +1923,123 @@ def test_lazy_worker_retries_after_a_lost_claim_lease():
     assert launches == [_job(), _job()]
     assert runtime.state_size() == 0
     assert worker.close()
+
+
+def test_browser_comparison_v2_queue_validation_is_owned_only():
+    import pending_navigation_probe_runtime as runtime
+    job = dict(schema_version=2, capability='a'*32, host='example.com',
+               candidate_routes=['owned_geph'], issued_at_unix_ms=1000,
+               deadline_unix_ms=21000)
+    assert runtime._validate_job(job, 1001) == job
+    assert runtime._validate_job(dict(job, schema_version=1), 1001) is None
+    assert runtime._validate_job(dict(job, deadline_unix_ms=21001), 1001) is None
+    assert runtime._validate_job(dict(job, candidate_routes=['system','owned_geph']), 1001) is None
+    assert runtime._validate_job(job, 21000) is None
+
+
+def test_lazy_worker_close_during_thread_start_is_joinable():
+    starting = threading.Event()
+    release_start = threading.Event()
+    closed = threading.Event()
+    errors = []
+    launches = []
+
+    class DelayedStart(threading.Thread):
+        def start(self):
+            starting.set()
+            assert release_start.wait(2)
+            super().start()
+
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=lambda: 1,
+        launch_worker=lambda: launches.append('unexpected'),
+        thread_factory=DelayedStart,
+    )
+    notifier = threading.Thread(target=worker.notify_job_ready)
+    def close():
+        try:
+            assert worker.close(timeout=1)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            closed.set()
+    closer = threading.Thread(target=close)
+    notifier.start()
+    assert starting.wait(1)
+    closer.start()
+    assert worker._stop.wait(1)
+    release_start.set()
+    notifier.join(2)
+    closer.join(2)
+    assert closed.is_set()
+    assert not errors
+    assert not launches
+    assert worker.close(timeout=1)
+
+
+def test_lazy_worker_close_between_job_count_and_registration():
+    sampled = threading.Event()
+    resume = threading.Event()
+    created = []
+    result = []
+    def pending():
+        sampled.set()
+        assert resume.wait(2)
+        return 1
+    def factory(**kwargs):
+        created.append('thread')
+        return threading.Thread(**kwargs)
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=pending, launch_worker=lambda: None, thread_factory=factory,
+    )
+    notifier = threading.Thread(target=lambda: result.append(worker.notify_job_ready()))
+    notifier.start()
+    assert sampled.wait(1)
+    assert worker.close()
+    resume.set()
+    notifier.join(2)
+    assert result == [False]
+    assert not created
+
+
+def test_cancelled_ipc_reader_closes_transport():
+    async def scenario():
+        class Writer:
+            closed = False
+            def close(self): self.closed = True
+            async def wait_closed(self): pass
+        reader = asyncio.StreamReader()
+        writer = Writer()
+        task = asyncio.create_task(probe_runtime.handle_pending_navigation_probe_client(reader, writer, None))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert writer.closed
+    asyncio.run(scenario())
+
+
+def test_cancelled_server_start_releases_bound_socket(monkeypatch):
+    async def scenario(directory):
+        import socket
+        path = Path(directory) / 'probe.sock'
+        class Server:
+            closed = False
+            socket = None
+            async def start_serving(self): raise asyncio.CancelledError
+            def close(self): self.closed = True; self.socket.close()
+            async def wait_closed(self): pass
+        server = Server()
+        async def start(*args, **kwargs):
+            server.socket = socket.socket(socket.AF_UNIX)
+            server.socket.bind(str(path))
+            return server
+        monkeypatch.setattr(probe_runtime.asyncio, 'start_unix_server', start)
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await probe_runtime.start_owned_pending_navigation_probe_server(str(path), os.getuid(), os.getgid(), None)
+            assert server.closed
+            assert not path.exists()
+        finally:
+            server.socket.close()
+    with tempfile.TemporaryDirectory(prefix='ss-ipc-', dir='/tmp') as directory:
+        asyncio.run(scenario(directory))

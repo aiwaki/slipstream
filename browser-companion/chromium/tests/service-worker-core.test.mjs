@@ -372,10 +372,11 @@ test("request correlation survives a service-worker restart", async () => {
   const values = {};
   const storageSession = {
     async get(key) {
+      if (key === null) return { ...values };
       return Object.hasOwn(values, key) ? { [key]: values[key] } : {};
     },
     async remove(key) {
-      delete values[key];
+      for (const entry of Array.isArray(key) ? key : [key]) delete values[entry];
     },
     async set(entries) {
       Object.assign(values, entries);
@@ -390,10 +391,10 @@ test("request correlation survives a service-worker restart", async () => {
     parentFrameId: -1,
     url: "https://example.net/private?token=secret"
   };
-  const firstWorker = core.createIncompleteResponseTracker(storageSession);
+  const firstWorker = core.createIncompleteResponseTracker(storageSession, () => 1_000_000);
   assert.equal(await firstWorker.remember(before, 900_000), true);
 
-  const restartedWorker = core.createIncompleteResponseTracker(storageSession);
+  const restartedWorker = core.createIncompleteResponseTracker(storageSession, () => 1_000_000);
   const candidate = await restartedWorker.take({
     requestId: before.requestId
   });
@@ -405,4 +406,33 @@ test("request correlation survives a service-worker restart", async () => {
     await restartedWorker.take({ requestId: before.requestId }),
     null
   );
+});
+
+test("correlation expires and stays bounded after missed terminal events and worker restarts", async () => {
+  let now = 1_000_000;
+  const values = { unrelated: { keep: true } };
+  const storage = {
+    async get(key) {
+      return key === null ? { ...values } : { [key]: values[key] };
+    },
+    async set(entries) { Object.assign(values, entries); },
+    async remove(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) delete values[key];
+    }
+  };
+  let tracker = core.createIncompleteResponseTracker(storage, () => now);
+  for (let index = 0; index < 130; index++) {
+    await tracker.remember({
+      requestId: `request-${index}`, tabId: index, type: "main_frame",
+      method: "GET", frameId: 0, url: "https://example.net/private"
+    }, now++);
+  }
+  assert.equal(Object.keys(values).length, 129);
+  assert.equal(await tracker.peek({ requestId: "request-0" }), null);
+  assert.equal(await tracker.peek({ requestId: "request-129" }) !== null, true);
+
+  now = 1_000_129 + 5 * 60 * 1000;
+  tracker = core.createIncompleteResponseTracker(storage, () => now);
+  assert.equal(await tracker.peek({ requestId: "request-129" }), null);
+  assert.deepEqual(values, { unrelated: { keep: true } });
 });

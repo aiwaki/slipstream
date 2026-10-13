@@ -274,6 +274,12 @@ impl RawPacketTcpStackV1 {
             self.poll_once()?;
             if !self.device.outbound.is_empty() {
                 let syn_ack = self.device.take_single_handshake_output()?;
+                if self.sockets.get::<tcp::Socket>(self.socket).state() != tcp::State::SynReceived {
+                    return Err(RawPacketTcpError::new(
+                        RawPacketTcpErrorCode::SegmentRejected,
+                        "selected stack emitted a rejection instead of accepting the TCP SYN",
+                    ));
+                }
                 self.phase = RawPacketTcpPhase::SynAckEmitted;
                 return Ok(syn_ack);
             }

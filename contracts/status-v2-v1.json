@@ -73,8 +73,8 @@
             "managed_by_slipstream": false
           },
           "dns": {
-            "state": "xbox_dns",
-            "providers": "xbox_dns",
+            "state": "configured",
+            "providers": "",
             "managed_by_slipstream": false,
             "resolution_state": "ok",
             "future_dns_signal": "preserved"
@@ -160,8 +160,8 @@
           "managed_by_slipstream": false
         },
         "system_dns": {
-          "state": "xbox_dns",
-          "providers": "xbox_dns",
+          "state": "configured",
+          "providers": "",
           "managed_by_slipstream": false,
           "resolution_state": "ok",
           "future_dns_signal": "preserved",

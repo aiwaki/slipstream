@@ -1,6 +1,6 @@
 //! Privacy-bounded public daemon status schema shared by platform adapters.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -26,6 +26,47 @@ impl DaemonPhaseV2 {
             Self::Stopping => "stopping",
         }
     }
+}
+
+/// Fixed-cardinality, public relay counts. No host history or extensible fields.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct RelayEndCountersV2 {
+    pub upstream_eof: u32,
+    pub upstream_read_error: u32,
+    pub upstream_reset: u32,
+    pub client_eof: u32,
+    pub client_read_error: u32,
+    pub local_partial_record_watchdog: u32,
+    pub local_half_close_idle: u32,
+    pub authorized_retry: u32,
+    pub cancellation: u32,
+    pub write_error: u32,
+    pub internal_error: u32,
+    pub unknown: u32,
+}
+
+/// Observations only: these counts never establish route health or route proof.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RelayDiagnosticsV2 {
+    pub schema_version: u32,
+    pub available: bool,
+    pub counters: RelayEndCountersV2,
+    pub counter_saturated: bool,
+}
+
+fn deserialize_relay_diagnostics<'de, D>(
+    deserializer: D,
+) -> Result<Option<RelayDiagnosticsV2>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Malformed optional observations must not invalidate the daemon heartbeat.
+    // Decode into a typed projection; never retain the temporary JSON value.
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value::<RelayDiagnosticsV2>(value)
+        .ok()
+        .filter(|diagnostics| diagnostics.schema_version == 1))
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -59,6 +100,12 @@ pub struct DaemonStatusV2 {
     pub hosts_learned: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_hosts: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_relay_diagnostics",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub relay_diagnostics: Option<RelayDiagnosticsV2>,
     #[serde(default, flatten)]
     pub extra: ExtraFields,
 }
@@ -286,4 +333,95 @@ pub fn status_v2_from_value(value: Value) -> Result<StatusV2, String> {
         ));
     }
     Ok(status)
+}
+
+#[cfg(test)]
+mod relay_diagnostics_tests {
+    use super::status_v2_from_value;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn relay_diagnostics_roundtrip_keeps_only_fixed_public_counts() {
+        let value = json!({
+            "schema_version": 2,
+            "daemon": {
+                "state": "active",
+                "relay_diagnostics": {
+                    "schema_version": 1,
+                    "available": true,
+                    "counter_saturated": false,
+                    "counters": {
+                        "upstream_eof": 2,
+                        "upstream_read_error": 3,
+                        "upstream_reset": 4,
+                        "client_eof": 5,
+                        "client_read_error": 6,
+                        "local_partial_record_watchdog": 7,
+                        "local_half_close_idle": 13,
+                        "authorized_retry": 8,
+                        "cancellation": 9,
+                        "write_error": 10,
+                        "internal_error": 14,
+                        "unknown": 11,
+                        "private.example": 12,
+                    },
+                    "recent": [{"host": "private.example"}],
+                    "url": "https://private.example/path?token=secret",
+                },
+            },
+        });
+        let status = status_v2_from_value(value).unwrap();
+        let encoded = serde_json::to_value(&status).unwrap();
+        let diagnostics = &encoded["daemon"]["relay_diagnostics"];
+        assert_eq!(diagnostics["counters"]["local_partial_record_watchdog"], 7);
+        assert_eq!(diagnostics["counters"]["authorized_retry"], 8);
+        assert_eq!(diagnostics["counters"].as_object().unwrap().len(), 12);
+        assert_eq!(diagnostics.as_object().unwrap().len(), 4);
+        assert!(!encoded.to_string().contains("private.example"));
+        assert!(!encoded.to_string().contains("secret"));
+        assert_eq!(status_v2_from_value(encoded).unwrap(), status);
+    }
+
+    #[test]
+    fn relay_diagnostics_missing_or_invalid_does_not_break_the_heartbeat() {
+        for diagnostics in [
+            Value::Null,
+            json!("https://private.example/secret"),
+            json!({}),
+            json!({"schema_version": 2, "available": true,
+                   "counters": {}, "counter_saturated": false}),
+            json!({"schema_version": 1, "available": true,
+                   "counters": {"upstream_eof": -1}, "counter_saturated": false}),
+            json!({"schema_version": 1, "available": true,
+                   "counters": {"upstream_eof": 4294967296u64}, "counter_saturated": false}),
+        ] {
+            let status = status_v2_from_value(json!({
+                "schema_version": 2,
+                "daemon": {"state": "active", "heartbeat_seq": 7,
+                           "relay_diagnostics": diagnostics},
+            }))
+            .unwrap();
+            let daemon = status.daemon.as_ref().unwrap();
+            assert_eq!(daemon.heartbeat_seq, Some(7));
+            assert!(daemon.relay_diagnostics.is_none());
+            assert!(serde_json::to_value(&status).unwrap()["daemon"]
+                .get("relay_diagnostics")
+                .is_none());
+        }
+        let status = status_v2_from_value(json!({"schema_version": 2, "daemon": {}})).unwrap();
+        assert!(status.daemon.unwrap().relay_diagnostics.is_none());
+    }
+
+    #[test]
+    fn relay_diagnostics_unavailable_stays_explicitly_unavailable() {
+        let status = status_v2_from_value(json!({
+            "schema_version": 2,
+            "daemon": {"relay_diagnostics": {
+                "schema_version": 1, "available": false,
+                "counters": {}, "counter_saturated": false,
+            }},
+        }))
+        .unwrap();
+        assert!(!status.daemon.unwrap().relay_diagnostics.unwrap().available);
+    }
 }

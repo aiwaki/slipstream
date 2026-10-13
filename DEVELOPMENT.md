@@ -86,21 +86,50 @@ crate is linked into the Windows production host.
 
 ## Build
 
-Build the self-contained Python daemon first:
+Keep long-lived development and qualification work in a durable checkout, not
+in an OS-managed temporary directory. Before replacing an installed app, retain
+the exact source revision and any uncommitted diff that produced it. If a prior
+worktree disappeared, an older saved branch or graph index is not proof that its
+uncommitted tail is present: reconcile that tail before building a replacement.
+Record the source, artifact verification result and remaining physical gates in
+`docs/CURRENT_STATE.md` and the relevant investigation log.
 
-```bash
-cd spike
-./build_daemon.sh
-cd ..
-rm -rf app-tauri/src-tauri/slipstreamd
-cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
-```
+The canonical `build:local` and `build:release` app scripts rebuild the
+self-contained Python daemon with Python 3.13 through Tauri's
+`beforeBuildCommand`, stage it through a temporary directory, build the final app, and run
+the canonical macOS bundle verifier. That verifier checks the complete
+fresh/staged/materialized bundle chain, critical binary hashes and
+architectures, app identity, helper isolation, routing invariants, and the
+ad-hoc signature's integrity. A tray rebuild therefore cannot silently reuse
+an older frozen daemon. If `python3.13` is not on `PATH`, set
+`SLIPSTREAM_PYTHON_313` to its exact executable path.
+
+The daemon must be staged before Cargo compilation: `tauri-build` copies its
+resources during `build.rs`, before any `beforeBundleCommand` could run. There
+is one freeze per canonical build, not a second npm or bundle-hook freeze.
+Standalone `tauri bundle` only repackages existing build output and is not a
+supported fresh-source build or release path; use the canonical scripts above.
+`tauri dev` has its separate development lifecycle and does not run this hook.
 
 A complete local app build also needs the Geph sidecar at:
 
 ```text
 app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
 ```
+
+Use the recorded Geph release contract and the verification sequence in
+`.github/workflows/ci.yml` before staging that sidecar; neither the upstream
+source crate nor a locally generated audit report substitutes for its binary
+attestations. The complete version- and hash-pinned Chromium headless runtime
+must also be materialized with
+`scripts/materialize_chromium_headless_shell.py` into
+`app-tauri/src-tauri/chromium-headless-shell`. The tracked README alone is not a
+runtime. Do not use test-only resource overrides for a product build.
+The canonical daemon staging hook first performs a read-only Chromium input
+check: required regular files, executable permission, manifest/source contract
+and executable digest must match before the expensive daemon freeze begins.
+It never silently downloads or repairs missing inputs. This catches incomplete
+staging early; the final whole-bundle verifier is still required.
 
 Then build the app without updater signing:
 
@@ -109,6 +138,22 @@ cd app-tauri
 npm ci
 npm run build:local
 ```
+
+After installing that exact build, compare the built and installed app trees
+and validate the schema-3 install attestation, witness, exact LaunchDaemon
+plist, fresh StatusV2 heartbeat, and live `launchctl` PID/program/arguments
+without opening the root-only daemon:
+
+```bash
+npm run verify:local-install
+```
+
+The command binds the attested PID to both StatusV2 and the running launchd
+service. Checks that require root access to hash `/usr/local/slipstream`, prove
+listener ownership, or inspect kernel PF state remain `not_run`; it does not
+silently treat them as passed. The current macOS build is ad-hoc signed and
+unnotarized, so this verification does not claim notarization or Gatekeeper
+compatibility.
 
 Release builds use `npm run build:release` and require the updater signing
 environment. The bundled Geph client is built by

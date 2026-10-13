@@ -49,13 +49,13 @@ const OUTCOME_CHALLENGE_OR_AUTH: &str = "challenge_or_auth";
 const OUTCOME_USABLE: &str = "usable";
 const OUTCOME_TERMINAL_ERROR: &str = "terminal_error";
 const ROUTE_PREFLIGHT_MAX_DEADLINE_MS: u64 = 8_000;
-const ROUTE_PREFLIGHT_MIN_START_BUDGET_MS: u64 = 2_000;
+const BROWSER_COMPARE_MAX_DEADLINE_MS: u64 = 20_000;
 const OWNED_GEPH_ROUTE: &str = "owned_geph";
 const OWNED_GEPH_PORT_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT";
 const DOM_CLASSIFICATION_COMMAND_ID: u64 = 4;
-const PINNED_HEADLESS_RUNTIME_VERSION: &str = "151.0.7922.77";
+const PINNED_HEADLESS_RUNTIME_VERSION: &str = "155.0.8059.39";
 const PINNED_HEADLESS_RUNTIME_ARCHIVE_SHA256: &str =
-    "44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e";
+    "b3e093c06001c41e68decbc8dd4a62f9efe4bf4e4dd247a686ea531863448d75";
 const PINNED_HEADLESS_RUNTIME_MANIFEST: &str = "manifest.json";
 const DOM_CLASSIFIER: &str = concat!(
     include_str!("../../../browser-companion/chromium/detector.js"),
@@ -145,6 +145,8 @@ struct ProbeJob {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RoutePreflightProbeJob {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    asset_hosts: Option<Vec<String>>,
     schema_version: u8,
     capability: String,
     host: String,
@@ -189,9 +191,13 @@ struct ProbeResultPayload<'a> {
     outcome: &'a str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 struct RoutePreflightResultPayload<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_url: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_kind: Option<&'a str>,
     schema_version: u8,
     capability: &'a str,
     host: &'a str,
@@ -227,6 +233,8 @@ struct ChromeConfig {
 }
 
 struct ChromeSession {
+    discovered_asset: Option<String>,
+    discovered_asset_kind: &'static str,
     uid: u32,
     config: ChromeConfig,
     profile: PathBuf,
@@ -277,12 +285,65 @@ fn is_correlated_document_redirect(event: &Value, expected_request_id: Option<&s
         && event.pointer("/params/redirectResponse").is_some()
 }
 
+fn admit_same_origin_document_redirect(
+    event: &Value,
+    initial_url: &str,
+    visited: &mut BTreeSet<String>,
+) -> bool {
+    let Some(target) = event.pointer("/params/request/url").and_then(Value::as_str) else {
+        return false;
+    };
+    if visited.len() >= 4
+        || target.len() > 2048
+        || !target.is_ascii()
+        || target
+            .bytes()
+            .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+        || target.contains('\\')
+        || !matches!(
+            event
+                .pointer("/params/redirectResponse/status")
+                .and_then(Value::as_u64),
+            Some(301 | 302 | 303 | 307 | 308)
+        )
+    {
+        return false;
+    }
+    let (Ok(initial), Ok(destination)) = (
+        reqwest::Url::parse(initial_url),
+        reqwest::Url::parse(target),
+    ) else {
+        return false;
+    };
+    if destination.scheme() != "https"
+        || destination.origin() != initial.origin()
+        || !destination.username().is_empty()
+        || destination.password().is_some()
+        || destination.fragment().is_some()
+    {
+        return false;
+    }
+    // Transient observer state only: never log or submit the redirected path.
+    visited.insert(destination.to_string())
+}
+
 fn full_navigation_completed(
     document_finished: bool,
     stopped_frame_id: Option<&str>,
     main_frame_id: Option<&str>,
 ) -> bool {
     document_finished && main_frame_id.is_some() && stopped_frame_id == main_frame_id
+}
+
+// V2 compares the completed main document, not every independently routed
+// iframe/image on the page. Correlate parser completion to its exact loader;
+// an old document or a child frame must never authorize the current request.
+fn main_document_parsed(event: &Value, frame: Option<&str>, loader: Option<&str>) -> bool {
+    frame.is_some() && loader.is_some()
+        && event.get("method").and_then(Value::as_str) == Some("Page.lifecycleEvent")
+        && event.pointer("/params/name").and_then(Value::as_str) == Some("DOMContentLoaded")
+        && event.pointer("/params/frameId").and_then(Value::as_str) == frame
+        && event.pointer("/params/loaderId").and_then(Value::as_str) == loader
 }
 
 fn observation_outcome(observation: NavigationObservation) -> &'static str {
@@ -317,6 +378,7 @@ fn classified_dom_observation(event: &Value) -> ProbeResult<NavigationObservatio
 fn classify_loaded_document(
     websocket: &mut TcpStream,
     deadline: Instant,
+    public_gets: &mut AnonymousGetDiscovery,
 ) -> ProbeResult<NavigationObservation> {
     websocket_send_json(
         websocket,
@@ -334,11 +396,120 @@ fn classify_loaded_document(
         let Some(event) = websocket_read_json(websocket, deadline)? else {
             continue;
         };
+        public_gets.observe(&event);
         if event.get("id").and_then(Value::as_u64) == Some(DOM_CLASSIFICATION_COMMAND_ID) {
             return classified_dom_observation(&event);
         }
     }
     Err(error("dom_classification_timeout"))
+}
+
+// Only an anonymous DOM image on the exact daemon-selected failed host is
+// returned. No cookies, headers, bodies, browsing profile or URL logs cross IPC.
+fn valid_dynamic_image_url(value: &str, host: &str) -> bool {
+    if value.len() > 1024 || !value.is_ascii()
+        || value.bytes().any(|b| b <= 32 || b == 127 || b == b'\\') { return false; }
+    let Ok(url) = reqwest::Url::parse(value) else { return false; };
+    url.scheme() == "https" && url.host_str() == Some(host) && canonical_host(host)
+        && url.username().is_empty() && url.password().is_none()
+        && url.port_or_known_default() == Some(443) && url.fragment().is_none()
+}
+
+// V4 observes only the disposable browser's own GET metadata. Bounded transient
+// URLs never enter logs, user profiles, persisted state or routing keys.
+struct AnonymousGetDiscovery {
+    hosts: Vec<String>,
+    pending: std::collections::BTreeMap<String, String>,
+    best: Option<(u64, String)>,
+}
+
+impl AnonymousGetDiscovery {
+    fn new(hosts: &[String]) -> Self {
+        Self { hosts: hosts.to_vec(), pending: Default::default(), best: None }
+    }
+
+    fn observe(&mut self, event: &Value) {
+        if self.hosts.is_empty() { return; }
+        let Some(id) = event.pointer("/params/requestId").and_then(Value::as_str) else { return; };
+        if id.len() > 128 { return; }
+        match event.get("method").and_then(Value::as_str) {
+            Some("Network.requestWillBeSent") => {
+                // A redirect or reused ID must not inherit earlier GET authority.
+                self.pending.remove(id);
+                if self.pending.len() >= 64
+                    || event.pointer("/params/request/method").and_then(Value::as_str) != Some("GET")
+                    || !matches!(event.pointer("/params/type").and_then(Value::as_str), Some("Fetch" | "XHR")) {
+                    return;
+                }
+                let Some(url) = event.pointer("/params/request/url").and_then(Value::as_str) else { return; };
+                if self.hosts.iter().any(|host| valid_dynamic_image_url(url, host)) {
+                    self.pending.insert(id.to_string(), url.to_string());
+                }
+            }
+            Some("Network.responseReceived") => {
+                let Some(url) = self.pending.remove(id) else { return; };
+                if event.pointer("/params/response/url").and_then(Value::as_str) != Some(url.as_str())
+                    || event.pointer("/params/response/status").and_then(Value::as_u64) != Some(200)
+                    || event.pointer("/params/response/mimeType").and_then(Value::as_str) != Some("application/json") {
+                    return;
+                }
+                let Some(headers) = event.pointer("/params/response/headers").and_then(Value::as_object) else { return; };
+                let lengths: Vec<_> = headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("content-length")).collect();
+                if lengths.len() != 1 { return; }
+                let Some(length) = lengths[0].1.as_str().and_then(|s| s.parse::<u64>().ok()) else { return; };
+                if (1..=262144).contains(&length) && self.best.as_ref().is_none_or(|(n, _)| length > *n) {
+                    // Prefer the substantial API object over tiny configuration
+                    // replies; every target still needs independent local proof.
+                    self.best = Some((length, url));
+                }
+            }
+            Some("Network.loadingFailed" | "Network.loadingFinished") => { self.pending.remove(id); }
+            _ => {}
+        }
+    }
+}
+
+fn discover_dynamic_image(
+    websocket: &mut TcpStream, hosts: &[String], deadline: Instant,
+    termination: &AtomicBool, public_gets: &mut AnonymousGetDiscovery,
+) -> ProbeResult<Option<(String, &'static str)>> {
+    // Use the remaining original job budget: hydration can finish after three
+    // seconds even when the owned route is healthy. Leave time for the CDP
+    // reply; never extend the job, scroll, click or authenticate.
+    let observation_ms = deadline.saturating_duration_since(Instant::now())
+        .as_millis().saturating_sub(100);
+    if observation_ms == 0 {
+        return Ok(None);
+    }
+    let host_json = serde_json::to_string(hosts).map_err(|_| error("asset_host_invalid"))?;
+    let expression = format!(r#"new Promise(resolve => {{
+        const until = Date.now() + {observation_ms};
+        const scan = () => {{
+            const found = Array.from(document.images).slice(0, 512).map(i => i.currentSrc || i.src)
+                .find(s => {{ try {{ const u = new URL(s); return s.length <= 1024 &&
+                    u.protocol === 'https:' && {host_json}.includes(u.hostname) &&
+                    !u.username && !u.password && !u.hash && (!u.port || u.port === '443');
+                }} catch (_) {{ return false; }} }});
+            if (found || Date.now() >= until) resolve(found || '');
+            else setTimeout(scan, 100);
+        }}; scan();
+    }})"#);
+    websocket_send_json(websocket, &json!({"id": 6, "method": "Runtime.evaluate",
+        "params": {"expression": expression, "returnByValue": true, "awaitPromise": true}}))?;
+    while Instant::now() < deadline {
+        require_not_terminated(termination)?;
+        let Some(event) = websocket_read_json(websocket, deadline)? else { continue; };
+        public_gets.observe(&event);
+        if event.get("id").and_then(Value::as_u64) == Some(6) {
+            let value = event.pointer("/result/result/value").and_then(Value::as_str).unwrap_or("");
+            return Ok(if hosts.iter().any(|host| valid_dynamic_image_url(value, host)) {
+                Some((value.to_string(), "image"))
+            } else {
+                public_gets.best.take().map(|(_, url)| (url, "public_json"))
+            });
+        }
+    }
+    Ok(None)
 }
 
 pub fn run_browser_probe_if_requested() -> Option<i32> {
@@ -360,7 +531,8 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
 }
 
 fn run_probe_worker() -> ProbeResult<()> {
-    let classification_deadline = Instant::now() + CLASSIFICATION_BUDGET;
+    let classification_deadline =
+        Instant::now() + Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS);
     let termination_requested = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(
         signal_hook::consts::SIGTERM,
@@ -419,19 +591,34 @@ fn run_claimed_probe(
 
     let remaining_ms = claimed_job_remaining_budget_ms(&job, now);
     let claimed_deadline = Instant::now() + Duration::from_millis(remaining_ms);
+    let worker_v1_deadline = classification_deadline
+        - (Duration::from_millis(BROWSER_COMPARE_MAX_DEADLINE_MS) - CLASSIFICATION_BUDGET);
     let classification_deadline = classification_deadline.min(claimed_deadline);
+    let classification_deadline = if matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2..=4))
+    {
+        classification_deadline
+    } else {
+        classification_deadline.min(worker_v1_deadline)
+    };
 
     let config = ChromeConfig::discover(&job, uid, classification_deadline)?;
     let mut chrome = ChromeSession::launch(uid, config, classification_deadline)?;
-    let observation =
-        match chrome.observe_navigation(termination_requested, classification_deadline) {
-            Ok(observation) => observation,
-            Err(failure) => {
-                chrome.cleanup()?;
-                return Err(failure);
-            }
-        };
+    let observation = match chrome.observe_navigation(
+        termination_requested,
+        classification_deadline,
+        matches!(&job, ClaimedProbeJob::RoutePreflight(j) if matches!(j.schema_version, 2..=4)),
+        match &job { ClaimedProbeJob::RoutePreflight(j) => j.asset_hosts.as_deref(), _ => None },
+        matches!(&job, ClaimedProbeJob::RoutePreflight(j) if j.schema_version == 4),
+    ) {
+        Ok(observation) => observation,
+        Err(failure) => {
+            chrome.cleanup()?;
+            return Err(failure);
+        }
+    };
     let outcome = observation_outcome(observation);
+    let discovered_asset = chrome.discovered_asset.take();
+    let discovered_asset_kind = chrome.discovered_asset_kind;
     let response = submit_before_cleanup(
         || {
             let observed_at_unix_ms = unix_now_ms()?;
@@ -448,7 +635,9 @@ fn run_claimed_probe(
                 }
                 ClaimedProbeJob::RoutePreflight(job) => {
                     serde_json::to_value(RoutePreflightResultPayload {
-                        schema_version: SCHEMA_VERSION,
+                        asset_url: matches!(job.schema_version, 3 | 4).then_some(discovered_asset.as_deref().unwrap_or("")),
+                        asset_kind: (job.schema_version == 4).then_some(discovered_asset_kind),
+                        schema_version: job.schema_version,
                         capability: &job.capability,
                         host: &job.host,
                         candidate_route: OWNED_GEPH_ROUTE,
@@ -469,7 +658,11 @@ fn claimed_job_has_start_budget(job: &ClaimedProbeJob, now_unix_ms: u64) -> bool
     match job {
         ClaimedProbeJob::PendingNavigation(job) => job_has_start_budget(job, now_unix_ms),
         ClaimedProbeJob::RoutePreflight(job) => {
-            job.deadline_unix_ms.saturating_sub(now_unix_ms) >= ROUTE_PREFLIGHT_MIN_START_BUDGET_MS
+            // Root I/O and signed-browser admission already consumed part of
+            // this same eight-second job. Do not silently discard its live
+            // remainder before attempting the independently bounded probe.
+            // Discovery, navigation and submission all enforce the deadline.
+            job.deadline_unix_ms > now_unix_ms
         }
     }
 }
@@ -618,7 +811,16 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
     let mut routes = job.candidate_routes.clone();
     routes.sort();
     routes.dedup();
-    if job.schema_version != SCHEMA_VERSION
+    let max_deadline = match job.schema_version {
+        1 => ROUTE_PREFLIGHT_MAX_DEADLINE_MS,
+        2..=4 if job.candidate_routes == [OWNED_GEPH_ROUTE] => BROWSER_COMPARE_MAX_DEADLINE_MS,
+        _ => return Err(error("claimed_job_invalid")),
+    };
+    if matches!(job.schema_version, 3 | 4) != job.asset_hosts.is_some()
+        || job.asset_hosts.as_ref().is_some_and(|hosts| hosts.is_empty() || hosts.len() > 4
+            || hosts.iter().any(|h| !canonical_host(h))
+            || hosts.iter().collect::<BTreeSet<_>>().len() != hosts.len())
+        || job.schema_version == 0
         || job.capability.len() != CAPABILITY_HEX_CHARS
         || !job
             .capability
@@ -640,7 +842,7 @@ fn validate_route_preflight_job(job: &RoutePreflightProbeJob) -> ProbeResult<()>
             .any(|route| route == OWNED_GEPH_ROUTE)
         || job.issued_at_unix_ms == 0
         || job.deadline_unix_ms <= job.issued_at_unix_ms
-        || job.deadline_unix_ms - job.issued_at_unix_ms > ROUTE_PREFLIGHT_MAX_DEADLINE_MS
+        || job.deadline_unix_ms - job.issued_at_unix_ms > max_deadline
         || now < job.issued_at_unix_ms
         || now.saturating_sub(job.issued_at_unix_ms) > MAX_CLAIM_AGE_MS
         || job.deadline_unix_ms <= now
@@ -728,6 +930,10 @@ fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<Claim
             if let Ok(job) = serde_json::from_value::<ProbeJob>(job.clone()) {
                 validate_job(&job)?;
                 return Ok(Some(ClaimedProbeJob::PendingNavigation(job)));
+            }
+            if !matches!(job.get("schema_version").and_then(Value::as_u64), Some(3 | 4))
+                && job.get("asset_hosts").is_some() {
+                return Err(error("claimed_job_invalid"));
             }
             let job = serde_json::from_value::<RoutePreflightProbeJob>(job)
                 .map_err(|_| error("claimed_job_invalid"))?;
@@ -1099,6 +1305,8 @@ impl ChromeSession {
         }
         let profile = create_private_profile()?;
         let mut session = Self {
+            discovered_asset: None,
+            discovered_asset_kind: "",
             uid,
             config,
             profile,
@@ -1183,6 +1391,9 @@ impl ChromeSession {
         &mut self,
         termination_requested: &AtomicBool,
         classification_deadline: Instant,
+        allow_document_redirects: bool,
+        asset_hosts: Option<&[String]>,
+        discover_public_get: bool,
     ) -> ProbeResult<NavigationObservation> {
         let port = read_devtools_port(&self.profile, self.uid)?
             .ok_or_else(|| error("devtools_unavailable"))?;
@@ -1200,6 +1411,12 @@ impl ChromeSession {
             &json!({"id": 1, "method": "Network.enable"}),
         )?;
         websocket_send_json(&mut websocket, &json!({"id": 2, "method": "Page.enable"}))?;
+        if allow_document_redirects {
+            websocket_send_json(&mut websocket, &json!({
+                "id": 5, "method": "Page.setLifecycleEventsEnabled",
+                "params": {"enabled": true},
+            }))?;
+        }
         let navigation_started = Instant::now();
         websocket_send_json(
             &mut websocket,
@@ -1211,11 +1428,15 @@ impl ChromeSession {
         )?;
 
         let overall_deadline = classification_deadline;
+        let mut public_gets = AnonymousGetDiscovery::new(
+            if discover_public_get { asset_hosts.unwrap_or_default() } else { &[] });
         let mut request_id = None;
         let mut request_started = None;
         let mut main_frame_id = None;
         let mut document_finished = false;
+        let mut document_parsed = false;
         let mut stopped_frame_id = None;
+        let mut visited_documents = BTreeSet::from([self.config.target_url.clone()]);
         while Instant::now() < overall_deadline {
             require_not_terminated(termination_requested)?;
             let event = match websocket_read_json(&mut websocket, overall_deadline)? {
@@ -1225,6 +1446,7 @@ impl ChromeSession {
                     continue;
                 }
             };
+            public_gets.observe(&event);
             if event.get("id").and_then(Value::as_u64) == Some(3)
                 && (event.get("error").is_some()
                     || event
@@ -1250,11 +1472,23 @@ impl ChromeSession {
                 continue;
             };
             if is_correlated_document_redirect(&event, request_id.as_deref()) {
-                let _ = websocket_send_json(
-                    &mut websocket,
-                    &json!({"id": 99, "method": "Browser.close"}),
-                );
-                return Ok(NavigationObservation::TerminalError);
+                if !allow_document_redirects
+                    || !admit_same_origin_document_redirect(
+                        &event,
+                        &self.config.target_url,
+                        &mut visited_documents,
+                    )
+                {
+                    let _ = websocket_send_json(
+                        &mut websocket,
+                        &json!({"id": 99, "method": "Browser.close"}),
+                    );
+                    return Ok(NavigationObservation::TerminalError);
+                }
+                // Only completion of the final correlated document counts.
+                document_finished = false;
+                document_parsed = false;
+                stopped_frame_id = None;
             }
             if method == "Network.requestWillBeSent"
                 && event.pointer("/params/type").and_then(Value::as_str) == Some("Document")
@@ -1267,6 +1501,11 @@ impl ChromeSession {
                     request_id = Some(observed_id.to_string());
                     request_started.get_or_insert_with(Instant::now);
                 }
+            }
+            if allow_document_redirects && main_document_parsed(
+                &event, main_frame_id.as_deref(), request_id.as_deref(),
+            ) {
+                document_parsed = true;
             }
             if method == "Page.frameStoppedLoading" {
                 stopped_frame_id = event
@@ -1295,13 +1534,26 @@ impl ChromeSession {
                     }
                 }
             }
-            if full_navigation_completed(
-                document_finished,
-                stopped_frame_id.as_deref(),
-                main_frame_id.as_deref(),
-            ) {
-                let observation = classify_loaded_document(&mut websocket, overall_deadline)
+            let ready = if allow_document_redirects {
+                document_finished && document_parsed
+            } else {
+                full_navigation_completed(
+                    document_finished, stopped_frame_id.as_deref(), main_frame_id.as_deref(),
+                )
+            };
+            if ready {
+                let observation = classify_loaded_document(&mut websocket, overall_deadline, &mut public_gets)
                     .unwrap_or(NavigationObservation::TerminalError);
+                if observation == NavigationObservation::Usable {
+                    if let Some(hosts) = asset_hosts {
+                        if let Some((url, kind)) = discover_dynamic_image(
+                            &mut websocket, hosts, overall_deadline, termination_requested, &mut public_gets,
+                        ).unwrap_or(None) {
+                            self.discovered_asset = Some(url);
+                            self.discovered_asset_kind = kind;
+                        }
+                    }
+                }
                 let _ = websocket_send_json(
                     &mut websocket,
                     &json!({"id": 99, "method": "Browser.close"}),
@@ -1815,6 +2067,64 @@ fn remaining_timeout(deadline: Instant, cap: Duration) -> ProbeResult<Duration> 
         .ok_or_else(|| error("classification_deadline_exceeded"))
 }
 
+fn read_before(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    cap: Duration,
+) -> io::Result<usize> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "read deadline expired"))?;
+    stream.set_read_timeout(Some(remaining.min(cap)))?;
+    let received = stream.read(buffer)?;
+    if Instant::now() >= deadline {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "read deadline expired",
+        ));
+    }
+    Ok(received)
+}
+
+fn read_exact_before(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    cap: Duration,
+) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < buffer.len() {
+        match read_before(stream, &mut buffer[offset..], deadline, cap) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "incomplete frame",
+                ))
+            }
+            Ok(received) => offset += received,
+            Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
+            Err(failure)
+                if offset > 0
+                    && matches!(
+                        failure.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+            {
+                // The next poll cannot resume midway through a consumed frame
+                // header. Fail closed instead of treating it as an idle socket.
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "incomplete frame before deadline",
+                ));
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+    Ok(())
+}
+
 fn http_response_extent(response: &[u8]) -> ProbeResult<Option<(usize, usize)>> {
     let Some(body_offset) = response
         .windows(4)
@@ -1867,8 +2177,7 @@ fn http_get(port: u16, path: &str, deadline: Instant) -> ProbeResult<Vec<u8>> {
     let mut response = Vec::new();
     let mut chunk = [0_u8; 4_096];
     let (body_offset, response_length) = loop {
-        let received = stream
-            .read(&mut chunk)
+        let received = read_before(&mut stream, &mut chunk, deadline, CDP_CONNECT_TIMEOUT)
             .map_err(|_| error("devtools_http_invalid"))?;
         if received == 0 {
             return Err(error("devtools_http_invalid"));
@@ -1948,8 +2257,7 @@ fn websocket_connect(
     let mut response = Vec::new();
     let mut byte = [0_u8; 1];
     while response.len() <= 16 * 1024 {
-        stream
-            .read_exact(&mut byte)
+        read_exact_before(&mut stream, &mut byte, deadline, CDP_CONNECT_TIMEOUT)
             .map_err(|_| error("devtools_websocket_invalid"))?;
         response.push(byte[0]);
         if response.ends_with(b"\r\n\r\n") {
@@ -2012,12 +2320,17 @@ fn websocket_send_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) -> P
 
 fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult<Option<Value>> {
     let mut fragmented = Vec::new();
+    let mut message_started = false;
     loop {
         if Instant::now() >= deadline {
-            return Ok(None);
+            return if message_started {
+                Err(error("devtools_unavailable"))
+            } else {
+                Ok(None)
+            };
         }
         let mut first = [0_u8; 2];
-        match stream.read_exact(&mut first) {
+        match read_exact_before(stream, &mut first, deadline, Duration::from_millis(250)) {
             Ok(()) => {}
             Err(failure)
                 if matches!(
@@ -2025,7 +2338,12 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                return Ok(None)
+                // Keep ownership of a fragmented message across idle polls.
+                // Returning here would discard its prefix before continuation.
+                if message_started {
+                    continue;
+                }
+                return Ok(None);
             }
             Err(_) => return Err(error("devtools_unavailable")),
         }
@@ -2037,14 +2355,12 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
         let mut length = u64::from(first[1] & 0x7f);
         if length == 126 {
             let mut encoded = [0_u8; 2];
-            stream
-                .read_exact(&mut encoded)
+            read_exact_before(stream, &mut encoded, deadline, Duration::from_millis(250))
                 .map_err(|_| error("devtools_unavailable"))?;
             length = u64::from(u16::from_be_bytes(encoded));
         } else if length == 127 {
             let mut encoded = [0_u8; 8];
-            stream
-                .read_exact(&mut encoded)
+            read_exact_before(stream, &mut encoded, deadline, Duration::from_millis(250))
                 .map_err(|_| error("devtools_unavailable"))?;
             length = u64::from_be_bytes(encoded);
         }
@@ -2055,11 +2371,19 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
             return Err(error("devtools_message_invalid"));
         }
         let mut payload = vec![0_u8; length];
-        stream
-            .read_exact(&mut payload)
+        read_exact_before(stream, &mut payload, deadline, Duration::from_millis(250))
             .map_err(|_| error("devtools_unavailable"))?;
         match opcode {
-            0x0 | 0x1 => {
+            0x1 if !message_started => {
+                message_started = true;
+                fragmented.extend_from_slice(&payload);
+                if fin {
+                    return serde_json::from_slice(&fragmented)
+                        .map(Some)
+                        .map_err(|_| error("devtools_message_invalid"));
+                }
+            }
+            0x0 if message_started => {
                 fragmented.extend_from_slice(&payload);
                 if fin {
                     return serde_json::from_slice(&fragmented)
@@ -2080,6 +2404,119 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
+    fn drip_server(bytes: Vec<u8>) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            for byte in bytes {
+                if connection.write_all(&[byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        });
+        (port, server)
+    }
+
+    #[test]
+    fn http_slow_drip_cannot_extend_the_absolute_deadline() {
+        let (port, server) =
+            drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}".to_vec());
+        let start = Instant::now();
+        assert!(http_get(port, "/json/list", start + Duration::from_millis(150)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(800));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn websocket_payload_slow_drip_cannot_extend_the_absolute_deadline() {
+        let mut bytes = vec![0x81, 32];
+        bytes.extend_from_slice(b"{\"message\":\"slow frame payload!\"}");
+        let (port, server) = drip_server(bytes);
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let start = Instant::now();
+        assert!(websocket_read_json(&mut connection, start + Duration::from_millis(150)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(800));
+        drop(connection);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn fragmented_websocket_message_survives_idle_between_frames() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(b"\x01\x05{\"id\"").unwrap();
+            std::thread::sleep(Duration::from_millis(400));
+            let _ = connection.write_all(b"\x80\x03:4}");
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), Some(json!({"id": 4})));
+    }
+
+    #[test]
+    fn empty_fragment_does_not_lose_message_ownership() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(&[0x01, 0]).unwrap();
+            std::thread::sleep(Duration::from_millis(400));
+            let _ = connection.write_all(b"\x80\x02{}");
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), Some(json!({})));
+    }
+
+    #[test]
+    fn fragmented_message_deadline_is_terminal_not_an_idle_poll() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(b"\x01\x01{").unwrap();
+            release_rx.recv().unwrap();
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let start = Instant::now();
+        let result = websocket_read_json(&mut connection, start + Duration::from_millis(350));
+        release_tx.send(()).unwrap();
+        server.join().unwrap();
+        assert!(result.is_err());
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn partial_websocket_header_timeout_is_not_an_idle_poll() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            connection.write_all(&[0x81]).unwrap();
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        ready_rx.recv().unwrap();
+        let result = websocket_read_json(&mut connection, Instant::now() + Duration::from_secs(2));
+        release_tx.send(()).unwrap();
+        drop(connection);
+        server.join().unwrap();
+        assert!(result.is_err());
+    }
+
     fn job(now: u64) -> ProbeJob {
         ProbeJob {
             schema_version: 1,
@@ -2093,6 +2530,7 @@ mod tests {
 
     fn route_preflight_job(now: u64) -> RoutePreflightProbeJob {
         RoutePreflightProbeJob {
+            asset_hosts: None,
             schema_version: 1,
             capability: "abcdef0123456789abcdef0123456789".to_string(),
             host: "unknown.example".to_string(),
@@ -2100,6 +2538,67 @@ mod tests {
             issued_at_unix_ms: now,
             deadline_unix_ms: now + ROUTE_PREFLIGHT_MAX_DEADLINE_MS,
         }
+    }
+
+    #[test]
+    fn public_get_discovery_excludes_posts_foreign_hosts_and_unbound_responses() {
+        let mut observer = AnonymousGetDiscovery::new(&["api.example.net".into()]);
+        let request = |id: &str, method: &str, url: &str| json!({"method": "Network.requestWillBeSent",
+            "params": {"requestId": id, "type": "Fetch", "request": {"method": method, "url": url}}});
+        let response = |id: &str, url: &str, length: &str| json!({"method": "Network.responseReceived",
+            "params": {"requestId": id, "response": {"url": url, "status": 200,
+                "mimeType": "application/json", "headers": {"content-length": length}}}});
+        let url = "https://api.example.net/public?ephemeral=1";
+        observer.observe(&request("post", "POST", url));
+        observer.observe(&response("post", url, "50000"));
+        observer.observe(&request("foreign", "GET", "https://foreign.example/a"));
+        observer.observe(&response("foreign", url, "50000"));
+        observer.observe(&response("unbound", url, "50000"));
+        assert!(observer.best.is_none());
+        observer.observe(&request("get", "GET", url));
+        observer.observe(&response("get", url, "16000"));
+        assert_eq!(observer.best.as_ref().map(|v| v.0), Some(16000));
+        observer.observe(&request("small", "GET", url));
+        observer.observe(&response("small", url, "50"));
+        observer.observe(&request("large", "GET", url));
+        observer.observe(&response("large", url, "83287"));
+        assert_eq!(observer.best.as_ref().map(|v| v.0), Some(83287));
+        for length in ["262145", "-1", "20\\n20", "unknown"] {
+            observer.observe(&request("invalid", "GET", url));
+            observer.observe(&response("invalid", url, length));
+            assert_eq!(observer.best.as_ref().map(|v| v.0), Some(83287));
+        }
+        let mut frozen = AnonymousGetDiscovery::new(&[]);
+        frozen.observe(&request("get", "GET", url));
+        frozen.observe(&response("get", url, "83287"));
+        assert!(frozen.pending.is_empty() && frozen.best.is_none());
+        for i in 0..100 {
+            observer.observe(&request(&i.to_string(), "GET", url));
+        }
+        assert_eq!(observer.pending.len(), 64);
+    }
+
+    #[test]
+    fn dynamic_discovery_requires_v3_bound_host_and_safe_url() {
+        let mut job = route_preflight_job(unix_now_ms().unwrap());
+        job.schema_version = 3;
+        job.candidate_routes = vec![OWNED_GEPH_ROUTE.to_string()];
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.asset_hosts = Some(vec!["images.example.net".to_string()]);
+        assert!(validate_route_preflight_job(&job).is_ok());
+        job.schema_version = 2;
+        assert!(validate_route_preflight_job(&job).is_err());
+        assert!(valid_dynamic_image_url("https://images.example.net/a.png?sig=ephemeral", "images.example.net"));
+        for url in ["http://images.example.net/a", "https://user@images.example.net/a",
+                    "https://images.example.net:444/a", "https://images.example.net/a#x",
+                    "https://other.example/a", "https://127.0.0.1/a"] {
+            assert!(!valid_dynamic_image_url(url, "images.example.net"));
+        }
+        let payload = RoutePreflightResultPayload { schema_version: 3,
+            capability: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", host: "parent.example",
+            candidate_route: OWNED_GEPH_ROUTE, outcome: OUTCOME_USABLE,
+            observed_at_unix_ms: 1000, asset_url: Some("https://images.example.net/a"), asset_kind: None };
+        assert!(serde_json::to_vec(&payload).unwrap().len() < MAX_IPC_BYTES);
     }
 
     #[test]
@@ -2167,6 +2666,35 @@ mod tests {
     }
 
     #[test]
+    fn route_preflight_uses_live_remainder_after_root_and_launcher_latency() {
+        let job = ClaimedProbeJob::RoutePreflight(route_preflight_job(10_000));
+        // Five seconds of root I/O, then provenance and launcher verification.
+        assert!(claimed_job_has_start_budget(&job, 16_700));
+        assert_eq!(claimed_job_remaining_budget_ms(&job, 16_700), 1_300);
+        assert!(claimed_job_has_start_budget(&job, 17_999));
+        assert!(!claimed_job_has_start_budget(&job, 18_000));
+        assert!(!claimed_job_has_start_budget(&job, 18_001));
+    }
+
+    #[test]
+    fn browser_comparison_v2_has_separate_owned_only_deadline() {
+        let now = unix_now_ms().unwrap();
+        let mut job = route_preflight_job(now);
+        job.schema_version = 2;
+        job.candidate_routes = vec![OWNED_GEPH_ROUTE.to_string()];
+        job.deadline_unix_ms = now + BROWSER_COMPARE_MAX_DEADLINE_MS;
+        assert!(validate_route_preflight_job(&job).is_ok());
+        job.schema_version = 1;
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.schema_version = 2;
+        job.deadline_unix_ms += 1;
+        assert!(validate_route_preflight_job(&job).is_err());
+        job.deadline_unix_ms -= 1;
+        job.candidate_routes.push("system".to_string());
+        assert!(validate_route_preflight_job(&job).is_err());
+    }
+
+    #[test]
     fn usable_requires_document_and_main_frame_completion() {
         assert!(!full_navigation_completed(
             false,
@@ -2180,6 +2708,18 @@ mod tests {
             Some("main"),
         ));
         assert!(full_navigation_completed(true, Some("main"), Some("main"),));
+    }
+
+    #[test]
+    fn v2_parser_completion_is_bound_to_main_document_loader() {
+        let event = json!({"method": "Page.lifecycleEvent", "params": {
+            "name": "DOMContentLoaded", "frameId": "main", "loaderId": "final"
+        }});
+        assert!(main_document_parsed(&event, Some("main"), Some("final")));
+        assert!(!main_document_parsed(&event, Some("child"), Some("final")));
+        assert!(!main_document_parsed(&event, Some("main"), Some("previous")));
+        assert!(!main_document_parsed(&event, None, Some("final")));
+        assert!(!main_document_parsed(&event, Some("main"), None));
     }
 
     #[test]
@@ -2375,6 +2915,65 @@ mod tests {
     }
 
     #[test]
+    fn same_origin_document_redirects_are_bounded_and_cycle_checked() {
+        let initial = "https://public.example/";
+        let mut visited = BTreeSet::from([initial.to_string()]);
+        for target in [
+            "https://public.example/en",
+            "https://public.example/en/",
+            "https://public.example/en/home",
+        ] {
+            let event = json!({"params": {"request": {"url": target}, "redirectResponse": {"status": 302}}});
+            assert!(admit_same_origin_document_redirect(
+                &event,
+                initial,
+                &mut visited
+            ));
+        }
+        let fourth = json!({"params": {"request": {"url": "https://public.example/fourth"}, "redirectResponse": {"status": 302}}});
+        assert!(!admit_same_origin_document_redirect(
+            &fourth,
+            initial,
+            &mut visited
+        ));
+        let cycle =
+            json!({"params": {"request": {"url": initial}, "redirectResponse": {"status": 302}}});
+        let mut fresh = BTreeSet::from([initial.to_string()]);
+        assert!(!admit_same_origin_document_redirect(
+            &cycle, initial, &mut fresh
+        ));
+    }
+
+    #[test]
+    fn document_redirects_never_expand_origin_or_accept_unsafe_targets() {
+        let initial = "https://public.example/";
+        for target in [
+            "http://public.example/en",
+            "https://other.example/en",
+            "https://public.example:444/en",
+            "https://user@public.example/en",
+            "https://public.example/en#fragment",
+            " https://public.example/en",
+            "https://public.example/en\n",
+        ] {
+            let mut visited = BTreeSet::from([initial.to_string()]);
+            let event = json!({"params": {"request": {"url": target}, "redirectResponse": {"status": 302}}});
+            assert!(
+                !admit_same_origin_document_redirect(&event, initial, &mut visited),
+                "{target}"
+            );
+            assert_eq!(visited.len(), 1);
+        }
+        let mut visited = BTreeSet::from([initial.to_string()]);
+        let event = json!({"params": {"request": {"url": "https://public.example/en"}, "redirectResponse": {"status": 200}}});
+        assert!(!admit_same_origin_document_redirect(
+            &event,
+            initial,
+            &mut visited
+        ));
+    }
+
+    #[test]
     fn result_is_submitted_before_cleanup_and_cleanup_always_runs() {
         let events = RefCell::new(Vec::new());
         let result = submit_before_cleanup(
@@ -2396,6 +2995,48 @@ mod tests {
     fn cleanup_failure_overrides_a_successful_submission() {
         let result = submit_before_cleanup(|| Ok("accepted"), || Err(error("cleanup_failed")));
         assert_eq!(result.unwrap_err().0, "cleanup_failed");
+    }
+
+    #[test]
+    fn stopped_broker_preserves_cleanup_before_ipc_failure() {
+        // launchd can stop the broker while its owned socket inode remains.
+        // Exercise the real transport error, not a substitute error string.
+        let root = tempfile::Builder::new()
+            .prefix("ss-ipc-stop-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = root.path().join("broker.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        let uid = fs::symlink_metadata(&socket).unwrap().uid();
+        drop(listener);
+        assert!(socket_metadata(&socket, uid).is_ok());
+
+        for cleanup_error in [
+            None,
+            Some("chrome_cleanup_failed"),
+            Some("profile_cleanup_failed"),
+        ] {
+            let events = RefCell::new(Vec::new());
+            let result = submit_before_cleanup(
+                || {
+                    events.borrow_mut().push("submit");
+                    ipc_request(&socket, uid, "submit", &json!({}))
+                },
+                || {
+                    events.borrow_mut().push("cleanup");
+                    match cleanup_error {
+                        Some(code) => Err(error(code)),
+                        None => Ok(()),
+                    }
+                },
+            );
+            assert_eq!(
+                result.err().unwrap().0,
+                cleanup_error.unwrap_or("ipc_unavailable")
+            );
+            assert_eq!(*events.borrow(), ["submit", "cleanup"]);
+        }
     }
 
     #[test]
@@ -2565,7 +3206,7 @@ mod tests {
             runtime.parent().unwrap().file_name(),
             Some(OsStr::new("chromium-headless-shell"))
         );
-        assert_eq!(PINNED_HEADLESS_RUNTIME_VERSION, "151.0.7922.77");
+        assert_eq!(PINNED_HEADLESS_RUNTIME_VERSION, "155.0.8059.39");
     }
 
     #[test]

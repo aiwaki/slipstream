@@ -109,6 +109,7 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --target "$SLIPSTREAM_TAURI_TARGET" \
             --evaluation-date "$(date -u +%F)" \
+            --evidence-dir "$RUNNER_TEMP/dependency-audit-evidence/app" \
             --output dist-audit/dependency-audit.json
           python3 scripts/dependency_audit.py verify \
             --report dist-audit/dependency-audit.json \
@@ -117,7 +118,32 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --target "$SLIPSTREAM_TAURI_TARGET"
 
+      - id: dependency-audit-app-evidence
+        name: Check for retained dependency scan evidence
+        if: always()
+        run: |
+          set -eu
+          evidence_dir="$RUNNER_TEMP/dependency-audit-evidence/app"
+          if [ -d "$evidence_dir" ] && [ ! -L "$evidence_dir" ]; then
+            for evidence_file in "$evidence_dir"/*; do
+              if [ -f "$evidence_file" ] && [ ! -L "$evidence_file" ]; then
+                echo "available=true" >> "$GITHUB_OUTPUT"
+                break
+              fi
+            done
+          fi
+
+      - name: Retain dependency scan inputs and raw result
+        if: always() && steps.dependency-audit-app-evidence.outputs.available == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-audit-raw-app-aarch64-apple-darwin-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-audit-evidence/app/
+          if-no-files-found: error
+          retention-days: 14
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: dependency-audit-${{ github.sha }}
           path: dist-audit/
@@ -189,6 +215,7 @@ jobs:
             --target macos-universal \
             --vendored-transitive-dependencies full \
             --evaluation-date "$(date -u +%F)" \
+            --evidence-dir "$RUNNER_TEMP/dependency-audit-evidence/geph" \
             --output dist-geph-audit/geph5-client-dependency-audit.json
           python3 scripts/dependency_audit.py verify \
             --report dist-geph-audit/geph5-client-dependency-audit.json \
@@ -198,7 +225,32 @@ jobs:
             --target macos-universal \
             --vendored-transitive-dependencies full
 
+      - id: dependency-audit-geph-evidence
+        name: Check for retained dependency scan evidence
+        if: always()
+        run: |
+          set -eu
+          evidence_dir="$RUNNER_TEMP/dependency-audit-evidence/geph"
+          if [ -d "$evidence_dir" ] && [ ! -L "$evidence_dir" ]; then
+            for evidence_file in "$evidence_dir"/*; do
+              if [ -f "$evidence_file" ] && [ ! -L "$evidence_file" ]; then
+                echo "available=true" >> "$GITHUB_OUTPUT"
+                break
+              fi
+            done
+          fi
+
+      - name: Retain dependency scan inputs and raw result
+        if: always() && steps.dependency-audit-geph-evidence.outputs.available == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-audit-raw-geph-macos-universal-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-audit-evidence/geph/
+          if-no-files-found: error
+          retention-days: 14
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: geph-vendor-dependency-audit-${{ github.sha }}
           path: dist-geph-audit/

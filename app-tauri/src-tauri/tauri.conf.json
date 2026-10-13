@@ -5,6 +5,7 @@
   "version": "0.1.9-preview.23",
   "identifier": "dev.slipstream.tray",
   "build": {
+    "beforeBuildCommand": "../scripts/build_and_stage_daemon.sh",
     "frontendDist": "../src"
   },
   "app": {

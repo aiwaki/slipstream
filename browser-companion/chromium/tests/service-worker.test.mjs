@@ -12,7 +12,13 @@ const workerSource = await readFile(
   "utf8"
 );
 
+const safariWorkerSource = await readFile(
+  new URL("../../safari/service-worker.js", import.meta.url), "utf8"
+);
+
 function createWorker({
+  source = workerSource,
+  sessionValues = {},
   nativeResponse = {
     schema_version: 1,
     accepted: true,
@@ -34,7 +40,6 @@ function createWorker({
     completedListener: null,
     errorListener: null
   };
-  const sessionValues = {};
   const chrome = {
     runtime: {
       onMessage: {
@@ -42,20 +47,21 @@ function createWorker({
       },
       sendNativeMessage(host, signal) {
         calls.native.push({ host, signal });
-        return Promise.resolve(nativeResponse);
+        return typeof nativeResponse === "function"
+          ? nativeResponse() : Promise.resolve(nativeResponse);
       }
     },
     storage: {
       session: {
         get(key) {
           return Promise.resolve(
-            Object.hasOwn(sessionValues, key)
+            key === null ? { ...sessionValues } : Object.hasOwn(sessionValues, key)
               ? { [key]: sessionValues[key] }
               : {}
           );
         },
         remove(key) {
-          delete sessionValues[key];
+          for (const entry of Array.isArray(key) ? key : [key]) delete sessionValues[entry];
           return Promise.resolve();
         },
         set(entries) {
@@ -130,7 +136,7 @@ function createWorker({
   vm.runInContext(coreSource, context, {
     filename: "service-worker-core.js"
   });
-  vm.runInContext(workerSource, context, {
+  vm.runInContext(source, context, {
     filename: "service-worker.js"
   });
   return {
@@ -139,6 +145,7 @@ function createWorker({
       nowUnixMs += milliseconds;
     },
     calls,
+    sessionValues,
     completed: calls.completedListener,
     error: calls.errorListener,
     redirect: calls.beforeRedirectListener
@@ -440,3 +447,61 @@ test("a redirected request cannot leave a reusable incomplete candidate", async 
   assert.deepEqual(calls.native, []);
   assert.deepEqual(calls.reload, []);
 });
+
+
+for (const [browserName, source] of [["Chrome", workerSource], ["Safari", safariWorkerSource]]) {
+  test(`${browserName}: late recovery cannot reload a newer same-host navigation`, async () => {
+    let finishNative;
+    const response = new Promise(resolve => { finishNative = resolve; });
+    const { before, error, completed, calls } = createWorker({
+      source, nativeResponse: () => response
+    });
+    const oldRequest = { requestId: "old", type: "main_frame", method: "GET",
+      frameId: 0, tabId: 17, url: "https://partial.example/old" };
+    before(oldRequest);
+    await settleWorkerPromises();
+    error({ ...oldRequest, error: "net::ERR_CONTENT_LENGTH_MISMATCH" });
+    await settleWorkerPromises();
+    assert.equal(calls.native.length, 1);
+    const newRequest = { ...oldRequest, requestId: "new", url: "https://partial.example/new" };
+    before(newRequest);
+    await settleWorkerPromises();
+    completed(newRequest);
+    await settleWorkerPromises();
+    finishNative({ schema_version: 1, accepted: true, action: "confirm_exact_host_geo_exit" });
+    await settleWorkerPromises();
+    assert.deepEqual(calls.reload, []);
+  });
+
+  test(`${browserName}: old pending timer cannot diagnose a newer same-host request`, async () => {
+    const { before, advanceClock, calls } = createWorker({
+      source, currentTab: { status: "loading", pendingUrl: "https://partial.example/new",
+        url: "https://partial.example/old" }
+    });
+    const oldRequest = { requestId: "old", type: "main_frame", method: "GET",
+      frameId: 0, tabId: 17, url: "https://partial.example/old" };
+    before(oldRequest);
+    await settleWorkerPromises();
+    advanceClock(8000);
+    before({ ...oldRequest, requestId: "new", url: "https://partial.example/new" });
+    await settleWorkerPromises();
+    calls.pendingTimeouts[0]();
+    await settleWorkerPromises();
+    assert.equal(calls.native.length, 0);
+  });
+}
+
+for (const [browserName, source] of [["Chrome", workerSource], ["Safari", safariWorkerSource]]) {
+  test(`${browserName}: worker restart retains durable evidence but not reload authority`, async () => {
+    const initial = createWorker({ source });
+    const request = { requestId: "survives-restart", type: "main_frame", method: "GET",
+      frameId: 0, tabId: 17, url: "https://partial.example/page" };
+    initial.before(request);
+    await settleWorkerPromises();
+    const restarted = createWorker({ source, sessionValues: initial.sessionValues });
+    restarted.error({ ...request, error: "net::ERR_CONTENT_LENGTH_MISMATCH" });
+    await settleWorkerPromises();
+    assert.equal(restarted.calls.native.length, 1);
+    assert.deepEqual(restarted.calls.reload, []);
+  });
+}

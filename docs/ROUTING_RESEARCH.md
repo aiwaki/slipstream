@@ -1,14 +1,977 @@
 # Routing Research Notes
 
-Updated: 2026-08-22
+Updated: 2026-10-13
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-10-13 bounded code-review-graph trial
+
+After macOS attributed 52 GiB of compressed memory to the Codex-owned
+codebase-memory-mcp process, that server was stopped and disabled. Its internal
+allocation defect is not established. The user requested a replacement trial.
+[code-review-graph 2.3.9](https://github.com/tirth8205/code-review-graph/tree/v2.3.9)
+is installed globally in an isolated Python environment and used on demand via
+`~/.local/bin/crg-safe`; it is not registered as an MCP server or watcher.
+
+| Check on this Mac | Result |
+|---|---|
+| Isolated tracked-source build | 401 parsed files, 21.55 s, 140.47 MiB peak process-group footprint |
+| Actual AUD-17 checkout build | 403 parsed files, 13.02 s, 160.17 MiB peak footprint |
+| Call relationships | Ground-truth Python, Rust and JavaScript callers match; comment/string false calls excluded |
+| Incremental edits | Added call appears, removal disappears, no-op reparses zero files |
+| Failure controls | Memory/time watchdogs and concurrent-run refusal verified |
+
+Use `crg-safe search <symbol> --limit 5 --repo <physical-checkout>`, or
+`crg-safe query callers_of <qualified-symbol> --repo <physical-checkout>`.
+Build/update uses only a nonempty tracked Git tree, serial parsing, disabled
+network access and skipped flow/community extraction. One command runs at a
+time; sampled process-group footprint above 1 GiB or elapsed time above 120 s
+terminates the owned process group. This is a watchdog, not an OS allocation
+quota or universal resource guarantee. No embeddings, hooks or background
+processes were enabled. Graph storage is outside the repository.
+
+The graph is an aid, not a completeness proof: dynamic `globals()` calls remain
+unresolved and ambiguous names must be disambiguated. Use direct reads/rg for
+known paths and strings, ast-grep for bounded syntax searches, and verify graph
+freshness before relying on it. Each physical worktree has a separate graph.
+Private trial evidence and 61 checked artifact hashes are retained in
+`~/.codex/audits/2026-10-13-code-search-replacement/crg-trial-summary.json`.
+
+## 2026-10-12 tg-ws-proxy 1.11.2 import and failure-path checks
+
+The official release is [v1.11.2](https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.11.2),
+commit `307a384ab7f522e34bb1a045884d0bd90f40bee5`, published October 11.
+Its source archive SHA-256 is
+`db9048b56faaf64f43f1a4f4833e45ad4ba8a7b1ee27c8ed5f7f4467db7326d1`.
+The source contract now pins all 15 imported Python modules. No GUI, updater,
+deployment code or release binary is imported; Python dependency locks stay
+unchanged. `LOCAL_CHANGES.md` records reconciliation with the existing local
+deadline, cancellation and socket-ownership fixes. The local `pool.py` is
+unchanged because its tracked cleanup already covers upstream close/reset.
+
+The update reconnects a silent H2 connection after its last active request
+times out, preserving active neighbours and already-ended buffered replies.
+It batches H2 I/O while respecting peer frame/flow-control limits, refreshes
+retry budgets for new reply identities, accepts the documented plaintext
+padding range, and locates packet boundaries using already-decrypted bytes.
+The Windows Proactor guard is confined to the Telegram proxy's own thread and
+event loop; on macOS it returns without modifying loop internals.
+
+| Evidence | Result | Boundary |
+|---|---|---|
+| Existing protocol, lifecycle and TLS suite | 62 PASS | Retained local behaviour, including cancellation and ownership |
+| New scoped regressions | 21 PASS | Four concurrent roughly 1 MiB H2 round trips, timeout/reconnect, framing, padding, masking and replay |
+| Selected upstream cases | 11 PASS plus 30 subtests; 2 replay cases PASS | Real reencryption/splitter and recovery-cancellation behaviour |
+| Previous local source controls | 3 expected failures | Old code reproduces silent-H2 reuse, padding rejection and exhausted reply budget |
+| Packaging and frozen CA cases | 7 PASS | Source inventory/import closure, spec wiring and owned CA selection/missing-file rejection |
+| Independent H2/event-loop review | 21 PASS | Active-sibling/ended-response isolation, flow control, cancellation and mocked Windows guard under OS network denial |
+| Actual PyInstaller discovery and certifi hook | 15 modules plus CA data found | Collection only; no frozen daemon build |
+
+Evidence lives under `output/tg-ws-proxy-1112/`. The final receipt `5cfd1df7`
+binds the archive, source, test logs and peer report `436e1edb`; parent verification
+checks all 77 file bindings and 20 peer source hashes. Some earlier test runs
+did not capture their full environment; the receipt states that limit.
+These checks do not prove installed-app operation, a real Windows Proactor,
+live Telegram media availability, or a historical cause of Codex reconnecting.
+The frozen daemon and installed bundle still require their canonical gates.
+
+## 2026-10-12 native SQLite and bounded Chromium qualification
+
+The detached Geph candidate keeps SQLx 0.8.6 and its single-worker ordering,
+switching its feature to `sqlite-unbundled` with an exact, app-owned SQLite
+3.53.2 static library. Existing registry versions/checksums are unchanged;
+eleven build dependencies are added for generated bindings. A separate OSV
+batch returns no known findings for those eleven coordinates. This is not
+native SQLite advisory clearance or a full Geph audit.
+
+The official amalgamation archive and its C/header bytes are retained with
+upstream checksum evidence. On ARM, compilation under OS network/private-read
+denial passes: native compile 15.14s and locked/offline Geph no-run 436.6s.
+Eleven exact cases pass: eight cancellation regressions, two existing database
+schema/waiter cases and one qualification-only SQLx runtime identity check.
+The latter reports SQLite 3.53.2 and the exact upstream source ID. The actual
+libsqlite3-sys rlib embeds a byte-identical copy of our compiled sqlite3.o;
+the tested Geph binary has no host SQLite dylib import. All 51 seed source files
+and the dedicated SOURCE/lock remain unchanged. The added identity test is
+explicitly outside the production source contract.
+
+The negative probes expose an important boundary. The actual sys build script
+rejects a missing owned header; a matching rlib producer rejects a missing
+static archive. However, a direct rustc executable probe with `-l static=sqlite3`
+and an empty owned search directory succeeds by loading `/usr/lib/libsqlite3.dylib`.
+Retain that result: flags alone do not prove library identity. The pinned sys
+build script also tries pkg-config even when LIB_DIR is set. Production needs
+`SQLITE3_NO_PKG_CONFIG=1`, exact owned input preflight, feature-closure checks,
+and binding of C/header -> archive -> each Geph slice -> final binary/SBOM.
+The registry wrapper and native SQLite must remain separate inventory entries.
+ARM debug evidence does not qualify Intel, a universal release or an installation.
+
+Native evidence: `output/sqlite-native-upgrade/static3532-candidate/`
+(`final-receipt.json` beefc1ed). Integration boundaries are recorded in
+`output/continuation-20261009/rsa-migration/sqlite-native-production-integration-review.md`.
+No production source, lock, native SBOM or workflow was activated by this experiment.
+
+The output-only Chromium adjudicator was independently challenged before any
+release use. Three V1 false-clearance cases were reproduced: an unfixed-issue
+prefix, a reverted-fix paragraph and ignored additional CNA configuration.
+V2 replaces permissive extraction with complete positive release grammar and
+rejects unhandled CNA/ADP claims. Its 70 regressions and four independent cases
+pass; retained and extended 104-record replays both yield 8 not-affected / 96
+unknown. All original claim and NVD evidence remains bound to each decision.
+
+V3 accepts only two additionally reviewed desktop-release forms: an optional
+dot in a slash patch-version shorthand and one exact Extended Stable sentence
+agreeing with the upper Mac/Windows Stable version. No CVE allowlist is added.
+Its 113 regressions and 13 independent cases pass under OS network denial.
+Thirty newly retained official desktop posts permit just three further research
+decisions: CVE-2024-8362/8636/9123. Extended replay is 11 not-affected / 93 unknown;
+retained replay remains 8/96. Parent review verifies 20 sealed files, the peer
+receipt, all 157/189 replay input bindings, unchanged original claims/NVD and
+exactly those three additions. Other release formats and inconsistent fix
+counts remain unknown. This does not change the immutable 7,216-record report,
+production policy or the closed release gate.
+
+Chromium evidence: `output/dependency-remediation-20261009/chromium-primary-evidence-replay/`
+(`v2-final-receipt.json` b58838f5, `v3-final-receipt.json` d65ebea7,
+`parent-v3-verification.json`), with independent review under
+`output/chromium-primary-evidence-peer-review/`.
+
+## 2026-10-12 official dependency chain and exact CI boundary
+
+Terminal CI for root6a4f8424 and dedicateda0022dd9 passes product/checks and
+Chromium contracts. The actual package leaf errors remain distinct: the root
+cannot validate historical Geph0.3.9-r5 without its missing scanned-package
+identities; the dedicated branch receives404 for unpublished0.4.3-r1. Neither
+the aggregate lifecycle failure nor these dependency errors demonstrate a new
+runtime regression. The exact-head PR/status/log bindings are retained in
+`output/continuation-20261009/sqlite-current-package-failure-summary.json`
+(f28068bc). Earlier unchanged runtime/E2E evidence remains separate.
+
+An updated, bounded official-source check finds the same published Geph client
+and broker0.4.3/Mizaru0.2.21 archives and no applicable full ISC notices. The
+new upstream55dcced4 tree and five hash-matching manifest/README blobs also
+retain the old RSA dependency chain. New blind-rsa-signatures/RSA releases are
+not assumed to satisfy the current Geph constraints or resolve the advisory.
+The old exact archive investigation is reused; a new full historical scan was
+not performed.32 retained artifact bindings pass parent verification.
+
+The minimal notice action is a prepared upstream clarification for the exact
+published archives, including their dirty provenance. It has not been sent;
+the user's authorization is pending. If the answer supplies applicable notices,
+the executable source and lock can remain unchanged while exact source/SBOM
+notice evidence is updated. An independent client-protocol implementation is
+a larger fallback: `geph5-misc-rpc` also depends on the broker and exposes its
+types through client config/control/exit/tunnel paths. The dependency-closed
+scope touches nine production consumer files and one test-only file. Neither
+alternative independently clears Chromium, native, release or installed gates.
+Evidence and unsent draft:
+`output/continuation-20261009/rsa-migration/official-chain-20261012/`
+(`report.json`68f77164, `parent-verification.json`, `proposal.md`,
+`replacement-scope.json`, `upstream-issue-draft.md`).
+
+## 2026-10-11 SQLite cancellation and dependency qualification
+
+The output-owned Geph 0.4.3 fixture reproduces a missed cache notification:
+cancel the `db_write` caller after the SQLite worker accepts its statement, let
+the native worker commit, and independently read the exact committed bytes.
+An already parked `db_read_or_wait` still times out because cancellation skips
+the notification after `.execute(...).await`. `db_remove` has the same boundary.
+This is a demonstrated code defect, not an established cause of the user's
+historical reconnecting incidents. The pinned 0.3.9 archive has the same static
+await-then-notify pattern; its runtime and installed behavior were not tested.
+
+The minimal correction creates `NotifyCacheWaitersOnDrop` before the await in
+both mutations. Success, SQL error and cancellation all wake existing waiters;
+the reader still checks actual database state. No detached write or rollback
+guarantee is introduced. Ordering depends on the existing single-connection
+pool and SQLx 0.8.6: returning its pool lease waits for the SQLite worker's queued
+Ping to drain submitted statements. A reader awakened early therefore waits
+behind that statement. A future pool-size/SQLx change must requalify this rule.
+
+The original missed-notification case is RED without the guard. Eight focused
+cases pass with it: queued cancellation, executing cancellation and successor
+progress, an already parked reader, cancellation before acquire, cancellation
+after commit but before caller resume, SQL ABORT, SQL ROLLBACK, and cancelled
+remove. They check committed bytes, rejected/absent state and subsequent retry,
+including a blocked-worker early-notification boundary. An intermediate fixture
+incorrectly awaited an independent read while its manually polled waiter held
+the pool lease; the retained correction polls both concurrently. That fixture
+failure did not require a production change. Independent review adds two passing
+cases: rollback/re-arm after cancellation and notification to eight readers.
+Runtime tests deny network and private cache access at the OS boundary, use only
+owned scratch state, and never run the upstream all-lib suite or an account.
+Evidence under `output/continuation-20261009/rsa-migration/source-contract-candidate/`:
+`sqlite-cancellation-qualification/final-receipt.json` (d3fd8426) and
+`sqlite-cancellation-independent/final-receipt.json` (8e6657dd). The exact branch
+integration and its verification are recorded separately in CURRENT_STATE.
+
+The dedicated source contract now embeds the guard and eight tests in its
+existing database edit (SOURCE3420708f,13 edits unchanged). Exact materialization
+passes the locked no-run build and all eight new cases; the previous eleven
+runtime cases are reused. Its future vendor workflow also imports the root's
+isolated runner, removing the old unfiltered all-lib command. Nineteen exact
+0.4.3 cases are selected;0.3.9 remains at nine. Sixteen helper/workflow checks
+and the dedicated contract/name bridge pass. Root's older materializer still
+does not accept the dedicated Cargo.toml edit; no validation rule was relaxed.
+Evidence: `sqlite-cancellation-qualification/integration-receipt.json` (4d2da1fd)
+and `output/continuation-20261009/geph-synthetic-runner-bridge/receipt.json` (be2c312f).
+
+The unchanged RSA prototype SOURCE cd82b7ea/lock9fd68248 now also passes an Intel
+debug compile. Only the x86_64 standard library was added to the existing rustup
+stable Rust 1.99.0 toolchain, from its verified official manifest; compiler,
+default toolchain and existing targets were preserved. One empty-target offline
+compile took109.162s under OS network/private-cache denial:421 non-fresh compiler
+records,780 hash-bound emitted files, Mach-O x86_64 binary db1c5956. No binary or
+test was executed. Parent review checks19 evidence and4 input receipt bindings.
+ARM used Rust1.97.1 and reused dependencies, so these are two explicit debug
+build boundaries, not a reproducible universal release or installed qualification.
+Evidence: `intel-compile-rust1990/{final-receipt,parent-review}.json`. Earlier
+missing-target preflight evidence is retained separately.
+
+Native inventory traces normal/build dependency edges on both targets and the
+actual ARM artifact records. The five cc/cmake builders are aws-lc-sys0.45.0
+(AWS-LC5.7.0), libsqlite3-sys0.30.1 (SQLite3.46.0), ring0.17.14, blake3 1.8.7 and
+tracing-oslog0.3.0. A guessed OpenSSL/BoringSSL version is not assigned to ring;
+openssl-sys is in the full lock but not either reachable target graph. All
+selected archive members are read from the same checksum-verified in-memory
+archive. Peer review verifies26 file bindings and5 archives/19 members. The
+collector now rejects ambiguous identities, mismatched source/lock/metadata,
+new unreviewed builders and duplicate/missing compiler artifact pairs; one
+unchanged positive and13 mutations pass, preserving inventory27f95baa exactly.
+Evidence: `rsa-migration/native-component-review/{inventory,collector-guard-review}.json`.
+This bounded builder inventory is not exhaustive system-framework or compiler
+provenance evidence for reused ARM objects.
+
+SQLite's [upstream CVE analysis](https://www.sqlite.org/cves.html) lists fixes
+newer than the bundled3.46.0. Fixed-version gaps alone do not establish that
+every later bug affects this older source. Reviewed production SQL uses literals
+and bound data in database/route-cache/BW-token/logging; no arbitrary-SQL or FTS5
+query entry point was found. FTS5 is compiled in, and a hostile/corrupt same-user
+cache remains a distinct unqualified boundary. SQLx's extension map is empty in
+the reviewed app configuration. None of this clears the native release gate.
+Exact source/callsite and primary-document bindings are in
+`native-component-review/sqlite-applicability.json` (3dbb2951).
+
+Separately, eight exact Chromium records are manually adjudicated not affected
+for the pinned CfT155 archive using the official July23,2024 desktop fix release,
+CNA descriptions and whole-tree NVD witnesses: CVE-2024-6989/6991/6994/6997/6998/
+7000/7003/7005. Independent review verifies42 input hashes; ten negative tests
+reject missing, mismatched and wrong-platform evidence. The iOS-qualified6988
+and Android-qualified6995 remain unknown. These decisions do not modify the
+retained1114-unknown report, the general parser, policy or release gate. Evidence:
+`output/dependency-remediation-20261009/chromium-primary-cohort-10/parent-review.json`.
+
+## 2026-10-11 retained scanner evidence
+
+The audit CLI has an optional --evidence-dir boundary for new scans. A fresh
+private directory retains input snapshots, exact bounded scanner output and a
+receipt, including failure states. Scanner verification/execution use one owned
+copy; report generation reads the same policy/SPDX snapshots as the scanner.
+This preserves evidence when JSON parsing, inventory validation or policy rejects
+a run, rather than deleting the raw result in finally. The legacy invocation
+remains compatible; historical missing evidence is not reconstructed.
+
+All four workflow scan sites opt in and upload diagnostic evidence separately
+from release assets even after audit failure. Collection is skipped when the
+scan never produced a directory. Retention is14 days, not permanent published
+release evidence; durable release archival remains an open contract change.
+Receipts bind hashes and observed/evaluation times but are not independent
+provenance attestations. Runner loss or kill may leave only a started receipt;
+missing terminal evidence never establishes a successful audit. No exception,
+bootstrap allowlist or release-asset schema is expanded.
+
+Focused audit/consumer/workflow/scope/docs verification:81 PASS, plus7 independent
+negative CLI cases. Fake scanners are real local subprocesses; malformed UTF-8,
+timeout/partial output, signal exits, swapped originals, invalid file types and
+existing paths are distinguished. Retained raw is capped at64MiB after scanner
+exit, not a runtime disk quota or same-UID sandbox. Parent verifies eight file
+bindings and unchanged policies. Evidence: output/continuation-20261009/
+{audit-evidence-final-tests.log,audit-evidence-parent-review.json,
+raw-audit-evidence/implementation-review.json}.
+
+Exact c5d4ebe0 dependency CI38161448151 exercises real Linux scan/upload failure
+paths: both retained evidence uploads succeed while both audits remain rejected.
+Four downloaded ZIP digests match GitHub metadata; merge4d30a694 binds exact
+base7e196a71/headc5d4ebe0. Receipt/evaluator/input hashes match. An offline replay
+reproduces the app incomplete-coverage error and Geph484 packages/10 blockers/
+3 informational findings; its regenerated report SHA256 matches the receipt.
+OSV normalizes source.path to an absolute runner-temp input path despite a
+relative argument; raw is retained unmodified. This is diagnostic evidence, not
+an anonymity guarantee. macOS build/release callsites remain synthetically
+checked, not executed by these two Linux jobs. Evidence in
+output/continuation-20261009/audit-evidence-ci/{verified,offline-replay}.json.
+
+## 2026-10-11 historical audit consumer and candidate packaging
+
+The new identity guard exposes a real migration boundary. PR376 bfa052f2 CI
+38158749251 passes product tests but rejects the published Geph0.3.9-r5 audit
+because it has no scanned_packages. The historical scanner wrapper removed raw
+OSV JSON in finally, and none of the eight release assets contains it. The only
+retained484-package raw has rustls0.23.43; the authenticated r5 SPDX has0.23.45.
+Rebuilding the claimed scan inventory from SPDX would invent scanner evidence.
+The report remains rejected; publishing a newly qualified vendor is a separate
+requirement, including current advisory policy and attestation. Evidence:
+output/continuation-20261009/vendor-audit-consumer-review/review.json.
+
+PR384 fbd3d7e6 CI38158619460 has a different packaging failure: four SBOM script
+and test paths are outside the narrow vendor-source bootstrap. Normal packaging
+requests geph-vendor-0.4.3-r1 and receives404 before downloading or verifying any
+binary. Product checks pass; the vendor is not published. Restoring only the two
+shared SBOM files would not restore bootstrap and could reintroduce false Cargo
+identities through the old converter. No workflow exemption was expanded. A
+backwards-compatible tooling prerequisite on the published vendor is the clean
+separation option, subject to its own packaging qualification. Dedicated evidence:
+output/source-owned-sbom/ci-scope-review.json. Prior green runtime evidence does
+not prove either current packaging path is green.
+
+## 2026-10-11 audit identity and derivative notice boundaries
+
+A local replay of `dependency_audit.py` found that matching package counts did
+not establish matching package identities. One registry package and three
+source-owned packages correctly failed when the latter were omitted or reported
+with an unsupported ecosystem. Four unrelated registry coordinates, or registry
+identities invented for the local packages, nevertheless passed both report
+generation and verification. This is an integrity defect in the wrapper's
+coverage checks; it is not evidence that the pinned OSV scanner fabricated
+results. The correction compares canonical SPDX and scanned identities and
+retains advisory-free package identities for later verification. Modified source
+packages must not inherit registry coverage from their ancestors.
+
+Twenty-one audit/identity and21 consumer tests pass. Independent review found a
+PyPI/GitHub normalization mismatch with reviewed policy exceptions; consistent
+canonical comparison fixes four failing roundtrips and preserves eight negative
+cases. Replay of retained real SPDX/OSV pairs accepts their362/484 package
+identities while retaining existing blocking findings. Cross-pairing other SPDX
+files with the same counts but different rustls versions now fails. No scanner
+or network query was repeated. Old reports lacking scanned identities must be
+rebuilt from their original raw results before passing verification.
+
+The bounded ISC review retains the complete Mizaru0.2.21 and broker-protocol0.4.3
+archives, their declared licenses and referenced Git tree. Forty file bindings
+and five API blob/tree links verify. Neither archive supplies the applicable
+full notice. Both mark their commit `dirty:true`; seven broker Rust files match
+that commit, while Mizaru source and the original manifests differ. The tree's
+absence of notice-named files is not an exhaustive all-history/content search.
+The upstream README's generic MPL/ISC description supplies neither missing
+attribution nor license clearance. Evidence stays under
+`output/continuation-20261009/rsa-migration/isc-notice-provenance/` and
+`source-owned-audit-coverage-review/`; no production license, waiver or source
+descriptor was changed by these investigations.
+
+## 2026-10-10 client RSA composition and source inventory
+
+The client-only Mizaru adapter passes six contract tests and six independent
+checks against the actual published Mizaru 0.2.21 signing/verification oracle.
+Both AccountLevel encodings and old cache tuples retain their wire format.
+Epoch, configured root, raw response DER and the request's mathematical key are
+bound before verified credentials can be published. The separate byte-owned
+pending-state tests remain the ownership baseline; these are not live-account
+or installed-app results. Frozen source, receipts and reviews are under
+`output/continuation-20261009/rsa-migration/`.
+
+Its macOS arm64 runtime/build closure has 27 registry packages and two local
+prototypes. All 27 cached archives match their locked checksums. One public OSV
+batch at 2026-10-09T20:18:56Z returned no advisory IDs for those 27 versions and
+the declared native AWS-LC commit. This does not prove complete native advisory
+coverage or audit the entire Geph graph. Actual aggregate AWS-LC notices must
+be preserved; the published Mizaru crate declares ISC but omits the original
+copyright/license notice. The prototypes remain unpublished and uninstalled.
+
+An output-only composition uses the real Geph auth/bandwidth functions,
+broker-protocol serialization and SQLite paths. Locked metadata for both macOS
+targets accepts a minimal graph with every retained registry version/checksum
+unchanged. Compilation then found an integration defect: removing RSA also
+removed transitively enabled features of an unused direct `derive_more`
+dependency. That unused edge is removed in the revised experimental graph;
+the original compiler failure is retained. A second compile failure exposed
+implicit `signature/std` support previously supplied by RSA. Explicit
+`ed25519-dalek/std` enables the needed error integration without default or
+legacy verification features. Offline resolution preserves all 485 prior
+package identities/checksums and adds five required codec packages. Locked
+no-run compilation passes. The first exact synthetic test run then exposed an
+invalid mock nanorpc envelope; its negative passes are not accepted as behavior
+evidence. After aligning success/error envelopes with the pinned nanorpc code,
+all eleven exact auth/bandwidth/SQLite cases pass in 32.37 seconds. Negative
+cases require the intended error, the expected RPC counts and an empty cache;
+the real 30-second timeout must reach signing first. Bandwidth success requires
+five consumed tokens verified by the old oracle and an empty table afterward.
+This is a real-source composition using synthetic peers, not live-account,
+external-network, packaged recovery or ABI proof on both architectures.
+Independent fixture review verifies twelve artifact hashes and the real error
+paths without rerunning unchanged tests. The WrongLevel case checks the first
+cached Free tuple and fresh blinding; bandwidth mismatch proves at least one
+worker retry, not all five. Cancellation of an already queued SQLite command
+remains unqualified. See `geph-callsite-composition/independent-fixture-review.json`.
+
+The source-inventory review also found a production tooling defect:
+`make_release_sbom._cargo_components` could label path/Git/other-registry
+dependencies as crates.io releases and emit them without a matching locked
+checksum. The shared app/Geph generator now rejects those unbound sources.
+Seven negative cases failed before the fix. Independent review then caught a
+regression: the strict guard also rejected the application's own core module.
+The exact repository-owned `slipstream-core` is now aggregated into the root Git
+source package only after binding its actual manifest, version, non-publishable
+MIT declaration, dependency path and source-less lock entry. Its third-party
+transitive dependencies remain in the graph. Seventeen negative bindings reject
+foreign paths, links, alternate identities and lock mismatches. Thirteen scoped
+SBOM tests and twelve release-manifest tests pass. Fresh locked app metadata for
+arm64 and Intel accepts 346 and 348 registry components, respectively, all with
+matching checksums; no false core crates.io identity is emitted. The historical
+root sourceInfo format remains valid; an additive comment explains ownership.
+Actual prototype metadata remains rejected without an explicit source contract.
+Independent review passes 46 release-validator tests and nine mutations of the
+actual metadata. Root and dev-only exclusions remain. This guard does not yet implement the explicit source-bound inventory
+needed to distribute the three local/modified Geph packages. No audit exception
+or package-count requirement was relaxed.
+
+A bounded NVD Google Chrome CPE query completed 14 pages with 6,922 unique
+records, stable advertised totals and retained response hashes. It is a complete
+enumeration of that query, not an atomic NVD snapshot or a complete component
+inventory. Of the retained Chromium evaluator's 1,114 unknowns, 840 appear in
+the query: the unchanged applicability prototype returns 418 FALSE and 422
+UNKNOWN witnesses. The other 274 remain unknown; absence from this query is
+not evidence of safety. No advisory is cleared. For 104 simple primary/ADP
+cases the representations agree; another 47 require explicit treatment of
+alternative Fedora/Debian OS branches. Conflicting affected assertions,
+malformed ranges and component dependencies remain separate obstacles.
+Exact page/index/record bindings and remaining branches are recorded in
+`output/dependency-remediation-20261009/nvd-chrome-applicability-155/HANDOFF.md`.
+
+## 2026-10-11 final RSA source assembly and public inventory
+
+The unactivated self-contained candidate passes locked offline metadata for both
+macOS targets (410 ARM/411 Intel packages) under OS network/private-path denial.
+A single native arm64 debug compile passes in143.35 seconds; the three embedded
+libraries, Geph library/binary and patched-broker caller misc-rpc were rebuilt.
+412 prior dependency artifacts were reused. All407 current extracted registry
+source trees match18,325 members of lock-bound archives. This does not establish
+retrospective compiler provenance for the reused artifacts. No binary ran.
+
+Exact source comparison binds all51 final Rust files to the previously tested
+composition:43 byte-identical files and eight files with only13 documented
+test-only removals; four manifest changes and two local lock identity renames are
+fully accounted for. The previous eleven synthetic tests remain the runtime
+baseline; a proposed new three-case harness was not executed and is superseded
+by this bounded reuse. Queued SQLite cancellation remains unqualified. Evidence:
+`output/continuation-20261009/rsa-migration/source-contract-candidate/`
+`native-compile-qualification/` and `source-equivalence-qualification/`.
+
+A separate output-only inventory distinguishes407 exact registry packages from
+the modified Geph root and three source-owned packages. One public OSV batch on
+October11 queried407 registry coordinates, three upstream ancestors and one
+source-bound native AWS-LC commit. The only result is bincode1.3.3's informational
+[RUSTSEC-2025-0141](https://rustsec.org/advisories/RUSTSEC-2025-0141.html), which
+reports discontinued maintenance. Ancestor queries are not coverage of modified
+source, and the native commit query is not a full native-component inventory.
+No production SPDX identity, audit coverage requirement or exception was changed.
+
+Archive collection preserves687 named license/notice files.31 registry archives
+have no file matching the license/notice filename check; declarations within
+README/source are not ruled out. The derivatives' missing upstream ISC notices
+remain open. Evidence and scope-specific query mapping are under
+`output/continuation-20261009/rsa-migration/source-owned-inventory/`. These results
+do not qualify publication, installation, physical browsers or live traffic.
+
+Review found a verify/reopen race in that output-only notice collector: it hashed
+archive bytes, then reopened the cache path for extraction. Extraction now uses
+the same verified in-memory snapshot, with absolute/traversal/containment checks.
+Six focused path cases pass; recollection preserves the exact inventory and all
+query mappings. No OSV query was repeated. The earlier peer report describes the
+old collector and must not be presented as approval of the corrected source.
+A separate post-fix peer report verifies18 hashes, six actual path-helper cases
+and a synthetic cache-path replacement against the actual extraction block. The
+replacement cannot change the already verified BytesIO payload. This remains
+local research tooling, not a hostile same-UID filesystem isolation boundary.
+
+## 2026-10-11 live log rotation and isolated vendor fixtures
+
+Exact e6bcfcd1 CI38151198776 exposed a real log-rotation race. On macOS, a controlled
+append made `tail -c 262144` return786432 bytes. Reading an actively growing path
+did not guarantee the intended archive bound. The launcher now reads at most the
+size observed by `stat`, then keeps its tail. A private completion marker carries
+read success across the POSIX pipeline; failed read, tail, permissions or archive
+replacement does not authorize truncating the live log. The existing copy-truncate
+strategy preserves its inode and open append writer. It can still discard lines
+written between snapshot and truncation; it is not lossless log transport.
+
+The old generator fails the deterministic growth case. Four scenarios cover growth
+and read/tail/archive errors; a real shell writer verifies unchanged exec PID and
+ownership. A focused test run of the full application crate passes12 tests with
+zero ignored in10.12 seconds (82.78 including compilation). This updates only the
+launcher portion of the earlier runtime baseline. No real Geph account, network
+session or installed-app traffic ran. Evidence: `output/continuation-20261009/`
+`geph-log-rotation-cargo.log` and `ci38151198776-peer/review.json`.
+
+The vendor workflow also contained an unsafe all-library execution path, including
+upstream account/network tests. It now compiles with `--no-run`, binds exactly one
+owned libtest executable, and lists/runs only reviewed version-specific cases under
+macOS sandbox network/private-home denial. Runtime variables are minimized, writes
+are confined to owned fixtures, and the owned process group is cleaned after success,
+failure or timeout. Unknown versions, absent cases, missing sandbox or zero/ignored
+results fail closed. Fifteen helper/workflow checks pass, with actual OS denial and
+process-cleanup tests; compilation orchestration is mocked. Build scripts/fetching
+remain in the separate build phase, not the runtime sandbox. Log limits bound
+retained output after exit, not instantaneous disk use. Separate CI evidence never
+enters the release artifact glob. This change does not turn fixture checks into
+live-account, physical-browser or full product qualification.
+
+## 2026-10-09 provider retirement and Telegram transport update
+
+The user reported Xbox DNS blocked and requested its removal. The application
+no longer recognizes its resolver addresses or queries its endpoint. Generic
+recovery uses independent, verified Cloudflare/Google RFC8484 connections under
+the existing local proof sequence. Equal system/app DNS answers still require
+an actual plain transport observation; they do not bypass proof stages.
+Unversioned temporary geo overlays cannot establish current DNS provenance and
+are discarded on load; new records carry evidence version 2. Local strategy
+learning and external network settings remain outside this migration.
+
+A separate reviewer exercised both production DNS reader entry points against a
+real loopback TLS/RFC8484 peer with a fixture CA and verified resolver SNI. This
+found two acceptance bugs in the ordinary reader: incomplete HTTP Content-Length
+and DNS TC=1 could still return addresses. The ordinary path now uses the same
+bounded framing/deadline reader as the existing deadline path. Sixteen loopback
+cases cover full fixed/chunked responses, wrong ID/type, DNS/HTTP truncation and
+HTTP errors; both previously failing cases pass. This is local protocol evidence,
+not a claim that public resolver endpoints are reachable on every user's network.
+A bounded direct query for `example.com` also passed against each production
+endpoint on this workstation (about 0.9 seconds each), with verified TLS and no
+resolver-setting change. That observation is retained in
+`output/continuation-20261009/public-dns-probe.json`; it is not a stability soak.
+
+The official tg-ws-proxy 1.11.1 archive (commit 18175fb4) replaces the 1.8.1 base,
+with all earlier local ownership/byte-stream fixes reconciled. Upstream's media
+404 handling is verified through real loopback H2 into all three native MTProto
+framing modes, without replaying the failed POST. New H2 ownership regressions
+also reproduced repeated-cancellation cleanup loss, late connect/dispatch during
+shutdown, a stranded lane permit, and unowned preflight work. Local fixes keep
+one owned close operation, reject late dispatch and finish release before
+propagating cancellation. The existing close deadline still bounds TLS cleanup.
+The source/provenance and detailed patch inventory live in
+[LOCAL_CHANGES.md](../vendor/tg-ws-proxy/LOCAL_CHANGES.md).
+
+The update adds HTTPX 0.28.1 and five transitive packages to all three
+hash-locked Python dependency sets. Existing pins are unchanged. A direct OSV
+query of all 14 locked Python runtime packages returned no findings on 2026-10-09
+(`output/continuation-20261009/python-runtime-osv.json`); that limited check is
+not the full product dependency audit. The unchanged Geph/Chromium gate remains
+unresolved. Read-only refresh identified existing PR383 / Geph 0.4.3 as a candidate
+removing five old findings, with 11 local Geph patches still needing forward-port
+and qualification; RSA and generic Chromium coverage remain separate work.
+No workstation installation or service restart was performed for this evidence.
+
+## 2026-10-09 dependency-remediation experiments
+
+The Geph0.4.3 source candidate now preserves all11 existing local patches and
+uses SQLite-only SQLx0.8.6. Its isolated session/SQLite tests and functional CI
+pass, but the fresh423-package inventory still contains two RSA blockers and
+one informational bincode finding. No exception was extended. Source and shipped
+binary qualification remain separate; no replacement Geph binary was installed.
+
+An output-only public-client RSA adapter uses pinned AWS-LC primitives, not a
+new PSS codec. Eighteen prototype tests (nine compatibility),36 cache tuples read by actual
+mizaru2 0.2.21, six exact OpenSSL signature comparisons and nine independent
+focused checks pass. Review found and fixed two prototype defects: equal
+mathematical keys encoded as SPKI/PKCS1 were wrongly rejected, and the backend
+SPKI parser admitted algorithm parameters rejected by the old parser. Key
+binding now uses public n/e while Merkle/cache identity retains original
+response DER; the legacy algorithm/NULL admission rule remains explicit.
+The2049-bit test preserves valid signature/cache interoperability, not the old
+encoder's broken rounded-bit operation. A byte-owned async pending operation
+then passed six focused and six independent checks: native handles do not cross
+await, and cancellation clears owned inverse/message buffers before deallocation.
+No unsafe Send/Sync is used. These output-only mock boundaries do not establish
+real auth/bandwidth callsite trust, SQLite publication, caller-token lifetime,
+scheduler performance or both shipped ABIs. A client-only wire adapter is the
+next separate integration step; production dependencies are unchanged.
+
+Actual OS-entropy failure produces AWS-LC SIGABRT, not a recoverable Rust error.
+Eight offline child cases established that boundary. A separate disposable user
+launchd job with the current KeepAlive/ThrottleInterval10/Background policy
+restarted after one injected failure and produced a healthy, identity-checked
+successor after43.630s from bootstrap. An earlier40s deadline failed. Therefore
+ThrottleInterval10 must never be described as a10s readiness guarantee. Both
+jobs and all observed PIDs were proven absent after cleanup; active app jobs,
+accounts and network settings were untouched. This is native policy-fixture
+evidence, not a Geph launcher, SOCKS, credential-cache, persistent-failure or
+traffic-restoration qualification. Private reproducible evidence is under
+`output/continuation-20261009/rsa-migration/`, including the independent review.
+
+The CfT155.0.8059.39 archive is mapped to its exact Chromium commit and
+V8 15.5.35.20 using official CfT, ChromiumDash, Gitiles and retained binary
+evidence. FFmpeg is an exact pinned Chromium fork whose README says Version:N/A;
+its RELEASE=8.0.git is not an interchangeable NVD CPE version. No feature
+absence is inferred from a missing dylib or a license notice. A separately
+reviewed eight-record NVD prototype preserves AND/OR/negate, environmental
+prerequisites and unknown component inventory. Neither component mapping nor
+that sample clears corpus-wide advisory unknowns. Retained source/provenance
+and reproduction are under `output/dependency-remediation-20261009/`.
+
+## 2026-08-31 continuous root and address/object authority boundary
+
+Cold production-shaped diagnostics moved the causal boundary earlier than
+gzip decoding or critical-child selection. For `app.aikido.dev`, TCP connect
+completed, TLS exhausted the bounded root slice, and HTTP send never began;
+therefore the attempt could not discover `cdn.aikido.dev`. The historical
+implementation also closed its first socket after 400 ms and spent the adaptive
+allowance on a second fresh TCP/TLS connection. That deterministic churn lost
+handshake progress, but removing it was not sufficient to make the current
+direct path usable.
+
+The correction keeps one exact-numeric-IP socket from connect through TLS,
+request send, bounded receive, strict framing, selected-representation decode,
+semantic classification, and critical-root inspection. Root I/O receives the
+remaining common job time after only classification and scheduling capacity,
+with a five-second cap. Browser provenance and Geph proof capacity are no
+longer reserved before the root outcome says either branch is relevant. A late
+denial or incomplete response still fails closed because every downstream
+branch must fit inside the same live job deadline. Any explicit
+`retryable_inconclusive` result--including connect, TLS, send, read, framing,
+decode, classification, inspection, or parser timeout/failure--authorizes no
+cache, provenance, child, Geph, local recovery, or learning. Existing admissible
+EOF/hard-error contracts are not broadened.
+
+The first source probe exposed the premature reservation directly: the
+five-second cap received only `4.375` seconds after subtracting 1.5 seconds of
+browser provenance, 50 ms of provenance grace, and two seconds of proof that a
+usable direct result would never need. It completed TCP, then reported
+`tls_handshake_timeout`, `retryable=1`, `hard=0`, `wire=zero`, and `assets=0`.
+The resolver returned exactly three current public A records and admitted all
+of them: `54.195.217.18`, `63.33.115.70`, and `54.229.203.255`. Repeating the
+single bounded source observation after the outcome-conditioned correction
+gave the root the full five-second cap but still timed out in TLS. One
+distinguishing eight-second observation to `54.229.203.255`, which had
+previously returned a complete usable gzip root with critical assets, also
+timed out before HTTP. Thus the current direct network/backend state no longer
+reproduces the earlier usable edge. This is negative source evidence, not
+authority to route: elapsed time remains `unclear`, and no larger timeout or
+retry ladder is justified.
+
+The bounded discriminator through the already-owned Geph listener did complete
+the identical Aikido root: it returned a usable response in roughly 2.2 seconds
+with 19,603 decoded payload bytes (6,314 bytes on the compressed wire). That
+locates a real current direct-versus-owned-exit split, but it does not convert
+one timeout into persistent route evidence. The production resolver set was
+therefore exercised as a whole. All three current public A records actually
+spent their full five-second continuous root allocation in the identical TLS
+handshake boundary with zero wire bytes, zero payload, no asset, no hard error,
+and no usable or mixed edge. An injected probe, an immediate synthetic timeout,
+a shortened window, an invalid/private or IPv6 resolver set, partial
+completion, or heterogeneous outcome cannot create this consensus.
+
+The resulting correction is a one-request liveness mechanism, not learning.
+The semantic consensus can mint one volatile capability bound to the normalized
+host, exact PF destination, port 443, verified owned-Geph PID, random owner
+capability, exact-system not-before boundary, and common semantic handoff
+deadline. Meanwhile the handler's separate exact PF stream stays open for its
+full eight-second hard window. After that boundary it continues to race the
+same held stream against at least 64 server bytes from the same held Geph PID;
+any direct byte before the no-await commit wins, including a byte that arrives
+during the synchronous PID ownership check. The capability is consumed before
+runtime awaits and has no second attempt. It cannot cache, learn, publish
+status, schedule confirmation, create a successor, or enter the generic Geph
+helper. Invalid identity, readiness, PID, session, drain, deadline, EOF, or
+short-payload outcomes return the held exact stream when possible. If both
+streams end without bytes, the request ends without route mutation. This
+bounded policy intentionally does not claim to distinguish an arbitrarily slow
+direct server; that is why timing remains forbidden as persistent authority.
+
+The same audit found a second root defect: transport evidence had been shared
+at host scope even though PF may select a different destination IP. Direct root
+cache and in-flight ownership are now `(normalized host, exact PF IP)`. An
+alternate system A record may complete the current root observation, but its
+usable result cannot mark the PF-primary address healthy. QUIC may suppress the
+TCP fallback only when direct evidence matches the packet's exact destination
+IP. A learned owned-Geph exact host remains the only host-wide cache authority.
+
+Critical child evidence is object-scoped, not merely host- or address-scoped.
+The child resolves one exact numeric address before taking ownership, never
+reads or writes direct root/other-object cache, and proves its own request
+bytes. Cross-origin child attempts use distinct opaque in-flight identities
+even for the same host and IP because routing state intentionally retains no
+path or query. Same-origin child work may reuse only the parent's exact-IP
+epoch as cancellation/authority context and still probes the child object.
+Discarded or cancelled work cannot commit, cache, or learn; the owned socket or
+bounded worker is closed/drained before authority is released. Private
+diagnostics remain fixed/coarse, drop-only, and outside StatusV2.
+
+Change-scoped coverage is green. The complete set of newly added direct-root,
+address/object, cancellation, diagnostic, cache, QUIC, and request-only tests
+passes (`62` cases). The affected existing root/preflight/QUIC/cache contracts
+pass (`62` cases), and the handler/request-only/owned-Geph contract selection
+passes (`43` cases); the narrower consensus/claim and exact race selections
+also pass (`21` and `33` cases). Python compilation and `git diff --check` are
+clean. No full suite was rerun because the prior broad baseline remains valid
+and the current diff has narrower executable contracts. Independent review of
+the fresh request-only ownership, deadline, direct-priority, cancellation, and
+session cleanup path found no remaining concrete defect. No bundle, install,
+browser, route learning, cache mutation, or account-backed run followed. The
+next boundary is the canonical fresh/staged/bundled daemon-equality guard,
+followed only then by one exact build/install and genuinely cold ordinary
+Chrome/Safari first-request validation. No Aikido, Capacitor, Weather, or
+complete-page success is claimed.
+
+## 2026-08-30 selected-representation root boundary
+
+The exact installed `9baf111` predecessor, with bundled/root daemon SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`,
+still left a genuinely cold Chrome Aikido navigation empty with no learned
+route. That result invalidates the earlier plan to treat its `200`/full-`206`
+extractor correction as the completed cold path. The visible Aikido result on
+`513484a` remains warm-route evidence: an exact overlay was already learned
+before that navigation, so it did not prove the missing first-navigation
+transition.
+
+Source history locates the next causal boundary in root content negotiation.
+The semantic root request asked for identity content, and the shared historical
+extractor blob
+`477e2796bd8b4daf525df47c347627c88d7740d0` had no gzip decoder. On the same
+direct Aikido root target with the same bounded range and cache controls, the
+identity request received HTTP `200` with `19,688` response-body bytes and
+`9.219354` seconds to first byte; changing only the request's content
+negotiation to advertise gzip received HTTP `200` with `3,561` response-body
+bytes and `1.872561` seconds to first byte. The capture did not retain the
+response headers, so these numbers establish only the request variant,
+received byte count, status, and timing. They do not establish the live
+`Content-Encoding`, `Content-Length`, or `Content-Range` values.
+
+Exact product commit `7d3c871582f1b795e7cf7ac061f718255ab3cdaa`
+makes the direct and owned-Geph semantic root requests byte-identical,
+including the bounded range and gzip negotiation. Raw encoded
+HTTP framing must complete first; a `206` must additionally prove the whole
+selected representation rather than a prefix. Only then may an absent/identity
+encoding or one bounded gzip stream be decoded and classified or scanned for a
+critical asset. Unsupported, malformed, corrupt, truncated, concatenated,
+trailing, input/output-cap, framing, range, or inspection-deadline failures are
+retryable-inconclusive. On the direct path they may consume only the existing
+one retry and may not publish a healthy cache, expose/probe a child, contact
+Geph, or learn a route; an invalid Geph representation is unusable and cannot
+authorize learning. Critical-child same-object range requests remain identity
+encoded.
+
+Change-scoped tests cover gzip content-length and chunked responses, corrupt
+and truncated streams, limits/deadlines, full versus prefix `206`, exact
+direct/Geph request equality, and the production route/cache/learning guards.
+With an isolated clean bytecode cache, the decoder/extractor set passes `54`
+tests and the exact production-chain set passes `17`; the documentation set
+passes `9`, compilation and `git diff --check` are clean, and mutation controls
+fail when either request equality or the full-selected-representation guard is
+removed. No physical Chrome or Safari success is claimed for this correction.
+
+## 2026-08-28 ranged-root request/parser boundary
+
+The exact installed `dfe300e` candidate reached the intended child deadline
+logic in isolation but did not enter it from a cold physical Aikido navigation.
+The fresh Chrome session started with no learned route and stayed at
+`learned=0`, `pending=0`, and `last_state=idle`; the empty shell's four primary
+CDN failures arrived after about `8.7` seconds and the broader failures after
+about `31.6` seconds. This ruled out an early screenshot and moved the causal
+boundary before child comparison.
+
+History and production composition exposed the missing edge. The root semantic
+probe has sent a bounded `Range` request since `a38c6d1`. The critical-asset
+extractor added by `c7f1942` accepted only an HTTP `200`, while the surrounding
+semantic classifier accepted any complete non-empty successful `2xx`/`3xx`
+response, including `206`, as usable. A server that satisfies the oversized
+range with its entire shorter representation therefore produced a valid full
+`206`, zero extracted assets, no child direct/Geph comparison, and a usable
+parent cache entry. The later UI-provenance and deadline corrections never
+exercised this request -> classifier -> extractor boundary: their helper built
+a synthetic `200` root and pre-extracted assets before invoking production
+preflight.
+
+The retained physical artifact does not contain status/headers for the
+daemon's internal root preflight, so it does not directly prove that the live
+Aikido observation was that `206`. The path is nevertheless a concrete product
+defect and a sufficient reproduction of the exact observed state. The new
+regression passes an Aikido-shaped full-representation `206` through the real
+TLS root probe, production classifier, root inspector, initial route preflight,
+unknown-route race, direct child EOF, same-object owned-Geph result, and exact
+child commit. The old `0de928e` extractor returns zero assets for the same
+response, and a behavior-equivalent old empty-assets mutation makes the new
+full-path regression fail.
+
+The generic correction distinguishes a complete representation from an
+unresolved ranged prefix. A root `206` is scannable only when one valid
+`Content-Range` starts at zero, ends inside the requested bound, declares
+`end + 1 == total`, agrees with transfer/content-length framing and observed
+body bytes, is identity encoded HTML, and is inspected before its deadline.
+A proper prefix, malformed/out-of-bound range, inconsistent body/framing, or
+expired inspection is `inconclusive`: the existing bounded same-IP retry may
+run once, but neither attempt can publish a healthy cache, resolve/probe a
+child, contact Geph, or learn a route. A fully scanned `200` retains its prior
+behavior. Asset targets remain one-shot and non-serializable, and only explicit
+child EOF/reset plus complete same-object evidence through the ownership-
+verified Geph listener can learn that exact child.
+
+The complete extractor plus production-chain tests pass `39` checks. The
+adjacent plain-preflight, route-preflight, critical-child, adaptive-retry, and
+slow/inconclusive selection passes `25` checks with `594` unrelated tests
+deselected. Two independent read-only reviews found no correctness,
+false-cache, slow-network, or test-boundary defects; one separately confirmed
+the regression fails under the old behavior. No physical browser test was run
+for exact product commit `9baf1110b5b4d17fd5a31df9cb42aa1986eead02`.
+Its canonical local build subsequently passed with the same daemon SHA-256
+`a5ea65633dd89b7be807873684fa648b9a13d4854f6b46ad25fd89b415d6c8ce`
+in the fresh, staged, and final app-bundled locations; no existing installation
+or browser state was changed by that build.
+
+## 2026-08-28 critical-child UI-provenance root cause
+
+Fresh ordinary Chrome proved the current installed correction could restore
+Capacitor, but Aikido still returned a usable `app.aikido.dev` shell with an
+empty DOM while its critical `cdn.aikido.dev` CSS/JavaScript connections ended
+in `ERR_CONNECTION_CLOSED`. The exact asset control returned only `15,711` of
+the requested `65,536` bytes on the transparent path, whereas the verified
+owned Geph SOCKS listener returned the complete same range. This is a
+critical-child routing failure even though the parent document, daemon, PF,
+canaries, and public status appeared healthy.
+
+Source and history comparison found the causal boundary introduced by commit
+`49aa6fc`: after extracting a bounded critical object from a complete usable
+parent, `_run_initial_route_preflight` required signed foreground/recent-input
+browser provenance before it would run the independent child direct-vs-Geph
+range comparison. A background tab, another frontmost application, or a client
+without browser UI therefore skipped the very network proof intended to learn
+the exact failing child. Repeated reloads could appear to help only when timing
+and focus happened to cross that unrelated gate.
+
+The correction does not add an Aikido/CDN rule or weaken evidence. Critical
+objects now use the existing explicit direct EOF/reset with valid incomplete
+range framing plus a complete same-object range through the ownership-verified
+Geph listener. Idle timeout and slow progress remain inconclusive. Foreground
+and recent input remain required only for the privacy-bounded browser worker on
+an ambiguous incomplete final document. Same-origin and cross-origin tests
+fail if this network-only path consults UI provenance; adjacent routing tests
+pass `684`, and the complete local suite passes `1781` tests plus `181`
+subtests. Fresh installed Chrome and Safari validation remains open, so this is
+not yet a physical product-success claim.
+
+The codebase-memory graph transport again returned `Transport closed`; this
+investigation used the documented narrow `rtk` fallback and exact git blame.
+
+## 2026-08-26 first-request late-handoff regression
+
+A clean installed-candidate control started with `learned=0` and reproduced the
+Capacitor direct denial. Production correctly classified the route and learned
+the exact host, but the initiating curl still ended in `SSL_ERROR_SYSCALL`
+after roughly eleven seconds. That is not recovery: it proves the semantic
+classifier and exact-host learning path while independently proving that the
+original replay-safe request missed its usable handoff.
+
+Exact history comparison isolated the regression. Commit `672c613` connected
+the hard-transport marker to the older sequential recovery ladder, and the
+later bounded direct retry in `af3e515` legitimately consumed more of the same
+client window. The preflight claim retained an absolute deadline, but the
+Geph handoff consumed only a boolean authorization and then started fresh
+readiness and first-payload waits. Separately, `timeout` was accepted by the
+zero-payload helper as if it were an explicit close. That could combine slow
+network ambiguity with stale observations and authorize a route incorrectly.
+
+The working correction keeps one eight-second deadline from accepted client
+connection through downstream drain, reserves four seconds for the verified
+owned-Geph payload/handoff, and races app-owned Xbox DNS with exactly two
+distinct local strategies only after an independent hard system failure. A
+local payload wins. Geph is authorized only when every current-attempt stage is
+explicitly `closed`; timeout, pending, failed, cancellation, and incomplete
+results publish nothing. Learning/status work begins only after the original
+client receives and drains at least 64 Geph bytes before its deadline.
+Deterministic verification passes the complete local suite: `1763` tests and
+`181` subtests, with only the existing Scapy finite-field-DH deprecation
+warning. Codebase-memory reindexing returned `Transport closed`, so this review
+used the documented narrow `rtk` source fallback. Physical clean-first-request
+Chrome and Safari evidence remains open; no account-backed workflow or soak
+was started.
+
+## 2026-08-25 Strict-denial network decision: physical validation
+
+The exact no-foreground correction was frozen, installed, and bound by the
+root attestation and embedded-daemon SHA-256
+`b66b7d5b44b1318642b47158b71f67a0eae036629f32132541518b0ad77a53fb`.
+Chrome's old UI was closed and its surviving background root and NetworkService
+were explicitly allowed to exit before relaunch, so the result did not reuse
+the direct Cloudflare connection seen by the prior build. The first clean
+Capacitor navigation loaded the normal site and advanced public exact-host
+learning from one entry to two; the same Chrome then completed Aikido to its
+login page. A separate private Safari window loaded the normal Capacitor page
+and consumed the shared overlay to render the complete Aikido login page;
+closing the temporary window left the user's ordinary Safari tabs intact. This
+proves reuse of an automatically learned overlay without a hostname exception,
+but it is not cold Aikido discovery evidence: one route was already learned
+before Aikido was opened. It therefore does not prove the missing transition
+from `learned=0` through first Aikido navigation to critical-child discovery
+and completion. A complete strict direct denial plus a complete same-host
+owned-Geph payload proof may still learn the exact network route, and the
+resulting runtime overlay is available to every eligible connection.
+Foreground signed-browser evidence remains limited to ambiguous incomplete or
+retry paths.
+
+## 2026-08-25 slow convergence and canonical-root follow-up
+
+The post-success physical sweep separated four superficially similar browser
+failures without adding service rules. RuTracker eventually became complete in
+Chrome only after enough retries to look broken; Safari first reported a secure
+connection failure and then could not connect. A bounded exact-root control
+failed direct TLS while the verified owned-Geph route returned the complete
+forum document. Code tracing found that the exact system probe could retain a
+few initial TLS bytes, making its stream truthy, while the independent semantic
+probe then observed a hard TLS/socket close. The old path committed that suspect
+stream and skipped the already-existing app-owned DNS/local recovery ladder.
+The corrected path closes it and sends the still replay-safe first flight into
+that ladder in the same request. Only an explicit socket/TLS exception or EOF
+without admissible HTTP framing takes this path. An idle timeout remains
+retryable-inconclusive and a slow but eventually usable direct response remains
+direct; focused regressions cover both outcomes and the coalesced-first-contact
+case.
+
+Weather exposed a separate proof-shape gap. The direct `www` root returned the
+known complete regional denial, while owned Geph returned a complete bodyless
+redirect to the apex and the apex then returned usable content through the same
+owned listener. The payload proof now follows at most one HTTPS root redirect
+between a conventional apex and its single `www.` form, shares the original
+absolute deadline, closes both sockets, and requires a complete usable final
+response. It still learns only the original exact host. Cross-host, path, query,
+userinfo, non-default-port, duplicate, chained, malformed, and unusable-final
+redirects all fail closed.
+
+The subsequent physical Chrome result was still only a shell: news and layout
+appeared, but forecast placeholders never resolved. An isolated browser trace
+identified the critical `dsx.weather.com` quick-navigation request. The exact
+object returned direct HTTP `403` with body `Bad Request - Blocked`,
+`Content-Type: text/html`, CSP `default-src 'none'`, and `nosniff`; the same
+object returned HTTP `200`, CORS `*`, and complete JSON through the verified
+owned SOCKS listener. The short denial lacks the security prose required by the
+older generic WAF classifier. It is now accepted only as that complete exact
+status/body/header fingerprint, still followed by the existing exact-host
+owned-Geph payload proof. A first owned connection to the object consumed its
+attempt on a connect timeout while the next bounded connection returned the
+payload. The six-second proof therefore permits exactly two sequential
+connections: the first receives at most three seconds, and the second may use
+only the remaining original deadline when at least one second remains. This is
+neither a retry loop nor a Weather/CDN rule, and elapsed time remains
+non-authorizing.
+
+LinkedIn demonstrated why elapsed time is not hard-failure evidence: some
+direct root attempts progressed slowly or ended partial, the owned route was
+complete, and a clean Chrome attempt could nevertheless finish. Yelp showed the
+opposite asymmetry: its direct root was complete while the owned root was
+denied, and the one missing module returned the same small object-denial response
+on both routes. Routing either whole site through Geph would therefore be wrong.
+These controls preserve the generic rule: route only from a proved alternate
+outcome, never from visual incompleteness, a status code, or elapsed time alone.
 
 ## Findings Index
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-31 | Initial semantic root discarded a live connection at 400 ms | Continuous one-socket correction implemented; focused and physical verification open | Production-shaped Aikido diagnostics completed TCP but timed out in TLS before HTTP send, while isolated identical requests sometimes completed in roughly one to two seconds with a gzip root and critical assets. The old adaptive path closed the first socket and opened a second fresh handshake. Production now gives one exact-IP connection the derived root-I/O remainder, keeps explicitly retryable-inconclusive timeout/framing/decode/parser outcomes non-authorizing while preserving the guarded safe-incomplete EOF path, and closes plus drains cancellation before same-host ownership is released. The observation locates the stage but does not speculate about the peer's reason. | Run only the focused changed-path tests and independent review. If green, verify exact bundle equality, then install and require genuinely cold first-request completion in ordinary Chrome and Safari. Do not run a full suite, soak, protected browser matrix, or account-backed workflow for this local correction. |
+| 2026-08-26 | Exact route learned after the initiating request had already failed | Shared-deadline/current-attempt correction locally green; physical proof open | A clean Capacitor curl ended in `SSL_ERROR_SYSCALL` at roughly eleven seconds even though public state learned the exact host. The hard marker entered a legacy sequential ladder, its claim deadline was reduced to boolean authorization before Geph, and timeout could count as closed evidence. Production now uses one eight-second client deadline, reserves four seconds for Geph delivery, races Xbox DNS plus exactly two distinct local strategies, admits Geph only when all current-attempt stages explicitly close, and schedules confirmation only after the original client drain succeeds before deadline. | Commit and build the exact tree, install it without touching the user's dirty primary checkout, reset only controlled product state, and require the first clean curl plus fresh Chrome and Safari connections to converge. No account-backed run or soak is relevant. |
+| 2026-08-25 | Strict denial was hidden behind the provenance gate after the fast probe | Root cause corrected; full local suite green | Exact comparison with successful head `513484a` showed that the strict-denial classifier, owned-Geph payload proof, and exact-host commit path still existed. Live direct probes instead exposed the timing boundary: the 400-ms root slice could end inconclusive before the complete strict denial arrived, while the same-host owned-Geph proof completed normally. Production then asked for browser provenance before its adaptive retry, so a network-only strict denial could be rejected as `not_frontmost` or `input_not_recent` before the retry revealed it. The correction gives exactly one bounded same-IP direct network retry first. A final usable result stays direct, a second inconclusive result returns no-cache/no-provenance/no-Geph, a final strict denial reaches only the existing complete exact-host proof, and final safe-incomplete or critical-resource evidence still requires signed foreground/recent-input provenance. Actionable branches default to no cache until proof commits. Existing h2/TCP/QUIC sessions cannot be migrated after learning and are excluded from clean first-request evidence. | Build and install the exact corrected commit, reset process-local learned state, and require first-request convergence on genuinely fresh Chrome and Safari connections before pushing PR #373. No hostname rule, account-backed run, or soak is relevant. |
+| 2026-08-25 | Hard first-contact and strict minimal edge denial converged only after repeated browser retries | Generic same-request corrections under local verification | A few retained TLS bytes made the exact system stream truthy even when the independent direct probe then produced a hard TLS/socket failure. The handler committed that stream instead of entering the existing guarded local ladder. Production now carries a distinct hard-transport bit from the direct probe and reuses the same replay-safe first flight for app-owned DNS/local recovery; idle timeout, slow progress, complete ordinary `403`, and unusable results on both direct and owned routes remain non-authorizing. A separate bounded exception follows one apex/`www` HTTPS root redirect only to obtain a complete usable final owned-Geph payload under the same deadline and still learns only the original host. Weather then proved its critical `dsx` resource used a complete minimal strict-denial fingerprint not covered by the prose classifier and that one owned target connection could fail while a second succeeded inside the existing proof budget. The new classifier is exact status/body/header bound and the proof has exactly one remaining-budget retry under its unchanged deadline. | Finish full local verification, rebuild/install the exact branch head, and require fresh physical Chrome and Safari convergence plus exact-head CI/audit before merging PR #373. No new soak or account-backed run is relevant. |
+| 2026-08-24 | Learned exact-host route bypassed over QUIC | Two physical failures reproduced; exact-flow socket-failure correction locally green | The first fresh attempt advanced public auto-geo-exit state from idle to one learned exact host, yet Chrome kept Aikido's critical bootstrap incomplete and showed Capacitor's direct Cloudflare denial; Safari held both URL loads over Start Page. Canonical private-cache size/timestamp plus the usable Aikido root and critical-asset path identify the learned entry as the exact `cdn.aikido.dev` child. Bounded post-attempt controls still got the direct Capacitor denial and incomplete Aikido asset, while explicit owned Geph returned complete 65,536-byte ranges for both. Source review found `_quic_geo_exit_tcp_fallback` consulted only static `route_policy(...)=geo_exit`: a learned unknown exact host therefore bypassed its TCP-only route over HTTP/3, and a QUIC-first unknown root never reached TCP semantic preflight. Exact-SNI Version Negotiation fixed that source defect but the next physical attempt still failed in both browsers; public state reached two learned hosts, while a live Safari socket showed the Aikido root on TCP and its critical CDN on UDP. RFC 9000 explains the race: a client must discard VN after processing a real server packet. The revised correction pairs bounded VN with a matching IPv4/IPv6 port-unreachable quoting only the observed UDP tuple, so the exact socket fails and the browser retries TCP even when the server wins the VN race. A fresh usable/challenge result restores exact-host QUIC; only the existing proof can learn Geph. Explicit policy/exclusions, ECH/no-SNI, other UDP, persistent PF, and shared CDN IPs remain untouched. | Build/install the exact local head, restart browsers to discard old QUIC connections, and require one fresh physical Chrome/Safari success before merge. No additional release soak is relevant to this targeted defect. |
+| 2026-08-24 | Current macOS Chrome/Safari provenance rejected before automatic recovery | Root cause reproduced; compatible exact-browser verification implemented locally | Public status after the physical Aikido/Capacitor failure remained `learned=0`, `pending=0`, `last_state=idle`, proving that neither a manual CDN rule nor semantic-classifier tuning could repair the first failure. A loopback TLS socket bound the Chrome connection to its exact official helper and root. The helper passed strict verification, while the root failed bare `--strict` only for Finder metadata and passed `--strict=symlinks`; its exact Google identifier, team, and designated requirement remained valid. Safari used the exact signed `com.apple.WebKit.Networking` executable in the current sealed Cryptex. Its legacy resource envelope failed ordinary/strict verification but passed `--ignore-resources --strict=symlinks` and the exact Apple designated requirement. The correction selects that compatibility form only for Safari family executables under exact canonical system/SSV/Cryptex roots; Chrome retains resource validation. All other process, socket, foreground, and recent-input gates are unchanged. | Run one fresh physical Chrome/Safari attempt against the installed exact local correction, inspect only privacy-bounded route state and visible completion, and keep PR #373 unmerged until both behavior and exact-head checks pass. |
+| 2026-08-24 | Aikido/Capacitor browser-visible controls | Direct/owned-Geph asymmetry reproduced; generic slow-link correction under test | `capacitorjs.com` returned a complete direct `403` classified as strict edge denial while the owned-Geph comparison was complete and usable. `app.aikido.dev` exposed a separate timing defect: its root could outlive the 400-ms semantic probe, while the current `cdn.aikido.dev` critical JavaScript object closed direct after exactly 16 KiB and completed the same bounded range through owned Geph. The bounded same-IP direct retry runs before provenance, is capped at 5.0 seconds, and uses only the unchanged eight-second job remainder after reserving 1.5 seconds for cold provenance, 50 ms of wait grace, 2.0 seconds for proof, and 25 ms scheduling grace; the 400-ms direct and 500-ms healthy first-contact paths remain unchanged. Any repeated idle timeout remains inconclusive/no-cache/no-provenance/no-Geph, as does reaching the local read-size cap (`truncated=True`). Only stable explicit EOF or reset (normalized as EOF) with valid incomplete framing can become actionable under signed browser provenance and the existing same-object proof. This supports generic retry and exact child-host learning, not Aikido/Capacitor policy entries or a general `403` rule. | Keep the correction generic, require bounded critical-resource completion in the live gate, and qualify the exact changed candidate normally. These bounded local controls diagnosed the defect without starting or reusing a new 30-minute release soak. |
 | 2026-08-22 | Sequential protected workflows duplicate account authentication | Root cause proven; single-session release gate in preparation | Exact main `c8c4c425e0488479686d76265b5eec3db133d202` passed CI `32589384708`, audit `32589384714`, and standalone owned-Geph run `32590027895`. Readiness `32590146466` then created a second ephemeral Keychain/config/process on a different hosted runner. Its first `get_connect_token` and one bounded retry both returned the already-classified daily rate limit before SafariDriver or any matrix browser started; artifact `9480105795` contains only exit marker `125`. Passing a Geph cache/token between runners would persist reusable authentication material and is rejected. The safe composition keeps one Geph lifecycle process inside `release-readiness.yml`, runs the existing deterministic Chromium semantic gate and fixed Safari/Chrome matrix before releasing it, proves cleanup, then runs the independent invisibility soak. Separate qualification and readiness proofs share one exact protected workflow attempt. | Merge only after local/PR verification, obtain a fresh exact-main candidate, and dispatch one combined readiness run. Do not run the explicit standalone diagnostic on a UTC day reserved for release qualification. |
 | 2026-08-22 | Obscura as a proposed CAPTCHA/rate-limit fallback | Not applicable to the broker failure; optional diagnostic only | The reviewed upstream repository describes Obscura as a Rust/V8 headless browser with CDP, rendering, stealth, and optional HTTP/SOCKS proxy input. It does not provide a geo-exit network path or an account-backed Slipstream-owned proxy. It therefore cannot repair `get_connect_token` rate limiting or replace Safari/Chrome/product-route evidence. It may later provide one additional browser comparison for CAPTCHA triage, but a different rendering result cannot authorize routing or publication. | Keep Obscura out of the `.23` release-critical path. If evaluated later, pin source/binary provenance and treat its result as non-gating targeted diagnostics only. |
 | 2026-08-22 | Live-site release-readiness false positive and masked Weather state | Narrow harness correction in preparation; routing/product code unchanged | Protected readiness `32572723728` proved the earlier Safari/Chrome lifecycle correction: Aikido and Capacitor were usable in both browsers, while XPersonatoy and Weather reached their exact host deadlines in both browsers. In one bounded direct XPersonatoy observation, the generic `captcha` marker that made the detector non-passing occurred only in a dormant script on an otherwise StarrToy-shaped document. The harness had searched raw Safari source and raw Chrome DOM alike, so generic marker presence alone was not a visible challenge. Retain strong raw challenge markers; derive one fixed `captcha` boolean only from visible page text or a visibility-gated CAPTCHA widget, without retaining DOM or text. Weather's `readyState != complete` was the first blocker and concealed whether the fixed title, visible body, protocol, and content conditions were ready. Preserve all conditions and report a new terminal `readiness_document_pending_semantic_ready` only when those conditions pass but the document remains pending. No route, deadline, control, host, or browser rule changes. | Validate the focused harness tests and PR checks, merge only after review, build a new exact-main candidate, then perform one protected owned-Geph qualification and one readiness for that changed candidate. Do not retry unchanged `111000c`. |
@@ -35,7 +998,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-08-10 | Owned-Geph replacement exposed SOCKS before its tunnel carried payload | Exact workstation race identified; generic readiness correction passes focused and full Python tests | Main `b9b989680abe4519a8ba2656697d83f175693a89` passed exact-main CI/audit/Windows and protected run `31380099738`; artifact `9059610687` reached active StatusV2 in transaction `7D29A3E8-1B4C-4E51-A2D8-8A2E6A5164C7`, but four incomplete-response smokes remained unlearned and ended `rejected`. The root log records two owned replacements followed immediately by backend-unavailable semantic probes. The user-owned Geph log contains no target tunnel in that window and shows authentication/session establishment completing only after listener startup. Code tracing confirmed that `execute_owned_geph_restart()` returned after exact PID, ownership, listener, and control liveness, and `_retry_semantic_geph_probe_after_owned_restart()` immediately called the target probe. The correction pins the successor and requires a bounded existing-portfolio HTTPS payload canary through the same PID before the target probe; no target rule or weaker proof was added. Exact rollback removed the root interception path and preserved DNS `111.88.96.50/51` plus external state. | Complete all language, browser, continuity, and diff checks; merge a small PR only when green. Then run exact-main gates and exactly one fresh protected qualification before another controlled install. |
 | 2026-08-10 | Partial TLS watchdog never reached content confirmation; valid partial HTTP/2 DATA was rejected | Exact workstation failure reproduced; generic correction and review hardening pass focused tests | Qualified main `00c48edad207dfa53442b9b6b713b02908bdeb7e` and artifact `9045740737` reached active StatusV2 in transaction `82D444BE-2F5C-4E7F-85EE-01220B50474F`, but the first required `xpersonatoy.com` smoke twice returned HTTP/2 `200`, `15,041` bytes, and curl error `18` after about 6.6 seconds with no recovery event; exact rollback completed without changing user DNS or external state. Code tracing found that the six-second partial-record watchdog cancelled the relay before the fifteen-second content observer. It now preserves the exact public-IP candidate, but review confirmed that route-authorizing content confirmation must still wait for independent system, app-owned DNS, and two local-strategy failures. A read-only exact-address control exposed a second false negative: after valid HTTP/2 headers and 16,384 body bytes, the peer began a valid 8,192-byte DATA frame on stream 1 but delivered only 1,386 payload bytes before the deadline; the parser classified every partial frame as a protocol error. The correction recognizes only a fully validated unfinished DATA frame on the active response stream after prior body bytes. Review hardening accepts a complete nine-byte nonempty unpadded DATA header and rejects any partial frame whose declared data would exceed `Content-Length`. It does not learn from TLS bytes. Live controls report direct incomplete after 25 seconds and a complete `1,113,091`-byte identity response through the unchanged verified owned-Geph listener in about nine seconds. | Repeat the full local suite and PR gates after review hardening. Then require exact-main gates and one fresh protected qualification before another controlled install; install only that run's artifact and roll back on the first failed smoke. |
 | 2026-08-09 | HTTP/2 partial-body confirmation disagreed with its HTTP/1.1 control | Root cause reproduced without PF mutation; protocol-aware correction implemented locally | Exact main `a38c6d12fe2ddc84059c7b77fd7bc97902d0b151` passed CI `30862641149`, audit `30862641178`, Windows qualification `30862641141`, and protected owned-Geph run `31326467025`. Its exact artifact reached active StatusV2 in controlled transaction `C17E2DFE-CC33-4FBE-8C61-8F76418D98C5` and passed Google, Spotify, Discord, YouTube plus a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT, and Modrinth. Four `xpersonatoy.com` HTTP/2 responses then returned `200` but ended with curl error `18` after 55-70 KiB, so exact rollback removed the daemon/PF/runtime state and preserved DNS `111.88.96.50/51`, both Geph owners, proxy/PAC, and default route. Code tracing showed that the client observation was HTTP/2 while the independent completion probe advertised no ALPN and sent HTTP/1.1, so a complete HTTP/1.1 response rejected the real HTTP/2 evidence. A no-PF live control with the new probe proved direct HTTP/2 incomplete. The owned-Geph HTTP/2 control then exposed two independent local false negatives: the origin ignored `Range` and completed at 1,045,719 bytes, above the old 512-KiB cap, and a six-second deadline stopped after 470,846 bytes. With the existing two-MiB semantic cap and a background-only 20-second deadline, the same owned listener completed all 1,045,719 bytes. No hostname rule was added. Automated review then found that a parser error after payload, a compressed partial response, an immediately handled graceful GOAWAY, GOAWAY interleaved inside an open header block, a new `PUSH_PROMISE` after graceful GOAWAY, an increasing repeated GOAWAY boundary, or an unfinished body exactly at the byte cap could falsely look incomplete. Protocol errors, compressed responses, capped responses, rejecting GOAWAY frames, illegal header-block interleaving, increasing GOAWAY boundaries, and post-GOAWAY new push streams now remain unknown. `GOAWAY(NO_ERROR)` permits only already eligible streams to finish outside a header block, and later GOAWAY frames may only retain or lower its `last_stream_id`. An exact-cap response remains valid only with `END_STREAM`, and a protocol or acknowledgement-write error recorded alongside completion keeps owned-Geph evidence unknown. Full local verification passes with `1047` Python tests plus `41` subtests, `255` script, `21` Chromium companion, `83` Rust tray, and `32` Rust core tests. A clean Python 3.13 PyInstaller build also runs its frozen daemon-free `--status` path with the new helper included. | Repeat PR review and merge only with green PR CI/audit. Then require exact-main gates and one fresh protected qualification before another controlled install. Include Weather regional-denial semantic smoke after the transport case passes. |
-| 2026-08-09 | Weather root redirect differs from final regional-denial page | Read-only control confirms the existing semantic split | `www.weather.com` directly returned the generic regional-denial page, while the same host through owned Geph returned a complete bodyless `301` to `https://weather.com/`; the canonical `weather.com` origin then returned payload through the same owned listener. A bodyless redirect is valid HTTP completion but cannot satisfy the nonzero-payload route proof by itself. The existing Chromium companion follows the real browser navigation and remains responsible for final rendered denial plus one bounded reload. No hostname rule or transport relaxation is justified. | Preserve redirect and canonical-host separation in the controlled Weather smoke; do not treat a zero-byte redirect as a usable payload. |
+| 2026-08-09 | Weather root redirect differs from final regional-denial page | Historical control; proof handling refined on 2026-08-25 | `www.weather.com` directly returned the generic regional-denial page, while the same host through owned Geph returned a complete bodyless `301` to `https://weather.com/`; the canonical `weather.com` origin then returned payload through the same owned listener. The bodyless redirect remains non-usable by itself. The later generic correction may follow exactly one apex/`www` HTTPS root redirect under the same deadline and requires the complete usable final payload, while learning only the original exact host. Every other redirect fails closed. No hostname rule or transport relaxation is justified. | Preserve redirect and canonical-host separation in the controlled Weather smoke; never treat the zero-byte redirect alone as payload evidence. |
 | 2026-08-03 | Live Weather regional-denial control | Exact production helper detects the observed direct response | A read-only exact-IP HTTP/1.1 control on the workstation returned a complete `403`, `Content-Length: 48`, and `This content is no longer available in your area`. The first implementation incorrectly returned false because the shared route-usability helper intentionally rejects all `4xx`. HTTP framing completion is now a separate invariant from response usability: ordinary route qualification still rejects `4xx`, while the semantic canary may inspect a completely framed `2xx`-`4xx` response except `429`. The same production helper then returned `regional_denial=True` for the live response. No Slipstream process, PF, DNS, proxy/PAC/VPN, or Geph state was changed by this control. | Preserve both the synthetic `403` framing regression and the protected generic Chromium scenario; never weaken ordinary successful-response qualification. |
 | 2026-08-03 | Browser-independent complete regional-denial canary | Implemented locally; broad daemon/traffic regressions pass | A rendered denial is invisible inside the intercepted TLS stream, but a second independent request can safely inspect the service root without decrypting browser traffic. For the first eligible unknown `system/plain` path, the daemon probes the exact observed public IP with normal hostname certificate validation, no cookies/path/query, identity encoding, a `128 KiB` cap, two-worker limit, eight-host-per-minute budget, and ten-minute exact-host cooldown. A complete body containing a strong generic regional-denial phrase can only schedule the existing owned-Geph semantic proof; it cannot learn a route by itself. Normal, compressed, incomplete, `429 local_rate_limited`, static/protected, and unowned-backend cases stop. This catches the observed Weather-style root denial without naming the service. It cannot diagnose a denial that exists only on another path or after JavaScript execution, and it cannot reload the already rendered page. | Complete the full suite and review, merge only with green PR CI/audit, then run exact-main and one protected account-backed qualification. Keep Chromium/Safari distribution as the complementary path-specific and reload mechanism. |
 | 2026-08-03 | Partial HTTP/2 body and rendered regional denial are two generic failure classes, not site rules | Exact artifact rolled back; bounded transport trigger implemented; production companion delivery remains open | Exact main `40fac7693e229de34adb6988fdf7cd08b28d1cbf` passed CI `30845033722`, audit `30845035284`, native Windows `30845034732`, and protected run `30846312090`; artifact `8868928993` passed broad workstation smoke before four HTTP 200 / curl 18 partial-body responses forced exact rollback in transaction `8E4BA969-2C1D-4B89-B9FA-71478789FF9E`. No daemon event existed because the client closed first after complete TLS records and relay teardown cancelled the idle observer. The generic correction requires two bounded unknown `system/plain` observations and then only schedules the independent local HTTP completion probe; ciphertext cannot advance routing. Separately, the exact observed `weather.com` message already passes the host-agnostic `regional_access_denied` browser detector and protected semantic fixture. Transport cannot read rendered meaning. | Pass full checks and merge the small transport PR only when green; requalify exact main before installation. In a separate delivery PR, finish all code-side Chromium/Safari packaging and lifecycle work while keeping store review, signing, and user browser enablement as explicit external gates. |
@@ -178,7 +1141,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | Unblock-Pro DNS/hosts/proxy mutations | Rejected | Do not mutate `/etc/hosts`, system DNS, system proxy, PAC, or external VPN configuration. | Detect and warn only. |
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
 | 2026-07-08 | Install hygiene ideas | Adopted where safe | Safe-copy and binary-format validation are useful for daemon install reliability. | Keep monitoring real reinstall logs for locked-file edge cases. |
-| 2026-07-08 | `xbox-dns.ru` external DNS | Active | User-managed resolver settings remain external state that Slipstream never enables or rewrites. Separately, the daemon may make a direct, verified DoH query for one failed generic hostname. | Keep the direct backend exact-host, local-only, and independent from system resolver settings. |
+| 2026-07-08 | `xbox-dns.ru` external DNS | Retired 2026-10-09; historical evidence only | User-managed resolver settings remain external state that Slipstream never enables or rewrites. Separately, the daemon may make a direct, verified DoH query for one failed generic hostname. | Keep the direct backend exact-host, local-only, and independent from system resolver settings. |
 | 2026-07-09 | Darkware Zapret UI | Reference only | Borrow the compact MenuBarExtra-style status layout, not its manual strategy workflow. | Redesign tray diagnostics as short status rows with details behind a button. |
 | 2026-07-09 | Darkware Zapret system mutations | Rejected | Do not copy system SOCKS proxy toggles or broad sudoers `NOPASSWD` service control. | Keep Slipstream-owned state scoped to its daemon, pf rules, and status files. |
 | 2026-07-09 | Darkware Zapret bruteforce probe | Backlog | Headless re-sweep can borrow the temporary-proxy probing idea without exposing a picker. | Consider only for autonomous local-bypass recovery. |
@@ -518,10 +1481,14 @@ document pending for another eight seconds and submits the existing bounded
 capability. Only then may the daemon advance and close the original relay;
 Chrome itself must repeat the unchanged original URL and fetch exactly one CSS,
 JavaScript, image, and ready resource. No extension or reload command exists in
-the scenario. Before the first request, a three-second installed idle sample
-requires the production broker to be owned by the console user with mode
-`0600`, the worker runtime to be empty, worker processes and profiles to be
-absent, and daemon CPU growth to remain at most one second.
+the scenario. Before the first request, an installed idle sample requires the
+production broker to be owned by the console user with mode `0600`, the worker
+runtime to be empty, worker processes and profiles to be absent, and daemon CPU
+growth to remain at most one second over three seconds. Only if that first
+sample exceeds the ceiling does the harness take exactly one consecutive
+three-second sample. It rechecks that worker processes and profiles remain
+absent after each sample and fails when both samples exceed the unchanged
+ceiling; evidence records every sample and the total observation duration.
 
 PR #330 merged as exact live main
 `9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main packaged job
@@ -1339,6 +2306,240 @@ preflight request/outcome boundary used by both Python and Rust. It carries
 bounded route candidates and fixed outcomes, never page text, path, cookies,
 Ray ID, or arbitrary browser failure strings.
 
+## 2026-08-24 Aikido and Capacitor controls
+
+The two live sites reproduced different generic failure classes through the
+installed transparent route:
+
+- `capacitorjs.com` returned a complete direct HTTP `403` whose bounded markers
+  classified as strict `edge_access_denied`. The same root comparison through
+  the exact owned-Geph SOCKS listener returned a complete usable response. This
+  is the existing strict semantic-denial case; an ordinary status-only `403`,
+  `429`, login, CAPTCHA, or generic security page remains non-authorizing.
+- The `app.aikido.dev` root took longer than the 400-ms direct semantic budget.
+  Treating that inconclusive timeout as cacheable could suppress the following
+  real foreground attempt even though no route decision had been proved.
+- Aikido redeployed during the investigation: the earlier
+  `/assets/vendor-DRSRiXAi.js` was replaced by root bundle
+  `/assets/index-lUwU0pAj.js` and vendor `/assets/vendor-B_TeJkvL.js`. A bounded
+  request for the current `cdn.aikido.dev` vendor object closed on the
+  transparent direct path after exactly 16,384 of 65,536 requested bytes. The
+  identical URL and range completed all 65,536 bytes through the verified owned
+  Geph. Real foreground Chrome showed the corresponding critical JavaScript/CSS
+  `ERR_CONNECTION_CLOSED` and an unfinished app, so root completion alone was
+  not browser usability.
+
+The earlier no-persistence live model learned the Capacitor parent in 3.892
+seconds and Aikido's exact `cdn.aikido.dev` child in 5.316 seconds, but a
+slow-link control showed that a fixed retry slice was not a safe general
+boundary. The correction therefore computes one adaptive same-IP network retry
+with `_route_preflight_network_retry_timeout`: at most
+`ROUTE_PREFLIGHT_NETWORK_RETRY_MAX_TIMEOUT` (5.0 seconds), drawn from the
+unchanged eight-second absolute job after reserving 1.5 seconds for cold
+signed-browser provenance, 50 ms of provenance wait grace,
+`ROUTE_PREFLIGHT_POST_RETRY_PROOF_RESERVE` (2.0 seconds), and
+`ROUTE_PREFLIGHT_DIRECT_PROBE_SCHEDULING_GRACE` (25 ms). It runs before
+provenance. A repeated inconclusive result returns immediately; only a final
+safe-incomplete or critical-resource result enters the provenance gate. The
+ordinary 400-ms direct and 500-ms healthy first-contact paths stay unchanged.
+
+A root idle timeout, or a partial critical range ending in
+`_BOOTSTRAP_RANGE_TERMINATION_IDLE_TIMEOUT`, maps to
+`_ROUTE_PREFLIGHT_RETRYABLE_INCONCLUSIVE`: it publishes neither parent nor
+child cache state and cannot start or authorize Geph. A length-framed partial
+response does not change that result. Reaching the local read-size cap with
+`truncated=True` is also `UNKNOWN`. Only stable explicit EOF or reset (normalized
+as EOF) with valid incomplete framing may continue through the existing
+incomplete-direct plus complete same-object owned-Geph proof. The observed
+16-KiB Aikido control was an explicit transfer close, not an idle timeout or
+local size-cap truncation. The correction adds no route entry for
+`app.aikido.dev`, `cdn.aikido.dev`, or `capacitorjs.com`, and it does not broaden
+HTTP-status classification. Live-site qualification now requires bounded
+critical-resource completion in addition to the root document. These local
+controls were diagnostic only; no new 30-minute invisibility soak was started
+or treated as proof.
+
+The following exact installed attempt isolated the remaining transport race.
+Both Chrome pages remained unusable, and Safari still showed a direct
+Capacitor denial while Aikido never replaced Start Page. Public state advanced
+from one to two learned exact hosts, proving classification was no longer the
+blocker. A live Safari WebKit Networking process then held the Aikido root over
+TCP while a critical CDN address remained on UDP/443. The daemon had emitted
+valid Version Negotiation for the exact flow, but RFC 9000 section 6.2 requires
+the client to discard that response after any real server packet was processed.
+The bounded successor therefore adds a matching ICMPv4 type 3/code 3 or
+ICMPv6 type 1/code 4 response. It embeds only the original address/port tuple
+and eight payload bytes needed to identify the connected socket. This is an
+exact-flow transport failure signal, not hostname/IP route authority; it adds
+no PF rule and never widens the existing route/provenance/proof gates.
+
+The first Chrome check against exact installed QUIC-correction source
+`124499bb1d44d6343f3ba7cd6246a502302a075c` exposed the next independent
+boundary. Aikido reached its login page after a delayed load, but a fresh
+physical Capacitor reload still rendered the complete direct Cloudflare denial
+and disclosed the workstation's ordinary public IP. The browser opened a new
+TCP connection, the bounded direct body still classified as
+`edge_access_denied`, and the same root remained usable through the owned-Geph
+listener. Calling the production provenance assessor on that live signed Chrome
+NetworkService socket while Chrome was actually frontmost returned
+`not_frontmost`.
+
+The cause was the system observation parser, not routing policy or semantic
+classification. Older `lsappinfo` output used quoted
+`"CFBundleIdentifier"`/`"pid"` keys; current macOS emits indented
+`bundleID="..."` and `pid = N` followed by process metadata. The old parser
+therefore stopped before any owned-Geph proof. The correction accepts only one
+complete known dialect, rejects mixed/duplicate/partial fields, and leaves the
+exact bundle/PID, canonical path, signature/team/designated requirement,
+ancestry, socket-owner stability, foreground stability, and five-second
+physical-input gate unchanged. A live read-only A/B check then advanced through
+the corrected current-format parser to `input_not_recent` when no fresh
+physical input was present, proving the parser fix without treating automation
+as product evidence. No hostname or HTTP-status exception was added.
+
+The next physical attempt exposed a separate cold-start timing edge. On the
+current live Chrome NetworkService socket, the first exact production assessor
+returned `signature_failed` in 0.279 seconds; the official helper's signature,
+Google team, designated requirement, path, and ancestry were valid, and the
+immediate warm assessment crossed signature verification to the foreground
+check. The failure was therefore the 0.25-second subprocess cap, not bad Chrome
+or a routing classification. The exceptional provenance budget is now 1.5
+seconds total with a 0.5-second per-command cap, still inside the existing
+eight-second exact-host job; direct healthy/inconclusive timing is unchanged.
+The same snapshot recorded owned Geph briefly unready after wake. A complete
+actionable denial in that interval no longer creates the two-minute retry
+cache: a subsequent new physical navigation may retry after readiness, but no
+route is learned without the same complete owned-Geph payload proof. This adds
+neither an Aikido/Capacitor rule nor a broad status-code rule.
+
+The following physical checks exposed a policy mistake rather than another
+browser-parser dialect. Capacitor continued to render its complete direct
+Cloudflare denial while the exact root returned HTTP 200 through the owned
+Geph SOCKS listener. Post-navigation observation could report `not_frontmost`
+as soon as the user returned to Codex, and the product still made that mutable
+window state a prerequisite for learning. Network recovery must not depend on
+which app happens to own focus. A complete strict regional/edge denial now
+skips browser provenance and uses only the independently complete direct
+classification plus complete usable same-host owned-Geph payload proof. The
+foreground/recent-input gate remains on inconclusive retries, incomplete
+navigation, and critical-child comparison, where the network evidence alone is
+ambiguous. A failed strict-denial proof remains uncached so a transient Geph or
+deadline failure cannot suppress the next independent first connection. The
+learned route is still exact-host, bounded, and shared by every eligible
+connection; ordinary 403/429, CAPTCHA/login, timeout, slow usable direct,
+Discord, YouTube, and googlevideo behavior is unchanged.
+
+The installed network-only critical-child correction then isolated a timing
+defect rather than another policy or browser-attribution defect. A fresh clean
+Chrome Aikido page retained the empty shell and emitted 161
+`ERR_CONNECTION_CLOSED` resource errors while StatusV2 remained idle. The
+current exact `cdn.aikido.dev/assets/index-DLov-Unh.js` object declared
+`1,242,476` bytes but delivered only `16,384` directly. The production range
+probe's one-second child deadline classified that partial transfer as
+`idle_timeout` before the same connection produced stable EOF at approximately
+`6.8` to `7.3` seconds, so the exact-object Geph comparison never ran. Giving
+the direct half the old shared eight-second final deadline exposed the second
+boundary: only `1.228` seconds remained and Geph returned
+`DEADLINE_EXCEEDED` at `8.001` seconds. With an independent five-second window,
+the unchanged Geph probe completed repeatedly in `1.4` to `1.6` seconds as
+HTTP `206`, all `65,536` requested bytes, matching range, validator, and prefix
+digest. Live TLS selected no ALPN and carried HTTP/1.1 correctly, ruling out an
+HTTP/2 implementation defect.
+
+The correction keeps the slow-link invariant by changing scheduling rather
+than evidence. Only an enumerated cross-origin critical child may use the
+already-held twelve-second replay-safe handler handoff. Its direct observation
+gets at most one eight-second RoutePreflightV1 window and must still end in
+explicit EOF/reset with valid incomplete framing; three seconds are reserved
+for the sequential Geph comparison. After that direct result validates, the
+daemon mints a fresh exact-host eight-second one-shot authority for Geph and
+compares the same transient request bytes with `proves_same_object_as`. A
+simulated `6.8`-second direct EOF plus `1.5`-second complete Geph response now
+learns only the child. Simulated slow idle remains uncacheable and never calls
+Geph; simulated slow complete direct remains usable and direct. A live
+non-committing call through the corrected production function returned an
+owned-Geph proof for the current Aikido object in `9.251` seconds with all
+`65,536` bytes. This adds no hostname, IP, suffix, status-code, browser-focus,
+or broad timeout rule and does not change the eight-second limit of either
+individual route observation.
+
+The first genuinely fresh temporary-profile Chrome validation then proved that
+the fixed twelve-second parent envelope was itself the remaining causal bug.
+The page root was held for about `10.04` seconds; its four primary CDN objects
+failed together after about `6.86` seconds, the DOM stayed empty, and StatusV2
+remained idle with owned Geph up. Exact production probes showed that the usable
+parent currently consumes about `2.3` to `4.8` seconds before exposing
+`cdn.aikido.dev`, while the child's parent-relative direct cutoff remained at
+parent-start plus nine seconds. The child therefore received only about `4.2`
+to `6.7` seconds and again reported idle just before its repeatable EOF.
+
+Deadline ownership now follows evidence ownership. The parent's bounded probe
+is unchanged. Only after a complete usable parent enumerates one allowed
+cross-origin child does that child receive a fresh eight-second direct window
+plus a separately capped three-second sequential Geph slice. Explicit EOF/reset,
+valid incomplete framing, identical transient request bytes, same-object proof,
+owned-listener checks, and exact-host commit guards remain mandatory. A new
+regression consumes `4.7` seconds in the parent, then proves the measured
+`6.8`-second child EOF plus `1.5`-second Geph completion after the old parent
+cutoff; the idle variant still does not call Geph or learn. The focused
+bootstrap set is green (`48 passed`). Physical validation of the rebuilt exact
+daemon remains open.
+
+## 2026-08-31 TLS wire evidence and deadline ownership
+
+The all-edge first-request work exposed two independent implementation defects
+after its initial review. Both were causal proof-boundary defects rather than a
+need for an Aikido rule, a longer generic timeout, more retries, or browser
+focus.
+
+First, the original `wire_bytes == 0` observation counted bytes only after the
+TLS layer exposed plaintext. A server could therefore deliver a partial
+encrypted `ServerHello`, leave the handshake incomplete, and still appear to
+have produced zero wire ingress. A second false candidate existed when TCP
+connect or the outgoing `ClientHello` consumed the I/O allocation: the stage
+could end as `tls_handshake_timeout` with zero received bytes even though the
+server had never received a complete usable TLS opening and had not been given
+the intended observation interval.
+
+The production continuous-root transport now retains the exact raw numeric-IP
+socket and drives `SSLObject` through `MemoryBIO`. Every successful raw `recv`
+increments an encrypted-ingress counter before decryption, and cancellation
+closes that same raw socket. The transport separately records when all initial
+handshake output has been sent, the receive budget remaining at that boundary,
+and the actual zero-ingress wait after it. An all-edge candidate is eligible
+only when the complete `ClientHello` flight was sent, at least four seconds of
+post-send receive budget remained, the whole remaining budget was consumed,
+and encrypted ingress remained exactly zero. A slow connect, blocked or partial
+send, short receive window, EOF/cancellation, unmeasured state, or one partial
+ciphertext byte remains inconclusive. It cannot contribute to consensus or
+authorize capability, cache, route, status, successor, recovery, or learning.
+
+Second, the exact stream's eight-second hard boundary was accidentally treated
+as authority to cancel every parallel result. That is correct only for the
+new request-only exception. An ordinary semantic or critical-child preflight
+already owns its historical bounded evidence window. The race now fast-cancels
+that work only when the system stream explicitly closes. At exact `timeout` or
+`unclear`, it snapshots whether the preflight was finished: a later
+request-only claim is rejected as outside the hard boundary, while a later
+ordinary semantic/critical-child result may still win within its unchanged
+deadline. This separates deadline authority without making a slow usable
+direct path into Geph evidence.
+
+The affected TLS/preflight selection passes `33` tests with `656` unrelated
+tests deselected. Exact-race, handler ownership, cancellation, and the existing
+cold-child path pass an independently reviewed `21`-test selection. Python
+compilation and `git diff --check` are clean, and separate post-patch reviews
+found no blocking TLS measurement, cancellation, ownership, direct-priority,
+or deadline defect. The earlier exact app bundle predates these production
+changes and is obsolete. The following single canonical current-tree build
+completed at `overall=pass`: fresh, staged, and bundled daemon executables are
+byte-identical at
+`4fbd59f26210ec5151909afe7a2ccfc25fbbba37b3f57fb6b03d2bb6b38cf7e3`,
+the materialized and bundled daemon trees match, and the app is validly ad-hoc
+signed and unnotarized. The verifier records `installed.status=not_run`. No
+installation, broad suite, soak, account-backed workflow, or physical browser
+run followed this correction; build integrity is proved, not product success.
+
 ## Transfer Backlog
 
 Safe candidates:
@@ -1385,3 +2586,1375 @@ Unsafe candidates:
 - Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
 - Importing upstream strategy scripts without a pinned, verified, and reviewed
   policy bundle.
+
+## 2026-09-13 Weather current-path control and Capacitor follow-up
+
+User reports fresh ordinary Chrome Weather now loads content slowly instead of
+its earlier regional-denial screenshot. Read-only installed73de754 logs contain
+26 Weather records; observed relays are system_plain, not Geph. At02:48:31+0500
+the exact root probe classified terminal_error in100ms_to_500ms, assets0.
+Later api.weather.com write_error and root client_read_error records do not by
+themselves establish elapsed page timing or fault ownership; upstream_eof alone
+is not an error. No Capacitor record in this snapshot; fresh user attempt pending.
+
+A separate current-route curl control (not browser success evidence) returned
+HTTP/2 302, zero body, in0.526s from https://weather.com/, Location
+https://weather.com/de-DE/?Goto=Redirected. One request to that exact redirect
+returned200 and2041965 bytes in1.763s (first byte1.416s). The root redirect is
+consistent with the generic non-usable empty-root classification, not proof of
+regional denial. No new routing edit occurred between user failure screenshot
+and current success; past screenshot has no bound route/time evidence, so the
+reason the upstream response changed is not established. Do not attribute it to
+the diagnostic-only patch, assume physical egress country from a locale redirect,
+or weaken semantic proof by treating arbitrary redirects as complete payload.
+Root response times do not explain full browser resource latency. Continue with
+current Capacitor observation plus Weather resource timing if needed.
+Evidence:output/aud17-comparison-bundle-20260913.ozu40ser/weather-capacitor-events-2.json
+and weather-{root,redirect}-control.{headers,body}; raw controls are private.
+
+## 2026-09-13 Capacitor confirmation prefix defect
+
+Current installed73de754 log classifies capacitorjs.com edge_access_denied,
+but observed relay remains system_plain. Independent non-mutating production
+request through verified owned listener returns206, Content-Length98300,
+Content-Range bytes0-98299/125562 in0.803s. Production classifier returns
+full_selection_inconclusive. The request itself forces a prefix although the
+complete representation can fit the unchanged128KiB wire cap. This reproduces
+a confirmation defect; it does not prove the exact guard in the earlier live
+attempt, whose log has no proof-result detail.
+
+Owned semantic confirmation now requests a whole root by default (no Range).
+Explicit range hooks/direct-root request remain unchanged. The same full-response,
+gzip-decode, byte cap, absolute deadline, status/denial and ownership checks remain.
+No partial206 relaxation, hostname rule, persisted route or workstation mutation.
+Live production control after edit returns125929 usable bytes in0.607s with
+same verified owner before/after. A realistic range-honoring socket regression
+covers a125KiB document; existing prefix gzip rejection, oversized reply,
+canonical redirect and semantic proof selections remain green:30 tests passed.
+Initial3 failures were expected old direct/geph request-equality assertions,
+corrected for full-root request. Evidence in output/aud17-comparison-bundle-20260913.ozu40ser/:
+capacitor-owned-{control,detail}.json, capacitor-owned-response.bin (private),
+capacitor-full-root-control.json, capacitor-full-root-final-tests.log.
+Source qualification is not installed-browser success. Weather latency and
+historical response-change cause remain separate open investigations.
+
+## 2026-09-13 Capacitor still denied after installed AUD-19
+
+User reports long apparent network stall and unchanged Cloudflare block after
+installed4c6d60d. This FAILS user-visible qualification. The request-prefix defect
+is independently fixed but is not sufficient for the installed product path.
+New log after22:06Z has no Capacitor root diagnostic: at03:07:34+0500 system_plain
+partial-record watchdog closed; later03:09-03:10 relays use xbox_plain and end in
+client/upstream read errors. Root diagnostics for other hosts are active (34 total,
+5-7 per minute around attempt), excluding a globally dead diagnostic sink.
+
+Source dispatch calls initial semantic preflight only in UNKNOWN_RECOVERY_SYSTEM;
+subsequent Xbox/local stages skip it. Admission also returns silently for2 concurrent
+executions or8 starts/reservations per60s. Existing logs cannot prove which gate
+skipped the first Capacitor root; load alone is not proof of admission rejection.
+No relaxation or route-policy fix is justified yet.
+
+Added fixed-category drop-only route-preflight-state diagnostics for admission,
+cache, cancellation/error, backend readiness, Geph response/proof/commit and
+local-stage skip. Same queue32, no extra network/ownership/clock probes, all route
+limits unchanged; split short-circuit admission conditions preserve evaluation
+order.40 focused cases pass;14 admission cases (overlapping) pass including a
+refused-window no-probe regression, sink failure isolation and arbitrary-detail
+rejection. Evidence in output/aud19-full-root-bundle-20260913.kagd4hmw/:
+browser-events-after-fix.json, preflight-load-after-fix.json,
+state-diagnostic-tests.log, state-diagnostic-admission-tests.log.
+Next canonical diagnostic build and installed gate observation; do not call
+Capacitor fixed or ask user for repeated reloads as a workaround.
+
+## 2026-09-13 Weather redirect/decode proof failure (AUD-20)
+
+Installedc140aaf user Chrome Capacitor succeeds without perceived delay. Matching
+03:23:59+0500 states geph_response_usable and committed prove actual Geph selection.
+User independently reopened Weather and got regional denial. Twice the current
+www.weather.com root was admitted and classified regional_access_denied, followed
+by proof_absent. This excludes admission starvation for these Weather attempts.
+
+Verified-owned non-mutating controls show301 www->apex root,302 apex->regional
+forecast path,301 same-origin path canonicalization, then200 gzip. Original code
+allowed only one apex/www root redirect; even after manually following the chain,
+its256KiB decoded cap rejects the413130-byte final body (only~77KiB encoded).
+The165-byte body on the intermediate301 was historically called usable by the
+coarse classifier: confirmation must not accept redirect prose as final content.
+
+Generic correction: maximum3 complete redirect responses inside the SAME existing
+absolute deadline; same-origin HTTPS absolute/root-relative paths up to2048 ASCII
+bytes, no whitespace/backslash/fragment/userinfo/non-default port; at most one
+existing strict apex/www HTTPS root transition and only from a root request.
+Visited host/target pairs reject cycles. No arbitrary cross-host transition, cookie,
+referer, browser path/input, new status fields or learned canonical target.
+All3xx are handled before final semantic success, including redirects with bodies.
+Each wire response retains128KiB cap; owned confirmation decoded cap becomes2MiB,
+while direct-root and critical-asset decode caps remain unchanged. This deliberately
+supersedes the prior single-redirect/256KiB owned confirmation limits only.
+Current full production control yields413130 usable bytes in5.288s with same
+verified owner before/after and no route commit.47 focused cases PASS (including
+17 new redirect/decode/request cases); initial2 failures were malformed synthetic
+HTTP status lines, fixed before final run. No installed success yet.
+Evidence in output/aud19-state-bundle-20260913.gaafxtr6/: browser-state-events.json,
+weather-owned-redirect-control.json, weather-final-control.json,
+weather-canonical-page-control.json, weather-decode-control.json,
+weather-page-response.bin (private), weather-fixed-chain-control.json,
+weather-redirect-tests.log. Earlier successful direct Weather response had a
+locale redirect; lack of matching historical failure evidence still prevents a
+claim about why that prior upstream response changed. Full page latency remains
+separate from the measured bounded proof cost.
+
+
+### 2026-09-13 Chrome recurrence: intercepted TCP and ECH outer-name ambiguity
+
+User reproduced Chrome HTTPS Capacitor pending -> ERR_TIMED_OUT -> Cloudflare
+block while Safari works, and Aikido hanging until reload. Installedbebada1
+unchanged. Private capture chrome-metadata-capture-20260913T040126.json in
+output/aud20-redirect-bundle-20260913.pror2xal spans04:00:23-04:01:25+0500,
+Chrome networkPID48444:134 packets for current system Capacitor IPs all TCP onlo0,
+one existing clientport62958, zero SYN and zero target QUIC. Other Google
+addresses used QUIC onen0. This does NOT establish an exact HTTP hostname from a
+shared CDN IP or prove absence of dropped packets (tcpdump required KILL; output
+preserved, no final counters). No metadata evidence of target QUIC bypass.
+
+Private browser-ech-events.json shows cloudflare-ech.com root_admitted/usable at
+03:57:02, then root_cache_reuse and system_plain/local_strategy relay events;
+also similar observations03:41-03:42. Source _handle_impl uses parse_sni(body) as
+routing host and has no ECH distinction. This establishes outer-name semantic
+health being evaluated as ordinary-host health. Cloudflare documents this public
+name as hiding the actual inner hostname:
+https://developers.cloudflare.com/ssl/edge-certificates/ech/
+It is a strong candidate for Chrome direct-egress mismatch, not yet correlated
+with the captured established flow's ClientHello. Do not route the shared outer
+name or CDN IP broadly through Geph, disable browser privacy globally, or claim
+that Safari's ECH behavior was measured. Next exact evidence is a fresh Chrome
+TLS handshake bound to the target flow (retain only SNI/ECH presence and tuple),
+then design exact-host browser-authorized routing without treating the outer
+cover name's root page as proof about the hidden origin.
+
+Aikido evidence is distinct:03:57:13 root window_refused;03:57:23 admitted;
+03:57:38 cdn.aikido.dev child committed after direct/Xbox/split64/split16
+incomplete_idle_timeout;03:57:48 existing system_plain child upstream_read_error
+with local_ladder_unchanged.03:59:30 root usable and learned child reused.
+This explains available recovery timing, not why the user's original tab stayed
+pending. Follow existing-stream handoff/recovery separately; no limit widening
+or forced browser reload is an established fix.
+
+
+### 2026-09-13 continuation: old-stream recovery boundary and decoder qualification
+
+Source _commit_preflight_owned_geph_proof writes the exact-host learned route;
+it does not migrate registered opaque TLS streams. The production startup sets
+_pending_navigation_probe_available=disposable_browser_fixture while enabling
+the separate production root-preflight headless worker. Therefore the old idle
+navigation broker is unavailable in normal production by explicit design, not
+an observed transient service crash. Do not re-enable it wholesale: startup
+comments document missing provenance and earlier visible-browser/focus failures.
+Aikido's observed child learning is not proof of original-tab recovery. Need a
+bounded, provenance-valid first-flight/child-admission or browser-level recovery
+rather than claiming encrypted stream replay is possible.
+
+Custom metadata decoding passed both root direct and UID502 intercepted TLS
+controls, but returned no ClientHello for user restart captures (block then
+content). Those empty samples are inconclusive. Global Homebrew Wireshark CLI
+4.6.8 installed for independent decoding; no BPF permissions/cask installed.
+Native root tcpdump streams via a checked ephemeral FIFO to unprivileged tshark;
+only ClientHello time/IP/sourceport/SNI/extension types saved, no packet files.
+Control TLS sourceport50595 was independently decoded in
+output/aud20-redirect-bundle-20260913.pror2xal/tls-20260913T041830.tsv.
+A preceding wrapper substitution error was caught at root Python parsing; no
+capture launched then, FIFO/decoder cleaned. Wrapper now compiles root source
+before authorization. Current physical Chrome test during independent capture
+pending; no ECH causal confirmation yet.
+
+Independent tshark handshake-only user capture also contained control only;
+no ECH conclusion. Follow-up all-TCP metadata capture tls-20260913T042202.tsv
+captured the user's reproduced block on existing Chrome flow50869 ->
+172.67.203.214:443 onlo0. At04:22:23.293484 Chrome sends792 encrypted bytes;
+04:22:23.325974 receives289 encrypted bytes (~32.49ms). Duplicate interface
+observations are not separate requests. This confirms traffic and timely response
+on intercepted established TCP, not a contemporaneous connect timeout; it does
+not decode HTTP status or prove which hidden hostname the TLS session uses.
+Keep initial delay and subsequent direct-egress denial as distinct observations.
+All native capture subprocesses reaped; ephemeral FIFO removed; no packet file.
+
+
+### 2026-09-13 confirmed Chrome ECH routing mismatch (AUD-21)
+
+Independent installed Google Chrome152 headed diagnostics used fresh temporary
+profiles via Playwright CLI, keeping the ordinary profile and system settings
+unchanged. Current daemon40559/PF ready/owned Geph up verified first; morning
+learned routes had expired (learned0). Private evidence:
+output/playwright/capacitor-netlog-20260913T130313/comparison-summary.json,
+per-case netlog.json/clienthello-summary.json, diagnostic-route-events.json.
+
+- Default fresh Chrome: Capacitor socket118 TCP completed immediately on local
+  port61838 to172.67.203.214. SSL_ECH_CONFIG_LIST and decoded outgoing
+  SSL_HANDSHAKE_MESSAGE_SENT establish actual public SNI cloudflare-ech.com;
+  separate SSL_ENCRYPTED_CLIENT_HELLO event contains inner capacitorjs.com.
+  After sending1946 bytes, SSL connect job expired at30,003ms with net_error=-7.
+  Chrome's own later retries also stalled. This locates the delay after TCP,
+  during TLS, rather than attributing it generically to network slowness.
+- A second fresh profile with --disable-features=EncryptedClientHello returned
+  Cloudflare403 and revealed the same user-reported direct ISP IP. NetLog still
+  proves actual ECH/outer cloudflare-ech.com: that flag was ineffective on this
+  Chrome build, so this is NOT an ECH-off control. No persistent policy written.
+- A fresh temporary profile seeded with Local State ssl.ech_enabled=false
+  actually sent capacitorjs.com without ECH. Page content loaded. Daemon logs
+ 13:07:32 root admitted,13:07:39 exact Capacitor denial classified plus owned
+  usable proof and route committed. Initial TLS7,585ms, next787ms. Current
+  source thus works when the actual host is visible. Only diagnostic profile
+  was changed; no ordinary-profile/global preference or DNS/proxy/PAC changed.
+- Default ECH-capable fresh profile AFTER learning also loaded. Crucially it
+  did NOT actually encrypt SNI: DNS job98 began A/HTTPS at884278761; A arrived
+  at884278791; HTTPS task timed out/cancelled at884278798 (~37ms from start),
+  leaving endpoint_metadatas empty. Outgoing SNI capacitorjs.com was visible.
+  An ECH extension remained as GREASE; extension presence alone is not proof
+  of real ECH. This observed DNS timing explains a successful default-browser
+  sample amid failures without assuming a cache reset fixed the product.
+
+Source _handle_impl routes using parse_sni(body); it cannot read the inner name.
+Correlated daemon logs probe cloudflare-ech.com as healthy then use system_plain
+or local_strategy. A healthy cover-name root cannot prove the hidden origin's
+health, and a learned capacitorjs.com route cannot match that cover name.
+This is a confirmed product compatibility gap. Do not fix it by Geph-routing
+all shared cover names/CDN IPs or globally disabling ECH. Next product work needs
+an authenticated exact-origin signal/connection binding compatible with ECH;
+merely detecting extension65037 also catches GREASE and is insufficient.
+
+Primary protocol/config references:
+https://developers.cloudflare.com/ssl/edge-certificates/ech/
+https://chromeenterprise.google/intl/en_uk/policies/encrypted-client-hello-enabled/
+https://chromium.googlesource.com/chromium/src/+/1e8e9dc69d467/chrome/browser/ssl/ssl_config_service_manager.cc
+
+### 2026-09-13 Aikido cold-navigation latency measured
+
+Same ordinary installed Chrome binary, diagnostic default profile, one navigation
+(no reload) to app.aikido.dev. Root admitted13:10:36; CDN child committed13:10:58
+following direct/Xbox/split64/split16 incomplete_idle_timeout, with owned Geph
+proof. Browser navigation responseStart22,246ms, responseEnd22,262ms,
+DOMContentLoaded24,192ms/load24,193ms; eventually /login with visible GitHub sign-in.
+Thus this sample's long initial wait is the held root/child recovery sequence,
+not an unexplained whole-network stall. Additional app-origin image requests
+hit system/Xbox partial-record watchdog and confirmation_not_scheduled; some
+resource durations reached12,730ms. Evidence aikido-page-summary.txt and
+ diagnostic-aikido-events.json beside the comparison. Earlier user-reported
+infinite-until-reload event was NOT reproduced; keep that gate open. Production
+idle-broker limitation remains an architectural observation, not a proved cause
+for every historical tab hang. All diagnostic browser sessions closed afterward.
+
+
+### AUD-21 installation: Darwin loopback NAT and restoration (2026-09-13)
+
+The first CONNECT candidate (128b500) passed canonical installation but its
+PAC fetch reset. A native DIOCNATLOOK query for the unprivileged loopback
+connection returned the unchanged destination 127.0.0.1:1080, rather than
+ENOENT. The existing recursive-destination guard therefore discarded it.
+Source6b8ca7c admits that exact unchanged tuple through the same bounded
+CONNECT/PAC parser. Invalid TLS cannot become a recursive upstream dial.
+The targeted suite passed54 tests. Evidence: output/aud21-connect/pac-natlook.json.
+
+Normal Quit was invoked through the observed macOS AX menu item Quit Slipstream
+(System Events; CUA timed out). After the owned daemon/tray exited, scutil showed
+only the original ExceptionsList and FTPPassive: no PAC remained. Evidence:
+output/aud21-connect/proxy-after-normal-quit.txt. This is actual installed
+restoration evidence, in addition to the harmless-key SIGKILL session test.
+
+
+### AUD-21 installed CONNECT browser results (2026-09-13)
+
+Source6b8ca7c is installed by the consumed39c49075 transaction. The local PAC
+fetch returned200 and556bytes; canonical installed verification passed with
+managed mode bound to both the plist and live launchd command. Headed installed
+Chrome152 with a fresh profile and no network override flags loaded Capacitor
+(first response2.697s, load4.728s), Weather (first response1.484s, normal content;
+load event not complete at sample), and Aikido/login (first response0.470s,
+load3.594s), without reload. NetLog records CONNECT for all exact origins and
+cdn.aikido.dev through127.0.0.1:1080. This is proxy-path evidence, unlike an
+intermittent transparent ECH-off success. Private artifacts are under
+output/playwright/aud21-installed-connect; the diagnostic session was closed.
+
+Safari normal navigations produced the expected Capacitor and forecast titles
+and Aikido/login URL. JavaScript from Apple Events was disabled and was not
+enabled; the AX heading query yielded no text. Safari evidence is therefore
+navigation/title-level, not a DOM-content assertion. Earlier infinite Aikido
+hang was not reproduced; do not claim every historical stall shares ECH cause.
+
+
+## AUD-21 www Weather recurrence (2026-09-13)
+
+User Safari screenshot shows a regional denial for www.weather.com; earlier
+apex Weather title checks did not validate this origin or Safari document body.
+Installed source6b8ca7c had managed PAC active. At13:57:53,13:58:10 and13:58:11
+local time the exact www host was refused by the global preflight window.
+Seven background roots had started, including two ocsp2.apple.com addresses.
+A new root needs two credits (own start plus child reservation); limit is eight.
+At13:58:47 a diagnostic CONNECT curl admitted www; direct regional denial plus
+usable owned-Geph response committed its route at13:58:51. That diagnostic
+learned the route and cannot validate a later cold-start fix. Learning retained.
+Evidence: output/aud21-www-weather/{window-route-events,later-route-events}.json.
+
+Candidate fairness patch charges each host at most once per60-second window,
+independent of outcome; exact-IP proof and inflight coalescing remain unchanged.
+Deterministic replay confirms a duplicate second address consumes no extra start
+and a new host fits while preserving child reservation. Expiry permits a fresh
+address probe.96 preflight/bootstrap tests pass (fairness-tests.log). This bounds
+duplicate starvation; saturation by many unique hosts remains possible.
+
+Installed3332d27 through unique fdc265fa transaction09:11:37Z; canonical installed
+verification passed. User confirmed a fresh Safari www navigation showed forecast.
+Fresh Chrome showed site UI/no denial after redirect (response2415ms/DOM3030ms),
+but forecast values were placeholders at the sample. NetLog confirms CONNECT
+for www, apex and dsx.weather.com. Own Chrome session closed. This is restored
+user-visible Safari behavior plus deterministic admission regression coverage,
+not a claim that arbitrary unique-host saturation or all data delays are solved.
+
+
+## AUD-22 queued navigation admission (2026-09-13)
+
+Removed synchronous start-per-minute and same-host cooldown refusal; root and
+standalone child jobs wait for active owner futures within their deadline.
+Eight socket jobs and two separately queued browser jobs bound active resource
+use; they are not quotas of sites per minute. Same-address owners are coalesced;
+waiter cancellation cannot cancel another owner. Background probes unchanged.
+Unqualified exact direct TIMEOUT previously fell through `elif exact` and attached
+the silent socket to the browser. Now it closes and enters the existing local
+DNS/strategy path. Partial/already-started responses and qualified request-only
+late-payload handling remain unchanged. Timeout never grants Geph or learning.
+
+Installed d0b2fa5 via dc793e87. Concurrent clean Chrome test recovered Capacitor,
+Facebook and X without reload; document bodies verified, DOM13.29/12.46/28.66s.
+The Capacitor exact Geph proof committed; Facebook and X used local recovery.
+Historical missing proof not reproduced; new explicit context/noise/owner refusal
+states distinguish future occurrences. Slow cold loading remains; abs.twimg.com
+also stalled during TLS. Artifacts output/playwright/aud22-queue and
+output/aud21-recurrence. This is not unlimited throughput or latency qualification.
+
+
+AUD-22 follow-up: user Safari X still hung after d0b2fa5. System resolver gave
+one public A address (162.159.140.229), and logs showed local_stage_skips_root
+following partial local TLS. c295501 adds singleton full-window zero-ingress
+consensus only with an additional complete usable same-origin owned-Geph payload,
+then the existing exact-stream hard-timeout/PID/single-use consumer. No learning
+or shared claim. A partial local stall causes a root recheck on the next stream.
+82 focused and117 traffic tests passed; canonical install118f22e4 succeeded
+09:50:47Z. User confirms login appeared in one fresh Safari X navigation; logs
+14:52:24 show geph_response_usable + singleton_payload_usable. Evidence under
+output/aud21-recurrence/singleton-events.json and installed-singleton-verification.log.
+This confirms restored navigation, not unlimited load or optimized cold latency.
+
+## AUD-23 Discord SNI filtering and timestamp decoy — 2026-09-13
+
+Fresh Chrome reproduced ERR_CONNECTION_CLOSED through successful loopback CONNECT.
+The first correction (08fcc49 installed via 4c7f2ba3) replaced constant seq/ack=1
+with observed handshake numbers, but Chrome still failed; this is not a proven fix
+by itself. System and independent Cloudflare DNS returned the same five addresses.
+Native exact-IP controls on 162.159.138.232: Discord SNI timed out; cloudflare-ech.com
+SNI completed TLS and returned403 in0.19s. This isolates an SNI-dependent path failure.
+Low-TTL poison (3,4,5,6,8,10), split TLS, other current addresses, raw disorder and
+overlap did not complete these controls. One raw packet was independently witnessed
+on en0; these diagnostics do not change system routing or DNS.
+
+A valid cover ClientHello at the observed sequence/ack, carrying a timestamp60000
+behind the negotiated client timestamp and the observed server echo, returned
+Discord /login HTTP200 in0.19s. Two additional controls with split TLS returned200
+in0.29/0.27s. Evidence in output/aud23-discord/*result*. Production candidate dfbc8ef
+captures negotiated timestamps, uses this decoy for Discord only, and retains the
+low-TTL fallback when timestamps are unavailable. New SYN sequence clears old
+per-tuple timestamp evidence. No application bytes, TLS SNI, or DNS are rewritten;
+no Geph permission is added.19 focused tests and117 traffic contracts PASS.
+Installed physical Chrome qualification remains pending canonical build/install.
+
+AUD-23 follow-up: dfbc8ef and840c82e installed browser gates failed despite
+HTML response around0.43/0.47s; required JS asset did not finish. Earlier native
+200/90KB timestamp success did not persist: later identical native controls,
+all five current addresses and alternative cover names failed. Modern Python
+generated1523-byte decoy; compact190/289/207 candidates failed native controls
+and were not installed. Installed packet capture showed no visible fake; do
+not treat this alone as proof of observer miss because BPF injection visibility
+and MTU/send behavior remain unqualified. Final control validated distinct
+SYN/SYNACK directions, ruling out collector retransmission confusion for that
+failure. Tiny TLS records, OOB and low-TTL first-segment disorder also failed.
+All diagnostics preserved under output/aud23-discord; no global DNS/VPN/QUIC
+changes and no Discord Geph route were used. Overall Discord task remains OPEN.
+
+
+### AUD-23 BPF size failure confirmed
+
+The aud23-observer NetLog has a successful h2 session103 over socket93: HTML
+stream1 completes (12136 payload bytes), all asset streams use that same
+connection, but receive no response before connection close after56 seconds.
+This rules out treating every missing asset as a separate TLS-handshake failure.
+
+A native BPF write on en0 (MTU1500), using the same Ethernet write boundary as
+Scapy, rejects frame1577 / payload1523 with errno40 EMSGSIZE; frame343 is
+accepted. See output/aud23-next/bpf-size.json. The installed OpenSSL default
+hybrid key share produces1523 bytes, and _l3send suppresses this error. Restricting
+the decoy's key share to X25519 produces517 bytes and fits even576 bytes including
+IP/TCP timestamp overhead. This only changes the fake; browser TLS is untouched.
+Earlier compact native probes were inconsistent, so this fixes a confirmed
+injection defect but does not by itself qualify Discord navigation.
+
+
+### AUD-23 installed alternate HTTPS endpoint result
+
+Installed a0a1174/a592d138: same resolved discord.com IP on8443 passes full
+89381-byte asset probes and fresh physical Chrome /login. Original URL retained;
+HTML466ms, load1768ms,207 scripts, complete document and login fields/button.
+42 focused and117 traffic checks passed. Canonical installed verification passed.
+Port support is documented at
+https://developers.cloudflare.com/fundamentals/reference/network-ports/.
+
+This is web-loading qualification, not all Discord functionality. The remote
+authentication WebSocket still fails; gateway alternate-port probes across all
+five system addresses and native TLS record/IP-fragment controls did not produce
+an upgrade. A provider shared-edge probe was rejected1034 and was not installed.
+Safari canonical new-tab title becameDiscord but form could not be read (CUA3811,
+Apple Events JS disabled); user confirmation remains pending. The initial Safari
+canonical failure and later title success must not be erased by a success claim.
+Artifacts: output/aud23-next, output/playwright/aud23-port. The oversized-decoy
+fix is independently confirmed on wire; the working web path does not need it.
+
+
+## 2026-09-13 AUD-24 incomplete Gauzy recovery
+
+Fresh Chrome showed blank gauzy.co with title loaded, then root and assets
+ERR_CONNECTION_CLOSED. Installed CONNECT curl received HTTP 200, 18,865 bytes,
+then curl 18; same public address on 8443 also stalled. Logs show repeated
+system_plain partial_record_watchdog and root io_timeout_incomplete, with no
+progress to app-owned DNS. Evidence: output/aud24-gauzy and
+output/playwright/aud24-gauzy.
+
+The partial-stall independent recheck overwrote the pending recovery stage.
+A None preflight result then selected the system stream again. Preserve that
+pending local stage when no qualified claim is returned. Close held system
+stream before replay-safe local ClientHello attempt; historical partial stall
+must not itself permit Geph. This repairs progression, not a claim that every
+local route or the website origin is healthy. Physical qualification pending.
+
+AUD-24 follow-up: bbee156 installed via da897768, canonical PASS, but fresh
+Chrome remained blank. HTTP/1.1 diagnostic response declares chunked + gzip,
+stalls at17,547 encoded bytes. Root probe requests gzip while legacy unfinished
+body helper deliberately accepts identity only. Also retryable timeout returns
+before safe-incomplete browser verification. Add opt-in gzip framing detection
+only for root idle timeout, not payload semantics; retain legacy helper defaults
+and gzip EOF hard-local recovery. Valid incomplete framing admits only existing
+foreground-provenance/full-browser comparison, never authorizes by itself.
+
+AUD-24 foreground diagnostic accepted real Chrome peer in0.735s with production
+budgets. bsexec-based context simulation returnedNULL and nested asuser141;
+a genuine temporary system LaunchDaemon returned the same valid front ASN as
+GUI authorization, including asuser. Thus the simulation does NOT establish a
+service GUI-context defect. Temporary job and root-owned files were removed.
+No asuser/source policy change. Actual service needs fixed admission reasons;
+logging-only candidate retains every acceptance/rejection condition.
+
+### AUD-24 Gauzy full-frame budget, 2026-09-13
+
+Installed ef2550c admission works: early-events.json records accepted then
+browser-proof wait_failed at the original8s boundary. Isolated installed helper
+with a private diagnostic broker (no production route state) and full8s returned
+navigation_pending, exit0. Playwright with the same bundled Chromium and owned
+SOCKS9954 loaded full content in12.383s; root completed2.422s. Cold-cache timings
+DOMContentLoaded3.099s, load11.678s; at3s screenshot still shows Loading overlay,
+so replacing full-frame readiness with HTML/DOMContentLoaded would be unsound.
+V2 candidate isolated helper completed10.790s and submitted usable at10.076s.
+Artifacts output/aud24-gauzy/isolated-worker-{full,v2}.json and
+output/playwright/aud24-owned/{result.txt,milestones.txt,at-three-seconds.png}.
+This establishes candidate browser-proof behavior, not installed user navigation.
+
+## AUD-25 updater failure and media reports — 2026-09-20
+
+User reports intermittent Gauzy recovery, Discord stream failure, some YouTube
+videos stalling, and now Discord updater failure. Fresh native updater log has
+five failures on updates.discord.com manifest TLS, error -9806 at00:59–01:00
+local. Slipstream active PID19490; owned Geph off (do not conflate account change
+with local-only failures). Current daemon log contains YouTube client_read_error
+ends, insufficient alone to diagnose media stalls.
+
+Evidence output/aud25-discord-update/same-ip-results.json: same162.159.138.232
+port443 SSL_ERROR_SYSCALL;8443 certificate-validating HTTP200,9067 bytes,2.795s.
+Explicit managed proxy1080 still TLS timeout8s before fix. Manifest requests omit
+private install_id. Native updater installation and real media qualification pending.
+
+### AUD-25 gateway matched ClientHello evidence
+
+Static517-byte decoys were visible with correct seq/ack/stale TS; server ACKed
+real hello but no TLS reply (gateway-wire.json). SNI disorder/overlap failed.
+A clone of the actual ClientHello, with only equal-length decoy SNI changed,
+returned HTTP101 in0.32s. Two independent repeats returned HTTP101 plus initial
+heartbeat_interval message in0.35/0.30s (gateway-hello.json). Badseq clone failed.
+Candidate retains opaque real bytes and local-only routing. Native Discord
+qualification remains required; headless/native TLS fingerprints can differ.
+Reference: https://github.com/bol-van/zapret/blob/master/docs/readme.md documents
+per-request fake random/session parameters and dupsid; observed proof, not the
+reference alone, justifies this exact gateway candidate.
+
+Installed382cbe4 via910c2e46 canonical verified. Real native Discord emitted
+CONNECTED, READY and READY_SUPPLEMENTAL at01:35:07 local; CUA confirmed the
+main channel window with servers/channels/members and online state. No messages
+sent or calls joined. Installed HTTP/1.1 probe returned101 plus gateway Hello
+in0.144s TLS; curl later8s timeout is deliberate closure of the open websocket.
+Defaultcurl HTTP/2 returned404, so upgrade controls must force HTTP/1.1.
+Gateway startup is qualified; voice/streams and YouTube remain separate open work.
+
+## AUD-25 REST after gateway READY — 2026-09-20
+
+User screenshot confirms main Discord shell but failed message history. Renderer
+reports522 for public application/profile/ack requests and message fetch failures.
+Public /api/v9/gateway comparison: local443 and8443 completed TLS but no HTTP
+within18s; managed proxy closed TLS. A matched real-ClientHello decoy with
+discord.com replaced by equal-length example.com and stale negotiated TCP TS
+returned full HTTP200 gateway JSON twice in0.19/0.13s on162.159.138.232:443.
+No credentials, channel requests, messages or Geph used. Evidence:
+output/aud25-discord-update/rest-port-comparison.json and rest-matched-full.json.
+65 scoped tests pass (rest-tests.log), including cached8443 cannot displace
+matched443 and updater8443 remains scoped. Native history still requires proof.
+
+REST installation90bc580/d205b205 canonical PASS; managed public API200/0.168s,
+but /app and /channels/@me stalled after12–14KB. Native reload reached internal
+error page. Independent matched example.com probe also stalled; TLS-record
+splitting16/64 did not help. Equal-length www.mail.ru decoy instead delivered
+complete /app HTTP200 through EOF,72227/72224bytes in0.17/0.16s. Root stdlib
+probe retained certificate validation and original flight. Evidence
+app-mail-complete.json. Change only exact discord.com decoy to this verified SNI.
+
+Installed8e63eaa via0470694e: canonical PASS. Native original chat history
+populated after restart;70 accessibility descendants, no message error or visible
+image error. Initial parallel batch5/6 immediate TLS EOF; after fully qualified
+normal Quit/restart6/6 full200 in0.226–0.279s. Initial EOF cause remains unproven
+(possible runtime admission/circuit); do not silently erase it or claim load soak.
+CLI --quit live running/absent-instance cases passed; restart attestation passed.
+No authenticated probe outside Discord, no messages sent, no voice joined.
+
+## AUD-25 missing images/stickers — 2026-09-20
+
+User confirms image/sticker failures after chat history recovery. Managed public
+avatar/CDN/media probes fail TLS. Exact matched CDN decoy www.wildberries.ru
+returns full PNG twice0.16/0.15s and public Lottie293355/293350bytes0.25/0.26s.
+Media server avatar path401 and Lottie.png404 are endpoint errors, not payload
+proof. Valid APNG from public sticker-packs list stalls with sport-express decoy;
+equal-length media.wildberries.ru completes985643bytes twice0.27/0.26s. No
+private attachment URLs or tokens used. Evidence media-baseline.json,
+cdn-matched-complete.json, cdn-sticker.json, media-apng-wb.json.
+
+Deterministic old runtime reproduced cross-host suppression: two CDN ladder
+failures deny healthy discord.com, then permit exactly1/6 concurrent requests
+after cooldown. Disable shared local-engine circuit suppression; retain bounded
+independent ladders and geo-exit circuits.73 scoped tests PASS(media-tests.log),
+including multiple full failing ladders cannot suppress unrelated local requests.
+
+Installed media qualification (0f661fd / e69daa65): canonical installed verifier
+passed. Native original broken attachment, previously missing avatar and activity
+icons rendered, as did frequent/server stickers in the picker. No message sent.
+Ten concurrent public avatar/Lottie/APNG/API/app requests completed HTTP200 with
+full curl success and PNG/JSON validation in0.235–0.524s. One earlier startup
+batch localhost-connect timeout retained separately; all ten repeated only after
+readiness. Evidence output/aud25-discord-update/installed-media-parallel.json and
+native-media-qualified.json. Voice/stream/YouTube remain unqualified.
+
+AUD-25 voice control: native logs at02:24 show endpoint assigned, then CONNECTING
+to finland14023.discord.media:443, WebSocket error16s later, no UDP-ready stage.
+Current proxy probe times out. Four independent direct timestamp-matched fake
+probes complete101 Switching Protocols in0.22–0.23s; two use the derived
+finland1402.wildberries.ru decoy. No credentials, voice authentication or audio
+are sent. Files voice-matched.json/voice-derived.json under aud25-discord-update.
+82 scoped tests PASS; installed and native voice qualification pending. Graph
+search transport returned Transport closed; used bounded source reads instead.
+
+After installation2ad62192, user retried the call and confirmed it now works.
+This closes the reported voice-connection failure, based on user observation;
+it does not qualify Discord streaming or YouTube. Recurrence prevention already
+includes numbered regional voice names and local circuit isolation. Remaining
+risk: static decoy choices and unqualified additional endpoints/transport flows;
+do not attribute prior failures to a proven external policy change without evidence.
+
+## AUD-26 recurrence prevention
+
+Source inspection found fallback fake strategies all reused the same host fake,
+preferred matched strategy bypassed ranking, Discord runtime cache invalidation
+affected other hosts, CDN checks accepted byte prefixes, and resweep used legacy
+TLS-only proof. Fixed those boundaries; added independent family strategies,
+full-object/API and voice upgrade qualification, exact-host recovery.
+103 focused tests PASS, including controlled incomplete PNG -> distinct strategy
+-> full object -> cached winner, and unchanged neighboring host. Expanded two
+suites:959 passed/7 failed;3 changed assertions subsequently corrected and passed.
+Other4 failures (two geo-exit relay mocks and two semantic-probe mocks) reproduced
+against unmodified HEAD in isolated in-memory baseline; not regressions or claimed
+green. Logs output/aud26-local-recovery/tests-{scoped,final}.log and
+baseline-known-failures.log. Graph transport unavailable, bounded reads used.
+
+Live voice alternative decoys mail and ozon each returned101 in0.2s, no auth/audio.
+Initial collector falsely missed SYN due ECN flags SEW/S.E; fixing diagnostic-only
+parser produced evidence voice-alternatives-ecn.json. Runtime uses packet fields,
+not that diagnostic regex. Installation and actual client checks pending.
+
+Installed5c39283 viac7a059b4 (consumed), canonical build/staged/install PASS.
+Ten concurrent public PNG/Lottie/APNG/API/app objects fully loaded HTTP200
+0.353–0.628s, voice control1010.479/0.234s. Native Discord reload displayed
+current chat and avatars. Picker did not open, later CUA noWindowsAvailable;
+no fresh picker UI claim, public sticker objects passed. No messages/audio sent.
+The final103-test regression set additionally proves a TLS-only success cannot
+erase recent full-payload failure evidence. No assertion of arbitrary future
+DPI compatibility or of fixed streaming/YouTube.
+
+## AUD-27 reserve flight layouts — 2026-09-20
+
+User requested more fallback strategies. Current AUD-26 has four fake-name
+families but shares a single flight layout. Added four orthogonal partition
+layouts and sixteen family/layout profiles as lower-priority Discord reserves.
+TLS records use RFC8446 section5.1 handshake fragmentation without changing the
+transcript: https://www.rfc-editor.org/rfc/rfc8446#section-5.1 . TCP writes are
+separated by10ms, without claiming the kernel guarantees packet boundaries.
+Fake bytes still use the established timestamp/TTL rejection mechanism.
+No new packet rejection mechanism or universal future-blocking guarantee.
+
+Graph discovery again failed Transport closed; bounded source reads used.
+128 focused tests passed (743 deselected): real client/server TLS with certificate
+verification and complete1MiB transfer for each profile; transcript/tail preservation,
+malformed pass-through, cancellation cleanup, reachability after failures, policy
+isolation and existing adaptive/canary/injector checks. Prior unrelated suite
+failures remain as recorded in AUD-26; no full-suite rerun claimed.
+Evidence output/aud27-reserves/tests.log. Live reserve and install gates pending.
+
+Live voice control trials: all eight record-layout candidates timed out; all eight
+TCP-layout candidates returned HTTP101 in0.24–0.27s. This diagnostic observed
+status only, not a new actual voice call. Excluded every record-layout candidate
+from the runtime strategy registry/ladder; retained as experimental test cases.
+129 focused tests now PASS, including exclusion of unqualified candidates.
+Evidence live-reserves.json and tests-final.log. Full public-media trials pending.
+
+All eight TCP profiles subsequently completed both public avatar and985KB APNG
+objects (16/16, content length satisfied and PNG signature checked,0.21–0.44s).
+Read-only public probes used no user tokens or messages. Diagnostic commands
+were embedded immutable stdlib literals in native authorization, not root imports
+from the user-writable repository. Local tests preserve1MiB payload byte-for-byte.
+Native baseline before install: Discord history loaded and no active call control.
+
+Installed sourcea5a675d via freshce65fe95 at2026-09-20T08:22:26Z, transaction consumed
+NEVER replay. Canonical build/staged/installed PASS; automatic normal Quit proved
+tray absent and launchctl113. Daemon718ce3657dd70b0d7b6282df56b06c2c0fc82f24a827053716bc928ead314bb0.
+Installed concurrent checks9/10 successful; one APNG request failed connecting to
+localhost1080 after7.78s, before any upstream strategy. Preserve that failure;
+subsequent two APNG-only checks both complete984455bytes HTTP2000.718/0.719s.
+This resembles historical AUD-25 startup-localhost symptom but cause unproven.
+No claim of unlimited concurrency or resolution of that transient. Voice-control
+HTTP1010.501/0.307s. Native reload shows history and no message loading error;
+no active call, no messages sent. Sticker-picker AX click did not visibly open,
+so no new native sticker-picker proof. Public sticker payloads fully qualified.
+Evidence output/aud27-reserves/installed*.json, installed.log, native-check.json.
+
+## AUD-28 localhost timeout diagnosis — 2026-09-20
+
+Read-only follow-up to AUD-27 transient reproduced one curl failure among40
+parallel public APNG requests. curl -q verbose proves TCP connect from
+127.0.0.1:49893 to127.0.0.1:1080 timed out7.788s before CONNECT/TLS; neighboring
+requests connected within2.5ms. Basic Python80 IPv4 +80 IPv6 proxy connects and
+80 independent listener controls initially all passed (<2.5ms). Subsequent40+80
+curl requests passed; randomness is consistent with source-port selection.
+
+Deterministic isolated reproduction: binding Python's source to49893 times out
+against1080; neighboring49894 connects0.21ms. The same49893 connects to an
+independent local listener51693 in0.06ms. Captured lo0 metadata shows repeated
+SYNs from49893 (seq2177822337) without SYN-ACK, while49894/49895 receive SYN-ACK.
+No HTTP contents/authentication captured.
+
+Read-only pfctl -ss -vv finds exact stale tuple:
+ALL tcp127.0.0.1:1080 <-127.0.0.1:49893 ESTABLISHED:ESTABLISHED;
+age47m17s, expires23h32m46s, sequence windows322158630/1709271798;
+id4a00000070190100 creator56410126. netstat finds no kernel TCP socket for49893.
+This is strong evidence of stale PF state rejecting reuse of an expired kernel
+connection tuple, not listener overload/DNS/Discord/Geph or curl-specific behavior.
+No targeted state deletion/A-B removal performed: local pfctl manual documents
+host/network kills only; avoid broad deletion of unrelated active state.
+
+Source explains persistence: pf_adapter.flush_private_anchor deliberately flushes
+rules/NAT only (macOS -F all also flushes global state). PF_RULES applies stateful
+reply-to to any lo0 inbound connection targeting1080, including explicit managed
+proxy clients. Stale entries survive rule replacement and app restart. Exact
+original missed-close event not captured; do not claim every past hang has this
+cause. Need isolate explicit loopback proxy tuples from transparent reply-to,
+plus safely reconcile pre-existing stale entries; do not globally clear states,
+change global TCP timeouts, or disable PF. Future fix needs targeted PF qualification.
+
+Evidence output/aud28-loopback/{connect.json,curl-first.json,fixed-port.json,
+loopback-syn2.txt,pf-state.json,captured/curl-results.json}. First35s collector
+failed to terminate cleanly and lost stdout; second45s collector killed its own
+child and returned119 metadata lines. Both collectors ended; no pending admin.
+Graph transport still closed; bounded source reads used. No source/runtime/routing
+changes made during this diagnosis. Installed AUD-27 remains current.
+
+## AUD-29 localhost stale-state repair — 2026-09-20
+
+AUD-28 isolated source 127.0.0.1:49893 to proxy1080: repeated SYN without SYN-ACK,
+no kernel socket, stale PF ESTABLISHED entry; adjacent port and independent local
+listener worked. Separate direct proxy traffic from transparent reply-to with
+four bidirectional exact-loopback stateless rules. Startup binds both addresses
+before scoped stale-state migration and accepting clients. Live/unproven kernel
+socket snapshots veto deletion. Cancellation waits for cleanup before unbinding.
+
+Darwin selector ABI verified against Apple XNU pfvar.h/pf_ioctl.c:
+https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/pfvar.h
+https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/pf_ioctl.c
+Native kernel accepted exact-port ioctl on an unused temporary bound port;
+`pfctl -n` accepted rules (no rules loaded by that diagnostic).
+73 affected tests passed, including selector masks/ports, live-socket veto,
+ordering, cancellation and existing PF contracts. Evidence output/aud29-pf-loopback.
+Installed and exact previously failing tuple qualification remain pending.
+
+First installed candidate3313895c/5b1b938 was REJECTED: stateless loopback
+connections timed out, all10 proxy media probes failed before TCP connection.
+Canonical artifact pass was not behavior proof. Normal Quit removed those rules.
+The netstat subprocess also returned empty output, causing the intended fail-closed
+cleanup veto; lsof correctly returns bound CLOSED and live socket states.
+Native rule comparison after readiness: stateless timeout1001ms, ordinary keep
+state without reply-to success0.217ms, original reply-to success0.166ms. Corrected
+candidate therefore retains TCP state and removes only inappropriate reply-to
+from direct loopback traffic. Transparent remote traffic keeps reply-to.
+Evidence rule-comparison.json, rejected-stateless-*.json, pf-after-failure.json.
+
+### AUD-29 corrected installed result
+
+Sourcee1bdc3e installed via3f81f9ad2026-09-20T08:52:31Z (consumed). Canonical
+build/staged/installed pass;73 affected tests pass. Exact failed source49893 now
+connects in0.153ms, neighboring49894 in0.075ms, IPv6 in0.077ms. Ten concurrent
+full public media/API/app objects all200 and complete0.314–0.563s;40 original
+APNG trials all pass, maxTCPconnect3.511ms and maxcomplete1.333s. A no-explicit-
+proxy API request completed200/35bytes0.352s, retaining transparent behavior.
+Native Discord reload showed loaded history without message/image error and no
+active call. Audio, streams and YouTube are not newly qualified.
+
+PF inspection shows four plain-loopback keep-state rules and two retained
+transparent reply-to rules. Original day-long ESTABLISHED state is absent; the
+new49893 tuple closed to TIME_WAIT with46sremaining at inspection. This proves
+normal closure for the tested connection, not all future disconnect scenarios.
+An independent local TCP connection on58393 remained alive throughout corrected
+installation/qualification. No global state flush, foreign configuration change,
+or message/call action. All evidence in output/aud29-pf-loopback; rejected first
+candidate evidence is retained separately, not overwritten by successful probes.
+
+### 2026-09-20: updater tray lifetime after watchdog cleanup
+
+Disposable run35503555564 (source e5cdf8d, merge cc971dd5) built successfully.
+The real accept case removed its journal with no failure record but immediately
+lost the exact successor. The rollback case reached `old_relaunched` with the
+matching nonce, then failed to find a live restored tray. Both cleanups passed.
+Artifacts are under output/aud30-traffic-gate/{accept,rollback}-e5cdf8d.
+
+The watchdog launches both trays as ordinary child processes. Its LaunchAgent
+omitted AbandonProcessGroup, and transaction completion asynchronously boots out
+the job. The local macOS launchd.plist manual states that launchd kills remaining
+processes in the job's process group when the job dies unless that key is true.
+The candidate therefore explicitly sets AbandonProcessGroup=true, preserving
+SuccessfulExit=false and exact-identity termination of rejected successors.
+This also covers the published helper used by the qualification driver because
+the production preparer writes the LaunchAgent policy. Real macOS confirmation
+of the corrected candidate remains required; the signed public old-version feed
+and its already-shipped preparer are not covered by this local driver.
+
+23 updater transaction tests pass. The harness additionally checks that the
+terminal tray retains its identity for two seconds after journal removal, since
+a single snapshot can race asynchronous launchd cleanup. Twelve harness tests
+plus12subtests pass, including immediate-alive then exited rejection.
+
+
+### 2026-09-20: real rollback success and archive permission mismatch
+
+Run35504245450/source476af9e confirmed both rollback cases: forced stopped
+successor and unsignalled live successor with broken traffic restored the exact
+old bundle and a surviving tray. Scoped cleanup passed. The accept successor
+also survived watchdog retirement, confirming the process-group correction,
+but canonical tree comparison failed. The extractor created its root0700 and
+skipped the archive root entry; directory modes were never restored and file
+creation remained subject to umask. Canonical tree hashing includes these modes.
+
+The repair records root and directory modes, restores exact ordinary file bits
+before sync, then restores directories deepest-first and root last. Extraction
+remains private while payload is written. Canonical hash/signature checks and
+special-bit stripping remain unchanged.24 transaction tests pass, including
+root privacy during extraction and final root755/directory750/file640 fidelity.
+New real packaged acceptance is still required; this is not installed evidence.
+Artifacts: output/aud30-traffic-gate/archive-mode-tests.log and
+{accept,rollback,traffic-failure}-476af9e/.
+
+
+### 2026-09-20: archive repair passes all real transaction cases
+
+CI35505371770/source653649e (merge5d0c31e0) passed accept, rollback and
+traffic_failure. Downloaded provision reports all say pass with no cleanup errors.
+Accepted tree55a50d68d5d47a8e93c32747c771f4774349e9d96847ef997997b0fe3b0f38f9
+matches the exact candidate; both rollback trees match previous
+ d2423806e64659b5a5f324fb3a8bd6ff465a5fcb8f56f5a22cf97df240b1bbea.
+The real accepted successor ACKed; each case removed its transaction, preserved
+the required terminal process identity through the survival check, and left no
+stage/backup. Traffic-failure report confirms stopped=false and
+live_traffic_failure=true. This closes the observed archive-mode mismatch and
+qualifies these production transaction paths, not a shipped old preparer or
+signed-feed migration. Evidence: output/aud30-traffic-gate/*-653649e/.
+
+
+### 2026-09-20: failed successor spawn must restore the old bundle
+
+Inspection of run_locked_watchdog found spawn_bundle(...)? in the persisted
+SuccessorLaunchPlanned phase. An OS-level spawn refusal therefore escaped to
+launchd's unsuccessful-exit restart policy without entering rollback. The
+candidate now dispatches that specific no-child failure into the existing
+hash-checked rollback and relaunch path. Successful spawn behavior is unchanged;
+rollback errors remain errors with the original spawn context. The regression
+uses a real non-executable candidate and confirms old bytes restored before a
+single injected relaunch, failed transaction evidence, no active journal and no
+stage/backup.25 transaction tests PASS. Real packaged startup-refusal testing is
+still required. This does not cover a spawned process dying before its identity
+is captured, or repair the already-published old helper.
+
+
+### 2026-09-20: successor exits before identity capture
+
+The same startup failure path also returned immediately when the spawned child
+exited before process identity was observed. spawn_successor_or_rollback now
+requires child_has_exited on the owned Child handle before restoring the old
+bundle in this branch. Missing process metadata alone cannot authorize rollback
+of a still-live process.26 transaction tests pass, including a real short-lived
+shell executable that exits1 before qualifying its identity, exact old content
+at relaunch and transaction/stage cleanup. The existing real packaged harness
+still invokes the published old bundle's helper: new helper startup-failure
+behavior needs its own real packaged coverage before acceptance.
+
+
+## AUD-30 independent public payload objects — 2026-09-20
+
+The updater admission gate now uses distinct public sticker objects:
+media.discordapp.net/stickers/1228092333061443654.png (984455 bytes) and
+cdn.discordapp.com/stickers/781291131828699156.png (471047 bytes).
+The second object is the official Cheerful Choco pack's Wave sticker, discovered
+without credentials via Discord API v10 `/sticker-packs`, format_type2/APNG.
+The documented catalogue is https://docs.discord.com/developers/resources/sticker#list-sticker-packs.
+Both passed full PNG CRC/framing/IEND checks; evidence is
+output/aud30-traffic-gate/independent-object-discovery.json. This is distinct
+object and host coverage, not independent-provider coverage. A whole Discord
+outage must not be masked by a successful neutral website. Tiny built-in avatars
+(1268/1274 bytes measured) are unsuitable for the large-response check; admission
+requires64KiB minimum and2MiB maximum. Runtime does not query the catalogue or
+fetch private attachments; only the two fixed public URLs are used.
+
+## 2026-09-23 Safari OAuth loopback navigation
+
+User screenshot shows WebKitErrorDomain:305 for an HTTP127.0.0.1 browser-session
+callback. User reports success after normal Slipstream Quit. Do not retain or
+replay the callback query (contains authentication state and account data).
+A synthetic file-page link to HTTP127.0.0.1:50661/callback produced Safari's
+HTTPS-only warning with Slipstream already OFF: no active PAC in scutil,
+no1080 listener and no slipstream process. No warning bypass was performed.
+The temporary loopback server was stopped; browser returned with GoBack.
+Earlier curl and PAC DIRECT checks do not cover this browser navigation policy.
+This independently reproduces the warning class, not the complete OAuth flow
+or the reason the user's later attempt succeeded.
+Primary source: https://bugs.webkit.org/show_bug.cgi?id=284559 documents305
+on localhost link navigation and distinctions from explicit typed HTTP URLs.
+No Safari security settings, certificates, DNS or proxy preferences changed.
+
+## 2026-09-24 Juniper Gorilla Tag storefront
+
+Safari reproduced a blank product page with Slipstream active. Explicit local
+HTTP CONNECT completed the root HTML (82916 bytes, HTTP200, 1.28s), but
+cdn.junipercreates.com vendor JS stopped at16922 bytes with curl18 and the main
+JS failed HTTP2 framing. A system-path request also stopped at16902 bytes; with
+PF active that is not an independent unfiltered direct-path control. Owned Geph
+PID42544 on9954 completed the same gzip objects:102780 and146115 wire bytes,
+539582 and645245 decoded bytes; gzip CRC/end-of-stream verified. This supports
+a reviewed CDN route repair, not a broad platform/CloudFront route. Root store
+remains local. Evidence: output/juniper-20260924/. Ten focused route/selection
+tests pass. External Geph processes were observed but not changed; comparisons
+used app-owned9954 only.
+
+Source922c876 installed via consumed transactionf649eb7d (never replay).
+Canonical installed verification PASS, including fresh active StatusV2, live
+launchd daemon PID5119 and installed public payload checks. Normal Safari
+navigation visibly renders the product photo, description, price and Add to
+Cart. Checkout was not exercised. Installed CONNECT main JS completes HTTP200,
+146115 wire bytes in1.81s. Logs and payload: output/juniper-20260924/.
+The first install attempt rejected service absence before replacement; a fixed
+3s stop wait was replaced with bounded launchd/process observation while keeping
+root preflight checks. A race was plausible, not conclusively captured. User
+confirmed successful retry; all old app/private backups and learning retained.
+
+## 2026-09-24 mid-call Discord silence investigation
+
+User reports incoming voice/activity disappears while connected UI remains; leaving
+and rejoining restores it. Approximate window22:00-00:00; date not specified, so
+Sep23 and24 local client logs were compared without exporting private payloads.
+Evidence: output/discord-midcall-20260924/{timeline.json,voice-event-counts.json,voice-flow-reproduction.json}.
+
+Sep23 22:42:32 default RTC clean Force Close followed by reconnect22:42:34;
+preceding voice heartbeat ACKs and decrypted-audio counters still advance. This
+could record a manual rejoin but does not identify why the user stopped hearing.
+Sep24 22:24-22:28 main Gateway has repeated OP_HELLO timeouts; distinguish main
+Gateway from dedicated voice control. Default voice ACKs currently arrive.
+Periodic UDP echo/reconnection successes are not failure evidence. Sparse DAVE
+decrypt failures mostly accompany setup; cumulative error counters must not be
+misread as continuing errors while successful counters advance.
+
+Exact extracted production observe_voice_flow reproduction with simulated time:
+continuous same tuple1801 observations primes only first5; new source port and
+more than300s idle reprime. This is a recovery blind spot if a classifier/path
+changes mid-flow, not proof that periodic poison fixes the incident. Current
+observer sees outbound IPv4 only and cannot distinguish incoming silence from
+participant silence. No speculative voice strategy installed.
+
+Reproduction plan: isolate a disposable UDP media/control fixture; establish both,
+then suppress only incoming media while control remains responsive, separately
+exercise control loss and tuple/path changes. This reproduces failure classes,
+not the production cause. For real incident correlate voice ACK, incoming packet
+counters and decoder success deltas before/after user rejoin; capture only timing,
+lengths and transport state, never voice content/credentials. Do not disrupt an
+ongoing call or route Discord via Geph.
+Reference: https://docs.discord.com/developers/topics/voice-connections describes
+separate voice WebSocket and UDP, heartbeats, and DAVE. Googlevideo ClientHello
+record fallback does not apply to UDP media and remains scoped to Googlevideo.
+
+
+## 2026-09-25 TestGlider document truncation behind a healthy redirect
+
+`www.testglider.com/` returned302 with Location `/en` and a complete15-byte
+body. The installed root preflight logged usable/assets0. Public `/en`
+declared243860 bytes but curl received16384 before exit18; its same-host
+`/_next/static/css/c38f03c02db00a32.css` also ended early. Explicit local
+CONNECT and compressed HTTP/1.1 requests reproduced incomplete delivery.
+The daemon logged partial-record watchdogs across local_strategy, system_plain
+and xbox_plain. This proves incomplete ingress, not which upstream component
+caused it. It does not justify sending a generic local failure through Geph.
+
+The candidate root probe follows only validated same-origin server redirects,
+retaining original exact IP, total deadline and cancellation owner. Two follows
+are allowed; cycles/hop exhaustion remain inconclusive. Final-document base URL
+is used for transient asset discovery. No browser URL or cookies are replayed.
+Live candidate observation was navigation_pending/framing_eof_incomplete after
+7.45s; safe_incomplete remained false, so this evidence does not itself grant
+Geph. Browser recovery and installation remain unqualified.
+
+Evidence: `output/testglider-20260925/`. Admin root-log read completed exit0;
+no runtime restart performed. Codex desktop logs separately recorded pubsub
+reconnect scheduling; these events alone cannot identify response-stream failure
+or attribute it to Slipstream.
+
+
+### Follow-up: preserve evidence boundaries and broker lifetime
+
+The attempted HTML/CSS comparisons through the JavaScript range evidence helper
+returned UNKNOWN by contract (requires206 JavaScript), so they cannot support
+same-object identity or route authorization. Separate full-document canaries
+use `_local_payload_probe` with GET `/en` and complete-body validation.
+
+CI36052190320's active-worker uninstall failure (`socket_unavailable`) matches
+source shutdown ordering: auxiliary broker close preceded worker quiescence.
+The candidate drains the worker before closing that socket and disables admission
+first. Focused tests cover both normal shutdown and listener completion; packaged
+CI, installed Quit and real browser outcomes remain separate gates.
+
+
+### Completion-aware redirect comparison
+
+Owned9954 listener identity was verified against the app runtime, with the same
+PID before/after comparison. Geph curl returnedHTTP200 and all243860 bytes of
+`/en` in2.645s. The transport completion probes now follow validated same-origin
+redirects under the original deadline for HTTP/1.1 and HTTP/2. Local probes stay
+on the original exact IP; targets remain transient. No automatic policy guard
+or learning entry is bypassed.
+
+Live updated probe evidence: system-address incomplete=true versus owned-Geph
+complete243860 bytes. App-owned DNS resolved66.33.60.66 and76.76.21.142 in0.13s;
+its first address also produced incomplete=true. Earlier complete-body canaries
+returned0 verified bytes for plain/split64/split16; this does not by itself prove
+an identical failure mechanism for all three. Candidate installation and browser
+outcome are still pending. Existing private learning was not modified.
+
+
+### 2026-09-27 TestGlider foreground partial render and recovery expiry
+
+Manual foreground Chrome navigation loaded the styled page, but the user still
+reported missing images. Console independently showed content-length mismatch
+for the public lesson API and connection-closed errors for CloudFront banners,
+examples and blog posts. A bounded public banner GET through the installed
+proxy received HTTP200 and15752 of400804 bytes before the25s deadline; the
+public API request completed16688 bytes in1.67s. No signed image URL or browser
+authentication data was needed for this comparison. Evidence is in
+`output/testglider-20260925/asset-probe.json` and accompanying headers/bodies.
+
+A process-local deterministic reproduction identified a separate recovery
+lifetime gap: partial TLS evidence expires after300s while the attempted local
+DNS/recovery state persists600s. Between301s and599s, requests skip the root
+preflight because their proof has expired although the local ladder persists.
+The candidate retains only a bounded recheck marker for the recovery lifetime;
+it does not extend any evidence accepted for a foreign-exit route. Tests cover
+expiry without route authority, protected hosts and bounded storage.
+
+This candidate is not installed and does not settle CDN completion or background
+browser recovery. Foreground/manual interaction must not be treated as the
+product requirement. Removing a provenance check alone would not prove complete
+resources or preserve independent exact-host routing evidence.
+
+
+### 2026-09-27 late shutdown worker acquisition
+
+Run36329652494 still failed active-worker uninstall with `ipc_unavailable`.
+Its retained log cannot distinguish broker shutdown from launchd process death.
+The source additionally allowed an in-flight admission to acquire/recreate the lazy
+worker after shutdown detached it. Two deterministic empty/existing-worker tests
+reproduce this; the final acquisition now rejects shutdown under the same lock.
+48 affected tests pass. Drain start/end and broker-close bounded diagnostics are
+added for the next packaged gate; no claim that this explains the CI failure yet.
+The workstation candidate remains uninstalled, with existing app/backups preserved.
+
+
+Shutdown budget correction: external owned-daemon stop used12s before force-kill,
+while internal worker drain permits125s and Rust comparison itself permits20s.
+A fake-clock20s orderly exit reproduced premature SIGKILL. The helper and explicit
+launchd ExitTimeOut now share137s (125 worker +10 connections +2 margin); ordinary
+exit still completes immediately. Ownership/PF guards remain unchanged. Two new
+regressions failed before and pass after;78 scoped tests PASS,822 deselected.
+Evidence: output/testglider-20260925/shutdown-budget-{before,after}.log.
+This establishes a shutdown defect; exact packaged CI is still needed to attribute
+and clear the observed uninstall failure. No new candidate installed.
+
+The explicit launchd ExitTimeOut experiment on f26a6a0 failed: its job remains
+loaded beyond the existing absence check despite logged successful worker drain.
+It also differs from canonical production plist keys. Removed that key; retain
+only the independently reproduced external helper budget correction and late
+worker guard. Do not infer that launchd's default timeout caused the original
+incident. Intermediate d90 packaged lifecycle passed; full code suite there had
+a separate coalescing timing failure, whereas f26 code suite passed.
+
+
+### 2026-09-27 Installed partial-resource counterexample
+
+Exact source `50c09e5` is installed and canonical local-install verification
+passes. This does not clear the browser product gate: TestGlider still has
+missing images. Through local `:1080`, its public CloudFront banner returns
+HTTP/1.1 200 then closes after 16,384 of 400,804 bytes (curl18,11.73s); HTTP/2
+reports a framing error. Through owned `:9954` the same object completes all
+400,804 bytes in2.26s. The API object independently completes16,688 bytes.
+
+The same CDN's `/` completes200/595 bytes, matching the daemon's usable-root
+classification. `_confirm_transport_incomplete_response` currently invokes
+`_incomplete_response_plain_payload_probe` with its default `/` target. That
+root cannot reproduce or establish completeness of the failing image. This is
+an evidence gap, not permission for a blanket CDN rule or a timeout-based exit.
+Raw diagnostic artifacts remain under `output/testglider-20260925/`:
+`banner-transport-comparison.json`, `installed-assets-50c09e5.json`,
+`cdn-root.headers/body`, and `post-install-daemon.log`.
+
+The daemon records system and app-owned DNS partial-record watchdog outcomes
+with confirmation_not_scheduled; those two stages alone do not complete the
+required local ladder. Generic process_identity_failed messages are not bound
+to a hostname and cannot yet be attributed to the browser asset. A standalone
+same-policy observation on an existing real Chrome socket accepted. Further
+ordinary-browser correlation is blocked while the Mac is locked; no new routing
+change has been made based on the uncorrelated identity messages.
+
+
+After unlock, ordinary Chrome reload again produced ERR_CONNECTION_CLOSED for
+both the document and banner. Fresh logs include successful browser provenance;
+there is no basis to blame foreground state. Six independent root-run local
+strategy payload probes failed to confirm the full banner within12s each on
+one currently resolved edge (18.165.142.153). The recorded zero count means no
+validated complete response, not zero received bytes.
+
+A separate deterministic recovery defect was reproduced: a strategy with many
+TLS-prefix successes could remain first despite fresh framed-partial failure.
+`_strategy_order_for_attempt` now partitions both idle and partial failed stages
+after untried choices, retaining order within groups, expiry and explicit-repeat
+precedence. Before:1failed/5passed; after:35passed/828deselected. This fixes local
+ladder progress only; the same-object image/API proof gap remains open and the
+new source has not been installed.
+
+
+## 2026-09-28 TestGlider: browser comparison redirects and remaining cutoff
+
+Installed exact3c56614 after green CI and canonical build/install checks. The V2
+observer previously treated every correlated redirect as terminal, including the
+observed owned-Geph public root302 to `/en`. It now admits up to three exact-origin
+HTTPS redirects, preserving request correlation, deadline and final-completion
+classification. Pending-navigation/V1 behavior remains unchanged; Rust36 tests pass.
+
+This was not the whole incident. Fresh accepted-provenance attempts now wait20s
+then report `browser-proof wait_failed`, rather than the previous immediate
+`result_refused`. That log does not distinguish main-document, subframe, DOM or
+IPC delay; the direct launcher currently discards worker stderr. Do not attribute
+it to a specific stage without additional bounded diagnostics.
+
+Ordinary Chrome eventually rendered styled content but retained failed images.
+A same-session explicit-local-proxy public banner GET returned HTTP200 but closed
+at16384 of400804 bytes (curl18,11.85s); the representative public lessons API
+completed16688 bytes (2.30s). DevTools additionally showed `44_TOEFL.webp` with
+ERR_CONNECTION_CLOSED. Evidence: output/recovery-replacement-3c56614f/
+{installed-assets.json,browser-daemon.log,installed-verification.log}.
+
+The unchanged structural limit remains: a usable CDN root does not qualify an
+image, and a parent obtainable only through owned Geph does not currently expose
+critical children to the independent same-object pipeline. No site/CDN policy
+exception was added, and no successful root/install check is a product pass.
+
+### 2026-09-28 Owned root waits for unrelated resources
+
+An isolated pinned headless browser through owned SOCKS9954 observed TestGlider:
+final main-document loadingFinished at2293ms, DOMContentLoaded4091ms, 15 Vimeo
+iframe document requests beginning8058ms, main-frame stop18097ms. Launch and
+runtime validation consume the same20s production deadline. This demonstrates
+that main-frame stop delays an already complete parent, although it does not
+prove which internal stage exhausted every previous production attempt.
+
+Candidate separates exact main-document parser completion (V2 only) and adds
+owned-parent critical-asset enumeration with independent child proof. Focused
+Python85pass; further cancellation/integration/build/install gates pending.
+
+### 2026-09-28: learned parent skips newly added child discovery
+
+Installed12ea83e9 passed canonical installed verification (90696), but live public
+probes still showed banner16384/400804 with curl18; document243860 and API16688
+completed. Evidence: output/recovery-replacement-12ea83e9/installed-assets.json
+and browser-daemon.log (native read94900 exit0). The www parent was already
+learned and went directly through Geph, so the newly added initial-parent
+comparison/discovery never ran. This is a separate control-flow gap, not a
+reason to reset learning or repeat the earlier browser observer correction.
+
+The new learned-parent continuation enumerates one critical unlearned child
+alongside the relay and uses the existing independent object proof. It retains
+and drains its scheduling lease/thread, coalesces pooled connections across
+addresses, and stores only a bounded host cooldown. Focused Python integration
+99pass and discovery/lifecycle14pass; live candidate qualification remains due.
+
+
+## 2026-09-29 Geph new-opening reserve
+
+The selected Montreal path failed2/6 public opens; an isolated Zurich process
+completed6/6. Changing the persistent owned process to Zurich did not eliminate
+opening timeouts. Therefore exit geography alone does not explain the defect.
+The old client dial uses one SOCKS opening, despite multiple Geph sessions.
+The new owned-only dial gives a slow opening one reserve after350ms and sends
+the buffered first flight only to the winning tunnel. Both attempts remain within
+the caller's existing deadline. Losers are closed, cancellation is propagated,
+and no established stream or application request is replayed. A real local SOCKS
+server that stalls the first opening proves RED old/GREEN new behavior.
+A temporary proxy using the changed dial completed8/9 responses; one still failed.
+This is bounded recovery coverage, not evidence that all backend faults or
+post-commit stream resets are solved. No external Geph or DNS/proxy settings changed.
+
+
+## 2026-09-29 First navigation did not register its proven HTML parent
+
+Physical Chrome reproduced a restored root with broken CDN hero images.
+The private daemon log records root provenance accepted and proof committed,
+then independent child partial-record failures without scheduled confirmation.
+`_run_initial_route_preflight` learns the parent but previously only the later
+`_check_learned_parent_assets` path registered `_recent_asset_parents`. On a first
+navigation there need not be another parent connection, so later child failures
+had no parent hint. Register that bounded hint after successful root proof and
+completed owned HTML asset discovery. It neither learns a child nor broadens
+routing policy; existing fresh failure, cooldown, TTL, coalescing and independent
+object proof remain required. RED/GREEN tests include subsequent scheduling
+without manually registering a parent or opening another parent connection.
+Physical browser qualification of this source correction remains pending.
+
+
+### 2026-09-29: child proof admitted during an in-flight CDN root probe
+
+Installed842d74e5 passed canonical installation and exact-source CI, but a fresh
+Chrome session still had two failed TestGlider hero images (the third decoded)
+and three failed dynamic images. This does not satisfy browser qualification.
+Private evidence: `output/reconnecting-20260929/first-parent-private.log` and
+sanitized resource report `first-parent-browser-resources.txt` in that directory.
+At15:33:10+0500 the CDN root preflight started, at15:33:15 it returned usable,
+and at15:33:17 the independent bootstrap object committed its owned route.
+The entry-only child join misses a child nonce created during the root probe.
+
+`test_child_started_during_root_probe_is_joined_before_release` reproduces that
+ordering with events rather than network timing. All three cases fail before
+repair: committed/ready, no commitment, and lost owned readiness. The root now
+rechecks existing exact-edge children after its observation and before releasing
+the held ClientHello or publishing a usable-root cache. Waiting supplies no route
+authority; only an independently committed route with current owned readiness
+(or a valid local claim) is eligible. Joined observations never publish root
+health. Existing deadlines, cancellation ownership and protected-host admission
+remain unchanged.76 child/parent/dynamic and94 routing tests pass; physical
+qualification of the new source remains outstanding.
+
+
+### 2026-09-29: dynamic image observer exits before hydration
+
+Installed acda6bb2 passes stable canonical verification and full CI36557568300.
+Chrome initially reports connection closed but then autonomously reaches the
+complete page with all three hero banners decoded. Dynamic signed images remain
+broken, so the product gate is still open.
+
+An anonymous isolated Chrome context through owned SOCKS9954 reached
+DOMContentLoaded at6407ms and had no dynamic images at8962ms; they appeared at
+10299ms, about3892ms after DOM readiness. Only host, timing, URL length and decode
+state were retained, not signed URLs. Evidence: dynamic-timing-return.txt in
+output/reconnecting-20260929. The worker's fixed3000ms hydration promise can
+therefore return an empty hint even with time remaining in its20s job.
+
+The observer now uses the remaining original job deadline, reserving100ms for
+its CDP reply. This changes neither discovery scope nor route authority. The
+exact production JavaScript expression is tested with virtual DOM/time for late
+hydration, budget exhaustion and an unlisted host. A real Chrome controlled
+4s delayed-image fixture returned absent at3157ms with the old expression and
+present at4048ms with the corrected budget. Those fixtures issue no external
+image request. New source is not yet installed; real-site qualification remains.
+
+
+### 2026-09-29 Dynamic browser worker refusal is not one failure class
+
+The retained `output/reconnecting-20260929/dynamic-budget-complete-private.log`
+contains worker signature-unavailable failures at 17:12:58 and 17:13:08 before
+browser-proof wait failure at 17:13:12. The previous signature label conflated
+an OS launch error with the existing three-second codesign timeout. A fresh
+read-only verification of the installed helper and deep bundle passed in
+0.214s and 0.479s respectively; this does not establish what happened earlier.
+The diagnostic labels now distinguish these causes and non-usable result,
+expired deadline, changed backend, and wait exceptions. No deadlines or
+signature checks are relaxed, and no private URL or exception text is logged.
+The earlier result_refused at 17:08:07 remains ambiguous. Full dynamic image
+recovery and Codex reconnecting remain unqualified.
+
+
+### 2026-09-30 Steam and Codex fail together through owned Geph
+
+Retained Steam CEF evidence records TLS `net_error -100` on September29 at
+18:09:04 local; the same second Slipstream records a failed SOCKS opening for
+store.steampowered.com. ChatGPT upstream resets at18:07:20 and18:08:40 coincide
+with Codex request retries. Owned Geph restarts at18:07:31 and18:08:03 follow
+failures, so restart timing alone is not their cause. The install restart was
+at18:01–18:02; an additional shutdown at18:09:13 has an unproven initiator.
+
+A later six-request HEAD comparison saved in
+`output/reconnecting-20260929/steam-owned-comparison.json` independently observed
+TestGlider's SOCKS opening close at10.007s through owned9954 directly, while
+Steam and anonymous ChatGPT answered. This establishes a failure below the
+Slipstream routing layer, not its precise transport cause. Anonymous403 and
+HEAD200 are not authenticated app or full-resource qualification.
+
+The materialized Geph r3 selector uses mux liveness and pending opening count;
+a destination-open timeout no longer kills shared streams, but neither lowers
+selection preference nor retries another session within Geph. Investigate
+bounded independent new-opening failover without tearing down existing streams;
+do not restore shared early-dead behavior or infer all destinations need Geph.
+
+### 2026-09-30 opening-response EOF also retires a shared session
+
+A focused real-PicoMux regression on r4 confirms a second shared-session kill
+path: response read EOF or JSON parse error sets early_dead although mux.is_alive
+remains true. Unlike the r3 timeout fix, these branches retained upstream
+behavior. Current installed logs had read-response errors at14:20:23.765596Z
+and14:23:39.694089Z, but correlation to a specific app interruption remains open.
+
+Vendor r5/PR382 removes only those two early_dead assignments. The regression
+requires an error, pending_opens zero, no shared death signal and byte transfer
+on a pre-existing stream for both EOF and malformed JSON. RED on r4; all28
+library tests GREEN11.02s with fix. Guarded source materialization from original
+upstream matches tested source; four guard tests pass. Actual mux death and
+mux stream allocation failure handling remain unchanged. No installed/browser
+success is inferred. Evidence: output/geph-failover-20260930/stream-error-*.log.
+
+
+## 2026-09-30 r5 browser qualification and delayed dynamic recovery
+
+Installed e2871ae6 with canonical installed verification PASS. Cold Chrome still
+failed (70.916s); owned Geph was unready at20:48:13, root learned20:48:40 and
+static CDN20:49:11, after the browser's failures. A second navigation completed
+with all three static heroes decoded, but three dynamic review images failed and
+api.testglider.com returned ERR_CONTENT_LENGTH_MISMATCH. At20:57:00 the dynamic
+CDN hit the local partial-record watchdog; parent enumeration restarted only
+at20:58:36, after the120s parent cooldown, and independently learned the exact
+child at20:59:03. This isolates a scheduler delay, not an absent discovery result.
+
+Candidate allows bounded new failure hosts to enter the existing parent window
+without waiting behind a static enumeration; duplicate failures retain cooldown.
+A new failure wakes an existing cooldown waiter. Regression reproduces the old
+half-second fixture timeout, then passes without sleeps or route authority.
+Independent same-object proof, protected exclusions, leases and shutdown remain.
+This does not yet repair API-only discovery, cold backend readiness, or retry an
+already failed browser request. Do not claim all resources or reconnects fixed.
+Evidence: output/geph-stream-isolation-20260930/{browser-cold-start.log,
+browser-learned-route.log,root-after-delayed-private.log,dynamic-cooldown-red.log,
+dynamic-cooldown-green.log}. Root capture is private and must not be published.
+
+
+Anonymous API comparison on the still-installed r5 (2026-09-30): five public
+GET targets were observed transiently in the isolated Chrome navigation. Three
+had actual browser requestfailed records; two of those exact failed targets were
+then opened anonymously through owned SOCKS9954. Both completed HTTP200,16688
+and83287 bytes, in2.862s and1.448s. Installed-route responses included HTTP200
+with incomplete bodies/ERR_CONTENT_LENGTH_MISMATCH. No target URL, query,
+headers, cookies or body was persisted; result retains host-free sizes/status.
+Artifact: output/geph-stream-isolation-20260930/same-failed-api-comparison.log.
+This establishes alternate payload availability, not sufficient learning proof:
+independent system/app-DNS/local-strategy comparisons for the same object remain
+required. Existing V3 only discovers document.images, and ranged bootstrap
+inspection explicitly refuses generic200 JSON. API-root404 therefore cannot
+stand in for these failing public data resources. A separately reviewed anonymous
+GET discovery/full-framing contract is needed; do not weaken V3 or route the
+whole API because one manual comparison worked. Live root capture also shows
+xbox_plain and local_strategy partial-record watchdog failures for the API.
+
+### 2026-09-30: TestGlider public API truncation after image recovery
+
+On installed e2871ae6/Geph r5, anonymous real Chrome reported four HTTP200 JSON
+responses truncated (`ERR_CONTENT_LENGTH_MISMATCH`) in8.8–17.2s, including retries.
+For the first two exact failed GET targets, a fresh anonymous context on owned
+9954 completed16688 and83287 bytes in2.862/1.448s. Targets were kept only in memory;
+no user profile, credentials, query strings or response bodies entered artifacts.
+Evidence: `output/geph-stream-isolation-20260930/same-failed-api-comparison.log`.
+Private root capture `root-after-api-private.log` shows app-DNS/local partial
+record stalls; probing API `/` instead produced a short terminal response.
+
+V3 could only return DOM images and the range classifier deliberately rejected
+HTTP200 JSON. Thus root checks and recovered images did not qualify API delivery.
+V4 now supplies a separate anonymous GET hint and full-JSON comparison, preserving
+independent local proof. Its largest bounded response selection avoids tiny
+configuration replies dominating discovery. Source regressions are separate
+from installed/browser qualification; do not claim the live API fixed until the
+new exact candidate has been installed and checked.
+
+### 2026-09-30: V4 discovery candidate accounting
+
+Installed f4251985 canonical verification passed, but real Chrome qualification
+failed. First navigation closed its incomplete root HTML after24.073s; owned
+browser proof was terminal_error. A later independent owned browser completed
+302 `/` to200 `/en`. Installed repeat committed the parent but still delivered
+an incomplete API body and broken dynamic images. Logs subsequently showed the
+image child committed; no API object comparison followed in that window.
+
+Code marked every V4 candidate host attempted before the browser returned its
+single chosen object. Image-first selection therefore suppressed unselected API
+hosts for the parent cooldown. The regression
+`test_selected_image_does_not_cool_down_unselected_api` failed before the fix.
+Account only for the selected host, exclude already attempted hosts from the next
+job, and continue coalesced recovery while new candidates remain and progress
+was made. An empty discovery cools down its queried hosts; four-host window and
+all independent object proof requirements remain. Focused42 tests passed.
+Evidence: output/geph-stream-isolation-20260930/selection-fairness-{red,green}.log.
+This does not establish the earlier browser terminal-error cause or repair an
+already delivered partial response. Installed behavior remains unqualified.
+
+
+### Geph review-branch overwrite — 2026-10-11
+
+The scheduled vendor updater read the current `automation/geph-<version>` remote
+OID immediately before `push --force-with-lease`. That lease protected only a
+later race; it explicitly authorized replacement of already-reviewed human
+commits. PR383 changed from `d2856d8a` to bot `0a20407e` with a different source
+tree, losing the retained session/database qualification work. The qualified
+local branch survived and was published separately as
+`codex/geph-043-remediation`; no force restoration of the bot branch was used.
+
+The corrected discovery workflow treats an existing version branch as a review
+handoff and stops before source preparation. Lookup failures fail closed. A new
+branch is pushed only under an atomic expected-absent lease, so concurrent
+creation cannot replace another writer. Existing PR descriptions are preserved.
+The new test executes the actual workflow shell against local bare Git remotes:
+new branch, existing human work, lookup errors, creation race, existing PR
+description, contaminated Git environment and missing-PR recovery all pass.
+PR recovery queries the exact repository/head across all returned pages and
+changes only metadata, never the preserved branch; API errors fail closed. The old workflow first reproduced human-commit loss.
+This is repository automation coverage, not application traffic qualification.
+Evidence: `output/continuation-20261009/geph-branch-handoff-evidence.json`.

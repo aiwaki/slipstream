@@ -102,3 +102,36 @@ def test_route_preflight_rejects_private_fields_duplicates_and_long_deadline():
         parse_route_preflight_job_v1(
             json.dumps({**contract["job_defaults"], "deadline_unix_ms": 1_008_001})
         )
+
+
+def test_browser_comparison_v2_vectors_preserve_v1_budget():
+    from route_preflight import parse_route_preflight_job_v2
+    contract = json.loads((ROOT / 'contracts/route-preflight-v2.json').read_text())
+    for vector in contract['vectors']:
+        payload = json.dumps(dict(schema_version=vector['version'], capability='a'*32,
+                                  host='example.com', candidate_routes=vector['routes'],
+                                  issued_at_unix_ms=1000,
+                                  deadline_unix_ms=1000+vector['duration_ms']))
+        parser = parse_route_preflight_job_v2 if vector['version']==2 else parse_route_preflight_job_v1
+        if vector['valid']:
+            assert parser(payload).schema_version == 2
+            with pytest.raises(RoutePreflightError):
+                parse_route_preflight_job_v1(payload)
+        else:
+            with pytest.raises(RoutePreflightError):
+                parser(payload)
+
+
+def test_browser_comparison_v2_result_binding_and_expiry():
+    from route_preflight import parse_route_preflight_job_v2, parse_route_preflight_result_v2
+    job = parse_route_preflight_job_v2(json.dumps(dict(schema_version=2,
+        capability='a'*32,host='example.com',candidate_routes=['owned_geph'],
+        issued_at_unix_ms=1000,deadline_unix_ms=21000)))
+    payload=dict(schema_version=2,capability='a'*32,host='example.com',
+                 candidate_route='owned_geph',outcome='usable',observed_at_unix_ms=12000)
+    result=parse_route_preflight_result_v2(json.dumps(payload))
+    assert validate_route_preflight_result_v1(job,result,now_unix_ms=12000).accepted
+    assert not validate_route_preflight_result_v1(job,result,now_unix_ms=21001).accepted
+    assert not validate_route_preflight_result_v1(job,result,now_unix_ms=12000,capability_seen=True).accepted
+    with pytest.raises(RoutePreflightError):parse_route_preflight_result_v1(json.dumps(payload))
+    with pytest.raises(RoutePreflightError):parse_route_preflight_result_v2(json.dumps(dict(payload,candidate_route='system')))

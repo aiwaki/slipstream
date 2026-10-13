@@ -4,6 +4,7 @@ importScripts("service-worker-core.js");
 
 const NATIVE_HOST = "dev.slipstream.semantic";
 const core = globalThis.SlipstreamServiceWorkerCore;
+const navigationTracker = core.createTabNavigationTracker();
 const incompleteResponseTracker = core.createIncompleteResponseTracker(
   chrome.storage.session
 );
@@ -32,6 +33,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
+    const navigation = navigationTracker.begin(details);
     incompleteResponseTracker
       .remember(details, Date.now())
       .then((remembered) => {
@@ -45,6 +47,7 @@ chrome.webRequest.onBeforeRequest.addListener(
               chrome.tabs.get(details.tabId).then((tab) => ({ candidate, tab }))
             )
             .then(({ candidate, tab }) => {
+              if (!navigationTracker.isCurrent(navigation)) return null;
               const randomBytes = new Uint8Array(16);
               crypto.getRandomValues(randomBytes);
               return core.buildPendingNavigationSignal(
@@ -88,9 +91,11 @@ chrome.webRequest.onCompleted.addListener(
 
 chrome.webRequest.onErrorOccurred.addListener(
   (details) => {
+    const navigation = navigationTracker.capture(details);
     incompleteResponseTracker
       .take(details)
       .then((candidate) => {
+        // Persisted evidence survives worker suspension; reload authority does not.
         const randomBytes = new Uint8Array(16);
         crypto.getRandomValues(randomBytes);
         return core.buildIncompleteResponseSignal(
@@ -118,7 +123,8 @@ chrome.webRequest.onErrorOccurred.addListener(
           chrome.tabs
             .get(details.tabId)
             .then((tab) => {
-              if (core.tabStillOnSignalHost(tab, signal)) {
+              if (navigationTracker.isCurrent(navigation) &&
+                  core.tabStillOnSignalHost(tab, signal)) {
                 return chrome.tabs.reload(details.tabId);
               }
               return undefined;

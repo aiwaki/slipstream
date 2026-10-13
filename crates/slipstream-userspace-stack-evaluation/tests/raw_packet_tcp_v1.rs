@@ -250,6 +250,43 @@ fn invalid_syn_checksum_is_rejected_without_advancing_phase() {
 }
 
 #[test]
+fn reset_reply_is_not_accepted_as_a_syn_ack() {
+    for (destination_port, flags) in [(SERVER_PORT, TCP_ACK), (SERVER_PORT + 1, TCP_SYN)] {
+        let mut stack = RawPacketTcpStackV1::new_ipv4(SERVER, 0, SERVER_PORT, 1).unwrap();
+        let packet = ipv4_tcp_packet(
+            CLIENT,
+            SERVER,
+            CLIENT_PORT,
+            destination_port,
+            CLIENT_SEQUENCE,
+            1,
+            flags,
+            &[],
+        );
+        let error = stack.accept_syn_ipv4(&packet).unwrap_err();
+        assert_eq!(error.code, RawPacketTcpErrorCode::SegmentRejected);
+        assert_eq!(stack.phase(), RawPacketTcpPhase::Listening);
+
+        // Rejection must drain the unrelated response and leave the listener usable.
+        let syn = ipv4_tcp_packet(
+            CLIENT,
+            SERVER,
+            CLIENT_PORT,
+            SERVER_PORT,
+            CLIENT_SEQUENCE,
+            0,
+            TCP_SYN,
+            &[],
+        );
+        let reply = stack.accept_syn_ipv4(&syn).unwrap();
+        assert_eq!(
+            parse_tcp_packet(&reply).flags & (TCP_SYN | TCP_ACK),
+            TCP_SYN | TCP_ACK
+        );
+    }
+}
+
+#[test]
 fn handshake_steps_fail_closed_when_called_out_of_order() {
     let mut stack = RawPacketTcpStackV1::new_ipv4(SERVER, 0, SERVER_PORT, 1).unwrap();
     let acknowledgment = ipv4_tcp_packet(

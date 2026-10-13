@@ -27,8 +27,13 @@ ownership, and daemon recovery must not depend on a visible menu-bar process.
 | `geo_exit` | Use only a verified owned Geph process; never substitute an external process |
 | `unknown` | Collect bounded evidence before changing policy |
 
-External DNS, proxy, PAC, and VPN configuration is observed only. Slipstream
-does not rewrite or disable user-managed network settings.
+External DNS, proxy, PAC, and VPN configuration is observed only by default.
+The opt-in AUD-21 managed HTTPS mode adds a session-owned local PAC overlay;
+it never rewrites persistent preferences or replaces a foreign proxy key.
+CONNECT binds the origin to one stream before TLS/ECH. The same routing and
+proof machinery handles that stream. configd removes the overlay on process
+death; normal shutdown releases it before closing the listener. See
+[the authorized decision](DECISIONS.md#aud-21-managed-https-proxy--authorized-2026-09-13).
 
 ## Contracts And Adapters
 

@@ -1,14 +1,16 @@
 """Pure, privacy-bounded exact-host route preflight contract."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
 import json
 import re
+from urllib.parse import urlsplit
 
 
 SCHEMA_VERSION = 1
 MAX_PAYLOAD_BYTES = 2048
 MAX_DEADLINE_MS = 8_000
+BROWSER_COMPARE_MAX_DEADLINE_MS = 20_000
 MAX_CANDIDATE_ROUTES = 4
 
 CANDIDATE_ROUTES = frozenset(("system", "app_doh", "local_strategy", "owned_geph"))
@@ -81,6 +83,101 @@ class RoutePreflightResultV1:
 
 
 @dataclass(frozen=True)
+class RoutePreflightJobV2(RoutePreflightJobV1):
+    schema_version: int = 2
+
+
+@dataclass(frozen=True)
+class RoutePreflightResultV2(RoutePreflightResultV1):
+    schema_version: int = 2
+
+
+@dataclass(frozen=True)
+class RoutePreflightJobV3(RoutePreflightJobV1):
+    schema_version: int = 3
+    asset_hosts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RoutePreflightResultV3(RoutePreflightResultV1):
+    schema_version: int = 3
+    # Ephemeral anonymous discovery only. Never include signed targets in repr.
+    asset_url: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True)
+class RoutePreflightJobV4(RoutePreflightJobV3):
+    schema_version: int = 4
+
+
+@dataclass(frozen=True)
+class RoutePreflightResultV4(RoutePreflightResultV3):
+    schema_version: int = 4
+    asset_kind: str = ""
+
+
+def parse_route_preflight_job_v4(payload):
+    value = _object(payload, _JOB_FIELDS | {"asset_hosts"}, 4)
+    value["schema_version"] = 3
+    base = parse_route_preflight_job_v3(json.dumps(value))
+    return RoutePreflightJobV4(**{**base.__dict__, "schema_version": 4})
+
+
+def parse_route_preflight_result_v4(payload):
+    value = _object(payload, _RESULT_FIELDS | {"asset_url", "asset_kind"}, 4)
+    kind = value.pop("asset_kind")
+    if kind not in ("", "image", "public_json") or bool(kind) != bool(value["asset_url"]):
+        raise RoutePreflightError("invalid_asset_kind")
+    value["schema_version"] = 3
+    base = parse_route_preflight_result_v3(json.dumps(value))
+    return RoutePreflightResultV4(**{**base.__dict__, "schema_version": 4, "asset_kind": kind})
+
+
+def dynamic_asset_host(value):
+    if (not isinstance(value, str) or not value or len(value) > 1024
+            or not value.isascii() or any(ord(c) <= 32 or ord(c) == 127 for c in value)
+            or "\\" in value):
+        raise RoutePreflightError("invalid_asset_url")
+    try:
+        url = urlsplit(value)
+        host = _host(url.hostname)
+        if (url.scheme != "https" or url.username is not None
+                or url.password is not None or url.port not in (None, 443)
+                or url.fragment or url.hostname != host):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise RoutePreflightError("invalid_asset_url") from None
+    return host
+
+
+def parse_route_preflight_job_v3(payload):
+    value = _object(payload, _JOB_FIELDS | {"asset_hosts"}, 3)
+    hosts = value.pop("asset_hosts")
+    if not isinstance(hosts, list) or not 1 <= len(hosts) <= 4:
+        raise RoutePreflightError("invalid_asset_hosts")
+    hosts = tuple(_host(h) for h in hosts)
+    if len(set(hosts)) != len(hosts):
+        raise RoutePreflightError("invalid_asset_hosts")
+    value["schema_version"] = 2
+    base = parse_route_preflight_job_v2(json.dumps(value))
+    return RoutePreflightJobV3(**{**base.__dict__, "schema_version": 3,
+                                 "asset_hosts": hosts})
+
+
+def parse_route_preflight_result_v3(payload):
+    value = _object(payload, _RESULT_FIELDS | {"asset_url"}, 3)
+    asset_url = value.pop("asset_url")
+    if asset_url != "":
+        dynamic_asset_host(asset_url)
+    value["schema_version"] = 2
+    base = parse_route_preflight_result_v2(json.dumps(value))
+    if asset_url and base.outcome != "usable":
+        raise RoutePreflightError("invalid_asset_url")
+    return RoutePreflightResultV3(**{**base.__dict__, "schema_version": 3,
+                                    "asset_url": asset_url})
+
+
+@dataclass(frozen=True)
 class RoutePreflightDecision:
     accepted: bool
     reason: str
@@ -89,7 +186,7 @@ class RoutePreflightDecision:
     outcome: str
 
 
-def _object(payload, fields):
+def _object(payload, fields, version=SCHEMA_VERSION):
     if isinstance(payload, str):
         raw = payload.encode("utf-8")
     elif isinstance(payload, bytes):
@@ -106,7 +203,7 @@ def _object(payload, fields):
         raise RoutePreflightError("invalid_json") from error
     if not isinstance(value, dict) or frozenset(value) != fields:
         raise RoutePreflightError("invalid_shape")
-    if type(value["schema_version"]) is not int or value["schema_version"] != SCHEMA_VERSION:
+    if type(value["schema_version"]) is not int or value["schema_version"] != version:
         raise RoutePreflightError("unsupported_version")
     return value
 
@@ -140,8 +237,8 @@ def _host(value):
     return host
 
 
-def parse_route_preflight_job_v1(payload):
-    value = _object(payload, _JOB_FIELDS)
+def _parse_job(payload, version, max_deadline, job_type):
+    value = _object(payload, _JOB_FIELDS, version)
     capability = _capability(value["capability"])
     host = _host(value["host"])
     routes = value["candidate_routes"]
@@ -160,10 +257,12 @@ def parse_route_preflight_job_v1(payload):
     if (
         type(deadline) is not int
         or deadline <= issued_at
-        or deadline - issued_at > MAX_DEADLINE_MS
+        or deadline - issued_at > max_deadline
     ):
         raise RoutePreflightError("invalid_deadline")
-    return RoutePreflightJobV1(
+    if version == 2 and routes != ["owned_geph"]:
+        raise RoutePreflightError("invalid_candidate_routes")
+    return job_type(
         capability=capability,
         host=host,
         candidate_routes=tuple(routes),
@@ -172,8 +271,8 @@ def parse_route_preflight_job_v1(payload):
     )
 
 
-def parse_route_preflight_result_v1(payload):
-    value = _object(payload, _RESULT_FIELDS)
+def _parse_result(payload, version, result_type):
+    value = _object(payload, _RESULT_FIELDS, version)
     capability = _capability(value["capability"])
     host = _host(value["host"])
     route = value["candidate_route"]
@@ -185,7 +284,9 @@ def parse_route_preflight_result_v1(payload):
     observed_at = value["observed_at_unix_ms"]
     if type(observed_at) is not int or observed_at <= 0:
         raise RoutePreflightError("invalid_observed_at")
-    return RoutePreflightResultV1(
+    if version == 2 and route != "owned_geph":
+        raise RoutePreflightError("invalid_candidate_route")
+    return result_type(
         capability=capability,
         host=host,
         candidate_route=route,
@@ -203,6 +304,8 @@ def validate_route_preflight_result_v1(
         job.schema_version != result.schema_version
         or job.capability != result.capability
         or job.host != result.host
+        or (job.schema_version in (3, 4) and result.asset_url
+            and dynamic_asset_host(result.asset_url) not in job.asset_hosts)
     ):
         reason = REASON_BINDING_MISMATCH
     elif result.candidate_route not in job.candidate_routes:
@@ -220,3 +323,19 @@ def validate_route_preflight_result_v1(
         candidate_route=result.candidate_route,
         outcome=result.outcome,
     )
+
+
+def parse_route_preflight_job_v1(payload):
+    return _parse_job(payload, 1, MAX_DEADLINE_MS, RoutePreflightJobV1)
+
+
+def parse_route_preflight_job_v2(payload):
+    return _parse_job(payload, 2, BROWSER_COMPARE_MAX_DEADLINE_MS, RoutePreflightJobV2)
+
+
+def parse_route_preflight_result_v1(payload):
+    return _parse_result(payload, 1, RoutePreflightResultV1)
+
+
+def parse_route_preflight_result_v2(payload):
+    return _parse_result(payload, 2, RoutePreflightResultV2)
