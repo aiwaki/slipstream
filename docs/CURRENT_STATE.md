@@ -1,3 +1,27 @@
+# README publication checkpoint — 2026-10-13
+
+This documentation-only change starts from published main
+`2e5e6b4a72e734ddd6d4ea7cbc3d876cb08da47a` (PR #385). The Russian and English
+READMEs were reviewed with humanizer-ru and humanizer, then reorganized around
+the product, download, and installation. Preview limitations remain visible;
+routing/privacy details are folded. Platform plans and installation remain
+version-independent. No executable, policy, or workstation state changed.
+
+The Telegram update is now isolated in [PR #386](https://github.com/aiwaki/slipstream/pull/386),
+head `ab27a5333eb78f3f768c3889adc5316b3894d50a`. Its
+[CI 38423785527](https://github.com/aiwaki/slipstream/actions/runs/38423785527)
+passes product checks, packaging, Chromium contracts, and packaged-browser
+qualification. Lifecycle fails at `active-worker-uninstall:active` with
+`daemon status could not be removed`; this is not an app qualification pass.
+[Audit 38423785690](https://github.com/aiwaki/slipstream/actions/runs/38423785690)
+also fails the expired app policy and existing Geph dependency findings.
+
+Next action: investigate the exact PR #386 lifecycle failure, then continue the
+dependency/package release gates. The native-dependency review in PR #384
+remains separate. No new installer has been published.
+
+## Previous publication checkpoint (historical)
+
 # Publication checkpoint — 2026-10-13
 
 This documentation update is based on main
