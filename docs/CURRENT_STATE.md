@@ -1,5 +1,23 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- ISC packaging contract updated, 2026-10-13: the user declined the upstream
+  issue; do not send it or require an upstream answer before proceeding. Both
+  known ISC derivatives now require the exact standard license text alongside
+  their retained declarations/provenance and SOURCE-NOTICE. The template is
+  labelled as standard text, not a recovered package-specific copyright notice;
+  no author/year is invented. Output-only SOURCE3c2cf6d9 now passes the canonical
+  source/archive/lock verifier, with20 embedded files. Production SOURCE, lock,
+  policy and installed app remain unchanged.49 scoped tests PASS, including
+  causal RED for previously accepted license omission after hash rebinding;
+  independent8 actual-candidate negative cases and1 SPDX inventory test PASS.
+  Evidence: output/rsa-isc-contract-integration-20261013/receipt.json and
+  candidate-verification.json. No build, scan, account, release or installation.
+  Next implement source-owned advisory assessment with actual ancestor archive
+  verification and exact package partitioning; the existing audit correctly
+  refuses these three packages without registry identities. An old candidate
+  SPDX cannot qualify the new SOURCE. Native SQLite composition/applicability,
+  Chromium coverage and release qualification remain separate open work.
+
 - Fresh output-only candidate-v4 resolves14 more exact-v2 groups: SQLite2/PHP
   1887/1888, eight auxiliary shell/zipfile/expert/sqldiff findings and Session
   7104 are excluded from the built-in component; concat29087/3277 and lookaside

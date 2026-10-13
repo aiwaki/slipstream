@@ -37,6 +37,9 @@ MAX_CRATE_BYTES = 64 * 1024 * 1024
 MAX_CRATE_UNPACKED_BYTES = 128 * 1024 * 1024
 MAX_CRATE_ENTRIES = 4096
 REPOSITORY_MIT_SHA256 = "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15"
+# Standard template from https://opensource.org/license/isc, including literal
+# <YEAR>/<OWNER> placeholders; this is not a recovered upstream copyright notice.
+ISC_STANDARD_TEXT_SHA256 = "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee"
 # Deliberately not a general path-package or build-script extension point.
 EMBEDDED_PACKAGES = {
     "slipstream-vendor/mizaru-client": {
@@ -265,7 +268,7 @@ def _validate_embedded_packages(section: object) -> None:
             raise ValueError("embedded package descriptor digest mismatch")
         file_list = package["files"]
         mandatory = {"Cargo.toml"} | spec["sources"]
-        mandatory |= {"SOURCE-NOTICE.md", "provenance/Cargo.toml"} if spec["upstream"] else {"LICENSE"}
+        mandatory |= {"SOURCE-NOTICE.md", "provenance/Cargo.toml", "LICENSE-ISC.txt"} if spec["upstream"] else {"LICENSE"}
         if not isinstance(file_list, list) or len(file_list) != len(mandatory):
             raise ValueError("embedded package file set is incomplete or unreviewed")
         contents = {}
@@ -294,6 +297,8 @@ def _validate_embedded_packages(section: object) -> None:
         if not isinstance(provenance, dict):
             raise ValueError("embedded provenance must be an object")
         if spec["upstream"]:
+            if hashlib.sha256(contents["LICENSE-ISC.txt"].encode()).hexdigest() != ISC_STANDARD_TEXT_SHA256:
+                raise ValueError("embedded derivative must preserve the standard ISC license text")
             _require_exact_keys(provenance, {"kind", "name", "version", "url", "sha256",
                                              "original_files"}, "embedded derivative provenance")
             name, version = spec["upstream"]

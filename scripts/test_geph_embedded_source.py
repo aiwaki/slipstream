@@ -13,6 +13,10 @@ from unittest import mock
 import geph_vendor_source as source
 
 
+# Standard OSI template, not a recovered package-specific copyright notice.
+ISC_STANDARD_TEXT = (Path(__file__).parent / "fixtures/isc-standard-license.txt").read_text()
+
+
 def digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -89,6 +93,7 @@ class EmbeddedGephSourceTests(unittest.TestCase):
                 files["provenance/Cargo.toml"] = original
                 files["SOURCE-NOTICE.md"] = ("Synthetic fixture: the retained package declares ISC. "
                     "This is a source attribution/declaration, not a fabricated upstream copyright notice.\n")
+                files["LICENSE-ISC.txt"] = ISC_STANDARD_TEXT
                 provenance = {"kind": "derivative", "name": upstream[0], "version": upstream[1],
                               "url": f"https://static.crates.io/crates/{upstream[0]}/{upstream[0]}-{upstream[1]}.crate",
                               "sha256": digest(b"synthetic upstream archive"),
@@ -153,6 +158,58 @@ class EmbeddedGephSourceTests(unittest.TestCase):
                 self.save()
                 with self.assertRaises(ValueError):
                     source.load_source_contract(self.contract_path)
+
+    def test_contract_requires_each_isc_license_after_rebinding_hashes(self) -> None:
+        original = copy.deepcopy(self.contract)
+        # Removing both licenses also exercises the formerly accepted file set.
+        for indices in ((0, 2), (0,), (2,)):
+            with self.subTest(indices=indices):
+                self.contract = copy.deepcopy(original)
+                for index in indices:
+                    package = self.contract["embedded_packages"]["packages"][index]
+                    package["files"].remove(self.entry(package, "LICENSE-ISC.txt"))
+                    bind(package)
+                self.save()
+                with self.assertRaisesRegex(ValueError, "file set"):
+                    source.load_source_contract(self.contract_path)
+
+    def test_contract_rejects_changed_isc_license_after_rebinding_hashes(self) -> None:
+        original = copy.deepcopy(self.contract)
+        mutations = (
+            ISC_STANDARD_TEXT[:100],
+            ISC_STANDARD_TEXT.replace("with or without fee", "without fee"),
+            ISC_STANDARD_TEXT.replace("<YEAR> <OWNER>", "2026 Invented Copyright Holder"),
+        )
+        for index in (0, 2):
+            for payload in mutations:
+                with self.subTest(index=index, payload=payload[:100]):
+                    self.contract = copy.deepcopy(original)
+                    package = self.contract["embedded_packages"]["packages"][index]
+                    self.entry(package, "LICENSE-ISC.txt")["content"] = payload
+                    bind(package)
+                    self.save()
+                    with self.assertRaisesRegex(ValueError, "standard ISC license text"):
+                        source.load_source_contract(self.contract_path)
+
+    def test_contract_rejects_isc_license_path_substitution_and_mit_addition(self) -> None:
+        original = copy.deepcopy(self.contract)
+        for index in (0, 2):
+            for path in ("LICENSE", "provenance/LICENSE-ISC.txt", "../LICENSE-ISC.txt"):
+                with self.subTest(index=index, path=path):
+                    self.contract = copy.deepcopy(original)
+                    package = self.contract["embedded_packages"]["packages"][index]
+                    self.entry(package, "LICENSE-ISC.txt")["path"] = path
+                    bind(package)
+                    self.save()
+                    with self.assertRaisesRegex(ValueError, "file path"):
+                        source.load_source_contract(self.contract_path)
+        self.contract = copy.deepcopy(original)
+        package = self.contract["embedded_packages"]["packages"][1]
+        package["files"].append({"path": "LICENSE-ISC.txt", "content": ISC_STANDARD_TEXT})
+        bind(package)
+        self.save()
+        with self.assertRaisesRegex(ValueError, "file set"):
+            source.load_source_contract(self.contract_path)
 
     def test_contract_rejects_duplicate_missing_and_fourth_packages_or_files(self) -> None:
         original = copy.deepcopy(self.contract)

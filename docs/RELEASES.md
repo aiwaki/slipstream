@@ -138,6 +138,16 @@ still block a later app release.
 `tg-ws-proxy` remains covered by its separate vendored-source review rather
 than a Rust dependency graph.
 
+The prepared Geph source-owned packages keep their actual upstream license
+declarations and provenance. The two ISC derivatives include the standard ISC
+text and a notice explaining that no package-specific copyright notice was
+recovered from the retained upstream archives. The standard template is not
+presented as upstream attribution; no copyright name or year is invented. The
+source contract requires both exact license files, and SPDX inventories their
+bytes while retaining `NOASSERTION` for copyright and license conclusions.
+An upstream reply is not a release prerequisite. This packaging check does not
+clear source-owned advisory findings or replace the separate source assessment.
+
 An exception never changes an immutable Geph release in place. If a fix is
 lock-compatible, the reviewed lock digest and `release_revision` are bumped and
 a new `geph-vendor-X.Y.Z-rN` is built and attested after that change reaches

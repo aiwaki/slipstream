@@ -62,7 +62,7 @@ class SourceOwnedGephSbomTests(unittest.TestCase):
         self.assertEqual(document, self.document())
         self.assertEqual(self.verify(document)["package_count"], 6)
         self.assertEqual(self.verify(json.loads(json.dumps(document, sort_keys=True)))["package_count"], 6)
-        self.assertEqual(len(document["files"]), 18)
+        self.assertEqual(len(document["files"]), 20)
         owned = [p for p in document["packages"] if p["SPDXID"].startswith("SPDXRef-Package-source-")]
         self.assertEqual(len(owned), 3)
         for package in owned:
@@ -71,6 +71,7 @@ class SourceOwnedGephSbomTests(unittest.TestCase):
             self.assertNotIn("checksums", package)
             self.assertEqual(package["downloadLocation"], "NOASSERTION")
             self.assertEqual(package["licenseConcluded"], "NOASSERTION")
+            self.assertEqual(package["copyrightText"], "NOASSERTION")
             info = json.loads(package["sourceInfo"])
             self.assertEqual(info["descriptor_sha256"], descriptor["sha256"])
             self.assertEqual(info["source_sha256"], self.source_hash)
@@ -79,6 +80,36 @@ class SourceOwnedGephSbomTests(unittest.TestCase):
         for file in document["files"]:
             payload = (self.root / file["fileName"]).read_bytes()
             self.assertEqual(file["checksums"][1]["checksumValue"], hashlib.sha256(payload).hexdigest())
+
+    def test_isc_standard_text_is_inventoried_and_tampering_fails_closed(self):
+        document = self.document()
+        license_files = [file for file in document["files"] if file["fileName"].endswith("/LICENSE-ISC.txt")]
+        self.assertEqual({file["fileName"] for file in license_files}, {
+            "./slipstream-vendor/mizaru-client/LICENSE-ISC.txt",
+            "./slipstream-vendor/geph5-broker-protocol/LICENSE-ISC.txt",
+        })
+        for file in license_files:
+            with self.subTest(path=file["fileName"]):
+                path = self.root / file["fileName"]
+                original = path.read_bytes()
+                self.assertEqual(original, embedded_fixture.ISC_STANDARD_TEXT.encode())
+                for payload in (None, original.replace(b"<OWNER>", b"Invented Owner")):
+                    if payload is None:
+                        path.unlink()
+                    else:
+                        path.write_bytes(payload)
+                    with self.assertRaises(ValueError):
+                        self.collect()
+                    path.write_bytes(original)
+                missing = copy.deepcopy(document)
+                missing["files"] = [entry for entry in missing["files"] if entry["SPDXID"] != file["SPDXID"]]
+                with self.assertRaises(ValueError):
+                    self.verify(missing)
+                changed = copy.deepcopy(document)
+                entry = next(entry for entry in changed["files"] if entry["SPDXID"] == file["SPDXID"])
+                entry["checksums"][1]["checksumValue"] = hashlib.sha256(b"changed license").hexdigest()
+                with self.assertRaises(ValueError):
+                    self.verify(changed)
 
     def test_materialized_root_is_required_and_symlinks_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "explicit"):
