@@ -42,6 +42,19 @@ file.
 
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- Dedicated c0e67587d records actual v2 attempt3 PASS11:53:13 UTC; PID81015/exec30920 terminal.
+  Both architectures, jobs1,653s, peak1058.19MiB, OS network denied. Preserved
+  56-file proof completion674afe7e under dedicated output/native-producer/
+  real-inputs/attempt3-v2/. SOURCEc173f2be/helper24c1c042; final960f4039,
+  native receipt a6f0f07b. Actual new pack CLI/bundle/SPDX435-package path PASS,
+  wrong binary/truncated archive reject (postbuild a877510c). Bundle CLI31 tests
+  PASS after independent standalone-import regression fix with causal RED.
+  Fresh proof peer and three-CVE v2 binding reviews PASS; parent203+256
+  hashes match (a8a55093/bcd2c732). No install/runtime claim. Scoped v1 Session/SQLar review parent verifies77+159 bindings; census
+  unchanged, native audit remains open. Exact eb91 CI product/checks and Chromium
+  PASS; package still404unpublished0.4.3-r1, dependency audit2 blocking/2
+  informational plus expired app policy. Next: conditional pipeline/
+  native-advisory integration; do not repeat successful builds.
 - Dedicated eb91da9dd adds inactive native descriptor v2 with an independently
   reviewed producer-helper pin and frozen SOURCE snapshot. Producer rejects
   wrong pins before output/compiler and after-import helper replacement on
@@ -52,9 +65,9 @@ expose historical vendor-evidence and candidate-release packaging gates.
   static review complete. Actual old v1 build peer PASS;1291/1294 current
   peer/census bindings match, three edited source hashes match historical86b2
   exactly (source-resolution08945643). Census enumeration complete,81 exact
-  source unknowns and binary applicability still open. No fresh actual v2
-  build, SOURCE/workflow activation or install. Next: fresh v2 proof, conditional
-  pipeline integration and native advisory evaluation; do not rerun old v1.
+  source unknowns remain in the immutable census; fresh actual v2 proof and
+  scoped applicability progress are recorded above. SOURCE/workflow activation
+  and installation remain open; do not rerun old v1.
 - Dedicated86b2e266c actual native production build PASS for ARM+Intel;
   attempt2 finished10:13:04 UTC. PID64493/exec62244 are terminal; do not poll.
   Final universal40,061,456bytes SHA c3c640c3, native-release b1ef8f1f;109-file
