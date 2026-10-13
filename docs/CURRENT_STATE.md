@@ -10,8 +10,19 @@ file.
 
 ## Current Checkpoint
 
-2026-10-12 continuation: DNS/TG/runtime baseline qualified; latest audit changes
+2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- TG1.11.2 source57aca7e9 pushed to PR376. Exact CI38205590782 is terminal:
+  product/checks, Chromium contract and Windows adapter PASS; standalone
+  Windows38205590844 both targets PASS. Packaging still rejects historical
+  Geph0.3.9-r5's missing scanned-package identity evidence; lifecycle aggregate
+  fails and dependent qualification is skipped. Dependency38205590781 retains
+  10 blocking/3 informational Geph findings across484 registry packages.
+  Evidence: output/tg-ws-proxy-1112/ci/summary.json (01767be1). The retained
+  product log ends before its final summary; terminal API step statuses prove
+  job success, not an invented complete-log test count. No install occurred.
+  Dedicated native source/SBOM and static-build helpers are now being integrated
+  on PR384's checkout; production SOURCE/lock/workflow activation remains open.
 - tg-ws-proxy1.11.2 imported from official307a384a (Oct11 release), preserving
   local lifecycle/ownership fixes. Archive db9048b5 and all15 upstream module
   hashes verified. Existing62, new21, upstream11+30subtests and2 replay cases
@@ -366,10 +377,11 @@ expose historical vendor-evidence and candidate-release packaging gates.
 - Read-only local check found no system/dev.slipstream.tproxy service or app at
   /Applications/Slipstream.app and ~/Applications/Slipstream.app. This is not
   whole-disk absence. Preserved backups were not restored; no install/restart.
-- Correct-project graph unavailable (project not found); bounded direct searches
-  used. Reuse exact188323a8 functional/E2E CI; no unchanged broad rerun is needed.
-- NEXT publish the qualified TG1.11.2 delta and inspect exact-head CI; then
-  exact native SQLite SOURCE/build/SBOM integration and Intel qualification,
+- Correct root project now appears in graph inventory; the dedicated Geph
+  worktree has no matching index. Bounded direct searches are used there rather
+  than substituting the root or historical alias. Reuse exact188323a8 only for
+  unchanged runtime/E2E, with57aca7e9's scoped/CI proof for the Telegram delta.
+- NEXT exact native SQLite SOURCE/build/SBOM integration and Intel qualification,
   source-owned production advisory/notice and complete Chromium coverage.
   New Linux audit evidence is qualified; macOS release evidence remains separate. A new
   qualified vendor artifact is required: historical count-only evidence cannot
