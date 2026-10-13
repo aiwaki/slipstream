@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 
@@ -27,6 +27,8 @@ DEFAULT_POLICY = (
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 MAX_SCANNER_BYTES = 128 * 1024 * 1024
+MAX_OSV_EVIDENCE_BYTES = 64 * 1024 * 1024
+OSV_SCAN_TIMEOUT_SECONDS = 300
 VENDORED_TRANSITIVE_COVERAGE = ("top-level-only", "full")
 INTEGRITY_ONLY_FIELDS = {
     "expires",
@@ -611,7 +613,7 @@ def build_audit_report(
     return report
 
 
-def write_json_atomic(path: Path, data: dict) -> None:
+def write_json_atomic(path: Path, data: dict, *, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", dir=path.parent
@@ -623,10 +625,157 @@ def write_json_atomic(path: Path, data: dict) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary, 0o644)
+        os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _snapshot_audit_input(source: Path, destination: Path, limit: int) -> dict:
+    """Copy once; the scanner and evaluator must consume these same bytes."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | os.O_NONBLOCK
+    descriptor = os.open(source, flags)
+    digest = hashlib.sha256()
+    size = 0
+    created = False
+    try:
+        with os.fdopen(descriptor, "rb") as incoming:
+            if not stat.S_ISREG(os.fstat(incoming.fileno()).st_mode):
+                raise ValueError("audit input must be a regular file")
+            with destination.open("xb") as outgoing:
+                created = True
+                os.chmod(destination, 0o600)
+                for block in iter(lambda: incoming.read(1024 * 1024), b""):
+                    size += len(block)
+                    if size > limit:
+                        raise ValueError("audit input exceeds the evidence size limit")
+                    outgoing.write(block)
+                    digest.update(block)
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+        os.chmod(destination, 0o400)
+    except Exception:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
+    return {"path": destination.name, "sha256": digest.hexdigest(), "size_bytes": size}
+
+
+def _retain_osv_output(source: Path, destination: Path) -> dict:
+    """Preserve exact bytes, including invalid/partial output, within a bound."""
+    try:
+        metadata = source.lstat()
+    except FileNotFoundError:
+        return {"state": "missing"}
+    if not stat.S_ISREG(metadata.st_mode):
+        return {"state": "invalid_file"}
+    size = metadata.st_size
+    if size > MAX_OSV_EVIDENCE_BYTES:
+        return {"state": "oversized", "size_bytes": size}
+    retained = _snapshot_audit_input(source, destination, MAX_OSV_EVIDENCE_BYTES)
+    destination.chmod(0o600)
+    return retained | {"state": "partial"}
+
+
+def scan_with_evidence(args: argparse.Namespace) -> int:
+    """Retain diagnostic evidence without changing audit policy or report schema."""
+    evidence = args.evidence_dir.absolute()
+    receipt: dict = {
+        "schema_version": 1,
+        "generator": "slipstream-dependency-audit-evidence-1",
+        "status": "started", "stage": "prepare",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "evaluator_sha256": hash_file(Path(__file__)),
+        "source": {"commit": args.source_commit, "target": args.target},
+        "evaluation_date": args.evaluation_date.isoformat(),
+        "platform": args.platform,
+        "vendored_transitive_dependencies": args.vendored_transitive_dependencies,
+        "inputs": {}, "scan": {"state": "not_started"},
+    }
+    created = False
+    try:
+        if args.output.resolve().is_relative_to(evidence.resolve()):
+            raise ValueError("audit report must be outside the evidence directory")
+        evidence.mkdir(mode=0o700, parents=True, exist_ok=False)
+        created = True
+        os.chmod(evidence, 0o700)
+        write_json_atomic(evidence / "receipt.json", receipt, mode=0o600)
+        sbom = evidence / "input.spdx.json"
+        policy_path = evidence / "policy.json"
+        receipt["inputs"]["sbom"] = _snapshot_audit_input(args.sbom, sbom, 16 * 1024 * 1024)
+        receipt["inputs"]["policy"] = _snapshot_audit_input(args.policy, policy_path, 1024 * 1024)
+        policy = load_policy(policy_path)
+        receipt["stage"] = "scanner_verification"
+        write_json_atomic(evidence / "receipt.json", receipt, mode=0o600)
+        # Do not retain a large executable in an uploadable evidence directory.
+        # Verify and execute the owned copy, never the mutable caller path.
+        with tempfile.TemporaryDirectory(prefix="slipstream-audit-scanner-") as temporary:
+            scanner_path = Path(temporary) / "osv-scanner"
+            raw_path = Path(temporary) / "osv.json"
+            _snapshot_audit_input(args.scanner, scanner_path, MAX_SCANNER_BYTES)
+            scanner_path.chmod(0o700)
+            receipt["scanner"] = verify_scanner(
+                scanner_path=scanner_path, policy=policy, platform=args.platform,
+            )
+            receipt["stage"] = "scan"
+            receipt["scan"] = {"state": "running"}
+            write_json_atomic(evidence / "receipt.json", receipt, mode=0o600)
+            try:
+                completed = subprocess.run(
+                    (str(scanner_path), "scan", "source", "--format", "json",
+                     "--all-packages", "-L", sbom.name, "--output-file", str(raw_path)),
+                    cwd=evidence, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=False, shell=False, timeout=OSV_SCAN_TIMEOUT_SECONDS,
+                )
+                receipt["scan"] = {"state": "completed", "exit_code": completed.returncode}
+            except subprocess.TimeoutExpired:
+                receipt["scan"] = {"state": "timeout"}
+                raise
+            finally:
+                # Scanner-owned output stays outside the upload tree until it
+                # is proven to be a bounded regular file, never a link/FIFO/dir.
+                receipt["raw"] = _retain_osv_output(raw_path, evidence / "osv.json")
+                write_json_atomic(evidence / "receipt.json", receipt, mode=0o600)
+        if completed.returncode not in {0, 1}:
+            raise RuntimeError("dependency scanner failed")
+        receipt["stage"] = "parse"
+        if receipt["raw"]["state"] != "partial":
+            raise ValueError("dependency scanner did not produce bounded regular output")
+        try:
+            osv_result = _read_json_object(evidence / "osv.json", "OSV scanner result")
+        except (ValueError, UnicodeError):
+            receipt["raw"]["state"] = "invalid"
+            raise
+        receipt["raw"]["state"] = "complete"
+        receipt["stage"] = "audit"
+        for name, path in (("sbom", sbom), ("policy", policy_path)):
+            if hash_file(path) != receipt["inputs"][name]["sha256"]:
+                raise ValueError("audit input snapshot changed during scanning")
+        report = build_audit_report(
+            osv_result=osv_result, policy=policy, policy_path=policy_path,
+            sbom_path=sbom, scanner=receipt["scanner"], source_commit=args.source_commit,
+            target=args.target, evaluated_on=args.evaluation_date,
+            vendored_transitive_dependencies=args.vendored_transitive_dependencies,
+        )
+        receipt["stage"] = "report"
+        write_json_atomic(args.output, report)
+        receipt["report"] = {"sha256": hash_file(args.output), "status": report["status"]}
+        receipt["status"] = report["status"]
+        receipt["stage"] = "complete"
+        result = report["summary"] | {"status": report["status"]}
+        exit_code = 0 if report["status"] == "pass" else 1
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        receipt["status"] = "error"
+        receipt["error_type"] = type(exc).__name__
+        # Paths, environment values and arbitrary scanner diagnostics do not
+        # belong in uploadable evidence (or the structured console summary).
+        result = {"status": "error", "stage": receipt["stage"], "error_type": type(exc).__name__}
+        exit_code = 1
+    if created:
+        receipt["finished_at"] = datetime.now(timezone.utc).isoformat()
+        write_json_atomic(evidence / "receipt.json", receipt, mode=0o600)
+    print(json.dumps(result, sort_keys=True))
+    return exit_code
 
 
 def _sbom_package_count(path: Path) -> int:
@@ -854,6 +1003,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     scan.add_argument("--evaluation-date", required=True, type=date.fromisoformat)
     scan.add_argument("--output", required=True, type=Path)
     scan.add_argument(
+        "--evidence-dir", type=Path,
+        help="Fresh private directory for exact scan inputs, raw OSV output and receipt; separate from --output",
+    )
+    scan.add_argument(
         "--vendored-transitive-dependencies",
         choices=VENDORED_TRANSITIVE_COVERAGE,
         default="top-level-only",
@@ -882,6 +1035,8 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output,
         )
     elif args.command == "scan":
+        if args.evidence_dir is not None:
+            return scan_with_evidence(args)
         policy = load_policy(args.policy)
         scanner = verify_scanner(
             scanner_path=args.scanner,

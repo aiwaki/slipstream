@@ -27,16 +27,26 @@ main `a24fd398c` was merged; its intervening changes are documentation only.
   CI retains the existing lifecycle stdout/stderr as one artifact even on failure;
   pipefail still preserves the smoke failure. Thirty focused CI/config tests
   and 27 subtests passed. Evidence: `output/uninstall-recovery/`.
-- This is a bounded prerequisite repair, not a claim that CI's opaque failure
-  has been fully explained. The old log lacks a component/error classification;
-  the next exact-head packaged lifecycle run must confirm the repaired behavior.
+- CI 38430845049 passed on exact head `d0d4007`: product checks, package build,
+  Chromium contracts, packaged-browser qualification and packaged lifecycle.
+  The small lifecycle artifact confirms active-worker and original-capture
+  cleanup, absent installed state, clean uninstall, preserved sentinel connection
+  and state, and unchanged global PF. Reuse this unchanged runtime baseline.
+  The old generic failure log still cannot establish its precise failed component.
   Routing, Geph, Chromium versions, dependency policies, and the installer
   transaction order/budgets are unchanged. No workstation app/service was changed.
-- Audit 38423785690 separately failed the expired app policy and existing Geph
-  findings. Keep these release gates enforced; no new installer is published.
+- Audit 38430844955 separately failed the expired app policy and existing Geph
+  findings. App evaluation stops before producing its report and the old workflow
+  does not retain raw scan evidence on failure. The bounded repair now retains
+  exact app-audit inputs and scanner output without changing policy or expiry.
+  Artifact upload allows only four fixed evidence filenames; scanner stdout/stderr
+  and the executable are excluded. Thirty-five focused tests and 15 subtests pass,
+  including exact expired-policy rejection with raw retention and no new report.
+  Independent source review, eight documentation tests and continuity checks pass.
+  Keep all release gates enforced; no new installer is published.
 
-Next: push the focused repair, inspect exact-head required CI and lifecycle
-artifacts, then continue the actual dependency/package release blockers.
+Next: qualify and publish the app-audit evidence-retention repair, inspect its
+exact-head audit artifact, then address the actual dependency release blockers.
 
 ## Previous README publication checkpoint (historical)
 
