@@ -59,8 +59,23 @@ main `a24fd398c` was merged; its intervening changes are documentation only.
   The green d0d4007 lifecycle remains runtime evidence, not qualification of this
   stricter audit/package contract. No workstation app or dependency policy changed.
 
-Next: qualify and publish the app-audit evidence-retention repair, inspect its
-exact-head audit artifact, then address the actual dependency release blockers.
+Audit38435691158 on e61aad3 retained the intended four files; thirteen receipt,
+input/source/evaluator checks pass. The raw368-package inventory matches SPDX
+and exposes five blocking quinn-proto0.11.16 findings behind the policy error.
+CI38435691159 passes product/checks/Windows/Chromium; packaging now rejects the
+known immutable Geph report without scanned package identities.
+
+The next lock repair changes only quinn-proto version/checksum to0.11.18; all
+other547 packages and dependency edges remain unchanged. The verified registry
+archive matches the new checksum. Locked offline target metadata and five SBOM
+tests pass; the real SBOM helper emits the new coordinate. All five retained
+advisory affected ranges exclude0.11.18. This is not a fresh vulnerability scan
+or runtime qualification. Cargo metadata/SBOM includes this optional reqwest
+HTTP/3 chain, while the current cargo tree does not activate it; no active app
+runtime vulnerability is asserted from its SBOM presence alone.
+
+Next: publish the bounded lock repair and inspect fresh exact-head audit evidence.
+Chromium coverage and authentic Geph package evidence remain separate blockers.
 
 ## Previous README publication checkpoint (historical)
 
