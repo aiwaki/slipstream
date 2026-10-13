@@ -1,5 +1,33 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Fresh output-only candidate-v4 resolves14 more exact-v2 groups: SQLite2/PHP
+  1887/1888, eight auxiliary shell/zipfile/expert/sqldiff findings and Session
+  7104 are excluded from the built-in component; concat29087/3277 and lookaside
+  29088 have independently reviewed source fixes. Dynamic extension loading
+  support exists; arbitrary later-loaded code is outside these exclusions.
+  Positive source/preprocessing controls and both target compile/link bindings
+  support component absence; version ranges or missing symbols alone do not.
+  Session peer's comment-aware parser removes one prologue-comment directive
+  from the author's raw stack; all five real owners remain inside the Session
+  guard, corroborated by actual/positive preprocessing. No source-fix claim there.
+  Four author reviews and separate semantic peers PASS; parent608 byte bindings
+  verified. Original301 groups/503 aliases/92 native/209 exclusions, all identity
+  conflicts, source/binary binding and cutoff/expiry remain unchanged. Native
+  result31 adjudicated/61 unknown/0 census-only, overallFAIL with2 RSA blockers.
+  Retained real434-registry OSV response/projection/findings reused offline;
+  no rescan, compiler, client/runtime or install. Guard1.066s/331.75MiB,1process;
+  receipt45ab5468 in output/sqlite-native-integration/native-audit-candidate-v4-20261013/.
+  Independent integration review8e83a6f0 PASS:198 inputs/183 outputs and174
+  catalogue files rehashed, exactly14 changes, wrapper retained in registry scan.
+  Docs8/continuity PASS; unchanged830-test full baseline reused. This docs-only
+  checkpoint is local/unpushed; PR384 remains ebdf6b8bd to avoid another
+  unchanged CI cycle. Push it with the next substantive branch update.
+  Author evidence remains private; production SOURCE/lock/policy inactive.
+  Exactdocs-only ebdf6b8bd CI38414401897 terminal: product/checks/Windows/
+  Chromium PASS; package release lookup404, lifecycle downstream failure.
+  Dependency38414402007 expired app policy andGeph2blocking/2informational/
+  423packages,0exceptions. Terminal receipts/logs in ci/ebdf6b8bd/; no rerun.
+
 - Native advisory coverage is now implemented in scan/verify and conditional
   producer/consumer workflows; production policy/SOURCE remain unchanged/inactive.
   The native verifier binds exact source, linked proof, complete census aliases
@@ -57,8 +85,8 @@
   blocking/2 informational/423 scanned. Final JSON/failed/product logs retained
   with -final suffix in output/sqlite-native-integration/ci/520bea685/; earlier
   snapshots unchanged. No CI rerun or successful large Geph build repeated.
-- Next: review remaining75 native source-applicability unknowns, beginning with
-  the SQLite2/PHP and fork-specific product-identity rows; preserve the census
+- Next: review remaining61 native source-applicability unknowns, beginning with
+  fork-specific product-identity rows; preserve the census
   while resolving only exact reviewed groups. Native policy adoption/source
   activation, actual native CI libtest, RSA/app-audit, release/installed/browser
   gates remain open.
