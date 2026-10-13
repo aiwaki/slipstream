@@ -1,5 +1,29 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Exact012da0fc1 CI38374565990 is terminal: product/checks and Chromium PASS,
+  including the Xcode15 metadata/linker fixture. Package stops at HTTP404 for
+  unpublished Geph0.4.3-r1. Evidence: output/sqlite-native-integration/ci/012da0fc1/.
+  Inactive offline producer, deterministic full-proof bundle and conditional
+  consumer are implemented and under independent review. Review reproduced
+  destructive cleanup and mixed SPDX/SOURCE snapshots; fixes pass21 bundle
+  and32 consumer cases under OS network denial. Real two-target production
+  build qualification is next; synthetic fixtures are not release or installed
+  evidence. SOURCE/lock/workflow remain unchanged and no install occurred.
+- Producer/transport/consumer review is complete: 30 producer, 21 bundle,
+  32 consumer and 8 documentation cases PASS. Separate peer replays cover
+  process cancellation, partial second target, four snapshot/extraction races,
+  happy native binding and the explicit build-jobs control. The real offline
+  production-feature build started at 09:43:56 UTC, producer PID 60479;
+  do not start another copy. State/argv/env/input hashes are in
+  output/native-producer/real-inputs/{build-status,build-command,preparation-manifest}.json.
+  Output is /private/tmp/slipstream-native-production-788x15x3/build; persistent
+  outer logs are beside build-status.json. Reviewed SOURCE8b59fe86 is output-only:
+  13 existing edits plus sqlite-unbundled, no qualification-only Rust tests.
+  Both real metadata closures and 436 registry archive checksums are verified;
+  build runs with OS network/private-read denial and --jobs2 on this 8GiB Mac.
+  Native helper ce2a52ce and producer ef7fe741 are frozen during the build.
+  Actual compiled targets, transport/SBOM replay, conditional workflow wiring,
+  native advisory coverage and producer/helper compatibility remain open.
 - Exact2297aaaaf CI38371930625 reduced the657-test metadata failure to one
   captured Xcode15.4/ld1053 row: the exact archive path is followed by `[5]`
   before `(sqlite3.o)`. The parser now accepts that observed numeric annotation

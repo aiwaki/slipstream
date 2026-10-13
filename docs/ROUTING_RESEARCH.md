@@ -20,6 +20,9 @@ verify the actual native library instead of inferring it from Cargo features.
 | Native archive | `geph_native_sqlite_build.build_native` / `verify_native_build` | Fresh per-target compiler output, explicit tool identities/arguments/environment, exact owned object inside the static archive. This proves only the native archive. |
 | Linked target | `seal_linked_target` / `verify_linked_target` | Resolved unbundled features, actual sys build directives, Rust rlib metadata/codegen members and byte-identical SQLite object, linker-map identity symbols matching the Mach-O global symbols, exact version/source ID bytes, no dynamic SQLite import. |
 | Final universal | `verify_release_evidence` | Both target receipts and byte-identical corresponding slices in the actual final universal artifact. One target, an archive-only receipt, rehashed changed slices and post-proof strip/sign mutations reject. |
+| Offline producer | `build_geph_native_release.py` | Fresh reviewed source and private build directories, explicit tools, locked/offline Cargo metadata and package-matched compiler messages. Compile both production-feature targets, seal each linked artifact, then verify unchanged lipo output. Never execute Geph or account-backed tests. |
+| Evidence transport | `geph_native_sqlite_bundle.py` | Canonical regular-file USTAR with the complete referenced proof, exact inventory and independent downloaded-binary comparison. Reused/nonempty replacement destinations reject; failure retains unverified output and never deletes a caller pathname. |
+| Release consumer | `verify_geph_release.py` | Reviewed SOURCE selects the exact legacy or native asset set. Native evidence is an additional checksum/provenance subject. Parsed SPDX/SOURCE snapshots must match the bytes hashed for provenance; mixed snapshots reject. |
 | Native inventory | `make_geph_vendor_sbom.py` | Separate SQLite source package/files and static-link relationship, raw SOURCE and final-binary/receipt hashes. Keep `libsqlite3-sys` as its genuine Cargo registry component. Generation and verification require the final universal evidence. |
 | Advisory coverage | `dependency_audit.py` | Exact scanner package identities and original result binding. Source-owned/native packages cannot inherit the Rust wrapper's coverage or invented registry coordinates. Separate reviewed native applicability remains required. |
 
@@ -42,6 +45,19 @@ license and workflow are unchanged. Next integrate the producer and release
 consumer, qualify both actual target artifacts and final bytes, and finish
 native/source-owned advisory coverage; do not publish or install from fixture
 results. Existing unchanged Geph runtime tests remain reusable.
+
+The inactive producer/transport/consumer integration additionally has focused
+success and failure tests. Independent review reproduced destructive cleanup of
+a replaced directory, acceptance of a nonempty replacement directory, and mixed
+SPDX/provenance snapshots; parent review found the equivalent SOURCE-snapshot
+gap. The corrected consumer passes 32 cases and transport passes 21 under OS
+network denial. Five independent replays cover the four failures and successful
+9-asset/binary binding. Evidence is retained in `bundle-transport-v3/` and
+`independent-consumer-review/` beneath the private integration output directory.
+These fixtures use synthetic universal binaries; they do not prove a Geph build.
+The caller must control the output parent, and same-user writers can still
+change files after return. Automatic deletion on failure is intentionally absent.
+Real target builds, workflow integration and native advisory coverage remain open.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
