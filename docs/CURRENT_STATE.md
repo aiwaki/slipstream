@@ -42,28 +42,35 @@ file.
 
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
-- Dedicated520bea685 implements separate native SQLite advisory scan/verify and
-  conditional producer/consumer wiring, leaving production policy/SOURCE inactive.
-  Exact registry/native SPDXID partitions, original+scanner-projection hashes,
-  independently verified native linkage and complete census/alias coverage.
-  Actual v2 proof435 packages =434 registry+1 native;301 groups/92 native/
-  209 exclusions,6 adjudicated and86 unresolved (75 unknown+11 census-only),
-  expected FAIL. No actual434-package OSV scan yet; research candidate stays
-  private/output-only and must be made publishable before policy adoption.
-  Helper20 tests PASS; bridge49 focused baseline+11 checks after causal fix PASS;
-  workflow4 tests/28 shell scenarios, YAML+7 syntax checks and dedicated docs8 PASS.
-  Fixed Bash3 empty-array/nounset regression and native receipt snapshot outside
-  proof-root. Real tiny-proof tests reach inert scanner and reject receipt
-  mutation; independent peer0a5b1d7f has no open findings. Parent187 retained
-  bindings verify, including historical cb815 source snapshot. Evidence in
-  dedicated output/sqlite-native-integration/native-{advisory-validator,
-  audit-candidate,audit-bridge,audit-workflow,audit-bridge-review}/.
-  Exact5b3 CI38403655112 product/checks/Windows/Chromium PASS; package still404
-  unpublished0.4.3-r1. Dependency38403655193 expired app policy andGeph2blocking/
-  2informational/423packages. Logs retained; no broad rerun/build/install.
-  Next: actual pinned scanner on434 registry projection, remaining native source
-  applicability reviews; source activation, native CI runtime, release/installed
-  browser qualification remain open. New520bea685 CI pending.
+- Dedicatedebdf6b8bd records real pinned OSV2.3.8 qualification of520bea685:
+  435 SPDX packages =434 registry+1 native, wrapper retained; complete90368-byte
+  OSV response.2 RSA findings block on expired exceptions,2 unmaintained notices,
+  0 accepted exceptions. Candidate-v2's86 unresolved native groups correctly
+  produce FAIL; release verification refuses it. Guard6.48s/344.3MiB; receipt
+  483784f6, parent64 bindings and independentcb25f7b2 review PASS. This launches
+  no Geph client and provides no installed/browser qualification. Evidence:
+  dedicated output/sqlite-native-integration/native-actual-scan-20261013/.
+  Fresh output-only candidate-v3 resolves11 census-only decisions:9 rejected
+  identities+2 exact-source fixes (11822/11824 loader and separate LeafSeek
+  guard).301groups/503aliases/92native/209exclusions unchanged;17adjudicated,
+  75unknown,0census-only, overallFAIL. Duplicate52099 does not clear29088.
+  Peer corrected51302 dateUpdated/rejection wording in new rejected overlay-v2;
+  originals retained. Real registry scan/projection/findings reused unchanged
+  offline, not rescanned:0.944s/329.03MiB, receipt0b9d2dd0; parent381 review/
+  integration bindings plus21 final peer bindings PASS. Independent source-fixed
+  b36ce1569 and integration b5e6310c reviews have no findings;91 evidence files
+  and exactly11 changed groups verified. Dedicated docs8/continuity PASS.
+  Candidate remains private/unadopted; evidence needs privacy review before
+  production publication. No SOURCE/policy activation, Geph build or install.
+  Exact520 CI38409376434 terminal: product/checks/Windows/Chromium PASS;
+  metadata830/68.458s is the reusable full baseline. Package first release-tag
+  lookup404unpublished0.4.3-r1, lifecycle downstream failure. Dependency
+  38409376242 expired app policy andGeph2blocking/2informational/423packages;
+  final logs/JSON retained in dedicated ci/520bea685/ with -final suffix.
+  Next: review75 native applicability unknowns, beginning with SQLite2/PHP and
+  fork-specific identity rows. Native CI runtime, RSA/app audit,
+  release/installed/browser gates remain open. New docs-only ebdf6b8bd CI pending;
+  preserve reusable520 product/830-test baseline and do not repeat large builds.
 - Dedicated5b3f0ede6 integrates conditional native producer and host synthetic
   compile path; SOURCE/lock/helper pins unchanged/inactive. Fresh full-lock
   fetch -> sealed cache -> OS-denied offline fetch/producer/jobs1 -> runtime
