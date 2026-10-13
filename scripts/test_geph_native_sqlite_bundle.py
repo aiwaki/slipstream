@@ -4,10 +4,16 @@ No production Geph build, account, network or installed-app claim is made.
 """
 from __future__ import annotations
 
+import copy
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tarfile
+import tempfile
 import unittest
 from unittest import mock
 
@@ -342,6 +348,177 @@ class NativeBundleTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "unexpected"):
                         self.unpack()
                 self.assert_retained()
+
+
+class NativeBundleStandaloneTests(unittest.TestCase):
+    def test_import_and_help_need_only_original_three_modules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for module in (native, build, bundle):
+                original = Path(module.__file__)
+                (root / original.name).write_bytes(original.read_bytes())
+            entrypoints = {
+                "import": "import geph_native_sqlite_bundle as bundle; assert callable(bundle.pack_bundle); assert callable(bundle.unpack_bundle)",
+                "--help": "import runpy; sys.argv = ['geph_native_sqlite_bundle.py', '--help']; runpy.run_module('geph_native_sqlite_bundle', run_name='__main__')",
+            }
+            for name, entrypoint in entrypoints.items():
+                with self.subTest(entrypoint=name):
+                    code = "import sys; sys.path.insert(0, sys.argv[1]); " + entrypoint
+                    result = subprocess.run([sys.executable, "-I", "-c", code, str(root)],
+                                            cwd=root, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, "")
+                    if name == "--help":
+                        self.assertIn("pack", result.stdout)
+                    else:
+                        self.assertEqual(result.stdout, "")
+
+
+class NativeBundleCliTests(unittest.TestCase):
+    def setUp(self):
+        wrapper = native.WRAPPER
+        self.lock_bytes = (f'version = 3\n\n[[package]]\nname = "{wrapper["name"]}"\n'
+                           f'version = "{wrapper["version"]}"\n'
+                           'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+                           f'checksum = "{wrapper["sha256"]}"\n').encode()
+        self.descriptor = fixture.descriptor() | {
+            "schema_version": 2, "producer_helper_sha256": build.sha(Path(build.__file__).read_bytes()),
+        }
+        self.source = {"schema_version": 1,
+                       "crate": {"name": "geph5-client", "version": "0.4.3",
+                                 "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.4.3.crate",
+                                 "sha256": "e" * 64},
+                       "features": ["aws_lambda"], "targets": native.TARGETS.copy(),
+                       "lock_sha256": build.sha(self.lock_bytes), "release_revision": 1,
+                       "native_sqlite": self.descriptor}
+        self.source_bytes = (json.dumps(self.source, sort_keys=True) + "\n").encode()
+        self.source_sha = build.sha(self.source_bytes)
+        self.case = fixture.NativeBuildEvidenceTests()
+        self.addCleanup(self.case.doCleanups)
+        # Configure only the synthetic evidence factory, never the verifiers.
+        with mock.patch.multiple(fixture, SOURCE_SHA=self.source_sha, LOCK=self.lock_bytes,
+                                 LOCK_SHA=self.source["lock_sha256"]), \
+                mock.patch.object(fixture, "descriptor", return_value=self.descriptor):
+            self.case.setUp()
+            self.receipt = self.case.release()
+        self.root = self.case.root
+        self.source_path = self.case.write(self.root / "SOURCE.json", self.source_bytes)
+        self.lock = self.case.write(self.root / "Cargo.lock", self.lock_bytes)
+        self.published = self.case.write(self.root / "independent-published",
+                                         (self.root / "geph-universal").read_bytes())
+        self.archive = self.root / bundle.BUNDLE_NAME
+        self.argv = ["pack", "--source", str(self.source_path), "--cargo-lock", str(self.lock),
+                     "--receipt", str(self.receipt), "--artifacts-root", str(self.root),
+                     "--published-binary", str(self.published), "--output", str(self.archive)]
+
+    def failure(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr), self.assertRaises(SystemExit) as failure:
+            bundle.main(self.argv)
+        self.assertEqual(failure.exception.code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        return stderr.getvalue()
+
+    def test_cli_pack_emits_metadata_and_independently_unpackable_v2_bundle(self):
+        result = subprocess.run([sys.executable, "-E", "-s", str(Path(bundle.__file__)), *self.argv],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        report = json.loads(result.stdout)
+        self.assertEqual(report["scope"], bundle.SCOPE)
+        self.assertEqual(report["bundle_path"], str(self.archive))
+        self.assertEqual(report["bundle_sha256"], build.sha(self.archive.read_bytes()))
+        self.assertEqual(report["size"], self.archive.stat().st_size)
+        self.assertEqual(report["file_count"], 24)
+        unpacked = bundle.unpack_bundle(self.archive, self.root / "unpacked", self.descriptor,
+                                         self.source_sha, build.sha(self.lock_bytes), self.published)
+        self.assertEqual(unpacked["receipt_sha256"], report["receipt_sha256"])
+        self.assertEqual(unpacked["final_binary_sha256"], build.sha(self.published.read_bytes()))
+
+    def test_cli_validates_full_source_before_delegating(self):
+        invalid = [self.source | {"features": []}, self.source | {"targets": native.TARGETS[:1]},
+                   self.source | {"unexpected": True},
+                   self.source | {"crate": self.source["crate"] | {"url": "https://unreviewed.invalid/crate"}}]
+        payloads = [json.dumps(source).encode() for source in invalid]
+        payloads.append(self.source_bytes.replace(b'{', b'{"schema_version":1,', 1))
+        for payload in payloads:
+            with self.subTest(payload=payload[:100]), mock.patch.object(bundle, "pack_bundle") as pack:
+                self.source_path.write_bytes(payload)
+                self.failure()
+                pack.assert_not_called()
+                self.assertFalse(self.archive.exists())
+
+    def test_cli_refuses_source_without_native_descriptor(self):
+        source = dict(self.source)
+        del source["native_sqlite"]
+        self.source_path.write_text(json.dumps(source))
+        with mock.patch.object(bundle, "pack_bundle") as pack:
+            self.assertIn("reviewed native SQLite SOURCE is required", self.failure())
+            pack.assert_not_called()
+        self.assertFalse(self.archive.exists())
+
+    def test_cli_checks_lock_hash_and_genuine_wrapper_before_delegating(self):
+        self.lock.write_bytes(self.lock_bytes + b"# different\n")
+        with mock.patch.object(bundle, "pack_bundle") as pack:
+            self.assertIn("Cargo.lock hash mismatch", self.failure())
+            pack.assert_not_called()
+        wrong_wrapper = self.lock_bytes.replace(native.WRAPPER["sha256"].encode(), b"0" * 64)
+        self.lock.write_bytes(wrong_wrapper)
+        self.source_path.write_text(json.dumps(self.source | {"lock_sha256": build.sha(wrong_wrapper)}))
+        with mock.patch.object(bundle, "pack_bundle") as pack:
+            self.assertIn("wrapper identity/checksum", self.failure())
+            pack.assert_not_called()
+        self.assertFalse(self.archive.exists())
+
+    def test_cli_cannot_reuse_proof_under_other_source_or_receipt_selected_pin(self):
+        for field in ("release_revision", "producer_helper_sha256"):
+            source = copy.deepcopy(self.source)
+            if field == "release_revision":
+                source[field] += 1
+            else:
+                source["native_sqlite"][field] = "0" * 64
+            with self.subTest(field=field):
+                self.source_path.write_text(json.dumps(source))
+                self.assertIn("final native evidence input mismatch", self.failure())
+                self.assertFalse(self.archive.exists())
+
+    def test_cli_rejects_wrong_independent_binary_without_output(self):
+        self.published.write_bytes(self.published.read_bytes() + b"different")
+        self.assertIn("independently published binary", self.failure())
+        self.assertFalse(self.archive.exists())
+
+    def test_cli_preserves_existing_output(self):
+        self.archive.write_bytes(b"existing user artifact")
+        self.failure()
+        self.assertEqual(self.archive.read_bytes(), b"existing user artifact")
+
+    def test_cli_refuses_symlink_authority_inputs(self):
+        for path in (self.source_path, self.lock):
+            with self.subTest(path=path.name):
+                original = path.read_bytes()
+                target = self.case.write(self.root / (path.name + ".original"), original)
+                path.unlink()
+                path.symlink_to(target)
+                with mock.patch.object(bundle, "pack_bundle") as pack:
+                    self.failure()
+                    pack.assert_not_called()
+                self.assertFalse(self.archive.exists())
+                path.unlink()
+                path.write_bytes(original)
+
+    def test_cli_keeps_one_authoritative_source_and_lock_snapshot(self):
+        real_pack = bundle.pack_bundle
+        def replace_authority_after_read(*args, **kwargs):
+            self.source_path.write_bytes(b"replaced SOURCE after snapshot")
+            self.lock.write_bytes(b"replaced lock after snapshot")
+            return real_pack(*args, **kwargs)
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), mock.patch.object(bundle, "pack_bundle", side_effect=replace_authority_after_read):
+            self.assertEqual(bundle.main(self.argv), 0)
+        self.assertEqual(json.loads(stdout.getvalue())["bundle_sha256"], build.sha(self.archive.read_bytes()))
+        result = bundle.unpack_bundle(self.archive, self.root / "unpacked", self.descriptor,
+                                      self.source_sha, build.sha(self.lock_bytes), self.published)
+        self.assertEqual(result["file_count"], 24)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,45 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Fresh actual v2 attempt3 PASS 2026-10-13 11:53:13 UTC from eb91da9dd.
+  PID81015/exec30920 are terminal; do not poll or restart. Both production
+  architectures, jobs 1, elapsed653s, sampled owned-tree peak 1058.19MiB; verified
+  OS network denial, fresh436-archive cache and original v1 evidence retained.
+  SOURCE c173f2be pins helper 24c1c042; manifest 7b8c2c3e. Preserved 56-file clone
+  (158,949,971bytes) completion 674afe7e in output/native-producer/real-inputs/
+  attempt3-v2/. Final universal 960f4039 (39,927,984bytes), receipt a6f0f07b.
+  New public pack CLI -> actual24-file bundle149,765,120bytes -> unpack ->
+  SPDX 435 packages PASS; wrong binary and truncated archive reject. Postbuild receipt
+  a877510c binds15 inputs/artifacts; separate artifact-only guard peak 1137.69MiB.
+  Independent fresh-proof peer PASS (a8a55093,203 bindings); three-CVE v2
+  rebind PASS (bcd2c732,256 bindings), all parent-rehashed with zero mismatches.
+  Exact C/header/native objects/flags/tool identities equal v1; new linked
+  outputs and both universal slices verified separately.53 original scratch
+  source files verified; source tree is retained there, not in the proof clone.
+  No client/account/runtime or published attestation claim; no installation.
+  Next: conditional producer/release-consumer pipeline and machine-enforced
+  native advisory coverage. Successful actual builds need not be repeated.
+
+- Thin native-bundle pack CLI validates full reviewed SOURCE and exact wrapper/
+  lock before delegation; existing API remains standalone with three modules.
+  Independent review caught a CLI-only import becoming a global dependency;
+  isolated import/help RED retained and corrected. 31 bundle tests PASS, including
+  frozen-authority, wrong-pin/binary, symlink and existing-output cases. Logs and
+  hash receipts: output/sqlite-native-integration/bundle-cli/. No producer change.
+  Exact eb91da9dd CI38390411158 product/checks and Chromium PASS; package HTTP404
+  for unpublished0.4.3-r1. Dependency38390411134 still fails expired app policy
+  and Geph 2 blocking/2 informational across 423 packages, 0 exceptions. Terminal
+  logs retained in output/sqlite-native-integration/ci/eb91da9dd/; no CI rerun.
+
+- Scoped SQLite applicability for actual v1 c3c640c3: CVE-2026-50812 fixed in
+  exact C; 50813 Session code excluded; 39113 SQLar absent from built component.
+  Session preprocessing controls and exact object/archive/rlib/slice chain bind
+  the decisions; SQLar exists in ZIP shell.c, not compiled sqlite3.c/h. The OSV
+  169f68ed fixed event is not the malloc64 fix (34e139d3); primary release source
+  has that separate fix. Parent verified 77 Session and 159 SQLar receipt bindings,
+  zero mismatches. Receipts 8ff5b66f/56078c17 in output/sqlite-native-integration/
+  {session,sqlar}-applicability-20261013/. Original census 81 unknowns unchanged;
+  these are scoped adjudications, not universal source or native-audit clearance.
+
 - SOURCE-pinned producer-helper compatibility is implemented but inactive.
   Native descriptor v2 requires the independently reviewed helper SHA; the
   producer rejects the wrong pin before output/compiler, freezes SOURCE bytes,
@@ -11,9 +51,8 @@
   37-case producer run replacing its prior 36-case subset). SOURCE swap after
   preflight passes with frozen authority; an initial fixture-path failure is
   retained separately. Logs: output/native-producer-review/helper-compatibility/.
-  No new Geph compilation, SOURCE/workflow activation or installation.
-  Next: qualify a fresh actual v2 build without altering any v1 receipts, then
-  conditional pipeline integration and native advisory applicability.
+  Fresh actual v2 qualification is recorded above; SOURCE/workflow activation
+  and installation remain outstanding. V1 receipts are unchanged.
   Memory/tool note: codebase-memory-mcp is disabled after a 52GiB incident.
   Do not restart it. Root checkout has a qualified on-demand crg-safe graph;
   this worktree requires its own explicit physical --repo if indexed. Use

@@ -28,15 +28,64 @@ found three expected current-source differences; all three historical hashes
 and lengths match commit `86b2e266c`. These are historical proofs, not a fresh v2
 build: all original receipts and artifacts remain immutable. The v2 fixture
 consumer covers the complete nine-asset/bundle/SPDX path with a synthetic
-attestation, not a signed published release. A fresh actual v2 producer build,
-pipeline activation and native advisory applicability remain open.
+attestation, not a signed published release. Actual v2 attempt3 subsequently completed; its distinct evidence is recorded
+below. Pipeline activation and general native advisory clearance remain open.
 
 The advisory census is complete as an enumeration of retained upstream/NVD/OSV/
 CNA results: 301 CVEs, 92 native/ambiguous groups, and 81 exact-source unknowns.
-Unknown does not mean confirmed vulnerability. Binary applicability has not
-been evaluated and the advisory gate stays open. Private receipts are retained
+Unknown does not mean confirmed vulnerability. The original census did not
+evaluate binary applicability; subsequent scoped decisions below do not rewrite
+it or close the advisory gate. Private receipts are retained
 under `output/native-producer-review/` and
 `output/sqlite-native-integration/native-advisory-census-20261013/`.
+
+Fresh v2 attempt3 completed both actual production targets at 11:53:13 UTC
+on 2026-10-13: jobs 1, 653s, sampled owned-process footprint peak 1058.19MiB.
+The fresh private cache verified 436 crate archives and regenerated extracted
+sources; OS network access was denied. The universal artifact is 39,927,984bytes,
+SHA 960f403944b03f8db1b17f8ca48a1fd97e3120636da0f368b6707220be757b1b,
+with native-release receipt a6f0f07b. The 56 preserved evidence files are streamed
+and hash-compared to the original scratch tree (completion 674afe7e). This is
+new evidence under independently pinned SOURCE c173f2be/helper 24c1c042, not a
+relabeling or reproducibility claim about the older v1 binary.
+
+The public `geph_native_sqlite_bundle.py pack` command accepts `--source`,
+`--cargo-lock`, `--receipt`, `--artifacts-root`, `--published-binary`, and
+`--output`. It validates one bounded full SOURCE snapshot and exact registry
+wrapper/lock before packaging; downloaded receipts do not select authority.
+The existing standalone three-module API and `--help` remain usable without the
+CLI-only source helper. Independent review caught that import regression; its
+isolated subprocess RED and corrected 31-case suite are retained in
+`output/sqlite-native-integration/bundle-cli/`. Actual v2 CLI packaging, 24-file
+149,765,120-byte archive roundtrip, 435-package SPDX generation/verification,
+wrong-binary and truncated-archive controls PASS. Postbuild receipt a877510c in
+`output/native-producer/real-inputs/attempt3-v2/` binds 15 inputs/artifacts;
+artifact-only verification peaked 1137.69MiB under the same offline guard.
+These checks neither execute Geph nor attest a published release.
+
+Three scoped native advisory reviews apply to the exact v1 universal c3c640c3:
+CVE-2026-50812 has its upstream fix in the exact amalgamation;
+CVE-2026-50813 retains old Session code in source, but both actual objects exclude
+Session/Preupdate; CVE-2026-39113 SQLar is absent from compiled inputs. SQLar
+exists in the official ZIP's `shell.c`, so archive presence cannot stand in for
+component presence. Primary SQLar commit 169f68ed does not fix the described
+allocation narrowing; the separate malloc64 fix 34e139d3 is present in full
+release source. Actual compiler definitions, positive preprocessing controls,
+exact source/object/archive/rlib/link-map/slice bindings support the exclusions;
+symbol absence alone is insufficient. Parent verified 77 Session and 159 SQLar
+receipt bindings (8ff5b66f and 56078c17). Reports remain private under
+`output/sqlite-native-integration/{session,sqlar}-applicability-20261013/`.
+A distinct v2 review now binds the same three decisions to universal960f4039
+(receipt bcd2c732,256 parent-verified bindings). The C/header, objects, archive,
+compiler definitions/tools and SDK records equal v1 exactly; the new Rust rlibs,
+link maps and thin-to-universal slices have their own verification. All53 source
+entries were checked in the retained original scratch tree; it is not part of
+the56-file proof clone. Fresh-proof peer a8a55093 separately binds203 inputs/
+artifacts and verifies the current consumer. Both native objects equal v1 while
+the fresh final binary differs; no cause or deterministic reproduction claim
+is inferred from that difference. The original81-unknown census remains intact.
+General native advisory coverage, workflow integration and installed qualification
+are still separate open gates.
 
 Earlier parser investigation and proof boundaries:
 
@@ -88,8 +137,8 @@ execution. They do not cryptographically prove every relocated instruction or
 replace release attestations. SDK evidence records the physical path and
 SDKSettings hash, not the entire SDK tree. The production SOURCE, lock, version,
 license and workflow are unchanged. Next integrate the producer and release
-consumer, qualify both actual target artifacts and final bytes, and finish
-native/source-owned advisory coverage; do not publish or install from fixture
+consumer using the actual v2 proof above, and finish native/source-owned
+advisory coverage; do not publish or install from fixture
 results. Existing unchanged Geph runtime tests remain reusable.
 
 The inactive producer/transport/consumer integration additionally has focused
@@ -103,7 +152,8 @@ network denial. Five independent replays cover the four failures and successful
 These fixtures use synthetic universal binaries; they do not prove a Geph build.
 The caller must control the output parent, and same-user writers can still
 change files after return. Automatic deletion on failure is intentionally absent.
-Real target builds, workflow integration and native advisory coverage remain open.
+Actual v2 target builds are recorded above; workflow integration and native
+advisory coverage remain open.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|

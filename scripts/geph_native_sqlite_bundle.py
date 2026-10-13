@@ -7,6 +7,7 @@ copied or executed by this consumer.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -300,3 +301,40 @@ def unpack_bundle(bundle_path: Path, output_root: Path, descriptor: dict,
     except BaseException as exc:
         exc.add_note(f"Unverified evidence retained at {root}; use a fresh destination for retry.")
         raise
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    pack = commands.add_parser("pack", help="Verify and package the complete native release proof")
+    for name in ("source", "cargo-lock", "receipt", "artifacts-root", "published-binary", "output"):
+        pack.add_argument("--" + name, type=Path, required=True)
+    args = parser.parse_args(argv)
+    # Source-contract validation belongs to the CLI; standalone transport and
+    # --help retain the original three-module dependency boundary.
+    import geph_vendor_source as vendor
+
+    try:
+        # The reviewed files select authority; a receipt must never select its
+        # own descriptor/helper pin. Freeze each bounded input before packing.
+        source_bytes = native.read_regular(args.source, vendor.MAX_SOURCE_BYTES)
+        source = vendor._json_object(source_bytes, "Geph source contract")
+        vendor._validate_source_contract(source)
+        if "native_sqlite" not in source:
+            raise ValueError("reviewed native SQLite SOURCE is required")
+        lock_bytes = native.read_regular(args.cargo_lock, vendor.MAX_SOURCE_BYTES)
+        native.verify_wrapper_lock(source["native_sqlite"], lock_bytes, source["lock_sha256"])
+        result = pack_bundle(
+            receipt_path=args.receipt, artifacts_root=args.artifacts_root,
+            output_path=args.output, descriptor=source["native_sqlite"],
+            source_sha256=build.sha(source_bytes), lock_sha256=build.sha(lock_bytes),
+            published_binary=args.published_binary,
+        )
+    except (OSError, ValueError) as exc:
+        parser.exit(1, f"native SQLite evidence packing failed: {exc}\n")
+    print(json.dumps({"scope": SCOPE, "bundle_path": str(args.output.absolute()), **result}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
