@@ -396,7 +396,16 @@ def _link_evidence(native_proof: dict, root: Path, files: dict, binary_build_pat
     object_rows = re.findall(r"^\[\s*(\d+)\]\s+(.+)$", text, re.MULTILINE)
     matches = [index for index, name in object_rows if name == rlib_build_path + "(sqlite3.o)"]
     if len(matches) != 1 or len({idx for idx, _ in object_rows}) != len(object_rows):
-        raise ValueError("link map must use the exact sys rlib native member once")
+        # Keep the decisive input in CI failures: supported Apple linkers can
+        # evolve their display grammar independently of the linked bytes. Do
+        # not silently normalize an unobserved spelling or accept a basename.
+        relevant = [(idx, name[:1024]) for idx, name in object_rows
+                    if ".rlib" in name or "sqlite3" in name]
+        detail = {"expected": (rlib_build_path + "(sqlite3.o)")[:1024],
+                  "matches": len(matches), "object_rows": len(object_rows),
+                  "duplicate_indices": len({idx for idx, _ in object_rows}) != len(object_rows),
+                  "relevant_rows": (relevant or object_rows)[:8]}
+        raise ValueError("link map must use the exact sys rlib native member once: " + json.dumps(detail, sort_keys=True))
     try:
         live = text.split("# Symbols:\n", 1)[1].split("# Dead Stripped Symbols:", 1)[0]
     except IndexError as exc:

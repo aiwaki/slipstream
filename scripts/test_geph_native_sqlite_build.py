@@ -210,6 +210,18 @@ class NativeBuildEvidenceTests(unittest.TestCase):
             self.update_linked_file("link_map", bad)
             with self.assertRaises(ValueError): self.verify()
 
+    def test_unrecognized_map_member_preserves_exact_bounded_diagnostics(self):
+        proof = json.loads(self.linked_paths[self.target].read_text())
+        original = (self.root / proof["files"]["link_map"]["path"]).read_bytes()
+        bad = original.replace(b"sys.rlib(sqlite3.o)", b"sys.rlib(unknown-sqlite3.o)")
+        self.update_linked_file("link_map", bad)
+        with self.assertRaises(ValueError) as failure:
+            self.verify()
+        detail = json.loads(str(failure.exception).split("once: ", 1)[1])
+        self.assertEqual(detail["expected"], str(self.root / self.target / "sys.rlib") + "(sqlite3.o)")
+        self.assertEqual(detail["matches"], 0)
+        self.assertEqual(detail["relevant_rows"], [["1", str(self.root / self.target / "sys.rlib") + "(unknown-sqlite3.o)"]])
+
     def test_environment_strips_inherited_native_overrides(self):
         env = build.cargo_environment(self.descriptor, self.native_paths[self.target], self.root, SOURCE_SHA, LOCK_SHA,
                                      {"HOME": "/home", "PKG_CONFIG_PATH": "/host", "CARGO_ENCODED_RUSTFLAGS": "bad", "CFLAGS": "bad", "DYLD_LIBRARY_PATH": "bad", "SQLITE3_LIB_DIR": "/host"})
@@ -281,6 +293,37 @@ class NativeBuildEvidenceTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "Apple native build boundary")
     def test_actual_clang_build_is_archived_and_stale_output_rejected(self):
+        try:
+            self._actual_native_fixture()
+        except unittest.SkipTest:
+            raise
+        except Exception:
+            # TemporaryDirectory cleanup must not erase the only failing
+            # linker map. Persist this public toy fixture; log bounded facts
+            # too, since an ephemeral CI runner may not upload its output/.
+            base = Path(__file__).resolve().parents[1] / "output/sqlite-native-test-failures"
+            base.mkdir(parents=True, exist_ok=True)
+            retained = Path(tempfile.mkdtemp(prefix="apple-link-", dir=base))
+            actual = self.root / "actual"
+            if actual.is_dir():
+                shutil.copytree(actual, retained / "actual")
+            report = {"retained_fixture": str(retained), "toolchain": {}}
+            for name, argv in (("clang", ["/usr/bin/xcrun", "clang", "--version"]),
+                               ("ld", ["/usr/bin/xcrun", "ld", "-v"]),
+                               ("rustc", [shutil.which("rustc") or "rustc", "-Vv"])):
+                try:
+                    proc = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+                    report["toolchain"][name] = (proc.stdout + proc.stderr)[:2048]
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    report["toolchain"][name] = str(exc)[:512]
+            mp = actual / self.target / "map"
+            if mp.is_file():
+                report["map_excerpt"] = mp.read_text()[:8192]
+            (retained / "diagnostics.json").write_text(json.dumps(report, indent=2) + "\n")
+            print("Native SQLite linker fixture failure: " + json.dumps(report, sort_keys=True), file=sys.stderr)
+            raise
+
+    def _actual_native_fixture(self):
         # Tiny public fixture proves compiler/archiver plumbing only, not Geph.
         if not Path("/usr/bin/xcrun").is_file() or not shutil.which("rustc"):
             self.skipTest("Apple developer tools and rustc required")

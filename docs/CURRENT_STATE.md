@@ -1,5 +1,17 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Integration follow-up fixes the two stale scanner-row fixtures and includes
+  the shared native module in the reduced source-helper fixture. Causal REDs
+  are retained;21 release and53 build-config tests PASS. The full metadata
+  suite now passes657 tests locally in37.97s with unchanged source. The initial
+  build-venv attempt lacked pytest and could not execute its home-local Python
+  through the private-read sandbox; the passing run uses the existing audit
+  dependencies with their base interpreter, without changing isolation policy.
+  Exact59ef2fc7b CI38369350907 also exposed an Apple linker map mismatch on
+  Xcode15.4 that three local linkers do not reproduce. Acceptance is unchanged;
+  bounded map/toolchain diagnostics and retained fixture plus17 passing builder
+  cases are ready for the next CI run. Do not claim that runner gap is fixed.
+  Logs, commands and source hashes: output/sqlite-native-integration/ci/.
 - Optional native SQLite source/build/SPDX tooling is implemented, reviewed and
   inactive.69 focused source/materializer/SPDX cases and16 native-builder cases
   PASS. The latter includes a real tiny clang/ar -> Rust rlib -> Apple linker
