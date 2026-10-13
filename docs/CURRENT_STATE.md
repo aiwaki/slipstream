@@ -10,8 +10,86 @@ file.
 
 ## Current Checkpoint
 
+- Workstation memory incident, 2026-10-13 15:39–15:44 +05:00: macOS `top`
+  attributed 52 GiB MEM / 52 GiB CMPRS to `codebase-memory-mcp.bin` PID71381
+  (Codex child), while this 8 GiB Mac used about26.2 GiB swap. SIGTERM did
+  not stop it; SIGKILL did. PID absence was verified and swap fell to about
+  3.6 GiB. No cargo/rustc jobs or subagents remained active. This identifies
+  the responsible process, not its internal allocation bug. The MCP server
+  is now disabled in local Codex config (TOML validated; original backed up
+  under ~/.codex/backups/config-before-codebase-memory-disable-20261013-154241.toml).
+  Do not restart/reindex it during continuation. Use rg for text and the already
+  installed ast-grep0.42.3 for syntax searches, explicit tracked paths, one
+  thread. Two real call-pattern searches measured33 MiB peakRSS/0.46s over205
+  Python files and19 MiB/0.23s over183 Rust files; this is not a global callgraph
+  or a universal RAM bound. Local benchmark: ~/.codex/audits/
+  2026-10-13-code-search-replacement/ast-grep-benchmark.json.
+  User-requested code-review-graph2.3.9 trial is now qualified for bounded CLI
+  navigation: isolated tracked-source build21.55s/140.47MiB peak footprint;
+  actual checkout403 source files13.02s/160.17MiB, HEAD7b898ac6. Final graph
+  status10053 nodes/127381 edges/395 file records, build_incomplete=false.
+  Use ~/.local/bin/crg-safe <build|update|status|search|query|impact|architecture|dead-code>
+  ... --repo <physical-checkout>. It runs offline/serial/minimal postprocessing,
+  allows one command at a time, and kills the owned group on sampled footprint
+  >1GiB or120s (watchdog, not an OS allocation quota). Graphs live outside repos.
+  Positive Python/Rust/JS callers, negative text, incremental add/remove/no-op,
+  ambiguity, memory/time controls and concurrency refusal PASS. Dynamic globals
+  calls remain unresolved; empty results are not proof of no references. No MCP,
+  watcher, hooks, embeddings or background process enabled. Proof and limitations:
+  ~/.codex/audits/2026-10-13-code-search-replacement/crg-trial-summary.json.
+  User apps, Slipstream, Geph, repository data and existing evidence were not
+  removed or restarted. Continue pending source work without heavy parallel jobs.
+
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- Dedicated eb91da9dd adds inactive native descriptor v2 with an independently
+  reviewed producer-helper pin and frozen SOURCE snapshot. Producer rejects
+  wrong pins before output/compiler and after-import helper replacement on
+  pre/postflight; newer consumers accept original pinned v2 proof without
+  rewriting receipts.125 distinct scoped tests +8 docs PASS, retained module
+  replacement RED and SOURCE-swap fixture correction; receipt adeb1e7d in
+  dedicated output/native-producer-review/helper-compatibility/. Independent
+  static review complete. Actual old v1 build peer PASS;1291/1294 current
+  peer/census bindings match, three edited source hashes match historical86b2
+  exactly (source-resolution08945643). Census enumeration complete,81 exact
+  source unknowns and binary applicability still open. No fresh actual v2
+  build, SOURCE/workflow activation or install. Next: fresh v2 proof, conditional
+  pipeline integration and native advisory evaluation; do not rerun old v1.
+- Dedicated86b2e266c actual native production build PASS for ARM+Intel;
+  attempt2 finished10:13:04 UTC. PID64493/exec62244 are terminal; do not poll.
+  Final universal40,061,456bytes SHA c3c640c3, native-release b1ef8f1f;109-file
+  preserved clone/receipt058f0f21 at dedicated output/native-producer/real-inputs/
+  attempt2/. Actual24-file bundle roundtrip and SPDX435 packages PASS; wrong
+  binary/truncated archive both reject (postbuild receipt bd8d071f,12 bindings).
+  Source/helper correction passes34 producer+24 builder+21 bundle+12 native
+  consumer+8 nativeSPDX+8 docs; actual old-source causal RED retained. Independent
+  real-build peer and native census are now reconciled in the newer entry above. No client/account or
+  installed-browser E2E, no SOURCE/workflow activation or app installation.
+  Exact86b2e266c CI38381206722 product/checks and Chromium PASS; package404 for
+  unpublished0.4.3-r1. Dependency38381206760 rejects expired app integrity-only
+  policy and Geph2 blocking/2 informational across423 packages. Logs retained.
+  SOURCE-pinned producer-helper identity is now implemented above; conditional
+  pipeline integration remains open. Old receipts stay immutable.
+- Dedicated012da0fc1 closes the observed Xcode15 linker-map grammar gap and
+  numeric duplicate-index aliases.21 focused builder cases PASS with causal
+  REDs retained. Exact CI38374565990 is terminal: product/checks and Chromium
+  PASS; package stops at HTTP404 for unpublished Geph0.4.3-r1. No rerun.
+  Inactive producer/bundle/release-consumer integration is under independent
+  review before real two-target production-feature qualification. Review found
+  and fixed destructive extraction cleanup and mixed SPDX/SOURCE snapshots;
+  bundle21 and consumer32 focused cases PASS under OS network denial. These
+  use synthetic release fixtures, not a Geph build or installed E2E. Evidence:
+  dedicated output/sqlite-native-integration/{ci/012da0fc1,bundle-transport-v3,
+  independent-consumer-review}/. SOURCE/lock/workflow remain inactive.
+- Dedicated integration follow-up fixes stale scanner-row fixtures and the
+  standalone source-helper dependency closure;21 release and53 build-config
+  cases PASS after retained causal REDs. Full metadata suite657 tests PASS
+  locally with the existing audit dependencies/base Python; initial unsuitable
+  build-venv failures remain recorded. Exact59ef2fc7b CI38369350907 also exposed
+  an Xcode15.4 linker map mismatch not reproduced by three local linkers.
+  Bounded diagnostics and fixture retention are ready for CI; acceptance stays
+  strict and this runner gap is still open.17 builder cases PASS. Logs and
+  source hashes are in dedicated output/sqlite-native-integration/ci/.
 - Dedicated PR384 now contains strict audit bridge af235281f and optional native
   SQLite source/build/SPDX helpers59ef2fc7b, pushed and verified remotely.
   Audit49 focused cases PASS under OS network denial; old evaluator's two

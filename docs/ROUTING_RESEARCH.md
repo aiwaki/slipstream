@@ -1,9 +1,42 @@
 # Routing Research Notes
 
-Updated: 2026-10-12
+Updated: 2026-10-13
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
+
+## 2026-10-13 bounded code-review-graph trial
+
+After macOS attributed 52 GiB of compressed memory to the Codex-owned
+codebase-memory-mcp process, that server was stopped and disabled. Its internal
+allocation defect is not established. The user requested a replacement trial.
+[code-review-graph 2.3.9](https://github.com/tirth8205/code-review-graph/tree/v2.3.9)
+is installed globally in an isolated Python environment and used on demand via
+`~/.local/bin/crg-safe`; it is not registered as an MCP server or watcher.
+
+| Check on this Mac | Result |
+|---|---|
+| Isolated tracked-source build | 401 parsed files, 21.55 s, 140.47 MiB peak process-group footprint |
+| Actual AUD-17 checkout build | 403 parsed files, 13.02 s, 160.17 MiB peak footprint |
+| Call relationships | Ground-truth Python, Rust and JavaScript callers match; comment/string false calls excluded |
+| Incremental edits | Added call appears, removal disappears, no-op reparses zero files |
+| Failure controls | Memory/time watchdogs and concurrent-run refusal verified |
+
+Use `crg-safe search <symbol> --limit 5 --repo <physical-checkout>`, or
+`crg-safe query callers_of <qualified-symbol> --repo <physical-checkout>`.
+Build/update uses only a nonempty tracked Git tree, serial parsing, disabled
+network access and skipped flow/community extraction. One command runs at a
+time; sampled process-group footprint above 1 GiB or elapsed time above 120 s
+terminates the owned process group. This is a watchdog, not an OS allocation
+quota or universal resource guarantee. No embeddings, hooks or background
+processes were enabled. Graph storage is outside the repository.
+
+The graph is an aid, not a completeness proof: dynamic `globals()` calls remain
+unresolved and ambiguous names must be disambiguated. Use direct reads/rg for
+known paths and strings, ast-grep for bounded syntax searches, and verify graph
+freshness before relying on it. Each physical worktree has a separate graph.
+Private trial evidence and 61 checked artifact hashes are retained in
+`~/.codex/audits/2026-10-13-code-search-replacement/crg-trial-summary.json`.
 
 ## 2026-10-12 tg-ws-proxy 1.11.2 import and failure-path checks
 
