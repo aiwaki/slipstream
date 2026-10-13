@@ -1,5 +1,45 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Conditional native producer and synthetic compile integration implemented;
+  SOURCE/lock/helper pins remain inactive and unchanged. Fresh online full-lock
+  fetch -> streamed cache seal -> OS-denied offline fetch -> explicit-tools
+  producer/jobs1 -> host synthetic runner -> bundle/SPDX. Native binaries are
+  not stripped after proof. Existing native releases require all9 assets,
+  independently materialized source, historical/current audit and attestations.
+  Producer12 and existing-release9 shell scenarios PASS;4 static contracts,
+  YAML and6 shell checks PASS;4 legacy shell bodies byte-equivalent to2f0.
+  These shell tests stub external services/verifiers, not actual release builds.
+  Independent workflow review9c21a98b has no actionable finding. Native runner
+  26 tests PASS; fixed inline network denial covers compiler children, clean
+  explicit-tool env and host-proof matching. Its existing private-file runtime
+  sandbox/19-case allowlist is unchanged. No real native libtest compile/run yet.
+  Parent verifies106 author/plan bindings, plus actual native runner preflight.
+  Evidence: output/sqlite-native-integration/{producer-workflow,
+  producer-workflow-review,native-synthetic,integration-parent-bindings.json}.
+- Actual full cache qualification PASS:38 missing archives fetched into a new
+  private home, then512 archives/453 sparse entries sealed. Actual Cargo offline
+  full-lock fetch and both aws_lambda target metadata PASS under OS network
+  denial (EPERM control); no build.17.539s/160.22MiB sampled owned-tree peak;
+  original cache/source untouched. Parent rehashes966 sealed records and verifies
+  metadata package/feature identities plus actual v2 ARM runner preflight.
+  Evidence: output/sqlite-native-integration/cache-live-20261013/verification.json
+  (6ee40408); scratch/private/tmp/slipstream-cache-live-47f1o4np retained.
+  This proves cache resolution/preflight, not synthetic runtime or installation.
+- Exact2f0cbc1fd CI38399979673 terminal: product/checks, Windows adapter and
+  Chromium PASS; packaging HTTP404unpublished0.4.3-r1. Dependency38399979669:
+  expired app integrity-only policy; Geph2 blocking/2 informational/423 scanned,
+  0exceptions. Logs retained in output/sqlite-native-integration/ci/2f0cbc1fd/.
+  No unchanged full suite or successful dual-architecture build repeated.
+- Next: machine-enforced native advisory partition in dependency_audit scan/
+  verify, preserving legacy no-PURL rejection. Read-only plan2334d7b0 identifies
+  435 actual SPDX packages:434PURL+1native;6 scoped overlays leave75 of81
+  source-applicability unknowns.9CNA-rejected and2source-fixed census-only rows
+  also need explicit production adoption/binding; none is automatic clearance.
+  First machine result must fail, not silently omit native SQLite. Plan/evidence:
+  output/sqlite-native-integration/native-audit-plan/. Existing full metadata657
+  baseline reused. SOURCE activation, actual native CI libtest, native audit,
+  release attestations and installed/browser qualification remain open.
+
 - Conditional app consumer implemented (SOURCE still inactive): native nine
   assets versus legacy eight, fresh private workspace, independently materialized
   source and verifier-returned native receipt/root. All historical policy and
@@ -8,8 +48,8 @@
   independent review found no actionable defect (9fabee09), both source hashes
   parent-verified. Evidence: output/sqlite-native-integration/consumer-workflow-review/.
   Full metadata657 baseline is reused; no Geph rebuild or install this turn.
-  Producer workflow and native synthetic compile sandbox remain pending
-  (design in ROUTING_RESEARCH).
+  Producer workflow and native synthetic compile integration are now recorded
+  above; actual native CI runtime/release qualification is still pending.
 - Offline cache preparation is implemented in scripts/seal_geph_cargo_cache.py:
   frozen full SOURCE/lock, every locked registry archive checked while streaming,
   selected whole sparse-index records only, fresh physical output and exact
@@ -19,8 +59,8 @@
   Cargo resolution or network call. Actual v2 metadata:512 packages/453 names;
   retained cache has38 missing exact archives and is rejected before output.
   Evidence: output/sqlite-native-integration/{cache-seal,cache-seal-peer}/.
-  The index is opaque and unauthenticated; offline Cargo fetch/resolve and
-  producer integration are still required. Do not recompile successful Geph
+  The index remains opaque and unauthenticated; actual offline resolution and
+  producer integration are now recorded above. Do not recompile successful Geph
   artifacts merely to repeat their existing proof.
 - Three more scoped FTS5 fixes verified against exact actual v2 960f4039:
   CVE-2025-7709, CVE-2019-9936 and CVE-2019-9937 code_fixed. FTS5 is enabled;
@@ -50,8 +90,8 @@
   outputs and both universal slices verified separately.53 original scratch
   source files verified; source tree is retained there, not in the proof clone.
   No client/account/runtime or published attestation claim; no installation.
-  Next: conditional producer/release-consumer pipeline and machine-enforced
-  native advisory coverage. Successful actual builds need not be repeated.
+  Producer/release-consumer integration is now recorded above. Next gate is
+  machine-enforced native advisory coverage; do not repeat successful builds.
 
 - Thin native-bundle pack CLI validates full reviewed SOURCE and exact wrapper/
   lock before delegation; existing API remains standalone with three modules.

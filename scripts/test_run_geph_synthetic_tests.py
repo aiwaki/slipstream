@@ -11,7 +11,10 @@ import time
 import unittest
 from unittest import mock
 
+import geph_native_sqlite as native
+import geph_native_sqlite_build as link
 import run_geph_synthetic_tests as runner
+from test_geph_native_sqlite_build import descriptor, source_contents, macho, ar, metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -184,6 +187,300 @@ class SyntheticRunnerTests(unittest.TestCase):
             runner.require_single_pass(log, "expected")
 
 
+class NativeSyntheticRunnerTests(unittest.TestCase):
+    """Actual validators and tiny command outputs; no Cargo/compiler execution."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.source, self.evidence = self.root / "source", self.root / "evidence"
+        (self.source / "src").mkdir(parents=True)
+        for name in ("lib", "session", "database"):
+            (self.source / f"src/{name}.rs").write_text("// fixture, never compiled\n")
+        (self.source / "Cargo.toml").write_text('[package]\nname="geph5-client"\nversion="0.4.3"\n')
+        (self.source / "Cargo.lock").write_text('version = 3\n[[package]]\nname = "libsqlite3-sys"\n'
+            'version = "0.30.1"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n'
+            f'checksum = "{native.WRAPPER["sha256"]}"\n')
+        self.descriptor = descriptor()
+        self.descriptor.update(schema_version=2, producer_helper_sha256="4" * 64)
+        for name, data in source_contents().items():
+            self.write(self.source / native.PATH / name, data)
+        self.contract_value = {"schema_version": 1, "crate": {"name": "geph5-client", "version": "0.4.3",
+            "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.4.3.crate", "sha256": "a" * 64},
+            "lock_sha256": runner.digest(self.source / "Cargo.lock"), "features": ["aws_lambda"],
+            "targets": native.TARGETS[:], "release_revision": 1, "native_sqlite": self.descriptor}
+        self.contract = self.root / "SOURCE.json"
+        self.contract.write_text(json.dumps(self.contract_value))
+        self.tools = {}
+        for name in ("cargo", "rustc", "clang", "ar", "cmake"):
+            self.tools[name] = self.write(self.root / "tools" / name, f"fake {name}\n".encode())
+            self.tools[name].chmod(0o755)
+        self.tools["sdk"] = self.root / "SDK"
+        self.write(self.tools["sdk"] / "SDKSettings.json", b"{}")
+        self.tools["libclang"] = self.write(self.root / "libclang.dylib", b"fake libclang\n")
+        self.cargo_home = self.root / "cargo-home"
+        self.cargo_home.mkdir()
+        self.artifacts = self.root / "native-artifacts"
+        self.artifacts.mkdir()
+        self.make_receipt(native.TARGETS[0])
+        self.calls, self.fault = [], None
+
+    def write(self, path, data):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def make_receipt(self, target):
+        directory = self.artifacts / target
+        for name, data in source_contents().items():
+            self.write(directory / "include" / name, data)
+        self.write(directory / "sqlite3.o", macho(target))
+        self.write(directory / "libsqlite3.a", ar(macho(target)))
+        tools = {name: link._tool(self.tools[name]) for name in ("clang", "ar")}
+        tools["sdk"] = {"path": str(self.tools["sdk"]), "settings_sha256": link.sha(b"{}")}
+        self.proof = {"schema_version": 1, "scope": link.NATIVE_SCOPE, "target": target,
+            "descriptor_sha256": native.descriptor_sha256(self.descriptor),
+            "source_sha256": runner.digest(self.contract), "lock_sha256": self.contract_value["lock_sha256"],
+            "helper_sha256": self.descriptor["producer_helper_sha256"], "tools": tools,
+            "commands": link._commands(self.descriptor, target, directory, tools),
+            "environment": {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "ZERO_AR_DATE": "1", "TMPDIR": str(directory / "tmp")},
+            "build_directory": str(directory), "files": {name: link._record(self.artifacts, directory / name)
+                for name in ("include/sqlite3.c", "include/sqlite3.h", "sqlite3.o", "libsqlite3.a")}}
+        self.receipt = directory / "native-build.json"
+        self.receipt.write_text(json.dumps(self.proof))
+
+    def cargo_driver(self, command, *, cwd, env, prefix, timeout, stdout_limit):
+        self.assertEqual(command[:3], [str(runner.SANDBOX), "-p", runner.COMPILE_PROFILE])
+        self.assertEqual(command[3], str(self.tools["cargo"]))
+        stage = command[4]
+        self.calls.append((stage, command, env.copy()))
+        self.assertNotEqual(cwd, self.source)
+        self.assertEqual(cwd, Path(env["HOME"]))
+        self.assertEqual(env["PATH"], "/usr/bin:/bin")
+        self.assertEqual(env["CARGO_HOME"], str(self.cargo_home))
+        self.assertEqual(env["CARGO_NET_OFFLINE"], "true")
+        for key in ("RUSTC_WRAPPER", "RUSTFLAGS", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "CFLAGS",
+                    "CARGO_BUILD_JOBS", "HTTP_PROXY", "PYTHONPATH", "AWS_SECRET_ACCESS_KEY",
+                    "SLIPSTREAM_GEPH_ACCOUNT_SECRET"):
+            self.assertNotIn(key, env)
+        self.assertEqual(env["RUSTC"], str(self.tools["rustc"]))
+        self.assertEqual(env["CC"], str(self.tools["clang"]))
+        self.assertEqual(env["AR"], str(self.tools["ar"]))
+        self.assertEqual(env["SDKROOT"], str(self.tools["sdk"]))
+        self.assertEqual(env["LIBCLANG_PATH"], str(self.tools["libclang"].parent))
+        self.assertEqual(env["SQLITE3_STATIC"], "1")
+        self.assertIn("--locked", command)
+        self.assertIn("--offline", command)
+        self.assertEqual(command[command.index("--features") + 1], "aws_lambda")
+        self.write(prefix.with_suffix(".stderr"), b"warning: synthetic stderr does not corrupt JSON\n")
+        if stage == "metadata":
+            self.assertEqual(command[command.index("--filter-platform") + 1], self.proof["target"])
+            value = metadata()
+            value["packages"].append({"id": "geph-root", "name": "geph5-client", "version": "0.4.3",
+                                      "source": None, "manifest_path": str(self.source / "Cargo.toml")})
+            value["resolve"]["root"] = "geph-root"
+            value["resolve"]["nodes"].append({"id": "geph-root", "features": ["aws_lambda"]})
+            if self.fault == "bundled":
+                value["resolve"]["nodes"][0]["features"].append("sqlite")
+            elif self.fault == "root":
+                value["packages"][-1]["manifest_path"] = str(self.root / "wrong/Cargo.toml")
+            elif self.fault == "missing-feature":
+                value["resolve"]["nodes"][-1]["features"] = []
+            elif self.fault == "source-mutation":
+                (self.source / "src/lib.rs").write_text("changed during metadata")
+            elif self.fault == "tool-mutation":
+                self.tools["cargo"].write_bytes(b"different executable")
+            elif self.fault == "config-injection":
+                self.write(cwd / ".cargo/config.toml", b"[build]\nrustc-wrapper='bad'\n")
+            elif self.fault == "contract-swap":
+                self.contract.write_bytes(b"invalid replacement SOURCE")
+            self.write(prefix.with_suffix(".stdout"), json.dumps(value).encode())
+        elif stage == "test":
+            if self.fault == "compile-timeout":
+                raise RuntimeError("build command failed: timeout")
+            self.assertEqual(command[command.index("--jobs") + 1], "1")
+            self.assertEqual(command[command.index("--target") + 1], self.proof["target"])
+            self.assertIn("--no-run", command)
+            self.assertIn("--lib", command)
+            target = Path(env["CARGO_TARGET_DIR"])
+            self.executable = self.write(target / self.proof["target"] / "debug/deps/geph5_client-fixture", b"fake libtest")
+            artifact = {"reason": "compiler-artifact", "profile": {"test": True},
+                "target": {"name": "geph5_client", "src_path": str(self.source / "src/lib.rs")},
+                "executable": str(self.executable)}
+            self.write(prefix.with_suffix(".stdout"), json.dumps(artifact).encode() + b"\n")
+        else:
+            self.fail(f"unexpected native command stage {stage}")
+
+    def runtime_driver(self, command, *, cwd, env, timeout, log, log_limit=1024 * 1024):
+        if "-c" in command:
+            self.calls.append(("compile-probe", command, env.copy()))
+            self.assertEqual(command[:3], [str(runner.SANDBOX), "-p", runner.COMPILE_PROFILE])
+            value = {"network": 1, "child_network": "13" if self.fault == "compile-probe" else "1"}
+            log.write_text(json.dumps(value))
+        elif "--list" in command:
+            self.calls.append(("list", command, env.copy()))
+            self.assertEqual(command[3], str(self.executable))
+            log.write_text("\n".join(name + ": test" for name in runner.ALLOWLIST["0.4.3"]) +
+                           "\ntests::test_clib: test\n")
+        else:
+            self.calls.append(("case", command, env.copy()))
+            name = command[4]
+            self.assertIn(name, runner.ALLOWLIST["0.4.3"])
+            self.assertEqual(command[5:], ["--exact", "--test-threads=1", "--nocapture"])
+            log.write_text(f"running 1 test\ntest {name} ... ok\n"
+                           "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out;\n")
+        return {"returncode": 0}
+
+    def run_native(self, *, fault=None, machine="arm64", **overrides):
+        self.fault = fault
+        options = {"native_receipt": self.receipt, "native_artifacts_root": self.artifacts,
+                   "cargo_home": self.cargo_home, "native_tools": self.tools, "build_jobs": 1}
+        options.update(overrides)
+        with mock.patch.object(runner.sys, "platform", "darwin"), \
+                mock.patch.object(runner.platform, "machine", return_value=machine), \
+                mock.patch.object(runner, "SANDBOX", Path(sys.executable).resolve()), \
+                mock.patch.object(runner, "sandbox_selftest"), \
+                mock.patch.object(runner, "run_command", side_effect=self.runtime_driver), \
+                mock.patch.object(runner.producer, "run", side_effect=self.cargo_driver):
+            return runner.qualify(self.source, self.contract, self.evidence, **options)
+
+    def test_native_host_receipt_runs_offline_metadata_then_exact_nineteen(self):
+        result = self.run_native()
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["passed_tests"], list(runner.ALLOWLIST["0.4.3"]))
+        self.assertEqual([c[0] for c in self.calls[:4]], ["compile-probe", "metadata", "test", "list"])
+        self.assertEqual(len(self.calls), 23)
+        self.assertEqual(result["native_compile"]["target"], native.TARGETS[0])
+        self.assertEqual((self.evidence / "compile.sb").read_text(), runner.COMPILE_PROFILE)
+
+    def test_intel_host_and_optional_cmake_are_supported(self):
+        self.make_receipt(native.TARGETS[1])
+        selected = {name: value for name, value in self.tools.items() if name != "cmake"}
+        result = self.run_native(machine="x86_64", native_tools=selected)
+        self.assertEqual(result["native_compile"]["target"], native.TARGETS[1])
+        self.assertNotIn("CMAKE", self.calls[1][2])
+
+    def test_minimal_compile_environment_discards_ambient_overrides_and_secrets(self):
+        poison = {key: "must-not-propagate" for key in (
+            "RUSTC_WRAPPER", "RUSTFLAGS", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "CFLAGS",
+            "CARGO_BUILD_JOBS", "HTTP_PROXY", "PYTHONPATH", "AWS_SECRET_ACCESS_KEY", "SLIPSTREAM_GEPH_ACCOUNT_SECRET")}
+        with mock.patch.dict(os.environ, poison):
+            self.run_native()
+
+    def test_missing_native_arguments_and_nonserial_jobs_fail_before_commands(self):
+        for key in ("native_receipt", "native_artifacts_root", "cargo_home", "native_tools", "build_jobs"):
+            with self.subTest(key=key), self.assertRaisesRegex(runner.QualificationError, "requires explicit"):
+                self.run_native(**{key: None})
+        for jobs in (0, 2, True):
+            with self.subTest(jobs=jobs), self.assertRaisesRegex(runner.QualificationError, "set to 1"):
+                self.run_native(build_jobs=jobs)
+        for missing in runner.NATIVE_TOOLS:
+            with self.subTest(tool=missing), self.assertRaisesRegex(runner.QualificationError, "explicit tool"):
+                self.run_native(native_tools={k: v for k, v in self.tools.items() if k != missing})
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.evidence.exists())
+
+    def test_native_arguments_cannot_change_legacy_compile_path(self):
+        self.contract_value.pop("native_sqlite")
+        self.contract.write_text(json.dumps(self.contract_value))
+        with self.assertRaisesRegex(runner.QualificationError, "require native SOURCE"):
+            self.run_native()
+        self.assertEqual(self.calls, [])
+
+    def test_wrong_host_or_unknown_architecture_fails_before_commands(self):
+        for machine in ("x86_64", "unsupported"):
+            with self.subTest(machine=machine), self.assertRaises(runner.QualificationError):
+                self.run_native(machine=machine)
+        self.assertEqual(self.calls, [])
+
+    def test_lock_materialized_c_and_receipt_hash_reject_before_commands(self):
+        for path in (self.source / "Cargo.lock", self.source / native.PATH / "sqlite3.c", self.receipt):
+            original = path.read_bytes()
+            path.write_bytes(original + b"changed")
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                self.run_native()
+            path.write_bytes(original)
+        self.assertEqual(self.calls, [])
+
+    def test_receipt_cannot_select_executables(self):
+        self.proof["tools"]["clang"]["path"] = "/untrusted/receipt-selected-clang"
+        self.proof["commands"] = link._commands(self.descriptor, self.proof["target"],
+                                                 Path(self.proof["build_directory"]), self.proof["tools"])
+        self.receipt.write_text(json.dumps(self.proof))
+        with self.assertRaisesRegex(runner.QualificationError, "identities differ"):
+            self.run_native()
+        self.assertEqual(self.calls, [])
+
+    def test_environment_cannot_switch_away_from_initial_host_proof(self):
+        original = link.cargo_environment
+        def wrong_library(*args, **kwargs):
+            env = original(*args, **kwargs)
+            env["SQLITE3_LIB_DIR"] = str(self.root / "alternate-library")
+            return env
+        with mock.patch.object(link, "cargo_environment", side_effect=wrong_library):
+            with self.assertRaisesRegex(runner.QualificationError, "verified host proof"):
+                self.run_native()
+        self.assertEqual(self.calls, [])
+
+    def test_symlink_tool_or_source_and_nonexecutable_tool_reject(self):
+        cargo = self.tools["cargo"]
+        real = cargo.with_name("real-cargo")
+        cargo.rename(real)
+        cargo.symlink_to(real)
+        with self.assertRaisesRegex(runner.QualificationError, "physical"):
+            self.run_native()
+        cargo.unlink()
+        real.rename(cargo)
+        cargo.chmod(0o644)
+        with self.assertRaisesRegex(runner.QualificationError, "executable"):
+            self.run_native()
+        cargo.chmod(0o755)
+        actual = self.root / "physical-source"
+        self.source.rename(actual)
+        self.source.symlink_to(actual, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "physical directory"):
+            self.run_native()
+        self.assertEqual(self.calls, [])
+
+    def test_initial_cargo_config_rejects_before_probe(self):
+        for path in (self.cargo_home / "config.toml", self.source / ".cargo/config"):
+            self.write(path, b"[build]\nrustc-wrapper='bad'\n")
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "Cargo configuration"):
+                self.run_native()
+            path.unlink()
+        self.assertEqual(self.calls, [])
+
+    def test_probe_metadata_and_timeout_fail_closed_with_retained_summary(self):
+        faults = (("compile-probe", 1), ("bundled", 2), ("root", 2), ("missing-feature", 2),
+                  ("config-injection", 2), ("compile-timeout", 3))
+        for fault, count in faults:
+            self.calls = []
+            self.evidence = self.root / ("evidence-" + fault)
+            with self.subTest(fault=fault), self.assertRaises((ValueError, RuntimeError)):
+                self.run_native(fault=fault)
+            self.assertEqual(len(self.calls), count)
+            summary = json.loads((self.evidence / "summary.json").read_text())
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["passed_tests"], [])
+
+    def test_source_and_tool_mutation_after_metadata_prevent_compilation(self):
+        for fault, path in (("source-mutation", self.source / "src/lib.rs"), ("tool-mutation", self.tools["cargo"])):
+            original = path.read_bytes()
+            self.calls = []
+            self.evidence = self.root / fault
+            with self.subTest(fault=fault), self.assertRaisesRegex(runner.QualificationError, "changed"):
+                self.run_native(fault=fault)
+            self.assertEqual([c[0] for c in self.calls], ["compile-probe", "metadata"])
+            path.write_bytes(original)
+
+    def test_authoritative_source_is_frozen_across_compile(self):
+        expected = runner.digest(self.contract)
+        result = self.run_native(fault="contract-swap")
+        self.assertEqual(result["inputs"][str(self.contract)], expected)
+        self.assertEqual(result["status"], "passed")
+
+
 @unittest.skipUnless(os.name == "posix", "owned process groups require POSIX")
 class LauncherTests(unittest.TestCase):
     def test_logs_remain_bounded_and_nonzero_exit_is_not_success(self):
@@ -235,6 +532,15 @@ class LauncherTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS sandbox integration")
 class SandboxTests(unittest.TestCase):
+    def test_fake_compiler_and_child_really_receive_network_eperm(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            env = {"PATH": "/usr/bin:/bin", "HOME": str(root), "TMPDIR": str(root), "LC_ALL": "C"}
+            runner.compile_sandbox_selftest([str(runner.SANDBOX), "-p", runner.COMPILE_PROFILE],
+                                            cwd=root, env=env, evidence=root)
+            self.assertEqual(json.loads((root / "compile-sandbox-probe.log").read_text()),
+                             {"network": 1, "child_network": "1"})
+
     def test_real_os_denies_network_private_reads_and_unowned_writes(self):
         # Keep the controlled sentinel under the real home, but outside every
         # allowed subtree: this proves the broad home rule, not a literal deny.

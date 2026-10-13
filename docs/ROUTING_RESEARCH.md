@@ -38,21 +38,52 @@ synthetic file tests, not Cargo resolution. Actual v2 SOURCE/lock validates as
 are distinct from the historical436-archive production proof. Evidence lives in
 `output/sqlite-native-integration/{cache-seal,cache-seal-peer}/`.
 
-The seal explicitly labels sparse metadata unauthenticated and offline Cargo
-resolution unperformed. Before compilation, a fresh all-lock dependency fetch,
-sealing and `cargo fetch --locked --offline` must qualify the supported cache
-layout; no target-only cache or unverified Cargo home can stand in for that gate.
-The cache helper is not yet connected to the producer workflow.
+The seal itself labels sparse metadata unauthenticated and Cargo resolution
+unperformed. A separate actual qualification now fills the38 missing archives
+in a new private fetched cache, seals all512 archives/453 index records, and
+runs full-lock `cargo fetch --locked --offline` plus production-feature metadata
+for both Apple targets under OS network denial. An EPERM socket control verifies
+that denial. Parent rehashes966 sealed records after Cargo use and validates
+Geph/root/wrapper/feature identities. No source/lock change, build, client run or
+installation occurs. The owned process tree peaks at160.22MiB over17.539s. Full
+proof and retained scratch locator are in
+`output/sqlite-native-integration/cache-live-20261013/verification.json`.
 
-Producer workflow integration is still pending. Native compilation needs a
-separate online dependency-fetch phase followed by a fresh verified Cargo cache
-and a fixed OS network-deny sandbox. Cargo offline mode alone does not restrict
-build scripts. The synthetic runner's current compile step inherits environment;
-its runtime allowlist/sandbox does not cover compilation. The native path must
-use explicit physical tools, clean environment, verified host native receipt,
-offline metadata/feature checks, and a network-denial control before compiling.
-Preserve the existing runtime allowlist, and never strip a binary after its
-native proof is sealed. None of these pending steps authorize release activation.
+The producer workflow now conditionally executes online fetch, cache seal,
+OS-denied offline fetch, the pinned explicit-tools producer/jobs1, native host
+synthetic qualification, then bundle/SPDX generation. Native output is never
+stripped after its proof. Existing native releases must pass all nine assets,
+independent source materialization, proof/SPDX, historical and current audit,
+and signer/commit/main-reference attestations before reuse. Four legacy shell
+bodies are unchanged after indentation normalization. Twelve producer and nine
+existing-release shell scenarios exercise success and each gate refusal; four
+static contracts, YAML and six shell syntax checks also pass. External services
+and verifiers are fixtures in these shell tests. Independent review9c21a98b
+found no actionable defect; evidence is under
+`output/sqlite-native-integration/{producer-workflow,producer-workflow-review}/`.
+
+The native synthetic runner requires the verified host archive receipt and
+independently selected physical tool paths, rejects ambient Cargo config, uses
+a clean compile environment and locked offline metadata/feature checks, and
+requires parent/child EPERM controls before compilation. The fixed inline
+compile policy denies network only; private-file protection remains the separate
+existing runtime sandbox. The exact19-case runtime allowlist is unchanged.
+Twenty-six focused tests pass, including command-driver failure controls and a
+real Python child network-denial test. Actual v2 ARM receipt/source/tool preflight
+also passes without compiling. Evidence lives in
+`output/sqlite-native-integration/native-synthetic/`. This is not evidence that
+the actual native libtest has run in CI, nor authorization to activate SOURCE.
+
+The next audit gate needs one exact native SPDX identity partition, separate
+from registry PURLs and generic integrity-only exceptions. The actual435-package
+v2 SBOM has434PURLs and one native SQLite package. The six scoped decisions leave
+75 of the original81 source-applicability unknowns; nine CNA-rejected and two
+source-fixed census rows still require explicit production adoption/binding.
+Five rejected groups conflict with live OSV aliases. The first machine report
+must fail with unresolved coverage, never silently omit the native package or
+transfer wrapper clearance. Read-only implementation plan2334d7b0 is retained in
+`output/sqlite-native-integration/native-audit-plan/`; no policy exception or
+source activation has been made.
 
 A further scoped source review binds CVE-2025-7709, CVE-2019-9936 and
 CVE-2019-9937 to actual v2 universal960f4039 as `not_affected / code_fixed`.
