@@ -394,8 +394,13 @@ def _link_evidence(native_proof: dict, root: Path, files: dict, binary_build_pat
     if text.splitlines().count("# Arch: " + TARGET_ARCH[native_proof["target"]][0]) != 1:
         raise ValueError("link map architecture mismatch")
     object_rows = re.findall(r"^\[\s*(\d+)\]\s+(.+)$", text, re.MULTILINE)
-    matches = [index for index, name in object_rows if name == rlib_build_path + "(sqlite3.o)"]
-    if len(matches) != 1 or len({idx for idx, _ in object_rows}) != len(object_rows):
+    # Apple ld-1053 emits archive[index](member); ld-1267 emits
+    # archive(member). Only this observed numeric annotation is optional:
+    # both forms must still name the exact absolute archive and native member.
+    member = re.compile(re.escape(rlib_build_path) + r"(?:\[[0-9]+\])?\(sqlite3\.o\)")
+    matches = [index for index, name in object_rows if member.fullmatch(name)]
+    duplicate_indices = len({int(idx) for idx, _ in object_rows}) != len(object_rows)
+    if len(matches) != 1 or duplicate_indices:
         # Keep the decisive input in CI failures: supported Apple linkers can
         # evolve their display grammar independently of the linked bytes. Do
         # not silently normalize an unobserved spelling or accept a basename.
@@ -403,7 +408,7 @@ def _link_evidence(native_proof: dict, root: Path, files: dict, binary_build_pat
                     if ".rlib" in name or "sqlite3" in name]
         detail = {"expected": (rlib_build_path + "(sqlite3.o)")[:1024],
                   "matches": len(matches), "object_rows": len(object_rows),
-                  "duplicate_indices": len({idx for idx, _ in object_rows}) != len(object_rows),
+                  "duplicate_indices": duplicate_indices,
                   "relevant_rows": (relevant or object_rows)[:8]}
         raise ValueError("link map must use the exact sys rlib native member once: " + json.dumps(detail, sort_keys=True))
     try:

@@ -1,5 +1,15 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Exact2297aaaaf CI38371930625 reduced the657-test metadata failure to one
+  captured Xcode15.4/ld1053 row: the exact archive path is followed by `[5]`
+  before `(sqlite3.o)`. The parser now accepts that observed numeric annotation
+  while preserving exact path/member and binary checks. Parent review also
+  found numeric index aliases (`1`/`01`) escaping duplicate detection; causal
+  REDs for both defects are retained.21 builder tests PASS under OS network
+  denial, including a real local compiler/rlib/linker fixture. Final receipt
+  output/sqlite-native-integration/link-map-xcode15-v2/receipt.json (9a087afb)
+  binds11 files. A fresh exact-head CI is still required. Separate inactive
+  producer/bundle/consumer work is in progress; no SOURCE/workflow activation.
 - Integration follow-up fixes the two stale scanner-row fixtures and includes
   the shared native module in the reduced source-helper fixture. Causal REDs
   are retained;21 release and53 build-config tests PASS. The full metadata

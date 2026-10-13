@@ -222,6 +222,49 @@ class NativeBuildEvidenceTests(unittest.TestCase):
         self.assertEqual(detail["matches"], 0)
         self.assertEqual(detail["relevant_rows"], [["1", str(self.root / self.target / "sys.rlib") + "(unknown-sqlite3.o)"]])
 
+    def test_xcode15_map_archive_annotation_keeps_exact_linkage(self):
+        # Captured from CI 38371930625: Apple ld-1053.12 adds [5] between
+        # the exact archive path and member; ld-1267 omits that annotation.
+        original = (self.root / self.target / "map").read_bytes()
+        annotated = original.replace(b"sys.rlib(sqlite3.o)", b"sys.rlib[5](sqlite3.o)")
+        self.update_linked_file("link_map", annotated)
+        self.assertEqual(self.verify()["scope"], build.LINKED_SCOPE)
+        # Annotation support must not bypass the existing actual-binary check.
+        self.update_linked_file("binary", macho(self.target, True, address=8192))
+        with self.assertRaisesRegex(ValueError, "address"):
+            self.verify()
+
+    def test_archive_annotation_cannot_hide_foreign_or_malformed_member(self):
+        original = (self.root / self.target / "map").read_bytes()
+        for spelling in (b"other.rlib[5](sqlite3.o)", b"sys.rlib[5](other.o)",
+                         b"sys.rlib[](sqlite3.o)", b"sys.rlib[-5](sqlite3.o)",
+                         b"sys.rlib[5x](sqlite3.o)", b"sys.rlib[5][5](sqlite3.o)",
+                         b"sys.rlib[5](sqlite3.o).other", b"sys.rlib [5](sqlite3.o)",
+                         b"sysXrlib[5](sqlite3.o)", b"sys.rlib[5.0](sqlite3.o)",
+                         "sys.rlib[５](sqlite3.o)".encode()):
+            with self.subTest(spelling=spelling):
+                self.update_linked_file("link_map", original.replace(b"sys.rlib(sqlite3.o)", spelling))
+                with self.assertRaisesRegex(ValueError, "exact sys rlib native member once"):
+                    self.verify()
+
+    def test_annotated_and_plain_member_duplicates_rejected(self):
+        original = (self.root / self.target / "map").read_bytes()
+        for index in (1, 2):
+            with self.subTest(index=index):
+                extra = f"[ {index}] {self.root / self.target}/sys.rlib[5](sqlite3.o)\n".encode()
+                self.update_linked_file("link_map", original.replace(b"# Symbols:\n", extra + b"# Symbols:\n"))
+                with self.assertRaisesRegex(ValueError, "exact sys rlib native member once"):
+                    self.verify()
+
+    def test_numeric_object_index_alias_duplicates_rejected(self):
+        original = (self.root / self.target / "map").read_bytes()
+        for index in ("01", "001"):
+            with self.subTest(index=index):
+                extra = f"[ {index}] {self.root / self.target}/foreign.rcgu.o\n".encode()
+                self.update_linked_file("link_map", original.replace(b"# Symbols:\n", extra + b"# Symbols:\n"))
+                with self.assertRaisesRegex(ValueError, "exact sys rlib native member once"):
+                    self.verify()
+
     def test_environment_strips_inherited_native_overrides(self):
         env = build.cargo_environment(self.descriptor, self.native_paths[self.target], self.root, SOURCE_SHA, LOCK_SHA,
                                      {"HOME": "/home", "PKG_CONFIG_PATH": "/host", "CARGO_ENCODED_RUSTFLAGS": "bad", "CFLAGS": "bad", "DYLD_LIBRARY_PATH": "bad", "SQLITE3_LIB_DIR": "/host"})
