@@ -12,6 +12,24 @@ file.
 
 2026-10-13 continuation: DNS/TG/runtime baseline qualified; latest audit changes
 expose historical vendor-evidence and candidate-release packaging gates.
+- Dedicated PR384 now contains strict audit bridge af235281f and optional native
+  SQLite source/build/SPDX helpers59ef2fc7b, pushed and verified remotely.
+  Audit49 focused cases PASS under OS network denial; old evaluator's two
+  false passes against the actual411-package candidate are retained as RED.
+  Native69 source/SPDX plus16 builder tests PASS,85 distinct cases; real tiny
+  clang/ar -> Rust rlib -> Apple linker fixture and read-only retained Geph
+  parser check are separate from the synthetic universal fixtures. Review fixed
+  duplicate Rust-local rejection, Cargo sqlite/native confusion and a wrapper
+  URL mismatch. Final-live independent four-scenario replay4402f167 passes.
+  Parent verifies60 native and19 audit evidence/source/policy bindings;8 docs
+  tests PASS. Dedicated output/sqlite-native-integration/ receipts retain detail.
+  Production SOURCE3420708f/lockdc8ec61a/workflow remain inactive for native;
+  actual producer/consumer integration and both target artifacts remain open.
+- Root checkpoint66e294910 exact CI38365280991 is terminal: product/checks,
+  Chromium and Windows adapter PASS; package fails at the same historical
+  missing scanned-package identity evidence. Windows38365281003 both targets
+  PASS; dependency38365280970 FAIL. Logs/API results retained under
+  output/tg-ws-proxy-1112/ci/checkpoint-66e294910/. No rerun was dispatched.
 - TG1.11.2 source57aca7e9 pushed to PR376. Exact CI38205590782 is terminal:
   product/checks, Chromium contract and Windows adapter PASS; standalone
   Windows38205590844 both targets PASS. Packaging still rejects historical
@@ -21,8 +39,8 @@ expose historical vendor-evidence and candidate-release packaging gates.
   Evidence: output/tg-ws-proxy-1112/ci/summary.json (01767be1). The retained
   product log ends before its final summary; terminal API step statuses prove
   job success, not an invented complete-log test count. No install occurred.
-  Dedicated native source/SBOM and static-build helpers are now being integrated
-  on PR384's checkout; production SOURCE/lock/workflow activation remains open.
+  Dedicated native source/SBOM and static-build helper results are above;
+  production SOURCE/lock/workflow activation remains open.
 - tg-ws-proxy1.11.2 imported from official307a384a (Oct11 release), preserving
   local lifecycle/ownership fixes. Archive db9048b5 and all15 upstream module
   hashes verified. Existing62, new21, upstream11+30subtests and2 replay cases
@@ -50,8 +68,9 @@ expose historical vendor-evidence and candidate-release packaging gates.
   native/source-owned advisories. Evidence: output/sqlite-native-upgrade/
   static3532-candidate/{final-receipt,peer-review}.json (beefc1ed/0c1a2acb).
   Independent review verifies28 bindings and actual rlib/Mach-O identities.
-  Native SOURCE/build/SBOM integration, Intel and production aws_lambda remain
-  open; see ROUTING_RESEARCH and the linked integration review. No installation.
+  Tooling integration is now covered above; actual native producer/consumer,
+  Intel and production aws_lambda remain open. See ROUTING_RESEARCH and the
+  linked integration review. No installation.
 - Output-only Chromium V1 peer found3 false-clearances; V2 complete grammar and
   unhandled-claim rejection pass70 regressions+4 independent cases. V3 admits
   only2 reviewed release forms, passing113 regressions+13 independent cases.
@@ -381,7 +400,7 @@ expose historical vendor-evidence and candidate-release packaging gates.
   worktree has no matching index. Bounded direct searches are used there rather
   than substituting the root or historical alias. Reuse exact188323a8 only for
   unchanged runtime/E2E, with57aca7e9's scoped/CI proof for the Telegram delta.
-- NEXT exact native SQLite SOURCE/build/SBOM integration and Intel qualification,
+- NEXT native SQLite release producer/consumer integration and actual target qualification,
   source-owned production advisory/notice and complete Chromium coverage.
   New Linux audit evidence is qualified; macOS release evidence remains separate. A new
   qualified vendor artifact is required: historical count-only evidence cannot
@@ -7635,12 +7654,15 @@ and dependency audit in
 
 ## Next Verified Action
 
-Follow the dated top checkpoint and live PR376, not historical milestone labels.
-Publish the accumulated Googlevideo/voice recovery changes after focused checks,
-then inspect exact-head CI and review. Keep installed4564274 distinct from the
-new source head: documentation integration does not justify another install.
-Real Discord incoming-audio/stream recovery, sustained Safari playback, physical
-route-change/sleep-wake and stable-release qualification remain separate gates.
+Follow the dated top checkpoint and live PR376/PR384, not historical milestone
+labels. Check exact59ef2fc7b CI, then integrate the prepared native SQLite proof
+with Geph's actual release producer/consumer and both target artifacts. Preserve
+the source-owned/native advisory and notice gates; do not manufacture historical
+scanner evidence or broaden exceptions. Retain the qualified TG1.11.2 and DNS
+retirement source changes while vendor packaging is closed. Canonical installed
+verification and normal Chrome/Safari/Telegram qualification follow a permitted
+installation. Real Discord incoming-audio/stream recovery, sustained Safari
+playback and physical route-change/sleep-wake remain separate gates.
 Do not start a call, sleep the Mac, or reset installed learning for a smoke test.
 
 The former instruction to merge PR336 was historical and superseded; its retained
