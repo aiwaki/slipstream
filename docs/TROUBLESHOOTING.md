@@ -69,8 +69,20 @@ as a product fix.
 ### A new-version notification does not appear
 
 Preview `.22` cannot discover `.23`: `.22` reports package version `0.1.9`,
-while the honest preview channel starts at `0.1.9-preview.23`. Install `.23`
-manually once; subsequent previews use ordinary semver precedence.
+while the honest preview channel starts at `0.1.9-preview.23`. Install the newest
+compatible preview from its DMG; preview comparisons use ordinary semver precedence.
+
+Released `.23` and `.24` also have a discovery-size defect. On 2026-10-15 the
+public GitHub releases response contained 29 records and 417722 bytes, above the
+client's 256 KiB per-page limit. This API response was fetched separately after
+the run; client stderr was not captured. The blocker follows from the source and
+API bytes, rather than a captured client error. The real public `.23` test opened its tray menu
+but never offered `.24`; no installation began, and cleanup passed. This happens
+before notification submission, so enabling notifications cannot repair it.
+Use the published DMG. The source repair requests 10 records per page instead of
+100 while preserving the 256 KiB page limit, 768 KiB total budget, shared
+10-second deadline and 300-record ceiling. It still scans through the last page
+and selects the highest eligible version. This repair is not in the `.24` binary.
 
 From `.23` onward, Slipstream waits briefly after startup, then checks in the
 background and at a long cadence. It does not open a window, activate itself,
@@ -110,11 +122,14 @@ Unit and MockRuntime mechanics tests do not prove native macOS delivery or a
 complete public product transition. Preview `.24` publication follows the existing
 mandatory candidate, audit, packaged/native and protected-readiness gates,
 including the exact packaged OS-observed notification gate with no activation.
-The real public `.23 -> .24` notification/download/install/relaunch and forced
-rollback are qualified after publication against the released assets. Until that
-post-publication qualification passes, treat preview auto-update and public
-upgrade/rollback as unverified; use the published DMG for manual installation.
-The durable rollback and successor acknowledgement requirements remain unchanged.
+The real public `.23 -> .24` attempt stopped at discovery; download, installation,
+relaunch and forced rollback remain unverified. Source review also found that a
+successor can acknowledge an advancing old daemon without checking the new daemon
+payload, while asynchronous privileged installation is pending. That separate
+defect is not fixed by pagination and has not been reproduced by this run.
+Keep preview auto-update and public upgrade/rollback marked unverified; use the
+published DMG for manual installation. Do not preinstall a new daemon or replace
+released assets to turn a public updater check into a pass.
 
 For a packaged candidate, verify the runtime without starting it:
 

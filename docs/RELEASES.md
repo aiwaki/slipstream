@@ -6,7 +6,7 @@ purpose must remain visually and mechanically separate.
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|
 | Stable app | `vX.Y.Z` | Release and latest | Signed updater feed and first installation |
-| Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Qualified build from `main`; `.23+` discovers later previews in the background |
+| Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Qualified build from `main`; use the DMG while public auto-update remains unverified |
 | Geph dependency | `geph-vendor-X.Y.Z-rN` | Internal pre-release, never latest | Reviewed and attested build input, not an app release |
 
 Preview and internal dependency releases never replace GitHub's latest pointer
@@ -29,6 +29,14 @@ tile, window or focus change. Until it passes, release notes and user-facing
 claims must describe preview auto-update and public upgrade/rollback as
 unverified. Local MockRuntime tests are updater mechanics evidence only and do
 not satisfy this live gate. No other publication requirement changes.
+
+The 2026-10-15 public `.23 -> .24` attempt stopped before installation: the
+GitHub releases listing exceeded the released client's per-page byte limit.
+The pagination repair in source is not present in either published binary.
+Keep both releases' signed assets unchanged and use the DMG for this transition.
+Public success, forced rollback and the separate daemon-identity acknowledgement
+boundary remain open; no source-only or modified-old-client test closes them.
+
 Root READMEs link to the releases list and instruct users to select the newest
 Slipstream app release, excluding internal dependency releases. Keep installation
 instructions version-independent; do not use GitHub's latest pointer for previews.
