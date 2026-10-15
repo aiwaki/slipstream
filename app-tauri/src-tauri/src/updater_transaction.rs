@@ -28,10 +28,25 @@ pub const WATCHDOG_BINARY: &str = "slipstream-update-watchdog";
 pub const WATCHDOG_LABEL: &str = "dev.slipstream.update-watchdog";
 pub const JOURNAL_FILE: &str = "app-update-transaction-v1.json";
 pub const TRANSACTION_ENV: &str = "SLIPSTREAM_UPDATE_TRANSACTION";
+pub const ROLLBACK_ENV: &str = "SLIPSTREAM_UPDATE_ROLLBACK";
 const JOURNAL_VERSION: u8 = 1;
 const ACK_TIMEOUT_SECS: u64 = 60;
 const MAX_JOURNAL_BYTES: u64 = 32 * 1024;
 const MAX_ACK_BYTES: u64 = 8 * 1024;
+
+fn transaction_markers_present(
+    transaction: Option<&std::ffi::OsStr>,
+    rollback: Option<&std::ffi::OsStr>,
+) -> bool {
+    transaction.is_some() || rollback.is_some()
+}
+
+pub fn startup_has_transaction() -> bool {
+    transaction_markers_present(
+        std::env::var_os(TRANSACTION_ENV).as_deref(),
+        std::env::var_os(ROLLBACK_ENV).as_deref(),
+    )
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -100,8 +115,12 @@ pub struct PendingSuccessorAck {
     nonce: String,
     uid: u32,
     target: PathBuf,
+    backup: PathBuf,
+    stage: PathBuf,
+    launch_agent: PathBuf,
     version: String,
     executable_sha256: String,
+    ack_written: bool,
 }
 
 fn unix_now() -> u64 {
@@ -781,6 +800,7 @@ fn recover_prepared_transaction_with<L, U, B>(
     current_exe: &Path,
     state_dir: &Path,
     launch_agents_dir: &Path,
+    startup_transaction_context: bool,
     service_loaded: L,
     unload: U,
     bootstrap: B,
@@ -790,6 +810,9 @@ where
     U: Fn(u32) -> Result<(), String>,
     B: Fn(u32, &Path) -> Result<(), String>,
 {
+    if startup_transaction_context {
+        return Ok(false);
+    }
     match fs::symlink_metadata(state_dir) {
         Ok(_) => {
             ensure_user_directory(state_dir, true)
@@ -868,13 +891,11 @@ pub fn recover_prepared_transaction(
     state_dir: &Path,
     launch_agents_dir: &Path,
 ) -> Result<bool, String> {
-    if std::env::var_os(TRANSACTION_ENV).is_some() {
-        return Ok(false);
-    }
     recover_prepared_transaction_with(
         current_exe,
         state_dir,
         launch_agents_dir,
+        startup_has_transaction(),
         watchdog_service_loaded,
         unload_watchdog,
         bootstrap_watchdog,
@@ -1183,13 +1204,34 @@ fn record_failure(path: &Path, journal: &mut UpdateJournalV1, error: &str) {
     let _ = write_journal(path, journal);
 }
 
-fn spawn_bundle(bundle: &Path, journal_path: &Path) -> Result<Child, String> {
-    let executable = bundle_executable(bundle);
-    Command::new(&executable)
-        .env(TRANSACTION_ENV, journal_path)
+fn failed_receipt_path(journal_path: &Path, nonce: &str) -> PathBuf {
+    journal_path.with_file_name(format!("app-update-transaction-failed-{nonce}.json"))
+}
+
+fn bundle_launch_command(
+    bundle: &Path,
+    journal_path: &Path,
+    rollback_receipt: Option<&Path>,
+) -> Command {
+    let mut command = Command::new(bundle_executable(bundle));
+    // Old clients use this marker to skip Prepared recovery while the watchdog
+    // still holds the lock. Removing it on rollback can make that old app exit.
+    command.env(TRANSACTION_ENV, journal_path);
+    if let Some(rollback_receipt) = rollback_receipt {
+        command.env(ROLLBACK_ENV, rollback_receipt);
+    } else {
+        command.env_remove(ROLLBACK_ENV);
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+fn spawn_bundle(bundle: &Path, journal_path: &Path) -> Result<Child, String> {
+    let executable = bundle_executable(bundle);
+    bundle_launch_command(bundle, journal_path, None)
         .spawn()
         .map_err(|error| format!("cannot launch {}: {error}", executable.display()))
 }
@@ -1334,7 +1376,12 @@ fn complete_success(journal_path: &Path, journal: &mut UpdateJournalV1) -> Resul
 }
 
 fn direct_relaunch(bundle: &Path, journal_path: &Path) -> Result<(), String> {
-    spawn_bundle(bundle, journal_path).map(|_| ())
+    let journal = read_journal(journal_path)?;
+    let receipt = failed_receipt_path(journal_path, &journal.nonce);
+    bundle_launch_command(bundle, journal_path, Some(&receipt))
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("cannot relaunch {}: {error}", bundle.display()))
 }
 
 fn finish_rollback_with<R>(
@@ -1345,7 +1392,14 @@ fn finish_rollback_with<R>(
 where
     R: FnMut(&Path, &Path) -> Result<(), String>,
 {
+    let failed = failed_receipt_path(journal_path, &journal.nonce);
     if journal.phase != TransactionPhase::OldRelaunched {
+        // Persist the validated rollback context before launching old clients.
+        // It survives active-journal cleanup and keeps the existing crash retry.
+        write_private_atomic(
+            &failed,
+            &serde_json::to_vec(journal).map_err(|error| error.to_string())?,
+        )?;
         relaunch(&journal.target, journal_path)?;
         set_phase(journal_path, journal, TransactionPhase::OldRelaunched)?;
     }
@@ -1353,10 +1407,6 @@ where
         fs::remove_dir_all(&journal.stage)
             .map_err(|error| format!("cannot remove failed new bundle: {error}"))?;
     }
-    let failed = journal_path.with_file_name(format!(
-        "app-update-transaction-failed-{}.json",
-        journal.nonce
-    ));
     write_private_atomic(
         &failed,
         &serde_json::to_vec(journal).map_err(|error| error.to_string())?,
@@ -1599,10 +1649,63 @@ pub fn pending_successor_ack(
     current_exe: &Path,
     current_version: &str,
 ) -> Result<Option<PendingSuccessorAck>, String> {
-    let Some(value) = std::env::var_os(TRANSACTION_ENV) else {
+    let journal_path = std::env::var_os(TRANSACTION_ENV).map(PathBuf::from);
+    let rollback_receipt = std::env::var_os(ROLLBACK_ENV).map(PathBuf::from);
+    pending_successor_ack_at(
+        current_exe,
+        current_version,
+        journal_path.as_deref(),
+        rollback_receipt.as_deref(),
+    )
+}
+
+fn pending_successor_ack_at(
+    current_exe: &Path,
+    current_version: &str,
+    journal_path: Option<&Path>,
+    rollback_receipt: Option<&Path>,
+) -> Result<Option<PendingSuccessorAck>, String> {
+    let Some(journal_path) = journal_path else {
+        if rollback_receipt.is_some() {
+            return Err("rollback context has no original transaction path".into());
+        }
         return Ok(None);
     };
-    let journal_path = PathBuf::from(value);
+    if let Some(receipt_path) = rollback_receipt {
+        let state_dir = journal_path
+            .parent()
+            .ok_or_else(|| "rollback transaction parent is missing".to_string())?;
+        if !journal_path.is_absolute()
+            || state_dir
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+                != state_dir
+        {
+            return Err("rollback transaction path is not canonical".into());
+        }
+        ensure_user_directory(state_dir, true)?;
+        if receipt_path.parent() != Some(state_dir) {
+            return Err("rollback receipt is outside its transaction directory".into());
+        }
+        let receipt: UpdateJournalV1 =
+            serde_json::from_slice(&read_private_file(receipt_path, MAX_JOURNAL_BYTES)?)
+                .map_err(|error| format!("rollback receipt is invalid: {error}"))?;
+        validate_journal(journal_path, &receipt)?;
+        if receipt_path != failed_receipt_path(journal_path, &receipt.nonce)
+            || !matches!(
+                receipt.phase,
+                TransactionPhase::RolledBack | TransactionPhase::OldRelaunched
+            )
+            || receipt.current_version != current_version
+            || derive_target(current_exe)? != receipt.target
+            || sha256_file(current_exe)? != receipt.old_executable_sha256
+            || bundle_version(&receipt.target)? != receipt.current_version
+        {
+            return Err("running rollback does not match its retained transaction".into());
+        }
+        return Ok(None);
+    }
+    let journal_path = journal_path.to_path_buf();
     let mut journal = read_journal(&journal_path)?;
     if journal.expected_version != current_version
         || derive_target(current_exe)? != journal.target
@@ -1633,13 +1736,17 @@ pub fn pending_successor_ack(
         nonce: journal.nonce,
         uid: journal.uid,
         target: journal.target,
+        backup: journal.backup,
+        stage: journal.stage,
+        launch_agent: journal.launch_agent,
         version: journal.expected_version,
         executable_sha256: journal.new_executable_sha256,
+        ack_written: false,
     }))
 }
 
 pub fn acknowledge_successor(
-    context: &PendingSuccessorAck,
+    context: &mut PendingSuccessorAck,
     heartbeat_seq: u64,
 ) -> Result<(), String> {
     if heartbeat_seq == 0 {
@@ -1666,7 +1773,65 @@ pub fn acknowledge_successor(
     write_private_atomic(
         &context.ack_path,
         &serde_json::to_vec(&ack).map_err(|error| error.to_string())?,
-    )
+    )?;
+    context.ack_written = true;
+    Ok(())
+}
+
+/// ACK is only a request to commit. Release the successor's mutation guard
+/// after the same watchdog lock and exact terminal filesystem state prove that
+/// the acknowledged new bundle survived cleanup, rather than a rollback.
+pub fn successor_transaction_committed(
+    context: &PendingSuccessorAck,
+    current_version: &str,
+) -> Result<bool, String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|error| format!("cannot identify committed successor: {error}"))?;
+    successor_transaction_committed_at(context, &current_exe, current_version)
+}
+
+fn successor_transaction_committed_at(
+    context: &PendingSuccessorAck,
+    current_exe: &Path,
+    current_version: &str,
+) -> Result<bool, String> {
+    if !context.ack_written {
+        return Ok(false);
+    }
+    let state_dir = context
+        .journal_path
+        .parent()
+        .ok_or_else(|| "update journal parent is missing".to_string())?;
+    ensure_user_directory(state_dir, true)?;
+    let Some(_lock) = try_transaction_lock(state_dir)? else {
+        return Ok(false);
+    };
+    let failed = failed_receipt_path(&context.journal_path, &context.nonce);
+    for path in [
+        &context.journal_path,
+        &context.ack_path,
+        &context.backup,
+        &context.stage,
+        &context.launch_agent,
+        &failed,
+    ] {
+        match fs::symlink_metadata(path) {
+            Ok(_) => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!("cannot inspect completed update state: {error}"));
+            }
+        }
+    }
+    if context.uid != current_uid()
+        || context.version != current_version
+        || derive_target(current_exe)? != context.target
+        || sha256_file(current_exe)? != context.executable_sha256
+        || bundle_version(&context.target)? != context.version
+    {
+        return Err("committed successor identity changed".into());
+    }
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -1722,6 +1887,37 @@ mod tests {
         sha256_file(&path).unwrap()
     }
 
+    fn successor_context(path: &Path, journal: &UpdateJournalV1) -> PendingSuccessorAck {
+        PendingSuccessorAck {
+            journal_path: path.to_path_buf(),
+            ack_path: ack_path(path),
+            nonce: journal.nonce.clone(),
+            uid: journal.uid,
+            target: journal.target.clone(),
+            backup: journal.backup.clone(),
+            stage: journal.stage.clone(),
+            launch_agent: journal.launch_agent.clone(),
+            version: journal.expected_version.clone(),
+            executable_sha256: journal.new_executable_sha256.clone(),
+            ack_written: false,
+        }
+    }
+
+    fn bundle_metadata(bundle: &Path, version: &str) {
+        fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                "<plist version=\"1.0\"><dict>\
+                 <key>CFBundleIdentifier</key><string>dev.slipstream.tray</string>\
+                 <key>CFBundleExecutable</key><string>slipstream</string>\
+                 <key>LSUIElement</key><true/>\
+                 <key>CFBundleShortVersionString</key><string>{version}</string>\
+                 </dict></plist>"
+            ),
+        )
+        .unwrap();
+    }
+
     fn archive_with_executable(contents: &[u8]) -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = tar::Builder::new(encoder);
@@ -1757,17 +1953,11 @@ mod tests {
         value.successor_pid = Some(std::process::id());
         value.successor_started = Some("Thu Aug 20 12:34:56 2026".into());
         write_private_atomic(&path, &serde_json::to_vec(&value).unwrap()).unwrap();
-        let context = PendingSuccessorAck {
-            journal_path: path.clone(),
-            ack_path: ack_path(&path),
-            nonce: value.nonce.clone(),
-            uid: value.uid,
-            target: value.target.clone(),
-            version: value.expected_version.clone(),
-            executable_sha256: value.new_executable_sha256.clone(),
-        };
-        assert!(acknowledge_successor(&context, 0).is_err());
-        acknowledge_successor(&context, 7).unwrap();
+        let mut context = successor_context(&path, &value);
+        assert!(acknowledge_successor(&mut context, 0).is_err());
+        assert!(!context.ack_written);
+        acknowledge_successor(&mut context, 7).unwrap();
+        assert!(context.ack_written);
         assert_eq!(
             read_valid_ack(&ack_path(&path), &value)
                 .unwrap()
@@ -1778,6 +1968,81 @@ mod tests {
         let mut wrong = value.clone();
         wrong.expected_version = "0.1.9-preview.25".into();
         assert!(read_valid_ack(&ack_path(&path), &wrong).is_err());
+    }
+
+    #[test]
+    fn commit_guard_waits_for_own_ack_watchdog_unlock_and_terminal_cleanup() {
+        let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.target, b"new");
+        value.old_executable_sha256 = executable(&value.backup, b"old");
+        value.phase = TransactionPhase::SuccessorLaunched;
+        value.successor_pid = Some(std::process::id());
+        value.successor_started = Some("Thu Aug 20 12:34:56 2026".into());
+        bundle_metadata(&value.target, &value.expected_version);
+        fs::create_dir_all(value.launch_agent.parent().unwrap()).unwrap();
+        fs::write(&value.launch_agent, b"owned watchdog").unwrap();
+        write_journal(&path, &value).unwrap();
+        let current_exe = bundle_executable(&value.target);
+        let mut context = successor_context(&path, &value);
+        let never_acknowledged = context.clone();
+        acknowledge_successor(&mut context, 7).unwrap();
+        let expected_version = value.expected_version.clone();
+        let committed = |context: &PendingSuccessorAck| {
+            successor_transaction_committed_at(context, &current_exe, &expected_version)
+        };
+        assert!(!committed(&context).unwrap(), "ACK alone is not commit");
+        let watchdog_lock = try_transaction_lock(path.parent().unwrap())
+            .unwrap()
+            .unwrap();
+        complete_success(&path, &mut value).unwrap();
+        assert!(
+            !committed(&context).unwrap(),
+            "watchdog still owns its lock"
+        );
+        drop(watchdog_lock);
+        assert!(!committed(&never_acknowledged).unwrap());
+        assert!(committed(&context).unwrap());
+        for residue in [&context.backup, &context.stage, &context.launch_agent] {
+            fs::write(residue, b"incomplete cleanup").unwrap();
+            assert!(!committed(&context).unwrap());
+            fs::remove_file(residue).unwrap();
+        }
+        assert!(
+            successor_transaction_committed_at(&context, &current_exe, "wrong-version").is_err()
+        );
+        fs::write(&current_exe, b"changed").unwrap();
+        assert!(committed(&context).is_err());
+    }
+
+    #[test]
+    fn commit_guard_rejects_rollback_even_after_successor_wrote_ack() {
+        let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.target, b"new");
+        value.old_executable_sha256 = executable(&value.backup, b"old");
+        value.phase = TransactionPhase::SuccessorLaunched;
+        value.successor_pid = Some(std::process::id());
+        value.successor_started = Some("Thu Aug 20 12:34:56 2026".into());
+        write_journal(&path, &value).unwrap();
+        let mut context = successor_context(&path, &value);
+        acknowledge_successor(&mut context, 7).unwrap();
+        rollback_impl_with_relaunch(&path, &mut value, false, &mut |_, _| Ok(())).unwrap();
+        let current_exe = bundle_executable(&value.target);
+        assert!(!path.exists());
+        assert!(!context.backup.exists());
+        assert!(!context.stage.exists());
+        assert!(
+            !successor_transaction_committed_at(&context, &current_exe, &context.version).unwrap()
+        );
+        fs::remove_file(path.with_file_name(format!(
+            "app-update-transaction-failed-{}.json",
+            context.nonce
+        )))
+        .unwrap();
+        assert!(
+            successor_transaction_committed_at(&context, &current_exe, &context.version).is_err()
+        );
     }
 
     #[test]
@@ -1820,17 +2085,47 @@ mod tests {
     }
 
     #[test]
+    fn successor_launch_keeps_the_exact_transaction_journal() {
+        let bundle = Path::new("/Applications/Slipstream.app");
+        let journal_path = Path::new("/private/update-state/app-update-transaction.json");
+        let command = bundle_launch_command(bundle, journal_path, None);
+        assert_eq!(command.get_program(), bundle_executable(bundle).as_os_str());
+        assert_eq!(command.get_args().count(), 0);
+        assert_eq!(
+            command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new(TRANSACTION_ENV))
+                .map(|(_, value)| value),
+            Some(Some(journal_path.as_os_str()))
+        );
+        assert_eq!(
+            command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new(ROLLBACK_ENV))
+                .map(|(_, value)| value),
+            Some(None),
+            "a successor must not inherit a prior rollback context"
+        );
+    }
+
+    #[test]
     fn rollback_restores_old_bundle_before_one_injected_relaunch_request() {
-        let root = TempDir::new().unwrap();
+        let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
         let (path, mut value) = journal(root.path());
         value.new_executable_sha256 = executable(&value.target, b"new");
         value.old_executable_sha256 = executable(&value.backup, b"old");
+        bundle_metadata(&value.backup, &value.current_version);
         value.phase = TransactionPhase::SuccessorLaunched;
         value.successor_deadline_unix = Some(unix_now().saturating_sub(1));
         write_journal(&path, &value).unwrap();
 
         let relaunches = Cell::new(0usize);
         let expected_target = value.target.clone();
+        let expected_nonce = value.nonce.clone();
+        let old_version = value.current_version.clone();
+        let _watchdog_lock = try_transaction_lock(path.parent().unwrap())
+            .unwrap()
+            .unwrap();
         let mut relaunch = |bundle: &Path, journal_path: &Path| {
             relaunches.set(relaunches.get() + 1);
             assert_eq!(bundle, expected_target);
@@ -1843,6 +2138,33 @@ mod tests {
                 read_journal(journal_path).unwrap().phase,
                 TransactionPhase::RolledBack
             );
+            let receipt_path = failed_receipt_path(journal_path, &expected_nonce);
+            let command = bundle_launch_command(bundle, journal_path, Some(&receipt_path));
+            assert_eq!(command.get_program(), bundle_executable(bundle).as_os_str());
+            assert_eq!(fs::read(Path::new(command.get_program())).unwrap(), b"old");
+            assert_eq!(
+                command
+                    .get_envs()
+                    .find(|(name, _)| *name == std::ffi::OsStr::new(TRANSACTION_ENV))
+                    .map(|(_, value)| value),
+                Some(Some(journal_path.as_os_str())),
+                "legacy restored clients must skip Prepared recovery under the watchdog lock"
+            );
+            assert_eq!(
+                command
+                    .get_envs()
+                    .find(|(name, _)| *name == std::ffi::OsStr::new(ROLLBACK_ENV))
+                    .map(|(_, value)| value),
+                Some(Some(receipt_path.as_os_str()))
+            );
+            assert!(pending_successor_ack_at(
+                Path::new(command.get_program()),
+                &old_version,
+                Some(journal_path),
+                Some(&receipt_path)
+            )
+            .unwrap()
+            .is_none());
             Ok(())
         };
         rollback_impl_with_relaunch(&path, &mut value, false, &mut relaunch).unwrap();
@@ -1850,6 +2172,72 @@ mod tests {
         assert_eq!(relaunches.get(), 1);
         assert_eq!(value.phase, TransactionPhase::OldRelaunched);
         assert!(!path.exists());
+        assert!(pending_successor_ack_at(
+            &bundle_executable(&value.target),
+            &value.current_version,
+            Some(&path),
+            Some(&failed_receipt_path(&path, &value.nonce))
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn rollback_context_rejects_unbound_or_nonprivate_receipts() {
+        let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let (path, mut value) = journal(root.path());
+        value.old_executable_sha256 = executable(&value.target, b"old");
+        bundle_metadata(&value.target, &value.current_version);
+        value.phase = TransactionPhase::RolledBack;
+        let receipt_path = failed_receipt_path(&path, &value.nonce);
+        let current_exe = bundle_executable(&value.target);
+        let validate = || {
+            pending_successor_ack_at(
+                &current_exe,
+                &value.current_version,
+                Some(&path),
+                Some(&receipt_path),
+            )
+        };
+        for changed in 0..6 {
+            let mut receipt = value.clone();
+            match changed {
+                0 => receipt.nonce = "b".repeat(32),
+                1 => receipt.uid = receipt.uid.wrapping_add(1),
+                2 => receipt.phase = TransactionPhase::SuccessorLaunched,
+                3 => receipt.current_version = "0.1.9-preview.99".into(),
+                4 => receipt.old_executable_sha256 = "f".repeat(64),
+                _ => receipt.target = root.path().join("other/Slipstream.app"),
+            }
+            write_private_atomic(&receipt_path, &serde_json::to_vec(&receipt).unwrap()).unwrap();
+            assert!(
+                validate().is_err(),
+                "accepted altered rollback field {changed}"
+            );
+        }
+        write_private_atomic(&receipt_path, &serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(validate().unwrap().is_none());
+        assert!(pending_successor_ack_at(
+            &current_exe,
+            &value.current_version,
+            None,
+            Some(&receipt_path)
+        )
+        .is_err());
+        assert!(pending_successor_ack_at(
+            &current_exe,
+            &value.expected_version,
+            Some(&path),
+            Some(&receipt_path)
+        )
+        .is_err());
+        fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(validate().is_err());
+        fs::remove_file(&receipt_path).unwrap();
+        let other = receipt_path.with_extension("other");
+        write_private_atomic(&other, &serde_json::to_vec(&value).unwrap()).unwrap();
+        symlink(&other, &receipt_path).unwrap();
+        assert!(validate().is_err());
     }
 
     #[test]
@@ -2204,6 +2592,7 @@ mod tests {
             &current_exe,
             state_dir,
             launch_agents,
+            false,
             |_| Ok(false),
             |_| Ok(()),
             |_, _| Err("injected bootstrap failure".into()),
@@ -2219,6 +2608,7 @@ mod tests {
             &current_exe,
             state_dir,
             launch_agents,
+            false,
             |_| Ok(false),
             |_| Ok(()),
             |_, plist| {
@@ -2255,6 +2645,7 @@ mod tests {
             &current_exe,
             state_dir,
             launch_agents,
+            false,
             |_| Ok(loaded.get()),
             |_| {
                 unloads.set(unloads.get() + 1);
@@ -2273,6 +2664,24 @@ mod tests {
     }
 
     #[test]
+    fn malformed_rollback_marker_skips_recovery_then_fails_startup_validation() {
+        let marker = Path::new("malformed-rollback-context");
+        let has_context = transaction_markers_present(None, Some(marker.as_os_str()));
+        assert!(has_context);
+        assert!(!recover_prepared_transaction_with(
+            Path::new("/unused"),
+            Path::new("/unused-state"),
+            Path::new("/unused-agents"),
+            has_context,
+            |_| panic!("rollback context must not query launchd during recovery"),
+            |_| panic!("rollback context must not unload a watchdog"),
+            |_, _| panic!("rollback context must not bootstrap a watchdog"),
+        )
+        .unwrap());
+        assert!(pending_successor_ack_at(Path::new("/unused"), "old", None, Some(marker)).is_err());
+    }
+
+    #[test]
     fn prepared_recovery_never_races_an_active_watchdog_lock() {
         let root = TempDir::new().unwrap();
         let state = root.path().join("state");
@@ -2284,6 +2693,7 @@ mod tests {
             Path::new("/unused"),
             &state,
             root.path(),
+            false,
             |_| panic!("loaded state must not be queried while watchdog owns lock"),
             |_| panic!("active watchdog must not be unloaded"),
             |_, _| panic!("a second watchdog must not be bootstrapped"),
