@@ -1,5 +1,24 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Core traffic fixture isolation, 2026-10-15: exact7824aaafd CI38713624559
+  passed903 release tests but failed the spent-candidate status assertion.
+  Production/test source is identical to the earlier green ab77 baseline.
+  A controlled barrier reproduces the same failure: a prior fixture's real
+  confirmation worker overwrites shared last_status after its test teardown,
+  while the next route's payload/proof/session assertions still pass. CI did
+  not record the status host, so that run's exact writer remains unproven.
+  The predecessor now records/asserts confirmation scheduling without spawning
+  an unrelated worker. Three relay fixtures explicitly stub plain preflight
+  and verify its IP/host/timeout, preserving real preflight orchestration and
+  all existing route assertions. Scoped67 tests and100 paired executions PASS;
+  final guard records zero external attempts and no leaked owned workers.
+  Initial guarded attempts and causal failures are retained under
+  output/source-owned-generation-workflows-20261015/ci-7824aaafd/.
+  Production routing is unchanged. Docs8/continuity/diff checks PASS.
+  Exact audit38713624564 still reports old production RSA2blocking/2info,
+  expired app Chromium policy; packaging still fails unpublishedr1 HTTP404.
+  A fresh exact-head CI result is required after this fixture commit.
+
 - Source-owned SPDX generation repair, 2026-10-15: both dependency-audit and
   Geph producer now pass the materialized source root to the real generator.
   Previously both source-owned-only paths failed before producing SPDX; native
@@ -40,17 +59,28 @@
   all26 receipt files: output/source-owned-workflow-integration-20261015/
   ci-e44f57042/receipt.json. Reuse unaffected tests; do not rerun this old head.
 
-- Actual source-owned preparation now passes its bounded semantic helper:
-  SOURCEa94d4c1d,3packages/20files,2 exact ancestor archives,0 inherited findings
-  in retained OSV2026-10-13. Parent rechecked all399 input bindings; SPDX has
-  407registry+3owned+root. Evidence: output/source-owned-actual-candidate-20261015/
-  (receiptb9068849, revieweea5c5f5). This is output-only package review, not a
-  full scanner/build/release result; source_commit identifies the audit checkout,
-  not a committed candidate. Root auth regression uses a different harness lock.
-  Native31 adjudicated/61unknown remains FAIL; a new recent-CVE review and
-  combined auth/source-owned/native/rustls candidate preparation are in progress.
-  Combined SOURCE needs fresh binding, metadata, build and both audit layers;
-  previous native binary evidence cannot be relabelled for it.
+- Combined output-only candidate, verified 2026-10-15: SOURCE f603c673, lock
+  0ee76556 contains the auth repair, three source-owned packages/20 files,
+  SQLite 3.53.2 and rustls 0.23.46. Actual universal build750.77s/1046.91MiB,
+  source/native linkage and fresh SPDX PASS; binary00ddd64a, receipt4a6a0e67
+  under output/geph-combined-candidate-20261015/v2/actual-build/. Reuse this
+  build. Fresh registry scan419 coordinates has0blocking/2informational;
+  source-owned review3 PASS. Exact combined-lock auth v2 reproduces old101/101/0
+  and fixed0/0/0,174.893s/610.09MiB; receipt0e9035d9 under
+  output/geph-combined-auth-regression-20261015/v2/. All24081 protected original
+  files are unchanged; libtest's existing dev-dependencies do not qualify the
+  installed app. No account/browser/system changes or additional build needed.
+
+- Native output candidate v7 accepts only four independently reviewed source
+  fixes (CVE-2019-19244/19880/19924/20218);19926 remains unknown. Parent verified
+  1705 retained files and recomputed identical current-date canonical report
+  502e5284:39adjudicated/54unknown/0affected,209excluded; registry0blocking and
+  source-owned PASS. Only four rows plus17author/4peer evidence records change;
+  other298groups,505aliases,census,binding and expiry2026-10-16 are conserved.
+  Receipt5940aaa1/parentb799c8e1 under output/sqlite-native-integration/
+  native-audit-candidate-v7-20261015/. This remains FAIL only54native unknowns,
+  not production adoption or CI/artifact qualification. V6 and earlier evidence
+  are immutable. The separate native CI binding gap is described above.
 
 - Source-owned workflow3399e9d7c and main mergee44f57042 are published in PR384.
   Bridge82, bundle/release63, BuildConfig57 (45producer+38existing-release

@@ -11,7 +11,7 @@ import asyncio
 import struct
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 
 import pytest
@@ -292,6 +292,22 @@ def seed_complete_unknown_zero_payload_proof(host, now):
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
+
+
+def stub_inconclusive_plain_preflight(monkeypatch):
+    """Keep relay fixtures offline while retaining the real preflight flow."""
+    calls = []
+
+    def probe(ip, host, timeout):
+        assert 0 < timeout <= tproxy.ROUTE_PREFLIGHT_DIRECT_TIMEOUT
+        calls.append((ip, host))
+        return tproxy._SemanticPlainPreflightObservation(
+            tproxy.SEMANTIC_OUTCOME_TERMINAL_ERROR,
+        )
+
+    monkeypatch.setattr(tproxy, "_route_preflight_cache", OrderedDict())
+    monkeypatch.setattr(tproxy, "_semantic_plain_preflight_probe_detail", probe)
+    return calls
 
 
 @pytest.mark.parametrize("contract", CORE_TRAFFIC_CONTRACTS, ids=lambda item: item.name)
@@ -1100,6 +1116,7 @@ def test_downstream_close_after_owned_payload_grants_successor(monkeypatch):
     host = "closed-downstream-handoff.example"
     first_flight = static_tls_fixture_record(host)
     response = b"\x16\x03\x03\x00\x60" + (b"U" * 96)
+    confirmations = []
     now = time.monotonic()
     seed_complete_unknown_zero_payload_proof(host, now)
     tproxy._auto_geph_candidates[host] = now + 10.0
@@ -1112,6 +1129,13 @@ def test_downstream_close_after_owned_payload_grants_successor(monkeypatch):
         return streaming_upstream_response(response)
 
     monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    # This fixture checks the handoff and scheduling request. A real worker
+    # could finish after teardown and overwrite the next test's shared status.
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_auto_geph_confirmation_before_relay",
+        lambda actual_host: confirmations.append(actual_host) or True,
+    )
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
@@ -1129,6 +1153,7 @@ def test_downstream_close_after_owned_payload_grants_successor(monkeypatch):
     assert selected
     assert host in tproxy._auto_geph_successor_requests
     assert not tproxy._auto_geph_learned_exact_host(host)
+    assert confirmations == [host]
 
 
 def test_candidate_request_becomes_spent_one_shot_when_noise_arrives_mid_dial(
@@ -1909,6 +1934,7 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
 def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
     """A quiet TLS relay advances only after its local browser probe result."""
     isolate_runtime_state(monkeypatch)
+    preflights = stub_inconclusive_plain_preflight(monkeypatch)
     host = "idle-system-route.example"
     response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
@@ -2024,6 +2050,7 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response
+    assert preflights == [("1.1.1.1", host)]
     assert tproxy._xbox_dns_candidate_active(host, now=signal_times[0])
     assert not tproxy._auto_geph_learned_exact_host(host)
 
@@ -2031,6 +2058,7 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
 def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatch):
     """A browser-side HTTP/2 body failure must survive relay cancellation."""
     isolate_runtime_state(monkeypatch)
+    preflights = stub_inconclusive_plain_preflight(monkeypatch)
     host = "partial-body-contract.example"
     payload = b"R" * 9000
     response = b"\x17\x03\x03" + len(payload).to_bytes(2, "big") + payload
@@ -2081,6 +2109,7 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
         asyncio.run(run_handler(client, CaptureWriter()))
 
     assert len(confirmations) == 1
+    assert preflights == [("1.1.1.1", host)]
     assert confirmations[0][:3] == (host, "1.1.1.1", "plain")
     assert clean_eof_advances == []
     assert not tproxy._xbox_dns_candidate_active(host)
@@ -2092,6 +2121,7 @@ def test_unknown_partial_tls_watchdog_preserves_candidate_without_bypassing_ladd
 ):
     """A framed system-route stall preserves evidence but cannot authorize."""
     isolate_runtime_state(monkeypatch)
+    preflights = stub_inconclusive_plain_preflight(monkeypatch)
     host = "partial-record-contract.example"
     response = b"\x17\x03\x03\x00\x08" + b"R" * 8
     confirmations = []
@@ -2133,6 +2163,7 @@ def test_unknown_partial_tls_watchdog_preserves_candidate_without_bypassing_ladd
     asyncio.run(run_handler(client, CaptureWriter()))
 
     assert confirmations == []
+    assert preflights == [("1.1.1.1", host)]
     assert tproxy._transport_incomplete_plain_candidates[host][0] == "1.1.1.1"
     assert not tproxy.is_geo_exit_route(host)
 
