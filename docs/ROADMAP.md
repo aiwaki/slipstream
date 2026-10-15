@@ -3,6 +3,47 @@
 Roadmap is informational and not a release promise. Each milestone lands as a
 small PR with tests and matching documentation.
 
+<a id="development-status"></a>
+## Статус разработки / Development status — 2026-10-13
+
+### Русский
+
+Работа продолжается в публичных PR. Последние исправления пока не вошли
+в скачиваемое приложение: успешные тесты исходников сами по себе не подтверждают,
+что установка, обновление и обычные браузерные сеансы работают правильно.
+
+| Направление | Что уже сделано в кандидатах | Что осталось до выпуска |
+|---|---|---|
+| Загрузка страниц и восстановление соединений ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Добавлены исправления неполных ответов и гонок при восстановлении и завершении работы; автоматические проверки кода проходят. | Проверить собранное приложение, обновление с опубликованной версии и работу в обычных Chrome/Safari. |
+| DNS и Telegram ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Удалён встроенный провайдер xbox-dns.ru; обновлён Telegram-прокси с сохранением локальных исправлений. Локальные тесты покрывают TLS, параллельные запросы, обрыв ответа и отмену. | Выпустить эти изменения в составе проверенной сборки; живой сеанс Telegram остаётся отдельной проверкой. |
+| Встроенный Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Подготовлено обновление клиента с исправлениями общей сессии и зависания читателей кеша после отмены запроса; соответствующие регрессии проверены. | Завершить проверку зависимостей и подготовить пригодный для публикации пакет. |
+
+Главные препятствия сейчас — незавершённая проверка зависимостей и последующая
+проверка упакованного приложения. Прежние временные исключения аудита истекли;
+новый установщик пока не готов к публикации. Наличие внутреннего релиза Geph
+не означает, что вышла новая версия Slipstream. Даты следующего выпуска пока нет.
+
+### English
+
+Work continues in public PRs. The latest fixes are not yet in the downloadable
+app: passing source tests alone does not establish that installation, updates,
+and ordinary browser sessions work correctly.
+
+| Area | Completed in candidates | Remaining before release |
+|---|---|---|
+| Page loading and connection recovery ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Fixes for incomplete responses and recovery/shutdown races; automated product checks pass. | Qualify the packaged app, upgrading from the published version, and ordinary Chrome/Safari sessions. |
+| DNS and Telegram ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Removed the bundled xbox-dns.ru provider and updated the Telegram proxy while preserving local fixes. Local tests cover TLS, concurrent requests, truncated responses, and cancellation. | Ship the changes in a qualified app; a live Telegram session remains a separate check. |
+| Bundled Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Prepared a client update preserving shared-session fixes and preventing cache readers from hanging after request cancellation; targeted regressions are tested. | Complete dependency review and prepare a publishable vendor package. |
+
+The immediate blockers are incomplete dependency review and subsequent packaged
+app qualification. Previous temporary audit exceptions have expired; a new
+installer is not ready to publish. An internal Geph release is not a new
+Slipstream app release. No date for the next app release is announced.
+
+For exact commits, checks, and remaining gates, see [CURRENT_STATE.md](CURRENT_STATE.md).
+The milestone descriptions below are the longer-term plan, not a claim that the
+current download includes every candidate change.
+
 ## Baseline
 
 The July 2026 audit found the existing routing layer ahead of the previous

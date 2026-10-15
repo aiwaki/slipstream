@@ -1,6 +1,9 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
-- Resumed by the user, 2026-10-15. Bridge baseline5cd158262 contains the source-owned
+- Resumed by the user, 2026-10-15. Main a24fd398c is merged; current Russian/
+  English READMEs and roadmap are preserved. The checkpoint-only conflict is
+  resolved by retaining the main publication notes as historical below.
+  Source-owned workflow integration3399e9d7c is published in PR384. Bridge baseline5cd158262 contains the source-owned
   audit validation; its unchanged82-test baseline is retained. Immutable transport
   and workflow wiring are implemented and reviewed; scoped verification passed.
   The optional source-review archive is bound to SOURCE/review policy, release
@@ -532,6 +535,68 @@ policy exception change.
   dependency blockers and product qualification remain.
 
 ## Historical checkpoints below (not the current worktree identity)
+# README publication checkpoint — 2026-10-13
+
+This documentation-only change starts from published main
+`2e5e6b4a72e734ddd6d4ea7cbc3d876cb08da47a` (PR #385). The Russian and English
+READMEs were reviewed with humanizer-ru and humanizer, then reorganized around
+the product, download, and installation. Preview limitations remain visible;
+routing/privacy details are folded. Platform plans and installation remain
+version-independent. No executable, policy, or workstation state changed.
+
+The Telegram update is now isolated in [PR #386](https://github.com/aiwaki/slipstream/pull/386),
+head `ab27a5333eb78f3f768c3889adc5316b3894d50a`. Its
+[CI 38423785527](https://github.com/aiwaki/slipstream/actions/runs/38423785527)
+passes product checks, packaging, Chromium contracts, and packaged-browser
+qualification. Lifecycle fails at `active-worker-uninstall:active` with
+`daemon status could not be removed`; this is not an app qualification pass.
+[Audit 38423785690](https://github.com/aiwaki/slipstream/actions/runs/38423785690)
+also fails the expired app policy and existing Geph dependency findings.
+
+Next action: investigate the exact PR #386 lifecycle failure, then continue the
+dependency/package release gates. The native-dependency review in PR #384
+remains separate. No new installer has been published.
+
+## Previous publication checkpoint (historical)
+
+# Publication checkpoint — 2026-10-13
+
+This documentation update is based on main
+`7e196a71a307f470cadf6519d5e753dd7e1b27ac`. PR #382 has merged and
+`geph-vendor-0.3.9-r5` was published on 2026-09-30; the old NEXT below is
+historical. The latest public app remains `v0.1.9-preview.23`, published on
+2026-08-24. Internal vendor releases do not update the downloadable app.
+
+- [PR #376](https://github.com/aiwaki/slipstream/pull/376), remote head
+  `35284416b6b835aad9c3ae035f009605c31288f3`, remains a draft. It contains
+  recovery/lifecycle fixes, removal of the app-owned xbox-dns.ru provider,
+  and the tg-ws-proxy 1.11.2 update. Product checks pass; packaging and
+  dependency gates do not. These changes are not in the published app.
+- [PR #384](https://github.com/aiwaki/slipstream/pull/384), remote head
+  `ebdf6b8bded404a67098d43128b2406e4bcdbba4`, remains a separate draft.
+  [CI 38414401897](https://github.com/aiwaki/slipstream/actions/runs/38414401897)
+  passes product/checks, Windows adapter and Chromium checks. Packaging requests
+  the unpublished `geph-vendor-0.4.3-r1` and receives HTTP 404; the lifecycle
+  failure is downstream of that missing package.
+  [Audit 38414402007](https://github.com/aiwaki/slipstream/actions/runs/38414402007)
+  fails the expired app policy and two Geph dependency findings.
+- Local native-dependency review continues in the dedicated Geph checkout.
+  Its output-only candidate has 31 adjudicated native groups and 61 unresolved;
+  it is not activated in production SOURCE/lock/policy and is not release proof.
+- Source tests and retained regressions are reusable evidence, not a substitute
+  for installed-app behavior. Normal browser use, update/Quit, sustained
+  Discord/YouTube, sleep/wake and mixed load remain separate product gates.
+- This publication changes documentation only. It changes no release tag,
+  dependency policy, executable, workstation service, or routing behavior.
+  Required main checks must pass through the existing documentation-only path;
+  no branch protection or release requirement is waived.
+
+Next action: isolate the tested Telegram transport update from the larger audit. Keep the
+app release blocked until dependency and packaged-app requirements pass.
+The AUD-17 working checkpoint remains in its Developer checkout; reconcile
+current PR heads and CI there before resuming implementation.
+
+## Previous checkpoints (historical; not current actions)
 
 # Geph r5 source continuation — 2026-09-30
 
