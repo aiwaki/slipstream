@@ -106,14 +106,15 @@ mismatch, a replayed archive with the wrong internal version, a wrong bundle
 identity/executable, or missing `LSUIElement` all fail closed. Do not bypass
 these checks by replacing `latest.json` or the signature manually.
 
-Current P0 status is intentionally conservative: unit and MockRuntime mechanics
-tests do not prove native macOS delivery or a complete product transition.
-The durable rollback and successor acknowledgement are implemented and covered
-by fault tests, but `.23` release qualification still requires the exact
-packaged OS-observed notification gate with no activation. A real released
-`.23 -> .24` notification/download/install/relaunch plus forced rollback is the
-future `.24` gate. Until the applicable packaged gate passes, treat the feature
-as implemented but not end-to-end released.
+Unit and MockRuntime mechanics tests do not prove native macOS delivery or a
+complete public product transition. Preview `.24` publication follows the existing
+mandatory candidate, audit, packaged/native and protected-readiness gates,
+including the exact packaged OS-observed notification gate with no activation.
+The real public `.23 -> .24` notification/download/install/relaunch and forced
+rollback are qualified after publication against the released assets. Until that
+post-publication qualification passes, treat preview auto-update and public
+upgrade/rollback as unverified; use the published DMG for manual installation.
+The durable rollback and successor acknowledgement requirements remain unchanged.
 
 For a packaged candidate, verify the runtime without starting it:
 
