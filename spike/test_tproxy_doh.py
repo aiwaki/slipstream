@@ -4013,6 +4013,7 @@ def test_network_monitor_rearms_only_after_explicit_system_marker_change(
     monkeypatch,
 ):
     rearms = []
+    canary_requests = []
     markers = iter(((100, 0), (101, 0)))
 
     def write_status_and_stop(_state, _iface, _voice_iface):
@@ -4037,6 +4038,13 @@ def test_network_monitor_rearms_only_after_explicit_system_marker_change(
         "_apply_runtime_rearm",
         lambda reason, **kwargs: rearms.append((reason, kwargs)),
     )
+    # This test owns wake detection and scheduling, not the asynchronous probes.
+    # A real canary worker can outlive teardown and consume a later relay's mocks.
+    monkeypatch.setattr(
+        tproxy,
+        "start_canaries_if_due",
+        lambda reason, **kwargs: canary_requests.append((reason, kwargs)),
+    )
     monkeypatch.setattr(
         tproxy,
         "start_route_policy_remote_update_if_due",
@@ -4053,6 +4061,7 @@ def test_network_monitor_rearms_only_after_explicit_system_marker_change(
     assert rearms[0][0] == "wake"
     assert rearms[0][1]["iface"] == ""
     assert rearms[0][1]["gap"] >= 0.0
+    assert canary_requests == [("startup", {"force": True})]
 
 
 def test_network_monitor_retries_pending_confirmation_on_owned_geph_recovery(

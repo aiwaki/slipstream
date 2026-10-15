@@ -53,14 +53,24 @@ Reusable predecessor evidence:
   Do not rerun that old-version candidate merely for reassurance: `.24` needs
   its own exact-source package and qualification. Logs: `output/main-2a6c550a7/`.
 
-PR389 is open at ecba4814c8edec0d3434fd25f59c2213de2e29bd before the
-permission follow-up. CI38732650718 and audit38732650992 SUCCESS are the reusable
-version-bump baseline, including packaging, browser and lifecycle. Parent
-verified19 retained evidence files; receiptdfd560f3fa0b24efeaf55be518a412d4f7260161fdf0b27b815e667bc4c204d1.
-Exact current-head CI must qualify the permission fix.
-Next: push the reviewed narrow permission fix to the existing PR389,
-merge normally after required checks/review, then qualify its exact main
-candidate and publish.
+PR389 is open. The version-only ecba4814c CI38732650718 and audit38732650992
+both passed; parent verified19 retained evidence files. Permission headc36f826ea
+CI38735286380 passed packaging/browser/lifecycle and audit38735286300 passed,
+but daemon tests failed one assertion: cleared=[True,True,True] rather than
+[True] in the external-Geph relay fixture (circuit_results remained correct).
+Parent verified21 retained CI files; receiptb27b39bcb8c4ed702725d4f4816d2e63923b8de036a7e1e01b4c525bb82cc21c.
+A controlled replay proves the prior network-monitor fixture left a startup
+canary worker after teardown; its OpenAI/Anthropic callbacks consume successor
+mocks and add two clears. CI did not retain stacks, so the replay establishes
+the fixture defect and matching signature, not the exact CI thread identity.
+A nine-line test-only fix captures/asserts the predecessor's exact startup
+schedule. Target relay assertions and production code remain byte-identical.
+Controlled RED->GREEN,20 further paired runs and5 focused tests pass with zero
+network attempts/pending workers/new live threads. Parent reviewed and verified
+14 evidence files, receiptc42c8c8b8a2680e2c0028968d28f11f86cff368f587cf99814049babb2c6e1cb;
+see output/preview24-external-relay/ and output/pr389-ci-c36f826ea/.
+Next: push this narrow fixture repair to PR389, require exact new-head CI and
+review, merge normally, then qualify its exact main candidate and publish.
 Installed Chrome/Safari/lifecycle and protected readiness gates remain open.
 No new app is installed or published. Native/source-owned migration stays
 deferred; broader pending fixes in PR384/PR386 and root checkout are preserved.
