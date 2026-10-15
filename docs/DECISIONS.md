@@ -3,6 +3,21 @@
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 
+## Native SQLite must have separate advisory coverage — 2026-10-13
+
+An OSV result for the Rust wrapper cannot clear the C library linked into Geph.
+The native audit therefore requires an explicit reviewed policy tied to exact
+source and linkage evidence, with every retained advisory/alias group accounted
+for. Unknown applicability, affected code and census-only dispositions block
+release. No version-range inference, missing upstream record or wrapper scan
+may silently remove a native finding. Other packages without valid registry
+identities retain their existing rejection behavior.
+
+Build and research evidence may be tested as an output-only candidate before
+production adoption. Passing its schema/proof checks is distinct from passing
+its advisory result; a complete inventory with unresolved groups must fail.
+The release contract is documented in [RELEASES.md](RELEASES.md).
+
 > **P0 supersession scope (2026-08-13):** every historical row below that
 > describes a production Aqua/LaunchServices worker, installed Google Chrome,
 > extension-driven reload, or transport-idle browser admission is superseded by
@@ -273,6 +288,14 @@ Git SHAs; all other parsed packages, edges and metadata must remain identical.
 Missing refs/read evidence or any other lock change disables bootstrap. The
 application audit policy and all required audits remain unchanged.
 
+2026-10-15 follow-up: main already contains that migration. Also admit the
+exact rustls0.23.45->0.23.46 version/checksum-only repair for
+RUSTSEC-2026-0346/0347/0348/0349. Each approved repair set is compared against
+the entire parsed lockfile; unrelated changes, target package identity
+collisions and missing Git evidence are rejected. This does not admit the
+mixed native/source-owned infrastructure PR to bootstrap. Its extra paths
+still require normal packaged checks. Fresh dependency audits remain mandatory.
+
 
 ### 2026-09-30: reserve session for new Geph tunnel openings
 
@@ -307,3 +330,40 @@ With the correction, both EOF and malformed-response cases must return an error,
 drain pending accounting, leave early_dead unset, and transfer bytes on a
 pre-existing stream. This fixes a causal mechanism, not proof that every observed
 application disconnect has this cause.
+
+
+## 2026-10-09: Geph 0.4.3 reviewed source candidate
+
+Retain every r5 session-isolation/reserve edit when updating the canonical Geph
+crate: automation discovery alone has no local source edits. Each transferred
+replacement remains literal and bound to sequential complete-file hashes. Pin
+SQLx to exactly 0.8.6 with default features disabled and only SQLite/runtime-tokio;
+Geph's existing cache schema and wake-on-write behavior are qualified separately.
+
+The source-edit contract may additionally name exactly root `Cargo.toml`, with the
+same before/after hashes and single-match rule as Rust source. Revalidate the crate
+name/version after applying edits so dependency repairs cannot rewrite identity.
+This does not permit
+Cargo.lock, build scripts, nested manifests or arbitrary configuration files. The
+existing source-only CI path, both dependency audits and immutable release gates
+are unchanged. RSA findings remain blocking; version upgrades do not extend their
+expired exceptions.
+
+`cargo --offline` limits Cargo downloads, not runtime networking. Upstream
+`tests::test_clib` and `china::tests::resolve_baidu_via_alidns` are external smoke
+tests. Workstation source qualification must use inspected session/database test
+filters and an explicit network-denying sandbox; it must not invoke either test
+or read/change user account state. Universal metadata is graph evidence, not an
+x86_64 execution test or installed-product qualification.
+
+The 2026-10-09 all-library run did not meet that offline boundary. Although
+`test_clib` hard-codes an empty Secret, its default cache namespace already
+existed and its WAL/SHM metadata changed during the run. The auth path reads a
+cached `auth_token` before using the configured credentials; an empty Secret
+therefore does not prove absence of prior account-token use. Exact cache-row
+changes are unknown without a pre-run snapshot; the follow-up inspected only
+metadata, not credentials or database contents. This call path does not overwrite
+Slipstream's Keychain secret or app settings, which use separate storage. Preserve
+the shared cache and retain exact private paths/digests only in local evidence.
+Any future external-smoke execution requires a disposable cache and separately
+reviewed broker behavior; it cannot be counted as offline source qualification.

@@ -157,6 +157,23 @@ checksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                     expected_targets=source["targets"],
                 )
 
+    def test_registry_crate_named_sqlite_is_not_native_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lock, metadata, source = self._inputs(Path(tmp))
+            for path in [lock, *(path for _, path in metadata)]:
+                path.write_text(path.read_text().replace("common", "sqlite"))
+            components = make_geph_vendor_sbom.collect_components(
+                cargo_lock=lock, cargo_metadata=metadata, expected_targets=source["targets"])
+            document = make_geph_vendor_sbom.build_spdx_document(
+                repository=REPOSITORY, source_commit=SOURCE_COMMIT,
+                source_date_epoch=SOURCE_DATE_EPOCH, target="macos-universal",
+                source=source, components=components)
+            result = make_geph_vendor_sbom.validate_spdx_document(
+                document, repository=REPOSITORY, source_commit=SOURCE_COMMIT,
+                target="macos-universal", source=source)
+            self.assertEqual(result["dependency_count"], 3)
+            self.assertNotIn("files", document)
+
     def test_validation_rejects_source_contract_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             lock, metadata, source = self._inputs(Path(tmp))

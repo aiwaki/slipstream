@@ -23,8 +23,16 @@ on:
       - ".github/workflows/build-geph.yml"
       - "scripts/dependency_audit.py"
       - "scripts/geph_vendor_source.py"
+      - "scripts/build_geph_native_release.py"
+      - "scripts/geph_native_sqlite*.py"
+      - "scripts/geph_source_owned*.py"
+      - "scripts/seal_geph_cargo_cache.py"
+      - "scripts/verify_geph_release.py"
+      - "scripts/run_geph_synthetic_tests.py"
       - "scripts/make_geph_vendor_sbom.py"
       - "security/geph-dependency-audit-policy.json"
+      - "security/geph-native-sqlite-advisories/**"
+      - "security/geph-source-owned-advisories/**"
       - "vendor/geph/**"
 
 permissions:
@@ -132,6 +140,16 @@ jobs:
             geph5-client-dependency-audit.json
             SHA256SUMS
           )
+          if [ "$(python3 -c 'import json,sys; print("true" if "native_sqlite" in json.load(sys.stdin) else "false")' <<< "$source_summary")" = true ]; then
+            native_sqlite=true
+            required+=(geph5-client-native-sqlite-evidence.tar)
+          else
+            native_sqlite=false
+          fi
+          source_owned="$(python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("embedded_packages") else "false")' <<< "$source_summary")"
+          if [ "$source_owned" = true ]; then
+            required+=(geph5-client-source-review-evidence.tar)
+          fi
           if ! assets="$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>/dev/null)"; then
             should_build=true
           else
@@ -141,44 +159,216 @@ jobs:
                 exit 1
               }
             done
-            rm -rf /tmp/geph-existing
-            python3 scripts/download_github_release_assets.py \
-              --repo "${{ github.repository }}" \
-              --tag "$tag" \
-              --output /tmp/geph-existing \
-              --pattern geph5-client.SOURCE.json \
-              --pattern geph5-client.Cargo.lock \
-              --pattern geph5-client.spdx.json \
-              --pattern geph5-client-dependency-audit.json
-            cmp vendor/geph/SOURCE.json /tmp/geph-existing/geph5-client.SOURCE.json || {
-              echo "release $tag has a different source contract; bump release_revision"
-              exit 1
-            }
-            cmp vendor/geph/Cargo.lock /tmp/geph-existing/geph5-client.Cargo.lock || {
-              echo "release $tag has a different lock; bump release_revision"
-              exit 1
-            }
-            vendor_commit="$(python3 -c 'import json; print(json.load(open("/tmp/geph-existing/geph5-client-dependency-audit.json"))["source"]["commit"])')"
-            tag_commit="$(gh api "repos/${{ github.repository }}/commits/$tag" --jq .sha)"
-            [ "$vendor_commit" = "$tag_commit" ] || {
-              echo "release $tag audit source does not match its immutable tag"
-              exit 1
-            }
-            python3 scripts/make_geph_vendor_sbom.py verify \
-              --source vendor/geph/SOURCE.json \
-              --version-file vendor/geph/VERSION \
-              --cargo-lock vendor/geph/Cargo.lock \
-              --repository "${{ github.repository }}" \
-              --source-commit "$vendor_commit" \
-              --target macos-universal \
-              --sbom /tmp/geph-existing/geph5-client.spdx.json
-            python3 scripts/dependency_audit.py verify \
-              --report /tmp/geph-existing/geph5-client-dependency-audit.json \
-              --sbom /tmp/geph-existing/geph5-client.spdx.json \
-              --policy security/geph-dependency-audit-policy.json \
-              --source-commit "$vendor_commit" \
-              --target macos-universal \
-              --vendored-transitive-dependencies full
+            if [ "$native_sqlite" = true ] || [ "$source_owned" = true ]; then
+              umask 077
+              geph_workspace="$(mktemp -d "$RUNNER_TEMP/geph-existing.XXXXXX")"
+              geph_workspace="$(cd "$geph_workspace" && pwd -P)"
+              geph_release="$geph_workspace/release"
+              release_metadata="$geph_workspace/release.json"
+              asset_report="$geph_workspace/verified-assets.json"
+              gh api "repos/${{ github.repository }}/releases/tags/$tag" \
+                > "$release_metadata"
+              python3 scripts/verify_geph_release.py verify-metadata \
+                --metadata "$release_metadata" \
+                --expected-tag "$tag" \
+                --source vendor/geph/SOURCE.json
+              tag_ref="$(gh api \
+                "repos/${{ github.repository }}/git/ref/tags/$tag")"
+              tag_type="$(python3 -c \
+                'import json,sys; print(json.load(sys.stdin)["object"]["type"])' \
+                <<< "$tag_ref")"
+              [ "$tag_type" = commit ] || {
+                echo "recorded Geph tag must be an immutable lightweight commit ref"
+                exit 1
+              }
+              tag_commit="$(python3 -c \
+                'import json,sys; print(json.load(sys.stdin)["object"]["sha"])' \
+                <<< "$tag_ref")"
+              [[ "$tag_commit" =~ ^[0-9a-f]{40,64}$ ]] || {
+                echo "recorded Geph tag does not resolve to a full commit"
+                exit 1
+              }
+              download_args=(
+                --pattern geph5-client
+                --pattern geph5-client.LICENSE
+                --pattern geph5-client.VERSION
+                --pattern geph5-client.SOURCE.json
+                --pattern geph5-client.Cargo.lock
+                --pattern geph5-client.spdx.json
+                --pattern geph5-client-dependency-audit.json
+                --pattern SHA256SUMS
+              )
+              asset_args=(
+                --release-dir "$geph_release"
+                --metadata "$release_metadata"
+                --expected-tag "$tag"
+                --source vendor/geph/SOURCE.json
+                --cargo-lock vendor/geph/Cargo.lock
+                --version-file vendor/geph/VERSION
+                --license vendor/geph/LICENSE
+              )
+              sbom_args=(
+                --source vendor/geph/SOURCE.json
+                --version-file vendor/geph/VERSION
+                --cargo-lock vendor/geph/Cargo.lock
+                --repository "${{ github.repository }}"
+                --source-commit "$tag_commit"
+                --target macos-universal
+                --sbom "$geph_release/geph5-client.spdx.json"
+              )
+              if [ "$native_sqlite" = true ]; then
+                download_args+=(--pattern geph5-client-native-sqlite-evidence.tar)
+                asset_args+=(--native-output-root "$geph_workspace/native-evidence")
+              fi
+              historical_policy="$(mktemp \
+                "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
+              gh api \
+                -H "Accept: application/vnd.github.raw+json" \
+                "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
+                > "$historical_policy"
+              test -f "$historical_policy"
+              test ! -L "$historical_policy"
+              test -s "$historical_policy"
+              python3 -m json.tool "$historical_policy" >/dev/null
+              if [ "$source_owned" = true ]; then
+                download_args+=(--pattern geph5-client-source-review-evidence.tar)
+                asset_args+=(--source-owned-policy "$historical_policy"
+                  --source-owned-output-root "$geph_workspace/source-owned")
+              fi
+              python3 scripts/download_github_release_assets.py \
+                --repo "${{ github.repository }}" \
+                --tag "$tag" \
+                --output "$geph_release" \
+                "${download_args[@]}"
+              python3 scripts/verify_geph_release.py verify-assets \
+                "${asset_args[@]}" > "$asset_report"
+              if [ "$native_sqlite" = true ]; then
+                # Independently materialize reviewed source; bundle files are proof,
+                # never the authority for the SQLite archive or source inventory.
+                crate_url="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["crate"]["url"])')"
+                sqlite_url="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["native_sqlite"]["archive"]["url"])')"
+                curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+                  "$crate_url" -o "$geph_workspace/geph5-client.crate"
+                curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+                  "$sqlite_url" -o "$geph_workspace/sqlite.zip"
+                python3 scripts/geph_vendor_source.py extract \
+                  --source vendor/geph/SOURCE.json \
+                  --version-file vendor/geph/VERSION \
+                  --cargo-lock vendor/geph/Cargo.lock \
+                  --crate "$geph_workspace/geph5-client.crate" \
+                  --native-sqlite-archive "$geph_workspace/sqlite.zip" \
+                  --output "$geph_workspace/source" \
+                  > "$geph_workspace/materialized-source.json"
+                source_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root"])' "$geph_workspace/materialized-source.json")"
+                native_receipt="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_evidence"]["receipt_path"])' "$asset_report")"
+                native_artifacts="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_evidence"]["artifacts_root"])' "$asset_report")"
+                sbom_args+=(--source-root "$source_root" --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+              fi
+              audit_native_args=(--vendored-transitive-dependencies full)
+              audit_native_args+=(--source vendor/geph/SOURCE.json)
+              if [ "$native_sqlite" = true ]; then
+                audit_native_args+=(--native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+              fi
+              if [ "$source_owned" = true ]; then
+                owned_evidence="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_owned_evidence"]["root"])' "$asset_report")"
+                audit_native_args+=(--source-owned-evidence "$owned_evidence")
+              fi
+              python3 scripts/make_geph_vendor_sbom.py verify "${sbom_args[@]}"
+              python3 scripts/dependency_audit.py verify \
+                --report "$geph_release/geph5-client-dependency-audit.json" \
+                --sbom "$geph_release/geph5-client.spdx.json" \
+                --policy "$historical_policy" \
+                "${audit_native_args[@]}" \
+                --source-commit "$tag_commit" \
+                --target macos-universal
+              signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
+              provenance_json="$(mktemp \
+                "$RUNNER_TEMP/geph-provenance.XXXXXX")"
+              spdx_attestation_json="$(mktemp \
+                "$RUNNER_TEMP/geph-spdx-attestation.XXXXXX")"
+              for artifact in "$geph_release"/*; do
+                if [ "$artifact" = "$geph_release/SHA256SUMS" ]; then
+                  gh attestation verify "$artifact" \
+                    --repo "${{ github.repository }}" \
+                    --signer-workflow "$signer_workflow" \
+                    --signer-digest "$tag_commit" \
+                    --source-digest "$tag_commit" \
+                    --source-ref refs/heads/main \
+                    --predicate-type https://slsa.dev/provenance/v1 \
+                    --deny-self-hosted-runners \
+                    --format json > "$provenance_json"
+                else
+                  gh attestation verify "$artifact" \
+                    --repo "${{ github.repository }}" \
+                    --signer-workflow "$signer_workflow" \
+                    --signer-digest "$tag_commit" \
+                    --source-digest "$tag_commit" \
+                    --source-ref refs/heads/main \
+                    --predicate-type https://slsa.dev/provenance/v1 \
+                    --deny-self-hosted-runners >/dev/null
+                fi
+              done
+              gh attestation verify "$geph_release/geph5-client" \
+                --repo "${{ github.repository }}" \
+                --signer-workflow "$signer_workflow" \
+                --signer-digest "$tag_commit" \
+                --source-digest "$tag_commit" \
+                --source-ref refs/heads/main \
+                --predicate-type https://spdx.dev/Document/v2.3 \
+                --deny-self-hosted-runners \
+                --format json > "$spdx_attestation_json"
+              python3 scripts/verify_geph_release.py verify-attestations \
+                --release-dir "$geph_release" \
+                --provenance-json "$provenance_json" \
+                --spdx-json "$spdx_attestation_json" \
+                --source vendor/geph/SOURCE.json
+              # The resolver also retains the existing current-policy admission gate.
+              python3 scripts/dependency_audit.py verify \
+                --report "$geph_release/geph5-client-dependency-audit.json" \
+                --sbom "$geph_release/geph5-client.spdx.json" \
+                --policy security/geph-dependency-audit-policy.json \
+                "${audit_native_args[@]}" \
+                --source-commit "$tag_commit" --target macos-universal
+            else
+              rm -rf /tmp/geph-existing
+              python3 scripts/download_github_release_assets.py \
+                --repo "${{ github.repository }}" \
+                --tag "$tag" \
+                --output /tmp/geph-existing \
+                --pattern geph5-client.SOURCE.json \
+                --pattern geph5-client.Cargo.lock \
+                --pattern geph5-client.spdx.json \
+                --pattern geph5-client-dependency-audit.json
+              cmp vendor/geph/SOURCE.json /tmp/geph-existing/geph5-client.SOURCE.json || {
+                echo "release $tag has a different source contract; bump release_revision"
+                exit 1
+              }
+              cmp vendor/geph/Cargo.lock /tmp/geph-existing/geph5-client.Cargo.lock || {
+                echo "release $tag has a different lock; bump release_revision"
+                exit 1
+              }
+              vendor_commit="$(python3 -c 'import json; print(json.load(open("/tmp/geph-existing/geph5-client-dependency-audit.json"))["source"]["commit"])')"
+              tag_commit="$(gh api "repos/${{ github.repository }}/commits/$tag" --jq .sha)"
+              [ "$vendor_commit" = "$tag_commit" ] || {
+                echo "release $tag audit source does not match its immutable tag"
+                exit 1
+              }
+              python3 scripts/make_geph_vendor_sbom.py verify \
+                --source vendor/geph/SOURCE.json \
+                --version-file vendor/geph/VERSION \
+                --cargo-lock vendor/geph/Cargo.lock \
+                --repository "${{ github.repository }}" \
+                --source-commit "$vendor_commit" \
+                --target macos-universal \
+                --sbom /tmp/geph-existing/geph5-client.spdx.json
+              python3 scripts/dependency_audit.py verify \
+                --report /tmp/geph-existing/geph5-client-dependency-audit.json \
+                --sbom /tmp/geph-existing/geph5-client.spdx.json \
+                --policy security/geph-dependency-audit-policy.json \
+                --source-commit "$vendor_commit" \
+                --target macos-universal \
+                --vendored-transitive-dependencies full
+            fi
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
 
@@ -271,13 +461,6 @@ jobs:
         with:
           python-version: "3.13.14"
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: geph-macos-universal-${{ hashFiles('vendor/geph/Cargo.lock', 'vendor/geph/SOURCE.json') }}
-
       - name: Install checked macOS build dependencies
         run: bash scripts/ensure_macos_build_deps.sh
 
@@ -285,87 +468,269 @@ jobs:
         name: Materialize the reviewed Geph source
         run: |
           set -euo pipefail
-          curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
-            "${{ needs.resolve.outputs.crate_url }}" -o /tmp/geph5-client.crate
-          source_json="$(python3 scripts/geph_vendor_source.py extract \
-            --source vendor/geph/SOURCE.json \
-            --version-file vendor/geph/VERSION \
-            --cargo-lock vendor/geph/Cargo.lock \
-            --crate /tmp/geph5-client.crate \
-            --output /tmp/geph-source)"
-          source_root="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root"])' <<< "$source_json")"
-          echo "root=$source_root" >> "$GITHUB_OUTPUT"
+          source_summary="$(python3 scripts/geph_vendor_source.py verify \
+            --source vendor/geph/SOURCE.json --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock)"
+          native_sqlite="$(python3 -c 'import json,sys; print("true" if "native_sqlite" in json.load(sys.stdin) else "false")' <<< "$source_summary")"
+          source_owned="$(python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("embedded_packages") else "false")' <<< "$source_summary")"
+          echo "native_sqlite=$native_sqlite" >> "$GITHUB_OUTPUT"
+          echo "source_owned=$source_owned" >> "$GITHUB_OUTPUT"
+          if [ "$native_sqlite" = true ] || [ "$source_owned" = true ]; then
+            umask 077
+            workspace="$(mktemp -d "$RUNNER_TEMP/geph-evidence.XXXXXX")"
+            workspace="$(cd "$workspace" && pwd -P)"
+            echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$native_sqlite" = true ]; then
+            sqlite_url="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["native_sqlite"]["archive"]["url"])')"
+            curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+              "${{ needs.resolve.outputs.crate_url }}" -o "$workspace/geph5-client.crate"
+            curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+              "$sqlite_url" -o "$workspace/sqlite.zip"
+            python3 scripts/geph_vendor_source.py extract \
+              --source vendor/geph/SOURCE.json --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock --crate "$workspace/geph5-client.crate" \
+              --native-sqlite-archive "$workspace/sqlite.zip" --output "$workspace/source" \
+              > "$workspace/materialized-source.json"
+            source_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root"])' "$workspace/materialized-source.json")"
+            echo "root=$source_root" >> "$GITHUB_OUTPUT"
+          else
+            curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+              "${{ needs.resolve.outputs.crate_url }}" -o /tmp/geph5-client.crate
+            source_json="$(python3 scripts/geph_vendor_source.py extract \
+              --source vendor/geph/SOURCE.json \
+              --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock \
+              --crate /tmp/geph5-client.crate \
+              --output /tmp/geph-source)"
+            source_root="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root"])' <<< "$source_json")"
+            echo "root=$source_root" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.source.outputs.native_sqlite != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: geph-macos-universal-${{ hashFiles('vendor/geph/Cargo.lock', 'vendor/geph/SOURCE.json') }}
+
 
       - name: Build the exact locked universal binary
         run: |
           set -euo pipefail
           source_root="${{ steps.source.outputs.root }}"
-          mkdir -p out /tmp/geph-metadata
-          # The reviewed contract can carry exact source edits and regression tests.
-          cargo test --manifest-path "$source_root/Cargo.toml" --locked --features aws_lambda --lib
-          IFS=',' read -ra targets <<< "$GEPH_TARGETS"
-          bins=()
-          for target in "${targets[@]}"; do
-            cargo metadata \
-              --manifest-path "$source_root/Cargo.toml" \
-              --locked \
-              --features aws_lambda \
-              --filter-platform "$target" \
-              --format-version 1 \
-              > "/tmp/geph-metadata/$target.json"
-            cargo install \
-              --path "$source_root" \
-              --locked \
-              --target "$target" \
-              --root "/tmp/geph-install-$target" \
-              --no-track \
-              --force \
-              --features aws_lambda
-            bins+=("/tmp/geph-install-$target/bin/geph5-client")
-          done
-          lipo -create -output out/geph5-client "${bins[@]}"
-          strip -x out/geph5-client
-          lipo out/geph5-client -verify_arch arm64 x86_64
-          grep -aq aws_smithy out/geph5-client || {
-            echo "aws_lambda feature is absent from the built binary"; exit 1;
-          }
+          if [ "${{ steps.source.outputs.native_sqlite }}" = true ]; then
+            umask 077
+            workspace="${{ steps.source.outputs.workspace }}"
+            repository="$(pwd -P)"
+            native_output="$workspace/producer"
+            # Resolve rustup shims and Xcode symlinks before entering a clean HOME.
+            physical() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+            python="$(physical "$(command -v python3)")"
+            cargo="$(physical "$(rustup which cargo)")"
+            rustc="$(physical "$(rustup which rustc)")"
+            clang="$(physical "$(xcrun --find clang)")"
+            ar="$(physical "$(xcrun --find ar)")"
+            lipo="$(physical "$(xcrun --find lipo)")"
+            sdk="$(physical "$(xcrun --sdk macosx --show-sdk-path)")"
+            libclang="$(physical "$(dirname "$(dirname "$clang")")/lib/libclang.dylib")"
+            cmake="$(physical "$(command -v cmake)")"
+            mkdir "$workspace/home" "$workspace/tmp" "$workspace/fetched-cargo-home"
+            # This full-lock fetch has no --target: seal_cache requires every
+            # registry package, including host/dev and other-platform entries.
+            "$python" -c 'import sys; from pathlib import Path; sys.path.insert(0, "scripts"); from build_geph_native_release import no_cargo_config; no_cargo_config(Path(sys.argv[1]), Path(sys.argv[2]))' \
+              "$workspace/home" "$workspace/fetched-cargo-home"
+            (
+              cd "$workspace/home"
+              /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C HOME="$workspace/home" \
+                TMPDIR="$workspace/tmp" CARGO_HOME="$workspace/fetched-cargo-home" RUSTC="$rustc" \
+                "$cargo" fetch --manifest-path "$source_root/Cargo.toml" --locked
+            ) > "$workspace/online-fetch.log" 2>&1
+            "$python" scripts/seal_geph_cargo_cache.py \
+              --source vendor/geph/SOURCE.json --cargo-lock vendor/geph/Cargo.lock \
+              --fetched-cargo-home "$workspace/fetched-cargo-home" --output "$workspace/cargo-home" \
+              > "$workspace/cache-seal-result.json"
+            printf '%s\n' '(version 1)' '(allow default)' '(deny network*)' > "$workspace/compile.sb"
+            clean_env=(/usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C HOME="$workspace/home" TMPDIR="$workspace/tmp")
+            (
+              cd "$workspace/home"
+              # EPERM is required; an unavailable endpoint/ECONNREFUSED is not denial.
+              "${clean_env[@]}" /usr/bin/sandbox-exec -f "$workspace/compile.sb" \
+                "$python" -c 'import errno,json,socket; s=socket.socket(); result=s.connect_ex(("127.0.0.1",9)); s.close(); print(json.dumps({"network_errno":result})); assert result == errno.EPERM, "compile sandbox did not deny networking"' \
+                > "$workspace/network-control.json"
+              "${clean_env[@]}" CARGO_HOME="$workspace/cargo-home" CARGO_NET_OFFLINE=true RUSTC="$rustc" \
+                /usr/bin/sandbox-exec -f "$workspace/compile.sb" \
+                "$cargo" fetch --manifest-path "$source_root/Cargo.toml" --locked --offline \
+                > "$workspace/offline-fetch.log" 2>&1
+              "${clean_env[@]}" /usr/bin/sandbox-exec -f "$workspace/compile.sb" \
+                "$python" "$repository/scripts/build_geph_native_release.py" \
+                --source "$repository/vendor/geph/SOURCE.json" --version "$repository/vendor/geph/VERSION" \
+                --lock "$repository/vendor/geph/Cargo.lock" --crate "$workspace/geph5-client.crate" \
+                --native-archive "$workspace/sqlite.zip" --output "$native_output" \
+                --cargo-home "$workspace/cargo-home" --cargo "$cargo" --rustc "$rustc" --python "$python" \
+                --clang "$clang" --ar "$ar" --lipo "$lipo" --sdk "$sdk" --libclang "$libclang" \
+                --cmake "$cmake" --jobs 1 > "$workspace/producer-result.json" 2> "$workspace/producer.stderr.log"
+            )
+            version="$(cat vendor/geph/VERSION)"
+            source_root="$native_output/source/geph5-client-$version"
+            host_target="$("$python" -c 'import platform; print({"arm64":"aarch64-apple-darwin","aarch64":"aarch64-apple-darwin","x86_64":"x86_64-apple-darwin"}[platform.machine()])')"
+            "$python" scripts/run_geph_synthetic_tests.py --source-root "$source_root" \
+              --source-contract vendor/geph/SOURCE.json --evidence-dir "$RUNNER_TEMP/geph-synthetic-tests" \
+              --native-receipt "$native_output/evidence/$host_target/native-build.json" \
+              --native-artifacts-root "$native_output/evidence" --cargo-home "$workspace/cargo-home" \
+              --cargo "$cargo" --rustc "$rustc" --clang "$clang" --ar "$ar" \
+              --sdk "$sdk" --libclang "$libclang" --cmake "$cmake" --build-jobs 1
+            mkdir out
+            # The producer has sealed these exact final bytes: no strip/relink.
+            cp "$native_output/evidence/geph5-client" out/geph5-client
+            "$python" scripts/geph_native_sqlite_bundle.py pack \
+              --source vendor/geph/SOURCE.json --cargo-lock vendor/geph/Cargo.lock \
+              --receipt "$native_output/evidence/native-release.json" --artifacts-root "$native_output/evidence" \
+              --published-binary out/geph5-client --output out/geph5-client-native-sqlite-evidence.tar \
+              > "$workspace/bundle-result.json"
+          else
+            mkdir -p out /tmp/geph-metadata
+            # Compile without executing upstream account/network tests. Only exact
+            # reviewed fixtures run, with OS network and private-file denial.
+            python3 scripts/run_geph_synthetic_tests.py --source-root "$source_root" \
+              --evidence-dir "$RUNNER_TEMP/geph-synthetic-tests"
+            IFS=',' read -ra targets <<< "$GEPH_TARGETS"
+            bins=()
+            for target in "${targets[@]}"; do
+              cargo metadata \
+                --manifest-path "$source_root/Cargo.toml" \
+                --locked \
+                --features aws_lambda \
+                --filter-platform "$target" \
+                --format-version 1 \
+                > "/tmp/geph-metadata/$target.json"
+              cargo install \
+                --path "$source_root" \
+                --locked \
+                --target "$target" \
+                --root "/tmp/geph-install-$target" \
+                --no-track \
+                --force \
+                --features aws_lambda
+              bins+=("/tmp/geph-install-$target/bin/geph5-client")
+            done
+            lipo -create -output out/geph5-client "${bins[@]}"
+            strip -x out/geph5-client
+            lipo out/geph5-client -verify_arch arm64 x86_64
+            grep -aq aws_smithy out/geph5-client || {
+              echo "aws_lambda feature is absent from the built binary"; exit 1;
+            }
+          fi
+
+      - name: Retain isolated synthetic test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-synthetic-tests-${{ needs.resolve.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/geph-synthetic-tests/*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Retain native producer proof and cache controls
+        if: always() && steps.source.outputs.native_sqlite == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-native-producer-${{ needs.resolve.outputs.version }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.source.outputs.workspace }}/*.json
+            ${{ steps.source.outputs.workspace }}/*.log
+            ${{ steps.source.outputs.workspace }}/*.sb
+            ${{ steps.source.outputs.workspace }}/cargo-home/cache-seal.json
+            ${{ steps.source.outputs.workspace }}/producer/inputs/*
+            ${{ steps.source.outputs.workspace }}/producer/producer.json
+            ${{ steps.source.outputs.workspace }}/producer/logs/*
+            ${{ steps.source.outputs.workspace }}/producer/evidence/**
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build and audit the vendored dependency inventory
         run: |
           set -euo pipefail
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
-          python3 scripts/make_geph_vendor_sbom.py generate \
-            --source vendor/geph/SOURCE.json \
-            --version-file vendor/geph/VERSION \
-            --cargo-lock vendor/geph/Cargo.lock \
-            --cargo-metadata aarch64-apple-darwin=/tmp/geph-metadata/aarch64-apple-darwin.json \
-            --cargo-metadata x86_64-apple-darwin=/tmp/geph-metadata/x86_64-apple-darwin.json \
-            --repository "${{ github.repository }}" \
-            --source-commit "$GITHUB_SHA" \
-            --source-date-epoch "$source_date_epoch" \
-            --target macos-universal \
-            --output out/geph5-client.spdx.json
+          audit_native_args=(--vendored-transitive-dependencies full)
+          audit_evidence_args=(--evaluation-date "$(date -u +%F)")
+          if [ "${{ steps.source.outputs.native_sqlite }}" = true ] || [ "${{ steps.source.outputs.source_owned }}" = true ]; then
+            audit_native_args+=(--source vendor/geph/SOURCE.json)
+            audit_evidence_args+=(--evidence-dir "${{ steps.source.outputs.workspace }}/dependency-audit-evidence")
+          fi
+          if [ "${{ steps.source.outputs.source_owned }}" = true ]; then
+            audit_evidence_args+=(--source-owned-evidence security/geph-source-owned-advisories)
+          fi
+          sbom_args=(
+            --source vendor/geph/SOURCE.json --version-file vendor/geph/VERSION
+            --cargo-lock vendor/geph/Cargo.lock --repository "${{ github.repository }}"
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$source_date_epoch"
+            --target macos-universal --output out/geph5-client.spdx.json
+          )
+          if [ "${{ steps.source.outputs.native_sqlite }}" = true ]; then
+            native_output="${{ steps.source.outputs.workspace }}/producer"
+            version="$(cat vendor/geph/VERSION)"
+            audit_native_args+=(--native-receipt "$native_output/evidence/native-release.json"
+              --native-artifacts-root "$native_output/evidence")
+            # Reviewed evidence is intentionally required before native activation.
+            # Keep raw scanner/evidence snapshots outside the release payload.
+            audit_evidence_args+=(--native-advisory-evidence security/geph-native-sqlite-advisories)
+            sbom_args+=(
+              --source-root "$native_output/source/geph5-client-$version"
+              --native-receipt "$native_output/evidence/native-release.json"
+              --native-artifacts-root "$native_output/evidence"
+              --cargo-metadata "aarch64-apple-darwin=$native_output/evidence/aarch64-apple-darwin/linked/cargo_metadata"
+              --cargo-metadata "x86_64-apple-darwin=$native_output/evidence/x86_64-apple-darwin/linked/cargo_metadata"
+            )
+          else
+            sbom_args+=(
+              --source-root "${{ steps.source.outputs.root }}"
+              --cargo-metadata aarch64-apple-darwin=/tmp/geph-metadata/aarch64-apple-darwin.json
+              --cargo-metadata x86_64-apple-darwin=/tmp/geph-metadata/x86_64-apple-darwin.json
+            )
+          fi
+          python3 scripts/make_geph_vendor_sbom.py generate "${sbom_args[@]}"
+          audit_verify_args=("${audit_native_args[@]}")
+          if [ "${{ steps.source.outputs.source_owned }}" = true ]; then
+            audit_verify_args+=(--source-owned-evidence "${{ steps.source.outputs.workspace }}/dependency-audit-evidence/source-owned")
+          fi
           python3 scripts/dependency_audit.py fetch-scanner \
             --policy security/geph-dependency-audit-policy.json \
             --platform darwin-arm64 \
             --output /tmp/osv-scanner
           python3 scripts/dependency_audit.py scan \
+            "${audit_native_args[@]}" "${audit_evidence_args[@]}" \
             --scanner /tmp/osv-scanner \
             --platform darwin-arm64 \
             --sbom out/geph5-client.spdx.json \
             --policy security/geph-dependency-audit-policy.json \
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
-            --vendored-transitive-dependencies full \
-            --evaluation-date "$(date -u +%F)" \
             --output out/geph5-client-dependency-audit.json
           python3 scripts/dependency_audit.py verify \
+            "${audit_verify_args[@]}" \
             --report out/geph5-client-dependency-audit.json \
             --sbom out/geph5-client.spdx.json \
             --policy security/geph-dependency-audit-policy.json \
             --source-commit "$GITHUB_SHA" \
-            --target macos-universal \
-            --vendored-transitive-dependencies full
+            --target macos-universal
+
+          if [ "${{ steps.source.outputs.source_owned }}" = true ]; then
+            python3 scripts/geph_source_owned_bundle.py pack \
+              --policy security/geph-dependency-audit-policy.json \
+              --evidence-root "${{ steps.source.outputs.workspace }}/dependency-audit-evidence/source-owned" \
+              --output out/geph5-client-source-review-evidence.tar
+          fi
+
+      - name: Retain Geph dependency audit evidence
+        if: always() && (steps.source.outputs.native_sqlite == 'true' || steps.source.outputs.source_owned == 'true')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-dependency-audit-${{ github.sha }}
+          path: ${{ steps.source.outputs.workspace }}/dependency-audit-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Assemble the internal release payload
         run: |
@@ -374,6 +739,19 @@ jobs:
           cp vendor/geph/VERSION out/geph5-client.VERSION
           cp vendor/geph/SOURCE.json out/geph5-client.SOURCE.json
           cp vendor/geph/Cargo.lock out/geph5-client.Cargo.lock
+          python3 - <<'PY_ASSETS'
+          import json
+          from pathlib import Path
+          expected = {"geph5-client", "geph5-client.LICENSE", "geph5-client.VERSION",
+                      "geph5-client.SOURCE.json", "geph5-client.Cargo.lock",
+                      "geph5-client.spdx.json", "geph5-client-dependency-audit.json"}
+          source = json.loads(Path("vendor/geph/SOURCE.json").read_bytes())
+          if "native_sqlite" in source:
+              expected.add("geph5-client-native-sqlite-evidence.tar")
+          if source.get("embedded_packages"):
+              expected.add("geph5-client-source-review-evidence.tar")
+          assert {path.name for path in Path("out").iterdir()} == expected, "unexpected release asset set"
+          PY_ASSETS
           ( cd out && shasum -a 256 geph5-client* > SHA256SUMS )
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -399,20 +777,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
-          for artifact in out/*; do
-            gh attestation verify "$artifact" \
+          if [ "${{ steps.source.outputs.native_sqlite }}" = true ] || [ "${{ steps.source.outputs.source_owned }}" = true ]; then
+            workspace="${{ steps.source.outputs.workspace }}"
+            signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
+            provenance_json="$workspace/provenance.json"
+            spdx_attestation_json="$workspace/spdx-attestation.json"
+            for artifact in out/*; do
+              result=/dev/null
+              [ "$artifact" != out/SHA256SUMS ] || result="$provenance_json"
+              gh attestation verify "$artifact" \
+                --repo "${{ github.repository }}" --signer-workflow "$signer_workflow" \
+                --signer-digest "$GITHUB_SHA" --source-digest "$GITHUB_SHA" \
+                --source-ref refs/heads/main --predicate-type https://slsa.dev/provenance/v1 \
+                --deny-self-hosted-runners --format json > "$result"
+            done
+            gh attestation verify out/geph5-client \
+              --repo "${{ github.repository }}" --signer-workflow "$signer_workflow" \
+              --signer-digest "$GITHUB_SHA" --source-digest "$GITHUB_SHA" \
+              --source-ref refs/heads/main --predicate-type https://spdx.dev/Document/v2.3 \
+              --deny-self-hosted-runners --format json > "$spdx_attestation_json"
+            python3 scripts/verify_geph_release.py verify-attestations \
+              --release-dir out --provenance-json "$provenance_json" \
+              --spdx-json "$spdx_attestation_json" --source vendor/geph/SOURCE.json
+          else
+            signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
+            for artifact in out/*; do
+              gh attestation verify "$artifact" \
+                --repo "${{ github.repository }}" \
+                --signer-workflow "$signer_workflow" \
+                --source-digest "$GITHUB_SHA" \
+                --deny-self-hosted-runners >/dev/null
+            done
+            gh attestation verify out/geph5-client \
               --repo "${{ github.repository }}" \
               --signer-workflow "$signer_workflow" \
               --source-digest "$GITHUB_SHA" \
+              --predicate-type https://spdx.dev/Document/v2.3 \
               --deny-self-hosted-runners >/dev/null
-          done
-          gh attestation verify out/geph5-client \
-            --repo "${{ github.repository }}" \
-            --signer-workflow "$signer_workflow" \
-            --source-digest "$GITHUB_SHA" \
-            --predicate-type https://spdx.dev/Document/v2.3 \
-            --deny-self-hosted-runners >/dev/null
+          fi
 
       - name: Publish the verified internal dependency release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2

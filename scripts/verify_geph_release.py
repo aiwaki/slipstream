@@ -19,6 +19,8 @@ from pathlib import Path
 
 CHECKSUM_NAME = "SHA256SUMS"
 BINARY_NAME = "geph5-client"
+NATIVE_EVIDENCE_NAME = "geph5-client-native-sqlite-evidence.tar"
+SOURCE_REVIEW_EVIDENCE_NAME = "geph5-client-source-review-evidence.tar"
 CHECKSUMMED_ASSETS = frozenset(
     {
         BINARY_NAME,
@@ -46,6 +48,8 @@ MAX_BYTES = {
     "geph5-client.spdx.json": 64 * 1024 * 1024,
     "geph5-client-dependency-audit.json": 64 * 1024 * 1024,
     CHECKSUM_NAME: 64 * 1024,
+    NATIVE_EVIDENCE_NAME: 1024 * 1024 * 1024,
+    SOURCE_REVIEW_EVIDENCE_NAME: 130 * 1024 * 1024,
 }
 MAX_RELEASE_METADATA_BYTES = 1024 * 1024
 MAX_PROVENANCE_JSON_BYTES = 8 * 1024 * 1024
@@ -140,7 +144,7 @@ def _read_regular(
         os.close(descriptor)
 
 
-def _read_checksums(path: Path) -> tuple[dict[str, str], dict[str, object]]:
+def _read_checksums(path: Path, expected_assets=CHECKSUMMED_ASSETS) -> tuple[dict[str, str], dict[str, object]]:
     content, metadata = _read_regular(
         path,
         limit=MAX_BYTES[CHECKSUM_NAME],
@@ -153,7 +157,7 @@ def _read_checksums(path: Path) -> tuple[dict[str, str], dict[str, object]]:
     if not text.endswith("\n") or "\r" in text:
         raise ValueError("Geph checksum manifest must end with one Unix newline")
     lines = text.splitlines()
-    if len(lines) != len(CHECKSUMMED_ASSETS):
+    if len(lines) != len(expected_assets):
         raise ValueError("Geph checksum manifest has an unexpected entry count")
     checksums: dict[str, str] = {}
     for line in lines:
@@ -164,7 +168,7 @@ def _read_checksums(path: Path) -> tuple[dict[str, str], dict[str, object]]:
         if name in checksums:
             raise ValueError(f"duplicate Geph checksum entry: {name}")
         checksums[name] = digest
-    if set(checksums) != CHECKSUMMED_ASSETS:
+    if set(checksums) != expected_assets:
         raise ValueError(
             "Geph checksum manifest names do not match the release contract"
         )
@@ -258,25 +262,62 @@ def _subject_digests(statement: dict[str, object], *, label: str) -> dict[str, s
     return result
 
 
+def _asset_contract(source: Path | None) -> tuple[frozenset[str], dict | None, dict | None]:
+    """Select one closed asset set using reviewed input, never archive presence."""
+    if source is None:
+        return REQUIRED_ASSETS, None, None
+    contract, identity = _read_json_regular(
+        source, limit=MAX_BYTES["geph5-client.SOURCE.json"], label="reviewed Geph source"
+    )
+    if not isinstance(contract, dict):
+        raise ValueError("reviewed Geph source must be an object")
+    if not {"native_sqlite", "embedded_packages"}.intersection(contract):
+        return REQUIRED_ASSETS, None, identity
+    import geph_vendor_source
+    geph_vendor_source._validate_source_contract(contract)
+    required = REQUIRED_ASSETS
+    if "native_sqlite" in contract:
+        required |= {NATIVE_EVIDENCE_NAME}
+    if "embedded_packages" in contract:
+        required |= {SOURCE_REVIEW_EVIDENCE_NAME}
+    return required, contract, identity
+
+
 def verify_attestation_results(
-    *, release_dir: Path, provenance_json: Path, spdx_json: Path
+    *, release_dir: Path, provenance_json: Path, spdx_json: Path,
+    source: Path | None = None,
 ) -> dict[str, object]:
     if not release_dir.is_dir() or release_dir.is_symlink():
         raise ValueError("Geph release directory is missing or unsafe")
+    required, _, reviewed_source = _asset_contract(source)
     names = {entry.name for entry in release_dir.iterdir()}
-    if names != REQUIRED_ASSETS:
+    if names != required:
         raise ValueError(
             "Geph attestation release asset set does not match the contract"
         )
 
     expected_subjects: dict[str, str] = {}
-    for name in sorted(REQUIRED_ASSETS):
+    for name in sorted(required):
         metadata = _hash_regular(
             release_dir / name,
             limit=MAX_BYTES[name],
             label=f"Geph attestation subject {name}",
         )
         expected_subjects[name] = str(metadata["sha256"])
+
+    if reviewed_source is not None:
+        if expected_subjects["geph5-client.SOURCE.json"] != reviewed_source["sha256"]:
+            raise ValueError("attested Geph source differs from reviewed source")
+    else:
+        downloaded_source, downloaded_source_metadata = _read_json_regular(
+            release_dir / "geph5-client.SOURCE.json",
+            limit=MAX_BYTES["geph5-client.SOURCE.json"], label="downloaded Geph source",
+        )
+        if downloaded_source_metadata["sha256"] != expected_subjects["geph5-client.SOURCE.json"]:
+            raise ValueError("downloaded Geph source changed during attestation verification")
+        if (not isinstance(downloaded_source, dict)
+                or {"native_sqlite", "embedded_packages"}.intersection(downloaded_source)):
+            raise ValueError("extended Geph attestations require a reviewed source contract")
 
     provenance, _ = _read_json_regular(
         provenance_json,
@@ -303,6 +344,8 @@ def verify_attestation_results(
         limit=MAX_BYTES["geph5-client.spdx.json"],
         label="downloaded Geph SPDX SBOM",
     )
+    if sbom_metadata["sha256"] != expected_subjects["geph5-client.spdx.json"]:
+        raise ValueError("downloaded Geph SPDX SBOM changed during attestation verification")
     if not isinstance(sbom, dict):
         raise ValueError("downloaded Geph SPDX SBOM must be a JSON object")
     spdx, _ = _read_json_regular(
@@ -346,13 +389,17 @@ def verify_release_assets(
     cargo_lock: Path,
     version: Path,
     license_file: Path,
+    native_output_root: Path | None = None,
+    source_owned_policy: Path | None = None,
+    source_owned_output_root: Path | None = None,
 ) -> dict[str, object]:
     if not release_dir.is_dir() or release_dir.is_symlink():
         raise ValueError("Geph release directory is missing or unsafe")
+    required, reviewed_contract, reviewed_source = _asset_contract(source)
     names = {entry.name for entry in release_dir.iterdir()}
-    if names != REQUIRED_ASSETS:
-        missing = sorted(REQUIRED_ASSETS - names)
-        unexpected = sorted(names - REQUIRED_ASSETS)
+    if names != required:
+        missing = sorted(required - names)
+        unexpected = sorted(names - required)
         raise ValueError(
             "Geph release asset set does not match the contract"
             f"; missing={missing}; unexpected={unexpected}"
@@ -361,12 +408,14 @@ def verify_release_assets(
     api_metadata = verify_release_metadata(
         metadata_path=metadata_path,
         expected_tag=expected_tag,
+        source=source,
     )
-    checksums, checksum_metadata = _read_checksums(release_dir / CHECKSUM_NAME)
+    checksummed = required - {CHECKSUM_NAME}
+    checksums, checksum_metadata = _read_checksums(release_dir / CHECKSUM_NAME, checksummed)
     downloaded_metadata: dict[str, dict[str, object]] = {
         CHECKSUM_NAME: checksum_metadata
     }
-    for name in sorted(CHECKSUMMED_ASSETS):
+    for name in sorted(checksummed):
         metadata = _hash_regular(
             release_dir / name,
             limit=MAX_BYTES[name],
@@ -380,6 +429,8 @@ def verify_release_assets(
         raise ValueError(
             "downloaded Geph asset sizes or digests differ from release metadata"
         )
+    if downloaded_metadata["geph5-client.SOURCE.json"] != reviewed_source:
+        raise ValueError("reviewed Geph source changed during asset verification")
 
     references = {
         "source": source,
@@ -400,16 +451,67 @@ def verify_release_assets(
                 f"{asset_name}"
             )
 
-    return {
-        "asset_count": len(REQUIRED_ASSETS),
+    result = {
+        "asset_count": len(required),
         "binary_sha256": downloaded_metadata[BINARY_NAME]["sha256"],
         "binary_size": downloaded_metadata[BINARY_NAME]["size"],
         "checksums_sha256": checksums[CHECKSUM_NAME],
     }
+    source_policy = None
+    if reviewed_contract is not None and "embedded_packages" in reviewed_contract:
+        if source_owned_policy is None or source_owned_output_root is None:
+            raise ValueError("source-owned Geph assets require trusted policy and a fresh evidence output root")
+        import geph_source_owned_bundle
+        source_policy = geph_source_owned_bundle.read_policy(source_owned_policy)
+        if source_policy["source_sha256"] != reviewed_source["sha256"]:
+            raise ValueError("source-owned policy differs from reviewed Geph source")
+    elif source_owned_policy is not None or source_owned_output_root is not None:
+        raise ValueError("source-owned evidence inputs supplied without embedded Geph source")
+    if reviewed_contract is not None and "native_sqlite" in reviewed_contract:
+        if native_output_root is None:
+            raise ValueError("native Geph assets require a fresh evidence output root")
+        import geph_native_sqlite
+        import geph_native_sqlite_bundle
+        lock_bytes, lock_identity = _read_regular(
+            cargo_lock, limit=MAX_BYTES["geph5-client.Cargo.lock"], label="reviewed native Geph lock"
+        )
+        if lock_identity != downloaded_metadata["geph5-client.Cargo.lock"]:
+            raise ValueError("reviewed Geph lock changed during asset verification")
+        geph_native_sqlite.verify_wrapper_lock(
+            reviewed_contract["native_sqlite"], lock_bytes, reviewed_contract["lock_sha256"]
+        )
+        proof = geph_native_sqlite_bundle.unpack_bundle(
+            bundle_path=release_dir / NATIVE_EVIDENCE_NAME,
+            output_root=native_output_root,
+            descriptor=reviewed_contract["native_sqlite"],
+            source_sha256=str(reviewed_source["sha256"]),
+            lock_sha256=str(downloaded_metadata["geph5-client.Cargo.lock"]["sha256"]),
+            published_binary=release_dir / BINARY_NAME,
+        )
+        if (proof["bundle_sha256"] != checksums[NATIVE_EVIDENCE_NAME]
+                or proof["size"] != downloaded_metadata[NATIVE_EVIDENCE_NAME]["size"]
+                or proof["final_binary_sha256"] != result["binary_sha256"]):
+            raise ValueError("native evidence or binary changed during asset verification")
+        result["native_evidence"] = proof
+    elif native_output_root is not None:
+        raise ValueError("native evidence output supplied for legacy Geph source")
+    if source_policy is not None:
+        proof = geph_source_owned_bundle.unpack_bundle(
+            bundle_path=release_dir / SOURCE_REVIEW_EVIDENCE_NAME,
+            output_root=source_owned_output_root,
+            policy_entry=source_policy,
+        )
+        if (proof["bundle_sha256"] != checksums[SOURCE_REVIEW_EVIDENCE_NAME]
+                or proof["size"] != downloaded_metadata[SOURCE_REVIEW_EVIDENCE_NAME]["size"]
+                or proof["source_sha256"] != reviewed_source["sha256"]
+                or proof["review_sha256"] != source_policy["review_sha256"]):
+            raise ValueError("source-owned evidence changed during asset verification")
+        result["source_owned_evidence"] = proof
+    return result
 
 
 def verify_release_metadata(
-    *, metadata_path: Path, expected_tag: str
+    *, metadata_path: Path, expected_tag: str, source: Path | None = None
 ) -> dict[str, object]:
     if not expected_tag or any(character.isspace() for character in expected_tag):
         raise ValueError("expected Geph release tag is invalid")
@@ -454,8 +556,12 @@ def verify_release_metadata(
             "sha256": digest_match.group(1),
             "size": size,
         }
-    if set(asset_metadata) != REQUIRED_ASSETS:
+    required, _, reviewed_source = _asset_contract(source)
+    if set(asset_metadata) != required:
         raise ValueError("Geph release metadata asset set does not match the contract")
+    if (reviewed_source is not None
+            and asset_metadata["geph5-client.SOURCE.json"] != reviewed_source):
+        raise ValueError("Geph release metadata does not bind reviewed source")
     return {
         "tag": expected_tag,
         "draft": False,
@@ -472,6 +578,7 @@ def parse_args() -> argparse.Namespace:
     metadata = subparsers.add_parser("verify-metadata")
     metadata.add_argument("--metadata", required=True, type=Path)
     metadata.add_argument("--expected-tag", required=True)
+    metadata.add_argument("--source", type=Path)
     assets = subparsers.add_parser("verify-assets")
     assets.add_argument("--release-dir", required=True, type=Path)
     assets.add_argument("--metadata", required=True, type=Path)
@@ -480,10 +587,14 @@ def parse_args() -> argparse.Namespace:
     assets.add_argument("--cargo-lock", required=True, type=Path)
     assets.add_argument("--version-file", required=True, type=Path)
     assets.add_argument("--license", required=True, type=Path)
+    assets.add_argument("--native-output-root", type=Path)
+    assets.add_argument("--source-owned-policy", type=Path)
+    assets.add_argument("--source-owned-output-root", type=Path)
     attestations = subparsers.add_parser("verify-attestations")
     attestations.add_argument("--release-dir", required=True, type=Path)
     attestations.add_argument("--provenance-json", required=True, type=Path)
     attestations.add_argument("--spdx-json", required=True, type=Path)
+    attestations.add_argument("--source", type=Path)
     return parser.parse_args()
 
 
@@ -493,6 +604,7 @@ def main() -> int:
         result = verify_release_metadata(
             metadata_path=args.metadata,
             expected_tag=args.expected_tag,
+            source=args.source,
         )
     elif args.command == "verify-assets":
         result = verify_release_assets(
@@ -503,12 +615,16 @@ def main() -> int:
             cargo_lock=args.cargo_lock,
             version=args.version_file,
             license_file=args.license,
+            native_output_root=args.native_output_root,
+            source_owned_policy=args.source_owned_policy,
+            source_owned_output_root=args.source_owned_output_root,
         )
     else:
         result = verify_attestation_results(
             release_dir=args.release_dir,
             provenance_json=args.provenance_json,
             spdx_json=args.spdx_json,
+            source=args.source,
         )
     print(json.dumps(result, sort_keys=True))
     return 0

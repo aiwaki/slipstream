@@ -1,3 +1,638 @@
+# Geph 0.4.3 remediation candidate — 2026-10-13
+
+- Delivery ordering repair, 2026-10-15: the exact app rustls0.23.45->0.23.46
+  repair was rejected by the old source-bootstrap classifier, which recognized
+  only the previous already-merged TLS migration. A second exact repair set now
+  accepts that transition while retaining all path/audit/main-build boundaries;
+  a target package identity collision found in review is also rejected.
+  Eleven scoped tests PASS, including wrong checksum, rollback, dependency edge,
+  metadata, unrelated package and collision cases. Exact main/head lock replay
+  changes the source-only fixture from rejected to accepted; the actual mixed
+  56-path PR remains in the ordinary packaged path. Evidence is retained in
+  output/minimal-geph-source-20261015/. This prepares separation of the existing
+  source repair from deferred native/source-owned tooling; it does not qualify
+  or publish a binary. Existing production SOURCE is unchanged.
+
+- RSA client review, 2026-10-15: renewed only the two exact rsa0.8.2
+  public-key-only exceptions through2026-10-22. Fresh static review checked
+  canonical Geph source plus13edits and the complete RSA reverse closure;
+  client config/RPC/cache and public-key call paths do not enter either
+  advisory's private-key prerequisite. Research notes record exact SOURCE/lock,
+  retained primary descriptions and limits. No RSA removal or whole-crypto
+  safety is claimed. Strict policy diff/loader/matcher and4 existing audit
+  tests PASS; ci_scope11 PASS with independent collision-fix review. Receipt
+  output/minimal-geph-source-20261015/rsa-policy-doc-verification.json binds
+  policy ac31a531. A fresh CI scan is still required. The source-only transition
+  guard currently forbids this reviewed policy change; resolve that exact
+  ordering boundary before creating a minimal bootstrap PR. App Chromium
+  policy and unpublished Geph package404 remain separate release blockers.
+
+- Exact96a1f8313 CI38717107048 and audit38717107102 are terminal FAIL.
+  Product/checks/Windows/Chromium PASS; metadata903, traffic67 and daemon1030
+  are reusable green results. Package still receives404 for unpublished0.4.3-r1,
+  lifecycle is downstream; audit has two expired RSA exceptions and expired
+  Chromium policy. Parent verified all21 retained evidence files, receipt
+  be09a06a in output/native-ci-integration-20261015/. No repeat run requested.
+
+- Core traffic fixture isolation, 2026-10-15: exact7824aaafd CI38713624559
+  passed903 release tests but failed the spent-candidate status assertion.
+  Production/test source is identical to the earlier green ab77 baseline.
+  A controlled barrier reproduces the same failure: a prior fixture's real
+  confirmation worker overwrites shared last_status after its test teardown,
+  while the next route's payload/proof/session assertions still pass. CI did
+  not record the status host, so that run's exact writer remains unproven.
+  The predecessor now records/asserts confirmation scheduling without spawning
+  an unrelated worker. Three relay fixtures explicitly stub plain preflight
+  and verify its IP/host/timeout, preserving real preflight orchestration and
+  all existing route assertions. Scoped67 tests and100 paired executions PASS;
+  final guard records zero external attempts and no leaked owned workers.
+  Initial guarded attempts and causal failures are retained under
+  output/source-owned-generation-workflows-20261015/ci-7824aaafd/.
+  Production routing is unchanged. Docs8/continuity/diff checks PASS.
+  Exact audit38713624564 still reports old production RSA2blocking/2info,
+  expired app Chromium policy; packaging still fails unpublishedr1 HTTP404.
+  A fresh exact-head CI result is required after this fixture commit.
+
+- Source-owned SPDX generation repair, 2026-10-15: both dependency-audit and
+  Geph producer now pass the materialized source root to the real generator.
+  Previously both source-owned-only paths failed before producing SPDX; native
+  producer root selection and consumer verify paths are unchanged. New real
+  extractor/generator workflow tests prove exact six-package/twenty-file output,
+  reject tampered embedded bytes and missing root before writing SPDX. Three
+  tests/six scenarios PASS; both ab77c6a63 workflow baselines reproduce the
+  original failure. Existing five consumer tests and two-workflow actionlint
+  PASS. Evidence: output/source-owned-generation-workflows-20261015/.
+  Remaining native CI gap is distinct: standalone audit lacks the explicit
+  SQLite archive and actual macOS linkage inputs. Static schema1 review also
+  binds local build receipt/binary hashes and cannot authorize a fresh CI build
+  by copying output policy. A versioned source-verdict/artifact-proof contract
+  is required; retain strict schema1 behavior and fresh full linkage checks.
+
+- Current repair, 2026-10-15: both app and Geph locks now pin rustls0.23.46
+  (registry/archive SHA25648e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf).
+  RUSTSEC-2026-0346/0347/0348/0349 were published after the previous retained
+  advisory scan; official release and exact published source confirm the fix.
+  Both parsed locks differ only in rustls version/checksum; SOURCE changes only
+  lock_sha256 (5ee1bccd). All other dependencies, source edits and policy remain
+  unchanged. Independent pin review, canonical source/archive verification and
+  locked/offline Cargo metadata for both Apple targets PASS. The bootstrap
+  exemption is not expanded; ordinary packaged qualification still applies.
+  Evidence: output/rustls-new-advisories-20261015/ and
+  output/rustls-pin-repair-20261015/. Next inspect the new exact-head audit;
+  no app build, installation or browser qualification has been performed.
+
+- Reusable exact-head CI baseline: PR384 e44f57042, tested mergefc8d67f1,
+  CI38698839023 and audit38698838815 (attempt1), terminal failures. Product,
+  Windows and Chromium contract jobs PASS; release metadata900 tests PASS in
+  130.464s. Package fails on unpublished geph-vendor-0.4.3-r1 HTTP404 and
+  lifecycle fails downstream. App audit rejects unchanged expired Chromium
+  integrity-only policy. Geph6 blocking+2informational/423packages comprised
+  the2 known RSA findings and4 new rustls findings above. SOURCE/lock/policies
+  matched ebdf6b8bd; no source-owned/native lane had been activated. Actual
+  failing Geph audit uploaded retained diagnostics successfully. Parent verified
+  all26 receipt files: output/source-owned-workflow-integration-20261015/
+  ci-e44f57042/receipt.json. Reuse unaffected tests; do not rerun this old head.
+
+- Combined output-only candidate, verified 2026-10-15: SOURCE f603c673, lock
+  0ee76556 contains the auth repair, three source-owned packages/20 files,
+  SQLite 3.53.2 and rustls 0.23.46. Actual universal build750.77s/1046.91MiB,
+  source/native linkage and fresh SPDX PASS; binary00ddd64a, receipt4a6a0e67
+  under output/geph-combined-candidate-20261015/v2/actual-build/. Reuse this
+  build. Fresh registry scan419 coordinates has0blocking/2informational;
+  source-owned review3 PASS. Exact combined-lock auth v2 reproduces old101/101/0
+  and fixed0/0/0,174.893s/610.09MiB; receipt0e9035d9 under
+  output/geph-combined-auth-regression-20261015/v2/. All24081 protected original
+  files are unchanged; libtest's existing dev-dependencies do not qualify the
+  installed app. No account/browser/system changes or additional build needed.
+
+- Native output candidate v7 accepts only four independently reviewed source
+  fixes (CVE-2019-19244/19880/19924/20218);19926 remains unknown. Parent verified
+  1705 retained files and recomputed identical current-date canonical report
+  502e5284:39adjudicated/54unknown/0affected,209excluded; registry0blocking and
+  source-owned PASS. Only four rows plus17author/4peer evidence records change;
+  other298groups,505aliases,census,binding and expiry2026-10-16 are conserved.
+  Receipt5940aaa1/parentb799c8e1 under output/sqlite-native-integration/
+  native-audit-candidate-v7-20261015/. This remains FAIL only54native unknowns,
+  not production adoption or CI/artifact qualification. V6 and earlier evidence
+  are immutable. The separate native CI binding gap is described above.
+
+- Source-owned workflow3399e9d7c and main mergee44f57042 are published in PR384.
+  Bridge82, bundle/release63, BuildConfig57 (45producer+38existing-release
+  scenarios), consumers5 (17scenarios), docs8/actionlint3 remain reusable green
+  focused baselines. Transport validates evidence bytes, not reviewer correctness.
+  PR386 remains open at4360003ca; maina24fd398c contains README PR387. Policies,
+  installed app and services are unchanged; no license issue was sent. Finish
+  actual dependency/applicability and combined qualification before publication.
+
+- Auth-expiry regression, 2026-10-15: actual Rust old RED2/PASS1, fixed PASS3;
+  offline/jobs1, peak925MiB, no surviving owned processes. Receipt:
+  output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/
+  execution-receipt.json, SHA256
+  31d893cebfebcf0d9d4879b3a5d462e51ce45290a211a04b30cc7f6377706b0f.
+  Candidatea94d4c1d changes only auth cache invalidation to compare active Plus
+  state with cached level. Valid Free cache survives expired-positive subscription
+  metadata without unnecessary signer RPC; expired Plus cache is retired; real
+  Free-to-Plus transition still invalidates cache. Auth bytes match the candidate,
+  but tests use retained harness lock94db8764, not full candidate lock9fd68248.
+  Old SOURCE3c2 and all evidence remain intact; full candidate is unqualified.
+  Preserve root-callsite semantic review separately from embedded package files.
+
+- ISC packaging contract updated, 2026-10-13: the user declined the upstream
+  issue; do not send it or require an upstream answer before proceeding. Both
+  known ISC derivatives now require the exact standard license text alongside
+  their retained declarations/provenance and SOURCE-NOTICE. The template is
+  labelled as standard text, not a recovered package-specific copyright notice;
+  no author/year is invented. Output-only SOURCE3c2cf6d9 now passes the canonical
+  source/archive/lock verifier, with20 embedded files. Production SOURCE, lock,
+  policy and installed app remain unchanged.49 scoped tests PASS, including
+  causal RED for previously accepted license omission after hash rebinding;
+  independent8 actual-candidate negative cases and1 SPDX inventory test PASS.
+  Evidence: output/rsa-isc-contract-integration-20261013/receipt.json and
+  candidate-verification.json. No build, scan, account, release or installation.
+  Next implement source-owned advisory assessment with actual ancestor archive
+  verification and exact package partitioning; the existing audit correctly
+  refuses these three packages without registry identities. An old candidate
+  SPDX cannot qualify the new SOURCE. Native SQLite composition/applicability,
+  Chromium coverage and release qualification remain separate open work.
+
+- Fresh output-only candidate-v4 resolves14 more exact-v2 groups: SQLite2/PHP
+  1887/1888, eight auxiliary shell/zipfile/expert/sqldiff findings and Session
+  7104 are excluded from the built-in component; concat29087/3277 and lookaside
+  29088 have independently reviewed source fixes. Dynamic extension loading
+  support exists; arbitrary later-loaded code is outside these exclusions.
+  Positive source/preprocessing controls and both target compile/link bindings
+  support component absence; version ranges or missing symbols alone do not.
+  Session peer's comment-aware parser removes one prologue-comment directive
+  from the author's raw stack; all five real owners remain inside the Session
+  guard, corroborated by actual/positive preprocessing. No source-fix claim there.
+  Four author reviews and separate semantic peers PASS; parent608 byte bindings
+  verified. Original301 groups/503 aliases/92 native/209 exclusions, all identity
+  conflicts, source/binary binding and cutoff/expiry remain unchanged. Native
+  result31 adjudicated/61 unknown/0 census-only, overallFAIL with2 RSA blockers.
+  Retained real434-registry OSV response/projection/findings reused offline;
+  no rescan, compiler, client/runtime or install. Guard1.066s/331.75MiB,1process;
+  receipt45ab5468 in output/sqlite-native-integration/native-audit-candidate-v4-20261013/.
+  Independent integration review8e83a6f0 PASS:198 inputs/183 outputs and174
+  catalogue files rehashed, exactly14 changes, wrapper retained in registry scan.
+  Docs8/continuity PASS; unchanged830-test full baseline reused. This docs-only
+  checkpoint is local/unpushed; PR384 remains ebdf6b8bd to avoid another
+  unchanged CI cycle. Push it with the next substantive branch update.
+  Author evidence remains private; production SOURCE/lock/policy inactive.
+  Exactdocs-only ebdf6b8bd CI38414401897 terminal: product/checks/Windows/
+  Chromium PASS; package release lookup404, lifecycle downstream failure.
+  Dependency38414402007 expired app policy andGeph2blocking/2informational/
+  423packages,0exceptions. Terminal receipts/logs in ci/ebdf6b8bd/; no rerun.
+
+- Native advisory coverage is now implemented in scan/verify and conditional
+  producer/consumer workflows; production policy/SOURCE remain unchanged/inactive.
+  The native verifier binds exact source, linked proof, complete census aliases
+  and reviewed dispositions. OSV receives only the verified registry projection;
+  schema2 records original/projection hashes and exact SPDXID partitions. Unknown
+  and census-only native groups fail; legacy schema1/no-PURL rules are preserved.
+  Actual pinned OSV2.3.8 qualification now completes:435 SPDX packages =434
+  registry +1 native (wrapper scanned); complete90368-byte raw response,2 RSA
+  blocking findings with expired exceptions,2 unmaintained advisories,0 accepted
+  exceptions. Initial candidate-v2 retains86 unresolved native groups; expected
+  audit FAIL is emitted and verify refuses it. Guard6.48s/344.3MiB/3processes;
+  receipt483784f6, parent64 bindings PASS, independent reviewcb25f7b2.
+  Evidence: output/sqlite-native-integration/native-actual-scan-20261013/.
+  Static exact-version scanner trace sends registry coordinates to OSV; this
+  is not packet-capture proof. Local raw evidence includes an absolute source
+  path, and research census receipts are private. Qualification launched no Geph client.
+  Candidate/source/policy remain output-only/inactive; reviewed publishable
+  evidence is required before production adoption (see RELEASES.md).
+- Scoped native review resolves11 census-only decisions in fresh output-only
+  candidate-v3:9 exact CNA-rejected identities (five live OSV conflicts explicitly
+  resolved by current CNA authority and inspected derivative provenance), plus
+  CVE-2026-11822/11824 code_fixed in exact v2. The latter requires both the
+  szLeaf loader guard and separate LeafSeek bounds patch;8 full-function byte
+  comparisons cover both architectures. Rejection of duplicate52099 does not
+  clear29088;51298 has no independent SQLite-table corroboration. Peer corrected
+  a51302 timestamp claim: dateUpdated is not dateRejected; original evidence is
+  unchanged and rejected overlay-v2 is authoritative (97c6b111/2cc52682).
+  Source-fixed overlay03e29f8c/receiptcac5ad62; original301 groups/503 aliases,
+  92 native/209 exclusions, binding and cutoff/expiry unchanged. Native helper
+  and report builder now give17 adjudicated,75 unknown,0 census-only, expected
+  overall FAIL. Registry identities/findings/projection unchanged; exact real
+  raw OSV7d3bdafd reused offline, not rescanned. Evaluation0.944s/329.03MiB;
+  receipt0b9d2dd0 in native-audit-candidate-v3-20261013/; parent381 review and
+  integration bindings PASS. Independent source-fixed peer b36ce1569 and final
+  integration peer b5e6310c pass with no findings; all91 evidence catalogue
+  entries and exactly11 changed groups verified. Production policy stays inactive.
+- Helper20 tests PASS under network denial; bridge49-test focused baseline plus
+  11 scoped checks after a concrete containment fix PASS. Peer found snapshot
+  receipt outside proof-root: retained causal RED, real tiny-proof scan reaches
+  the inert scanner after fix, receipt mutation rejects before report. Snapshot
+  hashes are checked against both independent live-proof validations. Final
+  bridge2e68397c, containment receipt dd1885a8; older cb815/f4d66 preserved.
+  Workflow4 tests/28 shell scenarios PASS, YAML+7 shell syntax checks PASS.
+  Causal macOS Bash3 empty-array/nounset failure fixed with common argument
+  arrays; native audit evidence now retained on failure after the audit step.
+  Workflow receipt6891021f. Parent verifies100 helper/candidate bindings and9
+  actual partition bindings (one historical source resolved to retained bytes).
+  Independent bridge review0a5b1d7f confirms the containment correction with no
+  open findings; parent verifies78 workflow/fix/peer bindings as well. Docs8 PASS.
+  Large build/proof and unchanged metadata657 suite not repeated.
+- Exact520bea685 CI38409376434 terminal: product/checks, Windows adapter and
+  Chromium PASS; metadata830 tests/68.458s is the reusable full baseline. Package
+  stops at first release-tag lookup, HTTP404unpublished0.4.3-r1; lifecycle failure
+  is downstream. Dependency38409376242 retains expired app policy andGeph2
+  blocking/2 informational/423 scanned. Final JSON/failed/product logs retained
+  with -final suffix in output/sqlite-native-integration/ci/520bea685/; earlier
+  snapshots unchanged. No CI rerun or successful large Geph build repeated.
+- Next: review remaining61 native source-applicability unknowns, beginning with
+  fork-specific product-identity rows; preserve the census
+  while resolving only exact reviewed groups. Native policy adoption/source
+  activation, actual native CI libtest, RSA/app-audit, release/installed/browser
+  gates remain open.
+
+
+- Conditional native producer and synthetic compile integration implemented;
+  SOURCE/lock/helper pins remain inactive and unchanged. Fresh online full-lock
+  fetch -> streamed cache seal -> OS-denied offline fetch -> explicit-tools
+  producer/jobs1 -> host synthetic runner -> bundle/SPDX. Native binaries are
+  not stripped after proof. Existing native releases require all9 assets,
+  independently materialized source, historical/current audit and attestations.
+  Producer12 and existing-release9 shell scenarios PASS;4 static contracts,
+  YAML and6 shell checks PASS;4 legacy shell bodies byte-equivalent to2f0.
+  These shell tests stub external services/verifiers, not actual release builds.
+  Independent workflow review9c21a98b has no actionable finding. Native runner
+  26 tests PASS; fixed inline network denial covers compiler children, clean
+  explicit-tool env and host-proof matching. Its existing private-file runtime
+  sandbox/19-case allowlist is unchanged. No real native libtest compile/run yet.
+  Parent verifies106 author/plan bindings, plus actual native runner preflight.
+  Evidence: output/sqlite-native-integration/{producer-workflow,
+  producer-workflow-review,native-synthetic,integration-parent-bindings.json}.
+- Actual full cache qualification PASS:38 missing archives fetched into a new
+  private home, then512 archives/453 sparse entries sealed. Actual Cargo offline
+  full-lock fetch and both aws_lambda target metadata PASS under OS network
+  denial (EPERM control); no build.17.539s/160.22MiB sampled owned-tree peak;
+  original cache/source untouched. Parent rehashes966 sealed records and verifies
+  metadata package/feature identities plus actual v2 ARM runner preflight.
+  Evidence: output/sqlite-native-integration/cache-live-20261013/verification.json
+  (6ee40408); scratch/private/tmp/slipstream-cache-live-47f1o4np retained.
+  This proves cache resolution/preflight, not synthetic runtime or installation.
+- Exact2f0cbc1fd CI38399979673 terminal: product/checks, Windows adapter and
+  Chromium PASS; packaging HTTP404unpublished0.4.3-r1. Dependency38399979669:
+  expired app integrity-only policy; Geph2 blocking/2 informational/423 scanned,
+  0exceptions. Logs retained in output/sqlite-native-integration/ci/2f0cbc1fd/.
+  No unchanged full suite or successful dual-architecture build repeated.
+- Next: machine-enforced native advisory partition in dependency_audit scan/
+  verify, preserving legacy no-PURL rejection. Read-only plan2334d7b0 identifies
+  435 actual SPDX packages:434PURL+1native;6 scoped overlays leave75 of81
+  source-applicability unknowns.9CNA-rejected and2source-fixed census-only rows
+  also need explicit production adoption/binding; none is automatic clearance.
+  First machine result must fail, not silently omit native SQLite. Plan/evidence:
+  output/sqlite-native-integration/native-audit-plan/. Existing full metadata657
+  baseline reused. SOURCE activation, actual native CI libtest, native audit,
+  release attestations and installed/browser qualification remain open.
+
+- Conditional app consumer implemented (SOURCE still inactive): native nine
+  assets versus legacy eight, fresh private workspace, independently materialized
+  source and verifier-returned native receipt/root. All historical policy and
+  identity/attestation gates precede binary copy. Two focused BuildConfig cases
+  PASS, including seven shell scenarios with mocked external services. Read-only
+  independent review found no actionable defect (9fabee09), both source hashes
+  parent-verified. Evidence: output/sqlite-native-integration/consumer-workflow-review/.
+  Full metadata657 baseline is reused; no Geph rebuild or install this turn.
+  Producer workflow and native synthetic compile integration are now recorded
+  above; actual native CI runtime/release qualification is still pending.
+- Offline cache preparation is implemented in scripts/seal_geph_cargo_cache.py:
+  frozen full SOURCE/lock, every locked registry archive checked while streaming,
+  selected whole sparse-index records only, fresh physical output and exact
+  final file inventory. Existing/failed outputs are never deleted.25 focused
+  tests PASS; independent peer found an extra-config injection gap, retained
+  causal RED, and confirmed the correction with7 tiny controls. No compiler,
+  Cargo resolution or network call. Actual v2 metadata:512 packages/453 names;
+  retained cache has38 missing exact archives and is rejected before output.
+  Evidence: output/sqlite-native-integration/{cache-seal,cache-seal-peer}/.
+  The index remains opaque and unauthenticated; actual offline resolution and
+  producer integration are now recorded above. Do not recompile successful Geph
+  artifacts merely to repeat their existing proof.
+- Three more scoped FTS5 fixes verified against exact actual v2 960f4039:
+  CVE-2025-7709, CVE-2019-9936 and CVE-2019-9937 code_fixed. FTS5 is enabled;
+  this is source-fix/binary-binding evidence, not runtime exploit qualification.
+  Parent verifies310 inputs/outputs, zero mismatches; receipt75d208f2 under
+  output/sqlite-native-integration/next-enabled-applicability-20261013/.
+  The immutable81-unknown census is unchanged; general native audit stays open.
+- Exact c0e67587d CI38394964903 is terminal: product/checks and Chromium PASS;
+  package HTTP404 for unpublished0.4.3-r1. Dependency38394965112 rejects expired
+  app integrity-only policy and reports Geph2 blocking/2 informational across
+  423 packages,0 exceptions. Logs/API retained in output/sqlite-native-integration/
+  ci/c0e67587d/. No CI rerun requested.
+
+- Fresh actual v2 attempt3 PASS 2026-10-13 11:53:13 UTC from eb91da9dd.
+  PID81015/exec30920 are terminal; do not poll or restart. Both production
+  architectures, jobs 1, elapsed653s, sampled owned-tree peak 1058.19MiB; verified
+  OS network denial, fresh436-archive cache and original v1 evidence retained.
+  SOURCE c173f2be pins helper 24c1c042; manifest 7b8c2c3e. Preserved 56-file clone
+  (158,949,971bytes) completion 674afe7e in output/native-producer/real-inputs/
+  attempt3-v2/. Final universal 960f4039 (39,927,984bytes), receipt a6f0f07b.
+  New public pack CLI -> actual24-file bundle149,765,120bytes -> unpack ->
+  SPDX 435 packages PASS; wrong binary and truncated archive reject. Postbuild receipt
+  a877510c binds15 inputs/artifacts; separate artifact-only guard peak 1137.69MiB.
+  Independent fresh-proof peer PASS (a8a55093,203 bindings); three-CVE v2
+  rebind PASS (bcd2c732,256 bindings), all parent-rehashed with zero mismatches.
+  Exact C/header/native objects/flags/tool identities equal v1; new linked
+  outputs and both universal slices verified separately.53 original scratch
+  source files verified; source tree is retained there, not in the proof clone.
+  No client/account/runtime or published attestation claim; no installation.
+  Producer/release-consumer integration is now recorded above. Next gate is
+  machine-enforced native advisory coverage; do not repeat successful builds.
+
+- Thin native-bundle pack CLI validates full reviewed SOURCE and exact wrapper/
+  lock before delegation; existing API remains standalone with three modules.
+  Independent review caught a CLI-only import becoming a global dependency;
+  isolated import/help RED retained and corrected. 31 bundle tests PASS, including
+  frozen-authority, wrong-pin/binary, symlink and existing-output cases. Logs and
+  hash receipts: output/sqlite-native-integration/bundle-cli/. No producer change.
+  Exact eb91da9dd CI38390411158 product/checks and Chromium PASS; package HTTP404
+  for unpublished0.4.3-r1. Dependency38390411134 still fails expired app policy
+  and Geph 2 blocking/2 informational across 423 packages, 0 exceptions. Terminal
+  logs retained in output/sqlite-native-integration/ci/eb91da9dd/; no CI rerun.
+
+- Scoped SQLite applicability for actual v1 c3c640c3: CVE-2026-50812 fixed in
+  exact C; 50813 Session code excluded; 39113 SQLar absent from built component.
+  Session preprocessing controls and exact object/archive/rlib/slice chain bind
+  the decisions; SQLar exists in ZIP shell.c, not compiled sqlite3.c/h. The OSV
+  169f68ed fixed event is not the malloc64 fix (34e139d3); primary release source
+  has that separate fix. Parent verified 77 Session and 159 SQLar receipt bindings,
+  zero mismatches. Receipts 8ff5b66f/56078c17 in output/sqlite-native-integration/
+  {session,sqlar}-applicability-20261013/. Original census 81 unknowns unchanged;
+  these are scoped adjudications, not universal source or native-audit clearance.
+
+- SOURCE-pinned producer-helper compatibility is implemented but inactive.
+  Native descriptor v2 requires the independently reviewed helper SHA; the
+  producer rejects the wrong pin before output/compiler, freezes SOURCE bytes,
+  and checks module-load/file coherence before and after compilation. Newer
+  consumers retain original v2 proof without reading a pin from its receipt;
+  v1 remains strict. Independent review found the after-import replacement
+  race; its retained RED is now covered for both schema versions. 125 distinct
+  scoped cases pass (124-case native/bundle/SPDX/consumer run plus the updated
+  37-case producer run replacing its prior 36-case subset). SOURCE swap after
+  preflight passes with frozen authority; an initial fixture-path failure is
+  retained separately. Logs: output/native-producer-review/helper-compatibility/.
+  Fresh actual v2 qualification is recorded above; SOURCE/workflow activation
+  and installation remain outstanding. V1 receipts are unchanged.
+  Memory/tool note: codebase-memory-mcp is disabled after a 52GiB incident.
+  Do not restart it. Root checkout has a qualified on-demand crg-safe graph;
+  this worktree requires its own explicit physical --repo if indexed. Use
+  bounded direct reads for the known pending files; no heavy parallel jobs.
+
+- Actual attempt2 PASS2026-10-13 10:13:04 UTC; PID64493/exec62244 finished.
+  ARM production compile181.31s; Intel226s; both linked seals and final lipo/
+  verifier pass. Final universal40,061,456bytes SHA c3c640c3; receipt b1ef8f1f.
+  Persistent109-file/172.6MB clone in output/native-producer/real-inputs/attempt2/
+  build-evidence is byte-verified; completion058f0f21. No Geph/client/account
+  execution. Source/workflow remain inactive; this is not installed E2E.
+  Actual24-file proof bundle150,730,240bytes roundtrip PASS; generated/verified
+  SPDX435 packages with native SQLite3.53.2 separate from Rust wrapper.
+  Independent wrong-binary and truncated-bundle controls both reject. Parent
+  postbuild receipt bd8d071f binds12 inputs/code/artifacts. Independent build
+  review PASS (5f96c715). Parent verified1291/1294 peer+census current bindings;
+  the three edited helpers match historical86b2 exactly (08945643). Initial
+  current-tree mismatch receipt328d1885 is retained, not rewritten as PASS.
+  Census566df9a9 finishes enumeration:301 CVEs/92 native-or-ambiguous groups,
+  81 exact-source unknowns, binary applicability unevaluated; audit gate OPEN.
+  Older attempts/receipts unchanged.
+  Exact86b2e266c CI38381206722 product/checks and Chromium PASS. Package still
+  HTTP404unpublished0.4.3-r1; dependency38381206760 reports expired app policy
+  and Geph2 blocking/2 informational findings. Terminal logs retained under
+  output/sqlite-native-integration/ci/86b2e266c/; no rerun.
+  Next action and v2 compatibility scope are in the newer checkpoint above.
+
+- Exact012da0fc1 CI38374565990 is terminal: product/checks and Chromium PASS,
+  including the Xcode15 metadata/linker fixture. Package stops at HTTP404 for
+  unpublished Geph0.4.3-r1. Evidence: output/sqlite-native-integration/ci/012da0fc1/.
+  Inactive offline producer, deterministic full-proof bundle and conditional
+  consumer are implemented and under independent review. Review reproduced
+  destructive cleanup and mixed SPDX/SOURCE snapshots; fixes pass21 bundle
+  and32 consumer cases under OS network denial. Real two-target production
+  build qualification is next; synthetic fixtures are not release or installed
+  evidence. SOURCE/lock/workflow remain unchanged and no install occurred.
+- Producer/transport/consumer review is complete: 30 producer, 21 bundle,
+  32 consumer and 8 documentation cases PASS. Separate peer replays cover
+  process cancellation, partial second target, four snapshot/extraction races,
+  happy native binding and the explicit build-jobs control. The real offline
+  production-feature attempt1 ended exit1 at09:47:42 UTC after ARM compile
+  PASS3m30s. Apple linker map contains opaque non-UTF8 literal rows; producer
+  and common verifier assumed whole-file UTF8. No Intel or final release proof.
+  PID60479 is finished. Original /private/tmp/slipstream-native-production-788x15x3/build
+  and persistent output/native-producer/real-inputs/attempt1-failure/ are retained;
+  failure receipt4fef9841 binds map5505268c (16071743 bytes) and actual cargo logs.
+  Both parsers are corrected: producer57dfee45/shared helper194c2104.
+  Producer34, helper24, bundle21, native-consumer12 and native-SPDX8 cases PASS;
+  actual ARM map/rlib/binary replays PASS without rewriting old receipts.
+  Attempt2 started10:05:43 UTC and finished10:13:04 UTC; PID64493/exec62244 are
+  terminal. Do not poll or duplicate this historical v1 build.
+  Output /private/tmp/slipstream-native-production-788x15x3/build-map-bytes.
+  Resume from output/native-producer/real-inputs/attempt2/ status/argv/manifest.
+  Manifest c51fbe93 binds freshly verified input/tools/cache; source stays frozen.
+  Old receipts stay immutable. Reviewed SOURCE8b59fe86 remains output-only,
+  13 existing edits plus sqlite-unbundled, no qualification-only Rust tests.
+  Both metadata closures/436 registry archives are verified; build used OS
+  network/private-read denial and --jobs2 on this8GiB Mac. Native advisory
+  coverage and producer/helper compatibility remain open; report+35 bindings:
+  output/sqlite-native-integration/native-advisory-review/ (receipt b2cfd257).
+  Exact7f5a7671c CI38378920630 product/checks and Chromium PASS; package and
+  dependency gates remain red: package HTTP404 for unpublished0.4.3-r1;
+  app audit rejects expired integrity-only policy; Geph audit reports2 blocking
+  and2 informational findings across423 packages. Exact logs retained in
+  dedicated output/sqlite-native-integration/ci/7f5a7671c/.
+- Exact2297aaaaf CI38371930625 reduced the657-test metadata failure to one
+  captured Xcode15.4/ld1053 row: the exact archive path is followed by `[5]`
+  before `(sqlite3.o)`. The parser now accepts that observed numeric annotation
+  while preserving exact path/member and binary checks. Parent review also
+  found numeric index aliases (`1`/`01`) escaping duplicate detection; causal
+  REDs for both defects are retained.21 builder tests PASS under OS network
+  denial, including a real local compiler/rlib/linker fixture. Final receipt
+  output/sqlite-native-integration/link-map-xcode15-v2/receipt.json (9a087afb)
+  binds11 files. A fresh exact-head CI is still required. Separate inactive
+  producer/bundle/consumer work is in progress; no SOURCE/workflow activation.
+- Integration follow-up fixes the two stale scanner-row fixtures and includes
+  the shared native module in the reduced source-helper fixture. Causal REDs
+  are retained;21 release and53 build-config tests PASS. The full metadata
+  suite now passes657 tests locally in37.97s with unchanged source. The initial
+  build-venv attempt lacked pytest and could not execute its home-local Python
+  through the private-read sandbox; the passing run uses the existing audit
+  dependencies with their base interpreter, without changing isolation policy.
+  Exact59ef2fc7b CI38369350907 also exposed an Apple linker map mismatch on
+  Xcode15.4 that three local linkers do not reproduce. Acceptance is unchanged;
+  bounded map/toolchain diagnostics and retained fixture plus17 passing builder
+  cases are ready for the next CI run. Do not claim that runner gap is fixed.
+  Logs, commands and source hashes: output/sqlite-native-integration/ci/.
+- Optional native SQLite source/build/SPDX tooling is implemented, reviewed and
+  inactive.69 focused source/materializer/SPDX cases and16 native-builder cases
+  PASS. The latter includes a real tiny clang/ar -> Rust rlib -> Apple linker
+  fixture, not a Geph rebuild; universal cases use explicit synthetic slices.
+  The retained actual ARM Geph binary passes read-only parser compatibility.
+  Review fixed duplicate Rust-local symbol rejection, legacy Cargo `sqlite`
+  misclassification and a wrapper URL mismatch with the shared Cargo converter.
+  Object-only, one-target, mixed-map/binary and altered universal evidence fail.
+  Source receipt a122bd43 and builder-result.json bind the final files; official
+  retained SQLite3.53.2 archive materializes with unchanged C/header hashes.
+  Independent final-live four-scenario replay4402f167 passes with every reviewed
+  file matching current bytes; earlier peer snapshots remain immutable. Parent
+  verifies60 retained bindings and85 distinct native test identities;8 docs tests
+  PASS. Evidence: output/sqlite-native-integration/. SOURCE3420708f, lockdc8ec61a,
+  VERSION/LICENSE and build-geph workflow remain unchanged. See the native
+  contract section in ROUTING_RESEARCH for proof boundaries and the next gate:
+  actual producer/consumer integration, both target builds and native advisory
+  coverage before production activation. No installation or runtime/E2E claim.
+- Strict dependency-audit identity/raw-evidence bridge from root66e294910 is
+  integrated. Previously, the evaluator accepted411 unrelated scanner rows, or
+  fabricated registry identities for the three source-owned packages, against
+  the actual411-package RSA candidate. Both false passes are retained as RED
+  evidence; the new evaluator rejects them and missing coverage.39 audit tests
+  plus10 Cargo SBOM compatibility tests PASS under verified OS network denial.
+  Three new cases keep native/source-owned coverage fail-closed without adding
+  registry identities or policy waivers. Parent verifies19 source/evidence/
+  policy bindings. Evidence: output/sqlite-native-integration/audit-identity/
+  receipt.json (a075a608), parent-audit-verification.json one directory above.
+  No real scanner, account, build, release or install was run for this bridge.
+  Native source/materializer/linkage helper results are recorded above;
+  SOURCE3420708f, lockdc8ec61a and release workflow remain unchanged.
+
+Physical worktree: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`.
+Branch `codex/geph-043-remediation`, retained qualified source `07a3d871`
+(checkpoint `d2856d8a`), now preserved on its own remote branch. On 2026-10-11 the
+scheduled updater replaced PR383's `automation/geph-0.4.3` branch with
+`0a20407ee6bfba1dfc240d44176bee4f667feee4`, dropping the reviewed changes.
+This branch is a separate review candidate; never restore it with a force push
+onto the bot branch. No vendor release, installation, account qualification or
+policy exception change.
+
+- SQLite cancellation fix: SOURCE3420708f changes only existing edit12's output
+  and hash (13 edits remain). If a caller is cancelled after SQLite accepts SQL,
+  its write can still commit while the former success-only EVENT notification
+  is skipped. The pre-await drop guard in db_write/db_remove notifies on every
+  exit; readers still check database state. Ordering relies on max_connections(1)
+  and pinned SQLx0.8.6 worker Ping before returning the connection to its pool.
+  RED reproduced missing wakeup;8 cases PASS on the exact dedicated materialized
+  source after locked no-run34.35s, with OS network/private-cache denial. The
+  original11 runtime cases were not repeated. Independent review adds two passing
+  cases: rollback/re-arm and notification to eight readers.21 source/materializer
+  tests PASS. No account,
+  broker, unfiltered all-lib execution or installed-causality claim.
+  Evidence in the root AUD-17 checkout:
+  output/continuation-20261009/rsa-migration/source-contract-candidate/
+  sqlite-cancellation-qualification/{integration-receipt,parent-integration-review}.json
+  (integration4d2da1fd); independent receipt8e6657dd. Parent verifies exact JSON
+  delta, unchanged lock, embedded file, compiled binary and9 build/test logs.
+  Root0.4.3 runner whitelist now19;0.3.9 remains9. The matching isolated runner
+  and workflow are now present in this dedicated branch; the unfiltered all-lib
+  command and its asserting workflow test are removed.16 helper/config checks
+  PASS, including OS denial with controlled files, and the exact source resolves
+  all19 allowed names. Root evidence geph-synthetic-runner-bridge/receipt.json
+  (be2c312f) binds the four transferred files and unchanged SOURCE/lock/policy.
+  No vendor-release workflow or additional Geph binary was run for that bridge.
+- The isolated RSA prototype is still NOT activated. Original SOURCEcd82b7ea/
+  lock9fd68248 now has both ARM debug and cold Intel debug compile evidence;
+  Intel Rust1.99.0 took109.162s,421 rebuilt artifact records,780 emitted files.
+  No binary/account execution. ARM used1.97.1/reused dependencies; no release
+  reproducibility claim. A separate output-only SQLite-v2 SOURCEc384d259 has two
+  identical materializations with only database.rs changed,16 edits unchanged.
+  Old prototype evidence remains immutable; exact RSA-v2 compile not repeated.
+  Native cc/cmake builder inventory identifies AWS-LC5.7.0 and SQLite3.46.0 plus
+  ring/blake3/tracing-oslog; collector1 positive/13 negative checks PASS.
+  Native advisory applicability and absent applicable upstream ISC notices
+  remain open, as do full Chromium coverage and installed qualification.
+  Root research and receipts retain details; do not treat Cargo-only OSV as
+  complete native coverage or broaden release-policy exceptions.
+- Live checkpoint81d7c133 CI38160979511 is terminal: product/checks and Chromium
+  PASS, packaging404 for unpublished0.4.3-r1; dependency38160979535 remains FAIL.
+  Base7e196a71 and both draft PR heads reconciled. These earlier checks remain
+  reusable only for unchanged code; the current SQLite delta has focused proof
+  above. Next: source-owned/native
+  advisory/notice and release qualification. No install while those gates are open.
+
+- Exact fbd3d7e6 CI38158619460: product/checks and Chromium contract PASS;
+  overall FAILURE because packaged-app-build requests unpublished
+  geph-vendor-0.4.3-r1 and receives404 before download/verification. Four SBOM
+  script/test files are outside the precise source-bootstrap allowlist; removing
+  only shared converter files would not restore bootstrap. No CI exception was
+  broadened. Dedicated output/source-owned-sbom/ci-scope-review.json records
+  the backwards-compatible tooling prerequisite option. Earlier eb388c92
+  source-bootstrap pass remains historical, not current packaging qualification.
+  Dependency38158619508 still fails with two RSA blockers and incomplete app
+  coverage. Production source-owned advisory/notice and release gates remain.
+
+- Oct11 source-owned SPDX support is now implemented in this draft PR384.
+  Shared strict Cargo identity checks from root source c3846615 are retained;
+  registry conversion is extracted unchanged. Embedded generation requires an
+  explicit physical materialized root, exact manifests/lock/metadata and file
+  bytes. Verification binds the exact three source-owned packages and18 files
+  to SOURCE, descriptor hashes and repository commit, without registry PURLs.
+  Standard SPDX package verification codes use per-file SHA1; SHA256 separately
+  binds source bytes. Declared licenses do not claim notice clearance.
+  Focused23 tests PASS (10 new); actual output-only candidate CLI generate/verify
+  PASS with411 packages/407 registry dependencies. Old verifier first accepted
+  a changed file checksum and invented Cargo PURL; RED evidence is retained.
+  Parent verifies11 receipt hashes, recomputes3 verification codes and rejects
+  6 independent mutations. Evidence: output/source-owned-sbom/{receipt.json,
+  parent-review.json,candidate-execution.json}. Production SOURCE/lock/license/
+  policy/workflow remain unchanged. Verify does not recompute full registry
+  reachability, and source-owned advisory coverage/notices remain open. No build,
+  account execution, release or installation occurred for this change.
+  Next: qualify source-owned advisory/notice coverage before activating the RSA
+  candidate; reuse unchanged runtime evidence rather than running all-lib tests.
+
+- Optional embedded-source schema is prepared but NOT activated in production
+  SOURCE/Cargo.lock/LICENSE. It admits exactly the reviewed Mizaru client,
+  owned RSA backend and broker derivative with bounded source/manifest/notice
+  bytes, fixed identities/dependency edges and per-file/descriptor hashes.
+  The existing legacy source contract remains valid. Source metadata retains
+  actual upstream ISC declarations; it does not fabricate upstream notices or
+  establish licensing clearance.
+- Materialization now uses one SOURCE snapshot and rechecks the copied lock.
+  An independently reproduced archive replacement race is fixed by hashing the
+  private archive snapshot used for extraction; the destination is exclusively
+  created with mode 0700, without trusting archive root permissions. Path,
+  symlink, duplicate and case-collision inputs fail closed.
+- Source tests 35 PASS, legacy Geph SBOM tests 3 PASS; CI scope tests 10 PASS
+  retain the exact PR-only source bootstrap and mandatory source-edit test pair.
+  Independent 14 tests and
+  the original archive-race replay PASS. Receipt
+  `output/geph-embedded-source-receipt.json` and root checkout evidence
+  `output/continuation-20261009/rsa-migration/source-contract-independent-review.json`
+  bind the exact inputs. Production local-package SBOM/advisory/notice integration
+  and two-target native qualification remain open; no account or Cargo all-lib
+  tests were run for this source-contract change.
+
+- SOURCE retains all 11 r5 literal edits with new sequential whole-file hashes for
+  the canonical 0.4.3 archive. Two additional edits pin SQLx exactly 0.8.6 with
+  `default-features=false`, SQLite/runtime-tokio only, and add database regression
+  tests. Canonical extract reproduces session/database/manifest/lock exactly.
+- Source builder additionally admits only root `Cargo.toml` as a hash-bound edit;
+  `Cargo.lock`, build.rs, nested manifests and .cargo paths remain rejected.
+  CI classifier/workflows are unchanged; PR source bootstrap keeps product/audits,
+  push never gets bootstrap. Source transition 0.3.9-r5→0.4.3-r1 PASS, policy unchanged.
+- Offline qualification: exact session module 9 tests and database module 2 tests
+  PASS under sandbox deny network + deny file writes outside evidence directory.
+  Separate upstream all-lib 36 PASS was NOT offline: test_clib started a client
+  configured with an empty Secret and contacted public brokers;
+  resolve_baidu_via_alidns contacted public DNS. Source and metadata confirm that
+  the existing shared empty-Secret cache was accessed and its WAL/SHM changed
+  during the run. Authentication reads a cached auth_token before using configured
+  credentials, so prior account-token use and exact cache-row changes cannot be
+  excluded. This call path does not overwrite Slipstream's Keychain secret or app
+  settings. The cache was preserved; the later inspection read metadata only,
+  not credentials or database contents. Do not repeat those external smoke tests.
+- Python source/SBOM guards 24 PASS+19subtests; CI/build-contract 62 PASS+27subtests.
+  Arm64/x86_64 locked metadata: 421/422 production dependencies, union 422 plus root.
+  MySQL/PostgreSQL SQLx and rsa 0.9.10 absent; SQLx 0.8.6 SQLite-only on both targets.
+- Fresh pinned OSV 2.3.8 scan 2026-10-09: 423 packages, 3 advisories, 2 BLOCKING
+  (rsa 0.8.2 CVE-2023-49092 and CVE-2026-21895; expired prior exceptions), 1 informational
+  (bincode 1.3.3 unmaintained). No exceptions extended. RSA remains a separate task.
+- Evidence in `output/geph-043-remediation/`: candidate-receipt.json binds this
+  dirty candidate's hashes; metadata/inventory, SPDX, fresh audit, guarded extract,
+  test logs, offline sandbox and patch. SBOM base commit is not a release attestation.
+- Parent review verified all 11 prior literal replacements are unchanged and the
+  new manifest path remains exact and hash-bound, with post-edit identity checking.
+- NEXT exact source CI and remaining RSA remediation. No release/install while RSA
+  dependency blockers and product qualification remain.
+
+## Historical checkpoints below (not the current worktree identity)
 # README publication checkpoint — 2026-10-13
 
 This documentation-only change starts from published main

@@ -138,6 +138,16 @@ still block a later app release.
 `tg-ws-proxy` remains covered by its separate vendored-source review rather
 than a Rust dependency graph.
 
+The prepared Geph source-owned packages keep their actual upstream license
+declarations and provenance. The two ISC derivatives include the standard ISC
+text and a notice explaining that no package-specific copyright notice was
+recovered from the retained upstream archives. The standard template is not
+presented as upstream attribution; no copyright name or year is invented. The
+source contract requires both exact license files, and SPDX inventories their
+bytes while retaining `NOASSERTION` for copyright and license conclusions.
+An upstream reply is not a release prerequisite. This packaging check does not
+clear source-owned advisory findings or replace the separate source assessment.
+
 An exception never changes an immutable Geph release in place. If a fix is
 lock-compatible, the reviewed lock digest and `release_revision` are bumped and
 a new `geph-vendor-X.Y.Z-rN` is built and attested after that change reaches
@@ -148,6 +158,109 @@ source merge; it expires on 2026-08-27 and does not authorize publishing
 0.3.27 exception documents the residual low-severity availability risk in
 Geph's Hyper 0.14 AWS client until upstream provides a fixed 0.3-compatible
 graph.
+
+### Source-owned Geph audit coverage (inactive until policy adoption)
+
+The optional `source_owned_review` policy section enables audit report schema 3
+for the three embedded source-owned Geph packages. Its own schema version is 1;
+it pins `source_sha256`, `review_sha256` and `expires`. The helper
+`scripts/geph_source_owned_advisories.py` reconstructs their exact SPDX package,
+file and `CONTAINS` inventory from SOURCE. A deterministic scanner projection
+excludes only the independently validated source-owned packages and their files,
+plus the separately validated native SQLite package when present. Every other
+package stays in its existing audit lane. Full SPDX and projection hashes and
+exact package partitions are bound to the report; native and source-owned
+reviews must bind the same SOURCE bytes. Legacy schema 1 and native-only
+schema 2 retain their existing acceptance rules.
+
+The pinned `review.json` binds SOURCE, the lock digest, package descriptors and
+all declared package files. Its evidence catalog retains the two exact ancestor
+archives, an OSV result for those ancestor identities, and referenced source
+review evidence. The helper verifies archive digests, recorded original files
+and retained original manifests; it never assigns a registry identity to a
+first-party package or treats an ancestor finding as a scan of the derivative.
+Each package requires complete declared file coverage, an inherited-finding
+list matching the exact OSV IDs and aliases, and a manual-finding list. An `unresolved` source
+review or any `unknown` or `affected` finding makes the audit fail. The consumer
+reconstructs the result from trusted policy and evidence and rejects a forged
+passing result, mismatched counts or incomplete partitions. Expired reviews and
+future evaluation dates fail closed.
+
+Source-owned `scan` requires `--source`, `--source-owned-evidence`, a fresh
+`--evidence-dir` and the normal required `--evaluation-date`. `verify` requires
+`--source` and `--source-owned-evidence` alongside the normal report, SPDX,
+policy and source identity arguments. The producer snapshots SOURCE and copies
+the policy-pinned review and evidence bytes into `source-owned/` under the
+evidence directory before scanning. Retained inputs, scanner projection,
+results and receipt remain available as far as execution reached, including
+on failure; they stay separate from release payloads. Verification requires
+the same policy-pinned evidence bytes, so a missing or changed archive or review
+file invalidates the result. Evidence bytes are copied verbatim: prepare a
+reviewed, publishable bundle before configuring CI uploads.
+
+When SOURCE contains embedded packages, the release also requires
+`geph5-client-source-review-evidence.tar`. The producer packs the retained
+`source-owned/` snapshot only after the audit passes. The bounded, uncompressed
+archive contains the exact review and evidence catalog plus a manifest tied to
+the trusted SOURCE/review hashes. It is included in the exact asset set,
+checksums, GitHub asset digests and provenance attestation.
+
+Consumers fetch the audit policy from the release tag's commit before unpacking
+into a fresh directory. `verify-assets` requires `--source-owned-policy` and
+`--source-owned-output-root`, rejects missing or altered evidence, and returns
+`source_owned_evidence.root`. The subsequent audit uses that verified tree;
+archive validation alone cannot approve a source review. The existing-release
+resolver applies both historical and current audit policies. The app build
+checks the historical release proof and remains subject to the independent
+current dependency audit. Native and source-owned evidence can coexist;
+legacy releases keep their original asset contract. CI retains audit diagnostics
+on failure. A standalone audit without required native build proof still fails.
+
+Archive and coverage checks prove byte identity and declared review coverage,
+not the correctness of reviewer conclusions or legal clearance. Finding
+dispositions remain policy-pinned human assessments, and retained ancestor OSV
+bytes do not establish a fresh query. The whole SOURCE hash binds root edits,
+but package file coverage does not separately establish the
+semantics of root callsites. This implementation does not adopt a production
+`source_owned_review` policy, activate an embedded-package SOURCE, or clear a
+release. The dependency-audit and release producer/consumer workflows carry
+source-owned arguments and retained evidence, but their controlled tests do not
+qualify a real candidate. Production adoption still requires the reviewed policy
+and SOURCE, a real scan/build, and the existing release qualification gates.
+
+### Native SQLite audit coverage (inactive until reviewed policy adoption)
+
+A native SQLite source contract requires audit report schema 2. Its SPDX package
+has no registry PURL and is validated by
+`scripts/geph_native_sqlite_advisories.py`; the genuine `libsqlite3-sys` wrapper
+keeps its registry identity and remains in the OSV scan. The scanner receives a
+deterministic projection that removes only the independently verified native
+package. The report binds both the full SPDX and projection hashes, and lists
+the exact SPDXIDs in the scanner, integrity-only and native partitions.
+Every other package without a supported PURL still fails closed.
+
+The optional `native_sqlite_review` policy section binds a retained advisory
+census and its complete alias groups to the exact SOURCE, SQLite archive,
+C/header files, compiler definitions, targets, native receipt and final binary.
+The consumer independently verifies that build proof and reconstructs the review
+result from trusted policy. Neither an omitted group nor an unreviewed
+`census_only` disposition can produce a passing native result. Review expiry is
+checked against both the report date and the current UTC date. Evidence roles
+record a human/source review; they do not automatically establish patch semantics.
+
+Native `scan` requires `--source`, `--native-receipt`,
+`--native-artifacts-root`, `--native-advisory-evidence` and a fresh
+`--evidence-dir`. Native `verify` requires the first three arguments. The
+producer retains bounded scanner inputs/results and reviewed evidence even on
+failure, separately from the release payload. Reviewed advisory files must be
+provided under `security/geph-native-sqlite-advisories/` before activation.
+These files become CI artifacts verbatim: review their contents for publication
+before pinning them. The private research candidate contains workstation paths
+and must not be copied into that directory unchanged; prepare and bind a
+publishable evidence set first. Size limits and hashes do not redact contents.
+This integration does not adopt the research candidate as production policy,
+activate native SOURCE, or qualify a newly built binary from an older receipt.
+Legacy report schema 1 and its acceptance rules remain unchanged.
 
 ## Geph Dependency Artifacts
 

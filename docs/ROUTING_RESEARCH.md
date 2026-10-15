@@ -1,11 +1,318 @@
 # Routing Research Notes
 
-Updated: 2026-08-22
+Updated: 2026-10-15
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
 
 ## Findings Index
+
+### RSA client review 2026-10-15
+
+The two exact `rsa 0.8.2` exceptions for CVE-2023-49092 and CVE-2026-21895
+are renewed through 2026-10-22 following a fresh static reachability review of
+Geph 0.4.3. The reviewed inputs are SOURCE SHA-256
+`843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe`
+and Cargo.lock SHA-256
+`5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d`,
+with `aws_lambda` on both Apple targets. No other exception is renewed by this
+decision, and RSA remains in the dependency graph.
+
+The canonical Geph archive and all 13 SOURCE edits were checked by hash. The
+review searched all 41 Rust files and traced the complete RSA reverse-dependency
+closure.
+Five dependency archives matched the lock and the inspected source bytes.
+The client uses public-key parsing, blinding, finalization and verification in
+`auth.rs` and `bw_token.rs`. Broker-protocol, misc-rpc, configuration and RPC/cache
+DTOs provide no caller or deserialization path for RSA private-key operations.
+Private APIs remain in the dependency source; their removal from the binary
+is not claimed.
+
+The retained primary [RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
+describes private-key recovery through observable timing. The client paths
+do not enter private-key signing or decryption. The retained
+[RustCrypto advisory](https://github.com/RustCrypto/RSA/security/advisories/GHSA-9c48-w39g-hm26)
+describes a panic when constructing a private key with a prime equal to one.
+Client DER parsing constructs only `RsaPublicKey`; it does not reach
+`RsaPrivateKey::from_components` or its private-key precomputation.
+
+Evidence and exact input hashes are retained in
+`output/minimal-geph-source-20261015/rsa-reachability.md`. This review used saved
+primary descriptions and ran no compiler, scanner, network or account operation.
+It does not establish constant-time blinding arithmetic, general cryptographic
+safety or installed-artifact behavior. Re-review is required when the source,
+dependencies or client role changes. These exceptions do not require the
+separate native SQLite/source-owned migration. **A fresh CI dependency scan has
+not yet passed; release qualification remains open.**
+
+### Rustls security update — 2026-10-15
+
+The same Geph graph that previously reported two blocking RSA findings now
+reports four additional rustls findings. Exact CI head `e44f57042` retained
+unchanged SOURCE, lock and policies relative to `ebdf6b8bd`; the database gained
+[RUSTSEC-2026-0346](https://rustsec.org/advisories/RUSTSEC-2026-0346.html),
+[0347](https://rustsec.org/advisories/RUSTSEC-2026-0347.html),
+[0348](https://rustsec.org/advisories/RUSTSEC-2026-0348.html) and
+[0349](https://rustsec.org/advisories/RUSTSEC-2026-0349.html) on 14 October.
+The official [rustls0.23.46 release](https://github.com/rustls/rustls/releases/tag/v%2F0.23.46)
+identifies fixes for all four. These audit results do not establish that any
+reported connection interruption was caused by those vulnerabilities.
+
+The application and Geph locks now select0.23.46. Exact crates.io metadata and
+published archive agree on SHA256
+`48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf`.
+Compared with0.23.45, the normalized manifest changes only its package version;
+dependencies, features, edition and MSRV remain identical. Both parsed lock
+changes are limited to the rustls version/checksum; the Geph SOURCE lock digest
+is updated without changing source edits, target/features or release revision.
+Locked/offline metadata accepts both Apple targets with the same active rustls
+features (`ring`, `std`, `tls12`). This is resolution evidence, not compilation
+or installed-runtime qualification.
+
+One primary metadata inconsistency is retained explicitly: the ECH GitHub
+advisory lists no patched version while RustSec specifies0.23.46. The published
+0.23.46 source confirms that ECH rejection is checked before `start_traffic()`,
+which prevents the buffered application data path described by that advisory.
+No version-only dismissal or exception is used. The CI bootstrap exemption
+remains unchanged; ordinary packaged gates and fresh SOURCE-bound audit evidence
+are still required. Retained sources, archive, manifest/source diff and independent
+pin review: `output/rustls-new-advisories-20261015/`; canonical source/metadata
+checks: `output/rustls-pin-repair-20261015/` in the dedicated Geph worktree.
+
+### Geph native SQLite contract — 2026-10-13
+
+The app consumer now conditionally handles the native nine-asset release. Its
+mode comes from reviewed SOURCE; the existing eight-asset release remains
+supported. Metadata and attestation checks also receive SOURCE. Every attempt
+gets a fresh physical private workspace, retained on failure. Native asset
+verification returns the unpacked receipt/root; SPDX receives those paths plus
+independently downloaded and verified Geph/SQLite source archives. Historical
+policy, exact tag/signer/source identity and all attestations precede binary
+copy. Static peer review found no actionable defect in this diff. Two focused
+BuildConfig tests passed, including actual shell execution for legacy/native
+success and five refusals before binary copy; external commands and verifiers
+were local fixtures, not a signed release. Review receipt 9fabee09 and its exact
+diff are retained in `output/sqlite-native-integration/consumer-workflow-review/`.
+
+`scripts/seal_geph_cargo_cache.py` now prepares a fresh Cargo home from reviewed
+SOURCE, lock and a fetched cache. It copies every crates.io archive in the full
+lock through a bounded stream and checks the lock checksum, then copies whole
+opaque sparse-index records for only the required names. No extracted source,
+Git cache, credentials or Cargo config is reused. Both input and output paths
+reject symlinks; existing output is never replaced, and failed partial output
+is retained without a successful seal. Per-file/aggregate limits bound archive
+and index copying. A peer's retained RED showed that extra output config could
+previously survive sealing; the final check now requires exactly the expected
+owned tree.25 focused tests and7 independent tiny controls PASS. These are local
+synthetic file tests, not Cargo resolution. Actual v2 SOURCE/lock validates as
+512 registry packages/453 index names; the retained production cache is missing
+38 exact archives and fails before any output is created. Those measurements
+are distinct from the historical436-archive production proof. Evidence lives in
+`output/sqlite-native-integration/{cache-seal,cache-seal-peer}/`.
+
+The seal itself labels sparse metadata unauthenticated and Cargo resolution
+unperformed. A separate actual qualification now fills the38 missing archives
+in a new private fetched cache, seals all512 archives/453 index records, and
+runs full-lock `cargo fetch --locked --offline` plus production-feature metadata
+for both Apple targets under OS network denial. An EPERM socket control verifies
+that denial. Parent rehashes966 sealed records after Cargo use and validates
+Geph/root/wrapper/feature identities. No source/lock change, build, client run or
+installation occurs. The owned process tree peaks at160.22MiB over17.539s. Full
+proof and retained scratch locator are in
+`output/sqlite-native-integration/cache-live-20261013/verification.json`.
+
+The producer workflow now conditionally executes online fetch, cache seal,
+OS-denied offline fetch, the pinned explicit-tools producer/jobs1, native host
+synthetic qualification, then bundle/SPDX generation. Native output is never
+stripped after its proof. Existing native releases must pass all nine assets,
+independent source materialization, proof/SPDX, historical and current audit,
+and signer/commit/main-reference attestations before reuse. Four legacy shell
+bodies are unchanged after indentation normalization. Twelve producer and nine
+existing-release shell scenarios exercise success and each gate refusal; four
+static contracts, YAML and six shell syntax checks also pass. External services
+and verifiers are fixtures in these shell tests. Independent review9c21a98b
+found no actionable defect; evidence is under
+`output/sqlite-native-integration/{producer-workflow,producer-workflow-review}/`.
+
+The native synthetic runner requires the verified host archive receipt and
+independently selected physical tool paths, rejects ambient Cargo config, uses
+a clean compile environment and locked offline metadata/feature checks, and
+requires parent/child EPERM controls before compilation. The fixed inline
+compile policy denies network only; private-file protection remains the separate
+existing runtime sandbox. The exact19-case runtime allowlist is unchanged.
+Twenty-six focused tests pass, including command-driver failure controls and a
+real Python child network-denial test. Actual v2 ARM receipt/source/tool preflight
+also passes without compiling. Evidence lives in
+`output/sqlite-native-integration/native-synthetic/`. This is not evidence that
+the actual native libtest has run in CI, nor authorization to activate SOURCE.
+
+The next audit gate needs one exact native SPDX identity partition, separate
+from registry PURLs and generic integrity-only exceptions. The actual435-package
+v2 SBOM has434PURLs and one native SQLite package. The six scoped decisions leave
+75 of the original81 source-applicability unknowns; nine CNA-rejected and two
+source-fixed census rows still require explicit production adoption/binding.
+Five rejected groups conflict with live OSV aliases. The first machine report
+must fail with unresolved coverage, never silently omit the native package or
+transfer wrapper clearance. Read-only implementation plan2334d7b0 is retained in
+`output/sqlite-native-integration/native-audit-plan/`; no policy exception or
+source activation has been made.
+
+A further scoped source review binds CVE-2025-7709, CVE-2019-9936 and
+CVE-2019-9937 to actual v2 universal960f4039 as `not_affected / code_fixed`.
+The exact C retains the 64-bit tombstone allocation, length guard before key
+comparison, and owned doclist copy respectively. FTS5 is enabled: 291 FTS5
+symbols/owned live link rows occur in each architecture. This is static
+verification of the specific fixes against primary patches and the existing
+source-to-binary proof, not exploit execution or general clearance. Parent
+verified all310 receipt inputs/outputs with no mismatch (75d208f2), retained in
+`output/sqlite-native-integration/next-enabled-applicability-20261013/`.
+The original census and previous scoped overlays remain unchanged.
+
+Native descriptor v2 adds a mandatory reviewed `producer_helper_sha256` to
+SOURCE. A producer checks that independent pin before creating output and after
+native compilation. It also binds the on-disk helper to the fingerprint captured
+at module initialization, rejecting replacement after import even when a new pin
+matches the replacement file. The outer producer snapshots authoritative SOURCE
+once before output creation and stages those same bytes. A newer consumer checks
+the original SOURCE pin, not its own helper file or an identity selected by the
+downloaded receipt. V1 keeps its existing current-helper verification; v1 proof
+is never relabeled as v2. This assumes a trusted Python loader/process and
+compiler/linker, not protection against arbitrary in-process code execution.
+
+The retained v1 production attempt2 completed both ARM and Intel targets and the
+final universal byte checks at 10:13:04 UTC. The 24-file bundle roundtrip, native
+SPDX generation, altered-binary and truncated-archive rejection checks passed.
+Independent peer review also passed. Parent verification of peer/census bindings
+found three expected current-source differences; all three historical hashes
+and lengths match commit `86b2e266c`. These are historical proofs, not a fresh v2
+build: all original receipts and artifacts remain immutable. The v2 fixture
+consumer covers the complete nine-asset/bundle/SPDX path with a synthetic
+attestation, not a signed published release. Actual v2 attempt3 subsequently completed; its distinct evidence is recorded
+below. Pipeline activation and general native advisory clearance remain open.
+
+The advisory census is complete as an enumeration of retained upstream/NVD/OSV/
+CNA results: 301 CVEs, 92 native/ambiguous groups, and 81 exact-source unknowns.
+Unknown does not mean confirmed vulnerability. The original census did not
+evaluate binary applicability; subsequent scoped decisions below do not rewrite
+it or close the advisory gate. Private receipts are retained
+under `output/native-producer-review/` and
+`output/sqlite-native-integration/native-advisory-census-20261013/`.
+
+Fresh v2 attempt3 completed both actual production targets at 11:53:13 UTC
+on 2026-10-13: jobs 1, 653s, sampled owned-process footprint peak 1058.19MiB.
+The fresh private cache verified 436 crate archives and regenerated extracted
+sources; OS network access was denied. The universal artifact is 39,927,984bytes,
+SHA 960f403944b03f8db1b17f8ca48a1fd97e3120636da0f368b6707220be757b1b,
+with native-release receipt a6f0f07b. The 56 preserved evidence files are streamed
+and hash-compared to the original scratch tree (completion 674afe7e). This is
+new evidence under independently pinned SOURCE c173f2be/helper 24c1c042, not a
+relabeling or reproducibility claim about the older v1 binary.
+
+The public `geph_native_sqlite_bundle.py pack` command accepts `--source`,
+`--cargo-lock`, `--receipt`, `--artifacts-root`, `--published-binary`, and
+`--output`. It validates one bounded full SOURCE snapshot and exact registry
+wrapper/lock before packaging; downloaded receipts do not select authority.
+The existing standalone three-module API and `--help` remain usable without the
+CLI-only source helper. Independent review caught that import regression; its
+isolated subprocess RED and corrected 31-case suite are retained in
+`output/sqlite-native-integration/bundle-cli/`. Actual v2 CLI packaging, 24-file
+149,765,120-byte archive roundtrip, 435-package SPDX generation/verification,
+wrong-binary and truncated-archive controls PASS. Postbuild receipt a877510c in
+`output/native-producer/real-inputs/attempt3-v2/` binds 15 inputs/artifacts;
+artifact-only verification peaked 1137.69MiB under the same offline guard.
+These checks neither execute Geph nor attest a published release.
+
+Three scoped native advisory reviews apply to the exact v1 universal c3c640c3:
+CVE-2026-50812 has its upstream fix in the exact amalgamation;
+CVE-2026-50813 retains old Session code in source, but both actual objects exclude
+Session/Preupdate; CVE-2026-39113 SQLar is absent from compiled inputs. SQLar
+exists in the official ZIP's `shell.c`, so archive presence cannot stand in for
+component presence. Primary SQLar commit 169f68ed does not fix the described
+allocation narrowing; the separate malloc64 fix 34e139d3 is present in full
+release source. Actual compiler definitions, positive preprocessing controls,
+exact source/object/archive/rlib/link-map/slice bindings support the exclusions;
+symbol absence alone is insufficient. Parent verified 77 Session and 159 SQLar
+receipt bindings (8ff5b66f and 56078c17). Reports remain private under
+`output/sqlite-native-integration/{session,sqlar}-applicability-20261013/`.
+A distinct v2 review now binds the same three decisions to universal960f4039
+(receipt bcd2c732,256 parent-verified bindings). The C/header, objects, archive,
+compiler definitions/tools and SDK records equal v1 exactly; the new Rust rlibs,
+link maps and thin-to-universal slices have their own verification. All53 source
+entries were checked in the retained original scratch tree; it is not part of
+the56-file proof clone. Fresh-proof peer a8a55093 separately binds203 inputs/
+artifacts and verifies the current consumer. Both native objects equal v1 while
+the fresh final binary differs; no cause or deterministic reproduction claim
+is inferred from that difference. The original81-unknown census remains intact.
+General native advisory coverage, workflow integration and installed qualification
+are still separate open gates.
+
+Earlier parser investigation and proof boundaries:
+
+The first actual production-feature ARM compile completed in3m30s, then proof
+collection stopped before sealing: Apple ld emits opaque non-UTF8 bytes in
+literal-string rows. The retained16,071,743-byte map (5505268c) fails the old
+whole-file UTF8 parser at byte5,992,970. Producer discovery now decodes only the
+single required `# Path` value; linked proof uses lossless surrogateescape.
+Exact paths, architecture, owned archive/member, SQLite symbols and their Mach-O
+addresses remain required. Corrupted required names still reject.24 builder,
+34 producer,21 bundle,12 native-consumer and8 native-SPDX checks pass after the
+correction. Read-only actual ARM map/rlib/binary replays pass; neither replay
+rewrites old receipts or qualifies a final release. This led to the two-target
+attempt2 described above; it does not establish a v2 producer build.
+Failure and review evidence: `output/native-producer/real-inputs/attempt1-failure/`
+and `output/native-producer-review/link-map-opaque/`.
+
+
+The optional native SQLite tooling in this candidate does not activate a new
+Geph source contract or change the installed application. It prepares the
+previously qualified static SQLite candidate for a release pipeline which can
+verify the actual native library instead of inferring it from Cargo features.
+
+| Boundary | Code | Required evidence / rejection |
+|---|---|---|
+| Native source | `scripts/geph_native_sqlite.py`, `geph_vendor_source.py` | Exact official archive snapshot, bounded C/header files, version/source ID, retained header notice, reviewed compile definitions and genuine registry wrapper checksum. Symlink/path replacement, duplicate archive members and mismatched source bytes reject. |
+| Native archive | `geph_native_sqlite_build.build_native` / `verify_native_build` | Fresh per-target compiler output, explicit tool identities/arguments/environment, exact owned object inside the static archive. This proves only the native archive. |
+| Linked target | `seal_linked_target` / `verify_linked_target` | Resolved unbundled features, actual sys build directives, Rust rlib metadata/codegen members and byte-identical SQLite object, linker-map identity symbols matching the Mach-O global symbols, exact version/source ID bytes, no dynamic SQLite import. |
+| Final universal | `verify_release_evidence` | Both target receipts and byte-identical corresponding slices in the actual final universal artifact. One target, an archive-only receipt, rehashed changed slices and post-proof strip/sign mutations reject. |
+| Offline producer | `build_geph_native_release.py` | Fresh reviewed source and private build directories, explicit tools, locked/offline Cargo metadata and package-matched compiler messages. Compile both production-feature targets, seal each linked artifact, then verify unchanged lipo output. Never execute Geph or account-backed tests. |
+| Evidence transport | `geph_native_sqlite_bundle.py` | Canonical regular-file USTAR with the complete referenced proof, exact inventory and independent downloaded-binary comparison. Reused/nonempty replacement destinations reject; failure retains unverified output and never deletes a caller pathname. |
+| Release consumer | `verify_geph_release.py` | Reviewed SOURCE selects the exact legacy or native asset set. Native evidence is an additional checksum/provenance subject. Parsed SPDX/SOURCE snapshots must match the bytes hashed for provenance; mixed snapshots reject. |
+| Native inventory | `make_geph_vendor_sbom.py` | Separate SQLite source package/files and static-link relationship, raw SOURCE and final-binary/receipt hashes. Keep `libsqlite3-sys` as its genuine Cargo registry component. Generation and verification require the final universal evidence. |
+| Advisory coverage | `dependency_audit.py` | Exact scanner package identities and original result binding. Source-owned/native packages cannot inherit the Rust wrapper's coverage or invented registry coordinates. Separate reviewed native applicability remains required. |
+
+69 focused source/materializer/SPDX cases and16 builder cases pass. The builder
+suite invokes real clang/ar, rustc and the Apple linker on a tiny fixture; its
+Cargo metadata/sys stdout and universal slices are explicitly synthetic. It
+does not qualify a Geph release. The actual retained ARM Geph test executable
+was parsed read-only. That check exposed legitimate duplicate Rust local
+symbols; the parser now enforces uniqueness/global definition only for the two
+SQLite identity symbols. Independent review also reproduced and fixed a Cargo
+crate named `sqlite` being mistaken for native SQLite, and an expected wrapper
+URL inconsistent with the real shared Cargo converter. Negative evidence is
+retained alongside successful replays in `output/sqlite-native-integration/`.
+
+These checks establish input/output coherence under trusted compiler/linker
+execution. They do not cryptographically prove every relocated instruction or
+replace release attestations. SDK evidence records the physical path and
+SDKSettings hash, not the entire SDK tree. The production SOURCE, lock, version,
+license and workflow are unchanged. Next integrate the producer and release
+consumer using the actual v2 proof above, and finish native/source-owned
+advisory coverage; do not publish or install from fixture
+results. Existing unchanged Geph runtime tests remain reusable.
+
+The inactive producer/transport/consumer integration additionally has focused
+success and failure tests. Independent review reproduced destructive cleanup of
+a replaced directory, acceptance of a nonempty replacement directory, and mixed
+SPDX/provenance snapshots; parent review found the equivalent SOURCE-snapshot
+gap. The corrected consumer passes 32 cases and transport passes 21 under OS
+network denial. Five independent replays cover the four failures and successful
+9-asset/binary binding. Evidence is retained in `bundle-transport-v3/` and
+`independent-consumer-review/` beneath the private integration output directory.
+These fixtures use synthetic universal binaries; they do not prove a Geph build.
+The caller must control the output parent, and same-user writers can still
+change files after return. Automatic deletion on failure is intentionally absent.
+Actual v2 target builds are recorded above; workflow integration and native
+advisory coverage remain open.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
