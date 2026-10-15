@@ -162,6 +162,7 @@ jobs:
           done
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
           python3 scripts/make_geph_vendor_sbom.py generate \
+            --source-root "$source_root" \
             --source vendor/geph/SOURCE.json \
             --version-file vendor/geph/VERSION \
             --cargo-lock vendor/geph/Cargo.lock \

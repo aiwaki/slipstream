@@ -1,5 +1,20 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Source-owned SPDX generation repair, 2026-10-15: both dependency-audit and
+  Geph producer now pass the materialized source root to the real generator.
+  Previously both source-owned-only paths failed before producing SPDX; native
+  producer root selection and consumer verify paths are unchanged. New real
+  extractor/generator workflow tests prove exact six-package/twenty-file output,
+  reject tampered embedded bytes and missing root before writing SPDX. Three
+  tests/six scenarios PASS; both ab77c6a63 workflow baselines reproduce the
+  original failure. Existing five consumer tests and two-workflow actionlint
+  PASS. Evidence: output/source-owned-generation-workflows-20261015/.
+  Remaining native CI gap is distinct: standalone audit lacks the explicit
+  SQLite archive and actual macOS linkage inputs. Static schema1 review also
+  binds local build receipt/binary hashes and cannot authorize a fresh CI build
+  by copying output policy. A versioned source-verdict/artifact-proof contract
+  is required; retain strict schema1 behavior and fresh full linkage checks.
+
 - Current repair, 2026-10-15: both app and Geph locks now pin rustls0.23.46
   (registry/archive SHA25648e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf).
   RUSTSEC-2026-0346/0347/0348/0349 were published after the previous retained

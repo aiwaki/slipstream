@@ -685,6 +685,7 @@ jobs:
             )
           else
             sbom_args+=(
+              --source-root "${{ steps.source.outputs.root }}"
               --cargo-metadata aarch64-apple-darwin=/tmp/geph-metadata/aarch64-apple-darwin.json
               --cargo-metadata x86_64-apple-darwin=/tmp/geph-metadata/x86_64-apple-darwin.json
             )
