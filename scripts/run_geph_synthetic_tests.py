@@ -147,20 +147,29 @@ def runtime_environment(scratch: Path) -> dict[str, str]:
     return env
 
 
-def sandbox_profile(target: Path, scratch: Path, sentinel: Path) -> str:
+def sandbox_profile(target: Path, scratch: Path, sentinel: Path, *,
+                    python_probe: bool = False) -> str:
     homes = {Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(), Path.home().resolve()}
-    interpreter = Path(sys.executable).resolve()
-    prefix = Path(sys.base_prefix).resolve()
-    if prefix == Path("/") or prefix in homes:
-        raise QualificationError("interpreter prefix is too broad for private-file isolation")
     quote = lambda p: json.dumps(str(p.resolve()))
+    readable = [target, scratch]
+    interpreter_rule = ""
+    if python_probe:
+        # Only the trusted -I/-S Python probe needs its runtime. Native Geph
+        # fixtures must not inherit this exception, including a hosted prefix
+        # beneath HOME.
+        interpreter = Path(sys.executable).resolve()
+        prefix = Path(sys.base_prefix).resolve()
+        if prefix == Path("/") or prefix in homes:
+            raise QualificationError("interpreter prefix is too broad for private-file isolation")
+        readable.append(prefix)
+        interpreter_rule = f" (literal {quote(interpreter)})"
     denied = homes | {Path("/Library/Application Support/Slipstream"),
                       Path("/Library/Keychains")}
     return "\n".join([
         "(version 1)", "(allow default)", "(deny network*)", "(deny file-write*)",
         "(deny file-read* " + " ".join(f"(subpath {quote(p)})" for p in sorted(denied)) + ")",
-        "(allow file-read* " + " ".join(f"(subpath {quote(p)})" for p in (target, scratch, prefix))
-        + f" (literal {quote(interpreter)}))",
+        "(allow file-read* " + " ".join(f"(subpath {quote(p)})" for p in readable)
+        + interpreter_rule + ")",
         f"(deny file-read* (literal {quote(sentinel)}))",
         f"(allow file-write* (subpath {quote(scratch)}) (literal \"/dev/null\"))",
     ]) + "\n"
@@ -240,7 +249,11 @@ def qualify(source: Path, contract: Path, evidence: Path, *, compile_timeout: fl
             profile.write_text(sandbox_profile(target, scratch, sentinel))
             (evidence / "runtime.sb").write_text(profile.read_text())
             base = [str(SANDBOX), "-f", str(profile)]
-            sandbox_selftest(base, scratch=scratch, sentinel=sentinel, env=env, evidence=evidence)
+            probe_profile = root / "probe.sb"
+            probe_profile.write_text(sandbox_profile(target, scratch, sentinel, python_probe=True))
+            (evidence / "probe.sb").write_text(probe_profile.read_text())
+            sandbox_selftest([str(SANDBOX), "-f", str(probe_profile)], scratch=scratch,
+                             sentinel=sentinel, env=env, evidence=evidence)
             compile_log = evidence / "compile.log"
             # Build scripts/dependency fetching remain part of the existing build
             # phase. No Geph libtest code executes during this no-run command.

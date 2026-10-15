@@ -48,16 +48,20 @@ class CiScopeTests(unittest.TestCase):
 
     def test_delivery_git_reader_requires_exact_refs_and_never_reads_working_tree(self):
         base, head = "1" * 40, "2" * 40
+        expected = {
+            path: tuple(f"{ref}:{path}".encode() for ref in (base, head))
+            for path in ci_scope.DELIVERY_FILE_BINDINGS
+        }
         with patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
-             patch.object(ci_scope.subprocess, "check_output", return_value=b"committed") as read:
+             patch.object(ci_scope.subprocess, "check_output",
+                          side_effect=lambda command, **kwargs: command[2].encode()) as read:
             result = ci_scope.delivery_delta_from_git()
-            self.assertEqual(set(result), set(ci_scope.DELIVERY_FILE_BINDINGS))
-            self.assertEqual(read.call_count, 2 * len(result))
-            for call in read.call_args_list:
-                self.assertEqual(call.args[0][:2], ["git", "show"])
-                ref, path = call.args[0][2].split(":", 1)
-                self.assertIn(ref, (base, head))
-                self.assertIn(path, ci_scope.DELIVERY_FILE_BINDINGS)
+            self.assertEqual(result, expected)
+            self.assertCountEqual(
+                [call.args[0] for call in read.call_args_list],
+                [["git", "show", f"{ref}:{path}"]
+                 for path in ci_scope.DELIVERY_FILE_BINDINGS for ref in (base, head)],
+            )
         for invalid in ("", "main", head + ":path"):
             with patch.dict(os.environ, {"BASE_SHA": invalid, "GITHUB_SHA": head}), \
                  patch.object(ci_scope.subprocess, "check_output") as read:

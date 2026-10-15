@@ -189,6 +189,17 @@ closed while that artifact is absent and is rerun only after publication. The
 rerun then builds and qualifies one candidate from the same source SHA and new
 exact Geph artifact before any application release.
 
+Scope classification runs reviewed repository code, as do the workflow and its
+tests. Exact byte bindings detect an unintended dependency transition; they are
+not a security boundary against a malicious edit to the classifier or workflow
+itself. Such edits require code review. A self-hash checked by that same mutable
+classifier would not establish an independent trust boundary.
+
+The Geph synthetic runner isolates execution of the allowlisted test binary.
+Compilation, including Cargo build scripts and procedural macros, remains part
+of the existing trusted build phase, just like the subsequent locked binary
+build. The runtime sandbox is not a claim that compilation is isolated.
+
 On a main push, the Geph publisher builds the verified committed source contract,
 including maintenance revisions older than the latest upstream crate. Scheduled
 discovery still proposes the latest upstream version for separate review. A manual

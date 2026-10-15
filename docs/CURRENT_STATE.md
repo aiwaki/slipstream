@@ -37,24 +37,29 @@ two necessary consumer fixtures to the required bundle passed14 scope tests.
 Independent source-bootstrap and audit-contract review found no blocking issue.
 No local Rust build or full suite was repeated.
 
-PR388 is open at0bcfc5d70. Exact audit38725912548 passes Geph; the app now
-reaches its fresh scan (361scanned,1integrity-only) and reports5blocking and
-5informational findings. The inherited workflow retained only successful
-reports, so that failed report was not uploaded. A narrow `if: always()`
-retention fix preserves enforcement and is added to the exact bootstrap file
-bindings;15 focused checks pass. One bounded offline-metadata/local-scanner
-replay identified all five in quinn-proto0.11.16. The exact reviewed PR386
-repair to0.11.18 clears all five in one fresh scan:361scanned,1integrity-only,
-0blocking,5informational, strict identity/report validation PASS. The archive
-was already cached and its hash matches the pin; no compiler/download ran. Product CI38725912572 is still
-running; Chromium contract already passes. Do not rerun that unchanged handle.
+PR388 exact head `76354926756eba19b0b2b1183bc8f8d1fb0d61ed` passed CI
+`38727176669` and dependency audit `38727176691`. App:361 scanned,
+1 integrity-only,0 blocking,5 informational. Geph:423 scanned,0 blocking,
+2 reviewed exceptions,2 informational. Artifact ZIP digests and strict
+source/report identities were verified; receipts are retained under
+`output/pr388-ci-763549267/`. No package or installed-app pass is implied.
 
-Next: push the exact QUIC repair and failed-report retention together and check
-the new exact CI. Fifteen scope checks and an independent review accepted the
-combined TLS/QUIC lock repair and five-file bootstrap binding. After its reviewed source reaches
-main, the main-only producer publishes the immutable Geph dependency. Then
-complete main packaging and installed Chrome/Safari/lifecycle qualification;
-no published or installed result is claimed yet. Reuse unchanged green suites.
+The normal exact-head merge was refused because review conversations remained
+unresolved. Review confirmed a runtime sandbox gap for interpreter prefixes
+inside HOME and a test gap that did not distinguish base/head reads. Both were
+corrected narrowly. Native test execution now has no Python-prefix allowance;
+the constant trusted Python denial probe uses a separate profile. Hosted CI
+uses Python beneath HOME, so a blanket prefix rejection would break that
+normal layout. Thirteen runner tests pass, including actual OS denial of a
+private file inside the Python prefix;23 documentation/scope tests pass. The classifier's trust in reviewed repository code
+and Cargo's existing build-phase trust are documented explicitly; neither is
+claimed to be a hostile-code isolation boundary. No protection was bypassed.
+
+Next: push the focused review corrections, check exact new CI and resolve
+reviewed conversations, then merge normally. The main-only producer must publish the
+immutable Geph dependency before main packaging can finish. Installed
+Chrome/Safari/lifecycle qualification remains open. Reuse unchanged green
+checks; do not restart native/source-owned migration or a broad audit.
 
 Local evidence is under `output/minimal-geph-payload-20261015/` in this worktree.
 The runtime/RSA evidence is in the dedicated PR384 worktree under

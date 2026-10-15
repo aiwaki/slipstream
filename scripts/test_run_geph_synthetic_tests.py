@@ -137,6 +137,24 @@ class SyntheticRunnerTests(unittest.TestCase):
                 runner.qualify(self.source, self.contract, self.evidence)
             command.assert_not_called()
 
+    def test_only_python_probe_allows_hosted_or_local_python_runtime(self):
+        for prefix in (Path("/Users/runner/hostedtoolcache/Python/3.13.14/arm64"),
+                       Path("/opt/homebrew/Frameworks/Python.framework/Versions/3.14")):
+            with self.subTest(prefix=prefix), \
+                 mock.patch.object(runner.Path, "home", return_value=Path("/Users/runner")), \
+                 mock.patch.object(runner.sys, "base_prefix", str(prefix)), \
+                 mock.patch.object(runner.sys, "executable", str(prefix / "bin/python3")):
+                runtime = runner.sandbox_profile(self.root / "target", self.root / "runtime",
+                                                 self.root / "sentinel")
+                probe = runner.sandbox_profile(self.root / "target", self.root / "runtime",
+                                               self.root / "sentinel", python_probe=True)
+                self.assertNotIn(str(prefix.resolve()), runtime)
+                self.assertIn(f'(subpath "{prefix.resolve()}")', probe)
+                self.assertIn(f'(literal "{(prefix / "bin/python3").resolve()}")', probe)
+                for denial in ("(deny network*)", "(deny file-write*)"):
+                    self.assertIn(denial, runtime)
+                    self.assertIn(denial, probe)
+
     def test_discovery_rejects_missing_ambiguous_and_symlink_escaped_artifacts(self):
         target = self.root / "target"
         target.mkdir()
@@ -246,11 +264,32 @@ class SandboxTests(unittest.TestCase):
             sentinel = root / "sentinel"
             sentinel.write_text("synthetic private sentinel")
             profile = root / "runtime.sb"
-            profile.write_text(runner.sandbox_profile(target, scratch, root / "other-sentinel"))
+            profile.write_text(runner.sandbox_profile(target, scratch, root / "other-sentinel",
+                                                       python_probe=True))
             env = runner.runtime_environment(scratch)
             self.assertEqual(env.get("HOME"), os.environ.get("HOME"))
             runner.sandbox_selftest([str(runner.SANDBOX), "-f", str(profile)], scratch=scratch,
                                     sentinel=sentinel, env=env, evidence=root)
+
+    def test_native_profile_denies_private_file_inside_python_prefix(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            root = Path(temporary).resolve()
+            target, scratch, prefix = root / "target", root / "runtime", root / "python-prefix"
+            for path in (target, scratch, prefix):
+                path.mkdir()
+            private = prefix / "private-sentinel"
+            private.write_text("synthetic private data")
+            profile = root / "runtime.sb"
+            with mock.patch.object(runner.sys, "base_prefix", str(prefix)):
+                profile.write_text(runner.sandbox_profile(target, scratch, root / "other-sentinel"))
+            env = runner.runtime_environment(scratch)
+            env["LC_ALL"] = "C"
+            result = subprocess.run([str(runner.SANDBOX), "-f", str(profile),
+                                     "/bin/cat", str(private)], cwd=scratch, env=env,
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("Operation not permitted", result.stderr)
 
 
 if __name__ == "__main__":
