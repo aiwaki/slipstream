@@ -4,7 +4,7 @@
 
 `v0.1.9-preview.24` is published from exact main
 `e5791a4d7f42e000bb37732f8aa4b9698e62dd9f` (merged PR389).
-Documentation update: PR390, branch `codex/preview24-publication-checkpoint`.
+Documentation update: PR390, merged at `323a4df52215f169a64df96760dc9d8838d68a34`.
 Worktree:
 `/Users/aiwaki/.codex/worktrees/release-delivery/slipstream-codebase-audit-20260905`.
 
@@ -57,16 +57,21 @@ are authoritative. Reuse unchanged green checks rather than repeating them.
 
 ## Next Verified Action
 
-Branch `codex/public-update-pair-qualification`: hosted run 38757195734 proved
-an active console/Aqua session and `AXIsProcessTrusted=true`. SystemUIServer
-returned no menu value; that does not test the app-owned Slipstream menu. The
-next scoped run verifies the signed public .23 archive, starts its exact bundle
-and owned daemon on a disposable runner, and inspects/opens only its tray menu.
-It requests no account secret, changes no TCC permissions, cannot publish, and
-does not yet trigger an app-update transaction. Cleanup must remove only the
-installed test app/daemon. Evidence remains capability/menu evidence, never
-public-pair qualification. Source graph tools are not exposed in this session;
-bounded reads establish that the released .23 installer needs the tray action.
+Branch `codex/public-update-pair-qualification`, HEAD `14a867fb7`: hosted run
+38760090724 verified the signed public .23 archive, launched its exact bundle
+and daemon, and opened its own tray menu through already-authorized AX.
+The run failed cleanup because the harness called nonexistent `/usr/bin/test`
+and misread its diagnostic exit as absence; this does not establish a product
+uninstall failure. Retained receipt binds 25 files at
+`output/public-update-pair-prep/menu-smoke-38760090724/receipt.json`.
+The harness correction and real-update driver pass 12 cleanup and 30 observer/driver
+offline tests. Next run exercises the genuine .23 menu update and observes
+both the successor and daemon identities. It retains failure evidence and leaves
+pending privileged work to disposable-host teardown rather than forcing cleanup. Source review found that ACK can
+accept the old daemon while asynchronous administrator installation is pending;
+do not preinstall .24's daemon or call the pair qualified without measuring it.
+No workstation mutation, TCC change, account-backed retry or app rebuild occurs.
+Source graph tools are unavailable; bounded direct source reads were used.
 
 Qualify the real public `.23 -> .24` upgrade and forced rollback against the
 verified published assets, retaining the existing notification, signed-install,

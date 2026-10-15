@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect the real public .23 tray on a disposable hosted Mac; never update it."""
+"""Prepare/inspect public .23; an optional verified driver owns update actions."""
 from __future__ import annotations
 
 import argparse
@@ -35,6 +35,21 @@ BASELINE_PATHS = (APP, Path("/usr/local/slipstream"), PLIST, STATUS,
                   Path("/Library/Application Support/dev.slipstream.tray"))
 
 
+class CommandFailure(RuntimeError):
+    def __init__(self, label: str, result: subprocess.CompletedProcess):
+        tail = (result.stderr or result.stdout).decode("utf-8", errors="replace")[-512:].strip()
+        super().__init__(f"{label}: exit={result.returncode}: {tail}")
+        self.label = label
+        self.returncode = result.returncode
+
+
+def error_detail(error: Exception) -> dict:
+    detail = {"error_type": type(error).__name__, "message": str(error)[-768:]}
+    if isinstance(error, CommandFailure):
+        detail.update(command=error.label, returncode=error.returncode, log=error.label + ".log")
+    return detail
+
+
 def sha256(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -50,11 +65,12 @@ def process_path(pid: int) -> str:
     return os.fsdecode(buf.value)
 
 
-def run(output: Path) -> dict:
+def run(output: Path, *, after_menu=None, successor_identity: dict | None = None) -> dict:
     report = {"schema_version": 1, "scope": "public_23_menu_only", "status": "blocked",
               "pair_qualified": False, "public_pair_qualified": False,
               "update_activated": False, "source_commit": os.environ.get("GITHUB_SHA"),
-              "run_id": os.environ.get("GITHUB_RUN_ID"), "cleanup_errors": []}
+              "run_id": os.environ.get("GITHUB_RUN_ID"), "cleanup_errors": [],
+              "cleanup_error_details": []}
     if not (sys.platform == "darwin" and os.environ.get("CI") == "true"
             and os.environ.get("GITHUB_ACTIONS") == "true"
             and os.environ.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
@@ -63,6 +79,10 @@ def run(output: Path) -> dict:
     uid = os.getuid()
     if uid == 0 or os.stat("/dev/console").st_uid != uid:
         raise RuntimeError("requires_nonroot_console_user")
+    if after_menu is not None and (not isinstance(successor_identity, dict) or any(
+            not re.fullmatch(r"[0-9a-f]{64}", successor_identity.get(key, ""))
+            for key in ("tray_sha256", "daemon_sha256"))):
+        raise RuntimeError("callback_requires_verified_successor_hashes")
     temp = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
     output = output.resolve()
     if temp not in output.parents or output.exists():
@@ -83,6 +103,7 @@ def run(output: Path) -> dict:
     created_app = None
     install_attempted = False
     daemon_hash = None
+    context = None
     stage = "preflight"
 
     def command(label: str, args: list[str], *, timeout: float = 30,
@@ -98,14 +119,18 @@ def run(output: Path) -> dict:
             stream.write((result.stdout + result.stderr)[-16384:])
         path.chmod(0o600)
         if check and result.returncode:
-            raise RuntimeError(label + "_failed")
+            raise CommandFailure(label, result)
         return result
 
-    def installed_identity(label: str) -> None:
+    def installed_identity(label: str, *, allow_successor: bool = False) -> str:
         digest = command(label, ["/usr/bin/sudo", "-n", "/usr/bin/shasum", "-a", "256",
                                  str(INSTALLED_DAEMON)]).stdout.decode().split()[0]
-        if digest != daemon_hash:
+        allowed = {daemon_hash}
+        if allow_successor and successor_identity:
+            allowed.add(successor_identity["daemon_sha256"])
+        if digest not in allowed:
             raise RuntimeError("installed_daemon_hash_mismatch")
+        return digest
 
     def healthy(label: str) -> dict:
         until = min(time.monotonic() + 75, deadline - 60)
@@ -205,12 +230,30 @@ def run(output: Path) -> dict:
             raise RuntimeError("actual_owned_menu_not_proven")
         report.update(status="passed", owned_menu_present=True)
         report["daemon_before_cleanup"] = healthy("before-cleanup")
+        if after_menu is not None:
+            stage = "public_pair_callback"
+            report.update(scope="public_23_setup_with_external_transaction", update_activated=None)
+            context = {"pid": app_process.pid, "uid": uid,
+                       "old_identity": json.loads((output / "ax-inspect.json").read_text())["identity"],
+                       "old_exe_sha256": report["tray_sha256"], "old_daemon_sha256": daemon_hash,
+                       "old_status": report["daemon_before_cleanup"], "output_dir": output,
+                       "app_env": dict(env), "helper_env": dict(helper_env),
+                       "deadline": deadline - 60, "command": command, "transaction": {}}
+            report["pair_transaction"] = after_menu(context)
+            if report["pair_transaction"].get("status") != "passed":
+                raise RuntimeError("public_pair_callback_not_passed")
     except Exception as error:
         report.update(status="blocked", failed_stage=stage, error_type=type(error).__name__)
+        report["error_detail"] = error_detail(error)
         if isinstance(error, RuntimeError):
             report["reason"] = str(error)
     finally:
         cleanup = True
+        if context is not None:
+            report["update_activated"] = context["transaction"].get("update_activated")
+        apps_stopped = True
+        daemon_clean = not install_attempted
+        installers_clear = True
         if app_process is not None and app_process.poll() is None:
             try:
                 if process_path(app_process.pid) != str(TRAY) or sha256(TRAY) != report["tray_sha256"]:
@@ -224,7 +267,88 @@ def run(output: Path) -> dict:
                     app_process.kill()
                     app_process.wait(timeout=3)
             except Exception as error:
+                apps_stopped = False
                 report["cleanup_errors"].append("app:" + type(error).__name__)
+                report["cleanup_error_details"].append({"phase": "app", **error_detail(error)})
+        if after_menu is not None and created_app is not None:
+            try:
+                # The real updater owns the handoff. Discover only its canonical,
+                # same-user successor; no name-only or process-group signaling.
+                from public_update_ax import identity
+                found = command("cleanup-successor-pids", ["/usr/bin/pgrep", "-x", "-u", str(uid), "slipstream"],
+                                timeout=3, check=False)
+                if found.returncode not in (0, 1) or (found.returncode == 1 and found.stderr):
+                    raise CommandFailure("cleanup-successor-pids", found)
+                pids = found.stdout.decode().split()
+                if len(pids) > 4:
+                    raise RuntimeError("ambiguous_successor_processes")
+                for raw_pid in pids:
+                    pid = int(raw_pid)
+                    if process_path(pid) != str(TRAY):
+                        continue
+                    digest = sha256(TRAY)
+                    if digest not in {report["tray_sha256"], successor_identity["tray_sha256"]}:
+                        raise RuntimeError("unknown_successor_executable")
+                    owned = identity(pid, uid, TRAY, digest)
+                    if identity(pid, uid, TRAY, digest) != owned:
+                        raise RuntimeError("successor_identity_changed")
+                    os.kill(pid, signal.SIGTERM)
+                    until = min(time.monotonic() + 8, deadline)
+                    while time.monotonic() < until:
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.2)
+                    else:
+                        if identity(pid, uid, TRAY, digest) != owned:
+                            raise RuntimeError("successor_identity_changed")
+                        os.kill(pid, signal.SIGKILL)
+                        killed_until = min(time.monotonic() + 3, deadline)
+                        while time.monotonic() < killed_until:
+                            try:
+                                os.kill(pid, 0)
+                            except ProcessLookupError:
+                                break
+                            time.sleep(0.1)
+                        else:
+                            raise RuntimeError("successor_did_not_stop")
+            except Exception as error:
+                apps_stopped = False
+                report["cleanup_errors"].append("successor:" + type(error).__name__)
+                report["cleanup_error_details"].append({"phase": "successor", **error_detail(error)})
+            try:
+                # After app termination, refuse teardown under a late installer.
+                # Do not persist the unrelated process command lines or kill them.
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("eight_minute_budget")
+                writers = subprocess.run(["/bin/ps", "-ww", "-axo", "pid=,uid=,command="],
+                                         cwd=ROOT, env=env, capture_output=True, timeout=min(3, remaining))
+                if writers.returncode:
+                    raise RuntimeError(f"installer_snapshot_exit_{writers.returncode}:" +
+                                       writers.stderr.decode(errors="replace")[-512:])
+                if len(writers.stdout) > 4 * 1024 * 1024:
+                    raise RuntimeError("oversized_installer_snapshot")
+                admin_prefix = (f'/usr/bin/osascript -e do shell script "\'{BUNDLED_DAEMON}\' --install" '
+                                'with administrator privileges')
+                pending = []
+                for line in writers.stdout.decode(errors="replace").splitlines():
+                    fields = line.split(None, 2)
+                    if len(fields) != 3:
+                        continue
+                    pid, owner, argv = fields
+                    if ((owner == "0" and argv == str(BUNDLED_DAEMON) + " --install")
+                            or (owner == str(uid) and argv.startswith(admin_prefix))):
+                        pending.append({"pid": int(pid), "uid": int(owner),
+                                        "kind": "daemon_install" if owner == "0" else "administrator_request"})
+                report["pending_installer_processes"] = pending
+                if pending:
+                    raise RuntimeError("pending_privileged_install_writer")
+            except Exception as error:
+                installers_clear = False
+                report["cleanup_errors"].append("installer:" + type(error).__name__)
+                report["cleanup_error_details"].append({"phase": "installer", **error_detail(error)})
         if install_attempted:
             try:
                 if STATUS.exists() and STATUS.stat().st_size <= 1024 * 1024:
@@ -235,28 +359,38 @@ def run(output: Path) -> dict:
             except (OSError, ValueError, KeyError, AttributeError):
                 report["daemon_cleanup_snapshot_unavailable"] = True
             try:
-                present = command("cleanup-daemon-present", ["/usr/bin/sudo", "-n", "/usr/bin/test", "-f",
+                if (not installers_clear or not apps_stopped
+                        or (context is not None and context["transaction"].get("cleanup_unproven"))):
+                    raise RuntimeError("teardown_deferred_until_disposable_runner_exit")
+                present = command("cleanup-daemon-present", ["/usr/bin/sudo", "-n", "/bin/test", "-f",
                                   str(INSTALLED_DAEMON)], timeout=3, check=False)
                 if present.returncode == 0:
-                    installed_identity("cleanup-daemon-hash")
-                    report["installed_daemon_sha256_before_cleanup"] = daemon_hash
+                    report["installed_daemon_sha256_before_cleanup"] = installed_identity(
+                        "cleanup-daemon-hash", allow_successor=True)
                     command("uninstall", ["/usr/bin/sudo", "-n", str(INSTALLED_DAEMON), "--uninstall"], timeout=40)
-                elif present.returncode != 1:
-                    raise RuntimeError("installed_daemon_presence_unproven")
+                elif present.returncode != 1 or present.stdout or present.stderr:
+                    raise CommandFailure("cleanup-daemon-present", present)
                 job = command("cleanup-launchd", ["/bin/launchctl", "print", JOB], timeout=3, check=False)
                 if job.returncode == 0 or b"could not find service" not in (job.stdout + job.stderr).lower():
                     raise RuntimeError("cleanup_daemon_absence_unproven")
+                daemon_clean = True
             except Exception as error:
                 report["cleanup_errors"].append("daemon:" + type(error).__name__)
+                report["cleanup_error_details"].append({"phase": "daemon", **error_detail(error)})
         if created_app is not None:
             try:
-                if APP.is_symlink() or (APP.stat().st_dev, APP.stat().st_ino) != created_app:
+                same_directory = (APP.stat().st_dev, APP.stat().st_ino) == created_app
+                known_replacement = (successor_identity and APP.stat().st_uid == uid
+                                     and not TRAY.is_symlink()
+                                     and sha256(TRAY) in {report["tray_sha256"], successor_identity["tray_sha256"]})
+                if APP.is_symlink() or not (same_directory or known_replacement):
                     raise RuntimeError("created_app_identity_changed")
-                if app_process is not None and app_process.poll() is None:
+                if not apps_stopped or not daemon_clean or (app_process is not None and app_process.poll() is None):
                     raise RuntimeError("created_app_still_running")
                 shutil.rmtree(APP)
             except Exception as error:
                 report["cleanup_errors"].append("bundle:" + type(error).__name__)
+                report["cleanup_error_details"].append({"phase": "bundle", **error_detail(error)})
         report["residue"] = [str(p) for p in BASELINE_PATHS if os.path.lexists(p)]
         if report["cleanup_errors"] or report["residue"]:
             report["status"] = "blocked"

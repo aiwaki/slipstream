@@ -1,8 +1,8 @@
-name: public-update-menu-smoke
+name: public-update-pair-smoke
 
 on:
-  # This branch-only bootstrap measures the real released app menu before
-  # attempting a public updater transaction. It cannot publish.
+  # This branch-only probe exercises the real released app update.
+  # No product rebuild, account secret, privilege-dialog action or publication.
   push:
     branches: ["codex/public-update-pair-qualification"]
     paths:
@@ -10,6 +10,8 @@ on:
       - "scripts/public_update_ui_preflight.py"
       - "scripts/public_update_ax.py"
       - "scripts/public_update_menu_smoke.py"
+      - "scripts/public_update_pair_smoke.py"
+      - "scripts/public_update_observer.py"
   workflow_dispatch:
 
 permissions:
@@ -34,11 +36,11 @@ jobs:
           mkdir -p output/public-update-ui-preflight
           python3 scripts/public_update_ui_preflight.py \
             --output output/public-update-ui-preflight/capability.json
-      - name: Verify and inspect public preview .23 on this disposable host
+      - name: Exercise the real public preview .23 to .24 update
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
-          python3 scripts/public_update_menu_smoke.py \
+          python3 scripts/public_update_pair_smoke.py \
             --output-dir "$RUNNER_TEMP/public-update-menu"
       - name: Retain capability evidence even when unavailable
         if: always()
@@ -47,7 +49,7 @@ jobs:
           name: public-update-ui-preflight-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/public-update-ui-preflight/*.json
-            ${{ runner.temp }}/public-update-menu/*.json
-            ${{ runner.temp }}/public-update-menu/*.log
+            ${{ runner.temp }}/public-update-menu/**/*.json
+            ${{ runner.temp }}/public-update-menu/**/*.log
           if-no-files-found: error
           retention-days: 14
