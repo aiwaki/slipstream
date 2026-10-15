@@ -1,4 +1,4 @@
-//! Keep pending app successors from installing or acknowledging the wrong daemon.
+//! Keep pending app startups from installing or acknowledging the wrong daemon.
 
 use crate::install_attestation::InstallAttestation;
 use crate::status_client::StatusRead;
@@ -49,6 +49,7 @@ impl HeartbeatProgress {
 
 pub(crate) struct SuccessorDaemonGuard<T> {
     context: Option<T>,
+    needs_daemon_ack: bool,
     heartbeat: HeartbeatProgress,
     acknowledged: bool,
     blocked: Arc<AtomicBool>,
@@ -57,10 +58,12 @@ pub(crate) struct SuccessorDaemonGuard<T> {
 impl<T> SuccessorDaemonGuard<T> {
     pub(crate) fn prepare(
         pending: Result<Option<T>, String>,
+        needs_daemon_ack: impl FnOnce(&T) -> bool,
         attest: impl FnOnce() -> Option<InstallAttestation>,
     ) -> Result<Self, String> {
         let context = pending?;
-        if context.is_some() && attest().is_none() {
+        let needs_daemon_ack = context.as_ref().is_some_and(needs_daemon_ack);
+        if needs_daemon_ack && attest().is_none() {
             return Err(
                 "pending update requires an exact bundled daemon install attestation".into(),
             );
@@ -68,6 +71,7 @@ impl<T> SuccessorDaemonGuard<T> {
         Ok(Self {
             blocked: Arc::new(AtomicBool::new(context.is_some())),
             context,
+            needs_daemon_ack,
             heartbeat: HeartbeatProgress::default(),
             acknowledged: false,
         })
@@ -83,28 +87,33 @@ impl<T> SuccessorDaemonGuard<T> {
         }
     }
 
-    /// ACK alone does not release privileged actions: the watchdog must have
-    /// committed under its transaction lock and removed its rollback state.
+    /// Both successor and rollback wait for the watchdog's terminal proof.
+    /// Only a successor requires ACK; a restored app may need daemon repair,
+    /// which must wait until rollback cleanup has finished under the same lock.
     pub(crate) fn poll(
         &mut self,
         attest: impl FnOnce() -> Option<InstallAttestation>,
         status: &StatusRead,
         owned: impl FnOnce(i64) -> bool,
         acknowledge: impl FnOnce(&mut T, u64) -> Result<(), String>,
-        committed: impl FnOnce(&T) -> Result<bool, String>,
+        finished: impl FnOnce(&T) -> Result<bool, String>,
+        resume_normal_install: impl FnOnce(),
     ) -> Result<bool, String> {
         let Some(context) = self.context.as_mut() else {
             return Ok(false);
         };
-        if !self.acknowledged {
+        if self.needs_daemon_ack && !self.acknowledged {
             if let Some(sequence) = self.heartbeat.observe(attest(), status, owned) {
                 acknowledge(context, sequence)?;
                 self.acknowledged = true;
             }
         }
-        if self.acknowledged && committed(context)? {
+        if (!self.needs_daemon_ack || self.acknowledged) && finished(context)? {
             self.context = None;
             self.blocked.store(false, Ordering::Release);
+            if !self.needs_daemon_ack {
+                resume_normal_install();
+            }
             return Ok(true);
         }
         Ok(false)
@@ -156,14 +165,17 @@ mod tests {
                 Ok(())
             },
             |_| committed,
+            || panic!("successor must not run the rollback installer"),
         )
     }
 
     #[test]
     fn normal_startup_keeps_install_behavior_without_pending_checks() {
-        let mut guard = SuccessorDaemonGuard::<()>::prepare(Ok(None), || {
-            panic!("normal startup must not require successor attestation")
-        })
+        let mut guard = SuccessorDaemonGuard::<()>::prepare(
+            Ok(None),
+            |_| panic!("normal startup has no transaction mode"),
+            || panic!("normal startup must not require successor attestation"),
+        )
         .unwrap();
         let installs = Cell::new(0);
         guard.start_normal_daemon(|| installs.set(installs.get() + 1));
@@ -176,6 +188,7 @@ mod tests {
                 |_| panic!("no pending ownership probe"),
                 |_, _| panic!("no pending ACK"),
                 |_| panic!("no pending commit probe"),
+                || panic!("no deferred rollback install"),
             )
             .unwrap());
     }
@@ -183,9 +196,11 @@ mod tests {
     #[test]
     fn invalid_transaction_never_falls_back_to_normal_install() {
         let installs = Cell::new(0);
-        let result = SuccessorDaemonGuard::<()>::prepare(Err("invalid transaction".into()), || {
-            panic!("invalid transaction must stop before attestation")
-        })
+        let result = SuccessorDaemonGuard::<()>::prepare(
+            Err("invalid transaction".into()),
+            |_| panic!("invalid transaction must stop before mode selection"),
+            || panic!("invalid transaction must stop before attestation"),
+        )
         .map(|guard| guard.start_normal_daemon(|| installs.set(installs.get() + 1)));
         assert_eq!(result.unwrap_err(), "invalid transaction");
         assert_eq!(installs.get(), 0);
@@ -230,23 +245,25 @@ mod tests {
         assert!(attest().is_none());
         let installs = Cell::new(0);
         let acknowledgements = Cell::new(0);
-        let result = SuccessorDaemonGuard::prepare(Ok(Some(())), attest).map(|mut guard| {
-            guard.start_normal_daemon(|| installs.set(installs.get() + 1));
-            for sequence in [100, 101] {
-                guard
-                    .poll(
-                        attest,
-                        &fresh(4242, sequence),
-                        |_| true,
-                        |_, _| {
-                            acknowledgements.set(acknowledgements.get() + 1);
-                            Ok(())
-                        },
-                        |_| Ok(false),
-                    )
-                    .unwrap();
-            }
-        });
+        let result =
+            SuccessorDaemonGuard::prepare(Ok(Some(())), |_| true, attest).map(|mut guard| {
+                guard.start_normal_daemon(|| installs.set(installs.get() + 1));
+                for sequence in [100, 101] {
+                    guard
+                        .poll(
+                            attest,
+                            &fresh(4242, sequence),
+                            |_| true,
+                            |_, _| {
+                                acknowledgements.set(acknowledgements.get() + 1);
+                                Ok(())
+                            },
+                            |_| Ok(false),
+                            || panic!("successor must not resume rollback installation"),
+                        )
+                        .unwrap();
+                }
+            });
         assert!(result.unwrap_err().contains("exact bundled daemon"));
         assert_eq!(installs.get(), 0);
         assert_eq!(acknowledgements.get(), 0);
@@ -255,7 +272,7 @@ mod tests {
     #[test]
     fn fresh_matching_heartbeat_acks_but_only_commit_releases_actions() {
         let mut guard =
-            SuccessorDaemonGuard::prepare(Ok(Some(())), || Some(evidence(4242))).unwrap();
+            SuccessorDaemonGuard::prepare(Ok(Some(())), |_| true, || Some(evidence(4242))).unwrap();
         let blocker = guard.blocker();
         guard.start_normal_daemon(|| panic!("pending successor must never install"));
         let acknowledgements = Cell::new(0);
@@ -376,7 +393,7 @@ mod tests {
     #[test]
     fn failed_ack_never_probes_commit_or_releases_actions() {
         let mut guard =
-            SuccessorDaemonGuard::prepare(Ok(Some(())), || Some(evidence(4242))).unwrap();
+            SuccessorDaemonGuard::prepare(Ok(Some(())), |_| true, || Some(evidence(4242))).unwrap();
         let acknowledgements = Cell::new(0);
         assert!(!poll(
             &mut guard,
@@ -395,10 +412,101 @@ mod tests {
                     |_| true,
                     |_, _| Err("ACK write failed".into()),
                     |_| panic!("commit cannot be inferred before own ACK success"),
+                    || panic!("failed successor must not run rollback installation"),
                 )
                 .unwrap_err(),
             "ACK write failed"
         );
         assert!(guard.blocker().load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn rollback_without_attestation_defers_install_until_cleanup_exactly_once() {
+        let attestation_reads = Cell::new(0);
+        let installs = Cell::new(0);
+        let mut guard = SuccessorDaemonGuard::prepare(
+            Ok(Some(())),
+            |_| false,
+            || {
+                attestation_reads.set(attestation_reads.get() + 1);
+                None
+            },
+        )
+        .unwrap();
+        let blocker = guard.blocker();
+        guard.start_normal_daemon(|| installs.set(installs.get() + 1));
+        for sequence in [100, 101] {
+            assert!(!guard
+                .poll(
+                    || {
+                        attestation_reads.set(attestation_reads.get() + 1);
+                        None
+                    },
+                    &fresh(4242, sequence),
+                    |_| panic!("rollback does not require daemon ownership proof"),
+                    |_, _| panic!("rollback must not acknowledge as a successor"),
+                    |_| Ok(false),
+                    || installs.set(installs.get() + 1),
+                )
+                .unwrap());
+            assert!(blocker.load(Ordering::Acquire));
+        }
+        assert_eq!(attestation_reads.get(), 0);
+        assert_eq!(installs.get(), 0);
+        assert!(guard
+            .poll(
+                || panic!("rollback may need repair, so attestation is not required"),
+                &StatusRead::Missing,
+                |_| panic!("no rollback ownership probe"),
+                |_, _| panic!("no rollback ACK"),
+                |_| {
+                    assert!(blocker.load(Ordering::Acquire));
+                    Ok(true)
+                },
+                || {
+                    assert!(!blocker.load(Ordering::Acquire));
+                    installs.set(installs.get() + 1);
+                },
+            )
+            .unwrap());
+        assert_eq!(installs.get(), 1);
+        assert!(!blocker.load(Ordering::Acquire));
+        assert!(!guard
+            .poll(
+                || panic!("finished startup must not reread attestation"),
+                &StatusRead::Missing,
+                |_| panic!("finished startup must not probe ownership"),
+                |_, _| panic!("finished rollback must not ACK"),
+                |_| panic!("finished rollback must not repeat cleanup proof"),
+                || panic!("deferred normal install must run exactly once"),
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn wrong_or_incomplete_rollback_proof_keeps_all_actions_blocked() {
+        let mut guard = SuccessorDaemonGuard::prepare(
+            Ok(Some(())),
+            |_| false,
+            || panic!("rollback must not require daemon attestation"),
+        )
+        .unwrap();
+        for proof in [Err("wrong rollback identity".into()), Ok(false)] {
+            let expected_error = proof.is_err();
+            let result = guard.poll(
+                || panic!("no rollback attestation read"),
+                &StatusRead::Missing,
+                |_| panic!("no rollback ownership probe"),
+                |_, _| panic!("no rollback ACK"),
+                |_| proof,
+                || panic!("wrong or incomplete proof must not install"),
+            );
+            assert_eq!(result.is_err(), expected_error);
+            if let Ok(released) = result {
+                assert!(!released);
+            }
+            assert!(guard.blocker().load(Ordering::Acquire));
+            guard.start_normal_daemon(|| panic!("pending rollback cannot enter normal startup"));
+        }
     }
 }

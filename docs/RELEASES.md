@@ -53,6 +53,9 @@ the same PID across fresh advancing heartbeat observations. A pending successor
 with a mismatched daemon refuses startup without spawning a privileged installer;
 the watchdog restores the previous application. Coordinated replacement of both
 daemon and app still needs implementation and public qualification.
+In updated clients, a restored rollback app also waits for the watchdog's lock,
+terminal cleanup and exact old-app receipt before resuming daemon installation.
+It emits no successor ACK. Existing published clients retain their old behavior.
 The journal and user LaunchAgent are owner-private,
 restart-safe, and removed only after a terminal acknowledgement or recorded
 rollback; neither path uses `open` or activates the app.

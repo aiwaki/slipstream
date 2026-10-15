@@ -137,6 +137,11 @@ watchdog has committed and its rollback state is gone under the transaction lock
 The rollback launch retains the legacy transaction marker for older clients and
 provides a validated, persistent rollback receipt for newer clients, so removing
 the active journal cannot turn a valid rollback into an invalid successor.
+The restored app keeps its mutation guard until the same watchdog lock is free,
+transaction files are removed and the retained receipt proves OldRelaunched with
+the exact old app identity. Only then may ordinary daemon installation resume,
+once; rollback never sends a successor ACK. This also prevents stale daemon
+attestation from starting an installer during rollback cleanup.
 
 This repair refuses an update when the installed daemon does not match; it does
 not yet coordinate replacement of both daemon and app. The source tests and

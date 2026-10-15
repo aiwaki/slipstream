@@ -3365,10 +3365,12 @@ pub fn run() {
                         )
                     })
             };
-            let pending_daemon_guard = SuccessorDaemonGuard::prepare(pending_update_ack, || {
-                bundled_daemon_path(app.handle())
-                    .and_then(|bundled| daemon_install_attestation(&bundled))
-            })
+            let pending_daemon_guard = SuccessorDaemonGuard::prepare(
+                pending_update_ack,
+                updater_transaction::PendingSuccessorAck::needs_daemon_ack,
+                || bundled_daemon_path(app.handle())
+                    .and_then(|bundled| daemon_install_attestation(&bundled)),
+            )
             .map_err(std::io::Error::other)?;
             let pending_daemon_actions = pending_daemon_guard.blocker();
             let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire);
@@ -3774,10 +3776,11 @@ pub fn run() {
                         &status_read,
                         daemon_pid_owned,
                         updater_transaction::acknowledge_successor,
-                        |context| updater_transaction::successor_transaction_committed(
+                        |context| updater_transaction::startup_transaction_finished(
                             context,
                             &app_handle.package_info().version.to_string(),
                         ),
+                        || ensure_daemon_installed(&app_handle),
                     ) {
                         Ok(true) => {
                             let _ = restart_item.set_enabled(true);
@@ -4207,7 +4210,16 @@ v0.1.9-preview.25/Slipstream.app.tar.gz";
             "if !pending_daemon_actions.load(Ordering::Acquire) && should_recover_daemon("
         ));
         assert!(run.contains("while pending_daemon_discovery.load(Ordering::Acquire)"));
-        assert!(run.contains("updater_transaction::successor_transaction_committed("));
+        assert!(run.contains("updater_transaction::PendingSuccessorAck::needs_daemon_ack"));
+        let poll = &run[run.find("match pending_daemon_guard.poll(").unwrap()..];
+        let finished = poll
+            .find("updater_transaction::startup_transaction_finished(")
+            .unwrap();
+        let install = poll
+            .find("|| ensure_daemon_installed(&app_handle)")
+            .unwrap();
+        let enable = poll.find("restart_item.set_enabled(true)").unwrap();
+        assert!(finished < install && install < enable);
     }
 
     #[test]

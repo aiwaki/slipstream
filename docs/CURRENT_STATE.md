@@ -27,20 +27,28 @@ because no offer appeared; cleanup passed. Public upgrade/rollback remains
 unqualified; use the published DMG. Evidence and separate source diagnosis are
 in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#a-new-version-notification-does-not-appear).
 
-Current branch `codex/updater-daemon-identity` starts at merged PR391 in
-`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-It repairs pending-successor startup and daemon ACK identity. A mismatched
-installed daemon must cause rollback before any privileged installer starts;
-healthy status alone must not acknowledge the update. Privileged mutation stays
-blocked until the watchdog finishes commit. This is a safe refusal boundary,
-not coordinated application-and-daemon update support.
+[PR392](https://github.com/aiwaki/slipstream/pull/392), branch
+`codex/updater-daemon-identity`, uses the attached `readme-humanizer` worktree.
+Initial head `0da43bbdfda3aa1314c75f6258e7e822c8f3524b` passed CI38774174406
+and audit38774174523, including 163 app tests (37 focused) and packaged checks.
+Review then found an early daemon-install race in restored-app startup; those
+checks do not qualify the correction below.
 
-Rollback must retain compatibility with old clients and survive removal of the
-active journal. Simply clearing the legacy transaction environment is unsafe:
-the old client can see the watchdog lock and exit before cleanup. A separate
-validated rollback receipt is used; no public pair is qualified.
-No local Rust build or workstation mutation. Focused evidence goes in
-`output/updater-daemon-identity/`; unchanged `.24` release checks are reused.
+Pending successors require exact bundled-daemon attestation before any installer,
+and an advancing heartbeat from the same owned PID before ACK. Both successor
+and restored rollback apps block privileged mutation until the watchdog releases
+its lock and completes cleanup. Rollback requires the retained nonce-bound
+OldRelaunched receipt and exact old app identity, emits no successor ACK, and
+resumes normal daemon installation once. Legacy transaction markers remain for
+compatibility; immutable published clients do not gain the new guard.
+
+Independent review of the follow-up source passed; fresh exact-head CI is next.
+Review receipt: `output/updater-daemon-identity/independent-review-rollback-followup.json`,
+SHA256 `b83df0f6989e356c5339b8b6d1e3c5b758d488afebe23c8b7b8484152bae6d82`.
+Prior-head CI receipt: `output/updater-daemon-identity/ci-0da43/final-ci-receipt.json`,
+SHA256 `55ee5acd6f1d2d75097a115f07b7ff1d55ab40dba572b034401cc955d868c662`.
+No local Rust build or workstation mutation. This safe refusal/rollback guard
+is not coordinated app-and-daemon replacement or public updater qualification.
 
 | Milestone | Current boundary |
 |---|---|

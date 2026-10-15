@@ -110,6 +110,7 @@ pub struct PreparedTransaction {
 
 #[derive(Clone, Debug)]
 pub struct PendingSuccessorAck {
+    mode: StartupTransactionMode,
     journal_path: PathBuf,
     ack_path: PathBuf,
     nonce: String,
@@ -121,6 +122,18 @@ pub struct PendingSuccessorAck {
     version: String,
     executable_sha256: String,
     ack_written: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupTransactionMode {
+    Successor,
+    Rollback,
+}
+
+impl PendingSuccessorAck {
+    pub fn needs_daemon_ack(&self) -> bool {
+        self.mode == StartupTransactionMode::Successor
+    }
 }
 
 fn unix_now() -> u64 {
@@ -1672,38 +1685,24 @@ fn pending_successor_ack_at(
         return Ok(None);
     };
     if let Some(receipt_path) = rollback_receipt {
-        let state_dir = journal_path
-            .parent()
-            .ok_or_else(|| "rollback transaction parent is missing".to_string())?;
-        if !journal_path.is_absolute()
-            || state_dir
-                .canonicalize()
-                .map_err(|error| error.to_string())?
-                != state_dir
-        {
-            return Err("rollback transaction path is not canonical".into());
-        }
-        ensure_user_directory(state_dir, true)?;
-        if receipt_path.parent() != Some(state_dir) {
-            return Err("rollback receipt is outside its transaction directory".into());
-        }
-        let receipt: UpdateJournalV1 =
-            serde_json::from_slice(&read_private_file(receipt_path, MAX_JOURNAL_BYTES)?)
-                .map_err(|error| format!("rollback receipt is invalid: {error}"))?;
-        validate_journal(journal_path, &receipt)?;
-        if receipt_path != failed_receipt_path(journal_path, &receipt.nonce)
-            || !matches!(
-                receipt.phase,
-                TransactionPhase::RolledBack | TransactionPhase::OldRelaunched
-            )
-            || receipt.current_version != current_version
-            || derive_target(current_exe)? != receipt.target
-            || sha256_file(current_exe)? != receipt.old_executable_sha256
-            || bundle_version(&receipt.target)? != receipt.current_version
-        {
-            return Err("running rollback does not match its retained transaction".into());
-        }
-        return Ok(None);
+        let receipt =
+            read_valid_rollback_receipt(journal_path, receipt_path, current_exe, current_version)?;
+        // New clients keep a rollback guard until the watchdog has finished.
+        // Published legacy clients ignore ROLLBACK_ENV and retain their old behavior.
+        return Ok(Some(PendingSuccessorAck {
+            mode: StartupTransactionMode::Rollback,
+            journal_path: journal_path.to_path_buf(),
+            ack_path: ack_path(journal_path),
+            nonce: receipt.nonce,
+            uid: receipt.uid,
+            target: receipt.target,
+            backup: receipt.backup,
+            stage: receipt.stage,
+            launch_agent: receipt.launch_agent,
+            version: receipt.current_version,
+            executable_sha256: receipt.old_executable_sha256,
+            ack_written: false,
+        }));
     }
     let journal_path = journal_path.to_path_buf();
     let mut journal = read_journal(&journal_path)?;
@@ -1731,6 +1730,7 @@ fn pending_successor_ack_at(
         return Err("running successor does not match its update transaction".into());
     }
     Ok(Some(PendingSuccessorAck {
+        mode: StartupTransactionMode::Successor,
         ack_path: ack_path(&journal_path),
         journal_path,
         nonce: journal.nonce,
@@ -1745,10 +1745,53 @@ fn pending_successor_ack_at(
     }))
 }
 
+fn read_valid_rollback_receipt(
+    journal_path: &Path,
+    receipt_path: &Path,
+    current_exe: &Path,
+    current_version: &str,
+) -> Result<UpdateJournalV1, String> {
+    let state_dir = journal_path
+        .parent()
+        .ok_or_else(|| "rollback transaction parent is missing".to_string())?;
+    if !journal_path.is_absolute()
+        || state_dir
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+            != state_dir
+    {
+        return Err("rollback transaction path is not canonical".into());
+    }
+    ensure_user_directory(state_dir, true)?;
+    if receipt_path.parent() != Some(state_dir) {
+        return Err("rollback receipt is outside its transaction directory".into());
+    }
+    let receipt: UpdateJournalV1 =
+        serde_json::from_slice(&read_private_file(receipt_path, MAX_JOURNAL_BYTES)?)
+            .map_err(|error| format!("rollback receipt is invalid: {error}"))?;
+    validate_journal(journal_path, &receipt)?;
+    if receipt_path != failed_receipt_path(journal_path, &receipt.nonce)
+        || !matches!(
+            receipt.phase,
+            TransactionPhase::RolledBack | TransactionPhase::OldRelaunched
+        )
+        || receipt.current_version != current_version
+        || derive_target(current_exe)? != receipt.target
+        || sha256_file(current_exe)? != receipt.old_executable_sha256
+        || bundle_version(&receipt.target)? != receipt.current_version
+    {
+        return Err("running rollback does not match its retained transaction".into());
+    }
+    Ok(receipt)
+}
+
 pub fn acknowledge_successor(
     context: &mut PendingSuccessorAck,
     heartbeat_seq: u64,
 ) -> Result<(), String> {
+    if !context.needs_daemon_ack() {
+        return Err("rollback startup cannot acknowledge a successor".into());
+    }
     if heartbeat_seq == 0 {
         return Err("successor acknowledgement requires a fresh daemon heartbeat".into());
     }
@@ -1778,24 +1821,23 @@ pub fn acknowledge_successor(
     Ok(())
 }
 
-/// ACK is only a request to commit. Release the successor's mutation guard
-/// after the same watchdog lock and exact terminal filesystem state prove that
-/// the acknowledged new bundle survived cleanup, rather than a rollback.
-pub fn successor_transaction_committed(
+/// Keep both successor and rollback startup guarded until the watchdog releases
+/// its lock and the exact app identity and terminal cleanup are proven.
+pub fn startup_transaction_finished(
     context: &PendingSuccessorAck,
     current_version: &str,
 ) -> Result<bool, String> {
     let current_exe = std::env::current_exe()
-        .map_err(|error| format!("cannot identify committed successor: {error}"))?;
-    successor_transaction_committed_at(context, &current_exe, current_version)
+        .map_err(|error| format!("cannot identify transaction startup: {error}"))?;
+    startup_transaction_finished_at(context, &current_exe, current_version)
 }
 
-fn successor_transaction_committed_at(
+fn startup_transaction_finished_at(
     context: &PendingSuccessorAck,
     current_exe: &Path,
     current_version: &str,
 ) -> Result<bool, String> {
-    if !context.ack_written {
+    if context.needs_daemon_ack() && !context.ack_written {
         return Ok(false);
     }
     let state_dir = context
@@ -1813,7 +1855,6 @@ fn successor_transaction_committed_at(
         &context.backup,
         &context.stage,
         &context.launch_agent,
-        &failed,
     ] {
         match fs::symlink_metadata(path) {
             Ok(_) => return Ok(false),
@@ -1823,13 +1864,41 @@ fn successor_transaction_committed_at(
             }
         }
     }
+    if context.needs_daemon_ack() {
+        match fs::symlink_metadata(&failed) {
+            Ok(_) => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("cannot inspect failed update receipt: {error}")),
+        }
+    } else {
+        let receipt = read_valid_rollback_receipt(
+            &context.journal_path,
+            &failed,
+            current_exe,
+            current_version,
+        )?;
+        if receipt.phase != TransactionPhase::OldRelaunched {
+            return Ok(false);
+        }
+        if receipt.nonce != context.nonce
+            || receipt.uid != context.uid
+            || receipt.target != context.target
+            || receipt.backup != context.backup
+            || receipt.stage != context.stage
+            || receipt.launch_agent != context.launch_agent
+            || receipt.current_version != context.version
+            || receipt.old_executable_sha256 != context.executable_sha256
+        {
+            return Err("rollback receipt changed before startup guard release".into());
+        }
+    }
     if context.uid != current_uid()
         || context.version != current_version
         || derive_target(current_exe)? != context.target
         || sha256_file(current_exe)? != context.executable_sha256
         || bundle_version(&context.target)? != context.version
     {
-        return Err("committed successor identity changed".into());
+        return Err("finished transaction app identity changed".into());
     }
     Ok(true)
 }
@@ -1889,6 +1958,7 @@ mod tests {
 
     fn successor_context(path: &Path, journal: &UpdateJournalV1) -> PendingSuccessorAck {
         PendingSuccessorAck {
+            mode: StartupTransactionMode::Successor,
             journal_path: path.to_path_buf(),
             ack_path: ack_path(path),
             nonce: journal.nonce.clone(),
@@ -1989,7 +2059,7 @@ mod tests {
         acknowledge_successor(&mut context, 7).unwrap();
         let expected_version = value.expected_version.clone();
         let committed = |context: &PendingSuccessorAck| {
-            successor_transaction_committed_at(context, &current_exe, &expected_version)
+            startup_transaction_finished_at(context, &current_exe, &expected_version)
         };
         assert!(!committed(&context).unwrap(), "ACK alone is not commit");
         let watchdog_lock = try_transaction_lock(path.parent().unwrap())
@@ -2008,9 +2078,7 @@ mod tests {
             assert!(!committed(&context).unwrap());
             fs::remove_file(residue).unwrap();
         }
-        assert!(
-            successor_transaction_committed_at(&context, &current_exe, "wrong-version").is_err()
-        );
+        assert!(startup_transaction_finished_at(&context, &current_exe, "wrong-version").is_err());
         fs::write(&current_exe, b"changed").unwrap();
         assert!(committed(&context).is_err());
     }
@@ -2033,16 +2101,14 @@ mod tests {
         assert!(!context.backup.exists());
         assert!(!context.stage.exists());
         assert!(
-            !successor_transaction_committed_at(&context, &current_exe, &context.version).unwrap()
+            !startup_transaction_finished_at(&context, &current_exe, &context.version).unwrap()
         );
         fs::remove_file(path.with_file_name(format!(
             "app-update-transaction-failed-{}.json",
             context.nonce
         )))
         .unwrap();
-        assert!(
-            successor_transaction_committed_at(&context, &current_exe, &context.version).is_err()
-        );
+        assert!(startup_transaction_finished_at(&context, &current_exe, &context.version).is_err());
     }
 
     #[test]
@@ -2117,9 +2183,12 @@ mod tests {
         bundle_metadata(&value.backup, &value.current_version);
         value.phase = TransactionPhase::SuccessorLaunched;
         value.successor_deadline_unix = Some(unix_now().saturating_sub(1));
+        fs::create_dir_all(value.launch_agent.parent().unwrap()).unwrap();
+        fs::write(&value.launch_agent, b"owned watchdog").unwrap();
         write_journal(&path, &value).unwrap();
 
         let relaunches = Cell::new(0usize);
+        let rollback_context = RefCell::new(None);
         let expected_target = value.target.clone();
         let expected_nonce = value.nonce.clone();
         let old_version = value.current_version.clone();
@@ -2157,14 +2226,24 @@ mod tests {
                     .map(|(_, value)| value),
                 Some(Some(receipt_path.as_os_str()))
             );
-            assert!(pending_successor_ack_at(
+            let mut context = pending_successor_ack_at(
                 Path::new(command.get_program()),
                 &old_version,
                 Some(journal_path),
-                Some(&receipt_path)
+                Some(&receipt_path),
             )
             .unwrap()
-            .is_none());
+            .unwrap();
+            assert!(!context.needs_daemon_ack());
+            assert!(acknowledge_successor(&mut context, 7).is_err());
+            assert!(!context.ack_path.exists());
+            assert!(!startup_transaction_finished_at(
+                &context,
+                Path::new(command.get_program()),
+                &old_version,
+            )
+            .unwrap());
+            *rollback_context.borrow_mut() = Some(context);
             Ok(())
         };
         rollback_impl_with_relaunch(&path, &mut value, false, &mut relaunch).unwrap();
@@ -2172,14 +2251,28 @@ mod tests {
         assert_eq!(relaunches.get(), 1);
         assert_eq!(value.phase, TransactionPhase::OldRelaunched);
         assert!(!path.exists());
-        assert!(pending_successor_ack_at(
-            &bundle_executable(&value.target),
-            &value.current_version,
-            Some(&path),
-            Some(&failed_receipt_path(&path, &value.nonce))
-        )
-        .unwrap()
-        .is_none());
+        let context = rollback_context.into_inner().unwrap();
+        let current_exe = bundle_executable(&value.target);
+        let finished =
+            || startup_transaction_finished_at(&context, &current_exe, &value.current_version);
+        assert!(
+            !finished().unwrap(),
+            "cleanup alone cannot bypass the watchdog lock"
+        );
+        drop(_watchdog_lock);
+        assert!(finished().unwrap());
+        for residue in [
+            &context.journal_path,
+            &context.ack_path,
+            &context.backup,
+            &context.stage,
+            &context.launch_agent,
+        ] {
+            fs::write(residue, b"partial cleanup").unwrap();
+            assert!(!finished().unwrap(), "rollback cleanup is incomplete");
+            fs::remove_file(residue).unwrap();
+        }
+        assert!(finished().unwrap());
     }
 
     #[test]
@@ -2216,7 +2309,7 @@ mod tests {
             );
         }
         write_private_atomic(&receipt_path, &serde_json::to_vec(&value).unwrap()).unwrap();
-        assert!(validate().unwrap().is_none());
+        assert!(!validate().unwrap().unwrap().needs_daemon_ack());
         assert!(pending_successor_ack_at(
             &current_exe,
             &value.current_version,
@@ -2238,6 +2331,62 @@ mod tests {
         write_private_atomic(&other, &serde_json::to_vec(&value).unwrap()).unwrap();
         symlink(&other, &receipt_path).unwrap();
         assert!(validate().is_err());
+    }
+
+    #[test]
+    fn rollback_guard_revalidates_terminal_receipt_and_old_identity() {
+        let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let (path, mut value) = journal(root.path());
+        value.old_executable_sha256 = executable(&value.target, b"old");
+        bundle_metadata(&value.target, &value.current_version);
+        value.phase = TransactionPhase::OldRelaunched;
+        let receipt_path = failed_receipt_path(&path, &value.nonce);
+        write_private_atomic(&receipt_path, &serde_json::to_vec(&value).unwrap()).unwrap();
+        let current_exe = bundle_executable(&value.target);
+        let mut context = pending_successor_ack_at(
+            &current_exe,
+            &value.current_version,
+            Some(&path),
+            Some(&receipt_path),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!context.needs_daemon_ack());
+        assert!(acknowledge_successor(&mut context, 7).is_err());
+        assert!(!context.ack_written);
+        assert!(!context.ack_path.exists());
+        let finished =
+            || startup_transaction_finished_at(&context, &current_exe, &value.current_version);
+        assert!(finished().unwrap());
+        let mut incomplete = value.clone();
+        incomplete.phase = TransactionPhase::RolledBack;
+        write_private_atomic(&receipt_path, &serde_json::to_vec(&incomplete).unwrap()).unwrap();
+        assert!(!finished().unwrap(), "old app launch is not yet durable");
+        for changed in 0..5 {
+            let mut receipt = value.clone();
+            match changed {
+                0 => receipt.nonce = "b".repeat(32),
+                1 => receipt.uid = receipt.uid.wrapping_add(1),
+                2 => receipt.current_version = "0.1.9-preview.99".into(),
+                3 => receipt.old_executable_sha256 = "f".repeat(64),
+                _ => {
+                    receipt.launch_agent = root
+                        .path()
+                        .join("other/dev.slipstream.update-watchdog.plist")
+                }
+            }
+            write_private_atomic(&receipt_path, &serde_json::to_vec(&receipt).unwrap()).unwrap();
+            assert!(
+                finished().is_err(),
+                "accepted changed terminal receipt field {changed}"
+            );
+        }
+        write_private_atomic(&receipt_path, &serde_json::to_vec(&value).unwrap()).unwrap();
+        fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(finished().is_err());
+        fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&current_exe, b"different old executable").unwrap();
+        assert!(finished().is_err());
     }
 
     #[test]
