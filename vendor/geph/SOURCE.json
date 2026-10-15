@@ -8,7 +8,7 @@
   "features": [
     "aws_lambda"
   ],
-  "lock_sha256": "dc8ec61a122d3b868265ee4cd67e6bae4f118f96570755173211887179dfd979",
+  "lock_sha256": "5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d",
   "release_revision": 1,
   "schema_version": 1,
   "source_edits": [

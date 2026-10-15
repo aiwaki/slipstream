@@ -1,11 +1,45 @@
 # Routing Research Notes
 
-Updated: 2026-10-13
+Updated: 2026-10-15
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
 
 ## Findings Index
+
+### Rustls security update — 2026-10-15
+
+The same Geph graph that previously reported two blocking RSA findings now
+reports four additional rustls findings. Exact CI head `e44f57042` retained
+unchanged SOURCE, lock and policies relative to `ebdf6b8bd`; the database gained
+[RUSTSEC-2026-0346](https://rustsec.org/advisories/RUSTSEC-2026-0346.html),
+[0347](https://rustsec.org/advisories/RUSTSEC-2026-0347.html),
+[0348](https://rustsec.org/advisories/RUSTSEC-2026-0348.html) and
+[0349](https://rustsec.org/advisories/RUSTSEC-2026-0349.html) on 14 October.
+The official [rustls0.23.46 release](https://github.com/rustls/rustls/releases/tag/v%2F0.23.46)
+identifies fixes for all four. These audit results do not establish that any
+reported connection interruption was caused by those vulnerabilities.
+
+The application and Geph locks now select0.23.46. Exact crates.io metadata and
+published archive agree on SHA256
+`48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf`.
+Compared with0.23.45, the normalized manifest changes only its package version;
+dependencies, features, edition and MSRV remain identical. Both parsed lock
+changes are limited to the rustls version/checksum; the Geph SOURCE lock digest
+is updated without changing source edits, target/features or release revision.
+Locked/offline metadata accepts both Apple targets with the same active rustls
+features (`ring`, `std`, `tls12`). This is resolution evidence, not compilation
+or installed-runtime qualification.
+
+One primary metadata inconsistency is retained explicitly: the ECH GitHub
+advisory lists no patched version while RustSec specifies0.23.46. The published
+0.23.46 source confirms that ECH rejection is checked before `start_traffic()`,
+which prevents the buffered application data path described by that advisory.
+No version-only dismissal or exception is used. The CI bootstrap exemption
+remains unchanged; ordinary packaged gates and fresh SOURCE-bound audit evidence
+are still required. Retained sources, archive, manifest/source diff and independent
+pin review: `output/rustls-new-advisories-20261015/`; canonical source/metadata
+checks: `output/rustls-pin-repair-20261015/` in the dedicated Geph worktree.
 
 ### Geph native SQLite contract — 2026-10-13
 

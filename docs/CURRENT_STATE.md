@@ -1,30 +1,49 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
-- Resumed by the user, 2026-10-15. Main a24fd398c is merged; current Russian/
-  English READMEs and roadmap are preserved. The checkpoint-only conflict is
-  resolved by retaining the main publication notes as historical below.
-  Source-owned workflow integration3399e9d7c is published in PR384. Bridge baseline5cd158262 contains the source-owned
-  audit validation; its unchanged82-test baseline is retained. Immutable transport
-  and workflow wiring are implemented and reviewed; scoped verification passed.
-  The optional source-review archive is bound to SOURCE/review policy, release
-  checksums/API digests and attestations. Consumers fetch tag policy before
-  unpack, then verify semantic audit evidence; producer verifies/packs the
-  retained snapshot. Native/source-owned/combined/legacy paths remain separate.
-  Independent review found a macOS Bash3 empty-array/set-u failure; fixed with
-  nonempty verify arguments. Bundle/release63 unique tests PASS, consumer5 tests
-  (17 controlled Bash scenarios) PASS; all57 BuildConfig methods PASS in
-  disjoint runs, including45 producer and38 existing-release Bash scenarios.
-  Actionlint3 workflows and docs8 PASS. No unchanged broad suite was rerun.
-  Evidence: output/source-owned-bundle-review-20261015/receipt.json and
-  output/source-owned-workflow-integration-20261015/. The transport checks bytes,
-  not reviewer correctness; synthetic CLIs do not qualify an actual release.
-  Production SOURCE/policy and installed app are unchanged. Before this slice,
-  PR384 remote was ebdf6b8bd (OPEN/CONFLICTING; existing audit/package failures).
-  Next reconcile PR384 with main, finish actual SOURCE-owned/native applicability
-  assessment and bind the auth fix into the exact candidate. Then run the real
-  scanner/build and release gates; neither plumbing tests nor the retained
-  harness authorize production activation. PR386 remains OPEN at4360003ca;
-  main remains a24fd398c (README PR387). All owned test/build processes finished.
+- Current repair, 2026-10-15: both app and Geph locks now pin rustls0.23.46
+  (registry/archive SHA25648e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf).
+  RUSTSEC-2026-0346/0347/0348/0349 were published after the previous retained
+  advisory scan; official release and exact published source confirm the fix.
+  Both parsed locks differ only in rustls version/checksum; SOURCE changes only
+  lock_sha256 (5ee1bccd). All other dependencies, source edits and policy remain
+  unchanged. Independent pin review, canonical source/archive verification and
+  locked/offline Cargo metadata for both Apple targets PASS. The bootstrap
+  exemption is not expanded; ordinary packaged qualification still applies.
+  Evidence: output/rustls-new-advisories-20261015/ and
+  output/rustls-pin-repair-20261015/. Next inspect the new exact-head audit;
+  no app build, installation or browser qualification has been performed.
+
+- Reusable exact-head CI baseline: PR384 e44f57042, tested mergefc8d67f1,
+  CI38698839023 and audit38698838815 (attempt1), terminal failures. Product,
+  Windows and Chromium contract jobs PASS; release metadata900 tests PASS in
+  130.464s. Package fails on unpublished geph-vendor-0.4.3-r1 HTTP404 and
+  lifecycle fails downstream. App audit rejects unchanged expired Chromium
+  integrity-only policy. Geph6 blocking+2informational/423packages comprised
+  the2 known RSA findings and4 new rustls findings above. SOURCE/lock/policies
+  matched ebdf6b8bd; no source-owned/native lane had been activated. Actual
+  failing Geph audit uploaded retained diagnostics successfully. Parent verified
+  all26 receipt files: output/source-owned-workflow-integration-20261015/
+  ci-e44f57042/receipt.json. Reuse unaffected tests; do not rerun this old head.
+
+- Actual source-owned preparation now passes its bounded semantic helper:
+  SOURCEa94d4c1d,3packages/20files,2 exact ancestor archives,0 inherited findings
+  in retained OSV2026-10-13. Parent rechecked all399 input bindings; SPDX has
+  407registry+3owned+root. Evidence: output/source-owned-actual-candidate-20261015/
+  (receiptb9068849, revieweea5c5f5). This is output-only package review, not a
+  full scanner/build/release result; source_commit identifies the audit checkout,
+  not a committed candidate. Root auth regression uses a different harness lock.
+  Native31 adjudicated/61unknown remains FAIL; a new recent-CVE review and
+  combined auth/source-owned/native/rustls candidate preparation are in progress.
+  Combined SOURCE needs fresh binding, metadata, build and both audit layers;
+  previous native binary evidence cannot be relabelled for it.
+
+- Source-owned workflow3399e9d7c and main mergee44f57042 are published in PR384.
+  Bridge82, bundle/release63, BuildConfig57 (45producer+38existing-release
+  scenarios), consumers5 (17scenarios), docs8/actionlint3 remain reusable green
+  focused baselines. Transport validates evidence bytes, not reviewer correctness.
+  PR386 remains open at4360003ca; maina24fd398c contains README PR387. Policies,
+  installed app and services are unchanged; no license issue was sent. Finish
+  actual dependency/applicability and combined qualification before publication.
 
 - Auth-expiry regression, 2026-10-15: actual Rust old RED2/PASS1, fixed PASS3;
   offline/jobs1, peak925MiB, no surviving owned processes. Receipt:
