@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import stat
 import tempfile
 import unittest
 import zipfile
@@ -73,6 +75,106 @@ class ChromiumHeadlessShellMaterializationTests(unittest.TestCase):
             self.assertEqual(
                 json.loads((output / "manifest.json").read_text()), result
             )
+
+    def test_materialized_resources_survive_root_ownership_and_restrictive_umask(self) -> None:
+        for mask in (0o022, 0o077):
+            with self.subTest(umask=oct(mask)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / "runtime.zip"
+                self._archive(archive)
+                with zipfile.ZipFile(archive, "a") as bundle:
+                    for name, system, mode, payload in (
+                        ("helpers/observer", 3, 0o104777, b"#!/bin/sh\nexit 0\n"),
+                        ("helpers/data", 3, 0o106666, b"resource"),
+                        ("helpers/non-unix", 0, 0o100777, b"data"),
+                    ):
+                        entry = zipfile.ZipInfo("chrome-headless-shell-mac-arm64/" + name)
+                        entry.create_system = system
+                        entry.external_attr = mode << 16
+                        bundle.writestr(entry, payload)
+                source = materialize.load_source()
+                source["archive"]["length"] = archive.stat().st_size
+                source["archive"]["sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+                output = root / "runtime"
+                previous_umask = os.umask(mask)
+                try:
+                    with mock.patch.object(materialize, "load_source", return_value=source):
+                        manifest = materialize.materialize(output, archive)
+                finally:
+                    os.umask(previous_umask)
+
+                expected = {
+                    ".": 0o755,
+                    "chrome-headless-shell": 0o755,
+                    "LICENSE.headless_shell": 0o644,
+                    "ABOUT": 0o644,
+                    "helpers": 0o755,
+                    "helpers/observer": 0o755,
+                    "helpers/data": 0o644,
+                    "helpers/non-unix": 0o644,
+                    "manifest.json": 0o644,
+                }
+                self.assertEqual(
+                    {name: stat.S_IMODE((output / name).stat().st_mode) for name in expected},
+                    expected,
+                )
+                self.assertEqual((output / "helpers/observer").read_bytes(), b"#!/bin/sh\nexit 0\n")
+                self.assertEqual((output / "helpers/data").read_bytes(), b"resource")
+                self.assertEqual(json.loads((output / "manifest.json").read_text()), manifest)
+
+    def test_permission_verifier_rejects_cross_owner_and_unsafe_modes_without_repair(self) -> None:
+        for name, mode in (
+            (".", 0o700),
+            ("chrome-headless-shell", 0o744),
+            ("LICENSE.headless_shell", 0o600),
+            ("helpers", 0o700),
+            ("helpers/observer", 0o744),
+            ("manifest.json", 0o600),
+            ("chrome-headless-shell", 0o775),
+            ("chrome-headless-shell", 0o4755),
+        ):
+            with self.subTest(path=name, mode=oct(mode)), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "runtime"
+                (output / "helpers").mkdir(parents=True)
+                for directory in (output, output / "helpers"):
+                    directory.chmod(0o755)
+                for filename in ("chrome-headless-shell", "LICENSE.headless_shell", "helpers/observer", "manifest.json"):
+                    path = output / filename
+                    path.write_bytes(b"fixture")
+                    path.chmod(0o755 if filename in ("chrome-headless-shell", "helpers/observer") else 0o644)
+                materialize._verify_runtime_permissions(output)
+                target = output / name
+                target.chmod(mode)
+                if name == "chrome-headless-shell" and mode == 0o744:
+                    self.assertTrue(os.access(target, os.X_OK))
+                with self.assertRaisesRegex(ValueError, "unsafe permissions|after root ownership"):
+                    materialize._verify_runtime_permissions(output)
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), mode)
+
+    def test_permission_check_precedes_output_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "runtime.zip"
+            digest = self._archive(archive)
+            source = materialize.load_source()
+            source["archive"].update(length=archive.stat().st_size, sha256=digest)
+            output = root / "runtime"
+            output.mkdir()
+            (output / "retained").write_bytes(b"existing runtime")
+
+            def reject_inaccessible_manifest(staged: Path) -> None:
+                (staged / "manifest.json").chmod(0o600)
+                verify_permissions(staged)
+
+            verify_permissions = materialize._verify_runtime_permissions
+            with (
+                mock.patch.object(materialize, "load_source", return_value=source),
+                mock.patch.object(materialize, "_verify_runtime_permissions", side_effect=reject_inaccessible_manifest),
+                self.assertRaisesRegex(ValueError, "after root ownership: manifest.json"),
+            ):
+                materialize.materialize(output, archive)
+            self.assertEqual((output / "retained").read_bytes(), b"existing runtime")
+            self.assertEqual(list(output.iterdir()), [output / "retained"])
 
     def test_rejects_archive_digest_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

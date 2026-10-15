@@ -11,14 +11,26 @@ publisher guard prevented a new version. This change advances VERSION and the
 six synchronized metadata files, then moves the publisher's exact guard/default
 to24. The historical `.23` repair override keeps its pinned identities and is
 explicitly rejected for `.24`. Dependency graphs, routing and Geph SOURCE/lock
-are unchanged. README installation links already select the latest Slipstream
+are unchanged. Before publication, code comparison identified the known
+root-install Chromium permission defect still present on this release branch:
+ZIP extraction plus owner-execute produced0744 (0700 under umask077). The
+minimal55fd57a repair is now carried here: runtime directories/executables0755,
+data/manifest0644, and a read-only packaged-browser prelaunch permission gate.
+This does not port the deferred root verifier or change routing. README installation links already select the latest Slipstream
 release without embedding a version; internal Geph builds are distinguished.
 
 Validation: `sync_version.py --check`,10 appcast/candidate tests,5 focused
 publisher contracts and4 actual shell guard cases pass. Parsed Cargo/npm locks
 prove only the app self-version changed; Geph SOURCE/lock remain identical.
+Permission follow-up:9 materializer tests and50 packaged-browser smoke tests
+pass, including rejection before any launch and no repair of a sealed bundle.
+The previous materializer fails the new umask022/077 regression. The real pinned
+archive under umask077 changes from directories/executable0700 and data0600 to
+0755/0644 with identical manifest and binary digest. A separate raw unsigned
+--version probe timed out after15s; no successful local launch or installed
+qualification is claimed. Evidence: output/preview24-permissions/.
 No local app/compiler build or broad suite was run. Ordinary product/package
-CI applies to this version change; the source-bootstrap exception does not.
+CI applies; the source-bootstrap exception does not.
 
 Reusable predecessor evidence:
 - PR388 final head`4cea4aa7e` passed CI`38729673798` and audit`38729673740`.
@@ -32,14 +44,23 @@ Reusable predecessor evidence:
 - Main producer`38730359017` SUCCESS published`geph-vendor-0.4.3-r1` at
   2026-10-15T12:02:16Z, release413759913, exact tag/main`2a6c550a7` and8assets.
   Binary SHA`71da4448d36ad63aef635a6537548610bd66201a70128c51d81c4144351b23e0`.
-  Canonical downloaded-asset/attestation verification is being finalized.
+  Canonical downloaded-asset/attestation verification PASS; parent rehashed
+  all62 retained files, receipt7ea2e199debb59b0bd83105d014ae901821fe57d07a7472334df42cbc120e7d1.
+  GitHub immutable:false; a verified signed snapshot is not a claim of
+  platform-enforced immutable publication.
 - Main audit`38730359046` SUCCESS. Main CI`38730358818` failed only because
   packaging fetched Geph before publication (404); product/Chromium checks pass.
   Do not rerun that old-version candidate merely for reassurance: `.24` needs
   its own exact-source package and qualification. Logs: `output/main-2a6c550a7/`.
 
-Next: open and qualify the preview24 PR using the now-published unchanged Geph
-artifact, merge normally, then qualify its exact main candidate and publish.
+PR389 is open at ecba4814c8edec0d3434fd25f59c2213de2e29bd before the
+permission follow-up. CI38732650718 and audit38732650992 SUCCESS are the reusable
+version-bump baseline, including packaging, browser and lifecycle. Parent
+verified19 retained evidence files; receiptdfd560f3fa0b24efeaf55be518a412d4f7260161fdf0b27b815e667bc4c204d1.
+Exact current-head CI must qualify the permission fix.
+Next: push the reviewed narrow permission fix to the existing PR389,
+merge normally after required checks/review, then qualify its exact main
+candidate and publish.
 Installed Chrome/Safari/lifecycle and protected readiness gates remain open.
 No new app is installed or published. Native/source-owned migration stays
 deferred; broader pending fixes in PR384/PR386 and root checkout are preserved.
