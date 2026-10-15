@@ -7,6 +7,44 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 ## Findings Index
 
+### RSA client review 2026-10-15
+
+The two exact `rsa 0.8.2` exceptions for CVE-2023-49092 and CVE-2026-21895
+are renewed through 2026-10-22 following a fresh static reachability review of
+Geph 0.4.3. The reviewed inputs are SOURCE SHA-256
+`843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe`
+and Cargo.lock SHA-256
+`5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d`,
+with `aws_lambda` on both Apple targets. No other exception is renewed by this
+decision, and RSA remains in the dependency graph.
+
+The canonical Geph archive and all 13 SOURCE edits were checked by hash. The
+review searched all 41 Rust files and traced the complete RSA reverse-dependency
+closure.
+Five dependency archives matched the lock and the inspected source bytes.
+The client uses public-key parsing, blinding, finalization and verification in
+`auth.rs` and `bw_token.rs`. Broker-protocol, misc-rpc, configuration and RPC/cache
+DTOs provide no caller or deserialization path for RSA private-key operations.
+Private APIs remain in the dependency source; their removal from the binary
+is not claimed.
+
+The retained primary [RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
+describes private-key recovery through observable timing. The client paths
+do not enter private-key signing or decryption. The retained
+[RustCrypto advisory](https://github.com/RustCrypto/RSA/security/advisories/GHSA-9c48-w39g-hm26)
+describes a panic when constructing a private key with a prime equal to one.
+Client DER parsing constructs only `RsaPublicKey`; it does not reach
+`RsaPrivateKey::from_components` or its private-key precomputation.
+
+Evidence and exact input hashes are retained in
+`output/minimal-geph-source-20261015/rsa-reachability.md`. This review used saved
+primary descriptions and ran no compiler, scanner, network or account operation.
+It does not establish constant-time blinding arithmetic, general cryptographic
+safety or installed-artifact behavior. Re-review is required when the source,
+dependencies or client role changes. These exceptions do not require the
+separate native SQLite/source-owned migration. **A fresh CI dependency scan has
+not yet passed; release qualification remains open.**
+
 ### Rustls security update — 2026-10-15
 
 The same Geph graph that previously reported two blocking RSA findings now

@@ -88,7 +88,7 @@ def _is_documentation(path: str) -> bool:
 
 
 APP_LOCK = "app-tauri/src-tauri/Cargo.lock"
-# Reviewed RUSTSEC-2026-0285 migration only. This is not a blanket lockfile
+# Reviewed TLS migrations only. This is not a blanket lockfile
 # exemption: any other dependency, checksum, dependency edge or metadata change
 # must take the ordinary packaged-build path.
 APP_LOCK_REPAIRS = (
@@ -97,21 +97,36 @@ APP_LOCK_REPAIRS = (
     ("rustls-webpki", "0.103.13", "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e",
      "0.103.15", "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"),
 )
+APP_LOCK_REPAIR_SETS = (
+    APP_LOCK_REPAIRS,
+    # RUSTSEC-2026-0346/0347/0348/0349. The previous migration is already on
+    # main; recognize this exact subsequent repair without admitting other
+    # lockfile changes into source bootstrap.
+    (("rustls", "0.23.45", "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
+      "0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),),
+)
 
 
 def reviewed_app_lock_repair(before: str, after: str) -> bool:
     try:
         original, actual = tomllib.loads(before), tomllib.loads(after)
-        expected = copy.deepcopy(original)
-        for name, old, old_hash, new, new_hash in APP_LOCK_REPAIRS:
-            matches = [p for p in expected["package"] if p["name"] == name and p["version"] == old]
-            if len(matches) != 1:
-                return False
-            package = matches[0]
-            if package.get("checksum") != old_hash or package.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
-                return False
-            package.update(version=new, checksum=new_hash)
-        return actual == expected
+        for repairs in APP_LOCK_REPAIR_SETS:
+            expected = copy.deepcopy(original)
+            for name, old, old_hash, new, new_hash in repairs:
+                matches = [p for p in expected["package"] if p["name"] == name and p["version"] == old]
+                if len(matches) != 1:
+                    break
+                package = matches[0]
+                if package.get("checksum") != old_hash or package.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
+                    break
+                if any(p["name"] == name and p["version"] == new
+                       and p.get("source") == package["source"] for p in expected["package"]):
+                    break
+                package.update(version=new, checksum=new_hash)
+            else:
+                if actual == expected:
+                    return True
+        return False
     except (ValueError, KeyError, TypeError):
         return False
 

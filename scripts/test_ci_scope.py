@@ -44,6 +44,43 @@ class CiScopeTests(unittest.TestCase):
         self.assertFalse(ci_scope.classify_paths(paths + ["spike/tproxy.py"],
             event_name="pull_request").geph_bootstrap)
 
+    def test_rustls_0346_repair_preserves_source_bootstrap_boundaries(self):
+        old_hash = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+        new_hash = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
+        before = ('version = 4\n[[package]]\nname="rustls"\nversion="0.23.45"\n'
+                  f'checksum="{old_hash}"\n'
+                  'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                  'dependencies=["ring"]\n[[package]]\nname="unrelated"\nversion="1.0.0"\n')
+        after = before.replace('"0.23.45"', '"0.23.46"').replace(old_hash, new_hash)
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock", ci_scope.APP_LOCK]
+        self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request",
+            app_lock_delta=(before, after)), ci_scope.CiScope(True, True, False))
+        for original, changed in (
+            (before, before), (after, before),
+            (before, after.replace(new_hash, "0" * 64)),
+            (before.replace(old_hash, "0" * 64), after),
+            (before, after.replace('dependencies=["ring"]', 'dependencies=[]')),
+            (before, after.replace('version="1.0.0"', 'version="1.0.1"')),
+            (before, after.replace('version = 4', 'version = 3')),
+            (before, after.replace('name="rustls"', 'name="other"')),
+            (before.replace('registry+https://github.com/rust-lang/crates.io-index', 'git+https://example.test/rustls'), after),
+        ):
+            with self.subTest(original=original, changed=changed):
+                self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request",
+                    app_lock_delta=(original, changed)).geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
+            app_lock_delta=(before, after)).geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        for extra in ("spike/tproxy.py", ".github/workflows/ci.yml", "security/dependency-audit-policy.json"):
+            self.assertFalse(ci_scope.classify_paths([*paths, extra], event_name="pull_request",
+                app_lock_delta=(before, after)).geph_bootstrap)
+        # A target version already in the graph must not become a duplicate
+        # package identity, even if the rest of the text matches the repair.
+        duplicate = (f'\n[[package]]\nname="rustls"\nversion="0.23.46"\nchecksum="{new_hash}"\n'
+                     'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                     'dependencies=["ring"]\n')
+        self.assertFalse(ci_scope.reviewed_app_lock_repair(before + duplicate, after + duplicate))
+
     def test_embedded_source_tests_preserve_exact_bootstrap_boundaries(self):
         paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock",
                  "scripts/geph_vendor_source.py", "scripts/test_geph_source_edits.py",

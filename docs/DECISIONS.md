@@ -288,6 +288,14 @@ Git SHAs; all other parsed packages, edges and metadata must remain identical.
 Missing refs/read evidence or any other lock change disables bootstrap. The
 application audit policy and all required audits remain unchanged.
 
+2026-10-15 follow-up: main already contains that migration. Also admit the
+exact rustls0.23.45->0.23.46 version/checksum-only repair for
+RUSTSEC-2026-0346/0347/0348/0349. Each approved repair set is compared against
+the entire parsed lockfile; unrelated changes, target package identity
+collisions and missing Git evidence are rejected. This does not admit the
+mixed native/source-owned infrastructure PR to bootstrap. Its extra paths
+still require normal packaged checks. Fresh dependency audits remain mandatory.
+
 
 ### 2026-09-30: reserve session for new Geph tunnel openings
 

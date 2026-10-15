@@ -1,5 +1,39 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Delivery ordering repair, 2026-10-15: the exact app rustls0.23.45->0.23.46
+  repair was rejected by the old source-bootstrap classifier, which recognized
+  only the previous already-merged TLS migration. A second exact repair set now
+  accepts that transition while retaining all path/audit/main-build boundaries;
+  a target package identity collision found in review is also rejected.
+  Eleven scoped tests PASS, including wrong checksum, rollback, dependency edge,
+  metadata, unrelated package and collision cases. Exact main/head lock replay
+  changes the source-only fixture from rejected to accepted; the actual mixed
+  56-path PR remains in the ordinary packaged path. Evidence is retained in
+  output/minimal-geph-source-20261015/. This prepares separation of the existing
+  source repair from deferred native/source-owned tooling; it does not qualify
+  or publish a binary. Existing production SOURCE is unchanged.
+
+- RSA client review, 2026-10-15: renewed only the two exact rsa0.8.2
+  public-key-only exceptions through2026-10-22. Fresh static review checked
+  canonical Geph source plus13edits and the complete RSA reverse closure;
+  client config/RPC/cache and public-key call paths do not enter either
+  advisory's private-key prerequisite. Research notes record exact SOURCE/lock,
+  retained primary descriptions and limits. No RSA removal or whole-crypto
+  safety is claimed. Strict policy diff/loader/matcher and4 existing audit
+  tests PASS; ci_scope11 PASS with independent collision-fix review. Receipt
+  output/minimal-geph-source-20261015/rsa-policy-doc-verification.json binds
+  policy ac31a531. A fresh CI scan is still required. The source-only transition
+  guard currently forbids this reviewed policy change; resolve that exact
+  ordering boundary before creating a minimal bootstrap PR. App Chromium
+  policy and unpublished Geph package404 remain separate release blockers.
+
+- Exact96a1f8313 CI38717107048 and audit38717107102 are terminal FAIL.
+  Product/checks/Windows/Chromium PASS; metadata903, traffic67 and daemon1030
+  are reusable green results. Package still receives404 for unpublished0.4.3-r1,
+  lifecycle is downstream; audit has two expired RSA exceptions and expired
+  Chromium policy. Parent verified all21 retained evidence files, receipt
+  be09a06a in output/native-ci-integration-20261015/. No repeat run requested.
+
 - Core traffic fixture isolation, 2026-10-15: exact7824aaafd CI38713624559
   passed903 release tests but failed the spent-candidate status assertion.
   Production/test source is identical to the earlier green ab77 baseline.
