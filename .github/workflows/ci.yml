@@ -198,6 +198,7 @@ jobs:
             scripts/make_appcast.py \
             scripts/dependency_audit.py \
             scripts/geph_native_sqlite_advisories.py \
+            scripts/geph_source_owned_advisories.py \
             scripts/make_release_manifest.py \
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
@@ -214,6 +215,8 @@ jobs:
             scripts/test_make_appcast.py \
             scripts/test_dependency_audit.py \
             scripts/test_geph_native_sqlite_advisories.py \
+            scripts/test_geph_source_owned_advisories.py \
+            scripts/test_source_owned_audit_bridge.py \
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \

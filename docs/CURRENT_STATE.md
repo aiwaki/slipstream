@@ -1,5 +1,31 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
+- Resumed 2026-10-15 after the user's limit-related pause. Source-owned audit
+  CLI integration is implemented: optional trusted `source_owned_review` uses
+  report schema3 and verifies exactly three embedded packages, their complete
+  file inventory, both actual ancestor archives, retained OSV ancestor IDs and
+  all finding aliases. Unknown/affected findings cannot produce PASS. Native
+  and source-owned reviews must bind the same SOURCE. Scanner projection omits
+  only independently verified packages; full release SPDX remains unchanged.
+  SOURCE/review/catalog are snapshotted before scanning and reverified by the
+  consumer. Legacy/native audit behavior is covered by the reused 82-test PASS
+  at output/source-owned-audit-integration-20261013/focused.log. Two tests use
+  real validators, tiny archives and a synthetic scanner, including changes to
+  original inputs during scanning and loss of retained evidence afterward.
+  Independent exact-file review found no actionable defect; evidence is in
+  output/source-owned-review-20261013/advisory-helper-review.json. These tests
+  prove orchestration, not real-candidate security or a fresh OSV assessment.
+  Production SOURCE/policy remain inactive. Immutable evidence packaging and
+  release workflow wiring are the next implementation step. Actual source
+  assessment must also retain the separate root-callsite review: package file
+  lists do not establish correctness of every root source edit.
+  Separately, auth-expiry-candidate/SOURCE.json (a94d4c1d) changes only the auth
+  cache invalidation predicate to compare active Plus state with cached level.
+  Old SOURCE3c2 and evidence remain intact. Python predicate/SQLite model passed;
+  actual Rust old/new callsite regressions are now being prepared using retained
+  offline caches. Do not describe this candidate as built, installed or released.
+  PR384 remains OPEN/DIRTY at ebdf6b8bd with unchanged audit/package failures.
+
 - ISC packaging contract updated, 2026-10-13: the user declined the upstream
   issue; do not send it or require an upstream answer before proceeding. Both
   known ISC derivatives now require the exact standard license text alongside

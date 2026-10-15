@@ -22,6 +22,7 @@ from pathlib import Path
 POLICY_SCHEMA_VERSION = 1
 LEGACY_REPORT_SCHEMA_VERSION = 1
 NATIVE_REPORT_SCHEMA_VERSION = 2
+SOURCE_OWNED_REPORT_SCHEMA_VERSION = 3
 GENERATOR = "slipstream-dependency-audit-1"
 REPORT_NAME = "dependency-audit.json"
 DEFAULT_POLICY = (
@@ -375,6 +376,7 @@ def _canonical_package_name(ecosystem: str, name: str) -> str:
 
 def _sbom_scan_identities(
     packages: list[dict], native_package_id: str | None = None,
+    source_owned_package_ids: tuple[str, ...] = (),
 ) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]], set[str]]:
     """Bind scanner coordinates to the package URLs that this generator emits.
 
@@ -389,6 +391,10 @@ def _sbom_scan_identities(
     ids: set[str] = set()
     identities: set[tuple[str, str, str]] = set()
     native_ids: set[str] = set()
+    owned_ids = set(source_owned_package_ids)
+    owned_seen: set[str] = set()
+    if len(owned_ids) != len(source_owned_package_ids) or native_package_id in owned_ids:
+        raise ValueError("reviewed source-owned and native package identities overlap or repeat")
     for package in packages:
         spdx_id = package.get("SPDXID")
         if not isinstance(spdx_id, str) or not spdx_id:
@@ -397,12 +403,12 @@ def _sbom_scan_identities(
             raise ValueError("release SBOM contains a duplicate package identity")
         ids.add(spdx_id)
         references = package.get("externalRefs")
-        if spdx_id == native_package_id:
+        if spdx_id == native_package_id or spdx_id in owned_ids:
             if references is not None and (not isinstance(references, list) or any(
                 isinstance(ref, dict) and ref.get("referenceType") == "purl" for ref in references
             )):
-                raise ValueError("reviewed native package must not acquire a scanner purl")
-            native_ids.add(spdx_id)
+                raise ValueError("reviewed package must not acquire a scanner purl")
+            (native_ids if spdx_id == native_package_id else owned_seen).add(spdx_id)
             continue
         if not isinstance(references, list):
             raise ValueError("release SBOM package purl is missing")
@@ -449,6 +455,8 @@ def _sbom_scan_identities(
         identities.add(identity)
     if native_package_id is not None and native_ids != {native_package_id}:
         raise ValueError("reviewed native package identity is absent from SBOM")
+    if owned_seen != owned_ids:
+        raise ValueError("reviewed source-owned package identity is absent from SBOM")
     return (
         {identity for identity in identities if identity[0]},
         {(name, version) for ecosystem, name, version in identities if not ecosystem},
@@ -462,7 +470,9 @@ def _native_review(*, policy: dict, sbom_path: Path, evaluated_on: date,
                    require_evidence: bool = False) -> dict | None:
     inputs = (source_path, native_receipt, native_artifacts_root)
     if "native_sqlite_review" not in policy:
-        if any(value is not None for value in (*inputs, evidence_root)):
+        # SOURCE is shared with the independently verified source-owned lane.
+        unclaimed_source = source_path if "source_owned_review" not in policy else None
+        if any(value is not None for value in (unclaimed_source, native_receipt, native_artifacts_root, evidence_root)):
             raise ValueError("native audit inputs require trusted native_sqlite_review policy")
         return None
     if any(value is None for value in inputs) or (require_evidence and evidence_root is None):
@@ -477,14 +487,38 @@ def _native_review(*, policy: dict, sbom_path: Path, evaluated_on: date,
     )
 
 
+def _source_owned_review(*, policy: dict, sbom_path: Path, evaluated_on: date,
+                         source_path: Path | None, evidence_root: Path | None,
+                         source_commit: str) -> dict | None:
+    if "source_owned_review" not in policy:
+        if evidence_root is not None:
+            raise ValueError("source-owned evidence requires trusted source_owned_review policy")
+        return None
+    if source_path is None or evidence_root is None:
+        raise ValueError("source-owned audit requires explicit SOURCE and review evidence")
+    from geph_source_owned_advisories import validate_source_owned_review
+    return validate_source_owned_review(policy["source_owned_review"],
+        sbom=_read_json_object(sbom_path, "release SBOM"), source_path=source_path,
+        evidence_root=evidence_root, evaluated_on=evaluated_on, source_commit=source_commit)
+
+
 def _native_partition(packages: list[dict], package_id: str) -> dict:
+    return _reviewed_partition(packages, package_id)
+
+
+def _reviewed_partition(packages: list[dict], native_id: str | None,
+                        source_owned_ids: tuple[str, ...] = ()) -> dict:
     # Call only after the native verifier and exact PURL validation. SPDXIDs,
     # not counts, bind every package to exactly one independently checked lane.
     partition = {"scanned": [], "integrity_only": [], "native": []}
+    if source_owned_ids:
+        partition["source_owned"] = []
     for package in packages:
         spdx_id = package["SPDXID"]
-        if spdx_id == package_id:
+        if spdx_id == native_id:
             lane = "native"
+        elif spdx_id in source_owned_ids:
+            lane = "source_owned"
         else:
             locator = next(ref["referenceLocator"] for ref in package["externalRefs"]
                            if isinstance(ref, dict) and ref.get("referenceType") == "purl")
@@ -506,6 +540,42 @@ def _native_scanner_sbom(sbom: dict, package_id: str) -> bytes:
     if "documentDescribes" in sbom:
         projected["documentDescribes"] = [identity for identity in sbom["documentDescribes"] if identity != package_id]
     return (json.dumps(projected, indent=2, sort_keys=True) + "\n").encode()
+
+
+def _reviewed_scanner_sbom(sbom: dict, native_id: str | None,
+                           source_owned_ids: tuple[str, ...] = ()) -> bytes:
+    if not source_owned_ids:
+        return _native_scanner_sbom(sbom, native_id)
+    # Preserve the full release document. Only the OSV input omits packages
+    # whose exact bytes and findings are covered by independent review lanes.
+    excluded = set(source_owned_ids) | ({native_id} if native_id else set())
+    file_ids = {relation["relatedSpdxElement"] for relation in sbom.get("relationships", [])
+        if relation.get("spdxElementId") in excluded and relation.get("relationshipType") == "CONTAINS"}
+    projected = dict(sbom)
+    projected["packages"] = [p for p in sbom["packages"] if p["SPDXID"] not in excluded]
+    # CONTAINS may also target packages. Remove file entries only by file ID.
+    excluded |= {f["SPDXID"] for f in sbom.get("files", []) if f["SPDXID"] in file_ids}
+    if "files" in sbom:
+        projected["files"] = [f for f in sbom["files"] if f["SPDXID"] not in excluded]
+    if "relationships" in sbom:
+        projected["relationships"] = [r for r in sbom["relationships"]
+            if r.get("spdxElementId") not in excluded and r.get("relatedSpdxElement") not in excluded]
+    if "documentDescribes" in sbom:
+        projected["documentDescribes"] = [p for p in sbom["documentDescribes"] if p not in excluded]
+    return (json.dumps(projected, indent=2, sort_keys=True) + "\n").encode()
+
+
+def _source_owned_summary(review: dict) -> dict:
+    return {"packages_source_owned": len(review["package_ids"]),
+            "source_owned_unresolved": review["summary"]["unresolved"],
+            "source_owned_affected": review["summary"]["affected"]}
+
+
+def _check_review_source_binding(native_review: dict | None, owned_review: dict | None) -> None:
+    # Independently valid proofs must concern the same SOURCE snapshot.
+    if native_review is not None and owned_review is not None:
+        if native_review["binding"]["source_sha256"] != owned_review["binding"]["source_sha256"]:
+            raise ValueError("native and source-owned reviews bind different SOURCE snapshots")
 
 
 def _native_summary(review: dict) -> dict:
@@ -585,6 +655,7 @@ def evaluate_osv_result(
     evaluated_on: date,
     sbom_path: Path,
     native_package_id: str | None = None,
+    source_owned_package_ids: tuple[str, ...] = (),
 ) -> tuple[list[dict], int, list[dict], list[dict]]:
     results = result.get("results")
     if not isinstance(results, list):
@@ -594,7 +665,7 @@ def evaluate_osv_result(
     integrity_only_seen: dict[tuple[str, str], dict] = {}
     findings_seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     sbom_packages = _sbom_packages(sbom_path)
-    expected_scanned, expected_integrity, _ = _sbom_scan_identities(sbom_packages, native_package_id)
+    expected_scanned, expected_integrity, _ = _sbom_scan_identities(sbom_packages, native_package_id, source_owned_package_ids)
     for source in results:
         if not isinstance(source, dict) or not isinstance(source.get("packages"), list):
             raise ValueError("OSV scanner result contains an invalid package source")
@@ -727,6 +798,7 @@ def build_audit_report(
     native_receipt: Path | None = None,
     native_artifacts_root: Path | None = None,
     native_advisory_evidence: Path | None = None,
+    source_owned_evidence: Path | None = None,
 ) -> dict:
     if not SOURCE_COMMIT_PATTERN.fullmatch(source_commit):
         raise ValueError("source commit must be a full lowercase Git object ID")
@@ -739,15 +811,19 @@ def build_audit_report(
         native_artifacts_root=native_artifacts_root, evidence_root=native_advisory_evidence,
         require_evidence=True)
     native_id = native_review["package_id"] if native_review is not None else None
+    owned_review = _source_owned_review(policy=policy, sbom_path=sbom_path, evaluated_on=evaluated_on,
+        source_path=source_path, evidence_root=source_owned_evidence, source_commit=source_commit)
+    owned_ids = tuple(owned_review["package_ids"]) if owned_review else ()
+    _check_review_source_binding(native_review, owned_review)
     findings, packages_scanned, integrity_only, scanned_identities = evaluate_osv_result(
         result=osv_result,
         policy=policy,
         evaluated_on=evaluated_on,
-        sbom_path=sbom_path, native_package_id=native_id,
+        sbom_path=sbom_path, native_package_id=native_id, source_owned_package_ids=owned_ids,
     )
     sbom_package_count = _sbom_package_count(sbom_path)
     packages_integrity_only = len(integrity_only)
-    if packages_scanned + packages_integrity_only + (1 if native_review else 0) != sbom_package_count:
+    if packages_scanned + packages_integrity_only + (1 if native_review else 0) + len(owned_ids) != sbom_package_count:
         raise ValueError(
             "dependency audit package counts do not match the release SBOM"
         )
@@ -790,14 +866,21 @@ def build_audit_report(
         report["summary"]["packages_integrity_only"] = packages_integrity_only
     if native_review is not None:
         report["schema_version"] = NATIVE_REPORT_SCHEMA_VERSION
-        report["coverage"]["sbom_packages"] = "partitioned"
         report["native_sqlite_review"] = native_review
-        report["package_partition"] = _native_partition(_sbom_packages(sbom_path), native_id)
-        report["inputs"]["scanner_sbom_sha256"] = hashlib.sha256(_native_scanner_sbom(
-            _read_json_object(sbom_path, "release SBOM"), native_id)).hexdigest()
         report["summary"].update(_native_summary(native_review))
         if native_review["status"] != "pass":
             report["status"] = "fail"
+    if owned_review is not None:
+        report["schema_version"] = SOURCE_OWNED_REPORT_SCHEMA_VERSION
+        report["source_owned_review"] = owned_review
+        report["summary"].update(_source_owned_summary(owned_review))
+        if owned_review["status"] != "pass":
+            report["status"] = "fail"
+    if native_review is not None or owned_review is not None:
+        report["coverage"]["sbom_packages"] = "partitioned"
+        report["package_partition"] = _reviewed_partition(_sbom_packages(sbom_path), native_id, owned_ids)
+        report["inputs"]["scanner_sbom_sha256"] = hashlib.sha256(_reviewed_scanner_sbom(
+            _read_json_object(sbom_path, "release SBOM"), native_id, owned_ids)).hexdigest()
     return report
 
 
@@ -896,6 +979,7 @@ def scan_with_evidence(args: argparse.Namespace) -> int:
         native_inputs = {"source_path": args.source, "native_receipt": args.native_receipt,
                          "native_artifacts_root": args.native_artifacts_root,
                          "native_advisory_evidence": args.native_advisory_evidence}
+        owned_evidence = getattr(args, "source_owned_evidence", None)
         snapshot_paths = {"sbom": sbom, "policy": policy_path}
         scanner_sbom = sbom
         if "native_sqlite_review" in policy:
@@ -917,17 +1001,38 @@ def scan_with_evidence(args: argparse.Namespace) -> int:
             native_inputs["native_advisory_evidence"] = Path(retained["root"])
             receipt["native_advisory_evidence"] = {key: value for key, value in retained.items() if key != "root"}
             receipt["native_advisory_evidence"]["path"] = "native-advisories"
+        if "source_owned_review" in policy:
+            if args.source is None or owned_evidence is None:
+                raise ValueError("source-owned scan requires explicit SOURCE and review evidence")
+            receipt["stage"] = "source_owned_evidence"
+            if "source" not in snapshot_paths:
+                destination = evidence / "source.json"
+                receipt["inputs"]["source"] = _snapshot_audit_input(args.source, destination, 4 * 1024 * 1024)
+                snapshot_paths["source"] = destination
+                native_inputs["source_path"] = destination
+            from geph_source_owned_advisories import retain_source_owned_review_evidence
+            retained = retain_source_owned_review_evidence(policy["source_owned_review"],
+                owned_evidence, evidence / "source-owned")
+            owned_evidence = Path(retained["root"])
+            receipt["source_owned_evidence"] = {key: value for key, value in retained.items() if key != "root"}
+            receipt["source_owned_evidence"]["path"] = "source-owned"
         native_review = _native_review(policy=policy, sbom_path=sbom, evaluated_on=args.evaluation_date,
             source_path=native_inputs["source_path"], native_receipt=native_inputs["native_receipt"],
             native_artifacts_root=native_inputs["native_artifacts_root"],
             evidence_root=native_inputs["native_advisory_evidence"], require_evidence=True)
+        owned_review = _source_owned_review(policy=policy, sbom_path=sbom, evaluated_on=args.evaluation_date,
+            source_path=native_inputs["source_path"], evidence_root=owned_evidence,
+            source_commit=args.source_commit)
+        native_id = native_review["package_id"] if native_review is not None else None
+        owned_ids = tuple(owned_review["package_ids"]) if owned_review else ()
+        _check_review_source_binding(native_review, owned_review)
         if native_review is not None:
             if native_review["binding"]["native_receipt_sha256"] != receipt["inputs"]["native_receipt"]["sha256"]:
                 raise ValueError("native receipt differs from retained audit input")
-            native_id = native_review["package_id"]
-            _sbom_scan_identities(_sbom_packages(sbom), native_id)
-            projection = _native_scanner_sbom(_read_json_object(sbom, "release SBOM"), native_id)
-            scanner_sbom = evidence / "native-scanner.spdx.json"
+        if native_review is not None or owned_review is not None:
+            _sbom_scan_identities(_sbom_packages(sbom), native_id, owned_ids)
+            projection = _reviewed_scanner_sbom(_read_json_object(sbom, "release SBOM"), native_id, owned_ids)
+            scanner_sbom = evidence / ("reviewed-scanner.spdx.json" if owned_review else "native-scanner.spdx.json")
             with scanner_sbom.open("xb") as stream:
                 stream.write(projection)
             scanner_sbom.chmod(0o400)
@@ -985,6 +1090,7 @@ def scan_with_evidence(args: argparse.Namespace) -> int:
             sbom_path=sbom, scanner=receipt["scanner"], source_commit=args.source_commit,
             target=args.target, evaluated_on=args.evaluation_date,
             vendored_transitive_dependencies=args.vendored_transitive_dependencies,
+            source_owned_evidence=owned_evidence,
             **native_inputs,
         )
         if native_review is not None:
@@ -1026,6 +1132,7 @@ def validate_audit_report(
     source_path: Path | None = None,
     native_receipt: Path | None = None,
     native_artifacts_root: Path | None = None,
+    source_owned_evidence: Path | None = None,
 ) -> dict:
     if not isinstance(report, dict):
         raise ValueError("dependency audit report must be a JSON object")
@@ -1040,13 +1147,18 @@ def validate_audit_report(
     native_review = _native_review(policy=policy, sbom_path=sbom_path, evaluated_on=evaluated_on,
         source_path=source_path, native_receipt=native_receipt, native_artifacts_root=native_artifacts_root)
     native_id = native_review["package_id"] if native_review is not None else None
+    owned_review = _source_owned_review(policy=policy, sbom_path=sbom_path, evaluated_on=evaluated_on,
+        source_path=source_path, evidence_root=source_owned_evidence, source_commit=source_commit)
+    owned_ids = tuple(owned_review["package_ids"]) if owned_review else ()
+    _check_review_source_binding(native_review, owned_review)
     expected = {
-        "schema_version": NATIVE_REPORT_SCHEMA_VERSION if native_review else LEGACY_REPORT_SCHEMA_VERSION,
+        "schema_version": (SOURCE_OWNED_REPORT_SCHEMA_VERSION if owned_review else
+                           NATIVE_REPORT_SCHEMA_VERSION if native_review else LEGACY_REPORT_SCHEMA_VERSION),
         "generator": GENERATOR,
         "status": "pass",
         "source": {"commit": source_commit, "target": target},
         "coverage": {
-            "sbom_packages": "partitioned" if native_review else "all",
+            "sbom_packages": "partitioned" if native_review or owned_review else "all",
             "vendored_transitive_dependencies": vendored_transitive_dependencies,
         },
     }
@@ -1054,17 +1166,29 @@ def validate_audit_report(
         if report.get(key) != value:
             raise ValueError(f"dependency audit report {key} does not match release")
     expected_inputs = {"policy_sha256": hash_file(policy_path), "sbom_sha256": hash_file(sbom_path)}
+    if native_review is not None or owned_review is not None:
+        expected_inputs["scanner_sbom_sha256"] = hashlib.sha256(_reviewed_scanner_sbom(
+            _read_json_object(sbom_path, "release SBOM"), native_id, owned_ids)).hexdigest()
+    elif "package_partition" in report:
+        raise ValueError("dependency audit package partition has no trusted policy")
     if native_review is not None:
-        expected_inputs["scanner_sbom_sha256"] = hashlib.sha256(_native_scanner_sbom(
-            _read_json_object(sbom_path, "release SBOM"), native_id)).hexdigest()
         if json.dumps(report.get("native_sqlite_review"), sort_keys=True, allow_nan=False) != json.dumps(
             native_review, sort_keys=True, allow_nan=False
         ):
             raise ValueError("dependency audit native review does not match trusted policy and proof")
         if native_review["status"] != "pass":
             raise ValueError("dependency audit native review has unresolved or affected groups")
-    elif "native_sqlite_review" in report or "package_partition" in report:
+    elif "native_sqlite_review" in report:
         raise ValueError("dependency audit native evidence has no trusted policy")
+    if owned_review is not None:
+        if json.dumps(report.get("source_owned_review"), sort_keys=True, allow_nan=False) != json.dumps(
+            owned_review, sort_keys=True, allow_nan=False
+        ):
+            raise ValueError("dependency audit source-owned review does not match trusted policy and evidence")
+        if owned_review["status"] != "pass":
+            raise ValueError("dependency audit source-owned review has unresolved or affected findings")
+    elif "source_owned_review" in report:
+        raise ValueError("dependency audit source-owned evidence has no trusted policy")
     if report.get("inputs") != expected_inputs:
         raise ValueError("dependency audit input hashes do not match release")
     scanner = report.get("scanner")
@@ -1156,19 +1280,26 @@ def validate_audit_report(
         raise ValueError(
             "dependency audit report has integrity-only data without policy"
         )
-    if packages_scanned + packages_integrity_only + (1 if native_review else 0) != len(sbom_packages):
+    if packages_scanned + packages_integrity_only + (1 if native_review else 0) + len(owned_ids) != len(sbom_packages):
         raise ValueError(
             "dependency audit package counts do not match the release SBOM"
         )
-    expected_scanned, expected_integrity, _ = _sbom_scan_identities(sbom_packages, native_id)
+    expected_scanned, expected_integrity, _ = _sbom_scan_identities(sbom_packages, native_id, owned_ids)
+    if native_review is not None or owned_review is not None:
+        if report.get("package_partition") != _reviewed_partition(sbom_packages, native_id, owned_ids):
+            raise ValueError("dependency audit reviewed package partition does not match SBOM")
     if native_review is not None:
-        if report.get("package_partition") != _native_partition(sbom_packages, native_id):
-            raise ValueError("dependency audit native package partition does not match SBOM")
         if any(type(summary.get(key)) is not int or summary[key] != value
                for key, value in _native_summary(native_review).items()):
             raise ValueError("dependency audit native summary counts are inconsistent")
     elif any(key in summary for key in ("packages_native", "native_unresolved", "native_affected")):
         raise ValueError("dependency audit native counts have no trusted policy")
+    if owned_review is not None:
+        if any(type(summary.get(key)) is not int or summary[key] != value
+               for key, value in _source_owned_summary(owned_review).items()):
+            raise ValueError("dependency audit source-owned summary counts are inconsistent")
+    elif any(key in summary for key in ("packages_source_owned", "source_owned_unresolved", "source_owned_affected")):
+        raise ValueError("dependency audit source-owned counts have no trusted policy")
     evidence = report.get("scanned_packages")
     if not isinstance(evidence, list):
         raise ValueError(
@@ -1237,6 +1368,7 @@ def validate_audit_report(
         "packages_scanned": packages_scanned,
         "scanner_version": scanner["version"],
         **(_native_summary(native_review) if native_review else {}),
+        **(_source_owned_summary(owned_review) if owned_review else {}),
     }
 
 
@@ -1251,6 +1383,7 @@ def validate_audit_report_file(
     source_path: Path | None = None,
     native_receipt: Path | None = None,
     native_artifacts_root: Path | None = None,
+    source_owned_evidence: Path | None = None,
 ) -> dict:
     report = _read_json_object(report_path, "dependency audit report")
     return validate_audit_report(
@@ -1261,6 +1394,7 @@ def validate_audit_report_file(
         target=target,
         vendored_transitive_dependencies=vendored_transitive_dependencies,
         source_path=source_path, native_receipt=native_receipt, native_artifacts_root=native_artifacts_root,
+        source_owned_evidence=source_owned_evidence,
     )
 
 
@@ -1304,19 +1438,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="top-level-only",
     )
     for command in (scan, verify):
-        for flag in ("source", "native-receipt", "native-artifacts-root"):
+        for flag in ("source", "native-receipt", "native-artifacts-root", "source-owned-evidence"):
             command.add_argument("--" + flag, type=Path)
     scan.add_argument("--native-advisory-evidence", type=Path)
     args = parser.parse_args(argv)
     if args.command in ("scan", "verify"):
-        provided = (args.source, args.native_receipt, args.native_artifacts_root)
-        if any(value is not None for value in provided) and any(value is None for value in provided):
+        native = any(value is not None for value in (args.native_receipt, args.native_artifacts_root,
+                                                    getattr(args, "native_advisory_evidence", None)))
+        owned = args.source_owned_evidence is not None
+        if native and any(value is None for value in (args.source, args.native_receipt, args.native_artifacts_root)):
             parser.error("native audit requires --source, --native-receipt and --native-artifacts-root together")
+        if owned and args.source is None:
+            parser.error("--source-owned-evidence requires --source")
+        if args.source is not None and not native and not owned:
+            parser.error("--source requires native inputs or --source-owned-evidence")
         if args.command == "scan":
-            if args.native_advisory_evidence is not None and args.source is None:
-                parser.error("--native-advisory-evidence requires explicit native inputs")
-            if args.source is not None and (args.native_advisory_evidence is None or args.evidence_dir is None):
+            if native and (args.native_advisory_evidence is None or args.evidence_dir is None):
                 parser.error("native scan requires --native-advisory-evidence and --evidence-dir")
+            if owned and args.evidence_dir is None:
+                parser.error("source-owned scan requires --evidence-dir")
     return args
 
 
@@ -1332,8 +1472,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.evidence_dir is not None:
             return scan_with_evidence(args)
         policy = load_policy(args.policy)
-        if "native_sqlite_review" in policy:
-            raise ValueError("native scan requires explicit native inputs and --evidence-dir")
+        if "native_sqlite_review" in policy or "source_owned_review" in policy:
+            raise ValueError("reviewed source scan requires explicit evidence inputs and --evidence-dir")
         scanner = verify_scanner(
             scanner_path=args.scanner,
             policy=policy,
@@ -1366,6 +1506,7 @@ def main(argv: list[str] | None = None) -> int:
             vendored_transitive_dependencies=args.vendored_transitive_dependencies,
             source_path=args.source, native_receipt=args.native_receipt,
             native_artifacts_root=args.native_artifacts_root,
+            source_owned_evidence=args.source_owned_evidence,
         )
     print(json.dumps(result, sort_keys=True))
     return 0

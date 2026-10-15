@@ -159,6 +159,56 @@ source merge; it expires on 2026-08-27 and does not authorize publishing
 Geph's Hyper 0.14 AWS client until upstream provides a fixed 0.3-compatible
 graph.
 
+### Source-owned Geph audit coverage (inactive until policy and workflow adoption)
+
+The optional `source_owned_review` policy section enables audit report schema 3
+for the three embedded source-owned Geph packages. Its own schema version is 1;
+it pins `source_sha256`, `review_sha256` and `expires`. The helper
+`scripts/geph_source_owned_advisories.py` reconstructs their exact SPDX package,
+file and `CONTAINS` inventory from SOURCE. A deterministic scanner projection
+excludes only the independently validated source-owned packages and their files,
+plus the separately validated native SQLite package when present. Every other
+package stays in its existing audit lane. Full SPDX and projection hashes and
+exact package partitions are bound to the report; native and source-owned
+reviews must bind the same SOURCE bytes. Legacy schema 1 and native-only
+schema 2 retain their existing acceptance rules.
+
+The pinned `review.json` binds SOURCE, the lock digest, package descriptors and
+all declared package files. Its evidence catalog retains the two exact ancestor
+archives, an OSV result for those ancestor identities, and referenced source
+review evidence. The helper verifies archive digests, recorded original files
+and retained original manifests; it never assigns a registry identity to a
+first-party package or treats an ancestor finding as a scan of the derivative.
+Each package requires complete declared file coverage, an inherited-finding
+list matching the exact OSV IDs and aliases, and a manual-finding list. An `unresolved` source
+review or any `unknown` or `affected` finding makes the audit fail. The consumer
+reconstructs the result from trusted policy and evidence and rejects a forged
+passing result, mismatched counts or incomplete partitions. Expired reviews and
+future evaluation dates fail closed.
+
+Source-owned `scan` requires `--source`, `--source-owned-evidence`, a fresh
+`--evidence-dir` and the normal required `--evaluation-date`. `verify` requires
+`--source` and `--source-owned-evidence` alongside the normal report, SPDX,
+policy and source identity arguments. The producer snapshots SOURCE and copies
+the policy-pinned review and evidence bytes into `source-owned/` under the
+evidence directory before scanning. Retained inputs, scanner projection,
+results and receipt remain available as far as execution reached, including
+on failure; they stay separate from release payloads. Verification requires
+the same policy-pinned evidence bytes, so a missing or changed archive or review
+file invalidates the result. Evidence bytes are copied verbatim: prepare a
+reviewed, publishable bundle before configuring CI uploads.
+
+Archive and coverage checks prove byte identity and declared review coverage,
+not the correctness of reviewer conclusions or legal clearance. Finding
+dispositions remain policy-pinned human assessments, and retained ancestor OSV
+bytes do not establish a fresh query. The whole SOURCE hash binds root edits,
+but package file coverage does not separately establish the
+semantics of root callsites. This implementation does not adopt a production
+`source_owned_review` policy, activate an embedded-package SOURCE, or clear a
+release. The dependency-audit and release producer/consumer workflows still
+need explicit source-owned arguments and evidence retention before activation;
+the helper and synthetic bridge tests alone do not qualify a real candidate.
+
 ### Native SQLite audit coverage (inactive until reviewed policy adoption)
 
 A native SQLite source contract requires audit report schema 2. Its SPDX package
