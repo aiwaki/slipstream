@@ -1,5 +1,54 @@
 # README publication checkpoint — 2026-10-13
 
+## Delivery checkpoint — 2026-10-15
+
+This branch, `codex/release-delivery-20261015`, starts at main `a24fd398c`.
+It separates the ordinary release dependency repair from PR384's deferred
+native/source-owned migration. Installed Slipstream, caches, accounts and
+system networking have not changed during this preparation.
+
+- Geph: exact ordinary0.4.3-r1 SOURCE `843b3bf0`, lock `5ee1bccd`, thirteen
+  reviewed source edits, SQLite cache retained. The two exact RSA public-key
+  exceptions were freshly reviewed through2026-10-22; no private-key safety
+  or removed-library claim is made. The main-to-candidate transition guard
+  binds SOURCE, lock and the complete policy. Full current Geph scan on the
+  identical contract passed in PR384 audit38722167139:423packages,0blocking,
+  2reviewed exceptions and2informational notices.
+- Both app and Geph pin rustls0.23.46. App lock changes only that version and
+  checksum. Chromium headless-shell moves to official Stable155.0.8059.79,
+  exact archive `5f51504e`; materialization and real localhost CDP complete/
+  truncated-body cases passed, sandbox enabled,172.17MiB peak, no survivors.
+  Its freshly checked scanner mapping remains explicitly integrity-only
+  through2026-10-29, not complete vulnerability coverage.
+- The Geph producer compiles then runs only reviewed isolated synthetic tests;
+  it never runs account/network upstream cases. Reports now carry exact
+  scanned-package identities required by the downstream consumer. Source,
+  runner and transition checks passed;33 adjacent report consumer tests also
+  pass after their scanner fixtures use the actual SBOM coordinates.
+- Source bootstrap on this PR additionally permits one exact four-file
+  Chromium/audit-helper transition, checked from committed base/head bytes.
+  The complete bundle and paired tests are required; changed bytes, partial
+  sets, missing refs, unrelated code, or push/main take ordinary packaged CI.
+  Both dependency audits, product and Chromium contracts still run on the PR.
+
+Focused validation:36 source/runner/transition checks,42 scope/audit/materializer
+checks,8 documentation checks and33 adjacent consumer tests passed. Adding the
+two necessary consumer fixtures to the required bundle passed14 scope tests.
+Independent source-bootstrap and audit-contract review found no blocking issue.
+No local Rust build or full suite was repeated.
+
+Next: commit/push this branch, open its PR and check its exact CI. After its reviewed source reaches
+main, the main-only producer publishes the immutable Geph dependency. Then
+complete main packaging and installed Chrome/Safari/lifecycle qualification;
+no published or installed result is claimed yet. Reuse unchanged green suites.
+
+Local evidence is under `output/minimal-geph-payload-20261015/` in this worktree.
+The runtime/RSA evidence is in the dedicated PR384 worktree under
+`output/chromium-stable-20261015/` and `output/minimal-geph-source-20261015/`.
+Historical checkpoint below refers to its original branch and is not current
+release evidence.
+
+
 This documentation-only change starts from published main
 `2e5e6b4a72e734ddd6d4ea7cbc3d876cb08da47a` (PR #385). The Russian and English
 READMEs were reviewed with humanizer-ru and humanizer, then reorganized around

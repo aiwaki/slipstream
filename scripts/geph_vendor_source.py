@@ -27,6 +27,19 @@ EXACT_SEMVER_PATTERN = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 )
 H2_TRANSITION_EXCEPTION_ID = "geph-h2-0.4.15-awaiting-vendor-r2"
+# One reviewed 0.3.9-r5 -> ordinary 0.4.3-r1 transition, not a renewal rule.
+# These bind both RSA 0.8.2 reasons/expiries (2026-10-22) and every other
+# policy field. A different source graph or policy requires its own review.
+RSA_REVIEW_SOURCE_BINDING = (
+    "cb12b384c2ee25995a96bb000eddad115207dfed949ae1109c3de5169915c087",
+    "d5a0e6f58cfdd7fea7db79c1322a486cc2d7ba47609c6d92c0edefe7a7e67b81",
+    "843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe",
+    "5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d",
+)
+RSA_REVIEW_POLICY_BINDING = (
+    "1fb2186a3ec212c509137c392a0beba24b61d39f423abf911a3a99d262a98e5f",
+    "53d6a5865d2106437b6106b65fd443a337b2d19fccb4a52a5a696e4f0a0d3ca0",
+)
 
 
 def hash_file(path: Path) -> str:
@@ -110,7 +123,7 @@ def load_source_contract(path: Path) -> dict:
         if not isinstance(edit, dict):
             raise ValueError("invalid Geph source edit")
         _require_exact_keys(edit, {"path", "before_sha256", "after_sha256", "before", "after"}, "Geph source edit")
-        if not isinstance(edit["path"], str) or not re.fullmatch(r"src/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\.rs", edit["path"]):
+        if not isinstance(edit["path"], str) or not re.fullmatch(r"(?:Cargo\.toml|src/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\.rs)", edit["path"]):
             raise ValueError("invalid Geph source edit path")
         for field in ("before_sha256", "after_sha256"):
             if not isinstance(edit[field], str) or not SHA256_PATTERN.fullmatch(edit[field]):
@@ -292,12 +305,28 @@ def _verify_policy_transition(
     current_policy: dict,
     previous_h2_present: bool,
     current_h2_present: bool,
+    verified_source_binding: tuple[str, str, str, str] | None = None,
 ) -> str:
     def canonical(value: dict) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
-    if canonical(current_policy) == canonical(previous_policy):
+    previous_canonical = canonical(previous_policy)
+    current_canonical = canonical(current_policy)
+    if current_canonical == previous_canonical:
         return "unchanged"
+
+    # Only verify_source_transition supplies identities after checking the
+    # source contracts and actual lock bytes. Policy-only callers fail closed.
+    if (
+        verified_source_binding == RSA_REVIEW_SOURCE_BINDING
+        and not previous_h2_present
+        and not current_h2_present
+        and (
+            hashlib.sha256(previous_canonical.encode("utf-8")).hexdigest(),
+            hashlib.sha256(current_canonical.encode("utf-8")).hexdigest(),
+        ) == RSA_REVIEW_POLICY_BINDING
+    ):
+        return "renewed-reviewed-rsa-public-key-exceptions"
 
     if not previous_h2_present or current_h2_present:
         raise ValueError("Geph dependency audit policy additions or changes are forbidden")
@@ -400,6 +429,10 @@ def verify_source_transition(
         current_policy=current_policy,
         previous_h2_present=previous_h2_present,
         current_h2_present=current_h2_present,
+        verified_source_binding=(
+            hash_file(previous_source_path), previous_summary["lock_sha256"],
+            hash_file(current_source_path), current_summary["lock_sha256"],
+        ),
     )
     return {
         "current_release_tag": current_summary["release_tag"],
@@ -567,6 +600,8 @@ def materialize_source(
     _verify_manifest(root, summary["version"])
     shutil.copyfile(cargo_lock_path, root / "Cargo.lock")
     apply_source_edits(root, load_source_contract(source_path).get("source_edits", []))
+    # Dependency-only manifest edits cannot rewrite the attested crate identity.
+    _verify_manifest(root, summary["version"])
     return root
 
 

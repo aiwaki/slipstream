@@ -1,5 +1,43 @@
 # Decisions
 
+### 2026-10-15: coordinated dependency delivery
+
+One source-bootstrap PR may carry the reviewed Geph source transition, exact
+app TLS repair, and the exact Chromium/audit-helper update bound in
+`scripts/ci_scope.py`. This exception reads committed base/head bytes and
+requires the entire bound file set with its tests; it is not general permission
+to skip packaging for app or audit policy edits. Both dependency audits and
+product/Chromium checks remain mandatory. Main always runs packaged checks.
+The main-only Geph producer must publish its immutable artifact before main
+packaging can finish; a pre-publication404 is not a successful package gate.
+The source-owned/native migration and historical Chromium research are deferred
+from this deliverable. Existing exact RSA and Chromium reviews retain their
+scope, expiry and explicit limitations.
+
+
+### 2026-10-15: exact reviewed RSA policy transition
+
+The ordinary Geph0.3.9-r5 ->0.4.3-r1 source transition may carry the two
+reviewed rsa0.8.2 reachability renewals documented in ROUTING_RESEARCH.
+Admission binds the complete previous/current SOURCE and lock digests and both
+canonical policy digests. It is not a generic expiry-extension rule: a missing
+binding, different graph, altered reason/date/scanner/rules or partial renewal
+rejects. Source/lock verification runs before this admission. Fresh audit,
+expiry enforcement, main-only publication and immutable vendor evidence remain
+mandatory. The native/source-owned migration is separate.
+
+### 2026-10-15: current Stable headless runtime and explicit audit gap
+
+Bundle the reviewed Chrome for Testing headless-shell155.0.8059.79 archive,
+not a floating download. SOURCE, application runtime constants and integrity-only
+policy bind the same exact version/hash. The latter expires2026-10-29 after a
+fresh pinned-scanner mapping check confirmed that generic Chromium remains
+unscannable. This accepts a documented coverage gap, not a vulnerability-free
+claim; mismatched identities and reported vulnerabilities still block. Keep
+hosted full-Chrome qualification pins separate. The standalone historical-CVE
+research is not an adopted release gate; do not silently turn that investigation
+into a requirement to classify every historical advisory before this update.
+
 Stable decisions and invariants for Slipstream. Add entries when a rule should
 survive across sessions and agents.
 

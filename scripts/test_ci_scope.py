@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import tempfile
+import hashlib
+import os
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -8,6 +11,68 @@ import ci_scope
 
 
 class CiScopeTests(unittest.TestCase):
+    def test_exact_delivery_bundle_never_exempts_partial_or_unreviewed_app_edits(self):
+        paths = list(ci_scope.DELIVERY_FILE_BINDINGS)
+        deltas = {path: (f"old:{path}".encode(), f"new:{path}".encode()) for path in paths}
+        bindings = {path: tuple(hashlib.sha256(v).hexdigest() for v in delta)
+                    for path, delta in deltas.items()}
+        changed = [*paths, *ci_scope.DELIVERY_TEST_PATHS, *ci_scope.GEPH_BOOTSTRAP_REQUIRED]
+        with patch.object(ci_scope, "DELIVERY_FILE_BINDINGS", bindings):
+            self.assertTrue(ci_scope.classify_paths(changed, event_name="pull_request",
+                delivery_delta=deltas).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(changed, event_name="push",
+                delivery_delta=deltas).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(changed, event_name="pull_request").geph_bootstrap)
+            for missing in changed:
+                with self.subTest(missing=missing):
+                    self.assertFalse(ci_scope.classify_paths([p for p in changed if p != missing],
+                        event_name="pull_request", delivery_delta=deltas).geph_bootstrap)
+            for path in paths:
+                for altered in ((b"unreviewed-base", deltas[path][1]),
+                                (deltas[path][0], b"unreviewed-head"),
+                                (deltas[path][0], deltas[path][0])):
+                    with self.subTest(path=path, altered=altered):
+                        bad = {**deltas, path: altered}
+                        self.assertFalse(ci_scope.classify_paths(changed, event_name="pull_request",
+                            delivery_delta=bad).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(changed + ["spike/tproxy.py"],
+                event_name="pull_request", delivery_delta=deltas).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(changed + [ci_scope.APP_LOCK],
+                event_name="pull_request", delivery_delta=deltas).geph_bootstrap)
+            before, after = self.app_lock_delta()
+            self.assertTrue(ci_scope.classify_paths(changed + [ci_scope.APP_LOCK],
+                event_name="pull_request", delivery_delta=deltas,
+                app_lock_delta=(before, after)).geph_bootstrap)
+            self.assertFalse(ci_scope.reviewed_delivery_delta({**deltas, "extra": (b"a", b"b")}))
+            self.assertFalse(ci_scope.reviewed_delivery_delta({paths[0]: deltas[paths[0]]}))
+
+    def test_delivery_git_reader_requires_exact_refs_and_never_reads_working_tree(self):
+        base, head = "1" * 40, "2" * 40
+        with patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+             patch.object(ci_scope.subprocess, "check_output", return_value=b"committed") as read:
+            result = ci_scope.delivery_delta_from_git()
+            self.assertEqual(set(result), set(ci_scope.DELIVERY_FILE_BINDINGS))
+            self.assertEqual(read.call_count, 2 * len(result))
+            for call in read.call_args_list:
+                self.assertEqual(call.args[0][:2], ["git", "show"])
+                ref, path = call.args[0][2].split(":", 1)
+                self.assertIn(ref, (base, head))
+                self.assertIn(path, ci_scope.DELIVERY_FILE_BINDINGS)
+        for invalid in ("", "main", head + ":path"):
+            with patch.dict(os.environ, {"BASE_SHA": invalid, "GITHUB_SHA": head}), \
+                 patch.object(ci_scope.subprocess, "check_output") as read:
+                self.assertIsNone(ci_scope.delivery_delta_from_git())
+                read.assert_not_called()
+        with patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+             patch.object(ci_scope.subprocess, "check_output", side_effect=OSError):
+            self.assertIsNone(ci_scope.delivery_delta_from_git())
+
+    def test_synthetic_runner_bootstrap_requires_its_tests(self):
+        paths = [*ci_scope.GEPH_BOOTSTRAP_REQUIRED, "scripts/run_geph_synthetic_tests.py"]
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        self.assertTrue(ci_scope.classify_paths(paths + ["scripts/test_run_geph_synthetic_tests.py"],
+            event_name="pull_request").geph_bootstrap)
+
     def app_lock_delta(self):
         before, after = ["version = 4"], ["version = 4"]
         for name, old, old_hash, new, new_hash in ci_scope.APP_LOCK_REPAIRS:
@@ -43,6 +108,70 @@ class CiScopeTests(unittest.TestCase):
                 event_name="pull_request").geph_bootstrap)
         self.assertFalse(ci_scope.classify_paths(paths + ["spike/tproxy.py"],
             event_name="pull_request").geph_bootstrap)
+
+    def test_rustls_0346_repair_preserves_source_bootstrap_boundaries(self):
+        old_hash = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+        new_hash = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
+        before = ('version = 4\n[[package]]\nname="rustls"\nversion="0.23.45"\n'
+                  f'checksum="{old_hash}"\n'
+                  'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                  'dependencies=["ring"]\n[[package]]\nname="unrelated"\nversion="1.0.0"\n')
+        after = before.replace('"0.23.45"', '"0.23.46"').replace(old_hash, new_hash)
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock", ci_scope.APP_LOCK]
+        self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request",
+            app_lock_delta=(before, after)), ci_scope.CiScope(True, True, False))
+        for original, changed in (
+            (before, before), (after, before),
+            (before, after.replace(new_hash, "0" * 64)),
+            (before.replace(old_hash, "0" * 64), after),
+            (before, after.replace('dependencies=["ring"]', 'dependencies=[]')),
+            (before, after.replace('version="1.0.0"', 'version="1.0.1"')),
+            (before, after.replace('version = 4', 'version = 3')),
+            (before, after.replace('name="rustls"', 'name="other"')),
+            (before.replace('registry+https://github.com/rust-lang/crates.io-index', 'git+https://example.test/rustls'), after),
+        ):
+            with self.subTest(original=original, changed=changed):
+                self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request",
+                    app_lock_delta=(original, changed)).geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
+            app_lock_delta=(before, after)).geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        for extra in ("spike/tproxy.py", ".github/workflows/ci.yml", "security/dependency-audit-policy.json"):
+            self.assertFalse(ci_scope.classify_paths([*paths, extra], event_name="pull_request",
+                app_lock_delta=(before, after)).geph_bootstrap)
+        # A target version already in the graph must not become a duplicate
+        # package identity, even if the rest of the text matches the repair.
+        duplicate = (f'\n[[package]]\nname="rustls"\nversion="0.23.46"\nchecksum="{new_hash}"\n'
+                     'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                     'dependencies=["ring"]\n')
+        self.assertFalse(ci_scope.reviewed_app_lock_repair(before + duplicate, after + duplicate))
+
+    def test_embedded_source_tests_preserve_exact_bootstrap_boundaries(self):
+        paths = ["vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock",
+                 "scripts/geph_vendor_source.py", "scripts/test_geph_source_edits.py",
+                 "scripts/test_geph_embedded_source.py",
+                 "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
+        self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request"),
+                         ci_scope.CiScope(True, True, False))
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push").geph_bootstrap)
+        for missing in ("vendor/geph/SOURCE.json", "scripts/test_geph_source_edits.py",
+                        "scripts/test_ci_scope.py"):
+            with self.subTest(missing=missing):
+                self.assertFalse(ci_scope.classify_paths(
+                    [path for path in paths if path != missing],
+                    event_name="pull_request").geph_bootstrap)
+        for extra in ("spike/tproxy.py", "app-tauri/src-tauri/src/lib.rs",
+                      "app-tauri/src-tauri/Cargo.toml", ".github/workflows/ci.yml",
+                      "security/dependency-audit-policy.json"):
+            with self.subTest(extra=extra):
+                self.assertFalse(ci_scope.classify_paths(
+                    [*paths, extra], event_name="pull_request").geph_bootstrap)
+        helper_only = ["scripts/geph_vendor_source.py", "scripts/test_geph_source_edits.py",
+                       "scripts/test_geph_embedded_source.py"]
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                self.assertEqual(ci_scope.classify_paths(helper_only, event_name=event),
+                                 ci_scope.CiScope(False, True, False))
 
     def test_existing_source_edit_revision_without_lock_change(self):
         paths = ["vendor/geph/SOURCE.json", "vendor/geph/README.md", "docs/CURRENT_STATE.md", "docs/DECISIONS.md",

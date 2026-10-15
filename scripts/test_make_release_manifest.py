@@ -72,9 +72,9 @@ class MakeReleaseManifestTests(unittest.TestCase):
                         "packages": [
                             {
                                 "package": {
-                                    "ecosystem": "crates.io",
-                                    "name": "serde",
-                                    "version": "1.0.228",
+                                    "ecosystem": "GitHub Actions",
+                                    "name": REPOSITORY.lower(),
+                                    "version": VERSION,
                                 },
                                 "vulnerabilities": [],
                             }
