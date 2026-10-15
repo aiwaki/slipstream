@@ -1,5 +1,116 @@
 # Routing Research Notes
 
+### Quinn dependency review 2026-10-15
+
+PR388 audit run 38725912548 reached the app scan at commit `0bcfc5d70` and
+reported five blocking advisories. One local replay of the exact committed
+inputs, using offline locked metadata for `aarch64-apple-darwin` and the
+policy-pinned OSV 2.3.8 scanner, identified all five on `quinn-proto 0.11.16`:
+
+| RustSec advisory | GitHub alias | Fixed version reported by OSV |
+|---|---|---|
+| [RUSTSEC-2026-0338](https://rustsec.org/advisories/RUSTSEC-2026-0338.html) | GHSA-465w-v9q3-7j98 | 0.11.18 |
+| [RUSTSEC-2026-0339](https://rustsec.org/advisories/RUSTSEC-2026-0339.html) | GHSA-hmxj-32vh-65vr | 0.11.17 |
+| [RUSTSEC-2026-0340](https://rustsec.org/advisories/RUSTSEC-2026-0340.html) | GHSA-3g6h-r5qx-f6hq | 0.11.18 |
+| [RUSTSEC-2026-0341](https://rustsec.org/advisories/RUSTSEC-2026-0341.html) | GHSA-qfwj-vfxf-92j2 | 0.11.17 |
+| [RUSTSEC-2026-0342](https://rustsec.org/advisories/RUSTSEC-2026-0342.html) | GHSA-2hv7-gw8g-gpq5 | 0.11.17 |
+
+The repair reuses only the `quinn-proto 0.11.18` version/checksum from PR386
+commit `4360003ca`: the cached registry archive matches SHA-256
+`a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc`.
+Parsed lock comparison confirms no other field changed; `rustls 0.23.46` and
+the `quinn 0.11.11` wrapper remain pinned. Offline locked metadata succeeds.
+
+One fresh scan after this repair, bounded to 60 seconds/300 MiB, reports
+zero blocking findings and the same five informational unmaintained notices.
+Both scans cover 361 exact package identities plus one integrity-only Chromium
+identity. The sole inventory change is `quinn-proto 0.11.16 -> 0.11.18`; strict
+report validation passes. Raw responses, input hashes, lock comparison and
+resource receipts are retained under
+`output/pr388-ci-0bcfc5d70/{local-app-replay,local-app-quinn-fix}/`.
+This is local dependency evidence, not a committed CI, compiled-app or runtime
+qualification. Chromium remains integrity-only, and the app report covers
+vendored components at top level; their separate gates still apply.
+
+### RSA client review 2026-10-15
+
+The two exact `rsa 0.8.2` exceptions for CVE-2023-49092 and CVE-2026-21895
+are renewed through 2026-10-22 following a fresh static reachability review of
+Geph 0.4.3. The reviewed inputs are SOURCE SHA-256
+`843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe`
+and Cargo.lock SHA-256
+`5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d`,
+with `aws_lambda` on both Apple targets. No other exception is renewed by this
+decision, and RSA remains in the dependency graph.
+
+The canonical Geph archive and all 13 SOURCE edits were checked by hash. The
+review searched all 41 Rust files and traced the complete RSA reverse-dependency
+closure.
+Five dependency archives matched the lock and the inspected source bytes.
+The client uses public-key parsing, blinding, finalization and verification in
+`auth.rs` and `bw_token.rs`. Broker-protocol, misc-rpc, configuration and RPC/cache
+DTOs provide no caller or deserialization path for RSA private-key operations.
+Private APIs remain in the dependency source; their removal from the binary
+is not claimed.
+
+The retained primary [RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
+describes private-key recovery through observable timing. The client paths
+do not enter private-key signing or decryption. The retained
+[RustCrypto advisory](https://github.com/RustCrypto/RSA/security/advisories/GHSA-9c48-w39g-hm26)
+describes a panic when constructing a private key with a prime equal to one.
+Client DER parsing constructs only `RsaPublicKey`; it does not reach
+`RsaPrivateKey::from_components` or its private-key precomputation.
+
+Evidence and exact input hashes are retained in
+`output/minimal-geph-source-20261015/rsa-reachability.md`. This review used saved
+primary descriptions and ran no compiler, scanner, network or account operation.
+It does not establish constant-time blinding arithmetic, general cryptographic
+safety or installed-artifact behavior. Re-review is required when the source,
+dependencies or client role changes. These exceptions do not require the
+separate native SQLite/source-owned migration. **A fresh CI dependency scan has
+not yet passed; release qualification remains open.**
+
+### Chromium runtime review 2026-10-15
+
+The bundled mac-arm64 headless runtime moves from151.0.7922.77 to the exact
+Chrome for Testing Stable155.0.8059.79, revision1697595, in Google's
+[official catalog](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
+retrieved on15October (catalog timestamp14October). The official ZIP is
+102390341bytes, SHA-256
+`5f51504ead3d41815111cd73e79c4979df3a4e6aedc7cf6fe2b042ae037363b5`.
+The existing materializer verified the archive and preserved its license/ABOUT;
+the arm64 executable SHA-256 is
+`30d40266569d5ad10647f0447c509cb3d82601850a89b16989c80a79061c1722`.
+The app's runtime verification constants and exact-identity fixtures change
+with SOURCE. Hosted full-Chrome qualification pins are a different artifact
+and are unchanged.
+
+A fresh checksum-verified OSV2.3.8 invocation against a clearly labelled
+one-package SPDX fixture retains this exact generic name/version with an empty
+ecosystem and explicitly reports it as unscannable. It emits no vulnerability
+field for that row. This demonstrates the scanner coverage gap; it does not
+establish that Chromium has no vulnerabilities. The existing integrity-only
+contract accepts this exact artifact through2026-10-29 with that residual
+coverage gap explicitly recorded, followed by review of current Stable and
+scanner support. Vulnerable/inconsistent rows still reject; scanner-covered and
+integrity-only counts remain separate. No claim about all historical CVEs or
+complete-app dependency acceptance follows from this decision.
+
+Retained evidence: `output/chromium-stable-20261015/receipt.json` and
+`osv-mapping/verification.json`. The mapping check ran once in1.233seconds,
+24.53MiB peak, without another download. Installed app, physical browser and
+release qualification remain separate gates.
+
+The actual new runtime also passed the localhost CDP behavior harness using
+production arguments with its browser sandbox enabled: HTML, CSS, JavaScript
+and an image completed; a deliberately truncated document produced
+`net::ERR_CONTENT_LENGTH_MISMATCH`, no loadingFinished and no complete-page
+classification. The run took 8.537 seconds with 172.17 MiB peak RSS and no
+surviving processes. Evidence is in `behavior-v3/` under the same directory.
+Two earlier harness launches failed before page assertions because of an
+additional sandbox-exec wrapper absent from production; neither qualifies as
+a runtime behavior result. No physical Chrome/Safari or installed app was changed.
+
 Updated: 2026-08-22
 
 Purpose: keep a compact record of routing research, graph-tool status, and

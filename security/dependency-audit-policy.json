@@ -2,12 +2,12 @@
   "exceptions": [],
   "integrity_only": [
     {
-      "expires": "2026-09-30",
+      "expires": "2026-10-29",
       "name": "chromium-headless-shell",
-      "purl": "pkg:generic/chromium-headless-shell@151.0.7922.77",
-      "reason": "OSV Scanner 2.3.8 preserves this SPDX generic package name and version but emits no ecosystem. Accept only the exact source-contract purl and SHA-256 until the scanner provides complete generic coordinates.",
-      "sha256": "44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e",
-      "version": "151.0.7922.77"
+      "purl": "pkg:generic/chromium-headless-shell@155.0.8059.79",
+      "reason": "Reviewed 2026-10-15: exact mac-arm64 headless-shell from the official Chrome for Testing Stable 155.0.8059.79 catalog, archive SHA-256 verified. A fresh run of pinned OSV Scanner 2.3.8 preserves this generic name/version with an empty ecosystem and explicitly filters it as unscannable. This time-bounded record accepts only artifact identity, not vulnerability coverage or absence of Chromium vulnerabilities. Reports must retain the separate integrity-only count; any scanner-reported vulnerability or identity mismatch still rejects. Re-review the current Stable artifact and scanner mapping by 2026-10-29; see docs/ROUTING_RESEARCH.md, Chromium runtime review 2026-10-15.",
+      "sha256": "5f51504ead3d41815111cd73e79c4979df3a4e6aedc7cf6fe2b042ae037363b5",
+      "version": "155.0.8059.79"
     }
   ],
   "rules": {

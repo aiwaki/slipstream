@@ -23,6 +23,7 @@ on:
       - ".github/workflows/build-geph.yml"
       - "scripts/dependency_audit.py"
       - "scripts/geph_vendor_source.py"
+      - "scripts/run_geph_synthetic_tests.py"
       - "scripts/make_geph_vendor_sbom.py"
       - "security/geph-dependency-audit-policy.json"
       - "vendor/geph/**"
@@ -301,8 +302,10 @@ jobs:
           set -euo pipefail
           source_root="${{ steps.source.outputs.root }}"
           mkdir -p out /tmp/geph-metadata
-          # The reviewed contract can carry exact source edits and regression tests.
-          cargo test --manifest-path "$source_root/Cargo.toml" --locked --features aws_lambda --lib
+          # Compile without executing upstream account/network tests. Only exact
+          # reviewed fixtures run, with OS network and private-file denial.
+          python3 scripts/run_geph_synthetic_tests.py --source-root "$source_root" \
+            --evidence-dir "$RUNNER_TEMP/geph-synthetic-tests"
           IFS=',' read -ra targets <<< "$GEPH_TARGETS"
           bins=()
           for target in "${targets[@]}"; do
@@ -329,6 +332,15 @@ jobs:
           grep -aq aws_smithy out/geph5-client || {
             echo "aws_lambda feature is absent from the built binary"; exit 1;
           }
+
+      - name: Retain isolated synthetic test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-synthetic-tests-${{ needs.resolve.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/geph-synthetic-tests/*
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build and audit the vendored dependency inventory
         run: |

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import copy
 import os
@@ -24,6 +25,7 @@ GEPH_BOOTSTRAP_ALLOWED = frozenset(
         "vendor/geph/README.md",
         "scripts/geph_vendor_source.py",
         "scripts/test_geph_source_edits.py",
+        "scripts/test_geph_embedded_source.py",
         # Both TLS graphs may need one coordinated source-only repair. All
         # dependency audits still run; no packaged binary is promoted here.
         "app-tauri/src-tauri/Cargo.lock",
@@ -34,6 +36,9 @@ GEPH_BOOTSTRAP_ALLOWED = frozenset(
         "scripts/test_ci_scope.py",
         ".github/workflows/build-geph.yml",
         "scripts/test_build_config.py",
+        "scripts/run_geph_synthetic_tests.py",
+        "scripts/test_run_geph_synthetic_tests.py",
+        "docs/ROUTING_RESEARCH.md",
     }
 )
 GEPH_BOOTSTRAP_REQUIRED = frozenset(
@@ -42,6 +47,63 @@ GEPH_BOOTSTRAP_REQUIRED = frozenset(
         "vendor/geph/SOURCE.json",
     }
 )
+# One coordinated delivery repair. Exact file bytes keep this from becoming a
+# general app/policy exemption. Full packaged checks still run on main, after
+# its producer publishes the reviewed Geph dependency; both audits run on PRs.
+DELIVERY_FILE_BINDINGS = {
+    '.github/workflows/dependency-audit.yml': (
+        '712ded84e3de62029067b6c3549829b3ed62e3a19b510a25cee842f684313285',
+        '709049d4b60b63a2e1d3d1150028457af1ea28c0627dc4b26c069f24fe9bb29f'),
+    'vendor/chromium-headless-shell/SOURCE.json': (
+        'bec2143e32afe1dfc128baff9183001451e3814c942140e782519d4363f49629',
+        '91a914cb43c5f8a6be8d3dc2da1ca4a05c963f95938a5c4bb0ab9cd5bbf05618'),
+    'app-tauri/src-tauri/src/browser_probe.rs': (
+        '20ccd41ac021c5308a70eeeca70779e93a629dbb3069185ac1a87bcb52df54cb',
+        '3d2b36ac1047fbc3f9cf25cc6ede2a69f104bcdeafa60371ab38177463839882'),
+    'security/dependency-audit-policy.json': (
+        'a3e663bdc2d5a999b9454f6cb95d35711240793d337acc3e3a7b1b32892efb16',
+        'dbcab882c56bd7daec4cdc8d964f95a84359cf83c66050497cae081b01009bdd'),
+    'scripts/dependency_audit.py': (
+        'a73162775fe9a47f00dc302e4d91ff9d828b7e54e17aef1a96603d8f87b246eb',
+        'e40869f5329103af2b595f001bfe0b9941c25422b284fa4f6b49a7ad444d4cf9'),
+}
+DELIVERY_TEST_PATHS = frozenset({
+    "scripts/test_build_config.py",
+    "scripts/test_dependency_audit.py",
+    "scripts/test_materialize_chromium_headless_shell.py",
+    "scripts/test_make_release_manifest.py",
+    "scripts/test_verify_release_artifacts.py",
+})
+GEPH_BOOTSTRAP_ALLOWED = GEPH_BOOTSTRAP_ALLOWED | DELIVERY_FILE_BINDINGS.keys() | DELIVERY_TEST_PATHS
+
+
+def reviewed_delivery_delta(deltas: dict[str, tuple[bytes, bytes]] | None) -> bool:
+    if deltas is None or deltas.keys() != DELIVERY_FILE_BINDINGS.keys():
+        return False
+    try:
+        return all(
+            tuple(hashlib.sha256(value).hexdigest() for value in deltas[path]) == binding
+            for path, binding in DELIVERY_FILE_BINDINGS.items()
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def delivery_delta_from_git() -> dict[str, tuple[bytes, bytes]] | None:
+    refs = (os.environ.get("BASE_SHA", ""), os.environ.get("GITHUB_SHA", ""))
+    if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs):
+        return None
+    try:
+        return {
+            path: tuple(subprocess.check_output(
+                ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL,
+                timeout=10) for ref in refs)
+            for path in DELIVERY_FILE_BINDINGS
+        }
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 WINDOWS_PREFIXES = (
     "contracts/",
     "crates/slipstream-core/",
@@ -87,7 +149,7 @@ def _is_documentation(path: str) -> bool:
 
 
 APP_LOCK = "app-tauri/src-tauri/Cargo.lock"
-# Reviewed RUSTSEC-2026-0285 migration only. This is not a blanket lockfile
+# Reviewed TLS migrations only. This is not a blanket lockfile
 # exemption: any other dependency, checksum, dependency edge or metadata change
 # must take the ordinary packaged-build path.
 APP_LOCK_REPAIRS = (
@@ -96,21 +158,45 @@ APP_LOCK_REPAIRS = (
     ("rustls-webpki", "0.103.13", "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e",
      "0.103.15", "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"),
 )
+APP_LOCK_REPAIR_SETS = (
+    APP_LOCK_REPAIRS,
+    # RUSTSEC-2026-0346/0347/0348/0349. The previous migration is already on
+    # main; recognize this exact subsequent repair without admitting other
+    # lockfile changes into source bootstrap.
+    (("rustls", "0.23.45", "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
+      "0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),),
+    # The same delivery graph also repairs the five current QUIC advisories.
+    # Version/checksum pairs only; dependency edges and all other bytes of the
+    # parsed lock contract must still be unchanged.
+    (
+        ("rustls", "0.23.45", "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
+         "0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
+        ("quinn-proto", "0.11.16", "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560",
+         "0.11.18", "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"),
+    ),
+)
 
 
 def reviewed_app_lock_repair(before: str, after: str) -> bool:
     try:
         original, actual = tomllib.loads(before), tomllib.loads(after)
-        expected = copy.deepcopy(original)
-        for name, old, old_hash, new, new_hash in APP_LOCK_REPAIRS:
-            matches = [p for p in expected["package"] if p["name"] == name and p["version"] == old]
-            if len(matches) != 1:
-                return False
-            package = matches[0]
-            if package.get("checksum") != old_hash or package.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
-                return False
-            package.update(version=new, checksum=new_hash)
-        return actual == expected
+        for repairs in APP_LOCK_REPAIR_SETS:
+            expected = copy.deepcopy(original)
+            for name, old, old_hash, new, new_hash in repairs:
+                matches = [p for p in expected["package"] if p["name"] == name and p["version"] == old]
+                if len(matches) != 1:
+                    break
+                package = matches[0]
+                if package.get("checksum") != old_hash or package.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
+                    break
+                if any(p["name"] == name and p["version"] == new
+                       and p.get("source") == package["source"] for p in expected["package"]):
+                    break
+                package.update(version=new, checksum=new_hash)
+            else:
+                if actual == expected:
+                    return True
+        return False
     except (ValueError, KeyError, TypeError):
         return False
 
@@ -128,7 +214,8 @@ def app_lock_delta_from_git() -> tuple[str, str] | None:
 
 
 def classify_paths(paths: list[str], *, event_name: str,
-                   app_lock_delta: tuple[str, str] | None = None) -> CiScope:
+                   app_lock_delta: tuple[str, str] | None = None,
+                   delivery_delta: dict[str, tuple[bytes, bytes]] | None = None) -> CiScope:
     if event_name not in {"pull_request", "push"}:
         raise ValueError(f"unsupported CI event: {event_name}")
     changed = {_validate_path(path) for path in paths if path}
@@ -156,6 +243,10 @@ def classify_paths(paths: list[str], *, event_name: str,
             })
         ))
         and changed.issubset(GEPH_BOOTSTRAP_ALLOWED)
+        and (not (changed & DELIVERY_FILE_BINDINGS.keys()) or (
+            (DELIVERY_FILE_BINDINGS.keys() | DELIVERY_TEST_PATHS | GEPH_BOOTSTRAP_REQUIRED).issubset(changed)
+            and reviewed_delivery_delta(delivery_delta)))
+        and ("scripts/run_geph_synthetic_tests.py" not in changed or "scripts/test_run_geph_synthetic_tests.py" in changed)
         and ("scripts/geph_vendor_source.py" not in changed or "scripts/test_geph_source_edits.py" in changed)
         and (APP_LOCK not in changed or (
             app_lock_delta is not None and reviewed_app_lock_repair(*app_lock_delta)))
@@ -187,7 +278,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     paths = [line.rstrip("\n") for line in sys.stdin]
     delta = app_lock_delta_from_git() if args.event_name == "pull_request" and APP_LOCK in paths else None
-    scope = classify_paths(paths, event_name=args.event_name, app_lock_delta=delta)
+    delivery_delta = (delivery_delta_from_git()
+        if args.event_name == "pull_request" and set(paths) & DELIVERY_FILE_BINDINGS.keys() else None)
+    scope = classify_paths(paths, event_name=args.event_name, app_lock_delta=delta,
+                           delivery_delta=delivery_delta)
     write_github_output(args.github_output, scope)
     print(json.dumps(asdict(scope), sort_keys=True, separators=(",", ":")))
     return 0
