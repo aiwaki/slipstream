@@ -1,0 +1,40 @@
+name: public-update-ui-preflight
+
+on:
+  # This branch-only bootstrap measures hosted UI capability before adding
+  # a genuine public updater qualification. It cannot install or publish.
+  push:
+    branches: ["codex/public-update-pair-qualification"]
+    paths:
+      - ".github/workflows/public-update-qualification.yml"
+      - "scripts/public_update_ui_preflight.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-update-ui-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  hosted-ui-capability:
+    runs-on: macos-14
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Observe console and Accessibility capability without prompting
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          mkdir -p output/public-update-ui-preflight
+          python3 scripts/public_update_ui_preflight.py \
+            --output output/public-update-ui-preflight/capability.json
+      - name: Retain capability evidence even when unavailable
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-update-ui-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/public-update-ui-preflight/
+          if-no-files-found: error
+          retention-days: 14

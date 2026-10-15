@@ -57,6 +57,14 @@ are authoritative. Reuse unchanged green checks rather than repeating them.
 
 ## Next Verified Action
 
+Branch `codex/public-update-pair-qualification` measures hosted macOS console and
+Accessibility capability with a read-only, no-prompt preflight. It installs
+nothing, requests no account secret and cannot publish. This replaces the
+previous untested assumption that hosted UI access is unavailable. Its result
+is capability evidence only, never proof of a public update. Source graph tools
+are not exposed in this session; bounded direct source reads establish that the
+released .23 installer requires the real tray action.
+
 Qualify the real public `.23 -> .24` upgrade and forced rollback against the
 verified published assets, retaining the existing notification, signed-install,
 exact-identity, successor-health and invisibility requirements. That public pair
