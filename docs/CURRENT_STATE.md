@@ -1,6 +1,43 @@
 # Current Project State
 
-## Delivery checkpoint — 2026-10-15
+## Published preview checkpoint — 2026-10-15
+
+`v0.1.9-preview.24` is published from exact main
+`e5791a4d7f42e000bb37732f8aa4b9698e62dd9f` (merged PR389).
+Documentation branch: `codex/preview24-publication-checkpoint`, based on that
+main commit. Worktree:
+`/Users/aiwaki/.codex/worktrees/release-delivery/slipstream-codebase-audit-20260905`.
+
+- Exact main [CI 38739537809](https://github.com/aiwaki/slipstream/actions/runs/38739537809)
+  and [dependency audit 38739537827](https://github.com/aiwaki/slipstream/actions/runs/38739537827)
+  passed, both attempt 1; the candidate was reused without rebuilding.
+- Protected [readiness 38745936996](https://github.com/aiwaki/slipstream/actions/runs/38745936996)
+  passed on the same source/candidate, attempt 1: all 8 Safari/Chrome checks across
+  four live sites passed, followed by 1800.095 seconds of measured invisibility
+  soak with 3600 samples, stable daemon PID, advancing heartbeat and clean teardown.
+  Candidate manifest SHA256:
+  `437084c9a5b26acc358620cb336ea1b81f24637d5f950889c9d7a53a6ccc1860`.
+- [Publisher 38752022135](https://github.com/aiwaki/slipstream/actions/runs/38752022135)
+  passed. [Public preview .24](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.24),
+  release ID 413914811, was published 2026-10-15T14:33:23Z with 12 assets and the tag
+  pointing to the exact source above. Preview .23 now has an archival title; its
+  tag/assets remain retained. The publisher verified remote identity and digests;
+  a separate download and independent verification of the public files is pending.
+
+Retained evidence: `output/main-e5791a4d7/`,
+`output/readiness-e5791a4d7-38745936996/` and
+`output/publish-preview24-e5791a4d7/`. Earlier failed attempts below are history,
+not the current release gate. No new workstation installation has occurred.
+
+The explicitly authorized order is publication after the existing mandatory
+gates, then a real public `.23 -> .24` upgrade and forced rollback. That public
+pair remains unverified; do not describe preview auto-update as verified.
+Next: finish independent public-file verification, then qualify the public
+upgrade/forced-rollback pair with the existing exact-identity and invisibility
+requirements. Native/source-owned migration and unrelated work in PR384/PR386
+remain deferred; preserve the root checkout, user changes and retained output.
+
+## Historical delivery checkpoint — before publication, 2026-10-15
 
 Current branch: `codex/preview24-20261015`, based on main
 `2a6c550a7a227a89867407d1492eda2b35b8f057` (merged PR388).

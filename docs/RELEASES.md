@@ -19,11 +19,16 @@ new preview releases. Existing `.22` installations require one manual `.23`
 installation because `.22` reported the stable-looking package version `0.1.9`
 and cannot safely compare it with the new prerelease version. From `.23`
 onward, discovery may post a native notification, but download, installation
-and relaunch require an explicit tray-menu action. The first real `.23 -> .24`
-release transition is itself a gate for `.24`: it must prove notification
-identity/submission, the bounded signed install, successor health, rollback on
-failure, and no Dock tile, window or focus change. Local MockRuntime tests are
-updater mechanics evidence only and do not satisfy that future live gate.
+and relaunch require an explicit tray-menu action. Publish `.24` after the
+existing exact-candidate CI, dependency-audit, packaged/native, protected
+readiness and publisher verification gates pass. Then qualify the first real
+public `.23 -> .24` upgrade and forced rollback against the immutable published
+assets. This post-publication gate must prove notification identity/submission,
+the bounded signed install, successor health, rollback on failure, and no Dock
+tile, window or focus change. Until it passes, release notes and user-facing
+claims must describe preview auto-update and public upgrade/rollback as
+unverified. Local MockRuntime tests are updater mechanics evidence only and do
+not satisfy this live gate. No other publication requirement changes.
 Root READMEs link to the releases list and instruct users to select the newest
 Slipstream app release, excluding internal dependency releases. Keep installation
 instructions version-independent; do not use GitHub's latest pointer for previews.
