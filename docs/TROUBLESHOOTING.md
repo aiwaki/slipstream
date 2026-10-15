@@ -74,7 +74,9 @@ compatible preview from its DMG; preview comparisons use ordinary semver precede
 
 Released `.23` and `.24` also have a discovery-size defect. On 2026-10-15 the
 public GitHub releases response contained 29 records and 417722 bytes, above the
-client's 256 KiB per-page limit. The real public `.23` test opened its tray menu
+client's 256 KiB per-page limit. This API response was fetched separately after
+the run; client stderr was not captured. The blocker follows from the source and
+API bytes, rather than a captured client error. The real public `.23` test opened its tray menu
 but never offered `.24`; no installation began, and cleanup passed. This happens
 before notification submission, so enabling notifications cannot repair it.
 Use the published DMG. The source repair requests 10 records per page instead of

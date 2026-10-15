@@ -1,6 +1,6 @@
 # Current Project State
 
-## Verified Release
+## Verified Checkpoint
 
 [Preview .24](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.24)
 is public from `e5791a4d7f42e000bb37732f8aa4b9698e62dd9f`, release ID 413914811.
@@ -23,8 +23,9 @@ Worktree: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-a
 Six new regressions, independent review, Rustfmt and fixture-integrity checks
 passed. Product checks and dependency audit passed at `be5311582bdd618f216ddd77220d7aea5db7e4fb`
 (CI38766921595 / audit38766921225); its remaining packaged lifecycle gate was
-still running when this documentation-only follow-up was prepared. Required
-checks must pass on the final PR head before normal merge. No local Rust build.
+still running when this documentation-only follow-up was prepared. Its complete CI is now green. The documentation-only b8eda556 follow-up failed
+the fixed checkpoint-heading contract; the required headings and milestone rows
+are restored below. Required checks must pass on the final head. No local Rust build.
 
 The real public `.23 -> .24` attempt (run38763822390) stopped before activation
 because no offer appeared; cleanup passed. Public upgrade/rollback remains
@@ -35,10 +36,21 @@ Public-run receipt: release-delivery `output/public-update-pair-prep/public-pair
 SHA256 `9ea4571838afa6931dbe2810b8f8ac594109dcf0a2c21fdaf13ca35c15b2084e`.
 Focused source/live-API evidence: this worktree's `output/preview-discovery-pagination/`.
 
-## Next Action and Open Gates
+| Milestone | Current boundary |
+|---|---|
+| M0 - Safe Base | Candidate cleanup passed; public update/rollback unqualified. |
+| M1 - Autonomous Routing V1 | Hosted browser/soak passed; no new workstation qualification. |
+| M2 - Contracts And Code | Discovery fix passed source tests; daemon ACK repair remains. |
+| M3 - Release-Grade macOS | Preview .24 public; stable and public updater gates open. |
+| M4 - Cross-Platform Core | No new platform qualification in this change. |
+
+## Next Verified Action
 
 - Finish final-head PR391 CI/audit and normal merge; then follow its main checks.
   Do not rebuild or republish `.24` or rerun its protected readiness.
+
+## External Gates
+
 - Repair pending-update daemon identity and privileged-installer lifetime before
   qualifying a future public updater pair. Preserve signed-install, rollback,
   notification and invisibility requirements; do not preinstall a new daemon to
@@ -50,9 +62,13 @@ Focused source/live-API evidence: this worktree's `output/preview-discovery-pagi
 - External DNS/proxy/PAC/VPN and PF owners are untouched. Discord, YouTube and
   Googlevideo remain on local bypass; this change affects no routing rule.
 
-## Resume
+## Resume Protocol
 
 Verify physical checkout, HEAD, PR state and exact matching CI once, then take
 the next action. This checkpoint is a locator, not proof. Read [DECISIONS.md](DECISIONS.md)
-and [RELEASES.md](RELEASES.md); update this file when the verified next action
-changes. Keep detailed investigations in their topic docs and retained evidence.
+and [RELEASES.md](RELEASES.md).
+
+## Update Rule
+
+Update this file when the verified next action changes. Keep detailed
+investigations in their topic docs and retained evidence.
