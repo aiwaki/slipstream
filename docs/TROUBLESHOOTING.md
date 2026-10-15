@@ -124,9 +124,28 @@ mandatory candidate, audit, packaged/native and protected-readiness gates,
 including the exact packaged OS-observed notification gate with no activation.
 The real public `.23 -> .24` attempt stopped at discovery; download, installation,
 relaunch and forced rollback remain unverified. Source review also found that a
-successor can acknowledge an advancing old daemon without checking the new daemon
-payload, while asynchronous privileged installation is pending. That separate
-defect is not fixed by pagination and has not been reproduced by this run.
+released successor can acknowledge an advancing old daemon without checking the
+new daemon payload, while asynchronous privileged installation is pending. That
+separate defect was identified in source; the public run did not reach it.
+
+The pending-successor repair requires exact bundled-daemon install evidence before
+startup can reach an installer. Each ACK observation also checks fresh StatusV2,
+matching daemon PID, owned process and an advancing heartbeat under the same
+attested identity. Invalid transaction state cannot become ordinary startup.
+Restart, uninstall, nested update and automatic daemon repair wait until the
+watchdog has committed and its rollback state is gone under the transaction lock.
+The rollback launch retains the legacy transaction marker for older clients and
+provides a validated, persistent rollback receipt for newer clients, so removing
+the active journal cannot turn a valid rollback into an invalid successor.
+The restored app keeps its mutation guard until the same watchdog lock is free,
+transaction files are removed and the retained receipt proves OldRelaunched with
+the exact old app identity. Only then may ordinary daemon installation resume,
+once; rollback never sends a successor ACK. This also prevents stale daemon
+attestation from starting an installer during rollback cleanup.
+
+This repair refuses an update when the installed daemon does not match; it does
+not yet coordinate replacement of both daemon and app. The source tests and
+packaged checks must be recorded separately from a genuine public update pair.
 Keep preview auto-update and public upgrade/rollback marked unverified; use the
 published DMG for manual installation. Do not preinstall a new daemon or replace
 released assets to turn a public updater check into a pass.

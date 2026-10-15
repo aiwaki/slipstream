@@ -15,6 +15,7 @@ mod native_messaging;
 mod native_update_notification;
 mod notification_qualification;
 mod status_client;
+mod successor_daemon;
 mod updater_transaction;
 
 pub use native_messaging::run_native_messaging_if_requested;
@@ -49,6 +50,7 @@ use install_attestation::{
 };
 use serde_json::{json, Value};
 use status_client::{read_status, read_status_state, StatusRead, STATUS_PATH};
+use successor_daemon::SuccessorDaemonGuard;
 use tauri::{
     image::Image,
     menu::{
@@ -3348,6 +3350,31 @@ pub fn run() {
                 }
             }
 
+            // A present transaction must validate before any daemon installer,
+            // menu or status task exists. Invalid pending state is not normal
+            // startup, and a different bundled daemon must roll back untouched.
+            let pending_update_ack = if !updater_transaction::startup_has_transaction() {
+                Ok(None)
+            } else {
+                std::env::current_exe()
+                    .map_err(|error| format!("update successor executable unavailable: {error}"))
+                    .and_then(|current_exe| {
+                        updater_transaction::pending_successor_ack(
+                            &current_exe,
+                            &app.package_info().version.to_string(),
+                        )
+                    })
+            };
+            let pending_daemon_guard = SuccessorDaemonGuard::prepare(
+                pending_update_ack,
+                updater_transaction::PendingSuccessorAck::needs_daemon_ack,
+                || bundled_daemon_path(app.handle())
+                    .and_then(|bundled| daemon_install_attestation(&bundled)),
+            )
+            .map_err(std::io::Error::other)?;
+            let pending_daemon_actions = pending_daemon_guard.blocker();
+            let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire);
+
             // notify-rust's macOS application identity is process-global and
             // immutable after the first notification. Set it before any
             // daemon/setup path can notify so production can never inherit the
@@ -3374,30 +3401,9 @@ pub fn run() {
                 eprintln!("{error}");
             }
 
-            // A replacement may acknowledge only from the exact directly
-            // launched successor.  Merely reaching setup is insufficient:
-            // the status loop below waits until the tray exists and an owned
-            // daemon has published a fresh independent heartbeat.
-            let pending_update_ack = match std::env::current_exe().map_err(|error| error.to_string()) {
-                Ok(current_exe) => updater_transaction::pending_successor_ack(
-                    &current_exe,
-                    &app.package_info().version.to_string(),
-                )
-                .map_err(|error| {
-                    eprintln!("update successor acknowledgement unavailable: {error}");
-                    error
-                })
-                .ok()
-                .flatten(),
-                Err(error) => {
-                    eprintln!("update successor executable unavailable: {error}");
-                    None
-                }
-            };
-
             // First launch: self-install the background service (one password
-            // prompt). Everything after this is automatic.
-            ensure_daemon_installed(app.handle());
+            // prompt). Pending successors must leave the existing service intact.
+            pending_daemon_guard.start_normal_daemon(|| ensure_daemon_installed(app.handle()));
             if let Err(error) = native_messaging::register_chromium_native_host() {
                 eprintln!("Chromium native host registration unavailable: {error}");
             }
@@ -3463,8 +3469,15 @@ pub fn run() {
                 if ui_ru() { "Версия" } else { "Version" },
                 app.package_info().version
             );
-            let update_item =
-                MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?;
+            let update_item = MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…"))
+                .enabled(daemon_actions_enabled)
+                .build(app)?;
+            let restart_item = MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy"))
+                .enabled(daemon_actions_enabled)
+                .build(app)?;
+            let uninstall_item = MenuItemBuilder::with_id(ID_UNINSTALL, tr("Uninstall Slipstream…"))
+                .enabled(daemon_actions_enabled)
+                .build(app)?;
             let update_state_path = app.path().app_config_dir()?.join(UPDATE_STATE_FILE);
             let update_state = Arc::new(Mutex::new(load_app_update_state(
                 update_state_path,
@@ -3477,7 +3490,7 @@ pub fn run() {
                 .separator()
                 .item(&geph_menu)
                 .item(&launch)
-                .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
+                .item(&restart_item)
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Status")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_DIAGNOSTICS, tr("Copy Diagnostics")).build(app)?)
                 .separator()
@@ -3488,10 +3501,7 @@ pub fn run() {
                         .build(app)?,
                 )
                 .separator()
-                .item(
-                    &MenuItemBuilder::with_id(ID_UNINSTALL, tr("Uninstall Slipstream…"))
-                        .build(app)?,
-                )
+                .item(&uninstall_item)
                 .item(
                     &MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream"))
                         .accelerator("CmdOrCtrl+Q")
@@ -3519,12 +3529,18 @@ pub fn run() {
             let exit_refreshing_menu = exit_refreshing.clone();
             let update_item_menu = update_item.clone();
             let update_state_menu = update_state.clone();
+            let pending_daemon_menu = pending_daemon_actions.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
                     let id = event.id().as_ref();
+                    if pending_daemon_menu.load(Ordering::Acquire)
+                        && matches!(id, ID_RESTART | ID_UNINSTALL | ID_UPDATE)
+                    {
+                        return;
+                    }
                     if let Some(val) = id.strip_prefix("exit:") {
                         {
                             let items = exit_items_menu.lock().expect("exit menu lock poisoned");
@@ -3706,8 +3722,12 @@ pub fn run() {
             let update_app = app.handle().clone();
             let update_item_watch = update_item.clone();
             let update_state_watch = update_state.clone();
+            let pending_daemon_discovery = pending_daemon_actions.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(UPDATE_INITIAL_DELAY_SECS)).await;
+                while pending_daemon_discovery.load(Ordering::Acquire) {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
                 loop {
                     refresh_app_update(
                         update_app.clone(),
@@ -3741,46 +3761,34 @@ pub fn run() {
                 let watchdog_started = Instant::now();
                 let mut next_daemon_recovery = Instant::now();
                 let mut tray_liveness = TrayLiveness::default();
-                let mut pending_update_ack = pending_update_ack;
-                let mut pending_update_heartbeat_baseline = None;
+                let mut pending_daemon_guard = pending_daemon_guard;
                 loop {
                     let state = refresh(&s, &d, &mut tray_liveness);
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
                     }
-                    let status = read_status();
-                    if let (Some(context), Some(heartbeat_seq)) = (
-                        pending_update_ack.as_ref(),
-                        status
-                            .as_ref()
-                            .and_then(|value| value.get("heartbeat_seq"))
-                            .and_then(Value::as_u64)
-                            .filter(|value| *value > 0),
+                    let status_read = read_status_state();
+                    let status = status_read.value().filter(|_| status_read.is_fresh()).cloned();
+                    match pending_daemon_guard.poll(
+                        || bundled_daemon_path(&app_handle)
+                            .and_then(|bundled| daemon_install_attestation(&bundled)),
+                        &status_read,
+                        daemon_pid_owned,
+                        updater_transaction::acknowledge_successor,
+                        |context| updater_transaction::startup_transaction_finished(
+                            context,
+                            &app_handle.package_info().version.to_string(),
+                        ),
+                        || ensure_daemon_installed(&app_handle),
                     ) {
-                        let owned_daemon = status
-                            .as_ref()
-                            .and_then(|value| value.get("pid"))
-                            .and_then(Value::as_i64)
-                            .is_some_and(daemon_pid_owned);
-                        let advanced = match pending_update_heartbeat_baseline {
-                            Some(baseline) => heartbeat_seq > baseline,
-                            None => {
-                                pending_update_heartbeat_baseline = Some(heartbeat_seq);
-                                false
-                            }
-                        };
-                        if owned_daemon && advanced {
-                            match updater_transaction::acknowledge_successor(
-                                context,
-                                heartbeat_seq,
-                            ) {
-                                Ok(()) => pending_update_ack = None,
-                                Err(error) => eprintln!(
-                                    "update successor acknowledgement failed: {error}"
-                                ),
-                            }
+                        Ok(true) => {
+                            let _ = restart_item.set_enabled(true);
+                            let _ = uninstall_item.set_enabled(true);
+                            let _ = update_item.set_enabled(true);
                         }
+                        Ok(false) => {}
+                        Err(error) => eprintln!("update successor daemon gate: {error}"),
                     }
                     let now = Instant::now();
                     if status.is_some() {
@@ -3794,7 +3802,7 @@ pub fn run() {
                         seen_tg_offer_reset = tg_offer_reset_seen_now;
                         next_tg_offer = now;
                     }
-                    if should_recover_daemon(
+                    if !pending_daemon_actions.load(Ordering::Acquire) && should_recover_daemon(
                         missing_status_polls,
                         has_seen_daemon_status,
                         now.duration_since(watchdog_started)
@@ -4175,6 +4183,43 @@ v0.1.9-preview.25/Slipstream.app.tar.gz";
         assert!(recovery < notification);
         assert!(notification < daemon);
         assert!(daemon < tray);
+    }
+
+    #[test]
+    fn pending_successor_guard_covers_startup_menu_and_recovery_paths() {
+        let source = include_str!("lib.rs");
+        let run = &source[source.find("pub fn run() {").unwrap()..];
+        let run = run.split("#[cfg(test)]").next().unwrap();
+        let validation = run.find("SuccessorDaemonGuard::prepare").unwrap();
+        let notification = run
+            .find("configure_native_notification_identity(notification_identity")
+            .unwrap();
+        let startup = run
+            .find("pending_daemon_guard.start_normal_daemon")
+            .unwrap();
+        let tray = run.find("TrayIconBuilder::with_id").unwrap();
+        assert!(validation < notification && notification < startup && startup < tray);
+        let menu = &run[run.find(".on_menu_event(move |app, event|").unwrap()..];
+        let guard = menu
+            .find("pending_daemon_menu.load(Ordering::Acquire)")
+            .unwrap();
+        assert!(guard < menu.find("match id {").unwrap());
+        assert!(menu[..menu.find("match id {").unwrap()]
+            .contains("matches!(id, ID_RESTART | ID_UNINSTALL | ID_UPDATE)"));
+        assert!(run.contains(
+            "if !pending_daemon_actions.load(Ordering::Acquire) && should_recover_daemon("
+        ));
+        assert!(run.contains("while pending_daemon_discovery.load(Ordering::Acquire)"));
+        assert!(run.contains("updater_transaction::PendingSuccessorAck::needs_daemon_ack"));
+        let poll = &run[run.find("match pending_daemon_guard.poll(").unwrap()..];
+        let finished = poll
+            .find("updater_transaction::startup_transaction_finished(")
+            .unwrap();
+        let install = poll
+            .find("|| ensure_daemon_installed(&app_handle)")
+            .unwrap();
+        let enable = poll.find("restart_item.set_enabled(true)").unwrap();
+        assert!(finished < install && install < enable);
     }
 
     #[test]
