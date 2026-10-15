@@ -51,6 +51,9 @@ GEPH_BOOTSTRAP_REQUIRED = frozenset(
 # general app/policy exemption. Full packaged checks still run on main, after
 # its producer publishes the reviewed Geph dependency; both audits run on PRs.
 DELIVERY_FILE_BINDINGS = {
+    '.github/workflows/dependency-audit.yml': (
+        '712ded84e3de62029067b6c3549829b3ed62e3a19b510a25cee842f684313285',
+        '709049d4b60b63a2e1d3d1150028457af1ea28c0627dc4b26c069f24fe9bb29f'),
     'vendor/chromium-headless-shell/SOURCE.json': (
         'bec2143e32afe1dfc128baff9183001451e3814c942140e782519d4363f49629',
         '91a914cb43c5f8a6be8d3dc2da1ca4a05c963f95938a5c4bb0ab9cd5bbf05618'),
@@ -65,6 +68,7 @@ DELIVERY_FILE_BINDINGS = {
         'e40869f5329103af2b595f001bfe0b9941c25422b284fa4f6b49a7ad444d4cf9'),
 }
 DELIVERY_TEST_PATHS = frozenset({
+    "scripts/test_build_config.py",
     "scripts/test_dependency_audit.py",
     "scripts/test_materialize_chromium_headless_shell.py",
     "scripts/test_make_release_manifest.py",
@@ -161,6 +165,15 @@ APP_LOCK_REPAIR_SETS = (
     # lockfile changes into source bootstrap.
     (("rustls", "0.23.45", "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
       "0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),),
+    # The same delivery graph also repairs the five current QUIC advisories.
+    # Version/checksum pairs only; dependency edges and all other bytes of the
+    # parsed lock contract must still be unchanged.
+    (
+        ("rustls", "0.23.45", "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
+         "0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
+        ("quinn-proto", "0.11.16", "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560",
+         "0.11.18", "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"),
+    ),
 )
 
 

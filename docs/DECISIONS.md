@@ -3,7 +3,7 @@
 ### 2026-10-15: coordinated dependency delivery
 
 One source-bootstrap PR may carry the reviewed Geph source transition, exact
-app TLS repair, and the exact Chromium/audit-helper update bound in
+app TLS/QUIC repairs, and the exact Chromium/audit-helper update bound in
 `scripts/ci_scope.py`. This exception reads committed base/head bytes and
 requires the entire bound file set with its tests; it is not general permission
 to skip packaging for app or audit policy edits. Both dependency audits and

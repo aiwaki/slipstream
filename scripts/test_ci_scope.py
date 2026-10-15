@@ -73,6 +73,27 @@ class CiScopeTests(unittest.TestCase):
         self.assertTrue(ci_scope.classify_paths(paths + ["scripts/test_run_geph_synthetic_tests.py"],
             event_name="pull_request").geph_bootstrap)
 
+    def test_combined_tls_and_quinn_repair_keeps_exact_lock_boundaries(self):
+        before, after = ["version = 4"], ["version = 4"]
+        for name, old, old_hash, new, new_hash in ci_scope.APP_LOCK_REPAIR_SETS[-1]:
+            for rows, version, checksum in ((before, old, old_hash), (after, new, new_hash)):
+                rows.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\nchecksum = "{checksum}"\n'
+                            'source = "registry+https://github.com/rust-lang/crates.io-index"\ndependencies = ["bytes"]')
+        before, after = "\n".join(before), "\n".join(after)
+        paths = [*ci_scope.GEPH_BOOTSTRAP_REQUIRED, ci_scope.APP_LOCK]
+        self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request",
+            app_lock_delta=(before, after)).geph_bootstrap)
+        bad_values = [after.replace('"0.11.18"', '"0.11.17"'),
+                      after.replace(ci_scope.APP_LOCK_REPAIR_SETS[-1][-1][-1], "0" * 64),
+                      after.replace('dependencies = ["bytes"]', 'dependencies = []'),
+                      after.replace('version = 4', 'version = 3'), before,
+                      after + '\n[[package]]\nname="other"\nversion="1.0.0"']
+        for actual in bad_values:
+            with self.subTest(actual=actual):
+                self.assertFalse(ci_scope.reviewed_app_lock_repair(before, actual))
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
+            app_lock_delta=(before, after)).geph_bootstrap)
+
     def app_lock_delta(self):
         before, after = ["version = 4"], ["version = 4"]
         for name, old, old_hash, new, new_hash in ci_scope.APP_LOCK_REPAIRS:

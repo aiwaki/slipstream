@@ -14,8 +14,8 @@ system networking have not changed during this preparation.
   binds SOURCE, lock and the complete policy. Full current Geph scan on the
   identical contract passed in PR384 audit38722167139:423packages,0blocking,
   2reviewed exceptions and2informational notices.
-- Both app and Geph pin rustls0.23.46. App lock changes only that version and
-  checksum. Chromium headless-shell moves to official Stable155.0.8059.79,
+- Both app and Geph pin rustls0.23.46. App lock changes only rustls and quinn-proto version/checksum pairs.
+  Quinn-proto0.11.18 replaces0.11.16; the wrapper and dependency edges stay unchanged. Chromium headless-shell moves to official Stable155.0.8059.79,
   exact archive `5f51504e`; materialization and real localhost CDP complete/
   truncated-body cases passed, sandbox enabled,172.17MiB peak, no survivors.
   Its freshly checked scanner mapping remains explicitly integrity-only
@@ -25,7 +25,7 @@ system networking have not changed during this preparation.
   scanned-package identities required by the downstream consumer. Source,
   runner and transition checks passed;33 adjacent report consumer tests also
   pass after their scanner fixtures use the actual SBOM coordinates.
-- Source bootstrap on this PR additionally permits one exact four-file
+- Source bootstrap on this PR additionally permits one exact five-file
   Chromium/audit-helper transition, checked from committed base/head bytes.
   The complete bundle and paired tests are required; changed bytes, partial
   sets, missing refs, unrelated code, or push/main take ordinary packaged CI.
@@ -37,7 +37,21 @@ two necessary consumer fixtures to the required bundle passed14 scope tests.
 Independent source-bootstrap and audit-contract review found no blocking issue.
 No local Rust build or full suite was repeated.
 
-Next: commit/push this branch, open its PR and check its exact CI. After its reviewed source reaches
+PR388 is open at0bcfc5d70. Exact audit38725912548 passes Geph; the app now
+reaches its fresh scan (361scanned,1integrity-only) and reports5blocking and
+5informational findings. The inherited workflow retained only successful
+reports, so that failed report was not uploaded. A narrow `if: always()`
+retention fix preserves enforcement and is added to the exact bootstrap file
+bindings;15 focused checks pass. One bounded offline-metadata/local-scanner
+replay identified all five in quinn-proto0.11.16. The exact reviewed PR386
+repair to0.11.18 clears all five in one fresh scan:361scanned,1integrity-only,
+0blocking,5informational, strict identity/report validation PASS. The archive
+was already cached and its hash matches the pin; no compiler/download ran. Product CI38725912572 is still
+running; Chromium contract already passes. Do not rerun that unchanged handle.
+
+Next: push the exact QUIC repair and failed-report retention together and check
+the new exact CI. Fifteen scope checks and an independent review accepted the
+combined TLS/QUIC lock repair and five-file bootstrap binding. After its reviewed source reaches
 main, the main-only producer publishes the immutable Geph dependency. Then
 complete main packaging and installed Chrome/Safari/lifecycle qualification;
 no published or installed result is claimed yet. Reuse unchanged green suites.

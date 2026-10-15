@@ -87,6 +87,17 @@ class BuildConfigTests(unittest.TestCase):
             env=env,
         )
 
+    def test_dependency_audit_retains_failed_report_evidence(self):
+        workflow = (ROOT / ".github/workflows/dependency-audit.yml").read_text()
+        for name in ("dependency-audit-${{ github.sha }}",
+                     "geph-vendor-dependency-audit-${{ github.sha }}"):
+            before = workflow[:workflow.index("name: " + name)]
+            upload = before[before.rindex("      - uses: actions/upload-artifact@"):]
+            self.assertIn("        if: always()\n", upload)
+        # Retaining a failing report must not change either enforcement result.
+        self.assertIn('"$APP_AUDIT" = success', workflow)
+        self.assertIn('"$GEPH_AUDIT" = success', workflow)
+
     def test_geph_source_regressions_run_before_vendor_build(self):
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()
         test = 'python3 scripts/run_geph_synthetic_tests.py --source-root "$source_root"'

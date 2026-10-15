@@ -1,5 +1,37 @@
 # Routing Research Notes
 
+### Quinn dependency review 2026-10-15
+
+PR388 audit run 38725912548 reached the app scan at commit `0bcfc5d70` and
+reported five blocking advisories. One local replay of the exact committed
+inputs, using offline locked metadata for `aarch64-apple-darwin` and the
+policy-pinned OSV 2.3.8 scanner, identified all five on `quinn-proto 0.11.16`:
+
+| RustSec advisory | GitHub alias | Fixed version reported by OSV |
+|---|---|---|
+| [RUSTSEC-2026-0338](https://rustsec.org/advisories/RUSTSEC-2026-0338.html) | GHSA-465w-v9q3-7j98 | 0.11.18 |
+| [RUSTSEC-2026-0339](https://rustsec.org/advisories/RUSTSEC-2026-0339.html) | GHSA-hmxj-32vh-65vr | 0.11.17 |
+| [RUSTSEC-2026-0340](https://rustsec.org/advisories/RUSTSEC-2026-0340.html) | GHSA-3g6h-r5qx-f6hq | 0.11.18 |
+| [RUSTSEC-2026-0341](https://rustsec.org/advisories/RUSTSEC-2026-0341.html) | GHSA-qfwj-vfxf-92j2 | 0.11.17 |
+| [RUSTSEC-2026-0342](https://rustsec.org/advisories/RUSTSEC-2026-0342.html) | GHSA-2hv7-gw8g-gpq5 | 0.11.17 |
+
+The repair reuses only the `quinn-proto 0.11.18` version/checksum from PR386
+commit `4360003ca`: the cached registry archive matches SHA-256
+`a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc`.
+Parsed lock comparison confirms no other field changed; `rustls 0.23.46` and
+the `quinn 0.11.11` wrapper remain pinned. Offline locked metadata succeeds.
+
+One fresh scan after this repair, bounded to 60 seconds/300 MiB, reports
+zero blocking findings and the same five informational unmaintained notices.
+Both scans cover 361 exact package identities plus one integrity-only Chromium
+identity. The sole inventory change is `quinn-proto 0.11.16 -> 0.11.18`; strict
+report validation passes. Raw responses, input hashes, lock comparison and
+resource receipts are retained under
+`output/pr388-ci-0bcfc5d70/{local-app-replay,local-app-quinn-fix}/`.
+This is local dependency evidence, not a committed CI, compiled-app or runtime
+qualification. Chromium remains integrity-only, and the app report covers
+vendored components at top level; their separate gates still apply.
+
 ### RSA client review 2026-10-15
 
 The two exact `rsa 0.8.2` exceptions for CVE-2023-49092 and CVE-2026-21895
