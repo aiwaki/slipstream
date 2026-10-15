@@ -131,8 +131,11 @@ def run() -> dict:
         cf.CFRelease(app)
     readable = any(item["ax_error"] == 0 and item.get("children_ax_error") == 0
                    and item.get("child_count", 0) > 0 for item in report["menu_reads"])
-    report.update(status="ready_for_owned_app_AX_probe" if readable else "blocked",
-                  reason="read_only_AX_menu_query_succeeded" if readable else "AX_menu_read_unavailable")
+    # Modern macOS need not expose status items through SystemUIServer. The
+    # actual app owns its status menu, so an empty system menu is diagnostic,
+    # not evidence that the trusted client cannot inspect Slipstream's PID.
+    report.update(status="ready_for_owned_app_AX_probe",
+                  reason="read_only_AX_menu_query_succeeded" if readable else "trusted_AX_requires_owned_app_probe")
     return report
 
 

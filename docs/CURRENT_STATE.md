@@ -57,13 +57,16 @@ are authoritative. Reuse unchanged green checks rather than repeating them.
 
 ## Next Verified Action
 
-Branch `codex/public-update-pair-qualification` measures hosted macOS console and
-Accessibility capability with a read-only, no-prompt preflight. It installs
-nothing, requests no account secret and cannot publish. This replaces the
-previous untested assumption that hosted UI access is unavailable. Its result
-is capability evidence only, never proof of a public update. Source graph tools
-are not exposed in this session; bounded direct source reads establish that the
-released .23 installer requires the real tray action.
+Branch `codex/public-update-pair-qualification`: hosted run 38757195734 proved
+an active console/Aqua session and `AXIsProcessTrusted=true`. SystemUIServer
+returned no menu value; that does not test the app-owned Slipstream menu. The
+next scoped run verifies the signed public .23 archive, starts its exact bundle
+and owned daemon on a disposable runner, and inspects/opens only its tray menu.
+It requests no account secret, changes no TCC permissions, cannot publish, and
+does not yet trigger an app-update transaction. Cleanup must remove only the
+installed test app/daemon. Evidence remains capability/menu evidence, never
+public-pair qualification. Source graph tools are not exposed in this session;
+bounded reads establish that the released .23 installer needs the tray action.
 
 Qualify the real public `.23 -> .24` upgrade and forced rollback against the
 verified published assets, retaining the existing notification, signed-install,

@@ -1,13 +1,15 @@
-name: public-update-ui-preflight
+name: public-update-menu-smoke
 
 on:
-  # This branch-only bootstrap measures hosted UI capability before adding
-  # a genuine public updater qualification. It cannot install or publish.
+  # This branch-only bootstrap measures the real released app menu before
+  # attempting a public updater transaction. It cannot publish.
   push:
     branches: ["codex/public-update-pair-qualification"]
     paths:
       - ".github/workflows/public-update-qualification.yml"
       - "scripts/public_update_ui_preflight.py"
+      - "scripts/public_update_ax.py"
+      - "scripts/public_update_menu_smoke.py"
   workflow_dispatch:
 
 permissions:
@@ -20,9 +22,11 @@ concurrency:
 jobs:
   hosted-ui-capability:
     runs-on: macos-14
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
       - name: Observe console and Accessibility capability without prompting
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
@@ -30,11 +34,20 @@ jobs:
           mkdir -p output/public-update-ui-preflight
           python3 scripts/public_update_ui_preflight.py \
             --output output/public-update-ui-preflight/capability.json
+      - name: Verify and inspect public preview .23 on this disposable host
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/public_update_menu_smoke.py \
+            --output-dir "$RUNNER_TEMP/public-update-menu"
       - name: Retain capability evidence even when unavailable
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: public-update-ui-preflight-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/public-update-ui-preflight/
+          path: |
+            output/public-update-ui-preflight/*.json
+            ${{ runner.temp }}/public-update-menu/*.json
+            ${{ runner.temp }}/public-update-menu/*.log
           if-no-files-found: error
           retention-days: 14
