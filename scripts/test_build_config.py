@@ -951,7 +951,8 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn('tag="v${v}"', workflow)
         self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
-        self.assertIn('[ "$preview_sequence" = 23 ]', workflow)
+        self.assertIn('[ "$preview_sequence" = 24 ]', workflow)
+        self.assertIn('default: "24"', workflow)
         self.assertIn("release or Git tag already exists", workflow)
         self.assertIn("git/matching-refs/tags/$tag", workflow)
         self.assertIn("releases?per_page=100", workflow)
@@ -1617,6 +1618,11 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("release_source_commit:", workflow)
         self.assertIn("fetch-depth: 5", workflow)
+        self.assertIn('[ "$v" = "0.1.9-preview.23" ]', resolution)
+        self.assertLess(
+            resolution.index('[ "$v" = "0.1.9-preview.23" ]'),
+            resolution.index("expected_repair_source="),
+        )
         self.assertIn('[ "$GITHUB_RUN_ATTEMPT" = 1 ]', resolution)
         self.assertIn(
             'git merge-base --is-ancestor "$RELEASE_SOURCE_INPUT" "$GITHUB_SHA"',

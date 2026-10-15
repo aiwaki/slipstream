@@ -1,72 +1,82 @@
-# README publication checkpoint — 2026-10-13
+# Current Project State
 
 ## Delivery checkpoint — 2026-10-15
 
-This branch, `codex/release-delivery-20261015`, starts at main `a24fd398c`.
-It separates the ordinary release dependency repair from PR384's deferred
-native/source-owned migration. Installed Slipstream, caches, accounts and
-system networking have not changed during this preparation.
+Current branch: `codex/preview24-20261015`, based on main
+`2a6c550a7a227a89867407d1492eda2b35b8f057` (merged PR388).
+Worktree: `/Users/aiwaki/.codex/worktrees/release-delivery/slipstream-codebase-audit-20260905`.
 
-- Geph: exact ordinary0.4.3-r1 SOURCE `843b3bf0`, lock `5ee1bccd`, thirteen
-  reviewed source edits, SQLite cache retained. The two exact RSA public-key
-  exceptions were freshly reviewed through2026-10-22; no private-key safety
-  or removed-library claim is made. The main-to-candidate transition guard
-  binds SOURCE, lock and the complete policy. Full current Geph scan on the
-  identical contract passed in PR384 audit38722167139:423packages,0blocking,
-  2reviewed exceptions and2informational notices.
-- Both app and Geph pin rustls0.23.46. App lock changes only rustls and quinn-proto version/checksum pairs.
-  Quinn-proto0.11.18 replaces0.11.16; the wrapper and dependency edges stay unchanged. Chromium headless-shell moves to official Stable155.0.8059.79,
-  exact archive `5f51504e`; materialization and real localhost CDP complete/
-  truncated-body cases passed, sandbox enabled,172.17MiB peak, no survivors.
-  Its freshly checked scanner mapping remains explicitly integrity-only
-  through2026-10-29, not complete vulnerability coverage.
-- The Geph producer compiles then runs only reviewed isolated synthetic tests;
-  it never runs account/network upstream cases. Reports now carry exact
-  scanned-package identities required by the downstream consumer. Source,
-  runner and transition checks passed;33 adjacent report consumer tests also
-  pass after their scanner fixtures use the actual SBOM coordinates.
-- Source bootstrap on this PR additionally permits one exact five-file
-  Chromium/audit-helper transition, checked from committed base/head bytes.
-  The complete bundle and paired tests are required; changed bytes, partial
-  sets, missing refs, unrelated code, or push/main take ordinary packaged CI.
-  Both dependency audits, product and Chromium contracts still run on the PR.
+The next deliverable is `0.1.9-preview.24`. GitHub has published `.23`; its exact
+publisher guard prevented a new version. This change advances VERSION and the
+six synchronized metadata files, then moves the publisher's exact guard/default
+to24. The historical `.23` repair override keeps its pinned identities and is
+explicitly rejected for `.24`. Dependency graphs, routing and Geph SOURCE/lock
+are unchanged. Before publication, code comparison identified the known
+root-install Chromium permission defect still present on this release branch:
+ZIP extraction plus owner-execute produced0744 (0700 under umask077). The
+minimal55fd57a repair is now carried here: runtime directories/executables0755,
+data/manifest0644, and a read-only packaged-browser prelaunch permission gate.
+This does not port the deferred root verifier or change routing. README installation links already select the latest Slipstream
+release without embedding a version; internal Geph builds are distinguished.
 
-Focused validation:36 source/runner/transition checks,42 scope/audit/materializer
-checks,8 documentation checks and33 adjacent consumer tests passed. Adding the
-two necessary consumer fixtures to the required bundle passed14 scope tests.
-Independent source-bootstrap and audit-contract review found no blocking issue.
-No local Rust build or full suite was repeated.
+Validation: `sync_version.py --check`,10 appcast/candidate tests,5 focused
+publisher contracts and4 actual shell guard cases pass. Parsed Cargo/npm locks
+prove only the app self-version changed; Geph SOURCE/lock remain identical.
+Permission follow-up:9 materializer tests and50 packaged-browser smoke tests
+pass, including rejection before any launch and no repair of a sealed bundle.
+The previous materializer fails the new umask022/077 regression. The real pinned
+archive under umask077 changes from directories/executable0700 and data0600 to
+0755/0644 with identical manifest and binary digest. A separate raw unsigned
+--version probe timed out after15s; no successful local launch or installed
+qualification is claimed. Evidence: output/preview24-permissions/.
+No local app/compiler build or broad suite was run. Ordinary product/package
+CI applies; the source-bootstrap exception does not.
 
-PR388 exact head `76354926756eba19b0b2b1183bc8f8d1fb0d61ed` passed CI
-`38727176669` and dependency audit `38727176691`. App:361 scanned,
-1 integrity-only,0 blocking,5 informational. Geph:423 scanned,0 blocking,
-2 reviewed exceptions,2 informational. Artifact ZIP digests and strict
-source/report identities were verified; receipts are retained under
-`output/pr388-ci-763549267/`. No package or installed-app pass is implied.
+Reusable predecessor evidence:
+- PR388 final head`4cea4aa7e` passed CI`38729673798` and audit`38729673740`.
+  Both fresh audits have0 blocking findings and verified exact reports/assets.
+  Evidence: `output/pr388-ci-4cea4aa7e/` and earlier`pr388-ci-763549267/`.
+- Native synthetic tests no longer inherit Python-prefix read grants. The
+  separate constant trusted Python probe supports interpreter paths under HOME.
+  Actual OS regression was RED before and EPERM after;13 runner tests pass.
+  Hosted logs prove `pythonLocation`, not `sys.base_prefix`; the append-only
+  clarification is under`output/pr388-review-followup/`.
+- Main producer`38730359017` SUCCESS published`geph-vendor-0.4.3-r1` at
+  2026-10-15T12:02:16Z, release413759913, exact tag/main`2a6c550a7` and8assets.
+  Binary SHA`71da4448d36ad63aef635a6537548610bd66201a70128c51d81c4144351b23e0`.
+  Canonical downloaded-asset/attestation verification PASS; parent rehashed
+  all62 retained files, receipt7ea2e199debb59b0bd83105d014ae901821fe57d07a7472334df42cbc120e7d1.
+  GitHub immutable:false; a verified signed snapshot is not a claim of
+  platform-enforced immutable publication.
+- Main audit`38730359046` SUCCESS. Main CI`38730358818` failed only because
+  packaging fetched Geph before publication (404); product/Chromium checks pass.
+  Do not rerun that old-version candidate merely for reassurance: `.24` needs
+  its own exact-source package and qualification. Logs: `output/main-2a6c550a7/`.
 
-The normal exact-head merge was refused because review conversations remained
-unresolved. Review confirmed a runtime sandbox gap for interpreter prefixes
-inside HOME and a test gap that did not distinguish base/head reads. Both were
-corrected narrowly. Native test execution now has no Python-prefix allowance;
-the constant trusted Python denial probe uses a separate profile. Hosted CI
-uses Python beneath HOME, so a blanket prefix rejection would break that
-normal layout. Thirteen runner tests pass, including actual OS denial of a
-private file inside the Python prefix;23 documentation/scope tests pass. The classifier's trust in reviewed repository code
-and Cargo's existing build-phase trust are documented explicitly; neither is
-claimed to be a hostile-code isolation boundary. No protection was bypassed.
+PR389 is open. The version-only ecba4814c CI38732650718 and audit38732650992
+both passed; parent verified19 retained evidence files. Permission headc36f826ea
+CI38735286380 passed packaging/browser/lifecycle and audit38735286300 passed,
+but daemon tests failed one assertion: cleared=[True,True,True] rather than
+[True] in the external-Geph relay fixture (circuit_results remained correct).
+Parent verified21 retained CI files; receiptb27b39bcb8c4ed702725d4f4816d2e63923b8de036a7e1e01b4c525bb82cc21c.
+A controlled replay proves the prior network-monitor fixture left a startup
+canary worker after teardown; its OpenAI/Anthropic callbacks consume successor
+mocks and add two clears. CI did not retain stacks, so the replay establishes
+the fixture defect and matching signature, not the exact CI thread identity.
+A nine-line test-only fix captures/asserts the predecessor's exact startup
+schedule. Target relay assertions and production code remain byte-identical.
+Controlled RED->GREEN,20 further paired runs and5 focused tests pass with zero
+network attempts/pending workers/new live threads. Parent reviewed and verified
+14 evidence files, receiptc42c8c8b8a2680e2c0028968d28f11f86cff368f587cf99814049babb2c6e1cb;
+see output/preview24-external-relay/ and output/pr389-ci-c36f826ea/.
+Next: push this narrow fixture repair to PR389, require exact new-head CI and
+review, merge normally, then qualify its exact main candidate and publish.
+Installed Chrome/Safari/lifecycle and protected readiness gates remain open.
+No new app is installed or published. Native/source-owned migration stays
+deferred; broader pending fixes in PR384/PR386 and root checkout are preserved.
+Do not push the root audit branch or discard user AGENTS edits/private backups.
 
-Next: push the focused review corrections, check exact new CI and resolve
-reviewed conversations, then merge normally. The main-only producer must publish the
-immutable Geph dependency before main packaging can finish. Installed
-Chrome/Safari/lifecycle qualification remains open. Reuse unchanged green
-checks; do not restart native/source-owned migration or a broad audit.
-
-Local evidence is under `output/minimal-geph-payload-20261015/` in this worktree.
-The runtime/RSA evidence is in the dedicated PR384 worktree under
-`output/chromium-stable-20261015/` and `output/minimal-geph-source-20261015/`.
-Historical checkpoint below refers to its original branch and is not current
-release evidence.
-
+## Historical README publication checkpoint
 
 This documentation-only change starts from published main
 `2e5e6b4a72e734ddd6d4ea7cbc3d876cb08da47a` (PR #385). The Russian and English

@@ -29,6 +29,11 @@ sys.path.insert(0, str(ROOT / "spike"))
 
 import pending_navigation_probe_runtime as probe_runtime  # noqa: E402
 
+if __package__:
+    from .materialize_chromium_headless_shell import _verify_runtime_permissions
+else:
+    from materialize_chromium_headless_shell import _verify_runtime_permissions
+
 FIXTURE_HOST = "pending.slipstream.invalid"
 MAX_FRAME_BYTES = probe_runtime.MAX_IPC_BYTES
 MAX_END_TO_END_MS = 25_000
@@ -103,6 +108,37 @@ LAUNCH_SERVICES_TYPE_RE = re.compile(r'type="([^"]+)"', re.I)
 
 class QualificationError(RuntimeError):
     pass
+
+
+def _verify_console_browser_access(app_bundle: Path) -> None:
+    """Reject permissions that stop working when installation changes the owner."""
+    contents = app_bundle / "Contents"
+    helper = app_bundle / PACKAGED_BROWSER_WORKER_RELATIVE
+    resources = contents / "Resources"
+    try:
+        for directory in (app_bundle, contents, helper.parent, resources):
+            metadata = directory.lstat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_mode & 0o555 != 0o555
+                or not os.access(directory, os.R_OK | os.X_OK)
+            ):
+                raise QualificationError(
+                    "console browser directory is not accessible after root installation: "
+                    f"{directory}"
+                )
+        metadata = helper.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_mode & 0o555 != 0o555
+            or not os.access(helper, os.R_OK | os.X_OK)
+        ):
+            raise QualificationError(
+                "packaged browser worker is not accessible after root installation"
+            )
+        _verify_runtime_permissions(resources / "chromium-headless-shell")
+    except (OSError, ValueError) as error:
+        raise QualificationError(f"packaged browser permissions are invalid: {error}") from error
 
 
 def _worker_failure_diagnostic(worker: subprocess.CompletedProcess[str]) -> str:
@@ -920,6 +956,7 @@ def main() -> int:
     _require_disposable_ci()
     arguments = _parse_args()
     app_bundle = arguments.app_bundle.resolve(strict=True)
+    _verify_console_browser_access(app_bundle)
     chrome = (
         app_bundle
         / "Contents"

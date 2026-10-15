@@ -261,8 +261,12 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; for this P0 release the accepted tag is exactly
-  `v0.1.9-preview.23`. A draft, tag-only collision or mismatched published
+  from `main`; the accepted tag is exactly `v0.1.9-preview.24`, with
+  `VERSION` and `preview_sequence=24` matching that version. The historical
+  `release_source_commit` repair override remains restricted to the pinned
+  `.23` source and is rejected for `.24`; the new preview requires its own
+  exact-source candidate and qualification evidence.
+  A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact
   already-published release left by this transaction: after the complete local
   and remote identity/digest proof, it may resume the idempotent post-publication

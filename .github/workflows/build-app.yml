@@ -15,9 +15,9 @@ on:
         description: "Optional package version override; must match VERSION including preview sequence. Manual runs produce prereleases."
         required: false
       preview_sequence:
-        description: "Preview sequence. This P0 release must be 23."
+        description: "Preview sequence. This release must be 24."
         required: true
-        default: "23"
+        default: "24"
       release_candidate_run_id:
         description: "Optional successful ci.yml main run ID for this exact SHA."
         required: false
@@ -108,8 +108,8 @@ jobs:
             case "$preview_sequence" in
               ''|*[!0-9]*) echo "preview_sequence must be a positive integer"; exit 1 ;;
             esac
-            [ "$preview_sequence" = 23 ] || {
-              echo "the next P0 release must use preview sequence 23"
+            [ "$preview_sequence" = 24 ] || {
+              echo "this release must use preview sequence 24"
               exit 1
             }
             [ "$v" = "0.1.9-preview.${preview_sequence}" ] || {
@@ -122,6 +122,10 @@ jobs:
             make_latest=false
             release_name="Slipstream $v"
             if [ -n "$RELEASE_SOURCE_INPUT" ]; then
+              [ "$v" = "0.1.9-preview.23" ] || {
+                echo "publisher repair is restricted to the historical preview.23 release"
+                exit 1
+              }
               expected_repair_source=6ba71ef75d821ee74cedcee5d8a9c83495da7c76
               expected_first_repair=1e0d03130405020a761504c1e65827f76020de47
               expected_second_repair=06885e10d22a435175034023d6cc9b51d3666b34

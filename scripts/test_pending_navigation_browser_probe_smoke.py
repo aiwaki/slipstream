@@ -1,4 +1,7 @@
+import argparse
 import hashlib
+import os
+import stat
 import tempfile
 from pathlib import Path
 import subprocess
@@ -9,6 +12,84 @@ import pytest
 from scripts import pending_navigation_browser_probe_smoke as smoke
 
 EXPECTED_SHELL = Path("/private/runtime/chrome-headless-shell")
+
+
+@pytest.fixture
+def packaged_browser_bundle(tmp_path: Path) -> Path:
+    app = tmp_path / "Slipstream.app"
+    helper = app / smoke.PACKAGED_BROWSER_WORKER_RELATIVE
+    runtime = app / "Contents/Resources/chromium-headless-shell"
+    helper.parent.mkdir(parents=True)
+    (runtime / "locales").mkdir(parents=True)
+    helper.write_bytes(b"packaged-worker")
+    chrome = runtime / "chrome-headless-shell"
+    chrome.write_bytes(b"pinned-shell")
+    (runtime / "manifest.json").write_text(
+        '{"executable_sha256":"' + hashlib.sha256(b"pinned-shell").hexdigest() + '"}',
+        encoding="utf-8",
+    )
+    (runtime / "locales/en-US.pak").write_bytes(b"runtime-data")
+    for path in (app, *app.rglob("*")):
+        path.chmod(0o755 if path.is_dir() or path in (helper, chrome) else 0o644)
+    return app
+
+
+def _bundle_modes(app: Path) -> dict[Path, int]:
+    return {path: stat.S_IMODE(path.lstat().st_mode) for path in (app, *app.rglob("*"))}
+
+
+def test_packaged_permissions_accept_cross_owner_access_without_modifying_bundle(
+    packaged_browser_bundle: Path,
+) -> None:
+    app = packaged_browser_bundle
+    before = _bundle_modes(app)
+    with mock.patch.object(
+        smoke, "_verify_runtime_permissions", wraps=smoke._verify_runtime_permissions
+    ) as verify_runtime:
+        smoke._verify_console_browser_access(app)
+    verify_runtime.assert_called_once_with(app / "Contents/Resources/chromium-headless-shell")
+    assert _bundle_modes(app) == before
+
+
+@pytest.mark.parametrize(
+    ("relative", "mode"),
+    (
+        ("Contents/MacOS/slipstream-browser-probe", 0o744),
+        ("Contents/Resources/chromium-headless-shell/chrome-headless-shell", 0o744),
+        (".", 0o700),
+        ("Contents", 0o700),
+        ("Contents/MacOS", 0o700),
+        ("Contents/Resources", 0o700),
+        ("Contents/Resources/chromium-headless-shell", 0o700),
+        ("Contents/Resources/chromium-headless-shell/locales", 0o700),
+        ("Contents/Resources/chromium-headless-shell/locales/en-US.pak", 0o600),
+        ("Contents/Resources/chromium-headless-shell/manifest.json", 0o600),
+    ),
+)
+def test_packaged_permissions_fail_before_launch_without_repair(
+    packaged_browser_bundle: Path, relative: str, mode: int
+) -> None:
+    app = packaged_browser_bundle
+    path = app / relative
+    path.chmod(mode)
+    # The build owner can still access these fixtures; installation changes UID.
+    assert os.access(path, os.R_OK | (os.X_OK if mode != 0o600 else 0))
+    before = _bundle_modes(app)
+    with (
+        mock.patch.object(smoke, "_require_disposable_ci"),
+        mock.patch.object(smoke, "_parse_args", return_value=argparse.Namespace(app_bundle=app)),
+        mock.patch.object(smoke.probe_runtime, "_active_console_user") as console_user,
+        mock.patch.object(smoke, "VisibilityMonitor") as visibility,
+        mock.patch.object(smoke, "HangingHttpsFixture") as fixture,
+        mock.patch.object(smoke.subprocess, "run") as launch,
+        pytest.raises(smoke.QualificationError, match="after root"),
+    ):
+        smoke.main()
+    console_user.assert_not_called()
+    visibility.assert_not_called()
+    fixture.assert_not_called()
+    launch.assert_not_called()
+    assert _bundle_modes(app) == before
 
 
 def test_worker_failure_diagnostic_reports_only_static_worker_category() -> None:
