@@ -21,8 +21,14 @@ main commit. Worktree:
   passed. [Public preview .24](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.24),
   release ID 413914811, was published 2026-10-15T14:33:23Z with 12 assets and the tag
   pointing to the exact source above. Preview .23 now has an archival title; its
-  tag/assets remain retained. The publisher verified remote identity and digests;
-  a separate download and independent verification of the public files is pending.
+  tag/assets remain retained. Independent verification of all 12 downloaded
+  public assets passed their GitHub size/SHA256 bindings. The canonical release
+  verifier passed updater minisign, archive/internal identity, appcast and
+  manifests; the published-release verifier passed tag/source/release ID and
+  the exact remote asset set. Its initial failure was only a missing local
+  release-notes file; the real release API body was materialized and that
+  verifier alone reran successfully. Both results remain retained under
+  `output/publish-preview24-e5791a4d7/public-verification/`.
 
 Retained evidence: `output/main-e5791a4d7/`,
 `output/readiness-e5791a4d7-38745936996/` and
@@ -32,9 +38,8 @@ not the current release gate. No new workstation installation has occurred.
 The explicitly authorized order is publication after the existing mandatory
 gates, then a real public `.23 -> .24` upgrade and forced rollback. That public
 pair remains unverified; do not describe preview auto-update as verified.
-Next: finish independent public-file verification, then qualify the public
-upgrade/forced-rollback pair with the existing exact-identity and invisibility
-requirements. Native/source-owned migration and unrelated work in PR384/PR386
+Next: qualify the real public upgrade/forced-rollback pair with the existing
+exact-identity and invisibility requirements. Native/source-owned migration and unrelated work in PR384/PR386
 remain deferred; preserve the root checkout, user changes and retained output.
 
 ## Historical delivery checkpoint — before publication, 2026-10-15
