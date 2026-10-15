@@ -4,9 +4,12 @@
 
 `v0.1.9-preview.24` is published from exact main
 `e5791a4d7f42e000bb37732f8aa4b9698e62dd9f` (merged PR389).
-Documentation update: PR390, branch `codex/preview24-publication-checkpoint`.
+PR390 merged at `323a4df52215f169a64df96760dc9d8838d68a34`; its CI and audit passed.
+Current change: `codex/preview-discovery-pagination`, based on that main commit.
 Worktree:
-`/Users/aiwaki/.codex/worktrees/release-delivery/slipstream-codebase-audit-20260905`.
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
+Publication and public updater evidence remain in the separate `release-delivery`
+worktree; no workstation installation has occurred.
 
 - Exact main [CI 38739537809](https://github.com/aiwaki/slipstream/actions/runs/38739537809)
   and [dependency audit 38739537827](https://github.com/aiwaki/slipstream/actions/runs/38739537827)
@@ -31,7 +34,7 @@ Worktree:
   The final public release notes explicitly mark public upgrade and rollback
   unverified; the 12 release assets are unchanged.
 
-Evidence: `output/main-e5791a4d7/`,
+Release-delivery evidence: `output/main-e5791a4d7/`,
 `output/readiness-e5791a4d7-38745936996/` and
 `output/publish-preview24-e5791a4d7/public-verification/`.
 The latter's `public-verification-receipt.json` binds 25 retained files;
@@ -44,7 +47,7 @@ superseded actions remain in Git history and retained output, not this checkpoin
 |---|---|
 | M0 - Safe Base | Exact candidate lifecycle and protected cleanup gates passed; public update/rollback remains unverified. |
 | M1 - Autonomous Routing V1 | Current preview passed the hosted Safari/Chrome matrix and measured soak; this is not a new workstation qualification. |
-| M2 - Contracts And Code | No contract or routing code changes in this documentation update; unrelated implementation work remains separate. |
+| M2 - Contracts And Code | Preview discovery pagination repair in source; no routing changes. Daemon identity acknowledgement remains a separate defect. |
 | M3 - Release-Grade macOS | Preview .24 is public and its files independently verified; public upgrade/rollback and stable signing/notarization remain open. |
 | M4 - Cross-Platform Core | No new cross-platform qualification in this release checkpoint; prior evidence remains in Git history. |
 
@@ -55,14 +58,41 @@ CI before continuing. Read [DECISIONS.md](DECISIONS.md) and
 [RELEASES.md](RELEASES.md); source, exact run evidence and public asset identities
 are authoritative. Reuse unchanged green checks rather than repeating them.
 
+## Public Updater Attempt
+
+[Run 38763822390](https://github.com/aiwaki/slipstream/actions/runs/38763822390)
+on harness commit `aef23e3dd83f7d08e1d543946cafe412866fe723` failed before an update
+was activated. The real signed public `.23` app and daemon launched, its own tray
+menu opened, but 24 observations over 78.171 seconds never offered `.24`.
+Cleanup errors and residue were both empty. No transaction, success ACK or forced
+rollback occurred. Release-delivery receipt:
+`output/public-update-pair-prep/public-pair-38763822390/receipt.json`, 80 files,
+SHA256 `9ea4571838afa6931dbe2810b8f8ac594109dcf0a2c21fdaf13ca35c15b2084e`.
+
+A separately fetched public API response contained 29 records / 417722 bytes,
+which exceeds the released discovery code's 256 KiB page limit. Runtime stderr
+was not captured; the API data and identical `.23`/`.24` source establish this
+size blocker. The source repair uses 10 records per page, up to 30 pages, keeping
+256 KiB per page, 768 KiB total and a shared 10-second deadline. A separate live
+API probe fetched all three pages in 6.242 seconds; it is not a Rust-client or
+installed-app qualification. Its evidence is `output/preview-discovery-pagination/`.
+
+Source review also found that successor ACK accepts an advancing old daemon
+without binding it to the new payload while privileged installation is pending.
+The pagination repair does not address that issue. Details remain in delivery
+`output/public-update-pair-prep/daemon-ack-gap.md` and [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+Do not preinstall the new daemon, modify old published binaries, or treat unit
+mechanics as proof of the public pair.
+
 ## Next Verified Action
 
-Qualify the real public `.23 -> .24` upgrade and forced rollback against the
-verified published assets, retaining the existing notification, signed-install,
-exact-identity, successor-health and invisibility requirements. That public pair
-has not been executed; do not describe preview auto-update as verified. Publication
-after the mandatory gates, followed by this public qualification, is the explicitly
-authorized order. This documentation update performs no installation or retry.
+Six focused pagination regressions are implemented; independent source review
+accepted the change. Rustfmt and exact retained-fixture verification passed.
+No local Rust build was run. Next: required exact-head CI/audit and normal PR merge. Reuse the unchanged `.24`
+publication/readiness evidence; do not rebuild or republish that version.
+The released `.23` cannot acquire this repair through its broken discovery.
+Use the published DMG for the current transition. Before qualifying a future
+public updater pair, repair the independent daemon ACK/installer lifetime gap.
 
 ## External Gates
 

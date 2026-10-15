@@ -19,11 +19,11 @@ use tokio::time::Instant;
 
 pub const REPOSITORY: &str = "aiwaki/slipstream";
 pub const PREVIEW_RELEASES_API: &str =
-    "https://api.github.com/repos/aiwaki/slipstream/releases?per_page=100";
-pub const PREVIEW_RELEASES_PER_PAGE: usize = 100;
-pub const MAX_PREVIEW_RELEASE_PAGES: usize = 3;
+    "https://api.github.com/repos/aiwaki/slipstream/releases?per_page=10";
+pub const PREVIEW_RELEASES_PER_PAGE: usize = 10;
+pub const MAX_PREVIEW_RELEASE_PAGES: usize = 30;
 pub const MAX_RELEASES_RESPONSE_BYTES: usize = 256 * 1024;
-pub const MAX_RELEASES_TOTAL_BYTES: usize = MAX_RELEASES_RESPONSE_BYTES * MAX_PREVIEW_RELEASE_PAGES;
+pub const MAX_RELEASES_TOTAL_BYTES: usize = 768 * 1024;
 pub const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DISCOVERY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
@@ -158,6 +158,52 @@ pub fn select_preview_release(
     Ok(selected)
 }
 
+#[derive(Default)]
+struct PreviewReleaseHistory {
+    selected: Option<PreviewRelease>,
+    total_bytes: usize,
+    pages: usize,
+}
+
+impl PreviewReleaseHistory {
+    fn check_body_length(&self, body_length: usize) -> Result<(), String> {
+        if body_length > MAX_RELEASES_RESPONSE_BYTES
+            || self.total_bytes.saturating_add(body_length) > MAX_RELEASES_TOTAL_BYTES
+        {
+            return Err("preview release response exceeds the byte limit".into());
+        }
+        Ok(())
+    }
+
+    // Only a short page proves that the bounded history is complete. GitHub's
+    // release order is not semver order, so an earlier candidate cannot end it.
+    fn add_page(&mut self, current: &Version, body: &[u8]) -> Result<bool, String> {
+        self.check_body_length(body.len())?;
+        let item_count = serde_json::from_slice::<Vec<serde_json::Value>>(body)
+            .map_err(|error| format!("invalid preview release response: {error}"))?
+            .len();
+        let candidate = select_preview_release(current, body)?;
+        let complete = item_count < PREVIEW_RELEASES_PER_PAGE;
+        if self.pages >= MAX_PREVIEW_RELEASE_PAGES
+            || (!complete && self.pages + 1 == MAX_PREVIEW_RELEASE_PAGES)
+        {
+            return Err("preview release history exceeds the bounded page limit".into());
+        }
+        self.total_bytes += body.len();
+        self.pages += 1;
+        if let Some(candidate) = candidate {
+            if self
+                .selected
+                .as_ref()
+                .is_none_or(|existing| candidate.version > existing.version)
+            {
+                self.selected = Some(candidate);
+            }
+        }
+        Ok(complete)
+    }
+}
+
 pub async fn discover_preview_release(current: &Version) -> Result<Option<PreviewRelease>, String> {
     let client = Client::builder()
         .connect_timeout(DISCOVERY_CONNECT_TIMEOUT)
@@ -167,8 +213,7 @@ pub async fn discover_preview_release(current: &Version) -> Result<Option<Previe
         .build()
         .map_err(|error| format!("preview discovery client unavailable: {error}"))?;
     let deadline = Instant::now() + DISCOVERY_TIMEOUT;
-    let mut selected: Option<PreviewRelease> = None;
-    let mut total_bytes = 0_usize;
+    let mut history = PreviewReleaseHistory::default();
     for page in 1..=MAX_PREVIEW_RELEASE_PAGES {
         let remaining = deadline
             .checked_duration_since(Instant::now())
@@ -199,30 +244,11 @@ pub async fn discover_preview_release(current: &Version) -> Result<Option<Previe
             .await
             .map_err(|error| format!("preview discovery body failed: {error}"))?
         {
-            if body.len().saturating_add(chunk.len()) > MAX_RELEASES_RESPONSE_BYTES
-                || total_bytes
-                    .saturating_add(body.len())
-                    .saturating_add(chunk.len())
-                    > MAX_RELEASES_TOTAL_BYTES
-            {
-                return Err("preview release response exceeds the byte limit".into());
-            }
+            history.check_body_length(body.len().saturating_add(chunk.len()))?;
             body.extend_from_slice(&chunk);
         }
-        total_bytes = total_bytes.saturating_add(body.len());
-        let item_count = serde_json::from_slice::<Vec<serde_json::Value>>(&body)
-            .map_err(|error| format!("invalid preview release response: {error}"))?
-            .len();
-        if let Some(candidate) = select_preview_release(current, &body)? {
-            if selected
-                .as_ref()
-                .is_none_or(|existing| candidate.version > existing.version)
-            {
-                selected = Some(candidate);
-            }
-        }
-        if item_count < PREVIEW_RELEASES_PER_PAGE {
-            return Ok(selected);
+        if history.add_page(current, &body)? {
+            return Ok(history.selected);
         }
     }
     Err("preview release history exceeds the bounded page limit".into())
@@ -471,12 +497,15 @@ pub fn validate_macos_archive(archive: &[u8], expected_version: &Version) -> Res
 mod tests {
     use super::{
         allowed_update_asset_url, allowed_update_redirect, is_preview_version,
-        select_preview_release, validate_macos_archive, MAX_RELEASES_RESPONSE_BYTES,
-        PREVIEW_RELEASES_PER_PAGE,
+        select_preview_release, validate_macos_archive, PreviewReleaseHistory, DISCOVERY_TIMEOUT,
+        MAX_PREVIEW_RELEASE_PAGES, MAX_RELEASES_RESPONSE_BYTES, MAX_RELEASES_TOTAL_BYTES,
+        PREVIEW_RELEASES_API, PREVIEW_RELEASES_PER_PAGE,
     };
-    use flate2::{write::GzEncoder, Compression};
+    use flate2::{read::GzDecoder, write::GzEncoder, Compression};
     use semver::Version;
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
     use tar::{Builder, EntryType, Header};
 
     fn release(tag: &str, prerelease: bool, draft: bool, asset_url: &str) -> serde_json::Value {
@@ -734,6 +763,159 @@ v0.2.0-preview.1/Slipstream.app.tar.gz"
             select_preview_release(&Version::parse("0.1.9-preview.23").unwrap(), &body).unwrap(),
             None
         );
+    }
+
+    fn release_page(tag: &str, count: usize) -> Vec<u8> {
+        serde_json::to_vec(&vec![release(tag, true, false, &appcast(tag)); count]).unwrap()
+    }
+
+    fn padded_release_page(tag: &str, count: usize, bytes: usize) -> Vec<u8> {
+        let mut body = release_page(tag, count);
+        assert!(body.len() <= bytes);
+        body.resize(bytes, b' ');
+        body
+    }
+
+    #[test]
+    fn discovery_pagination_preserves_global_limits() {
+        assert_eq!(PREVIEW_RELEASES_PER_PAGE, 10);
+        assert_eq!(MAX_PREVIEW_RELEASE_PAGES, 30);
+        assert_eq!(MAX_RELEASES_RESPONSE_BYTES, 256 * 1024);
+        assert_eq!(MAX_RELEASES_TOTAL_BYTES, 768 * 1024);
+        assert_eq!(DISCOVERY_TIMEOUT.as_secs(), 10);
+        assert!(PREVIEW_RELEASES_API.ends_with(&format!("?per_page={PREVIEW_RELEASES_PER_PAGE}")));
+    }
+
+    #[test]
+    fn retained_public_history_fits_small_pages_but_not_one_response() {
+        // Complete public API response fetched separately after hosted run
+        // 38763822390 on 2026-10-15, including bodies, authors and all asset metadata.
+        // Gzip keeps the exact 417,722-byte regression fixture small in Git.
+        let mut body = Vec::new();
+        GzDecoder::new(&include_bytes!("../tests/fixtures/github-releases-20261015.json.gz")[..])
+            .take(417_723)
+            .read_to_end(&mut body)
+            .unwrap();
+        assert_eq!(body.len(), 417_722);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&body)),
+            "db1e45594e02eceac3672f3e4a0fa32d8a85faa61cce5553787be8ab32cec253"
+        );
+        let current = Version::parse("0.1.9-preview.23").unwrap();
+        assert!(select_preview_release(&current, &body)
+            .unwrap_err()
+            .contains("byte limit"));
+        let releases: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(releases.len(), 29);
+        assert!(releases[0]["body"].is_string());
+        assert!(releases[0]["author"].is_object());
+        assert!(releases[0]["assets"][0]["uploader"].is_object());
+        let mut history = PreviewReleaseHistory::default();
+        for (index, page) in releases.chunks(PREVIEW_RELEASES_PER_PAGE).enumerate() {
+            let response = serde_json::to_vec(page).unwrap();
+            assert!(response.len() < MAX_RELEASES_RESPONSE_BYTES);
+            assert_eq!(history.add_page(&current, &response).unwrap(), index == 2);
+        }
+        assert_eq!(history.pages, 3);
+        assert!(history.total_bytes > MAX_RELEASES_RESPONSE_BYTES);
+        assert!(history.total_bytes < MAX_RELEASES_TOTAL_BYTES);
+        assert_eq!(history.selected.unwrap().tag, "v0.1.9-preview.24");
+    }
+
+    #[test]
+    fn later_page_newer_semver_wins_over_an_earlier_candidate() {
+        let current = Version::parse("0.1.9-preview.23").unwrap();
+        let mut history = PreviewReleaseHistory::default();
+        assert!(!history
+            .add_page(
+                &current,
+                &release_page("v0.1.9-preview.24", PREVIEW_RELEASES_PER_PAGE),
+            )
+            .unwrap());
+        assert!(history
+            .add_page(&current, &release_page("v0.2.0-preview.1", 1))
+            .unwrap());
+        assert_eq!(history.selected.unwrap().tag, "v0.2.0-preview.1");
+    }
+
+    #[test]
+    fn invalid_later_page_does_not_complete_an_earlier_candidate() {
+        let current = Version::parse("0.1.9-preview.23").unwrap();
+        for invalid in [
+            b"not JSON".to_vec(),
+            release_page("v0.1.9-preview.25", PREVIEW_RELEASES_PER_PAGE + 1),
+        ] {
+            let mut history = PreviewReleaseHistory::default();
+            assert!(!history
+                .add_page(
+                    &current,
+                    &release_page("v0.1.9-preview.24", PREVIEW_RELEASES_PER_PAGE),
+                )
+                .unwrap());
+            assert!(history.add_page(&current, &invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn pagination_enforces_page_and_aggregate_byte_boundaries() {
+        let current = Version::parse("0.1.9-preview.23").unwrap();
+        let full = padded_release_page(
+            "v0.1.9-preview.24",
+            PREVIEW_RELEASES_PER_PAGE,
+            MAX_RELEASES_RESPONSE_BYTES,
+        );
+        let mut oversized = full.clone();
+        oversized.push(b' ');
+        assert!(PreviewReleaseHistory::default()
+            .add_page(&current, &oversized)
+            .unwrap_err()
+            .contains("byte limit"));
+
+        let mut exact = PreviewReleaseHistory::default();
+        assert!(!exact.add_page(&current, &full).unwrap());
+        assert!(!exact.add_page(&current, &full).unwrap());
+        assert!(exact
+            .add_page(
+                &current,
+                &padded_release_page("v0.1.9-preview.25", 1, MAX_RELEASES_RESPONSE_BYTES),
+            )
+            .unwrap());
+        assert_eq!(exact.total_bytes, MAX_RELEASES_TOTAL_BYTES);
+        assert_eq!(exact.selected.unwrap().tag, "v0.1.9-preview.25");
+
+        let mut overflow = PreviewReleaseHistory::default();
+        assert!(!overflow.add_page(&current, &full).unwrap());
+        assert!(!overflow.add_page(&current, &full).unwrap());
+        assert!(!overflow
+            .add_page(&current, &full[..full.len() - 1])
+            .unwrap());
+        assert_eq!(overflow.total_bytes, MAX_RELEASES_TOTAL_BYTES - 1);
+        // The streaming guard and completed-page guard share this exact budget.
+        assert!(overflow.check_body_length(1).is_ok());
+        assert!(overflow.check_body_length(2).is_err());
+        assert!(overflow
+            .add_page(&current, b"[]")
+            .unwrap_err()
+            .contains("byte limit"));
+    }
+
+    #[test]
+    fn page_limit_requires_a_short_final_page_even_with_a_candidate() {
+        let current = Version::parse("0.1.9-preview.23").unwrap();
+        let full = release_page("v0.1.9-preview.24", PREVIEW_RELEASES_PER_PAGE);
+        let mut incomplete = PreviewReleaseHistory::default();
+        let mut complete = PreviewReleaseHistory::default();
+        for _ in 1..MAX_PREVIEW_RELEASE_PAGES {
+            assert!(!incomplete.add_page(&current, &full).unwrap());
+            assert!(!complete.add_page(&current, &full).unwrap());
+        }
+        assert!(incomplete
+            .add_page(&current, &full)
+            .unwrap_err()
+            .contains("page limit"));
+        assert!(complete.add_page(&current, b"[]").unwrap());
+        assert_eq!(complete.pages, MAX_PREVIEW_RELEASE_PAGES);
+        assert_eq!(complete.selected.unwrap().tag, "v0.1.9-preview.24");
     }
 
     #[test]
