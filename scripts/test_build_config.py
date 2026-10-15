@@ -129,7 +129,7 @@ class BuildConfigTests(unittest.TestCase):
             commands = root / "commands.jsonl"
             (output / "commands.jsonl").write_text(commands.read_text() if commands.exists() else "")
 
-    def test_geph_native_producer_shell_contract(self) -> None:
+    def test_geph_producer_shell_contract(self) -> None:
         import sys
         import textwrap
 
@@ -140,6 +140,8 @@ class BuildConfigTests(unittest.TestCase):
             from pathlib import Path
             ROOT = Path(__file__).resolve().parents[2] if Path(__file__).parent.name == "bin" else Path(__file__).resolve().parents[1]
             config = json.loads((ROOT / "fixture.json").read_text())
+            native, owned = config["native"], config["owned"]
+            binary = "sealed universal bytes" + ("" if native else " aws_smithy")
             name, args = Path(sys.argv[0]).name, sys.argv[1:]
             with (ROOT / "commands.jsonl").open("a") as stream:
                 stream.write(json.dumps({"name": name, "args": args, "cwd": os.getcwd(),
@@ -161,14 +163,22 @@ class BuildConfigTests(unittest.TestCase):
                 print(ROOT / "tools/sdk" if args[-1] == "--show-sdk-path" else ROOT / "tools/bin" / args[-1])
             elif name == "curl": write(value("-o"), args[args.index("-o") - 1])
             elif name == "cargo":
-                clean()
-                assert args[0] == "fetch" and "--locked" in args and "--target" not in args
-                assert Path(value("--manifest-path")).is_file()
-                if "--offline" in args:
+                manifest = Path(value("--path")) / "Cargo.toml" if args[0] == "install" else Path(value("--manifest-path"))
+                assert manifest.is_file()
+                assert "--locked" in args
+                if not native:
+                    assert args[0] in ("metadata", "install")
+                    if args[0] == "metadata": print('{}')
+                    else: write(Path(value("--root")) / "bin/geph5-client", binary)
+                elif "--offline" in args:
+                    clean()
+                    assert args[0] == "fetch" and "--target" not in args
                     assert os.environ["CARGO_NET_OFFLINE"] == "true"
                     assert (Path(os.environ["CARGO_HOME"]) / "cache-seal.json").is_file()
                     fail("offline-fetch")
                 else:
+                    clean()
+                    assert args[0] == "fetch" and "--target" not in args
                     assert "CARGO_NET_OFFLINE" not in os.environ
                     assert not list(Path(os.environ["CARGO_HOME"]).iterdir())
                     fail("online-fetch")
@@ -184,10 +194,12 @@ class BuildConfigTests(unittest.TestCase):
                 else: raise SystemExit(subprocess.run(args[2:]).returncode)
             elif name == "geph_vendor_source.py":
                 assert value("--source") == "vendor/geph/SOURCE.json"
-                if args[0] == "verify": print('{"native_sqlite":"reviewed"}')
+                if args[0] == "verify": print(Path(value("--source")).read_text())
                 else:
                     fail("materialize")
-                    assert Path(value("--native-sqlite-archive")).read_text().startswith("https://sqlite.org/")
+                    if native:
+                        assert Path(value("--native-sqlite-archive")).read_text().startswith("https://sqlite.org/")
+                    else: assert "--native-sqlite-archive" not in args
                     root = Path(value("--output")) / "geph5-client-0.4.3"
                     write(root / "Cargo.toml")
                     print(json.dumps({"root": str(root)}))
@@ -214,10 +226,12 @@ class BuildConfigTests(unittest.TestCase):
                     write(out / "evidence" / target / "linked/cargo_metadata")
                 print('{}')
             elif name == "run_geph_synthetic_tests.py":
-                assert value("--build-jobs") == "1"
-                proof = Path(value("--native-receipt"))
-                assert proof.name == "native-build.json" and proof.is_file()
-                assert Path(value("--native-artifacts-root")) == proof.parent.parent
+                if native:
+                    assert value("--build-jobs") == "1"
+                    proof = Path(value("--native-receipt"))
+                    assert proof.name == "native-build.json" and proof.is_file()
+                    assert Path(value("--native-artifacts-root")) == proof.parent.parent
+                else: assert "--native-receipt" not in args
                 assert (Path(value("--source-root")) / "Cargo.toml").is_file()
                 assert not Path(value("--evidence-dir")).exists()
                 fail("runtime")
@@ -232,13 +246,16 @@ class BuildConfigTests(unittest.TestCase):
                 print('{}')
             elif name == "make_geph_vendor_sbom.py":
                 assert args[0] == "generate"
-                assert Path(value("--source-root")).joinpath("Cargo.toml").is_file()
-                assert Path(value("--native-receipt")).is_file()
+                if native:
+                    assert Path(value("--source-root")).joinpath("Cargo.toml").is_file()
+                    assert Path(value("--native-receipt")).is_file()
+                else: assert "--native-receipt" not in args
                 metadata = [args[i+1] for i, arg in enumerate(args) if arg == "--cargo-metadata"]
                 assert len(metadata) == 2
                 for entry in metadata:
                     target, path = entry.split("=", 1)
-                    assert Path(path) == Path(value("--native-artifacts-root")) / target / "linked/cargo_metadata"
+                    if native:
+                        assert Path(path) == Path(value("--native-artifacts-root")) / target / "linked/cargo_metadata"
                     assert Path(path).is_file()
                 fail("spdx")
                 write(value("--output"))
@@ -246,57 +263,112 @@ class BuildConfigTests(unittest.TestCase):
                 assert value("--policy") == "security/geph-dependency-audit-policy.json"
                 if args[0] in ("scan", "verify"):
                     assert value("--vendored-transitive-dependencies") == "full"
-                    assert value("--source") == "vendor/geph/SOURCE.json"
-                    assert Path(value("--native-receipt")).is_file()
-                    assert Path(value("--native-receipt")).parent == Path(value("--native-artifacts-root"))
+                    if native or owned: assert value("--source") == "vendor/geph/SOURCE.json"
+                    else: assert "--source" not in args
+                    if native:
+                        assert Path(value("--native-receipt")).is_file()
+                        assert Path(value("--native-receipt")).parent == Path(value("--native-artifacts-root"))
+                    else: assert "--native-receipt" not in args
                     if args[0] == "scan":
-                        assert value("--native-advisory-evidence") == "security/geph-native-sqlite-advisories"
-                        assert Path(value("--evidence-dir")).name == "dependency-audit-evidence"
-                        assert not Path(value("--evidence-dir")).exists()
+                        if native:
+                            assert value("--native-advisory-evidence") == "security/geph-native-sqlite-advisories"
+                        else: assert "--native-advisory-evidence" not in args
+                        if native or owned:
+                            assert Path(value("--evidence-dir")).name == "dependency-audit-evidence"
+                            assert not Path(value("--evidence-dir")).exists()
+                        else: assert "--evidence-dir" not in args
+                        assert len(value("--evaluation-date")) == 10
+                        if owned:
+                            original = Path(value("--source-owned-evidence"))
+                            assert str(original) == "security/geph-source-owned-advisories"
+                            assert (original / "review.json").read_text() == "original review"
+                            write(Path(value("--evidence-dir")) / "source-owned/review.json", "original review")
+                            # The verified release must use the retained snapshot,
+                            # even if author input changes after scanning.
+                            (original / "review.json").write_text("changed after scan")
                     else:
                         assert "--evidence-dir" not in args and "--native-advisory-evidence" not in args
-                    fail("audit")
+                        if owned:
+                            retained = Path(value("--source-owned-evidence"))
+                            assert retained.parent.name == "dependency-audit-evidence" and retained.name == "source-owned"
+                            assert (retained / "review.json").read_text() == "original review"
+                    if not owned: assert "--source-owned-evidence" not in args
+                    fail("audit-" + args[0])
                 if "--output" in args: write(value("--output"))
+            elif name == "geph_source_owned_bundle.py":
+                assert owned and args[0] == "pack"
+                assert value("--policy") == "security/geph-dependency-audit-policy.json"
+                retained = Path(value("--evidence-root"))
+                assert retained.parent.name == "dependency-audit-evidence" and retained.name == "source-owned"
+                assert (retained / "review.json").read_text() == "original review"
+                assert Path("security/geph-source-owned-advisories/review.json").read_text() == "changed after scan"
+                fail("owned-bundle")
+                write(value("--output"), "retained full source review proof")
             elif name == "gh":
                 assert args[:2] == ["attestation", "verify"]
-                assert value("--source-digest") == value("--signer-digest") == "a" * 40
-                assert value("--source-ref") == "refs/heads/main"
+                assert value("--repo") == "aiwaki/slipstream"
+                assert value("--signer-workflow") == "aiwaki/slipstream/.github/workflows/build-geph.yml"
+                assert value("--source-digest") == "a" * 40
+                if native or owned:
+                    assert value("--signer-digest") == "a" * 40
+                    assert value("--source-ref") == "refs/heads/main"
+                    assert value("--predicate-type") in ("https://slsa.dev/provenance/v1", "https://spdx.dev/Document/v2.3")
                 assert "--deny-self-hosted-runners" in args
+                fail("attestation-command")
                 print('{}')
             elif name == "verify_geph_release.py":
                 assert args[0] == "verify-attestations"
                 assert value("--source") == "vendor/geph/SOURCE.json"
-                assert len(list(Path(value("--release-dir")).iterdir())) == 9
+                assert len(list(Path(value("--release-dir")).iterdir())) == 8 + native + owned
                 fail("attestations")
+            elif name == "lipo":
+                assert not native
+                if args[0] == "-create":
+                    for path in args[3:]: assert Path(path).read_text() == binary
+                    write(value("-output"), binary)
+                else: assert Path(args[0]).read_text() == binary
+            elif name == "strip":
+                assert not native and Path(args[-1]).read_text() == binary
             elif name == "git": print("1700000000")
             else: raise AssertionError((name, args))
         ''')
         names = ("Materialize the reviewed Geph source", "Build the exact locked universal binary",
                  "Build and audit the vendored dependency inventory", "Assemble the internal release payload",
                  "Verify stored Geph attestations")
-        for failure in ("", "materialize", "online-fetch", "seal", "network-control", "offline-fetch",
-                        "producer", "runtime", "bundle", "spdx", "audit", "attestations"):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+        scenarios = []
+        for native, owned in ((False, False), (True, False), (False, True), (True, True)):
+            failures = ["", "materialize", "runtime", "spdx", "audit-scan", "audit-verify", "attestation-command"]
+            if native: failures += ["online-fetch", "seal", "network-control", "offline-fetch", "producer", "bundle"]
+            if native or owned: failures += ["attestations"]
+            if owned: failures += ["owned-bundle"]
+            scenarios += [(native, owned, failure) for failure in failures]
+        for native, owned, failure in scenarios:
+            with self.subTest(native=native, owned=owned, failure=failure), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
-                for directory in ("scripts", "tools/bin", "tools/lib", "tools/sdk", "runner temp", "security", "vendor/geph"):
+                for directory in ("scripts", "tools/bin", "tools/lib", "tools/sdk", "runner temp", "security", "vendor/geph", "workflow-tmp"):
                     (root / directory).mkdir(parents=True, exist_ok=True)
-                (root / "fixture.json").write_text(json.dumps({"failure": failure}))
-                source = {"native_sqlite": {"archive": {"url": "https://sqlite.org/2026/sqlite.zip"}}}
+                (root / "fixture.json").write_text(json.dumps({"failure": failure, "native": native, "owned": owned}))
+                source = {}
+                if native: source["native_sqlite"] = {"archive": {"url": "https://sqlite.org/2026/sqlite.zip"}}
+                if owned:
+                    source["embedded_packages"] = [{"name": "source-owned-fixture"}]
+                    (root / "security/geph-source-owned-advisories").mkdir()
+                    (root / "security/geph-source-owned-advisories/review.json").write_text("original review")
                 (root / "vendor/geph/SOURCE.json").write_text(json.dumps(source))
                 for name, content in (("VERSION", "0.4.3\n"), ("Cargo.lock", "fixture lock"), ("LICENSE", "fixture license")):
                     (root / "vendor/geph" / name).write_text(content)
                 (root / "security/geph-dependency-audit-policy.json").write_text('{}')
                 for name in ("geph_vendor_source", "seal_geph_cargo_cache", "build_geph_native_release",
                              "run_geph_synthetic_tests", "geph_native_sqlite_bundle", "make_geph_vendor_sbom",
-                             "dependency_audit", "verify_geph_release"):
+                             "dependency_audit", "verify_geph_release", "geph_source_owned_bundle"):
                     prefix = "def no_cargo_config(*args): pass\nif __name__ == '__main__':\n" if name == "build_geph_native_release" else ""
                     body = textwrap.indent(driver, "    ") if prefix else driver
                     (root / "scripts" / (name + ".py")).write_text(prefix + body)
-                for name in ("rustup", "xcrun", "curl", "cargo", "sandbox-exec", "gh", "git"):
+                for name in ("rustup", "xcrun", "curl", "cargo", "sandbox-exec", "gh", "git", "lipo", "strip"):
                     path = root / "tools/bin" / name
                     path.write_text("#!" + str(Path(sys.executable).resolve()) + "\n" + driver)
                     path.chmod(0o755)
-                for name in ("rustc", "clang", "ar", "lipo", "cmake"):
+                for name in ("rustc", "clang", "ar", "cmake"):
                     write_executable(root / "tools/bin" / name, "exit 99\n")
                 (root / "tools/lib/libclang.dylib").write_text("fixture tool")
                 (root / "tools/bin/python3").symlink_to(Path(sys.executable).resolve())
@@ -305,7 +377,7 @@ class BuildConfigTests(unittest.TestCase):
                        "RUNNER_TEMP": str(root / "runner temp"), "GITHUB_OUTPUT": str(output),
                        "GITHUB_SHA": "a" * 40, "GEPH_TARGETS": "aarch64-apple-darwin,x86_64-apple-darwin",
                        "GH_TOKEN": "sentinel-not-a-secret", "RUSTFLAGS": "unwanted", "AWS_SECRET_ACCESS_KEY": "sentinel"}
-                outputs = {}
+                outputs = {"workspace": ""}
                 for name in names:
                     shell = self._geph_workflow_shell(name)
                     substitutions = {"github.repository": "aiwaki/slipstream",
@@ -313,13 +385,13 @@ class BuildConfigTests(unittest.TestCase):
                     substitutions.update({"steps.source.outputs." + key: value for key, value in outputs.items()})
                     for key, value in substitutions.items(): shell = shell.replace("${{ " + key + " }}", value)
                     shell = shell.replace("/usr/bin/sandbox-exec", str(root / "tools/bin/sandbox-exec"))
-                    shell = shell.replace("/tmp/osv-scanner", str(root / "scanner"))
+                    shell = shell.replace("/tmp/", str(root / "workflow-tmp") + "/")
                     self.assertNotIn("${{", shell)
                     result = subprocess.run(["/bin/bash", "-c", shell], cwd=root, env=env,
                                             capture_output=True, text=True, timeout=15)
                     if result.returncode: break
-                    if output.exists(): outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
-                self._retain_geph_shell_evidence("producer-" + (failure or "success"), root, result)
+                    if output.exists(): outputs.update(dict(line.split("=", 1) for line in output.read_text().splitlines()))
+                self._retain_geph_shell_evidence(f"producer-native{int(native)}-owned{int(owned)}-" + (failure or "success"), root, result)
                 commands = [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
                 command_names = [entry["name"] for entry in commands]
                 self.assertEqual(result.returncode == 0, not failure, result.stdout + result.stderr)
@@ -327,32 +399,50 @@ class BuildConfigTests(unittest.TestCase):
                     logs = "\n".join(p.read_text() for p in (root / "runner temp").rglob("*.log"))
                     self.assertIn("controlled refusal at " + failure, result.stderr + logs)
                 else:
-                    self.assertEqual((root / "out/geph5-client").read_text(), "sealed universal bytes")
-                    self.assertEqual(len(list((root / "out").iterdir())), 9)
-                    self.assertEqual(command_names.count("gh"), 10)
-                    self.assertEqual(command_names[-1], "verify_geph_release.py")
+                    self.assertEqual((root / "out/geph5-client").read_text(), "sealed universal bytes" + ("" if native else " aws_smithy"))
+                    expected = {"geph5-client", "geph5-client.LICENSE", "geph5-client.VERSION", "geph5-client.SOURCE.json",
+                                "geph5-client.Cargo.lock", "geph5-client.spdx.json", "geph5-client-dependency-audit.json", "SHA256SUMS"}
+                    if native: expected.add("geph5-client-native-sqlite-evidence.tar")
+                    if owned: expected.add("geph5-client-source-review-evidence.tar")
+                    self.assertEqual({path.name for path in (root / "out").iterdir()}, expected)
+                    attestations = [entry["args"] for entry in commands if entry["name"] == "gh"]
+                    self.assertEqual(len(attestations), len(expected) + 1)
+                    self.assertEqual({Path(args[2]).name for args in attestations[:-1]}, expected)
+                    self.assertEqual(attestations[-1][attestations[-1].index("--predicate-type") + 1], "https://spdx.dev/Document/v2.3")
+                    self.assertEqual(command_names[-1], "verify_geph_release.py" if native or owned else "gh")
+                    if owned:
+                        self.assertEqual((root / "out/geph5-client-source-review-evidence.tar").read_text(), "retained full source review proof")
                 order = ["seal_geph_cargo_cache.py", "build_geph_native_release.py", "run_geph_synthetic_tests.py",
                          "geph_native_sqlite_bundle.py", "make_geph_vendor_sbom.py", "verify_geph_release.py"]
                 seen = [command_names.index(name) for name in order if name in command_names]
                 self.assertEqual(seen, sorted(seen))
                 if failure in ("materialize", "online-fetch", "seal", "network-control", "offline-fetch", "producer", "runtime"):
                     self.assertFalse((root / "out/geph5-client").exists())
-                self.assertNotIn("strip", command_names)
+                if failure in ("spdx", "audit-scan", "audit-verify", "owned-bundle"):
+                    self.assertFalse((root / "out/SHA256SUMS").exists())
+                    self.assertNotIn("gh", command_names)
+                if owned:
+                    calls = [entry["args"][0] for entry in commands if entry["name"] in ("dependency_audit.py", "geph_source_owned_bundle.py")]
+                    if "pack" in calls: self.assertEqual(calls, ["fetch-scanner", "scan", "verify", "pack"])
+                    if failure in ("audit-scan", "audit-verify"):
+                        self.assertNotIn("pack", calls)
+                        self.assertFalse((root / "out/geph5-client-source-review-evidence.tar").exists())
+                if native: self.assertNotIn("strip", command_names)
 
-    def test_native_audit_evidence_is_retained_after_failure_before_assembly(self) -> None:
+    def test_geph_audit_evidence_is_retained_after_failure_before_assembly(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()
         audit = workflow.index("      - name: Build and audit the vendored dependency inventory")
-        retain = workflow.index("      - name: Retain native dependency audit evidence")
+        retain = workflow.index("      - name: Retain Geph dependency audit evidence")
         assembly = workflow.index("      - name: Assemble the internal release payload")
         self.assertLess(audit, retain)
         self.assertLess(retain, assembly)
         step = workflow[retain:assembly]
-        self.assertIn("if: always() && steps.source.outputs.native_sqlite == 'true'", step)
+        self.assertIn("if: always() && (steps.source.outputs.native_sqlite == 'true' || steps.source.outputs.source_owned == 'true')", step)
         self.assertIn("path: ${{ steps.source.outputs.workspace }}/dependency-audit-evidence/", step)
         self.assertNotIn("path: out/", step)
         self.assertIn("retention-days: 7", step)
 
-    def test_geph_native_existing_release_requires_full_proof(self) -> None:
+    def test_geph_existing_release_requires_full_proof(self) -> None:
         import sys
         import textwrap
 
@@ -364,40 +454,54 @@ class BuildConfigTests(unittest.TestCase):
             import json, os, sys
             from pathlib import Path
             root = Path(__file__).resolve().parents[1]
-            fail_at = json.loads((root / "fixture.json").read_text())["failure"]
+            config = json.loads((root / "fixture.json").read_text())
+            fail_at, native, owned = config["failure"], config["native"], config["owned"]
             name, args = Path(sys.argv[0]).name, sys.argv[1:]
             with (root / "commands.jsonl").open("a") as log:
                 log.write(json.dumps({"name": name, "args": args}) + "\n")
             assets = {"geph5-client", "geph5-client.LICENSE", "geph5-client.VERSION", "geph5-client.SOURCE.json",
                       "geph5-client.Cargo.lock", "geph5-client.spdx.json", "geph5-client-dependency-audit.json",
-                      "SHA256SUMS", "geph5-client-native-sqlite-evidence.tar"}
+                      "SHA256SUMS"}
+            native_bundle = "geph5-client-native-sqlite-evidence.tar"
+            owned_bundle = "geph5-client-source-review-evidence.tar"
+            if native: assets.add(native_bundle)
+            if owned: assets.add(owned_bundle)
+            challenged_bundle = owned_bundle if owned else native_bundle
             def value(flag): return args[args.index(flag) + 1]
             def fail(stage):
                 if fail_at == stage: raise SystemExit("controlled refusal at " + stage)
             if name == "gh":
                 if args[:2] == ["release", "view"]:
-                    print("\n".join(sorted(assets - ({"geph5-client-native-sqlite-evidence.tar"} if fail_at == "missing-asset" else set()))))
+                    print("\n".join(sorted(assets - ({challenged_bundle} if fail_at == "missing-asset" else set()))))
                 elif args[0] == "api":
                     endpoint = args[-1]
                     if "/git/ref/tags/" in endpoint:
                         print(json.dumps({"object": {"type": "tag" if fail_at == "tag-type" else "commit", "sha": "a" * 40}}))
                     elif "/contents/" in endpoint:
                         assert endpoint.endswith("?ref=" + "a" * 40)
+                        fail("historical-policy")
                         print('{"historical":true}')
                     else:
                         assert "/releases/tags/" in endpoint
                         print('{}')
                 else:
                     assert args[:2] == ["attestation", "verify"]
+                    assert value("--repo") == "aiwaki/slipstream"
+                    assert value("--signer-workflow") == "aiwaki/slipstream/.github/workflows/build-geph.yml"
                     assert value("--signer-digest") == value("--source-digest") == "a" * 40
                     assert value("--source-ref") == "refs/heads/main"
+                    assert value("--predicate-type") in ("https://slsa.dev/provenance/v1", "https://spdx.dev/Document/v2.3")
                     assert "--deny-self-hosted-runners" in args
+                    fail("attestation-command")
                     print('{}')
             elif name == "curl": Path(value("-o")).write_text(args[args.index("-o") - 1])
             elif name == "geph_vendor_source.py":
                 assert value("--source") == "vendor/geph/SOURCE.json"
-                if args[0] == "verify": print('{"release_tag":"geph-vendor-0.4.3-r1","native_sqlite":"reviewed"}')
+                if args[0] == "verify":
+                    source = json.loads(Path(value("--source")).read_text())
+                    print(json.dumps({**source, "release_tag":"geph-vendor-0.4.3-r1"}))
                 else:
+                    assert native
                     fail("materialize")
                     source = json.loads(Path(value("--source")).read_text())
                     assert Path(value("--crate")).read_text() == source["crate"]["url"]
@@ -407,43 +511,76 @@ class BuildConfigTests(unittest.TestCase):
                     print(json.dumps({"root": str(materialized)}))
             elif name == "download_github_release_assets.py":
                 patterns = [args[i+1] for i, a in enumerate(args) if a == "--pattern"]
-                assert len(patterns) == 9 and set(patterns) == assets
+                assert len(patterns) == 8 + native + owned and set(patterns) == assets
                 release = Path(value("--output")); assert not release.exists(); release.mkdir()
-                for asset in assets: (release / asset).write_text("fixture asset")
+                for asset in assets:
+                    if asset == challenged_bundle and fail_at == "missing-bundle": continue
+                    (release / asset).write_text("tampered" if asset == challenged_bundle and fail_at == "tampered-bundle" else "fixture asset")
             elif name == "verify_geph_release.py":
                 assert value("--source") == "vendor/geph/SOURCE.json"
                 if args[0] == "verify-assets":
+                    release = Path(value("--release-dir"))
+                    for bundle in assets.intersection({native_bundle, owned_bundle}):
+                        if not (release / bundle).is_file(): raise SystemExit("controlled refusal at missing-bundle")
+                        if (release / bundle).read_text() != "fixture asset": raise SystemExit("controlled refusal at tampered-bundle")
                     fail("assets")
-                    proof = Path(value("--native-output-root")); assert not proof.exists()
-                    proof = proof / "returned-proof"; proof.mkdir(parents=True)
-                    receipt = proof / "returned-receipt.json"; receipt.write_text('{}')
-                    print(json.dumps({"native_evidence": {"receipt_path": str(receipt), "artifacts_root": str(proof)}}))
+                    result = {"asset_count": len(assets)}
+                    if native:
+                        proof = Path(value("--native-output-root")); assert not proof.exists()
+                        proof = proof / "returned-proof"; proof.mkdir(parents=True)
+                        receipt = proof / "returned-receipt.json"; receipt.write_text('{}')
+                        result["native_evidence"] = {"receipt_path": str(receipt), "artifacts_root": str(proof)}
+                    else: assert "--native-output-root" not in args
+                    if owned:
+                        assert json.loads(Path(value("--source-owned-policy")).read_text()) == {"historical": True}
+                        requested = Path(value("--source-owned-output-root")); assert not requested.exists()
+                        extracted = requested / "returned-owned-root"; extracted.mkdir(parents=True)
+                        (extracted / "review.json").write_text("authenticated review")
+                        result["source_owned_evidence"] = {"root": str(extracted)}
+                    else: assert "--source-owned-policy" not in args and "--source-owned-output-root" not in args
+                    print(json.dumps(result))
                 else: fail("attestations" if args[0] == "verify-attestations" else "metadata")
             elif name == "make_geph_vendor_sbom.py":
-                assert Path(value("--source-root")).joinpath("marker").read_text() == "independent"
-                assert Path(value("--native-receipt")).name == "returned-receipt.json"
-                assert Path(value("--native-artifacts-root")).name == "returned-proof"
+                if native:
+                    assert Path(value("--source-root")).joinpath("marker").read_text() == "independent"
+                    assert Path(value("--native-receipt")).name == "returned-receipt.json"
+                    assert Path(value("--native-artifacts-root")).name == "returned-proof"
+                else: assert not {"--source-root", "--native-receipt", "--native-artifacts-root"}.intersection(args)
                 assert value("--source-commit") == "a" * 40
                 fail("spdx")
             elif name == "dependency_audit.py":
                 assert value("--source-commit") == "a" * 40
                 assert value("--vendored-transitive-dependencies") == "full"
                 assert value("--source") == "vendor/geph/SOURCE.json"
-                assert Path(value("--native-receipt")).name == "returned-receipt.json"
-                assert Path(value("--native-artifacts-root")).name == "returned-proof"
+                if native:
+                    assert Path(value("--native-receipt")).name == "returned-receipt.json"
+                    assert Path(value("--native-artifacts-root")).name == "returned-proof"
+                else: assert not {"--native-receipt", "--native-artifacts-root"}.intersection(args)
+                if owned:
+                    extracted = Path(value("--source-owned-evidence"))
+                    assert extracted.name == "returned-owned-root"
+                    assert (extracted / "review.json").read_text() == "authenticated review"
+                else: assert "--source-owned-evidence" not in args
                 policy = json.loads(Path(value("--policy")).read_text())
                 fail("historical-audit" if policy.get("historical") else "current-audit")
             else: raise AssertionError((name, args))
         ''')
-        for failure in ("", "missing-asset", "tag-type", "assets", "materialize", "spdx",
-                        "historical-audit", "current-audit", "attestations"):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+        scenarios = []
+        for native, owned in ((True, False), (False, True), (True, True)):
+            failures = ["", "missing-asset", "tag-type", "historical-policy", "missing-bundle", "tampered-bundle", "assets", "spdx",
+                        "historical-audit", "current-audit", "attestation-command", "attestations"]
+            if native: failures += ["materialize"]
+            scenarios += [(native, owned, failure) for failure in failures]
+        for native, owned, failure in scenarios:
+            with self.subTest(native=native, owned=owned, failure=failure), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 for directory in ("scripts", "bin", "runner temp", "vendor/geph", "security"):
                     (root / directory).mkdir(parents=True, exist_ok=True)
-                (root / "fixture.json").write_text(json.dumps({"failure": failure}))
-                (root / "vendor/geph/SOURCE.json").write_text(json.dumps({"crate": {"url": "https://static.crates.io/geph.crate"},
-                    "native_sqlite": {"archive": {"url": "https://sqlite.org/2026/sqlite.zip"}}}))
+                (root / "fixture.json").write_text(json.dumps({"failure": failure, "native": native, "owned": owned}))
+                source = {"crate": {"url": "https://static.crates.io/geph.crate"}}
+                if native: source["native_sqlite"] = {"archive": {"url": "https://sqlite.org/2026/sqlite.zip"}}
+                if owned: source["embedded_packages"] = [{"name": "source-owned-fixture"}]
+                (root / "vendor/geph/SOURCE.json").write_text(json.dumps(source))
                 (root / "security/geph-dependency-audit-policy.json").write_text('{}')
                 for name in ("geph_vendor_source.py", "download_github_release_assets.py", "verify_geph_release.py",
                              "make_geph_vendor_sbom.py", "dependency_audit.py"):
@@ -457,19 +594,43 @@ class BuildConfigTests(unittest.TestCase):
                     env={**os.environ, "PATH": str(root / "bin") + ":/usr/bin:/bin",
                          "RUNNER_TEMP": str(root / "runner temp"), "GITHUB_OUTPUT": str(output)},
                     capture_output=True, text=True, timeout=15)
-                self._retain_geph_shell_evidence("existing-" + (failure or "success"), root, result)
+                self._retain_geph_shell_evidence(f"existing-native{int(native)}-owned{int(owned)}-" + (failure or "success"), root, result)
                 self.assertEqual(result.returncode == 0, not failure, result.stdout + result.stderr)
                 self.assertEqual("should_build=false" in output.read_text(), not failure)
                 commands = [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
+                names = [entry["name"] for entry in commands]
+                audits = [entry for entry in commands if entry["name"] == "dependency_audit.py"]
+                attestations = [entry["args"] for entry in commands if entry["name"] == "gh" and entry["args"][:2] == ["attestation", "verify"]]
+                asset_checks = [i for i, entry in enumerate(commands) if entry["name"] == "verify_geph_release.py" and entry["args"][0] == "verify-assets"]
+                if asset_checks:
+                    policies = [i for i, entry in enumerate(commands) if entry["name"] == "gh" and entry["args"][0] == "api" and "/contents/" in entry["args"][-1]]
+                    self.assertEqual(len(policies), 1)
+                    self.assertLess(policies[0], names.index("download_github_release_assets.py"))
+                    self.assertLess(policies[0], asset_checks[0])
                 if not failure:
-                    audits = [entry for entry in commands if entry["name"] == "dependency_audit.py"]
                     self.assertEqual(len(audits), 2)
-                    self.assertEqual(sum(entry["name"] == "gh" and entry["args"][:2] == ["attestation", "verify"] for entry in commands), 10)
-                elif failure in ("missing-asset", "tag-type"):
-                    self.assertNotIn("download_github_release_assets.py", [entry["name"] for entry in commands])
+                    self.assertEqual(len(attestations), 9 + native + owned)
+                    expected = {"geph5-client", "geph5-client.LICENSE", "geph5-client.VERSION", "geph5-client.SOURCE.json",
+                                "geph5-client.Cargo.lock", "geph5-client.spdx.json", "geph5-client-dependency-audit.json", "SHA256SUMS"}
+                    if native: expected.add("geph5-client-native-sqlite-evidence.tar")
+                    if owned: expected.add("geph5-client-source-review-evidence.tar")
+                    self.assertEqual({Path(args[2]).name for args in attestations[:-1]}, expected)
+                    self.assertEqual(attestations[-1][attestations[-1].index("--predicate-type") + 1], "https://spdx.dev/Document/v2.3")
+                    if owned:
+                        roots = [entry["args"][entry["args"].index("--source-owned-evidence") + 1] for entry in audits]
+                        self.assertEqual(roots[0], roots[1])
+                elif failure in ("missing-asset", "tag-type", "historical-policy"):
+                    self.assertNotIn("download_github_release_assets.py", names)
                 else:
                     self.assertIn("controlled refusal at " + failure, result.stderr)
-                    self.assertTrue(list((root / "runner temp").glob("geph-existing.*/release/geph5-client-native-sqlite-evidence.tar")))
+                if failure in ("missing-asset", "tag-type", "historical-policy", "missing-bundle", "tampered-bundle", "assets", "materialize", "spdx"):
+                    self.assertEqual(audits, [])
+                    self.assertEqual(attestations, [])
+                if failure == "historical-audit":
+                    self.assertEqual(len(audits), 1)
+                    self.assertEqual(attestations, [])
+                if failure in ("attestation-command", "attestations"):
+                    self.assertEqual(len(audits), 1)
 
     def test_local_build_disables_updater_artifacts(self) -> None:
         config = json.loads(

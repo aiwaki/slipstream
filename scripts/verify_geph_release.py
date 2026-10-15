@@ -20,6 +20,7 @@ from pathlib import Path
 CHECKSUM_NAME = "SHA256SUMS"
 BINARY_NAME = "geph5-client"
 NATIVE_EVIDENCE_NAME = "geph5-client-native-sqlite-evidence.tar"
+SOURCE_REVIEW_EVIDENCE_NAME = "geph5-client-source-review-evidence.tar"
 CHECKSUMMED_ASSETS = frozenset(
     {
         BINARY_NAME,
@@ -48,6 +49,7 @@ MAX_BYTES = {
     "geph5-client-dependency-audit.json": 64 * 1024 * 1024,
     CHECKSUM_NAME: 64 * 1024,
     NATIVE_EVIDENCE_NAME: 1024 * 1024 * 1024,
+    SOURCE_REVIEW_EVIDENCE_NAME: 130 * 1024 * 1024,
 }
 MAX_RELEASE_METADATA_BYTES = 1024 * 1024
 MAX_PROVENANCE_JSON_BYTES = 8 * 1024 * 1024
@@ -269,11 +271,16 @@ def _asset_contract(source: Path | None) -> tuple[frozenset[str], dict | None, d
     )
     if not isinstance(contract, dict):
         raise ValueError("reviewed Geph source must be an object")
-    if "native_sqlite" not in contract:
+    if not {"native_sqlite", "embedded_packages"}.intersection(contract):
         return REQUIRED_ASSETS, None, identity
     import geph_vendor_source
     geph_vendor_source._validate_source_contract(contract)
-    return REQUIRED_ASSETS | {NATIVE_EVIDENCE_NAME}, contract, identity
+    required = REQUIRED_ASSETS
+    if "native_sqlite" in contract:
+        required |= {NATIVE_EVIDENCE_NAME}
+    if "embedded_packages" in contract:
+        required |= {SOURCE_REVIEW_EVIDENCE_NAME}
+    return required, contract, identity
 
 
 def verify_attestation_results(
@@ -308,8 +315,9 @@ def verify_attestation_results(
         )
         if downloaded_source_metadata["sha256"] != expected_subjects["geph5-client.SOURCE.json"]:
             raise ValueError("downloaded Geph source changed during attestation verification")
-        if not isinstance(downloaded_source, dict) or "native_sqlite" in downloaded_source:
-            raise ValueError("native Geph attestations require a reviewed source contract")
+        if (not isinstance(downloaded_source, dict)
+                or {"native_sqlite", "embedded_packages"}.intersection(downloaded_source)):
+            raise ValueError("extended Geph attestations require a reviewed source contract")
 
     provenance, _ = _read_json_regular(
         provenance_json,
@@ -382,10 +390,12 @@ def verify_release_assets(
     version: Path,
     license_file: Path,
     native_output_root: Path | None = None,
+    source_owned_policy: Path | None = None,
+    source_owned_output_root: Path | None = None,
 ) -> dict[str, object]:
     if not release_dir.is_dir() or release_dir.is_symlink():
         raise ValueError("Geph release directory is missing or unsafe")
-    required, native_contract, reviewed_source = _asset_contract(source)
+    required, reviewed_contract, reviewed_source = _asset_contract(source)
     names = {entry.name for entry in release_dir.iterdir()}
     if names != required:
         missing = sorted(required - names)
@@ -447,7 +457,17 @@ def verify_release_assets(
         "binary_size": downloaded_metadata[BINARY_NAME]["size"],
         "checksums_sha256": checksums[CHECKSUM_NAME],
     }
-    if native_contract is not None:
+    source_policy = None
+    if reviewed_contract is not None and "embedded_packages" in reviewed_contract:
+        if source_owned_policy is None or source_owned_output_root is None:
+            raise ValueError("source-owned Geph assets require trusted policy and a fresh evidence output root")
+        import geph_source_owned_bundle
+        source_policy = geph_source_owned_bundle.read_policy(source_owned_policy)
+        if source_policy["source_sha256"] != reviewed_source["sha256"]:
+            raise ValueError("source-owned policy differs from reviewed Geph source")
+    elif source_owned_policy is not None or source_owned_output_root is not None:
+        raise ValueError("source-owned evidence inputs supplied without embedded Geph source")
+    if reviewed_contract is not None and "native_sqlite" in reviewed_contract:
         if native_output_root is None:
             raise ValueError("native Geph assets require a fresh evidence output root")
         import geph_native_sqlite
@@ -458,12 +478,12 @@ def verify_release_assets(
         if lock_identity != downloaded_metadata["geph5-client.Cargo.lock"]:
             raise ValueError("reviewed Geph lock changed during asset verification")
         geph_native_sqlite.verify_wrapper_lock(
-            native_contract["native_sqlite"], lock_bytes, native_contract["lock_sha256"]
+            reviewed_contract["native_sqlite"], lock_bytes, reviewed_contract["lock_sha256"]
         )
         proof = geph_native_sqlite_bundle.unpack_bundle(
             bundle_path=release_dir / NATIVE_EVIDENCE_NAME,
             output_root=native_output_root,
-            descriptor=native_contract["native_sqlite"],
+            descriptor=reviewed_contract["native_sqlite"],
             source_sha256=str(reviewed_source["sha256"]),
             lock_sha256=str(downloaded_metadata["geph5-client.Cargo.lock"]["sha256"]),
             published_binary=release_dir / BINARY_NAME,
@@ -475,6 +495,18 @@ def verify_release_assets(
         result["native_evidence"] = proof
     elif native_output_root is not None:
         raise ValueError("native evidence output supplied for legacy Geph source")
+    if source_policy is not None:
+        proof = geph_source_owned_bundle.unpack_bundle(
+            bundle_path=release_dir / SOURCE_REVIEW_EVIDENCE_NAME,
+            output_root=source_owned_output_root,
+            policy_entry=source_policy,
+        )
+        if (proof["bundle_sha256"] != checksums[SOURCE_REVIEW_EVIDENCE_NAME]
+                or proof["size"] != downloaded_metadata[SOURCE_REVIEW_EVIDENCE_NAME]["size"]
+                or proof["source_sha256"] != reviewed_source["sha256"]
+                or proof["review_sha256"] != source_policy["review_sha256"]):
+            raise ValueError("source-owned evidence changed during asset verification")
+        result["source_owned_evidence"] = proof
     return result
 
 
@@ -556,6 +588,8 @@ def parse_args() -> argparse.Namespace:
     assets.add_argument("--version-file", required=True, type=Path)
     assets.add_argument("--license", required=True, type=Path)
     assets.add_argument("--native-output-root", type=Path)
+    assets.add_argument("--source-owned-policy", type=Path)
+    assets.add_argument("--source-owned-output-root", type=Path)
     attestations = subparsers.add_parser("verify-attestations")
     attestations.add_argument("--release-dir", required=True, type=Path)
     attestations.add_argument("--provenance-json", required=True, type=Path)
@@ -582,6 +616,8 @@ def main() -> int:
             version=args.version_file,
             license_file=args.license,
             native_output_root=args.native_output_root,
+            source_owned_policy=args.source_owned_policy,
+            source_owned_output_root=args.source_owned_output_root,
         )
     else:
         result = verify_attestation_results(

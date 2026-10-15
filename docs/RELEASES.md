@@ -159,7 +159,7 @@ source merge; it expires on 2026-08-27 and does not authorize publishing
 Geph's Hyper 0.14 AWS client until upstream provides a fixed 0.3-compatible
 graph.
 
-### Source-owned Geph audit coverage (inactive until policy and workflow adoption)
+### Source-owned Geph audit coverage (inactive until policy adoption)
 
 The optional `source_owned_review` policy section enables audit report schema 3
 for the three embedded source-owned Geph packages. Its own schema version is 1;
@@ -198,6 +198,24 @@ the same policy-pinned evidence bytes, so a missing or changed archive or review
 file invalidates the result. Evidence bytes are copied verbatim: prepare a
 reviewed, publishable bundle before configuring CI uploads.
 
+When SOURCE contains embedded packages, the release also requires
+`geph5-client-source-review-evidence.tar`. The producer packs the retained
+`source-owned/` snapshot only after the audit passes. The bounded, uncompressed
+archive contains the exact review and evidence catalog plus a manifest tied to
+the trusted SOURCE/review hashes. It is included in the exact asset set,
+checksums, GitHub asset digests and provenance attestation.
+
+Consumers fetch the audit policy from the release tag's commit before unpacking
+into a fresh directory. `verify-assets` requires `--source-owned-policy` and
+`--source-owned-output-root`, rejects missing or altered evidence, and returns
+`source_owned_evidence.root`. The subsequent audit uses that verified tree;
+archive validation alone cannot approve a source review. The existing-release
+resolver applies both historical and current audit policies. The app build
+checks the historical release proof and remains subject to the independent
+current dependency audit. Native and source-owned evidence can coexist;
+legacy releases keep their original asset contract. CI retains audit diagnostics
+on failure. A standalone audit without required native build proof still fails.
+
 Archive and coverage checks prove byte identity and declared review coverage,
 not the correctness of reviewer conclusions or legal clearance. Finding
 dispositions remain policy-pinned human assessments, and retained ancestor OSV
@@ -205,9 +223,10 @@ bytes do not establish a fresh query. The whole SOURCE hash binds root edits,
 but package file coverage does not separately establish the
 semantics of root callsites. This implementation does not adopt a production
 `source_owned_review` policy, activate an embedded-package SOURCE, or clear a
-release. The dependency-audit and release producer/consumer workflows still
-need explicit source-owned arguments and evidence retention before activation;
-the helper and synthetic bridge tests alone do not qualify a real candidate.
+release. The dependency-audit and release producer/consumer workflows carry
+source-owned arguments and retained evidence, but their controlled tests do not
+qualify a real candidate. Production adoption still requires the reviewed policy
+and SOURCE, a real scan/build, and the existing release qualification gates.
 
 ### Native SQLite audit coverage (inactive until reviewed policy adoption)
 

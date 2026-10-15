@@ -1,30 +1,40 @@
 # Geph 0.4.3 remediation candidate — 2026-10-13
 
-- Resumed 2026-10-15 after the user's limit-related pause. Source-owned audit
-  CLI integration is implemented: optional trusted `source_owned_review` uses
-  report schema3 and verifies exactly three embedded packages, their complete
-  file inventory, both actual ancestor archives, retained OSV ancestor IDs and
-  all finding aliases. Unknown/affected findings cannot produce PASS. Native
-  and source-owned reviews must bind the same SOURCE. Scanner projection omits
-  only independently verified packages; full release SPDX remains unchanged.
-  SOURCE/review/catalog are snapshotted before scanning and reverified by the
-  consumer. Legacy/native audit behavior is covered by the reused 82-test PASS
-  at output/source-owned-audit-integration-20261013/focused.log. Two tests use
-  real validators, tiny archives and a synthetic scanner, including changes to
-  original inputs during scanning and loss of retained evidence afterward.
-  Independent exact-file review found no actionable defect; evidence is in
-  output/source-owned-review-20261013/advisory-helper-review.json. These tests
-  prove orchestration, not real-candidate security or a fresh OSV assessment.
-  Production SOURCE/policy remain inactive. Immutable evidence packaging and
-  release workflow wiring are the next implementation step. Actual source
-  assessment must also retain the separate root-callsite review: package file
-  lists do not establish correctness of every root source edit.
-  Separately, auth-expiry-candidate/SOURCE.json (a94d4c1d) changes only the auth
-  cache invalidation predicate to compare active Plus state with cached level.
-  Old SOURCE3c2 and evidence remain intact. Python predicate/SQLite model passed;
-  actual Rust old/new callsite regressions are now being prepared using retained
-  offline caches. Do not describe this candidate as built, installed or released.
-  PR384 remains OPEN/DIRTY at ebdf6b8bd with unchanged audit/package failures.
+- Resumed by the user, 2026-10-15. Bridge baseline5cd158262 contains the source-owned
+  audit validation; its unchanged82-test baseline is retained. Immutable transport
+  and workflow wiring are implemented and reviewed; scoped verification passed.
+  The optional source-review archive is bound to SOURCE/review policy, release
+  checksums/API digests and attestations. Consumers fetch tag policy before
+  unpack, then verify semantic audit evidence; producer verifies/packs the
+  retained snapshot. Native/source-owned/combined/legacy paths remain separate.
+  Independent review found a macOS Bash3 empty-array/set-u failure; fixed with
+  nonempty verify arguments. Bundle/release63 unique tests PASS, consumer5 tests
+  (17 controlled Bash scenarios) PASS; all57 BuildConfig methods PASS in
+  disjoint runs, including45 producer and38 existing-release Bash scenarios.
+  Actionlint3 workflows and docs8 PASS. No unchanged broad suite was rerun.
+  Evidence: output/source-owned-bundle-review-20261015/receipt.json and
+  output/source-owned-workflow-integration-20261015/. The transport checks bytes,
+  not reviewer correctness; synthetic CLIs do not qualify an actual release.
+  Production SOURCE/policy and installed app are unchanged. Before this slice,
+  PR384 remote was ebdf6b8bd (OPEN/CONFLICTING; existing audit/package failures).
+  Next reconcile PR384 with main, finish actual SOURCE-owned/native applicability
+  assessment and bind the auth fix into the exact candidate. Then run the real
+  scanner/build and release gates; neither plumbing tests nor the retained
+  harness authorize production activation. PR386 remains OPEN at4360003ca;
+  main remains a24fd398c (README PR387). All owned test/build processes finished.
+
+- Auth-expiry regression, 2026-10-15: actual Rust old RED2/PASS1, fixed PASS3;
+  offline/jobs1, peak925MiB, no surviving owned processes. Receipt:
+  output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/
+  execution-receipt.json, SHA256
+  31d893cebfebcf0d9d4879b3a5d462e51ce45290a211a04b30cc7f6377706b0f.
+  Candidatea94d4c1d changes only auth cache invalidation to compare active Plus
+  state with cached level. Valid Free cache survives expired-positive subscription
+  metadata without unnecessary signer RPC; expired Plus cache is retired; real
+  Free-to-Plus transition still invalidates cache. Auth bytes match the candidate,
+  but tests use retained harness lock94db8764, not full candidate lock9fd68248.
+  Old SOURCE3c2 and all evidence remain intact; full candidate is unqualified.
+  Preserve root-callsite semantic review separately from embedded package files.
 
 - ISC packaging contract updated, 2026-10-13: the user declined the upstream
   issue; do not send it or require an upstream answer before proceeding. Both

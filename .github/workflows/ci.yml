@@ -199,6 +199,7 @@ jobs:
             scripts/dependency_audit.py \
             scripts/geph_native_sqlite_advisories.py \
             scripts/geph_source_owned_advisories.py \
+            scripts/geph_source_owned_bundle.py \
             scripts/make_release_manifest.py \
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
@@ -216,6 +217,9 @@ jobs:
             scripts/test_dependency_audit.py \
             scripts/test_geph_native_sqlite_advisories.py \
             scripts/test_geph_source_owned_advisories.py \
+            scripts/test_geph_source_owned_bundle.py \
+            scripts/test_verify_geph_source_owned_release.py \
+            scripts/test_geph_source_owned_consumers.py \
             scripts/test_source_owned_audit_bridge.py \
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
@@ -554,6 +558,9 @@ jobs:
           native_sqlite="$(python3 -c \
             'import json,sys; print("true" if "native_sqlite" in json.load(sys.stdin) else "false")' \
             <<< "$source_summary")"
+          source_owned="$(python3 -c \
+            'import json,sys; print("true" if bool(json.load(sys.stdin).get("embedded_packages")) else "false")' \
+            <<< "$source_summary")"
           gh api "repos/${{ github.repository }}/releases/tags/$tag" \
             > "$release_metadata"
           python3 scripts/verify_geph_release.py verify-metadata \
@@ -576,6 +583,16 @@ jobs:
             echo "recorded Geph tag does not resolve to a full commit"
             exit 1
           }
+          historical_policy="$(mktemp \
+            "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
+            > "$historical_policy"
+          test -f "$historical_policy"
+          test ! -L "$historical_policy"
+          test -s "$historical_policy"
+          python3 -m json.tool "$historical_policy" >/dev/null
           mkdir -p app-tauri/src-tauri/binaries
           rm -f \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
@@ -611,6 +628,11 @@ jobs:
             download_args+=(--pattern geph5-client-native-sqlite-evidence.tar)
             asset_args+=(--native-output-root "$geph_workspace/native-evidence")
           fi
+          if [ "$source_owned" = true ]; then
+            download_args+=(--pattern geph5-client-source-review-evidence.tar)
+            asset_args+=(--source-owned-policy "$historical_policy"
+              --source-owned-output-root "$geph_workspace/source-owned-evidence")
+          fi
           python3 scripts/download_github_release_assets.py \
             --repo "${{ github.repository }}" \
             --tag "$tag" \
@@ -641,21 +663,17 @@ jobs:
             sbom_args+=(--source-root "$source_root" --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
           fi
           audit_native_args=(--vendored-transitive-dependencies full)
+          if [ "$native_sqlite" = true ] || [ "$source_owned" = true ]; then
+            audit_native_args+=(--source vendor/geph/SOURCE.json)
+          fi
           if [ "$native_sqlite" = true ]; then
-            audit_native_args+=(--source vendor/geph/SOURCE.json
-              --native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+            audit_native_args+=(--native-receipt "$native_receipt" --native-artifacts-root "$native_artifacts")
+          fi
+          if [ "$source_owned" = true ]; then
+            source_owned_evidence="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_owned_evidence"]["root"])' "$asset_report")"
+            audit_native_args+=(--source-owned-evidence "$source_owned_evidence")
           fi
           python3 scripts/make_geph_vendor_sbom.py verify "${sbom_args[@]}"
-          historical_policy="$(mktemp \
-            "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
-          gh api \
-            -H "Accept: application/vnd.github.raw+json" \
-            "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
-            > "$historical_policy"
-          test -f "$historical_policy"
-          test ! -L "$historical_policy"
-          test -s "$historical_policy"
-          python3 -m json.tool "$historical_policy" >/dev/null
           python3 scripts/dependency_audit.py verify \
             --report "$geph_release/geph5-client-dependency-audit.json" \
             --sbom "$geph_release/geph5-client.spdx.json" \
