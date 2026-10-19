@@ -1378,30 +1378,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          candidate_attempt="$(PYTHONPATH=scripts python3 -c '
-          import sys
-          from pathlib import Path
-          import macos_update_notification_smoke as smoke
-          print(smoke._candidate_producer_attempt(
-              Path(sys.argv[1]),
-              repository=sys.argv[2],
-              source_commit=sys.argv[3],
-              candidate_run_id=int(sys.argv[4]),
-          ))
-          ' dist-candidate "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID")"
-          if ! [[ "$candidate_attempt" =~ ^[1-9][0-9]*$ ]]; then
-            echo "candidate producer attempt selector is invalid" >&2
-            exit 1
-          fi
           python3 scripts/macos_update_notification_smoke.py --producer-evidence-only \
             --candidate-dir dist-candidate --repository "$GITHUB_REPOSITORY" \
             --source-commit "$GITHUB_SHA" --candidate-run-id "$GITHUB_RUN_ID" \
-            --candidate-run-attempt "$candidate_attempt" \
             --qualification-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --candidate-run-metadata "$RUNNER_TEMP/update-notification-run.json" \
             --candidate-run-jobs "$RUNNER_TEMP/update-notification-jobs.json" \
             --candidate-run-artifacts "$RUNNER_TEMP/update-notification-artifacts.json" \
             --output "$RUNNER_TEMP/update-notification-producer.json"
+          candidate_attempt="$(python3 -c '
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              report = json.load(stream)
+          attempt = report.get("candidate_run_attempt")
+          if report.get("outcome") != "ready" or type(attempt) is not int or attempt <= 0:
+              raise SystemExit("candidate producer report is not ready")
+          print(attempt)
+          ' "$RUNNER_TEMP/update-notification-producer.json")"
           echo "run_attempt=$candidate_attempt" >> "$GITHUB_OUTPUT"
       - name: Unpack the exact candidate for native notification qualification
         run: |

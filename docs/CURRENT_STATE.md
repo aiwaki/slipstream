@@ -26,11 +26,21 @@ passed. The original input triplet/rejected predicate was not retained. API
 readiness is a reproduced failure mode, not a proven explanation of that call.
 
 This change keeps strict provenance checks, refreshes incomplete API readiness
-for at most 120 seconds/13 polls, and retains the final bounded inputs plus an
-allowlisted failure stage. Invalid identity/attempt/digest, duplicates and failed
-producers remain terminal. The native hook is never retried. After integration,
-129 focused Python tests, actionlint, diff and version-sync checks passed;
-independent source review found no blockers. Product source and VERSION remain
+for at most 120 seconds/13 polls, and retains bounded inputs plus an allowlisted
+failure stage. Invalid identity/attempt/digest, duplicates and failed producers
+remain terminal. The native hook is never retried.
+
+PR401 head `d83171eb7862b725d477308b7b158bab1a82a1ab` passed whole CI39287488586
+and audit39287488498, including packaged browser and lifecycle. Its 129 focused
+Python checks and independent review are retained as the baseline. Two subsequent
+review findings are now repaired: a failed or late API fetch preserves the
+previous complete triplet, and manifest-attempt selection occurs inside the
+reporting path. Native qualification still requires an explicit attempt; evidence
+collection alone may select it from the strictly validated manifest. The focused
+136-test suite passed in 0.49s, actionlint/diff checks passed, and independent plus
+parent source review found no blockers. This does not claim an atomic three-file
+transaction on filesystem write failure. Evidence is retained in
+`notification-producer-refresh/pr401-p2-tests.log`. Product source and VERSION stay
 `0.1.9-preview.27`. No local Rust build or native operation ran.
 
 Evidence: `output/updater-daemon-identity/notification-producer-refresh`.

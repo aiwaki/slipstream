@@ -593,14 +593,21 @@ def collect_candidate_producer_evidence(*, output: Path, fetch=None,
         attempt = _candidate_producer_attempt(kwargs["candidate_dir"],
             repository=kwargs["repository"], source_commit=kwargs["source_commit"],
             candidate_run_id=kwargs["candidate_run_id"])
-        if attempt != kwargs["candidate_run_attempt"] or kwargs["qualification_run_attempt"] < attempt:
+        expected_attempt = kwargs.get("candidate_run_attempt")
+        if (
+            (expected_attempt is not None and (type(expected_attempt) is not int or expected_attempt != attempt))
+            or type(kwargs["qualification_run_attempt"]) is not int
+            or kwargs["qualification_run_attempt"] < attempt
+        ):
             raise _producer_invalid("candidate producer attempt is invalid", stage="attempt_invalid")
+        kwargs["candidate_run_attempt"] = attempt
         base = f'repos/{kwargs["repository"]}/actions/runs/{kwargs["candidate_run_id"]}'
         endpoints = (("run_metadata_path", base),
             ("jobs_path", f"{base}/attempts/{attempt}/jobs?per_page=100"),
             ("artifacts_path", f"{base}/artifacts?per_page=100"))
         while count < PRODUCER_MAX_POLLS:
             count += 1
+            snapshot = []
             for key, endpoint in endpoints:
                 remaining = deadline - clock()
                 if remaining <= 0:
@@ -608,8 +615,12 @@ def collect_candidate_producer_evidence(*, output: Path, fetch=None,
                 payload = fetch(endpoint, min(15.0, remaining))
                 if not 0 < len(payload) <= PRODUCER_EVIDENCE_MAX_BYTES:
                     raise _producer_invalid("producer API response is invalid", stage="api_fetch_failed")
-                # Only the last triplet is retained. The strict nofollow parser
-                # below authenticates it before this mode returns success.
+                snapshot.append((key, payload))
+            if clock() >= deadline:
+                raise _producer_invalid("producer readiness deadline exhausted", stage="readiness_deadline")
+            # A failed or late fetch must leave the previous complete triplet
+            # untouched. Retain only this completed, bounded API collection.
+            for key, payload in snapshot:
                 try:
                     fd = os.open(kwargs[key], os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
                     with os.fdopen(fd, "wb") as stream:
@@ -639,6 +650,7 @@ def collect_candidate_producer_evidence(*, output: Path, fetch=None,
                 report["last_pending_stage"] = stage
             if stage == "ready":
                 report["outcome"] = "ready"
+                report["candidate_run_attempt"] = attempt
                 return report
             remaining = deadline - clock()
             if count >= PRODUCER_MAX_POLLS or remaining <= 0:
@@ -1962,7 +1974,7 @@ def _main() -> int:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--candidate-run-id", type=int, required=True)
-    parser.add_argument("--candidate-run-attempt", type=int, required=True)
+    parser.add_argument("--candidate-run-attempt", type=int)
     parser.add_argument("--qualification-run-attempt", type=int, required=True)
     parser.add_argument("--candidate-run-metadata", type=Path, required=True)
     parser.add_argument("--candidate-run-jobs", type=Path, required=True)
@@ -1985,6 +1997,8 @@ def _main() -> int:
         return 0
     if args.app_bundle is None:
         parser.error("--app-bundle is required for native qualification")
+    if args.candidate_run_attempt is None:
+        parser.error("--candidate-run-attempt is required for native qualification")
     try:
         report = run_gate(
             candidate_dir=args.candidate_dir,
