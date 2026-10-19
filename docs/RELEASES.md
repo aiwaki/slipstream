@@ -210,6 +210,65 @@ watchdog recovery, administrator dialogs, public discovery and an actual release
 update pair still need their own existing evidence. A passing root case must
 not be reported as a passing public auto-update.
 
+### Packaged app commit and pre-ACK rollback observation
+
+The dispatch-only [packaged update workflow](../.github/workflows/packaged-update-commit-qualification.yml)
+uses the same exact pair as the successful root gate. Its eight candidate pins
+are supplemented by the successful root run ID and attempt. Both root cases
+must pass with clean teardown at the NEW main source. Both complete candidate
+pins and their observed source, version, archive, app, daemon and bundle-tree
+hashes must match the app pair. The root identity must bind both versions and
+all transaction hashes. The app workflow SHA and actual checkout HEAD must
+equal that same NEW source before installation.
+
+For the current bridge, first build the corrected `.27` origin with its ordinary
+whole main CI. Then merge and build the normal `.28` successor. Run both root
+cases on `.28` for that exact `.27 -> .28` pair, followed by both app cases
+with the same eight pins. Include this workflow and both cases before building
+NEW, because the app harness must run from that exact NEW source. No third
+candidate or `.29` version is needed.
+The immutable `.26` origin cannot qualify this transition: its mailbox ancestry
+check predates the repair. The failed `.26 -> .27` run is retained evidence,
+not authorization for the app gate. Do not alter either signed candidate.
+
+The [adapter builder](../scripts/build_packaged_update_trigger.py) compiles the
+exact authenticated OLD preparation modules and locked dependencies into an
+isolated helper. It preserves both signed app bundles. This helper calls
+production preparation; the installed OLD watchdog and real NEW app own bundle
+replacement, acknowledgement and root commit. Ordinary PR CI compiles and tests
+the helper with an intentionally non-executable fixture plan and never starts
+an installer.
+
+The workflow runs `commit` and `kill-successor-before-ack` on separate disposable
+Macs with fail-fast disabled; its aggregate requires both cases to succeed.
+The [read-only observer](../scripts/packaged_update_observer.py) attaches before
+preparation. The commit case requires the real successor ACK, exact process
+identity, committed root proof and completed app transaction cleanup.
+
+The [pre-ACK case](../scripts/packaged_update_preack.py) observes a live exact NEW
+process, sends STOP, rechecks its PID, UID, birth and command along with the
+journal, absent ACK and undecided root, then sends KILL only inside that verified
+window. It requires the real watchdog's failed-NEW receipt, complete restored
+OLD app tree, independently found live OLD tray, fresh OLD daemon/snapshot proof
+and completed transaction cleanup. A missed ACK window or crossed deadline
+fails the case; there is no scheduling hook, ACK suppression or automatic retry.
+Numeric-PID signals cannot eliminate every process-reuse race, so this test is
+confined to the disposable runner. The receipt proves the resulting rollback,
+not which internal watchdog predicate selected it.
+
+The [driver](../scripts/qualify_packaged_update_commit.py) permits cleanup only
+after the selected case's terminal proof. It revalidates the selected tray PID,
+UID, birth and command before SIGTERM, then uses ordinary uninstall. Unknown
+outcomes, including a failure after STOP, retain evidence for runner destruction;
+they never trigger speculative abort, forced cleanup or removal.
+
+Passing both cases qualifies preparation through commit and this one injected
+successor exit before ACK. It does not qualify the tray update click, Quit,
+administrator dialog, public discovery, exit after ACK, other app/watchdog crash
+points or general rollback coverage. Root rollback evidence cannot substitute
+for restoration of the app bundle. Native execution remains hosted-only;
+hermetic tests and a merged workflow do not satisfy either native app case.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF

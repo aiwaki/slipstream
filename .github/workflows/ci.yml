@@ -258,6 +258,37 @@ jobs:
           cargo test --locked --bin slipstream-browser-probe
           cargo test --locked --test updater_installer_mechanics -- --test-threads=1
 
+      - name: Compile and test disposable update adapter (no installer execution)
+        env:
+          CARGO_BUILD_JOBS: "2"
+        run: |
+          set -euo pipefail
+          PYTHONPATH=scripts python3 - <<'PY_ADAPTER'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import build_packaged_update_trigger as builder
+
+          repo = Path.cwd().resolve()
+          out = Path(os.environ["RUNNER_TEMP"]).resolve() / "update-adapter-compile-only"
+          manifest = {"source": {
+              "commit": builder.git(repo, "rev-parse", "HEAD").decode().strip(),
+              "tree": builder.git(repo, "rev-parse", "HEAD^{tree}").decode().strip(),
+          }}
+          before = builder.verified_source(repo, manifest)
+          key = json.loads((repo / "app-tauri/src-tauri/tauri.conf.json").read_text())["plugins"]["updater"]["pubkey"]
+          # Invalid as an execution plan by design: this job never runs --prepare.
+          builder.write_crate(out, repo, repo / "scripts/packaged_update_trigger.rs", {"compile_only": True}, key)
+          env = dict(os.environ, CARGO_TARGET_DIR=str(repo / "app-tauri/src-tauri/target"))
+          subprocess.run(["cargo", "test", "--locked", "--manifest-path", str(out / "Cargo.toml"),
+                          "--bin", builder.BIN, "trigger::tests::"], check=True, env=env, timeout=1200)
+          assert builder.verified_source(repo, manifest) == before
+          builder.exclusive(out / "compile-receipt.json", json.dumps({"source": manifest["source"],
+              "source_sha256": before, "adapter_sha256": builder.digest(repo / "scripts/packaged_update_trigger.rs"),
+              "compiled_and_fixture_tested": True, "native_transaction_qualified": False}, indent=2) + "\n")
+          PY_ADAPTER
+
       - name: Rust core tests
         run: cargo test --locked --manifest-path crates/slipstream-core/Cargo.toml
 
