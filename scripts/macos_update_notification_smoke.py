@@ -51,6 +51,16 @@ CAPABILITY_MAX_BYTES = 16 * 1024
 CAPABILITY_MAX_LIFETIME_MS = 30_000
 INFO_PLIST_MAX_BYTES = 256 * 1024
 PRODUCER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024
+PRODUCER_POLL_SECONDS = 10.0
+PRODUCER_WAIT_SECONDS = 120.0
+PRODUCER_MAX_POLLS = 13
+PRODUCER_PENDING_STAGES = frozenset({"run_pending", "job_pending", "job_missing", "artifact_missing"})
+PRODUCER_STAGES = PRODUCER_PENDING_STAGES | frozenset({
+    "selector_invalid", "attempt_invalid", "run_invalid", "jobs_invalid",
+    "job_invalid", "job_timing_invalid", "artifacts_invalid", "artifact_invalid",
+    "artifact_timing_invalid", "input_invalid", "api_fetch_failed", "readiness_deadline",
+    "identity_changed", "ready",
+})
 HOOK_TIMEOUT_SECONDS = 20.0
 VISIBILITY_SAMPLE_SECONDS = 0.05
 LSAPPINFO = "/usr/bin/lsappinfo"
@@ -148,6 +158,9 @@ def _failure_report(error: BaseException) -> dict:
         "outcome": "terminal",
         "failure_code": failure_code,
     }
+    stage = getattr(error, "producer_stage", None)
+    if stage in PRODUCER_STAGES:
+        report["producer_stage"] = stage
     encoded = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
     if len(encoded) > FAILURE_REPORT_MAX_BYTES:
         raise AssertionError("notification failure report exceeded its bound")
@@ -297,11 +310,23 @@ def _require_disposable_macos_ci() -> None:
         )
 
 
-def _producer_invalid(message: str) -> NotificationQualificationError:
-    return NotificationQualificationError(
-        message,
-        failure_code="candidate_producer_invalid",
-    )
+class ProducerEvidencePending(NotificationQualificationError):
+    """Incomplete API visibility; never authenticated producer evidence."""
+
+    def __init__(self, stage: str, observed: dict) -> None:
+        if stage not in PRODUCER_PENDING_STAGES:
+            raise ValueError("producer pending stage is not whitelisted")
+        super().__init__("candidate producer evidence is not ready", failure_code="candidate_producer_invalid")
+        self.producer_stage = stage
+        self.observed = observed
+
+
+def _producer_invalid(message: str, *, stage: str = "input_invalid") -> NotificationQualificationError:
+    if stage not in PRODUCER_STAGES:
+        raise ValueError("producer stage is not whitelisted")
+    error = NotificationQualificationError(message, failure_code="candidate_producer_invalid")
+    error.producer_stage = stage
+    return error
 
 
 def _read_bounded_json_file(path: Path, *, label: str) -> dict:
@@ -348,7 +373,7 @@ def _candidate_producer_attempt(
         or type(builder.get("run_attempt")) is not int
         or builder["run_attempt"] <= 0
     ):
-        raise _producer_invalid("candidate producer selector is invalid")
+        raise _producer_invalid("candidate producer selector is invalid", stage="selector_invalid")
     return builder["run_attempt"]
 
 
@@ -391,8 +416,10 @@ def validate_candidate_producer_evidence(
         or type(qualification_run_attempt) is not int
         or qualification_run_attempt < producer_attempt
     ):
-        raise _producer_invalid("candidate producer attempt is invalid")
+        raise _producer_invalid("candidate producer attempt is invalid", stage="attempt_invalid")
 
+    pending = []
+    observed = {}
     run = _read_bounded_json_file(run_metadata_path, label="workflow run evidence")
     repository_value = run.get("repository")
     head_repository = run.get("head_repository")
@@ -405,7 +432,6 @@ def validate_candidate_producer_evidence(
         or run.get("head_branch") != "main"
         or run.get("event") != "push"
         or run.get("path") != release_candidate.BUILD_WORKFLOW
-        or run.get("status") not in {"in_progress", "completed"}
         or not isinstance(repository_value, dict)
         or repository_value.get("full_name") != repository
         or type(repository_value.get("id")) is not int
@@ -414,16 +440,15 @@ def validate_candidate_producer_evidence(
         or head_repository.get("full_name") != repository
         or type(head_repository.get("id")) is not int
         or head_repository["id"] != repository_value["id"]
-        or (
-            run.get("status") == "completed"
-            and run.get("conclusion") != "success"
-        )
-        or (
-            run.get("status") == "in_progress"
-            and run.get("conclusion") is not None
-        )
     ):
-        raise _producer_invalid("workflow run evidence is invalid")
+        raise _producer_invalid("workflow run evidence is invalid", stage="run_invalid")
+    if run.get("status") == "queued" and run.get("conclusion") is None:
+        pending.append("run_pending")
+    elif not (
+        (run.get("status") == "in_progress" and run.get("conclusion") is None)
+        or (run.get("status") == "completed" and run.get("conclusion") == "success")
+    ):
+        raise _producer_invalid("workflow run evidence is invalid", stage="run_invalid")
 
     jobs_payload = _read_bounded_json_file(jobs_path, label="workflow jobs evidence")
     jobs = jobs_payload.get("jobs")
@@ -432,36 +457,42 @@ def validate_candidate_producer_evidence(
         or type(jobs_payload.get("total_count")) is not int
         or jobs_payload["total_count"] != len(jobs)
         or len(jobs) > 100
+        or any(not isinstance(job, dict) or not isinstance(job.get("name"), str)
+               or not job["name"] for job in jobs)
     ):
-        raise _producer_invalid("workflow jobs evidence is incomplete")
+        raise _producer_invalid("workflow jobs evidence is incomplete", stage="jobs_invalid")
     assemble_jobs = [
         job
         for job in jobs
         if isinstance(job, dict) and job.get("name") == "assemble-release-candidate"
     ]
-    if len(assemble_jobs) != 1:
-        raise _producer_invalid("candidate producer job is not unique")
-    assemble_job = assemble_jobs[0]
-    if (
-        type(assemble_job.get("id")) is not int
-        or assemble_job["id"] <= 0
-        or type(assemble_job.get("run_id")) is not int
-        or assemble_job["run_id"] != candidate_run_id
-        or type(assemble_job.get("run_attempt")) is not int
-        or assemble_job["run_attempt"] != producer_attempt
-        or assemble_job.get("head_sha") != source_commit
-        or assemble_job.get("status") != "completed"
-        or assemble_job.get("conclusion") != "success"
-    ):
-        raise _producer_invalid("candidate producer job evidence is invalid")
-    job_started = _github_timestamp(
-        assemble_job.get("started_at"), label="candidate producer start"
-    )
-    job_completed = _github_timestamp(
-        assemble_job.get("completed_at"), label="candidate producer completion"
-    )
-    if job_completed < job_started:
-        raise _producer_invalid("candidate producer job timing is invalid")
+    if len(assemble_jobs) > 1:
+        raise _producer_invalid("candidate producer job is not unique", stage="jobs_invalid")
+    job_started = job_completed = None
+    if not assemble_jobs:
+        pending.append("job_missing")
+    else:
+        assemble_job = assemble_jobs[0]
+        if (
+            type(assemble_job.get("id")) is not int or assemble_job["id"] <= 0
+            or type(assemble_job.get("run_id")) is not int or assemble_job["run_id"] != candidate_run_id
+            or type(assemble_job.get("run_attempt")) is not int or assemble_job["run_attempt"] != producer_attempt
+            or assemble_job.get("head_sha") != source_commit
+        ):
+            raise _producer_invalid("candidate producer job evidence is invalid", stage="job_invalid")
+        observed["assemble_job_id"] = assemble_job["id"]
+        if assemble_job.get("started_at") is not None:
+            job_started = _github_timestamp(assemble_job["started_at"], label="candidate producer start")
+        if (assemble_job.get("status") in {"queued", "in_progress"}
+                and assemble_job.get("conclusion") is None and assemble_job.get("completed_at") is None):
+            pending.append("job_pending")
+        elif assemble_job.get("status") != "completed" or assemble_job.get("conclusion") != "success":
+            raise _producer_invalid("candidate producer job evidence is invalid", stage="job_invalid")
+        else:
+            job_started = _github_timestamp(assemble_job.get("started_at"), label="candidate producer start")
+            job_completed = _github_timestamp(assemble_job.get("completed_at"), label="candidate producer completion")
+            if job_completed < job_started:
+                raise _producer_invalid("candidate producer job timing is invalid", stage="job_timing_invalid")
 
     artifacts_payload = _read_bounded_json_file(
         artifacts_path,
@@ -473,50 +504,153 @@ def validate_candidate_producer_evidence(
         or type(artifacts_payload.get("total_count")) is not int
         or artifacts_payload["total_count"] != len(artifacts)
         or len(artifacts) > 100
+        or any(not isinstance(item, dict) or not isinstance(item.get("name"), str)
+               or not item["name"] for item in artifacts)
     ):
-        raise _producer_invalid("workflow artifacts evidence is incomplete")
+        raise _producer_invalid("workflow artifacts evidence is incomplete", stage="artifacts_invalid")
     artifact_name = f"release-candidate-{source_commit}"
     candidates = [
         artifact
         for artifact in artifacts
         if isinstance(artifact, dict) and artifact.get("name") == artifact_name
     ]
-    if len(candidates) != 1:
-        raise _producer_invalid("candidate artifact is not unique")
-    artifact = candidates[0]
-    workflow_run = artifact.get("workflow_run")
-    digest = artifact.get("digest")
-    if (
-        type(artifact.get("id")) is not int
-        or artifact["id"] <= 0
-        or type(artifact.get("size_in_bytes")) is not int
-        or artifact["size_in_bytes"] <= 0
-        or artifact.get("expired") is not False
-        or not isinstance(digest, str)
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
-        or not isinstance(workflow_run, dict)
-        or type(workflow_run.get("id")) is not int
-        or workflow_run["id"] != candidate_run_id
-        or workflow_run.get("head_sha") != source_commit
-        or workflow_run.get("head_branch") != "main"
-        or type(workflow_run.get("repository_id")) is not int
-        or workflow_run["repository_id"] != repository_value["id"]
-        or type(workflow_run.get("head_repository_id")) is not int
-        or workflow_run["head_repository_id"] != head_repository["id"]
-    ):
-        raise _producer_invalid("candidate artifact evidence is invalid")
-    artifact_created = _github_timestamp(
-        artifact.get("created_at"), label="candidate artifact creation"
-    )
-    if not job_started <= artifact_created <= job_completed:
-        raise _producer_invalid("candidate artifact escaped its producer job")
+    if len(candidates) > 1:
+        raise _producer_invalid("candidate artifact is not unique", stage="artifacts_invalid")
+    if not candidates:
+        pending.append("artifact_missing")
+    else:
+        artifact = candidates[0]
+        workflow_run = artifact.get("workflow_run")
+        digest = artifact.get("digest")
+        if (
+            type(artifact.get("id")) is not int
+            or artifact["id"] <= 0
+            or type(artifact.get("size_in_bytes")) is not int
+            or artifact["size_in_bytes"] <= 0
+            or artifact.get("expired") is not False
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            or not isinstance(workflow_run, dict)
+            or type(workflow_run.get("id")) is not int
+            or workflow_run["id"] != candidate_run_id
+            or workflow_run.get("head_sha") != source_commit
+            or workflow_run.get("head_branch") != "main"
+            or type(workflow_run.get("repository_id")) is not int
+            or workflow_run["repository_id"] != repository_value["id"]
+            or type(workflow_run.get("head_repository_id")) is not int
+            or workflow_run["head_repository_id"] != head_repository["id"]
+        ):
+            raise _producer_invalid("candidate artifact evidence is invalid", stage="artifact_invalid")
+        artifact_created = _github_timestamp(
+            artifact.get("created_at"), label="candidate artifact creation"
+        )
+        if ((job_started is not None and artifact_created < job_started)
+                or (job_completed is not None and artifact_created > job_completed)):
+            raise _producer_invalid("candidate artifact escaped its producer job", stage="artifact_timing_invalid")
+        observed.update(artifact_id=artifact["id"], artifact_digest=digest)
+    # All available identity/digest fields were checked, even when another
+    # endpoint was incomplete. A queued run cannot mask a hard provenance error.
+    if pending:
+        raise ProducerEvidencePending(pending[0], observed)
     return CandidateProducerEvidence(
         run_id=candidate_run_id,
         run_attempt=producer_attempt,
-        assemble_job_id=assemble_job["id"],
-        artifact_id=artifact["id"],
-        artifact_digest=digest,
+        assemble_job_id=observed["assemble_job_id"],
+        artifact_id=observed["artifact_id"],
+        artifact_digest=observed["artifact_digest"],
     )
+
+
+def _fetch_producer_evidence(endpoint: str, timeout: float) -> bytes:
+    # gh talks only to the repository's authenticated API. Capture to a temporary
+    # file; retain at most the same four-MiB bound as the strict input parser.
+    with tempfile.TemporaryFile() as output:
+        try:
+            result = subprocess.run(
+                ["gh", "api", "-H", "Cache-Control: no-cache", endpoint],
+                stdout=output, stderr=subprocess.DEVNULL, timeout=timeout, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise _producer_invalid("producer API read failed", stage="api_fetch_failed") from exc
+        output.seek(0)
+        payload = output.read(PRODUCER_EVIDENCE_MAX_BYTES + 1)
+    if result.returncode or not 0 < len(payload) <= PRODUCER_EVIDENCE_MAX_BYTES:
+        raise _producer_invalid("producer API read failed", stage="api_fetch_failed")
+    return payload
+
+
+def collect_candidate_producer_evidence(*, output: Path, fetch=None,
+        clock=time.monotonic, sleep=time.sleep, **kwargs) -> dict:
+    # This loop only refreshes evidence. It cannot unpack/install/launch an app
+    # or retry a native notification hook.
+    fetch = _fetch_producer_evidence if fetch is None else fetch
+    start = clock()
+    deadline = start + PRODUCER_WAIT_SECONDS
+    count = 0
+    report = {"schema_version": 1, "outcome": "terminal", "producer_stage": "input_invalid"}
+    pinned = {}
+    try:
+        attempt = _candidate_producer_attempt(kwargs["candidate_dir"],
+            repository=kwargs["repository"], source_commit=kwargs["source_commit"],
+            candidate_run_id=kwargs["candidate_run_id"])
+        if attempt != kwargs["candidate_run_attempt"] or kwargs["qualification_run_attempt"] < attempt:
+            raise _producer_invalid("candidate producer attempt is invalid", stage="attempt_invalid")
+        base = f'repos/{kwargs["repository"]}/actions/runs/{kwargs["candidate_run_id"]}'
+        endpoints = (("run_metadata_path", base),
+            ("jobs_path", f"{base}/attempts/{attempt}/jobs?per_page=100"),
+            ("artifacts_path", f"{base}/artifacts?per_page=100"))
+        while count < PRODUCER_MAX_POLLS:
+            count += 1
+            for key, endpoint in endpoints:
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    raise _producer_invalid("producer readiness deadline exhausted", stage="readiness_deadline")
+                payload = fetch(endpoint, min(15.0, remaining))
+                if not 0 < len(payload) <= PRODUCER_EVIDENCE_MAX_BYTES:
+                    raise _producer_invalid("producer API response is invalid", stage="api_fetch_failed")
+                # Only the last triplet is retained. The strict nofollow parser
+                # below authenticates it before this mode returns success.
+                try:
+                    fd = os.open(kwargs[key], os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+                    with os.fdopen(fd, "wb") as stream:
+                        info = os.fstat(stream.fileno())
+                        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                                or info.st_nlink != 1 or info.st_mode & 0o077):
+                            raise _producer_invalid("producer output is unsafe")
+                        stream.truncate(0)
+                        stream.write(payload)
+                except OSError as exc:
+                    raise _producer_invalid("producer output cannot be written") from exc
+            if clock() >= deadline:
+                raise _producer_invalid("producer readiness deadline exhausted", stage="readiness_deadline")
+            try:
+                evidence = validate_candidate_producer_evidence(**kwargs)
+                observed = {"assemble_job_id": evidence.assemble_job_id,
+                    "artifact_id": evidence.artifact_id, "artifact_digest": evidence.artifact_digest}
+                stage = "ready"
+            except ProducerEvidencePending as exc:
+                observed, stage = exc.observed, exc.producer_stage
+            for key, value in observed.items():
+                if key in pinned and pinned[key] != value:
+                    raise _producer_invalid("producer identity changed between reads", stage="identity_changed")
+                pinned[key] = value
+            report["producer_stage"] = stage
+            if stage in PRODUCER_PENDING_STAGES:
+                report["last_pending_stage"] = stage
+            if stage == "ready":
+                report["outcome"] = "ready"
+                return report
+            remaining = deadline - clock()
+            if count >= PRODUCER_MAX_POLLS or remaining <= 0:
+                break
+            sleep(min(PRODUCER_POLL_SECONDS, remaining))
+        raise _producer_invalid("producer readiness deadline exhausted", stage="readiness_deadline")
+    except NotificationQualificationError as exc:
+        report.update(_failure_report(exc))
+        raise
+    finally:
+        report.update(poll_count=count, duration_seconds=round(max(0.0, clock() - start), 3))
+        release_candidate._write_json(output, report)
 
 
 def _validate_packaged_bundle(app_bundle: Path) -> tuple[Path, dict]:
@@ -1823,7 +1957,8 @@ def _main() -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-dir", type=Path, required=True)
-    parser.add_argument("--app-bundle", type=Path, required=True)
+    parser.add_argument("--app-bundle", type=Path)
+    parser.add_argument("--producer-evidence-only", action="store_true")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--candidate-run-id", type=int, required=True)
@@ -1834,6 +1969,22 @@ def _main() -> int:
     parser.add_argument("--candidate-run-artifacts", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.producer_evidence_only:
+        try:
+            collect_candidate_producer_evidence(
+                output=args.output, candidate_dir=args.candidate_dir,
+                repository=args.repository, source_commit=args.source_commit,
+                candidate_run_id=args.candidate_run_id, candidate_run_attempt=args.candidate_run_attempt,
+                qualification_run_attempt=args.qualification_run_attempt,
+                run_metadata_path=args.candidate_run_metadata,
+                jobs_path=args.candidate_run_jobs, artifacts_path=args.candidate_run_artifacts,
+            )
+        except Exception as exc:
+            print(json.dumps(_failure_report(exc), sort_keys=True), file=sys.stderr)
+            return 1
+        return 0
+    if args.app_bundle is None:
+        parser.error("--app-bundle is required for native qualification")
     try:
         report = run_gate(
             candidate_dir=args.candidate_dir,

@@ -17,6 +17,33 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
+The CI-only producer-readiness repair is on `codex/notification-producer-readiness`,
+based on main `58601bfd19d6341531d84b1395e0e4f8e2fbe2b5`. Main
+CI39278945059/attempt1 failed only notification producer preflight
+(`candidate_producer_invalid`, before the native hook); the lifecycle aggregate
+failed accordingly. Product, build, browser, heavy lifecycle and attestation
+passed. The original input triplet/rejected predicate was not retained. API
+readiness is a reproduced failure mode, not a proven explanation of that call.
+
+This change keeps strict provenance checks, refreshes incomplete API readiness
+for at most 120 seconds/13 polls, and retains the final bounded inputs plus an
+allowlisted failure stage. Invalid identity/attempt/digest, duplicates and failed
+producers remain terminal. The native hook is never retried. After integration,
+129 focused Python tests, actionlint, diff and version-sync checks passed;
+independent source review found no blockers. Product source and VERSION remain
+`0.1.9-preview.27`. No local Rust build or native operation ran.
+
+Evidence: `output/updater-daemon-identity/notification-producer-refresh`.
+The failed-main candidate is authentic but unqualified; do not dispatch it or
+relabel its failed builder attempt as successful. Its
+`main399-verification/failure-receipt.json` SHA256 is
+`c308e6c7c66c19125c180916f587cb88522c8a878992bc40668f394febc425c9`.
+PR400 remains separately green at `0c3fc4a889845b0ddef71c87e30ce931d89fc538`
+(CI39277553981/audit39277553914); app commit/rollback/public gates remain open.
+Public preview .24 and workstation configuration are unchanged.
+
+### Previous .27 implementation evidence
+
 [PR398](https://github.com/aiwaki/slipstream/pull/398) merged at
 `ddfca43ff9d34e8d917bab5cb68cec2b8ff9203b`. Its tested head
 `df43790048123e8d709e99c33de7be5f8c408f94` has the same Git tree. Full
@@ -304,18 +331,17 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Reuse the authenticated repaired `.26` candidate from CI39266691016.
-  Finish the `.27` successor/handoff PR and exact-main build,
-  then verify both manifests, signatures, provenance, archive modes and actual
-  tray/daemon binary inequality before one native root qualification dispatch.
-  All older failed pairs remain immutable and must not be retried to qualify
-  the new originating code. The precise native run39261398050 refusal remains
-  unproven; preparation now reports its bounded stage if it fails again.
-- Continue the separate app/watchdog gate only after the native root gate. The
-  draft transaction adapter and unfinished observer are excluded from this
-  version change and have no native qualification yet.
-- Reuse the unchanged preview.24 release/readiness baseline. Public app-update
-  qualification remains separate; no public assets or workstation state change.
+- Complete required CI and merge the producer-readiness repair. Authenticate the
+  corrected exact-main `.27` candidate, reusing the authenticated `.26` from
+  CI39266691016. Verify signatures/provenance, archive modes and binary
+  inequality, then dispatch native root `.26 -> .27` before main advances to `.28`.
+  A partial rerun of the failed `.27` producer attempt cannot satisfy the native
+  consumer's exact successful-builder-attempt requirement.
+- Preserve green PR400 while this repair is integrated. After root qualification,
+  merge and authenticate its `.28` candidate; run the real packaged app/watchdog
+  commit and rollback gates. Source and hermetic checks do not qualify them.
+- Reuse preview .24 release/readiness evidence. Public updater qualification is
+  separate; signed public assets and workstation state remain unchanged.
 
 ## External Gates
 
