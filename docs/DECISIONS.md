@@ -1,5 +1,20 @@
 # Decisions
 
+### 2026-10-19: updater mailbox ancestry
+
+Both updater protocol sides use `/var/db/dev.slipstream-update/requests`. The
+root-owned parent is created under the existing installer lock; each operation
+mailbox remains private to the selected console UID. Keep strict root ancestry
+and non-writable-group checks. `/var/run` can be root:daemon0775 on macOS and is
+not accepted by that policy. Do not chmod a system directory, weaken ancestry
+checks, or silently adopt a legacy mailbox to make preparation succeed.
+
+An immutable originating daemon executes preparation and supplies the sealed
+root worker. A repair to the successor alone cannot qualify that origin. Native
+root and app gates may use the same normally built, byte-distinct pair when both
+full candidate identities and the exact successful root cases are bound. This
+does not qualify public discovery, ordinary tray/admin flows or app rollback.
+
 ### 2026-10-15: preview publication before public updater qualification
 
 Publish preview `.24` after its existing exact-candidate CI, dependency-audit,

@@ -15551,7 +15551,9 @@ INSTALL_ATTESTATION_PATH = os.path.join(
 )
 INSTALL_ATTESTATION_SCHEMA_VERSION = 3
 _DAEMON_UPDATE_ROOT = "/var/db/dev.slipstream-update"
-_DAEMON_UPDATE_REQUESTS = "/var/run/slipstream-update-requests"
+# /var/run is root:daemon 0775 on macOS and fails the strict ancestry check.
+# Keep user-owned mailboxes below the existing root-controlled update directory.
+_DAEMON_UPDATE_REQUESTS = os.path.join(_DAEMON_UPDATE_ROOT, "requests")
 _DAEMON_UPDATE_TARGET = "/Applications/Slipstream.app"
 _DAEMON_UPDATE_TTL = 300
 _DAEMON_UPDATE_LIMIT = 16384
