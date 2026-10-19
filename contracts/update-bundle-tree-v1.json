@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "purpose": "Cross-language app bundle tree identity vectors; inert fixtures, not install authorization. Root metadata excluded; modes are POSIX low nine bits. Symlink targets stay within tree.",
+  "vectors": [
+    {
+      "name": "minimal_bundle",
+      "nodes": [
+        {
+          "path": "Contents",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/MacOS",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/MacOS/slipstream",
+          "kind": "file",
+          "mode": 493,
+          "content": "fixture executable\n"
+        },
+        {
+          "path": "Contents/Info.plist",
+          "kind": "file",
+          "mode": 420,
+          "content": "fixture bundle metadata\n"
+        }
+      ],
+      "expected_sha256": "bbe20e5890299faec7c97853937ca112951290b5a3463af310ec393c52bacc9a",
+      "canonical_json": "{\"entries\":[{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"file\",\"mode\":420,\"path\":\"Contents/Info.plist\",\"sha256\":\"4f5e4583ab0cc9b7760794139eea2190beeadaa71f77cde3d85fade0e9bf2737\",\"target\":\"\"},{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents/MacOS\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"file\",\"mode\":493,\"path\":\"Contents/MacOS/slipstream\",\"sha256\":\"b84e82a9ed496e7469c9a2492823d6d0984bd9047cef970b160d13464ca1277e\",\"target\":\"\"}],\"schema_version\":1}"
+    },
+    {
+      "name": "utf8_and_framework_alias",
+      "nodes": [
+        {
+          "path": "Contents",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/Frameworks",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/Frameworks/Example.framework",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/Frameworks/Example.framework/Versions",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/Frameworks/Example.framework/Versions/A",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/Frameworks/Example.framework/Versions/A/Example",
+          "kind": "file",
+          "mode": 493,
+          "content": "fixture library\n"
+        },
+        {
+          "path": "Contents/Frameworks/Example.framework/Versions/Current",
+          "kind": "symlink",
+          "mode": 511,
+          "target": "A"
+        },
+        {
+          "path": "Contents/Frameworks/Example.framework/Example",
+          "kind": "symlink",
+          "mode": 511,
+          "target": "Versions/Current/Example"
+        },
+        {
+          "path": "Contents/Resources",
+          "kind": "directory",
+          "mode": 493
+        },
+        {
+          "path": "Contents/Resources/Ёжик «test».txt",
+          "kind": "file",
+          "mode": 420,
+          "content": "Проверка UTF-8: ё, λ, 🐾\n"
+        },
+        {
+          "path": "Contents/Resources/zero",
+          "kind": "file",
+          "mode": 420,
+          "content": ""
+        }
+      ],
+      "expected_sha256": "da2e05508124501f40a2ee29bc4d3aea40eaaa90c5b79a978e7caff82bd19329",
+      "canonical_json": "{\"entries\":[{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents/Frameworks\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents/Frameworks/Example.framework\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"symlink\",\"mode\":511,\"path\":\"Contents/Frameworks/Example.framework/Example\",\"sha256\":\"\",\"target\":\"Versions/Current/Example\"},{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents/Frameworks/Example.framework/Versions\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents/Frameworks/Example.framework/Versions/A\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"file\",\"mode\":493,\"path\":\"Contents/Frameworks/Example.framework/Versions/A/Example\",\"sha256\":\"fa95a0e31f09e006c13bf632a69811d0b80404b747762520b8e0b1ad63576e84\",\"target\":\"\"},{\"kind\":\"symlink\",\"mode\":511,\"path\":\"Contents/Frameworks/Example.framework/Versions/Current\",\"sha256\":\"\",\"target\":\"A\"},{\"kind\":\"directory\",\"mode\":493,\"path\":\"Contents/Resources\",\"sha256\":\"\",\"target\":\"\"},{\"kind\":\"file\",\"mode\":420,\"path\":\"Contents/Resources/zero\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"target\":\"\"},{\"kind\":\"file\",\"mode\":420,\"path\":\"Contents/Resources/Ёжик «test».txt\",\"sha256\":\"77c929c71b26ba5515498fd6943e28c51c6faed8850a9da255a323b3b76ab525\",\"target\":\"\"}],\"schema_version\":1}"
+    }
+  ]
+}

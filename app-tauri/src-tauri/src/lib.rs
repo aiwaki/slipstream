@@ -30,7 +30,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
-    atomic::{AtomicU64, AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
     Arc, Mutex,
 };
 use std::time::{Duration, Instant};
@@ -63,6 +63,11 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+// The initiator, pending successor and restored app use the same mutation
+// blocker. Downloading an archive does not block normal daemon use; preparing
+// an authorized root operation does, including an unknown authorization result.
+struct DaemonActionsBlocked(Arc<AtomicBool>);
 
 const UPDATE_INITIAL_DELAY_SECS: u64 = 30;
 const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
@@ -227,6 +232,92 @@ fn run_admin_status(shell: &str, prompt: &str) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn authorize_daemon_update(
+    app: &AppHandle,
+    identity: &updater_transaction::daemon_update::PrepareIdentity,
+) -> updater_transaction::AuthorizationOutcome {
+    use updater_transaction::AuthorizationOutcome;
+    let attestation = bundled_daemon_path(app)
+        .as_deref()
+        .and_then(daemon_install_attestation);
+    if !attestation.is_some_and(|value| value.source_sha256 == identity.old_daemon_sha256) {
+        return AuthorizationOutcome::NotExecuted(
+            "coordinated update requires the exact installed old daemon; use the signed DMG".into(),
+        );
+    }
+    let argument = match serde_json::to_string(identity) {
+        Ok(value) if value.len() <= 16 * 1024 => value,
+        _ => return AuthorizationOutcome::NotExecuted("invalid daemon update identity".into()),
+    };
+    // The installed directory is root-only. The public attestation binds its
+    // identity here; the privileged command validates the actual root payload.
+    let shell = format!(
+        "{} --update-prepare {}",
+        shell_quote(INSTALLED_DAEMON),
+        shell_quote(&argument)
+    );
+    let command = admin_shell_script(&shell,
+        "Slipstream needs administrator access to update its application and background daemon together.");
+    let script = format!("try\n{command}\nreturn \"slipstream-update-authorized\"\non error errorMessage number errorNumber\nif errorNumber is -128 then return \"slipstream-update-cancelled\"\nif errorNumber is 77 then return \"slipstream-update-no-operation\"\nerror errorMessage number errorNumber\nend try");
+    match Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+    {
+        Ok(output)
+            if output.status.success() && output.stdout == b"slipstream-update-authorized\n" =>
+        {
+            AuthorizationOutcome::Completed
+        }
+        Ok(output)
+            if output.status.success() && output.stdout == b"slipstream-update-cancelled\n" =>
+        {
+            AuthorizationOutcome::NotExecuted("update authorization cancelled".into())
+        }
+        Ok(output)
+            if output.status.success() && output.stdout == b"slipstream-update-no-operation\n" =>
+        {
+            AuthorizationOutcome::NotExecuted(
+                "privileged updater rejected preparation without effects".into(),
+            )
+        }
+        _ => AuthorizationOutcome::Uncertain(
+            "daemon update authorization result is unknown; resume the retained update".into(),
+        ),
+    }
+}
+
+async fn resume_app_update(app: &AppHandle) -> Result<bool, String> {
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let state_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    if !updater_transaction::resumable_prepared(&current_exe, &state_dir)? {
+        return Ok(false);
+    }
+    let launch_agents = app
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())?
+        .join("Library/LaunchAgents");
+    let journal_path = state_dir.join(updater_transaction::JOURNAL_FILE);
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        updater_transaction::recover_prepared_transaction(
+            &current_exe,
+            &state_dir,
+            &launch_agents,
+            |identity| authorize_daemon_update(&handle, identity),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if !journal_path.try_exists().map_err(|e| e.to_string())? {
+        app.state::<DaemonActionsBlocked>()
+            .0
+            .store(false, Ordering::Release);
+    }
+    result
 }
 
 fn shell_quote(arg: &str) -> String {
@@ -2108,15 +2199,36 @@ async fn install_app_update(app: &AppHandle, offer: &AppUpdateOffer) -> Result<(
         .home_dir()
         .map_err(|error| format!("user home directory unavailable: {error}"))?
         .join("Library/LaunchAgents");
-    let prepared = updater_transaction::prepare_transaction(
-        &current_exe,
-        &state_dir,
-        &launch_agents,
-        &bytes,
-        &update.current_version,
-        &expected_version.to_string(),
-    )?;
-    if prepared.journal_path != state_dir.join(updater_transaction::JOURNAL_FILE) {
+    let actions = app.state::<DaemonActionsBlocked>().0.clone();
+    actions
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| "another app/daemon transaction is pending".to_string())?;
+    let journal_path = state_dir.join(updater_transaction::JOURNAL_FILE);
+    let handle = app.clone();
+    let current_version = update.current_version.clone();
+    let version = expected_version.to_string();
+    let preparation = tauri::async_runtime::spawn_blocking(move || {
+        updater_transaction::prepare_transaction(
+            &current_exe,
+            &state_dir,
+            &launch_agents,
+            &bytes,
+            &current_version,
+            &version,
+            |identity| authorize_daemon_update(&handle, identity),
+        )
+    })
+    .await
+    .map_err(|e| format!("coordinated update preparation interrupted: {e}"));
+    let result = preparation.and_then(|result| result);
+    if result.is_err()
+        && fs::symlink_metadata(&journal_path)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    {
+        actions.store(false, Ordering::Release);
+    }
+    let prepared = result?;
+    if prepared.journal_path != journal_path {
         return Err("durable updater returned an unexpected journal path".into());
     }
     Ok(())
@@ -2128,6 +2240,12 @@ async fn refresh_app_update(
     state: Arc<Mutex<AppUpdateState>>,
     manual: bool,
 ) {
+    if app
+        .try_state::<DaemonActionsBlocked>()
+        .is_some_and(|state| state.0.load(Ordering::Acquire))
+    {
+        return;
+    }
     {
         let mut state = state.lock().expect("update state lock poisoned");
         if state.busy {
@@ -2223,6 +2341,27 @@ async fn install_or_discover_app_update(
     item: MenuItem<tauri::Wry>,
     state: Arc<Mutex<AppUpdateState>>,
 ) {
+    if app
+        .state::<DaemonActionsBlocked>()
+        .0
+        .load(Ordering::Acquire)
+    {
+        {
+            let mut guard = state.lock().expect("update state lock poisoned");
+            if guard.busy {
+                return;
+            }
+            guard.busy = true;
+        }
+        let result = resume_app_update(&app).await;
+        state.lock().expect("update state lock poisoned").busy = false;
+        match result {
+            Ok(true) => app.exit(0),
+            Ok(false) => {}
+            Err(error) => eprintln!("retained update recovery: {error}"),
+        }
+        return;
+    }
     let offer = {
         let mut guard = state.lock().expect("update state lock poisoned");
         if guard.busy {
@@ -2245,9 +2384,9 @@ async fn install_or_discover_app_update(
             notify(
                 &app,
                 if ui_ru() {
-                    "Обновление установлено — Slipstream перезапускается."
+                    "Обновление подготовлено — Slipstream перезапускается."
                 } else {
-                    "Update installed — restarting Slipstream."
+                    "Update prepared — restarting Slipstream."
                 },
             );
             // launchd now owns the separately packaged, non-AppKit watchdog.
@@ -2262,6 +2401,18 @@ async fn install_or_discover_app_update(
                 state.busy = false;
                 state.offer = None;
                 set_update_menu_text(&item, &state);
+                if app
+                    .state::<DaemonActionsBlocked>()
+                    .0
+                    .load(Ordering::Acquire)
+                {
+                    let _ = item.set_text(if ui_ru() {
+                        "Продолжить обновление…"
+                    } else {
+                        "Resume Update…"
+                    });
+                    let _ = item.set_enabled(true);
+                }
             }
             notify(
                 &app,
@@ -2973,11 +3124,15 @@ fn geph_launcher_script_with_log_limits(
          \x20 [ \"$size\" -le \"$log_max_bytes\" ] && return 0\n\
          \x20 archive=\"${{path}}{GEPH_LOG_ARCHIVE_SUFFIX}\"\n\
          \x20 tmp=\"${{archive}}.tmp.$$\"\n\
-         \x20 if /usr/bin/tail -c \"$log_retain_bytes\" \"$path\" > \"$tmp\" 2>/dev/null; then\n\
-         \x20\x20 /bin/chmod 600 \"$tmp\" 2>/dev/null || true\n\
-         \x20\x20 /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null || true\n\
-         \x20\x20 : > \"$path\"\n\
-         \x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20 count=\"$log_retain_bytes\"\n\
+         \x20 [ \"$count\" -le \"$size\" ] || count=\"$size\"\n\
+         \x20 offset=$((size - count))\n\
+         \x20 # BSD tail can include concurrent appends; copy only the observed byte range.\n\
+         \x20 if /bin/dd if=\"$path\" ibs=1 obs=65536 skip=\"$offset\" count=\"$count\" > \"$tmp\" 2>/dev/null; then\n\
+         \x20\x20 if /bin/chmod 600 \"$tmp\" 2>/dev/null && /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null; then\n\
+         \x20\x20\x20 : > \"$path\"\n\
+         \x20\x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20\x20 fi\n\
          \x20 fi\n\
          \x20 /bin/rm -f \"$tmp\" 2>/dev/null || true\n\
          \x20 return 0\n\
@@ -3320,6 +3475,7 @@ pub fn run() {
             // tray, touching notification state, or starting any daemon/network
             // work. The old process exits cleanly so the windowless watchdog
             // can perform the already-authorized replacement.
+            let mut retained_preparation = false;
             #[cfg(target_os = "macos")]
             {
                 let recovery = (|| -> Result<bool, String> {
@@ -3338,6 +3494,7 @@ pub fn run() {
                         &current_exe,
                         &state_dir,
                         &launch_agents,
+                        |identity| authorize_daemon_update(app.handle(), identity),
                     )
                 })();
                 match recovery {
@@ -3346,7 +3503,14 @@ pub fn run() {
                         return Ok(());
                     }
                     Ok(false) => {}
-                    Err(error) => return Err(std::io::Error::other(error).into()),
+                    Err(error) => {
+                        let resumable = std::env::current_exe().ok().and_then(|exe|
+                            app.path().app_config_dir().ok().and_then(|dir|
+                                updater_transaction::resumable_prepared(&exe, &dir).ok())).unwrap_or(false);
+                        if !resumable { return Err(std::io::Error::other(error).into()); }
+                        eprintln!("prepared update retained for retry: {error}");
+                        retained_preparation = true;
+                    }
                 }
             }
 
@@ -3373,6 +3537,8 @@ pub fn run() {
             )
             .map_err(std::io::Error::other)?;
             let pending_daemon_actions = pending_daemon_guard.blocker();
+            if retained_preparation { pending_daemon_actions.store(true, Ordering::Release); }
+            app.manage(DaemonActionsBlocked(pending_daemon_actions.clone()));
             let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire);
 
             // notify-rust's macOS application identity is process-global and
@@ -3469,8 +3635,10 @@ pub fn run() {
                 if ui_ru() { "Версия" } else { "Version" },
                 app.package_info().version
             );
-            let update_item = MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…"))
-                .enabled(daemon_actions_enabled)
+            let update_item = MenuItemBuilder::with_id(ID_UPDATE,
+                if retained_preparation { if ui_ru() { "Продолжить обновление…".into() } else { "Resume Update…".into() } }
+                else { tr("Check for Updates…") })
+                .enabled(daemon_actions_enabled || retained_preparation)
                 .build(app)?;
             let restart_item = MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy"))
                 .enabled(daemon_actions_enabled)
@@ -3537,7 +3705,7 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     let id = event.id().as_ref();
                     if pending_daemon_menu.load(Ordering::Acquire)
-                        && matches!(id, ID_RESTART | ID_UNINSTALL | ID_UPDATE)
+                        && matches!(id, ID_RESTART | ID_UNINSTALL)
                     {
                         return;
                     }
@@ -3789,6 +3957,11 @@ pub fn run() {
                         }
                         Ok(false) => {}
                         Err(error) => eprintln!("update successor daemon gate: {error}"),
+                    }
+                    if !pending_daemon_actions.load(Ordering::Acquire) {
+                        let _ = restart_item.set_enabled(true);
+                        let _ = uninstall_item.set_enabled(true);
+                        let _ = update_item.set_enabled(true);
                     }
                     let now = Instant::now();
                     if status.is_some() {
@@ -4205,7 +4378,7 @@ v0.1.9-preview.25/Slipstream.app.tar.gz";
             .unwrap();
         assert!(guard < menu.find("match id {").unwrap());
         assert!(menu[..menu.find("match id {").unwrap()]
-            .contains("matches!(id, ID_RESTART | ID_UNINSTALL | ID_UPDATE)"));
+            .contains("matches!(id, ID_RESTART | ID_UNINSTALL)"));
         assert!(run.contains(
             "if !pending_daemon_actions.load(Ordering::Acquire) && should_recover_daemon("
         ));
@@ -5461,7 +5634,9 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
         assert!(script.contains("log_max_bytes=1048576"));
         assert!(script.contains("log_retain_bytes=262144"));
         assert!(script.contains("log_guard_interval=5"));
-        assert!(script.contains("/usr/bin/tail -c \"$log_retain_bytes\""));
+        assert!(script.contains("offset=$((size - count))"));
+        assert!(script
+            .contains("/bin/dd if=\"$path\" ibs=1 obs=65536 skip=\"$offset\" count=\"$count\""));
         assert!(script.contains("archive=\"${path}.previous\""));
         assert!(script.contains("/bin/kill -0 \"$target_pid\""));
         assert!(script.contains(

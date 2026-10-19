@@ -1,6 +1,11 @@
 //! Non-AppKit durable updater watchdog.  This binary is copied verbatim from
 //! the signed application to owner-private runtime storage before replacement.
 
+// The tray also uses the convenience wrapper; this binary uses the exact-path verifier.
+#[allow(dead_code)]
+#[path = "../install_attestation.rs"]
+mod install_attestation;
+
 #[path = "../updater_transaction.rs"]
 mod updater_transaction;
 

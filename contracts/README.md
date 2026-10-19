@@ -3,6 +3,12 @@
 These versioned JSON vectors are the language-neutral behavior contract for
 Slipstream routing decisions and bounded recovery primitives.
 
+- `update-bundle-tree-v1.json` fixes the UTF-8 serialization, file modes and
+  internal framework symlinks used to identify retained macOS app bundles in
+  both Rust and Python. These inert test vectors authorize no installation.
+- `update-daemon-status-v1.json` carries the Python root worker's public status
+  projection for the Rust reader. It checks wire compatibility; live operation
+  ownership, daemon attestation and heartbeat remain separate requirements.
 - `routing-policy-v1.json` maps representative hostnames to their normalized
   policy result.
 - `recovery-v1.json` maps normalized connection outcomes and reducer context to
