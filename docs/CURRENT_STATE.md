@@ -45,8 +45,8 @@ packaged build, browser qualification and packaged lifecycle. The terminal
 receipt P1 is resolved. Retained receipt
 `output/updater-daemon-identity/pr393-green-b062-receipt.json` SHA256:
 `7aebe7cb8d46b66219cbd843c98c6cc0057cac592f1c48dccbc64d3218a1cdd2`.
-Main CI39241525733 and audit39241525729 are running; retain their exact candidate
-as the first protocol-capable build once the complete run passes.
+Main CI39241525733 is running; audit39241525729 passed. Retain its exact
+candidate as the first protocol-capable build once the complete CI run passes.
 
 After daemon PID rollover, the exact mailbox can wake the exited root worker
 without changing the durable decision. Its 330-second/33-attempt consumer budget
@@ -65,7 +65,10 @@ materializer, workflow and 45 hermetic tests. Its normal source version is
 The new source supplies a successor whose compiled tray and frozen daemon differ
 from the main393 bridge candidate. Initial CI39240828886 was deliberately stopped
 before packaging because strict main-base refresh required new exact-head CI;
-audit39240828853 passed. Fresh CI follows this base update.
+audit39240828853 passed. The base refresh passed audit39241690945; CI39241690927
+was superseded by the runner correction. Review found that GitHub is retiring
+`macos-14`; the new native workflow now uses supported ARM64 `macos-15` while
+retaining its architecture guard. Scoped workflow tests and actionlint passed.
 No native case has been dispatched and no preview.25 release is published.
 The installed workstation app and public preview.24 remain unchanged.
 
