@@ -857,9 +857,11 @@ mod tests {
                             // macOS applies the process umask to symlink modes.
                             assert_eq!(
                                 unsafe {
-                                    libc::lchmod(
+                                    libc::fchmodat(
+                                        libc::AT_FDCWD,
                                         path.as_ptr(),
                                         node["mode"].as_u64().unwrap() as libc::mode_t,
+                                        libc::AT_SYMLINK_NOFOLLOW,
                                     )
                                 },
                                 0

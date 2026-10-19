@@ -37,8 +37,14 @@ were rehashed on 2026-10-19; receipt SHA256:
 `output/updater-daemon-identity/main-2640/`. Reuse this baseline; it does not
 qualify the uncommitted work below or change the published `.24` binary.
 
-Branch `codex/coordinated-daemon-update` in the attached `readme-humanizer`
-worktree starts from that merge. Rust and Python now join the watchdog and
+[PR393](https://github.com/aiwaki/slipstream/pull/393), branch
+`codex/coordinated-daemon-update` in the attached `readme-humanizer` worktree,
+starts from that merge. Source commit `66d3f2e4151341802c415bdd54c2dfe2ef743477`
+is pushed. Audit39231763995 passed. CI39231763959 passed Python and Windows
+checks but stopped Rust compilation at a test-only `libc::lchmod` call missing
+from pinned libc 0.2.186. The fixture now uses supported no-follow `fchmodat`;
+its symlink/target behavior was checked without a Rust build. A new exact-head
+CI run must execute the Rust regressions. Rust and Python now join the watchdog and
 privileged daemon installer into one recoverable transaction. The installed
 workstation app and the published release are unchanged.
 
@@ -60,6 +66,7 @@ Eighteen Rust regression tests have been added but not executed locally; format
 and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
+Independent final source review found no remaining concrete blockers.
 Hosted compilation/tests and disposable native qualification remain pending.
 No local Rust build, privileged runtime test, or workstation installation ran.
 
@@ -73,8 +80,8 @@ No local Rust build, privileged runtime test, or workstation installation ran.
 
 ## Next Verified Action
 
-- Commit the coherent coordinated-updater diff and run exact-head hosted CI
-  through a PR. Reuse main2640's
+- Finish PR393 exact-head hosted CI, fix any concrete failures, and retain
+  matching evidence. Reuse main2640's
   unchanged baseline; do not rebuild or republish `.24` or rerun its readiness.
 - Qualify the coordinated path on disposable macOS with a supporting bridge
   build and a successor whose normal version bump changes the frozen daemon.
