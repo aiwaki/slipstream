@@ -656,7 +656,7 @@ jobs:
             -verify_arch arm64 x86_64
           cp /tmp/geph/geph5-client \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-          chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          chmod 0755 app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           /usr/bin/lipo \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin \
             -verify_arch arm64
@@ -712,6 +712,7 @@ jobs:
           set -euo pipefail
           app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
           test -d "$app"
+          PYTHONPATH=scripts python3 -c 'import sys; from pathlib import Path; import verify_updater_artifacts; verify_updater_artifacts.validate_app_tree_modes(Path(sys.argv[1]))' "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
             = slipstream
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \

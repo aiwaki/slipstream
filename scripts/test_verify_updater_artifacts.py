@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import plistlib
+import stat
 import tarfile
 import tempfile
 import unittest
@@ -178,6 +179,72 @@ def write_signed_updater_fixture(
 
 
 class VerifyUpdaterArtifactsTests(unittest.TestCase):
+    def test_packaged_tree_accepts_public_modes_without_mutating_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "Slipstream.app"
+            geph = app / "Contents/MacOS/geph5-client"
+            geph.parent.mkdir(parents=True)
+            geph.write_bytes(b"authenticated executable")
+            geph.chmod(0o755)
+            resource = app / "Contents/resource"
+            resource.write_bytes(b"resource")
+            resource.chmod(0o644)
+            (geph.parent / "geph-link").symlink_to("geph5-client")
+            before = {p: p.lstat().st_mode for p in app.rglob("*")}
+
+            verify_updater_artifacts.validate_app_tree_modes(app)
+
+            self.assertEqual(before, {p: p.lstat().st_mode for p in app.rglob("*")})
+            self.assertEqual(geph.read_bytes(), b"authenticated executable")
+
+    def test_packaged_tree_rejects_private_geph_and_inaccessible_resources(self) -> None:
+        cases = (
+            ("Contents/MacOS/geph5-client", 0o700, False),
+            ("Contents/MacOS/geph5-client", 0o744, False),
+            ("Contents/MacOS/geph5-client", 0o644, False),
+            ("Contents/resource", 0o600, False),
+            ("Contents/private", 0o700, True),
+            ("Contents/writable", 0o775, True),
+            ("Contents/resource", 0o664, False),
+            ("Contents/MacOS/geph5-client", 0o4755, False),
+        )
+        for relative, mode, directory in cases:
+            with self.subTest(path=relative, mode=oct(mode)), tempfile.TemporaryDirectory() as tmp:
+                app = Path(tmp) / "Slipstream.app"
+                path = app / relative
+                path.parent.mkdir(parents=True)
+                if directory:
+                    path.mkdir()
+                else:
+                    path.write_bytes(b"unchanged")
+                path.chmod(mode)
+                with self.assertRaisesRegex(ValueError, relative):
+                    verify_updater_artifacts.validate_app_tree_modes(app)
+                self.assertEqual(stat.S_IMODE(path.lstat().st_mode), mode)
+
+    def test_signed_archive_rejects_private_geph_before_installation(self) -> None:
+        for mode in (0o700, 0o744, 0o644):
+            with self.subTest(mode=oct(mode)), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                member = tarfile.TarInfo("Slipstream.app/Contents/MacOS/geph5-client")
+                member.mode, member.size = mode, 1
+                config = write_signed_updater_fixture(root, extra_member=member)
+                with self.assertRaisesRegex(ValueError, "geph5-client"):
+                    verify_updater_artifacts.verify_updater_artifacts(
+                        release_dir=root, version=TEST_VERSION, tauri_config=config
+                    )
+
+    def test_signed_archive_accepts_public_geph(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            member = tarfile.TarInfo("Slipstream.app/Contents/MacOS/geph5-client")
+            member.mode, member.size = 0o755, 1
+            config = write_signed_updater_fixture(root, extra_member=member)
+            result = verify_updater_artifacts.verify_updater_artifacts(
+                release_dir=root, version=TEST_VERSION, tauri_config=config
+            )
+            self.assertTrue(result["verified"])
+
     def test_offline_verifier_limits_match_runtime_archive_limits(self) -> None:
         pairs = {
             "MAX_UPDATE_ARCHIVE_BYTES": verify_updater_artifacts.MAX_ARCHIVE_BYTES,
