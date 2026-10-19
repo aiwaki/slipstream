@@ -17,47 +17,44 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
-PR400 (`codex/packaged-update-commit-gate`) is synchronized with merged PR401,
-main `abce52944051e472173de8c6e66eb715f061a8be`. The workflow merged cleanly;
-only this checkpoint needed reconciliation. Main remains `.27`; this branch's
-`.28` is a candidate, not a public release. Do not merge this successor into main
-until native root `.26 -> corrected .27` qualification has run at the exact
-`.27` source and both cases pass.
+Native root run39295979689 (main `abce52944051e472173de8c6e66eb715f061a8be`)
+failed both commit and crash-before-commit before activation. OLD `.26` installed
+successfully and published Prepared, but update-prepare exited1 with worker_pid0
+and no mailbox; cleanup retained state after FileNotFoundError. Neither commit,
+abort, crash injection nor clean teardown was qualified. The exact inner error
+and runner directory metadata were not retained. Failed receipt SHA256:
+`78fce0c5c600b81300daeedfa76a33c97382d24664be81e71b6d9f807c2f6953`.
 
-PR400 integrates the reviewed trigger/observer and commit-only workflow. It
-compiles an isolated adapter around authenticated OLD production preparation;
-the packaged OLD watchdog and NEW app perform activation, ACK and commit. The
-observer attaches before preparation and cannot synthesize transaction state.
-Eight immutable candidate pins plus two successful root-run pins are checked
-before install; root NEW must equal app OLD. Only a proven committed transaction
-permits exact-successor cleanup. Unknown outcomes retain evidence and fail on
-the disposable runner. No Geph secret or workstation operation is used.
+A deterministic source defect was then reproduced with the real directory
+validator: the fixed `/var/run` ancestry can be root:daemon0775 on macOS, while
+the validator rejects every writable-group ancestor. Existing prepare tests
+replaced that validator with mkdir and missed the conflict. Both protocol sides
+now use `/var/db/dev.slipstream-update/requests`, below the existing root-owned
+update directory. Strict ancestry/ownership validation is unchanged; no system
+permissions, legacy mailbox alias, migration or workstation state is modified.
+The new hermetic macOS-layout regression failed before the Python repair;
+97 scoped updater/lock/ancestry tests pass after it. Rust formatting passed;
+native/Rust execution remains hosted-CI-only and this repair is not qualified yet.
 
-Unchanged PR400 head `0c3fc4a889845b0ddef71c87e30ce931d89fc538` passed whole
-CI39277553981/audit39277553914, including hosted adapter compilation, its five
-tests, 194 app tests, browser and lifecycle checks. Its 107 hermetic Python tests,
-workflow lint, rustfmt and version synchronization are retained evidence. The
-new merge passed the focused notification workflow contract check and actionlint;
-source review confirmed both branches' unique implementations are byte-identical.
-It still needs its own required CI. Native app commit/rollback, normal
-tray click/Quit, administrator UI and public discovery remain unqualified.
+Branch `codex/update-mailbox-ancestry` starts from main401, version `.27`.
+The immutable `.26` origin contains this defect: changing its successor cannot
+repair prepare. Therefore the next honest pair is corrected `.27` -> `.28`.
+PR400 remains draft at `9a9b0c38f1f595795007cb3322464b422ec3ec42`; exact-merge
+CI39294168568/audit39294168467 passed, with zero review threads. Its old prerequisite
+(root NEW equals app OLD) must be replaced by a complete exact-pair binding so
+both native root and app tests exercise the same corrected `.27` -> `.28` pair.
+Independent plan review confirms this preserves the production boundary and
+avoids a redundant third candidate; no gate is satisfied by the failed run.
 
-The inherited PR401 repair refreshes only incomplete producer metadata for at
-most 120 seconds/13 polls. Invalid provenance is terminal; native notification
-is never retried. Failed or late API fetches preserve the previous complete
-triplet, and selector failures retain a bounded report. PR401 exact head
-`a5f02585cde1af0945bb8d253480862d6e6b2c3b` passed whole
-CI39290822772/audit39290822779, 136 focused Python checks, actionlint and independent
-review; both review threads were resolved before merge. Its tested and merged
-Git trees are identical. Exact-main CI39293099933 is running and audit39293099930
-passed. The original failed main399 attempt is retained, not reused as qualified
-evidence; its original rejected API predicate was not retained and remains unknown.
-
-Evidence is under `output/updater-daemon-identity`: `pr400-verification`,
-`pr401-p2-verification`, and `main401-verification`. The latter authenticates
-source-pinned `.27` candidate files, signatures, attestation and archive modes;
-qualification requires whole same-attempt CI success. No local Rust build,
-native execution or workstation mutation occurred. Public preview .24 is unchanged.
+Main401 CI39293099933/audit39293099930 and its notification/browser/lifecycle
+checks passed. Its signed `.27` candidate is authentic but predates the mailbox
+repair. Receipt `main401-verification/receipt.json` SHA256:
+`585d3299a65fe281695d8828d5c7bd11f390e4d5727dbab26006c79663bc0637`.
+Evidence under `output/updater-daemon-identity` includes
+`root26-to-main401-qualification`, `pr400-main-sync-verification`, and
+`mailbox-ancestry-before.log` / `mailbox-ancestry-after.log`.
+The output-only pre-ACK rollback extension remains reviewed but unintegrated.
+Public preview `.24`, its assets, user settings and learned state are unchanged.
 
 ### Previous .27 implementation evidence
 
@@ -348,17 +345,18 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Authenticate corrected exact-main `.27` from CI39293099933 after whole CI and
-  notification qualification succeed. Reuse authenticated `.26` from
-  CI39266691016; verify signatures/provenance, archive modes and executable
-  inequality. Dispatch both native root `.26 -> .27` cases while main remains
-  `.27`; a partial rerun of an old failed builder cannot qualify the pair.
-- Verify this synchronized PR400's required CI. After successful root
-  qualification, merge and authenticate its `.28` candidate, then run the real
-  packaged app/watchdog commit gate and the prepared pre-ACK rollback extension.
-  Source/hermetic checks alone do not qualify native update or recovery.
-- Reuse preview .24 release/readiness evidence. Public updater qualification is
-  separate; signed public assets and workstation state remain unchanged.
+- Review and merge the mailbox-path repair after focused and required CI. Keep
+  version `.27`; authenticate its corrected exact-main candidate once.
+- Rebase/synchronize PR400, bind its prerequisite to the same complete pair and
+  the `.28` harness source, preserving the authenticated OLD `.27` adapter source.
+  After required CI, merge and authenticate `.28`. The previous requirement to
+  run root `.26 -> .27` before this merge is superseded by the proven origin bug.
+- Run root commit + crash-before-commit on corrected `.27 -> .28`; only successful
+  exact-pair evidence admits the app/watchdog commit and rollback tests. Do not
+  retry immutable `.26` or count its retained failure as qualification.
+- Reuse preview `.24` release/readiness evidence. Public updater, ordinary tray
+  and administrator flows remain separate open gates; workstation state stays
+  unchanged.
 
 ## External Gates
 

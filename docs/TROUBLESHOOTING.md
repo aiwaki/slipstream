@@ -66,6 +66,24 @@ CoreServicesUIAgent records. If unified logging instead names the real
 failure: preserve the evidence and do not bypass Gatekeeper or strip quarantine
 as a product fix.
 
+### Update preparation stops before the worker starts
+
+Native run39295979689 installed the old candidate and published Prepared, then
+both cases exited before activation with worker_pid0 and an absent mailbox.
+Cleanup retained the incomplete operation. The native inner exception was not
+captured, so that run alone does not establish the precise filesystem cause.
+
+A separate hermetic reproduction exposed a conflict between the old fixed
+`/var/run/slipstream-update-requests` path and strict root ancestry validation:
+macOS can give `/private/var/run` mode0775. The prepare fixture had replaced the
+validator with mkdir and missed this. Both current protocol sides now use the
+existing protected `/var/db/dev.slipstream-update/requests` parent. The real
+validator still rejects writable or foreign ancestry. Do not change system
+folder permissions or remove retained transaction state as a workaround.
+The old immutable originating candidate cannot pick up this fix from a new
+successor; a corrected originating candidate needs fresh native qualification.
+This source repair is not evidence that a published update or rollback works.
+
 ### A new-version notification does not appear
 
 Preview `.22` cannot discover `.23`: `.22` reports package version `0.1.9`,
