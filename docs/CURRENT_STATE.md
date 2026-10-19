@@ -35,7 +35,7 @@ signing, assembly, attestation and notification checks. Its 17 retained files
 were rehashed on 2026-10-19; receipt SHA256:
 `ab87e4f2662d7b1f3a76a19d286da50e3de5faa65c78ea5013f185b422ae3a8a`, under
 `output/updater-daemon-identity/main-2640/`. Reuse this baseline; it does not
-qualify the uncommitted work below or change the published `.24` binary.
+qualify the coordinated work below or change the published `.24` binary.
 
 [PR393](https://github.com/aiwaki/slipstream/pull/393), branch
 `codex/coordinated-daemon-update` in the attached `readme-humanizer` worktree,
@@ -44,7 +44,19 @@ is pushed. After a test-fixture API fix, head
 `2462fd7e68fbae18de67f36ccbf7ac07a01e6745` passed 184 app tests, 29 browser-probe
 tests, 3 updater installer tests, Python suites, Windows checks and dependency
 audit39232771857. CI39232771871 stopped at two narrow Clippy findings; those
-are corrected in the follow-up. A fresh exact-head CI result is still required. Rust and Python now join the watchdog and
+are corrected at head `996e4aa12dc704bdd3b88f1c41f3683ba95e25a5`.
+At that head, dependency audit39233841112, packaged build, browser qualification
+and Windows checks passed. CI39233841163 failed one existing Geph log-rotation
+test (183 app tests passed): an archive exceeded its asserted 512-byte bound.
+The exact failure is retained in `pr393-product-996e.log`. A bounded native
+reproduction proved BSD `tail -c` can read concurrent appends past its requested
+length. The narrow correction snapshots the byte range and copies it with a
+fixed count; failed archive publication now preserves the live log. Reproducible shell
+checks covered appends after the snapshot, concurrent truncation, copy/chmod/mv
+failures, and eight concurrent-writer bursts. Each successful burst archive
+contained exactly 512 bytes. Independent scoped review found no blocker. The
+existing Rust live-process test remains unchanged. Final source CI is next. The superseded failed CI runs were
+cancelled after their decisive logs were retained. Rust and Python join the watchdog and
 privileged daemon installer into one recoverable transaction. The installed
 workstation app and the published release are unchanged.
 
@@ -62,13 +74,16 @@ cases, 2 real process-lock inheritance cases, and the existing system-command
 runner case. Logs are retained under `output/updater-daemon-identity/`.
 The process-lock test kills the lock owner and proves its still-running child
 retains the installer lock; a no-inheritance control demonstrates the race.
-Eighteen Rust regression tests have been added but not executed locally; format
-and whitespace checks passed. The reviewed cleanup crash window is closed by
+Eighteen new Rust regression tests passed in hosted CI at head2462 and again
+at head996e (the latter failed only the existing Geph rotation test). They were
+not executed locally; format and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
 Independent final source review found no remaining concrete blockers.
-Compilation and tests passed at the preceding head; final lint/packaging and
-disposable native qualification remain pending.
+Compilation and tests passed at the preceding head; the final product gate and
+disposable native qualification remain pending. A root-protocol driver draft
+under `output/updater-daemon-identity/native-driver-draft/` is being reviewed;
+it has not executed native operations and does not qualify app/public updates.
 No local Rust build, privileged runtime test, or workstation installation ran.
 
 | Milestone | Current boundary |

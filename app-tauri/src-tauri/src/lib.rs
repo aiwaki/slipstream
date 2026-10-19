@@ -3124,11 +3124,15 @@ fn geph_launcher_script_with_log_limits(
          \x20 [ \"$size\" -le \"$log_max_bytes\" ] && return 0\n\
          \x20 archive=\"${{path}}{GEPH_LOG_ARCHIVE_SUFFIX}\"\n\
          \x20 tmp=\"${{archive}}.tmp.$$\"\n\
-         \x20 if /usr/bin/tail -c \"$log_retain_bytes\" \"$path\" > \"$tmp\" 2>/dev/null; then\n\
-         \x20\x20 /bin/chmod 600 \"$tmp\" 2>/dev/null || true\n\
-         \x20\x20 /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null || true\n\
-         \x20\x20 : > \"$path\"\n\
-         \x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20 count=\"$log_retain_bytes\"\n\
+         \x20 [ \"$count\" -le \"$size\" ] || count=\"$size\"\n\
+         \x20 offset=$((size - count))\n\
+         \x20 # BSD tail can include concurrent appends; copy only the observed byte range.\n\
+         \x20 if /bin/dd if=\"$path\" ibs=1 obs=65536 skip=\"$offset\" count=\"$count\" > \"$tmp\" 2>/dev/null; then\n\
+         \x20\x20 if /bin/chmod 600 \"$tmp\" 2>/dev/null && /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null; then\n\
+         \x20\x20\x20 : > \"$path\"\n\
+         \x20\x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20\x20 fi\n\
          \x20 fi\n\
          \x20 /bin/rm -f \"$tmp\" 2>/dev/null || true\n\
          \x20 return 0\n\
@@ -5630,7 +5634,9 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
         assert!(script.contains("log_max_bytes=1048576"));
         assert!(script.contains("log_retain_bytes=262144"));
         assert!(script.contains("log_guard_interval=5"));
-        assert!(script.contains("/usr/bin/tail -c \"$log_retain_bytes\""));
+        assert!(script.contains("offset=$((size - count))"));
+        assert!(script
+            .contains("/bin/dd if=\"$path\" ibs=1 obs=65536 skip=\"$offset\" count=\"$count\""));
         assert!(script.contains("archive=\"${path}.previous\""));
         assert!(script.contains("/bin/kill -0 \"$target_pid\""));
         assert!(script.contains(
