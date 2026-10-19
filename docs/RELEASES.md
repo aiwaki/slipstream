@@ -151,6 +151,13 @@ change the compiled app version and frozen daemon bytes. Do not manufacture the
 pair by editing only `Info.plist`, repacking the same daemon, modifying a public
 release, or installing the successor daemon before triggering the update.
 
+The initial app handoff releases its transaction lock before bootstrapping the
+watchdog: a RunAtLoad helper may start before `launchctl` returns. LaunchAgent
+publication and retirement of the previous registration remain under the lock.
+If publication or bootstrap fails, durable Prepared evidence and the original
+root lease remain available to the existing recovery path. Once the lock has
+been released, the preparer never cancels using its stale journal snapshot.
+
 Qualification must observe the real installed daemon identity, fresh PID and
 attestation on success and forced rollback, and inject failures before/after
 runtime replacement and durable commit. App and watchdog exit before/after ACK
