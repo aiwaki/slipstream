@@ -1065,14 +1065,16 @@ def test_ci_authenticates_producer_attempt_independently_from_rerun() -> None:
     )[1].split("\n  packaged-app-lifecycle-heavy:\n", 1)[0]
 
     assert "Authenticate the exact candidate producer attempt" in job
-    assert "smoke._candidate_producer_attempt" in job
-    assert "actions/runs/$GITHUB_RUN_ID\"" in job
-    assert (
-        "actions/runs/$GITHUB_RUN_ID/attempts/$candidate_attempt/jobs?per_page=100"
-        in job
-    )
-    assert "actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" in job
-    assert 'test "$evidence_size" -le 4194304' in job
+    assert "smoke._candidate_producer_attempt" not in job
+    assert job.index("--producer-evidence-only") < job.index('candidate_attempt="$(')
+    assert 'report.get("candidate_run_attempt")' in job
+    collector = job.split("--producer-evidence-only", 1)[1].split('candidate_attempt="$(')[0]
+    assert "--candidate-run-attempt" not in collector
+    assert "--producer-evidence-only" in job
+    assert "update-notification-producer.json" in job
+    assert "${{ runner.temp }}/update-notification-run.json" in job
+    assert "${{ runner.temp }}/update-notification-jobs.json" in job
+    assert "${{ runner.temp }}/update-notification-artifacts.json" in job
     assert (
         '--candidate-run-attempt '
         '"${{ steps.candidate-producer.outputs.run_attempt }}"'
@@ -1123,3 +1125,365 @@ def test_report_contract_never_claims_visible_delivery_or_contains_content() -> 
     assert '"removed": hook_result["removed"]' in source
     assert "Notification Center" not in source
     assert "fixed non-user" not in source.lower() or "body" not in source
+
+
+def _pending_producer(payloads, stage):
+    _, run, jobs, artifacts = payloads
+    if stage == "run_pending":
+        run.update(status="queued", conclusion=None)
+    elif stage == "job_pending":
+        jobs["jobs"][0].update(status="in_progress", conclusion=None, completed_at=None)
+    elif stage == "job_missing":
+        jobs.update(total_count=0, jobs=[])
+    elif stage == "artifact_missing":
+        artifacts.update(total_count=0, artifacts=[])
+    else:
+        raise AssertionError(stage)
+    return payloads
+
+
+class _ProducerClock:
+    value = 0.0
+
+    def clock(self):
+        return self.value
+
+    def sleep(self, seconds):
+        assert 0 < seconds <= smoke.PRODUCER_POLL_SECONDS
+        self.value += seconds
+
+
+def _collector_fixture(tmp_path, snapshots):
+    kwargs = _write_producer_evidence(tmp_path, _producer_payloads())
+    for key in ("run_metadata_path", "jobs_path", "artifacts_path"):
+        kwargs[key].chmod(0o600)
+    calls = []
+    endpoints = ["repos/aiwaki/slipstream/actions/runs/77",
+                 "repos/aiwaki/slipstream/actions/runs/77/attempts/1/jobs?per_page=100",
+                 "repos/aiwaki/slipstream/actions/runs/77/artifacts?per_page=100"]
+
+    def fetch(endpoint, timeout):
+        index = len(calls)
+        assert endpoint == endpoints[index % 3]
+        assert 0 < timeout <= 15
+        calls.append(endpoint)
+        selected = snapshots[min(index // 3, len(snapshots) - 1)]
+        return json.dumps(selected[1 + index % 3]).encode()
+
+    return kwargs, calls, fetch, _ProducerClock()
+
+
+@pytest.mark.parametrize("stage", sorted(smoke.PRODUCER_PENDING_STAGES))
+def test_pending_api_snapshot_is_never_authenticated(stage, tmp_path):
+    kwargs = _write_producer_evidence(tmp_path, _pending_producer(_producer_payloads(), stage))
+    with pytest.raises(smoke.ProducerEvidencePending) as raised:
+        smoke.validate_candidate_producer_evidence(**kwargs)
+    assert raised.value.producer_stage == stage
+    assert raised.value.failure_code == "candidate_producer_invalid"
+
+
+@pytest.mark.parametrize("stage", sorted(smoke.PRODUCER_PENDING_STAGES))
+def test_producer_refresh_waits_only_for_new_strict_evidence(stage, tmp_path):
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [
+        _pending_producer(_producer_payloads(), stage), _producer_payloads()])
+    with mock.patch.object(smoke.subprocess, "run", side_effect=AssertionError("no real API or native call")):
+        report = smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert report == {"schema_version": 1, "outcome": "ready", "producer_stage": "ready",
+                      "poll_count": 2, "duration_seconds": 10.0, "last_pending_stage": stage,
+                      "candidate_run_attempt": 1}
+    assert len(calls) == 6
+    assert smoke.validate_candidate_producer_evidence(**kwargs).artifact_id == 201
+
+
+@pytest.mark.parametrize("hard", ["run_sha", "run_attempt", "job_sha", "job_attempt", "job_failed",
+                                  "artifact_digest", "artifact_duplicate", "artifact_expired", "artifact_repository"])
+def test_pending_run_never_masks_hard_provenance_error(hard, tmp_path):
+    snapshot = _pending_producer(_producer_payloads(), "run_pending")
+    _, run, jobs, artifacts = snapshot
+    if hard == "run_sha": run["head_sha"] = "9" * 40
+    elif hard == "run_attempt": run["run_attempt"] = 999
+    elif hard == "job_sha": jobs["jobs"][0]["head_sha"] = "9" * 40
+    elif hard == "job_attempt": jobs["jobs"][0]["run_attempt"] = 999
+    elif hard == "job_failed": jobs["jobs"][0]["conclusion"] = "failure"
+    elif hard == "artifact_digest": artifacts["artifacts"][0]["digest"] = "invalid"
+    elif hard == "artifact_duplicate":
+        artifacts["artifacts"].append(dict(artifacts["artifacts"][0])); artifacts["total_count"] = 2
+    elif hard == "artifact_expired": artifacts["artifacts"][0]["expired"] = True
+    elif hard == "artifact_repository": artifacts["artifacts"][0]["workflow_run"]["repository_id"] = 999
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [snapshot, _producer_payloads()])
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert not isinstance(raised.value, smoke.ProducerEvidencePending)
+    assert len(calls) == 3 and clock.value == 0
+    assert json.loads((tmp_path / "report.json").read_text())["outcome"] == "terminal"
+
+
+@pytest.mark.parametrize("field", ["assemble_job_id", "artifact_id", "artifact_digest"])
+def test_refresh_cannot_rebind_an_observed_producer_identity(field, tmp_path):
+    changed = _producer_payloads()
+    if field == "assemble_job_id": changed[2]["jobs"][0]["id"] += 1
+    elif field == "artifact_id": changed[3]["artifacts"][0]["id"] += 1
+    else: changed[3]["artifacts"][0]["digest"] = "sha256:" + "7" * 64
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [
+        _pending_producer(_producer_payloads(), "run_pending"), changed])
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert raised.value.producer_stage == "identity_changed"
+    assert len(calls) == 6
+
+
+def test_unchanged_pending_stops_at_fixed_deadline_and_retains_last_triplet(tmp_path):
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [
+        _pending_producer(_producer_payloads(), "run_pending")])
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert raised.value.producer_stage == "readiness_deadline"
+    assert report["duration_seconds"] == smoke.PRODUCER_WAIT_SECONDS
+    assert report["poll_count"] == smoke.PRODUCER_MAX_POLLS
+    assert len(calls) == 36
+    assert json.loads(kwargs["run_metadata_path"].read_text())["status"] == "queued"
+
+
+def test_ready_snapshot_does_not_poll_or_touch_native_hook(tmp_path):
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [_producer_payloads()])
+    with mock.patch.object(smoke, "_launch_hook", side_effect=AssertionError("native hook forbidden")):
+        report = smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert report["outcome"] == "ready" and len(calls) == 3 and clock.value == 0
+
+
+def test_producer_diagnostic_contains_only_fixed_stage(tmp_path):
+    failure = smoke._producer_invalid("private/API text must never be serialized", stage="run_invalid")
+    report = smoke._failure_report(failure)
+    assert report == {"schema_version": 1, "outcome": "terminal",
+                      "failure_code": "candidate_producer_invalid", "producer_stage": "run_invalid"}
+    with pytest.raises(ValueError): smoke._producer_invalid("x", stage="untrusted stage")
+
+
+def test_collector_cli_never_enters_native_gate(tmp_path):
+    kwargs = _write_producer_evidence(tmp_path, _producer_payloads())
+    options = {"candidate-dir": kwargs["candidate_dir"], "repository": kwargs["repository"],
+        "source-commit": SOURCE, "candidate-run-id": 77, "candidate-run-attempt": 1,
+        "qualification-run-attempt": 2, "candidate-run-metadata": kwargs["run_metadata_path"],
+        "candidate-run-jobs": kwargs["jobs_path"], "candidate-run-artifacts": kwargs["artifacts_path"],
+        "output": tmp_path / "report.json"}
+    argv = [str(smoke.__file__), "--producer-evidence-only"]
+    for key, value in options.items(): argv.extend(["--" + key, str(value)])
+    with mock.patch.object(smoke.sys, "argv", argv), \
+         mock.patch.object(smoke, "collect_candidate_producer_evidence") as collect, \
+         mock.patch.object(smoke, "run_gate", side_effect=AssertionError("native gate forbidden")):
+        assert smoke._main() == 0
+    collect.assert_called_once()
+
+
+def test_pending_job_does_not_hide_malformed_available_timestamp(tmp_path):
+    pending = _pending_producer(_producer_payloads(), "job_pending")
+    pending[2]["jobs"][0]["started_at"] = "not a timestamp"
+    kwargs = _write_producer_evidence(tmp_path, pending)
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.validate_candidate_producer_evidence(**kwargs)
+    assert not isinstance(raised.value, smoke.ProducerEvidencePending)
+
+
+def test_pending_job_does_not_hide_artifact_before_known_start(tmp_path):
+    pending = _pending_producer(_producer_payloads(), "job_pending")
+    pending[3]["artifacts"][0]["created_at"] = "2026-08-19T00:00:00Z"
+    kwargs = _write_producer_evidence(tmp_path, pending)
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.validate_candidate_producer_evidence(**kwargs)
+    assert raised.value.producer_stage == "artifact_timing_invalid"
+
+
+def test_each_api_read_obeys_remaining_budget_and_late_success_is_rejected(tmp_path):
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [_producer_payloads()])
+    def slow(endpoint, timeout):
+        payload = fetch(endpoint, timeout)
+        clock.value = smoke.PRODUCER_WAIT_SECONDS
+        return payload
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=slow,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert raised.value.producer_stage == "readiness_deadline" and len(calls) == 1
+
+
+def test_oversized_api_response_is_terminal_and_not_persisted(tmp_path):
+    kwargs, calls, _, clock = _collector_fixture(tmp_path, [_producer_payloads()])
+    old = kwargs["run_metadata_path"].read_bytes()
+    def oversized(endpoint, timeout):
+        calls.append(endpoint)
+        return b"x" * (smoke.PRODUCER_EVIDENCE_MAX_BYTES + 1)
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=oversized,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert raised.value.producer_stage == "api_fetch_failed" and len(calls) == 1
+    assert kwargs["run_metadata_path"].read_bytes() == old
+
+
+def test_native_api_reader_has_timeout_and_does_not_emit_backend_text(tmp_path):
+    def failing(command, **kwargs):
+        assert command[:4] == ["gh", "api", "-H", "Cache-Control: no-cache"]
+        assert kwargs["timeout"] == 0.5 and kwargs["stderr"] == smoke.subprocess.DEVNULL
+        raise smoke.subprocess.TimeoutExpired(command, 0.5, output=b"private server text")
+    with mock.patch.object(smoke.subprocess, "run", side_effect=failing), \
+         pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke._fetch_producer_evidence("repos/aiwaki/slipstream/actions/runs/77", 0.5)
+    assert "private" not in json.dumps(smoke._failure_report(raised.value))
+
+
+@pytest.mark.parametrize("page", ["jobs", "artifacts"])
+@pytest.mark.parametrize("entry", [None, [], {}, {"name": None}, {"name": ""}])
+def test_malformed_api_page_is_not_missing_readiness(page, entry, tmp_path):
+    snapshot = _producer_payloads()
+    payload = snapshot[2 if page == "jobs" else 3]
+    payload[page] = [entry]
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [snapshot, _producer_payloads()])
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert not isinstance(raised.value, smoke.ProducerEvidencePending)
+    assert raised.value.producer_stage == page + "_invalid"
+    assert len(calls) == 3 and clock.value == 0
+
+
+def test_collector_refuses_symlink_before_write_and_keeps_fixed_report(tmp_path):
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [_producer_payloads()])
+    victim = tmp_path / "not-evidence"
+    victim.write_bytes(b"preserve exactly")
+    kwargs["run_metadata_path"].unlink()
+    kwargs["run_metadata_path"].symlink_to(victim)
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert raised.value.producer_stage == "input_invalid"
+    assert victim.read_bytes() == b"preserve exactly"
+    assert len(calls) == 3
+    assert json.loads((tmp_path / "report.json").read_text())["producer_stage"] == "input_invalid"
+
+
+def test_collector_cli_sanitizes_unexpected_output_failure(tmp_path, capsys):
+    argv = [str(smoke.__file__), "--producer-evidence-only", "--candidate-dir", str(tmp_path),
+            "--repository", "aiwaki/slipstream", "--source-commit", SOURCE,
+            "--candidate-run-id", "77", "--candidate-run-attempt", "1",
+            "--qualification-run-attempt", "2", "--candidate-run-metadata", str(tmp_path / "run.json"),
+            "--candidate-run-jobs", str(tmp_path / "jobs.json"),
+            "--candidate-run-artifacts", str(tmp_path / "artifacts.json"),
+            "--output", str(tmp_path / "report.json")]
+    with mock.patch.object(smoke.sys, "argv", argv), \
+         mock.patch.object(smoke, "collect_candidate_producer_evidence", side_effect=OSError("private output path")), \
+         mock.patch.object(smoke, "run_gate", side_effect=AssertionError("native gate forbidden")):
+        assert smoke._main() == 1
+    captured = capsys.readouterr()
+    assert not captured.out and "private" not in captured.err and "Traceback" not in captured.err
+    assert json.loads(captured.err) == {"schema_version": 1, "outcome": "terminal", "failure_code": "internal_error"}
+
+
+@pytest.mark.parametrize("failed_endpoint", (2, 3))
+def test_partial_refresh_preserves_last_complete_triplet(failed_endpoint, tmp_path):
+    previous = _pending_producer(_producer_payloads(), "run_pending")
+    fresh = _producer_payloads()
+    for payload in previous[1:]: payload["snapshot"] = "previous"
+    for payload in fresh[1:]: payload["snapshot"] = "new"
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [previous, fresh])
+
+    def fail_partial(endpoint, timeout):
+        payload = fetch(endpoint, timeout)
+        if len(calls) == 3 + failed_endpoint:
+            raise smoke._producer_invalid("API read failed", stage="api_fetch_failed")
+        return payload
+
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fail_partial,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert raised.value.producer_stage == "api_fetch_failed"
+    for key, payload in zip(("run_metadata_path", "jobs_path", "artifacts_path"), previous[1:]):
+        assert kwargs[key].read_bytes() == json.dumps(payload).encode()
+    assert len(calls) == 3 + failed_endpoint
+    assert json.loads((tmp_path / "report.json").read_text())["poll_count"] == 2
+
+
+def test_last_fetch_after_deadline_preserves_complete_triplet(tmp_path):
+    previous = _pending_producer(_producer_payloads(), "run_pending")
+    kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [previous, _producer_payloads()])
+
+    def late_last(endpoint, timeout):
+        payload = fetch(endpoint, timeout)
+        if len(calls) == 6:
+            clock.value = smoke.PRODUCER_WAIT_SECONDS
+        return payload
+
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=late_last,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert raised.value.producer_stage == "readiness_deadline"
+    for key, payload in zip(("run_metadata_path", "jobs_path", "artifacts_path"), previous[1:]):
+        assert kwargs[key].read_bytes() == json.dumps(payload).encode()
+    assert len(calls) == 6
+
+
+def _producer_cli_args(kwargs, output):
+    values = {"candidate-dir": kwargs["candidate_dir"], "repository": kwargs["repository"],
+        "source-commit": kwargs["source_commit"], "candidate-run-id": kwargs["candidate_run_id"],
+        "qualification-run-attempt": kwargs["qualification_run_attempt"],
+        "candidate-run-metadata": kwargs["run_metadata_path"], "candidate-run-jobs": kwargs["jobs_path"],
+        "candidate-run-artifacts": kwargs["artifacts_path"], "output": output}
+    argv = [str(smoke.__file__), "--producer-evidence-only"]
+    for key, value in values.items(): argv.extend(["--" + key, str(value)])
+    return argv
+
+
+def test_collector_cli_selects_and_reports_authenticated_attempt(tmp_path):
+    kwargs, calls, fetch, _ = _collector_fixture(tmp_path, [_producer_payloads()])
+    output = tmp_path / "report.json"
+    with mock.patch.object(smoke.sys, "argv", _producer_cli_args(kwargs, output)), \
+         mock.patch.object(smoke, "_fetch_producer_evidence", side_effect=fetch), \
+         mock.patch.object(smoke, "run_gate", side_effect=AssertionError("native gate forbidden")):
+        assert smoke._main() == 0
+    report = json.loads(output.read_text())
+    assert report["outcome"] == "ready" and report["candidate_run_attempt"] == 1
+    assert "/attempts/1/jobs?per_page=100" in calls[1]
+
+
+def test_collector_cli_selector_failure_is_reported_before_fetch(tmp_path, capsys):
+    payloads = _producer_payloads()
+    payloads[0]["source"]["repository"] = "wrong/repository"
+    kwargs = _write_producer_evidence(tmp_path, payloads)
+    output = tmp_path / "report.json"
+    with mock.patch.object(smoke.sys, "argv", _producer_cli_args(kwargs, output)), \
+         mock.patch.object(smoke, "_fetch_producer_evidence", side_effect=AssertionError("no API on bad selector")), \
+         mock.patch.object(smoke, "run_gate", side_effect=AssertionError("native gate forbidden")):
+        assert smoke._main() == 1
+    report = json.loads(output.read_text())
+    assert report["producer_stage"] == "selector_invalid" and report["poll_count"] == 0
+    assert report["failure_code"] == "candidate_producer_invalid"
+    assert "candidate_run_attempt" not in report
+    stderr = capsys.readouterr().err
+    assert json.loads(stderr)["producer_stage"] == "selector_invalid"
+    assert "wrong/repository" not in stderr and "Traceback" not in stderr
+
+
+def test_collector_explicit_attempt_remains_a_strict_pin(tmp_path):
+    kwargs = _write_producer_evidence(tmp_path, _producer_payloads())
+    kwargs["candidate_run_attempt"] = 2
+    with mock.patch.object(smoke, "_fetch_producer_evidence", side_effect=AssertionError("no API on wrong pin")), \
+         pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", **kwargs)
+    assert raised.value.producer_stage == "attempt_invalid"
+    assert json.loads((tmp_path / "report.json").read_text())["poll_count"] == 0
+
+
+def test_native_cli_still_requires_explicit_candidate_attempt(tmp_path, capsys):
+    kwargs = _write_producer_evidence(tmp_path, _producer_payloads())
+    argv = _producer_cli_args(kwargs, tmp_path / "report.json")
+    argv.remove("--producer-evidence-only")
+    argv.extend(["--app-bundle", str(tmp_path / "Slipstream.app")])
+    with mock.patch.object(smoke.sys, "argv", argv), \
+         mock.patch.object(smoke, "run_gate", side_effect=AssertionError("native gate forbidden")), \
+         pytest.raises(SystemExit) as raised:
+        smoke._main()
+    assert raised.value.code == 2
+    assert "--candidate-run-attempt is required for native qualification" in capsys.readouterr().err

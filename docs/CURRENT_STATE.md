@@ -17,30 +17,49 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
-The stacked `codex/packaged-update-commit-gate` change is based on PR399 head
-`1b2e4c2c6280d053b363be9c1b1c618251352e4d`. Its cleanup repair passed 32
-focused tests; hosted CI39275694290 is still running and audit39275694232 passed.
-Do not merge this successor ahead of PR399's exact-main candidate or dispatch
-app qualification before both root cases pass. Keep the root qualification run
-at the exact `.27` main source before advancing main to this `.28` successor.
+PR400 (`codex/packaged-update-commit-gate`) is synchronized with merged PR401,
+main `abce52944051e472173de8c6e66eb715f061a8be`. The workflow merged cleanly;
+only this checkpoint needed reconciliation. Main remains `.27`; this branch's
+`.28` is a candidate, not a public release. Do not merge this successor into main
+until native root `.26 -> corrected .27` qualification has run at the exact
+`.27` source and both cases pass.
 
-This change integrates the reviewed trigger/observer drafts and commit-only
-workflow. It compiles an isolated adapter around authenticated OLD production
-preparation code; the actual packaged OLD watchdog and NEW app perform activation,
-ACK and commit. The observer attaches before preparation and cannot synthesize
-transaction state. Eight immutable pair pins plus two successful root-run pins
-are checked before install; root NEW must equal app OLD. Only a proven committed
-transaction permits exact-successor cleanup. Unknown outcomes retain evidence
-and fail on the disposable runner. No Geph secret or workstation operation is
-used. The ordinary `.28` version bump produces a byte-distinct successor; it is
-not a public release.
+PR400 integrates the reviewed trigger/observer and commit-only workflow. It
+compiles an isolated adapter around authenticated OLD production preparation;
+the packaged OLD watchdog and NEW app perform activation, ACK and commit. The
+observer attaches before preparation and cannot synthesize transaction state.
+Eight immutable candidate pins plus two successful root-run pins are checked
+before install; root NEW must equal app OLD. Only a proven committed transaction
+permits exact-successor cleanup. Unknown outcomes retain evidence and fail on
+the disposable runner. No Geph secret or workstation operation is used.
 
-All 107 integrated trigger/observer/driver Python tests passed in 0.29s;
-workflow lint, rustfmt and version sync checks passed. Independent source review
-found no blockers. Hosted adapter compilation and native execution remain open.
-The workflow covers commit only; app/watchdog failure before/after ACK, app
-rollback, the normal tray click/Quit, administrator UI and public discovery are
-not qualified by this check. The unchanged public `.24` remains manual-download.
+Unchanged PR400 head `0c3fc4a889845b0ddef71c87e30ce931d89fc538` passed whole
+CI39277553981/audit39277553914, including hosted adapter compilation, its five
+tests, 194 app tests, browser and lifecycle checks. Its 107 hermetic Python tests,
+workflow lint, rustfmt and version synchronization are retained evidence. The
+new merge passed the focused notification workflow contract check and actionlint;
+source review confirmed both branches' unique implementations are byte-identical.
+It still needs its own required CI. Native app commit/rollback, normal
+tray click/Quit, administrator UI and public discovery remain unqualified.
+
+The inherited PR401 repair refreshes only incomplete producer metadata for at
+most 120 seconds/13 polls. Invalid provenance is terminal; native notification
+is never retried. Failed or late API fetches preserve the previous complete
+triplet, and selector failures retain a bounded report. PR401 exact head
+`a5f02585cde1af0945bb8d253480862d6e6b2c3b` passed whole
+CI39290822772/audit39290822779, 136 focused Python checks, actionlint and independent
+review; both review threads were resolved before merge. Its tested and merged
+Git trees are identical. Exact-main CI39293099933 is running and audit39293099930
+passed. The original failed main399 attempt is retained, not reused as qualified
+evidence; its original rejected API predicate was not retained and remains unknown.
+
+Evidence is under `output/updater-daemon-identity`: `pr400-verification`,
+`pr401-p2-verification`, and `main401-verification`. The latter authenticates
+source-pinned `.27` candidate files, signatures, attestation and archive modes;
+qualification requires whole same-attempt CI success. No local Rust build,
+native execution or workstation mutation occurred. Public preview .24 is unchanged.
+
+### Previous .27 implementation evidence
 
 [PR398](https://github.com/aiwaki/slipstream/pull/398) merged at
 `ddfca43ff9d34e8d917bab5cb68cec2b8ff9203b`. Its tested head
@@ -329,18 +348,17 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Reuse the authenticated repaired `.26` candidate from CI39266691016.
-  Finish the `.27` successor/handoff PR and exact-main build,
-  then verify both manifests, signatures, provenance, archive modes and actual
-  tray/daemon binary inequality before one native root qualification dispatch.
-  All older failed pairs remain immutable and must not be retried to qualify
-  the new originating code. The precise native run39261398050 refusal remains
-  unproven; preparation now reports its bounded stage if it fails again.
-- Continue the separate app/watchdog gate only after the native root gate. The
-  draft transaction adapter and unfinished observer are excluded from this
-  version change and have no native qualification yet.
-- Reuse the unchanged preview.24 release/readiness baseline. Public app-update
-  qualification remains separate; no public assets or workstation state change.
+- Authenticate corrected exact-main `.27` from CI39293099933 after whole CI and
+  notification qualification succeed. Reuse authenticated `.26` from
+  CI39266691016; verify signatures/provenance, archive modes and executable
+  inequality. Dispatch both native root `.26 -> .27` cases while main remains
+  `.27`; a partial rerun of an old failed builder cannot qualify the pair.
+- Verify this synchronized PR400's required CI. After successful root
+  qualification, merge and authenticate its `.28` candidate, then run the real
+  packaged app/watchdog commit gate and the prepared pre-ACK rollback extension.
+  Source/hermetic checks alone do not qualify native update or recovery.
+- Reuse preview .24 release/readiness evidence. Public updater qualification is
+  separate; signed public assets and workstation state remain unchanged.
 
 ## External Gates
 
