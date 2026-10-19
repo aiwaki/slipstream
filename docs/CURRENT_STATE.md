@@ -82,7 +82,7 @@ audit39243567046 passed, including packaged browser and lifecycle checks.
 The retained `output/updater-daemon-identity/pr394-green-730-receipt.json` has
 SHA256 `61bf6de7de42c3b07d45671b21890c5ab9f2b7686ca80fc812e304da7939c87c`.
 Main CI39245442918 attempt1 and audit39245442978 passed. The active
-`readme-humanizer` checkout is now on `codex/packaged-geph-update-permissions`.
+`readme-humanizer` checkout is now on `codex/native-update-successor-26`.
 The merged change incorporates the reviewed disposable native driver,
 materializer, workflow and 45 hermetic tests. Its normal source version is
 `0.1.9-preview.25`; synchronization and scoped integration review passed.
@@ -115,6 +115,20 @@ fix, shared verifier, their tests and these docs belong to this change.
 The old candidates remain intact but cannot qualify the native update. A new
 normally built pair is required. No preview.25 release is published, and the
 installed workstation app and public preview.24 remain unchanged.
+
+[PR395](https://github.com/aiwaki/slipstream/pull/395) merged at
+`d3efc1891cd501db1af40b7e21352dd1106b947c`. Final head
+`74cdcfe2d9ba133d589b5c430e9721157e8a6e8b` passed CI39250716497 and
+audit39250716533, including the new bundle-mode gate, packaged browser and
+lifecycle checks. Receipt `output/updater-daemon-identity/pr395-green-74c-receipt.json`
+SHA256: `8d07fe1de4c7390c4593ed7020c91ebd3bb3c3178fe7b5b3fa64ba4692abb656`.
+Main CI39252308451 and audit39252308394 are building the fixed `.25` bridge.
+The current change is only the normal `.26` version bump through
+`scripts/sync_version.py` plus this checkpoint. It changes compiled tray and
+frozen-daemon inputs; actual binary inequality remains an artifact check.
+Version synchronization and the existing daemon-version regression passed.
+The adapter/observer drafts remain untracked and excluded. Neither `.25` nor
+`.26` is published; no workstation operation is requested by this change.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -150,15 +164,16 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Merge the packaging-mode fix after focused tests, independent review and
-  required exact-head CI. Preserve all old candidates and failure evidence.
-- Retain its successful main preview.25 build as the new bridge. A subsequent
-  normal preview.26 source bump must produce distinct tray and daemon bytes.
-  Verify both candidate manifests and attestations, then repeat the two native
-  cases with their new pins. Do not rerun the unchanged rejected pair.
+- Retain the successful exact-main PR395 `.25` candidate, its manifest, artifact
+  hashes and hosted attestation. The earlier rejected pair remains immutable.
+- Merge the normal `.26` version change after its required exact-head CI. Its
+  build may proceed alongside the `.25` bridge build. Retain the successful
+  exact-main `.26` candidate and require different tray and daemon hashes.
+- Dispatch the two native root cases with the fresh source/run/attempt/manifest
+  pins. Do not reuse or modify the old rejected archives.
 - Continue the separate app/watchdog gate only after the native root gate. The
-  draft transaction adapter and unfinished observer remain untracked and are
-  excluded from this packaging fix. They have no native qualification yet.
+  draft transaction adapter and unfinished observer are excluded from this
+  version change and have no native qualification yet.
 - Reuse the unchanged preview.24 release/readiness baseline. Public app-update
   qualification remains separate; no public assets or workstation state change.
 
