@@ -7,6 +7,7 @@ import stat
 from types import SimpleNamespace
 
 import pytest
+import tproxy as production_tproxy
 
 REPO = Path(__file__).resolve().parents[1]
 PATH = REPO / "scripts/native_root_update.py"
@@ -205,6 +206,8 @@ def readonly_observations(monkeypatch):
         _listener_bind_addresses=lambda port, pid: state.addresses,
         pf_state_snapshot=lambda port: {"rules_loaded": state.pf},
         _install_attestation_witness_path=lambda path: path + ".daemon",
+        _install_attestation_identity_matches=lambda *args:
+            production_tproxy._install_attestation_identity_matches(*args),
         _sha256_regular_file=lambda path: state.installed_sha if path == installed else "b" * 64,
         _daemon_update_tree=lambda path: "d" * 64,
         _daemon_update_paths=lambda nonce: ("/fake", "/fake/private/journal.json"))
@@ -225,6 +228,19 @@ def test_root_proof_works_under_python_without_implicit_frozen_executable(monkey
     assert result["process"]["command"] == "/usr/local/slipstream/slipstreamd --port 4433"
     assert result["current_tree_sha256"] == result["old_runtime_sha256"]
     assert state.process_reads == 2 and driver.sys.executable == executable
+
+
+@pytest.mark.parametrize("old_state,new_state", [("dormant", "active"), ("active", "dormant")])
+def test_readonly_proof_accepts_healthy_state_change_without_rewriting_receipt(readonly_observations, old_state, new_state):
+    tproxy, state, sha = readonly_observations
+    state.attestation.update(state=old_state, pf_active=old_state == "active")
+    before = copy.deepcopy(state.attestation)
+    state.raw["daemon"]["state"] = new_state
+    state.pf = new_state == "active"
+    value = driver.readonly_runtime_proof(tproxy, sha)
+    assert value["proof"]["daemon_pid"] == before["launchd"]["pid"]
+    assert value["proof"]["install_attestation_sha256"] == "b" * 64
+    assert state.attestation == before
 
 
 @pytest.mark.parametrize("fault", ["stale", "recovery", "wrong-exe", "launchd", "listener",

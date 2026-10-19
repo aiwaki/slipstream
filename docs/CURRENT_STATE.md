@@ -174,8 +174,43 @@ Authenticated GitHub commands, unknown commands and custom environments omit
 output; only the exact generated root-proof command has its own explicit
 allowlist entry. Forty hermetic driver tests passed in 0.08 seconds; log:
 `output/updater-daemon-identity/native-root-39256896555/diagnostic-tests.log`.
-No native command ran locally. Reuse the unchanged signed `.25`/`.26` pair;
+No native command ran locally. Independent review found no blocking issue.
+[PR397](https://github.com/aiwaki/slipstream/pull/397) merged at
+`2f3b214e648e1e20e86e496f5c75ec8cf717cee7` after CI39259110244 and audit39259110230
+passed on `18db0f2cf122ee79635fd6af3cb16ff2814db6d3`. Their Git trees are equal.
+Receipt `output/updater-daemon-identity/pr397-verification/receipt.json` SHA256:
+`6daaa75989c5a76de93e953445f04b5d48274bb764f6e564b50adff96bc68c11`.
+No unresolved review threads remain. The five untracked adapter/observer drafts
+are excluded. Active branch is now `codex/native-update-qualification`.
+Reuse the unchanged signed `.25`/`.26` pair;
 there is no reason to rebuild or modify these candidates for that change.
+
+Native run39261398050 attempt1 failed in both cases at `prepare-update`:
+the installed frozen daemon exited 77 with `daemon_update_no_operation`.
+Old-daemon installation completed; no root operation was published and both
+cleanup-error lists are empty. Retained receipt
+`output/updater-daemon-identity/native-root-39261398050/receipt.json` SHA256:
+`46dcb9a4c5d7dbefdcf120f7c497268353e1cbc72bfce4fbce88fcb0e6b83bc5`.
+The originating source catches runtime preflight and bundle-sealing errors into
+that code, so the native failure's precise cause is not yet established.
+Source review found a concrete mismatch: the installed attestation records
+historical `state`/`pf_active`, but the root runtime proof requires whole-record
+equality after a healthy same-PID state transition. The Rust consumer already
+separates historical health from stable identity. The production repair validates both historical and fresh health pairs, then
+compares every other attestation field. Fresh OS readiness remains mandatory,
+and the stored receipt is never rewritten to hide an identity change. The
+readonly native observer uses the same pure comparison after its own OS checks.
+Both same-PID transitions failed before repair; 89 root tests and 42 observer
+tests now pass. The root tests include malformed health, stable identity drift,
+actual temporary-file changes and injected CLI refusals. Independent identity
+review passed. Logs: `attestation-health-red.log`,
+`attestation-health-stage-green.log` and
+`native-root-39261398050/observer-health-before.log` under
+`output/updater-daemon-identity/`. Exit77 and its original stderr token are
+preserved; a second line now identifies an allowlisted preparation stage without
+exception text, paths or credentials. No native retry or local runtime operation
+has been performed. Immutable `.25`/`.26` still contain the old comparison; they
+cannot qualify a production repair in the originating daemon.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -197,7 +232,7 @@ not executed locally; format and whitespace checks passed. The reviewed cleanup 
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
 PR393 passed full exact-head and main CI. Disposable native qualification
-failed before installation as described above and remains open. The new workflow's 45 integrated hermetic tests,
+has not passed the native gate described above and remains open. The new workflow's 45 integrated hermetic tests,
 actionlint and source/path wiring review passed. No local Rust build, privileged runtime test or workstation
 installation ran. The unchanged release checks are not repeated.
 
@@ -214,10 +249,12 @@ installation ran. The unchanged release checks are not repeated.
 - Reuse the retained and verified exact-main PR395 `.25` candidate above. The
   earlier rejected pair remains immutable.
 - Reuse the verified exact-main `.26` candidate and binary inequality proof above.
-- Fix the native driver's missing command diagnostics, review and verify the
-  narrow change, then repeat the two root cases with the unchanged verified
-  pair. Run39256896555 failed as recorded above; do not infer a product cause
-  from the generic sudo error or modify signed archives.
+- Open the reviewed scoped PR for the historical-health comparison repair and
+  bounded preparation-stage diagnostics, then wait for its required CI. Retain all
+  fresh runtime readiness and stable identity checks. The precise native
+  run39261398050 refusal remains unproven. After required CI and merge, build a
+  normal fresh originating candidate and successor; do not rerun the unchanged
+  failing pair or modify its signed archives.
 - Continue the separate app/watchdog gate only after the native root gate. The
   draft transaction adapter and unfinished observer are excluded from this
   version change and have no native qualification yet.

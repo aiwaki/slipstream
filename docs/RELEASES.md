@@ -128,6 +128,16 @@ missing heartbeat does not reset it. Exhaustion retains the transaction guard
 and reports the recovery failure. A fresh proof remains mandatory before app
 recovery can finish.
 
+An installation attestation records the service's health at installation time.
+A healthy transition between `dormant` and `active` on the same process must not
+invalidate that receipt. Runtime proof validates both historical and current
+health pairs, compares every other identity field, and independently checks
+current process, listener, witness and PF evidence. It never rewrites the
+installation receipt to conceal drift. A preparation refusal before publication
+keeps exit code `77` and `daemon_update_no_operation`; an additional bounded
+`daemon_update_stage` symbol identifies the failing phase without logging
+exception text, paths, credentials or transaction identity.
+
 | Code owner | Responsibility | Useful failure boundary |
 |---|---|---|
 | [`lib.rs`](../app-tauri/src-tauri/src/lib.rs), `authorize_daemon_update` | Administrator authorization and guarded tray controls | Rejected authorization versus an uncertain privileged outcome |

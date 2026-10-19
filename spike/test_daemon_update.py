@@ -226,11 +226,112 @@ def test_real_status_unwrap_heartbeat_is_used(monkeypatch, tmp_path):
     assert actual["heartbeat_seq"] == 7 and "daemon" not in actual
     monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (True, "ready", actual, False))
     record = {"schema_version": tproxy.INSTALL_ATTESTATION_SCHEMA_VERSION, "source_sha256": sha,
-              "daemon": {"sha256": sha}, "launchd": {"pid": 100}}
+              "daemon": {"sha256": sha}, "launchd": {"pid": 100},
+              "state": "dormant", "pf_active": False}
     monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: record)
     monkeypatch.setattr(tproxy, "_sha256_regular_file", lambda _: sha)
     monkeypatch.setattr(tproxy, "_install_attestation_record", lambda *a, **k: record)
     assert tproxy._daemon_update_runtime_proof(sha)["heartbeat_seq"] == 7
+
+
+@pytest.fixture
+def attested_runtime(monkeypatch, tmp_path):
+    """Real retained inode/hash proof; only native readiness is substituted."""
+    installed = tmp_path / "slipstreamd"
+    installed.write_bytes(b"one unchanged frozen daemon")
+    installed.chmod(0o700)
+    evidence = tmp_path / "install.json"
+    witness = Path(tproxy._install_attestation_witness_path(str(evidence)))
+    os.link(installed, witness)
+    sha = tproxy._sha256_regular_file(str(installed))
+    current = {"state": "dormant", "pid": 100, "heartbeat_seq": 7}
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(tproxy, "INSTALL_ATTESTATION_PATH", str(evidence))
+    monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (
+        True, "ready", dict(current), current["state"] == "active"))
+    original_record = tproxy._install_attestation_record
+    def record(*args, **kwargs):
+        # A hermetic user-owned fixture retains all production inode, mode,
+        # hash and listener-record validation without requiring root.
+        return original_record(*args, **kwargs, expected_uid=os.getuid())
+    monkeypatch.setattr(tproxy, "_install_attestation_record", record)
+    stored = record(str(installed), sha, 0o700, tproxy.PROXY_PORT,
+                    witness_path=str(witness))
+    evidence.write_text(json.dumps(stored))
+    monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: copy.deepcopy(stored))
+    monkeypatch.setattr(tproxy, "_write_install_attestation", lambda *a, **k: pytest.fail("receipt rewritten"))
+    return SimpleNamespace(sha=sha, stored=stored, current=current, evidence=evidence,
+                           installed=installed, witness=witness)
+
+
+@pytest.mark.parametrize("before,after", [("dormant", "active"), ("active", "dormant")])
+def test_runtime_proof_accepts_healthy_state_change_on_same_process(attested_runtime, before, after):
+    runtime = attested_runtime
+    runtime.stored.update(state=before, pf_active=before == "active")
+    runtime.current["state"] = after
+    stored_before = copy.deepcopy(runtime.stored)
+    evidence_before = runtime.evidence.read_bytes()
+    result = tproxy._daemon_update_runtime_proof(runtime.sha)
+    assert result["daemon_pid"] == 100 and result["heartbeat_seq"] == 7
+    assert result["daemon_sha256"] == runtime.sha
+    assert runtime.stored == stored_before and runtime.evidence.read_bytes() == evidence_before
+
+
+@pytest.mark.parametrize("path,value", [
+    (("schema_version",), 2), (("schema_version",), 3.0),
+    (("source_sha256",), "f" * 64), (("unexpected",), True),
+    (("daemon", "path"), "/another/slipstreamd"),
+    (("daemon", "sha256"), "f" * 64), (("daemon", "uid"), -1),
+    (("daemon", "gid"), -1), (("daemon", "mode"), 0o755),
+    (("daemon", "unexpected"), True), (("witness", "ino"), -1),
+    (("launchd", "pid"), 101), (("launchd", "label"), "another.job"),
+    (("listener", "port"), 1081), (("listener", "hosts"), ["127.0.0.1"]),
+])
+def test_runtime_proof_rejects_identity_drift_despite_healthy_transition(attested_runtime, path, value):
+    runtime = attested_runtime
+    runtime.current["state"] = "active"
+    target = runtime.stored
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(RuntimeError, match="identity mismatch|attestation drift"):
+        tproxy._daemon_update_runtime_proof(runtime.sha)
+
+
+@pytest.mark.parametrize("state,pf_active", [
+    ("active", False), ("dormant", True), ("active", 1), ("dormant", 0),
+    ("starting", False), (None, False), ("active", None),
+])
+@pytest.mark.parametrize("side", ["retained", "fresh"])
+def test_identity_comparison_rejects_malformed_health(attested_runtime, state, pf_active, side):
+    retained = copy.deepcopy(attested_runtime.stored)
+    fresh = copy.deepcopy(retained)
+    (retained if side == "retained" else fresh).update(state=state, pf_active=pf_active)
+    assert not tproxy._install_attestation_identity_matches(retained, fresh)
+
+
+def test_runtime_proof_rejects_current_readiness_failure(attested_runtime, monkeypatch):
+    monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (
+        False, "listener or PF readiness failed", None, False))
+    monkeypatch.setattr(tproxy, "_install_attestation_record", lambda *a, **k: pytest.fail("unready proof accepted"))
+    with pytest.raises(RuntimeError, match="readiness missing"):
+        tproxy._daemon_update_runtime_proof(attested_runtime.sha)
+
+
+@pytest.mark.parametrize("mutation", ["payload", "mode", "witness"])
+def test_runtime_proof_rejects_actual_retained_file_change(attested_runtime, mutation):
+    runtime = attested_runtime
+    runtime.current["state"] = "active"
+    if mutation == "payload":
+        runtime.installed.write_bytes(b"different runtime")
+    elif mutation == "mode":
+        runtime.installed.chmod(0o600)
+    else:
+        runtime.witness.unlink()
+        runtime.witness.write_bytes(runtime.installed.read_bytes())
+        runtime.witness.chmod(0o700)
+    with pytest.raises(RuntimeError, match="identity mismatch|rejected mode|witness"):
+        tproxy._daemon_update_runtime_proof(runtime.sha)
 
 
 @pytest.mark.parametrize("vector", json.loads((ROOT / "contracts/update-bundle-tree-v1.json").read_text())["vectors"], ids=lambda v: v["name"])
@@ -549,6 +650,63 @@ def test_expired_authorization_is_definitive_noop_before_staging(prepared_filesy
     with pytest.raises(tproxy.DaemonUpdateNoOperation):
         tproxy.do_update_prepare(json.dumps(value))
     assert not (root / NONCE).exists() and not (root / "active.json").exists() and not boots
+
+
+@pytest.mark.parametrize("stage", [
+    "lease", "runtime-proof", "launch-intent", "plist", "runtime-tree",
+    "seal-old-app", "seal-new-app", "seal-worker", "publish",
+])
+def test_prepare_cli_rejection_reports_only_bounded_stage_and_preserves_noop(
+        prepared_filesystem, monkeypatch, capsys, stage):
+    value, root, boots, _ = prepared_filesystem
+    secret = "private-exception /Users/private/credential identity=secret env=secret"
+    def fail(*args, **kwargs):
+        raise RuntimeError(secret)
+    if stage == "lease":
+        value["prepare_deadline_unix"] = 4102444599
+    elif stage in {"runtime-proof", "launch-intent", "plist"}:
+        symbol = {"runtime-proof": "_daemon_update_runtime_proof",
+                  "launch-intent": "_daemon_update_require_enabled_intent",
+                  "plist": "_daemon_update_read_plist"}[stage]
+        monkeypatch.setattr(tproxy, symbol, fail)
+    elif stage in {"runtime-tree", "seal-worker"}:
+        original = tproxy._daemon_update_tree
+        def tree(path, **kwargs):
+            if ((stage == "runtime-tree" and os.fspath(path) == tproxy.INSTALL_DIR
+                 and not kwargs.get("copy_to"))
+                    or (stage == "seal-worker" and str(kwargs.get("copy_to", "")).endswith("worker-runtime"))):
+                fail()
+            return original(path, **kwargs)
+        monkeypatch.setattr(tproxy, "_daemon_update_tree", tree)
+    elif stage in {"seal-old-app", "seal-new-app"}:
+        def verify(app, identity, side):
+            if stage == "seal-" + side + "-app":
+                fail()
+        monkeypatch.setattr(tproxy, "_daemon_update_verify_app", verify)
+    else:
+        original_write = tproxy._update_write_json
+        def write(path, *args, **kwargs):
+            if str(path).endswith("/private/journal.json"):
+                fail()
+            return original_write(path, *args, **kwargs)
+        monkeypatch.setattr(tproxy, "_update_write_json", write)
+    installed_before = Path(tproxy.INSTALL_DIR, "slipstreamd").read_bytes()
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(tproxy.sys, "argv", ["slipstreamd", "--update-prepare", json.dumps(value)])
+    with pytest.raises(SystemExit) as result:
+        tproxy.main()
+    assert result.value.code == 77
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == f"daemon_update_no_operation\ndaemon_update_stage={stage}\n"
+    assert not (root / NONCE).exists() and not (root / "active.json").exists() and not boots
+    assert not (root / (".prepare-" + NONCE)).exists()
+    assert Path(tproxy.INSTALL_DIR, "slipstreamd").read_bytes() == installed_before
+
+
+def test_noop_stage_rejects_arbitrary_exception_payload():
+    with pytest.raises(ValueError, match="^invalid update rejection stage$"):
+        tproxy.DaemonUpdateNoOperation("private exception /path/credential")
 
 
 def test_canonical_publication_before_worker_plist_recovers_on_identical_prepare(prepared_filesystem, monkeypatch):
