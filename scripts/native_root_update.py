@@ -537,7 +537,8 @@ def readonly_runtime_proof(tproxy, expected_sha):
         "launchd": {"label": tproxy.LAUNCHD_LABEL, "pid": pid},
         "listener": {"host": "127.0.0.1", "hosts": ["127.0.0.1", "::1"], "port": port},
         "state": status["state"], "pf_active": pf_active}
-    require(fresh == attestation, "installed daemon attestation drift")
+    require(tproxy._install_attestation_identity_matches(attestation, fresh),
+            "installed daemon attestation drift")
     require(process() == birth, "daemon process changed during proof")
     return {"proof": {"daemon_pid": pid, "daemon_sha256": expected_sha,
                       "heartbeat_seq": heartbeat,

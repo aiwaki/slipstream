@@ -16202,6 +16202,28 @@ def _install_attestation_witness_path(evidence_path):
     return f"{evidence_path}.daemon"
 
 
+def _install_attestation_identity_matches(attestation, fresh):
+    """Compare a retained receipt with an already verified live record.
+
+    Network health can change on the same installed process. Validate both
+    health snapshots, but compare every other field, including unknown fields,
+    so this exception cannot hide changes to the retained runtime identity.
+    The caller must independently establish fresh OS readiness.
+    """
+    for record in (attestation, fresh):
+        if (not isinstance(record, dict)
+                or type(record.get("schema_version")) is not int
+                or record["schema_version"] != INSTALL_ATTESTATION_SCHEMA_VERSION
+                or record.get("state") not in ("active", "dormant")
+                or type(record.get("pf_active")) is not bool
+                or record["pf_active"] != (record["state"] == "active")):
+            return False
+    return (
+        {key: value for key, value in attestation.items() if key not in {"state", "pf_active"}}
+        == {key: value for key, value in fresh.items() if key not in {"state", "pf_active"}}
+    )
+
+
 def _ensure_install_attestation_directory(
     parent,
     *,
@@ -16909,6 +16931,15 @@ def _daemon_update_paths(nonce):
 class DaemonUpdateNoOperation(RuntimeError):
     """Definitive rejection with no published operation, under installer lock."""
 
+    def __init__(self, stage):
+        if stage not in {
+            "lease", "runtime-proof", "launch-intent", "plist", "runtime-tree",
+            "seal-old-app", "seal-new-app", "seal-worker", "publish",
+        }:
+            raise ValueError("invalid update rejection stage")
+        super().__init__("update rejected before publication")
+        self.stage = stage
+
 
 def _daemon_update_manifest(journal):
     return hashlib.sha256(_update_json_bytes({
@@ -16971,7 +17002,7 @@ def _daemon_update_runtime_proof(expected_sha, port=PROXY_PORT):
         installed, expected_sha, 0o700, port,
         witness_path=_install_attestation_witness_path(INSTALL_ATTESTATION_PATH),
     )
-    if fresh != attestation:
+    if not _install_attestation_identity_matches(attestation, fresh):
         raise RuntimeError("update daemon attestation drift")
     heartbeat = status.get("heartbeat_seq")
     if type(heartbeat) is not int or heartbeat < 0:
@@ -17123,18 +17154,22 @@ def do_update_prepare(raw_identity):
                 _daemon_update_ensure_worker(journal)
         else:
             if not time.time() < identity["prepare_deadline_unix"] <= time.time() + _DAEMON_UPDATE_TTL:
-                raise DaemonUpdateNoOperation("update authorization lease expired or invalid")
+                raise DaemonUpdateNoOperation("lease")
+            stage = "runtime-proof"
             try:
                 proof = _daemon_update_runtime_proof(identity["old_daemon_sha256"])
+                stage = "launch-intent"
                 _daemon_update_require_enabled_intent()
+                stage = "plist"
                 old_plist, plist_sha = _daemon_update_read_plist()
+                stage = "runtime-tree"
                 installed_metadata = os.lstat(INSTALL_DIR)
                 if (not stat.S_ISDIR(installed_metadata.st_mode) or installed_metadata.st_uid != 0
                         or stat.S_IMODE(installed_metadata.st_mode) != 0o700):
                     raise RuntimeError("installed runtime ownership invalid")
                 payload_sha = _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",))
             except Exception:
-                raise DaemonUpdateNoOperation("update preflight rejected before publication") from None
+                raise DaemonUpdateNoOperation(stage) from None
             temporary = os.path.join(_DAEMON_UPDATE_ROOT, ".prepare-" + nonce)
             if os.path.lexists(temporary):
                 # No worker can refer to an unpublished, root-owned staging
@@ -17149,17 +17184,20 @@ def do_update_prepare(raw_identity):
                     ("old", _DAEMON_UPDATE_TARGET),
                     ("new", os.path.join(os.path.dirname(_DAEMON_UPDATE_TARGET), ".Slipstream.app.slipstream-stage-" + nonce)),
                 ):
+                    stage = "seal-" + side + "-app"
                     destination = os.path.join(temporary, side + ".app")
                     digest = _daemon_update_tree(source, copy_to=destination, readable=True)
                     if digest != identity[side + "_bundle_tree_sha256"]:
                         raise RuntimeError("approved update bundle changed")
                     os.chmod(destination, 0o755)
                     _daemon_update_verify_app(destination, identity, side)
+                stage = "seal-worker"
                 _update_private_directory(os.path.join(temporary, "private"))
                 worker_runtime = os.path.join(temporary, "private", "worker-runtime")
                 worker_sha = _daemon_update_tree(INSTALL_DIR, copy_to=worker_runtime)
                 if _daemon_update_tree(worker_runtime, exclude_names=("tgws-secret",)) != payload_sha:
                     raise RuntimeError("installed worker payload changed during prepare")
+                stage = "publish"
                 journal = {
                     "identity": identity, "manifest_sha256": "",
                     "phase": "prepared", "decision": None, "accepted_sequence": 0,
@@ -17175,6 +17213,7 @@ def do_update_prepare(raw_identity):
                 journal["manifest_sha256"] = _daemon_update_manifest(journal)
                 _update_write_json(os.path.join(temporary, "private", "journal.json"), journal)
                 if time.time() >= identity["prepare_deadline_unix"]:
+                    stage = "lease"
                     raise RuntimeError("update authorization lease expired while sealing")
                 os.chmod(temporary, 0o755)
                 os.rename(temporary, operation)
@@ -17187,7 +17226,7 @@ def do_update_prepare(raw_identity):
                 # No runtime mutation occurs in prepare. If canonical state is
                 # already published, leave it for the bounded root worker.
                 if not os.path.lexists(operation):
-                    raise DaemonUpdateNoOperation("update preflight rejected before publication") from None
+                    raise DaemonUpdateNoOperation(stage) from None
                 raise
     # The worker cannot acquire the installer lock until prepare releases it.
     deadline = time.monotonic() + 10
@@ -18157,8 +18196,9 @@ def main():
                 with _installer_operation_lock():
                     result = (do_install(args.port) if args.install else
                               do_uninstall(cleanup_updater=True) if args.uninstall else recover_owned_network_state())
-        except DaemonUpdateNoOperation:
+        except DaemonUpdateNoOperation as error:
             print("daemon_update_no_operation", file=sys.stderr)
+            print(f"daemon_update_stage={error.stage}", file=sys.stderr)
             sys.exit(77)
         except Exception:
             print("privileged installation operation failed; inspect retained update state", file=sys.stderr)
