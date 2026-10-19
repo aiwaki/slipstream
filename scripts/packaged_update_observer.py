@@ -266,6 +266,9 @@ class Observer(Native):
 
     def setup_observation(self):
         require_commit_mode(self.args.mode)
+        self.authenticate_observation()
+
+    def authenticate_observation(self):
         pair = pins(document(self.args.pair_manifest))
         require(type(pair["schema_version"]) is int, "invalid pair schema version")
         for side in ("old", "new"):

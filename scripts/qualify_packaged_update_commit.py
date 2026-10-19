@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Disposable commit-only adapter gate; not old-tray Quit or public update proof."""
+"""Disposable packaged commit or one pre-ACK rollback gate; not old-tray Quit or public update proof."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ import time
 from build_packaged_update_trigger import pins
 from native_root_update import Native, Refused, digest, document, guard, modules, require
 from packaged_update_observer import Observer, exact_equal, exact_successor, same_process
+from packaged_update_preack import PreAckObserver
 
 
 MODES = ("commit", "crash-before-commit")
@@ -23,13 +24,13 @@ UNQUALIFIED = ["old tray exit", "release discovery", "administrator dialog",
 
 
 def prerequisite(metadata, directory, pair, expected, run_id, attempt):
-    """Authenticate the root gate separately from the app candidate CI pins."""
+    """Require successful root qualification of this complete app candidate pair."""
     require(metadata.get("id") == run_id and metadata.get("run_attempt") == attempt
-            and metadata.get("head_sha") == pair["old"]["source_commit"]
+            and metadata.get("head_sha") == pair["new"]["source_commit"]
             and metadata.get("head_branch") == "main" and metadata.get("event") == "workflow_dispatch"
             and metadata.get("path") == ".github/workflows/native-root-update-qualification.yml"
             and metadata.get("status") == "completed" and metadata.get("conclusion") == "success",
-            "root prerequisite must be successful exact OLD main workflow/attempt")
+            "root prerequisite must be successful exact NEW main workflow/attempt")
     require(expected["old"]["version"] == "0.1.9-preview.27"
             and expected["new"]["version"] == "0.1.9-preview.28", "this gate requires normal .27 -> .28 candidates")
     root_pair = None
@@ -37,11 +38,11 @@ def prerequisite(metadata, directory, pair, expected, run_id, attempt):
     for mode in MODES:
         folder = directory / f"native-root-update-{mode}-{run_id}-{attempt}"
         root_pins = pins(document(folder / "pair.json"))
-        require(exact_equal(root_pins["new"], pair["old"]), "root NEW must be the exact app OLD candidate")
+        require(exact_equal(root_pins, pair), "root and app gates must use the same exact candidate pair")
         require(root_pair is None or exact_equal(root_pair, root_pins), "root cases used different pairs")
         root_pair = root_pins
         outcome = document(folder / "workflow-outcome.json")
-        require(outcome.get("source_sha") == pair["old"]["source_commit"]
+        require(outcome.get("source_sha") == pair["new"]["source_commit"]
                 and outcome.get("run_id") == str(run_id) and outcome.get("run_attempt") == str(attempt)
                 and outcome.get("mode") == mode and outcome.get("job_status_before_upload") == "success"
                 and outcome.get("steps", {}).get("qualify") == "success", "root case workflow outcome mismatch")
@@ -51,19 +52,34 @@ def prerequisite(metadata, directory, pair, expected, run_id, attempt):
                 and result.get("public_pair_qualified") is False
                 and result.get("new_daemon_preinstalled") is False
                 and result.get("cleanup_errors") == [], "root case failed or cleanup incomplete")
-        artifacts = {item["side"]: {k: v for k, v in item.items() if k not in {"kind", "side"}}
-                     for item in result.get("events", []) if item.get("kind") == "artifact"}
-        require(exact_equal(artifacts.get("new"), expected["old"])
-                and artifacts.get("old", {}).get("version") == "0.1.9-preview.26",
-                "root case did not qualify the authenticated .26 -> .27 payloads")
+        events = result.get("events")
+        require(isinstance(events, list) and all(isinstance(item, dict) for item in events),
+                "root artifact observations malformed")
+        artifacts = [item for item in events if item.get("kind") == "artifact"]
+        require(len(artifacts) == 2, "root case needs exactly one OLD and one NEW artifact")
+        for side in ("old", "new"):
+            records = [item for item in artifacts if item.get("side") == side]
+            require(len(records) == 1 and exact_equal(
+                {k: v for k, v in records[0].items() if k not in {"kind", "side"}}, expected[side]),
+                "root artifact differs from authenticated " + side + " payload")
         identity = result.get("identity", {})
-        require(identity.get("old_version") == "0.1.9-preview.26"
-                and identity.get("new_version") == expected["old"]["version"]
-                and identity.get("new_app_executable_sha256") == expected["old"]["app_executable_sha256"]
-                and identity.get("new_daemon_sha256") == expected["old"]["daemon_sha256"], "root identity mismatch")
+        expected_identity = {"archive_sha256": expected["new"]["archive_sha256"]}
+        for side in ("old", "new"):
+            for field in ("version", "app_executable_sha256", "daemon_sha256", "bundle_tree_sha256"):
+                expected_identity[side + "_" + field] = expected[side][field]
+        require(isinstance(identity, dict) and all(exact_equal(identity.get(key), value)
+                for key, value in expected_identity.items()), "root identity mismatch")
         receipt_hashes[mode] = {name: digest(folder / name)
                                for name in ("pair.json", "workflow-outcome.json", "result.json")}
     return {"run_id": run_id, "run_attempt": attempt, "pair": root_pair, "sha256": receipt_hashes}
+
+
+def verify_harness_source(backend, pair):
+    """The app observer runs from the same main source as the successor/root gate."""
+    expected = pair["new"]["source_commit"]
+    require(os.environ.get("GITHUB_SHA") == expected, "app workflow SHA differs from exact NEW source")
+    head = backend.run(["/usr/bin/git", "-C", str(backend.args.repo), "rev-parse", "HEAD"]).stdout.decode("ascii").strip()
+    require(head == expected, "app checkout HEAD differs from exact NEW source")
 
 
 def install_old(backend):
@@ -122,7 +138,7 @@ def cleanup_committed(backend):
     Native.teardown(backend)
 
 
-def drive(backend, *, start=subprocess.Popen, cleanup=cleanup_committed):
+def drive(backend, *, start=subprocess.Popen, cleanup=None):
     install_old(backend)
     backend.setup_observation()  # Real observer is ready before the trigger exists.
     backend.trigger_started = True  # Even a lost Popen reply makes cleanup uncertain.
@@ -133,6 +149,8 @@ def drive(backend, *, start=subprocess.Popen, cleanup=cleanup_committed):
         result = backend.qualify_app()
         require(process.wait(timeout=5) == 0, "trigger did not return successful preparation")
     backend.transaction_observed = True
+    if cleanup is None:
+        cleanup = cleanup_committed if backend.args.mode == "commit" else lambda value: value.cleanup_rollback()
     cleanup(backend)
     return result
 
@@ -146,8 +164,8 @@ def main(argv=None):
     parser.add_argument("--root-gate-attempt", required=True)
     parser.add_argument("--gh", required=True)
     parser.add_argument("--repository", default="aiwaki/slipstream")
+    parser.add_argument("--mode", choices=("commit", "kill-successor-before-ack"), default="commit")
     args = parser.parse_args(argv)
-    args.mode = "commit"
     uid = guard()
     temp = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
     for name in ("repo", "pair_manifest", "old_candidate_dir", "new_candidate_dir", "old_app", "new_app", "trigger_dir", "root_gate_dir"):
@@ -159,15 +177,20 @@ def main(argv=None):
             "positive exact root run/attempt required")
     run_id, attempt = int(args.root_gate_run_id), int(args.root_gate_attempt)
     tproxy, candidate = modules(args.repo)
-    backend = Observer(args, uid, tproxy, candidate)
+    backend_type = Observer if args.mode == "commit" else PreAckObserver
+    backend = backend_type(args, uid, tproxy, candidate)
     backend.trigger_started = backend.transaction_observed = False
-    result = {"schema_version": 1, "status": "failed", "mode": "commit", "packaged_transaction_qualified": False,
-              "public_pair_qualified": False, "transaction_observed": False, "not_qualified": UNQUALIFIED,
+    result = {"schema_version": 1, "status": "failed", "mode": args.mode, "packaged_transaction_qualified": False,
+              "successor_exit_before_ack_rollback_qualified": False,
+              "public_pair_qualified": False, "transaction_observed": False, "not_qualified": (UNQUALIFIED if args.mode == "commit" else
+                  ["old tray exit", "release discovery", "administrator dialog", "other app rollback faults",
+                   "exit after ACK", "browser routing"]),
               "driver_sha256": digest(Path(__file__)), "cleanup_errors": []}
     fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as output:
         try:
             pair = pins(document(args.pair_manifest))
+            verify_harness_source(backend, pair)
             for side in ("old", "new"):
                 backend.expected[side] = backend.artifact(side, pair[side], getattr(args, side + "_app"),
                                                            getattr(args, side + "_candidate_dir"))

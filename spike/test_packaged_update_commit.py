@@ -18,12 +18,12 @@ def fixture(tmp_path):
     def pin(char, run):
         return {"source_commit": char * 40, "candidate_manifest_sha256": char * 64, "run_id": run, "run_attempt": 1}
     pair = {"schema_version": 1, "old": pin("b", 102), "new": pin("c", 103)}
-    root_pair = {"schema_version": 1, "old": pin("a", 101), "new": pair["old"]}
+    root_pair = copy.deepcopy(pair)
     def artifact(version, char):
         return {"version": "0.1.9-preview." + str(version), "source_commit": char * 40,
                 **{key: char * 64 for key in ("archive_sha256", "app_executable_sha256", "daemon_sha256", "bundle_tree_sha256")}}
     expected = {"old": artifact(27, "b"), "new": artifact(28, "c")}
-    metadata = {"id": 200, "run_attempt": 2, "head_sha": pair["old"]["source_commit"], "head_branch": "main",
+    metadata = {"id": 200, "run_attempt": 2, "head_sha": pair["new"]["source_commit"], "head_branch": "main",
                 "event": "workflow_dispatch", "path": ".github/workflows/native-root-update-qualification.yml",
                 "status": "completed", "conclusion": "success"}
     for mode in gate.MODES:
@@ -34,35 +34,37 @@ def fixture(tmp_path):
                    "job_status_before_upload": "success", "steps": {"qualify": "success"}}
         result = {"status": "passed", "mode": mode, "root_protocol_qualified": True,
                   "public_pair_qualified": False, "new_daemon_preinstalled": False, "cleanup_errors": [],
-                  "identity": {"old_version": "0.1.9-preview.26", "new_version": "0.1.9-preview.27",
-                               "new_app_executable_sha256": "b" * 64, "new_daemon_sha256": "b" * 64},
-                  "events": [{"kind": "artifact", "side": "old", **artifact(26, "a")},
-                             {"kind": "artifact", "side": "new", **expected["old"]}]}
+                  "identity": {"archive_sha256": expected["new"]["archive_sha256"],
+                               **{side + "_" + field: expected[side][field] for side in ("old", "new")
+                                  for field in ("version", "app_executable_sha256", "daemon_sha256", "bundle_tree_sha256")}},
+                  "events": [{"kind": "artifact", "side": side, **expected[side]} for side in ("old", "new")]}
         (directory / "workflow-outcome.json").write_text(json.dumps(outcome))
         (directory / "result.json").write_text(json.dumps(result))
     return metadata, pair, expected
 
 
-def test_requires_both_successful_root_cases_bound_to_exact_app_origin(tmp_path):
+def test_requires_both_successful_root_cases_bound_to_same_complete_app_pair(tmp_path):
     metadata, pair, expected = fixture(tmp_path)
     proof = gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
     assert set(proof["sha256"]) == set(gate.MODES)
-    assert proof["pair"]["new"] == pair["old"]
+    assert proof["pair"] == pair
     assert proof["run_attempt"] == 2
 
 
-@pytest.mark.parametrize("field,value", [("head_sha", "a" * 40), ("run_attempt", 1), ("head_branch", "feature"),
+@pytest.mark.parametrize("field,value", [("head_sha", "a" * 40), ("head_sha", "b" * 40),
+    ("id", 201), ("run_attempt", 1), ("head_branch", "feature"), ("status", "in_progress"),
     ("path", ".github/workflows/ci.yml"), ("conclusion", "failure"), ("event", "pull_request")])
 def test_root_workflow_identity_cannot_be_replaced(tmp_path, field, value):
     metadata, pair, expected = fixture(tmp_path)
     metadata[field] = value
-    with pytest.raises(Refused, match="exact OLD"):
+    with pytest.raises(Refused, match="exact NEW"):
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
 
 
 @pytest.mark.parametrize("name,field,value", [
     ("pair.json", "new", {"source_commit": "b" * 40, "candidate_manifest_sha256": "e" * 64, "run_id": 102, "run_attempt": 1}),
     ("workflow-outcome.json", "run_attempt", "1"), ("workflow-outcome.json", "job_status_before_upload", "failure"),
+    ("workflow-outcome.json", "source_sha", "b" * 40),
     ("result.json", "root_protocol_qualified", False), ("result.json", "cleanup_errors", ["residue"]),
     ("result.json", "new_daemon_preinstalled", True), ("result.json", "events", []),
     ("result.json", "identity", {})])
@@ -81,6 +83,132 @@ def test_root_pass_cannot_qualify_unfixed_origin(tmp_path):
     expected["old"]["version"] = "0.1.9-preview.26"
     with pytest.raises(Refused, match=".27 -> .28"):
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
+@pytest.mark.parametrize("side", ["old", "new"])
+@pytest.mark.parametrize("field", ["source_commit", "candidate_manifest_sha256", "run_id", "run_attempt"])
+def test_root_pair_rejects_each_changed_immutable_pin(tmp_path, side, field):
+    metadata, pair, expected = fixture(tmp_path)
+    path = tmp_path / "native-root-update-commit-200-2/pair.json"
+    changed = json.loads(path.read_text())
+    before = changed[side][field]
+    changed[side][field] = before + 100 if isinstance(before, int) else "d" * len(before)
+    path.write_text(json.dumps(changed))
+    with pytest.raises(Refused, match="same exact candidate pair"):
+        gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
+def test_previous_root_pair_cannot_authorize_app_origin_to_successor(tmp_path):
+    metadata, pair, expected = fixture(tmp_path)
+    path = tmp_path / "native-root-update-commit-200-2/pair.json"
+    changed = {"schema_version": 1, "old": {"source_commit": "a" * 40,
+        "candidate_manifest_sha256": "a" * 64, "run_id": 101, "run_attempt": 1}, "new": pair["old"]}
+    path.write_text(json.dumps(changed))
+    with pytest.raises(Refused, match="same exact candidate pair"):
+        gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
+@pytest.mark.parametrize("side", ["old", "new"])
+@pytest.mark.parametrize("field", ["version", "source_commit", "archive_sha256", "app_executable_sha256",
+                                  "daemon_sha256", "bundle_tree_sha256"])
+def test_full_root_artifact_records_must_match_both_authenticated_payloads(tmp_path, side, field):
+    metadata, pair, expected = fixture(tmp_path)
+    path = tmp_path / "native-root-update-commit-200-2/result.json"
+    changed = json.loads(path.read_text())
+    record = next(item for item in changed["events"] if item["side"] == side)
+    record[field] = "other" if field == "version" else "d" * len(record[field])
+    path.write_text(json.dumps(changed))
+    with pytest.raises(Refused, match="root artifact differs"):
+        gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
+@pytest.mark.parametrize("mode", gate.MODES)
+@pytest.mark.parametrize("kind", ["duplicate", "missing", "duplicate-side", "malformed", "extra-field"])
+def test_root_artifact_observations_are_exactly_one_complete_record_per_side(tmp_path, mode, kind):
+    metadata, pair, expected = fixture(tmp_path)
+    path = tmp_path / f"native-root-update-{mode}-200-2/result.json"
+    changed = json.loads(path.read_text())
+    events = changed["events"]
+    if kind == "duplicate":
+        events.append(copy.deepcopy(events[0]))
+    elif kind == "missing":
+        events.pop()
+    elif kind == "duplicate-side":
+        events[1] = copy.deepcopy(events[0])
+    elif kind == "malformed":
+        events.append(None)
+    else:
+        events[0]["unexpected"] = True
+    path.write_text(json.dumps(changed))
+    with pytest.raises(Refused):
+        gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
+@pytest.mark.parametrize("field", ["archive_sha256"] + [side + "_" + key for side in ("old", "new")
+    for key in ("version", "app_executable_sha256", "daemon_sha256", "bundle_tree_sha256")])
+def test_root_identity_binds_both_versions_and_all_transaction_hashes(tmp_path, field):
+    metadata, pair, expected = fixture(tmp_path)
+    path = tmp_path / "native-root-update-crash-before-commit-200-2/result.json"
+    changed = json.loads(path.read_text())
+    changed["identity"][field] = "other" if field.endswith("version") else "d" * 64
+    path.write_text(json.dumps(changed))
+    with pytest.raises(Refused, match="root identity mismatch"):
+        gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
+@pytest.mark.parametrize("head,workflow_sha", [("c", "c"), ("b", "c"), ("c", "b"), ("c", None)])
+def test_harness_requires_actual_checkout_and_workflow_sha_to_match_successor(tmp_path, monkeypatch, head, workflow_sha):
+    _, pair, _ = fixture(tmp_path)
+    if workflow_sha is None:
+        monkeypatch.delenv("GITHUB_SHA", raising=False)
+    else:
+        monkeypatch.setenv("GITHUB_SHA", workflow_sha * 40)
+    calls = []
+    def run(argv):
+        calls.append(argv)
+        return SimpleNamespace(stdout=(head * 40 + "\n").encode("ascii"))
+    backend = SimpleNamespace(args=SimpleNamespace(repo=tmp_path), run=run)
+    if head == workflow_sha == "c":
+        gate.verify_harness_source(backend, pair)
+    else:
+        with pytest.raises(Refused, match="exact NEW source"):
+            gate.verify_harness_source(backend, pair)
+    assert calls == ([["/usr/bin/git", "-C", str(tmp_path), "rev-parse", "HEAD"]] if workflow_sha == "c" else [])
+
+
+@pytest.mark.parametrize("mode", ["commit", "kill-successor-before-ack"])
+@pytest.mark.parametrize("head,workflow_sha", [("b", "c"), ("c", "b")])
+def test_harness_source_mismatch_stops_main_before_artifact_or_install(tmp_path, monkeypatch, head, workflow_sha, mode):
+    _, pair, _ = fixture(tmp_path)
+    (tmp_path / "pair.json").write_text(json.dumps(pair))
+    paths = {name: tmp_path / name for name in ("repo", "old-candidate-dir", "new-candidate-dir", "old-app",
+                                               "new-app", "trigger-dir", "root-gate-dir")}
+    for path in paths.values():
+        path.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("GITHUB_SHA", workflow_sha * 40)
+    monkeypatch.setattr(gate, "guard", lambda: 501)
+    monkeypatch.setattr(gate, "modules", lambda repo: (None, None))
+    backend = SimpleNamespace(expected={}, events=[], identity=None,
+        run=lambda argv: SimpleNamespace(stdout=(head * 40 + "\n").encode("ascii")),
+        artifact=lambda *a: pytest.fail("artifact processing before source proof"))
+    def observer(args, *unused):
+        backend.args = args
+        return backend
+    monkeypatch.setattr(gate, "Observer", observer)
+    monkeypatch.setattr(gate, "PreAckObserver", observer)
+    monkeypatch.setattr(gate, "drive", lambda b: pytest.fail("install before source proof"))
+    cleaned = []
+    monkeypatch.setattr(gate.Native, "teardown", lambda b: cleaned.append(b))
+    argv = [value for name, path in paths.items() for value in ("--" + name, str(path))]
+    output = tmp_path / "result.json"
+    argv += ["--pair-manifest", str(tmp_path / "pair.json"), "--output", str(output),
+             "--root-gate-run-id", "200", "--root-gate-attempt", "2", "--gh", "/unused/gh", "--mode", mode]
+    assert gate.main(argv) == 2
+    result = json.loads(output.read_text())
+    assert "exact NEW source" in result["reason"] and result["cleanup_errors"] == []
+    assert result["mode"] == mode
+    assert not result["transaction_observed"] and cleaned == [backend]
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -169,6 +297,7 @@ def test_workflow_uses_exact_pair_builder_and_observer_without_repair_hooks():
         assert script in source
     assert "ref: ${{ inputs.old_source_sha }}" in source
     assert "native-root-update-*-${{ inputs.root_gate_run_id }}-${{ inputs.root_gate_attempt }}" in source
+    assert "Successful exact NEW main root-gate run ID for the same .27 to .28 pair" in source
     assert "kickstart" not in source and "--update-prepare" not in source
     assert "if: always()" in source and "prepare-result.json" in source
 

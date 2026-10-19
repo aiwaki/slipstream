@@ -1,4 +1,4 @@
-name: Packaged update commit observation
+name: Packaged update commit and pre-ACK rollback observation
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ on:
         required: true
         type: string
       root_gate_run_id:
-        description: Successful exact OLD main root-gate run ID (.26 to .27)
+        description: Successful exact NEW main root-gate run ID for the same .27 to .28 pair
         required: true
         type: string
       root_gate_attempt:
@@ -51,9 +51,14 @@ permissions:
 
 jobs:
   packaged-commit:
+    name: Packaged update (${{ matrix.mode }})
     if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [commit, kill-successor-before-ack]
     env:
       SLIPSTREAM_DISPOSABLE_CI: "1"
     steps:
@@ -131,14 +136,16 @@ jobs:
             --old-app "$RUNNER_TEMP/app-update/old-app/Slipstream.app" \
             --new-app "$RUNNER_TEMP/app-update/new-app/Slipstream.app" \
             --output-dir "$RUNNER_TEMP/app-update-trigger" --gh "$(command -v gh)"
-      - name: Observe production prepare, packaged watchdog and real ACK (commit only)
+      - name: Observe packaged update (${{ matrix.mode }})
         id: qualify
         env:
           GH_TOKEN: ${{ github.token }}
           ROOT_GATE_RUN_ID: ${{ inputs.root_gate_run_id }}
           ROOT_GATE_ATTEMPT: ${{ inputs.root_gate_attempt }}
+          CASE_MODE: ${{ matrix.mode }}
         run: |
           "$RUNNER_TEMP/app-update-python/bin/python" scripts/qualify_packaged_update_commit.py \
+            --mode "$CASE_MODE" \
             --repo "$GITHUB_WORKSPACE" --pair-manifest "$RUNNER_TEMP/app-update/pair.json" \
             --old-candidate-dir "$RUNNER_TEMP/app-update/old-candidate" \
             --new-candidate-dir "$RUNNER_TEMP/app-update/new-candidate" \
@@ -154,7 +161,7 @@ jobs:
           OUTCOME_RUN_SHA: ${{ github.sha }}
           OUTCOME_RUN_ID: ${{ github.run_id }}
           OUTCOME_RUN_ATTEMPT: ${{ github.run_attempt }}
-          OUTCOME_MODE: commit
+          OUTCOME_MODE: ${{ matrix.mode }}
           OUTCOME_JOB_STATUS: ${{ job.status }}
           OUTCOME_CHECKOUT: ${{ steps.checkout.outcome }}
           OUTCOME_PYTHON: ${{ steps.python.outcome }}
@@ -196,7 +203,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: packaged-update-commit-${{ github.run_id }}-${{ github.run_attempt }}
+          name: packaged-update-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/app-update/*.json
             ${{ runner.temp }}/packaged-commit-result.json
@@ -205,3 +212,15 @@ jobs:
             ${{ runner.temp }}/app-update-trigger/build.log
           if-no-files-found: error
           retention-days: 14
+
+  packaged-update-qualification:
+    name: Require both packaged update cases
+    if: always() && github.ref == 'refs/heads/main'
+    needs: packaged-commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require successful commit and pre-ACK rollback
+        env:
+          CASES_RESULT: ${{ needs.packaged-commit.result }}
+        run: test "$CASES_RESULT" = success
