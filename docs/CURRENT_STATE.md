@@ -40,11 +40,11 @@ qualify the uncommitted work below or change the published `.24` binary.
 [PR393](https://github.com/aiwaki/slipstream/pull/393), branch
 `codex/coordinated-daemon-update` in the attached `readme-humanizer` worktree,
 starts from that merge. Source commit `66d3f2e4151341802c415bdd54c2dfe2ef743477`
-is pushed. Audit39231763995 passed. CI39231763959 passed Python and Windows
-checks but stopped Rust compilation at a test-only `libc::lchmod` call missing
-from pinned libc 0.2.186. The fixture now uses supported no-follow `fchmodat`;
-its symlink/target behavior was checked without a Rust build. A new exact-head
-CI run must execute the Rust regressions. Rust and Python now join the watchdog and
+is pushed. After a test-fixture API fix, head
+`2462fd7e68fbae18de67f36ccbf7ac07a01e6745` passed 184 app tests, 29 browser-probe
+tests, 3 updater installer tests, Python suites, Windows checks and dependency
+audit39232771857. CI39232771871 stopped at two narrow Clippy findings; those
+are corrected in the follow-up. A fresh exact-head CI result is still required. Rust and Python now join the watchdog and
 privileged daemon installer into one recoverable transaction. The installed
 workstation app and the published release are unchanged.
 
@@ -67,7 +67,8 @@ and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
 Independent final source review found no remaining concrete blockers.
-Hosted compilation/tests and disposable native qualification remain pending.
+Compilation and tests passed at the preceding head; final lint/packaging and
+disposable native qualification remain pending.
 No local Rust build, privileged runtime test, or workstation installation ran.
 
 | Milestone | Current boundary |

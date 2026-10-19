@@ -895,6 +895,8 @@ fn try_transaction_lock(state_dir: &Path) -> Result<Option<File>, String> {
     }
 }
 
+// Keep the independent launchd and authorization effects injectable for crash recovery tests.
+#[allow(clippy::too_many_arguments)]
 fn recover_prepared_transaction_with<L, U, B, A>(
     current_exe: &Path,
     state_dir: &Path,
@@ -2148,8 +2150,8 @@ fn advance_prelaunch_phase(
         {
             return Err("activated update filesystem identity is invalid".into());
         }
-        if journal.daemon_update.is_some() {
-            let status = DaemonClient::system().status(journal.daemon_update.as_ref().unwrap())?;
+        if let Some(binding) = &journal.daemon_update {
+            let status = DaemonClient::system().status(binding)?;
             if !status.ready() {
                 return Err(
                     "root daemon was not activated and attested for successor startup".into(),
