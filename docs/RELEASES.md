@@ -70,6 +70,73 @@ it then retries the archival finalizer without rebuilding or replacing files.
 Drafts, tag-only collisions and mismatched publications remain fail-closed. The
 previous tag and verified artifacts remain unchanged.
 
+## Coordinated app and daemon update qualification
+
+The coordinated implementation is being developed after PR392. It is not in
+preview `.24`, and the evidence for PR392 covers the refusal/rollback guard,
+not this new protocol. The supported updater must already be present in the
+originating app and root daemon; a successor cannot repair an older watchdog
+that was copied before replacement. Existing `.23` and `.24` users therefore
+need a manual DMG or separately qualified bridge transition.
+
+The protocol orders effects as follows. The root worker's durable decision
+controls recovery; a missing reply is not evidence that an operation stopped.
+
+| Boundary | Required evidence before proceeding | Failure behavior |
+|---|---|---|
+| Prepare | Signed archive, fixed target, exact old/new app and daemon identities, retained full bundles, recoverable root worker | Retain uncertain authorization state; never delete data a late authorized worker could still use. |
+| Activate daemon | Old service quiesced and saved, new frozen payload installed, fresh owned runtime attestation | Restore the exact old runtime and verify it before app rollback. |
+| Activate app | Root reports the exact new daemon ready | Move the old app to its verified backup, then launch the successor. |
+| Acknowledge | Exact successor identity and tray startup, same owned daemon PID with advancing heartbeat | Stop the exact successor and request abort. |
+| Commit | Root commit is durable and confirmed | Finish the new generation even if a reply or watchdog is lost. |
+| Abort | Root reports restored old runtime and no privileged writers remain | Only then restore and relaunch the old app. Unproven restoration remains an explicit recovery error. |
+
+```mermaid
+flowchart TD
+    P[Tray: verify archive and stage exact app] --> S[Root: seal pair and original deadline]
+    S --> D[Root: stop old service, snapshot, install new daemon]
+    D --> R[Root: attest new daemon ready]
+    R --> A[Watchdog: replace app and launch successor]
+    A --> H[Successor: exact identity and advancing heartbeat]
+    H --> C[Root: persist commit]
+    C --> F[Watchdog: ensure successor is running, then clean up]
+    D -->|Failure before commit| B[Root: persist abort and restore old daemon]
+    A -->|Failure before commit| Q[Watchdog: stop exact successor]
+    H -->|Missing ACK before commit| Q
+    Q --> B
+    B --> O[Watchdog: restore and relaunch old app]
+    C -->|Lost reply or process exit| N[Read durable commit and recover new app with fresh ACK]
+    N --> F
+```
+
+The two journals have different owners. The app journal records app replacement
+and the last requested root action; the root journal alone decides commit or
+abort. An unknown authorization outcome retains the original operation identity
+for an explicit retry. Retry does not renew its deadline. A committed root
+decision requires recovery of the new app, including a fresh acknowledgement
+after relaunch; it cannot authorize restoration of the old app.
+
+| Code owner | Responsibility | Useful failure boundary |
+|---|---|---|
+| [`lib.rs`](../app-tauri/src-tauri/src/lib.rs), `authorize_daemon_update` | Administrator authorization and guarded tray controls | Rejected authorization versus an uncertain privileged outcome |
+| [`updater_transaction.rs`](../app-tauri/src-tauri/src/updater_transaction.rs), `prepare_transaction`, `run_locked_watchdog` | Durable app journal, renames, exact successor process and recovery | Root readiness before rename; root decision before cleanup or rollback |
+| [`daemon_update.rs`](../app-tauri/src-tauri/src/daemon_update.rs), `Client`, `Status` | Strict cross-process messages and fresh daemon evidence | A receipt from another operation, version, PID or expired preparation |
+| [`tproxy.py`](../spike/tproxy.py), `do_update_prepare`, `_daemon_update_worker_loop` | Sealed root runtime, installer lock, service snapshot and durable decision | Worker restart, late request, failed install or incomplete restoration |
+
+Use two normally built, source-bound CI artifacts on disposable macOS: a bridge
+with this protocol and a successor with a normal version bump. The bump must
+change the compiled app version and frozen daemon bytes. Do not manufacture the
+pair by editing only `Info.plist`, repacking the same daemon, modifying a public
+release, or installing the successor daemon before triggering the update.
+
+Qualification must observe the real installed daemon identity, fresh PID and
+attestation on success and forced rollback, and inject failures before/after
+runtime replacement and durable commit. App and watchdog exit before/after ACK
+must converge to that same durable decision. Hermetic state-machine tests and a
+CI driver that directly invokes the transaction are useful protocol evidence;
+they do not establish public discovery, tray activation, or released-pair
+compatibility. Preserve those distinctions in the result and release notes.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF

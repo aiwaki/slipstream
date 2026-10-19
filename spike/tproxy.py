@@ -23,6 +23,7 @@ import asyncio
 import atexit
 import base64
 import contextvars
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import errno
 import filecmp
@@ -9089,6 +9090,7 @@ for _debug_env_name in tuple(_RUN_ENV):
         _RUN_ENV.pop(_debug_env_name, None)
 
 RUN_COMMAND_TIMEOUT_SECONDS = 5
+_INSTALL_OPERATION_LOCK_FD = None
 
 
 def _run(*args):
@@ -9099,6 +9101,10 @@ def _run(*args):
             text=True,
             env=_RUN_ENV,
             timeout=RUN_COMMAND_TIMEOUT_SECONDS,
+            pass_fds=(
+                (_INSTALL_OPERATION_LOCK_FD,)
+                if _INSTALL_OPERATION_LOCK_FD is not None else ()
+            ),
         )
     except FileNotFoundError:
         return subprocess.CompletedProcess(args, 127, "", f"not found: {args[0]}")
@@ -10224,7 +10230,7 @@ def _copy_script_runtime(source_file, install_dir):
         _copy_file_resilient(src, os.path.join(install_dir, name), mode=0o644)
 
 
-def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
+def _replace_tree_resilient(src, dst, attempts=3, delay=0.15, *, preserve_symlinks=False):
     parent = os.path.dirname(dst)
     os.makedirs(parent, exist_ok=True)
     last = None
@@ -10234,7 +10240,10 @@ def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
         try:
             shutil.rmtree(tmp, ignore_errors=True)
             shutil.rmtree(backup, ignore_errors=True)
-            shutil.copytree(src, tmp)
+            if preserve_symlinks:
+                shutil.copytree(src, tmp, symlinks=True)
+            else:
+                shutil.copytree(src, tmp)
             if os.path.exists(dst):
                 os.replace(dst, backup)
             os.replace(tmp, dst)
@@ -15541,6 +15550,18 @@ INSTALL_ATTESTATION_PATH = os.path.join(
     "install-attestation.json",
 )
 INSTALL_ATTESTATION_SCHEMA_VERSION = 3
+_DAEMON_UPDATE_ROOT = "/var/db/dev.slipstream-update"
+_DAEMON_UPDATE_REQUESTS = "/var/run/slipstream-update-requests"
+_DAEMON_UPDATE_TARGET = "/Applications/Slipstream.app"
+_DAEMON_UPDATE_TTL = 300
+_DAEMON_UPDATE_LIMIT = 16384
+_DAEMON_UPDATE_IDENTITY_FIELDS = {
+    "schema_version", "nonce", "uid", "old_version", "new_version",
+    "old_app_executable_sha256", "new_app_executable_sha256",
+    "old_daemon_sha256", "new_daemon_sha256", "old_bundle_tree_sha256",
+    "new_bundle_tree_sha256", "archive_sha256",
+    "prepare_deadline_unix",
+}
 _INSTALL_ATTESTATION_FAILURE_ENV = "SLIPSTREAM_CI_FORCE_INSTALL_ATTESTATION_FAILURE"
 LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 5
@@ -16607,12 +16628,874 @@ def _packaged_browser_worker_executable(source_executable):
     return candidate
 
 
-def do_install(port):
+def _update_json_bytes(value):
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _update_sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _update_private_directory(path, mode=0o700, owner=0):
+    # Only fixed root-controlled ancestry is accepted. /var itself is a system
+    # symlink on macOS; canonicalize that fixed prefix before inspecting it.
+    parent = os.path.realpath(os.path.dirname(path))
+    cursor = parent
+    while cursor != "/":
+        metadata = os.lstat(cursor)
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+                or stat.S_IMODE(metadata.st_mode) & 0o022):
+            raise RuntimeError("unsafe update directory ancestry")
+        cursor = os.path.dirname(cursor)
+    try:
+        os.mkdir(path, mode)
+        os.chown(path, owner, 0)
+        os.chmod(path, mode)
+        _update_sync_directory(parent)
+    except FileExistsError:
+        metadata = os.lstat(path)
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != owner
+                or stat.S_IMODE(metadata.st_mode) != mode):
+            raise RuntimeError("unsafe update directory")
+
+
+def _update_write_json(path, value, mode=0o600):
+    payload = _update_json_bytes(value)
+    temporary = path + ".tmp." + secrets.token_hex(8)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fchown(handle.fileno(), 0, 0)
+            os.fchmod(handle.fileno(), mode)
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _update_sync_directory(os.path.dirname(path))
+    finally:
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+
+
+def _update_read_json(path, *, owner=0, mode=0o600, limit=_DAEMON_UPDATE_LIMIT):
+    def unique_object(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate update JSON field")
+            value[key] = item
+        return value
+
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != owner
+                or stat.S_IMODE(before.st_mode) != mode
+                or before.st_size > limit):
+            raise RuntimeError("unsafe update JSON file")
+        payload = bytearray()
+        while len(payload) <= limit:
+            block = os.read(fd, min(65536, limit + 1 - len(payload)))
+            if not block:
+                break
+            payload.extend(block)
+        after = os.fstat(fd)
+        if (len(payload) > limit or before.st_size != len(payload)
+                or before.st_mtime_ns != after.st_mtime_ns):
+            raise RuntimeError("update JSON changed while reading")
+        value = json.loads(payload, object_pairs_hook=unique_object)
+        if not isinstance(value, dict):
+            raise RuntimeError("update JSON must be an object")
+        return value
+    finally:
+        os.close(fd)
+
+
+def _daemon_update_identity(value):
+    if not isinstance(value, dict) or set(value) != _DAEMON_UPDATE_IDENTITY_FIELDS:
+        raise RuntimeError("invalid update identity fields")
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        raise RuntimeError("unsupported daemon update schema")
+    if (type(value["uid"]) is not int or not 0 < value["uid"] < 2 ** 32
+            or not isinstance(value["nonce"], str)
+            or not re.fullmatch(r"[0-9a-f]{32}", value["nonce"])):
+        raise RuntimeError("invalid daemon update owner or nonce")
+    if (type(value["prepare_deadline_unix"]) is not int
+            or not 0 < value["prepare_deadline_unix"] < 2 ** 64):
+        raise RuntimeError("invalid daemon update prepare deadline")
+    for key, item in value.items():
+        if key.endswith("_sha256") and (
+            not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item)
+        ):
+            raise RuntimeError("invalid daemon update digest")
+    for key in ("old_version", "new_version"):
+        if not isinstance(value[key], str) or not re.fullmatch(r"[0-9A-Za-z.+-]{1,96}", value[key]):
+            raise RuntimeError("invalid daemon update version")
+    return dict(value)
+
+
+def _daemon_update_tree(path, *, copy_to=None, readable=False, exclude_names=()):
+    """Hash/copy a frozen tree through no-follow directory descriptors.
+
+    Excluding root metadata lets an extracted private staging root become a
+    readable retained app without changing the signed tree contract. Internal
+    modes are preserved; neither copy nor hashing follows an untrusted link.
+    """
+    entries = []
+    total_bytes = 0
+    count = 0
+    root_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+    def visit(directory_fd, relative, destination):
+        nonlocal total_bytes, count
+        for name in sorted(os.listdir(directory_fd)):
+            if not relative and name in exclude_names:
+                continue
+            count += 1
+            if count > 100000 or relative.count("/") > 64:
+                raise RuntimeError("update tree exceeds entry or depth budget")
+            name.encode("utf-8", errors="strict")
+            child = relative + "/" + name if relative else name
+            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            mode = stat.S_IMODE(metadata.st_mode)
+            record = {"path": child, "kind": "", "mode": mode, "sha256": "", "target": ""}
+            target = os.path.join(destination, name) if destination else None
+            if mode & 0o7000:
+                raise RuntimeError("special permissions in update tree")
+            if stat.S_ISLNK(metadata.st_mode):
+                link = os.readlink(name, dir_fd=directory_fd)
+                link.encode("utf-8", errors="strict")
+                resolved = os.path.normpath(os.path.join(relative, link))
+                if os.path.isabs(link) or resolved in {".", ".."} or resolved.startswith("../"):
+                    raise RuntimeError("update link escapes retained tree")
+                resolved_source = os.path.realpath(os.path.join(path, child), strict=True)
+                if os.path.commonpath((os.path.realpath(path), resolved_source)) != os.path.realpath(path):
+                    raise RuntimeError("update link escapes retained tree through alias")
+                record.update(kind="symlink", target=link)
+                if target:
+                    os.symlink(link, target)
+                    if hasattr(os, "lchmod"):
+                        os.lchmod(target, mode)
+            elif stat.S_ISDIR(metadata.st_mode):
+                if mode & 0o022 or (readable and mode & 0o055 != 0o055):
+                    raise RuntimeError("unsafe update directory mode")
+                record["kind"] = "directory"
+                child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+                try:
+                    opened = os.fstat(child_fd)
+                    if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+                        raise RuntimeError("update directory changed while opening")
+                    if target:
+                        os.mkdir(target, 0o700)
+                    visit(child_fd, child, target)
+                    if target:
+                        os.chmod(target, mode)
+                        _update_sync_directory(target)
+                finally:
+                    os.close(child_fd)
+            elif stat.S_ISREG(metadata.st_mode):
+                if mode & 0o022 or (readable and mode & 0o044 != 0o044):
+                    raise RuntimeError("unsafe update file mode")
+                record["kind"] = "file"
+                source_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+                output_fd = None
+                try:
+                    before = os.fstat(source_fd)
+                    if (before.st_dev, before.st_ino) != (metadata.st_dev, metadata.st_ino):
+                        raise RuntimeError("update file changed while opening")
+                    if target:
+                        output_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                    digest = hashlib.sha256()
+                    while True:
+                        block = os.read(source_fd, 1024 * 1024)
+                        if not block:
+                            break
+                        total_bytes += len(block)
+                        if total_bytes > 4 * 1024 ** 3:
+                            raise RuntimeError("update tree exceeds byte budget")
+                        digest.update(block)
+                        if output_fd is not None:
+                            with memoryview(block) as view:
+                                while view:
+                                    view = view[os.write(output_fd, view):]
+                    after = os.fstat(source_fd)
+                    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                        raise RuntimeError("update file changed while hashing")
+                    record["sha256"] = digest.hexdigest()
+                    if output_fd is not None:
+                        os.fchmod(output_fd, mode)
+                        os.fsync(output_fd)
+                finally:
+                    os.close(source_fd)
+                    if output_fd is not None:
+                        os.close(output_fd)
+            else:
+                raise RuntimeError("unsupported update tree entry")
+            entries.append(record)
+
+    try:
+        if copy_to:
+            os.mkdir(copy_to, 0o700)
+        visit(root_fd, "", copy_to)
+        if copy_to:
+            _update_sync_directory(copy_to)
+            # Recheck the immutable copied closure. Lexical bounds alone do
+            # not cover an internal symlink followed by a later '..'.
+            for entry in entries:
+                if entry["kind"] == "symlink":
+                    resolved = os.path.realpath(os.path.join(copy_to, entry["path"]), strict=True)
+                    if os.path.commonpath((os.path.realpath(copy_to), resolved)) != os.path.realpath(copy_to):
+                        raise RuntimeError("copied update link escapes retained tree")
+    finally:
+        os.close(root_fd)
+    entries.sort(key=lambda item: item["path"])
+    return hashlib.sha256(_update_json_bytes({"schema_version": 1, "entries": entries})).hexdigest()
+
+
+def _daemon_update_operation_path(nonce):
+    if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+        raise RuntimeError("invalid daemon update nonce")
+    return os.path.join(_DAEMON_UPDATE_ROOT, nonce)
+
+
+@contextmanager
+def _installer_operation_lock(nonce=None, *, allow_unindexed=False):
+    global _INSTALL_OPERATION_LOCK_FD
+    _update_private_directory(_DAEMON_UPDATE_ROOT, 0o755)
+    lock_path = os.path.join(_DAEMON_UPDATE_ROOT, "installer.lock")
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        metadata = os.fstat(fd)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+                or stat.S_IMODE(metadata.st_mode) != 0o600):
+            raise RuntimeError("unsafe installer lock")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        index_path = os.path.join(_DAEMON_UPDATE_ROOT, "active.json")
+        if os.path.lexists(index_path):
+            index = _update_read_json(index_path, mode=0o644)
+            if set(index) != {"schema_version", "nonce"} or index["schema_version"] != 1:
+                raise RuntimeError("unsafe active update index")
+            operation = _daemon_update_operation_path(index["nonce"])
+            if nonce != index["nonce"]:
+                status = _update_read_json(os.path.join(operation, "status.json"), mode=0o644)
+                if (status.get("nonce") != index["nonce"]
+                        or status.get("phase") not in {"committed", "aborted"}
+                        or status.get("writer_quiescent") is not True):
+                    raise RuntimeError("a daemon update still owns the installed runtime")
+        elif nonce is not None and not allow_unindexed:
+            raise RuntimeError("daemon update active index is absent")
+        previous = _INSTALL_OPERATION_LOCK_FD
+        _INSTALL_OPERATION_LOCK_FD = fd
+        try:
+            yield
+        finally:
+            _INSTALL_OPERATION_LOCK_FD = previous
+    finally:
+        os.close(fd)
+
+
+def _daemon_update_paths(nonce):
+    operation = _daemon_update_operation_path(nonce)
+    return operation, os.path.join(operation, "private", "journal.json")
+
+
+class DaemonUpdateNoOperation(RuntimeError):
+    """Definitive rejection with no published operation, under installer lock."""
+
+
+def _daemon_update_manifest(journal):
+    return hashlib.sha256(_update_json_bytes({
+        "identity": journal["identity"],
+        "old_plist_sha256": journal["old_plist_sha256"],
+        "old_payload_sha256": journal["old_payload_sha256"],
+        "worker_runtime_sha256": journal["worker_runtime_sha256"],
+        "predecessor_nonce": journal["predecessor_nonce"],
+    })).hexdigest()
+
+
+def _daemon_update_label(nonce):
+    _daemon_update_operation_path(nonce)
+    return "dev.slipstream.update." + nonce
+
+
+def _daemon_update_worker_plist(nonce):
+    return "/Library/LaunchDaemons/" + _daemon_update_label(nonce) + ".plist"
+
+
+def _daemon_update_daemon(app):
+    return os.path.join(app, "Contents", "Resources", "slipstreamd", "slipstreamd")
+
+
+def _daemon_update_probe(app):
+    return os.path.join(app, "Contents", "MacOS", "slipstream-browser-probe")
+
+
+def _daemon_update_publish(journal, **changes):
+    journal.update(changes)
+    operation, path = _daemon_update_paths(journal["identity"]["nonce"])
+    # Private state is authoritative. A crash before the public projection is
+    # written is recovered from this journal; it never changes the decision.
+    _update_write_json(path, journal)
+    status = dict(journal["identity"])
+    for key in (
+        "manifest_sha256", "phase", "decision", "accepted_sequence", "deadline_unix",
+        "worker_pid", "daemon_pid", "daemon_sha256", "heartbeat_seq",
+        "install_attestation_sha256", "writer_quiescent", "error",
+    ):
+        status[key] = journal[key]
+    _update_write_json(os.path.join(operation, "status.json"), status, 0o644)
+
+
+def _daemon_update_runtime_proof(expected_sha, port=PROXY_PORT):
+    ready, _, status, _ = _installed_daemon_readiness_snapshot(port)
+    if not ready or status is None:
+        raise RuntimeError("update daemon readiness missing")
+    attestation = _update_read_json(INSTALL_ATTESTATION_PATH, mode=0o644)
+    installed = os.path.join(INSTALL_DIR, "slipstreamd")
+    if (attestation.get("schema_version") != INSTALL_ATTESTATION_SCHEMA_VERSION
+            or attestation.get("source_sha256") != expected_sha
+            or attestation.get("daemon", {}).get("sha256") != expected_sha
+            or attestation.get("launchd", {}).get("pid") != status.get("pid")
+            or _sha256_regular_file(installed) != expected_sha):
+        raise RuntimeError("update daemon identity mismatch")
+    # Rebuild the witness proof with current file ownership, inode, listener,
+    # launchd PID and PF state rather than trusting a previous receipt alone.
+    fresh = _install_attestation_record(
+        installed, expected_sha, 0o700, port,
+        witness_path=_install_attestation_witness_path(INSTALL_ATTESTATION_PATH),
+    )
+    if fresh != attestation:
+        raise RuntimeError("update daemon attestation drift")
+    heartbeat = status.get("heartbeat_seq")
+    if type(heartbeat) is not int or heartbeat < 0:
+        raise RuntimeError("update daemon heartbeat missing")
+    return {
+        "daemon_pid": status["pid"], "daemon_sha256": expected_sha,
+        "heartbeat_seq": heartbeat,
+        "install_attestation_sha256": _sha256_regular_file(INSTALL_ATTESTATION_PATH),
+    }
+
+
+def _daemon_update_read_plist():
+    # The exact prior plist is retained privately. Validate its fixed execution
+    # surface before allowing any of its arguments to survive an update.
+    fd = os.open(LAUNCHD_PLIST, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(fd)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+                or stat.S_IMODE(metadata.st_mode) != 0o644
+                or not 0 < metadata.st_size <= 65536):
+            raise RuntimeError("unsafe installed daemon plist")
+        payload = os.read(fd, 65537)
+    finally:
+        os.close(fd)
+    value = plistlib.loads(payload)
+    arguments = value.get("ProgramArguments")
+    if (value.get("Label") != LAUNCHD_LABEL
+            or value.get("WorkingDirectory") != INSTALL_DIR
+            or not isinstance(arguments, list)
+            or arguments[0:1] != [os.path.join(INSTALL_DIR, "slipstreamd")]
+            or tuple(arguments[1:]) not in {
+                ("--port", str(PROXY_PORT)), ("--port", str(PROXY_PORT), "--no-voice")
+            }
+            or value.get("RunAtLoad") is not True or value.get("KeepAlive") is not True):
+        raise RuntimeError("unsupported installed daemon launch intent")
+    return value, hashlib.sha256(payload).hexdigest()
+
+
+def _daemon_update_require_enabled_intent():
+    result = _run("/bin/launchctl", "print-disabled", "system")
+    if result.returncode != 0:
+        raise RuntimeError("installed launch intent unavailable")
+    match = re.search(r'"' + re.escape(LAUNCHD_LABEL) + r'"\s*=>\s*(true|false)', result.stdout)
+    if match and match.group(1) == "true":
+        # A disabled service is a separate user/admin intent. Do not silently
+        # enable it to make an updater health check pass.
+        raise RuntimeError("installed daemon is deliberately disabled")
+
+
+def _daemon_update_verify_app(app, identity, side):
+    if _daemon_update_tree(app, readable=True) != identity[side + "_bundle_tree_sha256"]:
+        raise RuntimeError("update app tree identity mismatch")
+    if (_sha256_regular_file(os.path.join(app, "Contents", "MacOS", "slipstream"))
+            != identity[side + "_app_executable_sha256"]
+            or _sha256_regular_file(_daemon_update_daemon(app)) != identity[side + "_daemon_sha256"]):
+        raise RuntimeError("update executable identity mismatch")
+    with open(os.path.join(app, "Contents", "Info.plist"), "rb") as handle:
+        info = plistlib.load(handle)
+    if (info.get("CFBundleIdentifier") != "dev.slipstream.tray"
+            or info.get("CFBundleShortVersionString") != identity[side + "_version"]
+            or info.get("CFBundleExecutable") != "slipstream"
+            or info.get("LSUIElement") is not True):
+        raise RuntimeError("update app metadata mismatch")
+    _require_command("retained app signature invalid", "/usr/bin/codesign", "--verify", "--deep", "--strict", app)
+
+
+def _daemon_update_bootstrap(nonce):
+    target = "system/" + _daemon_update_label(nonce)
+    loaded = _run("/bin/launchctl", "print", target)
+    if loaded.returncode == 0:
+        return
+    if not _launchd_job_absent(loaded):
+        raise RuntimeError("update worker presence unknown")
+    _require_command("update worker enable failed", "/bin/launchctl", "enable", target)
+    _require_command("update worker bootstrap failed", "/bin/launchctl", "bootstrap", "system", _daemon_update_worker_plist(nonce))
+
+
+def _daemon_update_prune_retired(current_nonce):
+    # This runs only under the installer lock. A retained full app remains a
+    # live browser-probe dependency until a later transaction rebinds its plist.
+    probe = _installed_browser_worker_from_launchd()
+    if probe is None:
+        return  # Unknown plist/worker ownership is not absence proof.
+    for nonce in os.listdir(_DAEMON_UPDATE_ROOT):
+        if nonce == current_nonce or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+            continue
+        operation, path = _daemon_update_paths(nonce)
+        if probe and os.path.commonpath((operation, probe)) == operation:
+            continue
+        try:
+            previous = _update_read_json(path)
+            if (previous.get("phase") not in {"committed", "aborted"}
+                    or previous.get("writer_quiescent") is not True):
+                continue
+            target = "system/" + _daemon_update_label(nonce)
+            loaded = _run("/bin/launchctl", "print", target)
+            if loaded.returncode == 0:
+                _run("/bin/launchctl", "bootout", target)
+            if not _launchd_job_absent(_run("/bin/launchctl", "print", target)):
+                continue
+            identity = _daemon_update_identity(previous["identity"])
+            if identity["nonce"] != nonce:
+                continue
+            pid = previous.get("worker_pid")
+            command = _process_command_for_pid(pid) if pid else None
+            expected = os.path.join(operation, "private", "worker-runtime", "slipstreamd")
+            if command is not None and shlex.split(command) == [expected, "--update-worker", nonce]:
+                continue
+            mailbox = os.path.join(_DAEMON_UPDATE_REQUESTS, f"{identity['uid']}-{nonce}")
+            if os.path.lexists(mailbox):
+                metadata = os.lstat(mailbox)
+                if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != identity["uid"]:
+                    continue
+            try:
+                os.unlink(_daemon_update_worker_plist(nonce))
+            except FileNotFoundError:
+                pass
+            shutil.rmtree(operation)
+            if os.path.lexists(mailbox):
+                shutil.rmtree(mailbox)
+        except (OSError, RuntimeError, ValueError, KeyError):
+            continue
+
+
+def do_update_prepare(raw_identity):
+    """Seal the exact approved pair before any installed-runtime mutation."""
+    if not getattr(sys, "frozen", False) or os.path.realpath(sys.executable) != os.path.realpath(os.path.join(INSTALL_DIR, "slipstreamd")):
+        raise RuntimeError("update prepare requires the installed frozen daemon")
+    if len(raw_identity.encode("utf-8")) > _DAEMON_UPDATE_LIMIT:
+        raise RuntimeError("update identity too large")
+    identity = _daemon_update_identity(json.loads(raw_identity))
+    console = _console_probe_identity()
+    if console is None or console[0] != identity["uid"]:
+        raise RuntimeError("update owner is not the console user")
+    nonce = identity["nonce"]
+    operation, journal_path = _daemon_update_paths(nonce)
+    with _installer_operation_lock(nonce, allow_unindexed=True):
+        if os.path.lexists(operation):
+            journal = _update_read_json(journal_path)
+            if journal.get("identity") != identity:
+                raise RuntimeError("update nonce identity collision")
+            if journal["phase"] == "prepared":
+                _daemon_update_runtime_proof(identity["old_daemon_sha256"])
+                if _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",)) != journal["old_payload_sha256"]:
+                    raise RuntimeError("prepared installed generation changed")
+            # Idempotent retry never renews the deadline or resets a decision.
+            _daemon_update_publish(journal)
+            if journal["phase"] not in {"committed", "aborted"}:
+                _daemon_update_ensure_worker(journal)
+        else:
+            if not time.time() < identity["prepare_deadline_unix"] <= time.time() + _DAEMON_UPDATE_TTL:
+                raise DaemonUpdateNoOperation("update authorization lease expired or invalid")
+            try:
+                proof = _daemon_update_runtime_proof(identity["old_daemon_sha256"])
+                _daemon_update_require_enabled_intent()
+                old_plist, plist_sha = _daemon_update_read_plist()
+                installed_metadata = os.lstat(INSTALL_DIR)
+                if (not stat.S_ISDIR(installed_metadata.st_mode) or installed_metadata.st_uid != 0
+                        or stat.S_IMODE(installed_metadata.st_mode) != 0o700):
+                    raise RuntimeError("installed runtime ownership invalid")
+                payload_sha = _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",))
+            except Exception:
+                raise DaemonUpdateNoOperation("update preflight rejected before publication") from None
+            temporary = os.path.join(_DAEMON_UPDATE_ROOT, ".prepare-" + nonce)
+            if os.path.lexists(temporary):
+                # No worker can refer to an unpublished, root-owned staging
+                # directory. A previous interrupted preparation is disposable.
+                metadata = os.lstat(temporary)
+                if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0:
+                    raise RuntimeError("unsafe partial update preparation")
+                shutil.rmtree(temporary)
+            _update_private_directory(temporary)
+            try:
+                for side, source in (
+                    ("old", _DAEMON_UPDATE_TARGET),
+                    ("new", os.path.join(os.path.dirname(_DAEMON_UPDATE_TARGET), ".Slipstream.app.slipstream-stage-" + nonce)),
+                ):
+                    destination = os.path.join(temporary, side + ".app")
+                    digest = _daemon_update_tree(source, copy_to=destination, readable=True)
+                    if digest != identity[side + "_bundle_tree_sha256"]:
+                        raise RuntimeError("approved update bundle changed")
+                    os.chmod(destination, 0o755)
+                    _daemon_update_verify_app(destination, identity, side)
+                _update_private_directory(os.path.join(temporary, "private"))
+                worker_runtime = os.path.join(temporary, "private", "worker-runtime")
+                worker_sha = _daemon_update_tree(INSTALL_DIR, copy_to=worker_runtime)
+                if _daemon_update_tree(worker_runtime, exclude_names=("tgws-secret",)) != payload_sha:
+                    raise RuntimeError("installed worker payload changed during prepare")
+                journal = {
+                    "identity": identity, "manifest_sha256": "",
+                    "phase": "prepared", "decision": None, "accepted_sequence": 0,
+                    "deadline_unix": identity["prepare_deadline_unix"],
+                    "worker_pid": 0, "writer_quiescent": True, "error": None,
+                    "old_plist": old_plist, "old_plist_sha256": plist_sha,
+                    "old_runtime_sha256": None, "old_payload_sha256": payload_sha,
+                    "worker_runtime_sha256": worker_sha, "snapshot_ready": False,
+                    "predecessor_nonce": (_update_read_json(os.path.join(_DAEMON_UPDATE_ROOT, "active.json"), mode=0o644)["nonce"]
+                                          if os.path.lexists(os.path.join(_DAEMON_UPDATE_ROOT, "active.json")) else None),
+                    **proof,
+                }
+                journal["manifest_sha256"] = _daemon_update_manifest(journal)
+                _update_write_json(os.path.join(temporary, "private", "journal.json"), journal)
+                if time.time() >= identity["prepare_deadline_unix"]:
+                    raise RuntimeError("update authorization lease expired while sealing")
+                os.chmod(temporary, 0o755)
+                os.rename(temporary, operation)
+                _update_sync_directory(_DAEMON_UPDATE_ROOT)
+                _daemon_update_publish(journal)
+                _daemon_update_ensure_worker(journal)
+            except Exception:
+                if os.path.lexists(temporary):
+                    shutil.rmtree(temporary)
+                # No runtime mutation occurs in prepare. If canonical state is
+                # already published, leave it for the bounded root worker.
+                if not os.path.lexists(operation):
+                    raise DaemonUpdateNoOperation("update preflight rejected before publication") from None
+                raise
+    # The worker cannot acquire the installer lock until prepare releases it.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        status = _update_read_json(os.path.join(operation, "status.json"), mode=0o644)
+        if status.get("worker_pid", 0) > 0 or status.get("phase") in {"committed", "aborted"}:
+            return True
+        time.sleep(0.05)
+    raise RuntimeError("update worker startup unconfirmed")
+
+
+def _daemon_update_ensure_worker(journal):
+    identity = journal["identity"]
+    nonce = identity["nonce"]
+    operation, _ = _daemon_update_paths(nonce)
+    _daemon_update_check_predecessor(journal)
+    _update_private_directory(_DAEMON_UPDATE_REQUESTS, 0o755)
+    _update_private_directory(os.path.join(_DAEMON_UPDATE_REQUESTS, f"{identity['uid']}-{nonce}"), owner=identity["uid"])
+    worker = os.path.join(operation, "private", "worker-runtime", "slipstreamd")
+    plist = {
+        "Label": _daemon_update_label(nonce),
+        "ProgramArguments": [worker, "--update-worker", nonce],
+        "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False},
+        "ThrottleInterval": 2, "WorkingDirectory": operation,
+        "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null",
+        "EnvironmentVariables": {"PATH": "/sbin:/usr/sbin:/bin:/usr/bin", "PYTHONUNBUFFERED": "1"},
+    }
+    _daemon_update_write_worker_plist(nonce, plist)
+    # Index is durable before launching the worker. The persistent plist makes
+    # index-before-bootstrap crashes recover at boot; identical prepare retries
+    # reconcile every earlier publication boundary without renewing its lease.
+    _update_write_json(os.path.join(_DAEMON_UPDATE_ROOT, "active.json"), {"schema_version": 1, "nonce": nonce}, 0o644)
+    if time.time() >= journal["deadline_unix"] and journal["decision"] is None:
+        _daemon_update_publish(journal, phase="aborting", decision="abort")
+    _daemon_update_prune_retired(nonce)
+    _daemon_update_bootstrap(nonce)
+
+
+def _daemon_update_check_predecessor(journal):
+    path = os.path.join(_DAEMON_UPDATE_ROOT, "active.json")
+    current = _update_read_json(path, mode=0o644)["nonce"] if os.path.lexists(path) else None
+    if current not in {journal["identity"]["nonce"], journal["predecessor_nonce"]}:
+        raise RuntimeError("a later daemon update superseded this preparation")
+
+
+def _daemon_update_write_worker_plist(nonce, value):
+    path = _daemon_update_worker_plist(nonce)
+    temporary = path + ".tmp." + secrets.token_hex(8)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(plistlib.dumps(value))
+            handle.flush()
+            os.fchown(handle.fileno(), 0, 0)
+            os.fchmod(handle.fileno(), 0o644)
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _update_sync_directory(os.path.dirname(path))
+    finally:
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+
+
+def _daemon_update_request(journal):
+    identity = journal["identity"]
+    directory = os.path.join(_DAEMON_UPDATE_REQUESTS, f"{identity['uid']}-{identity['nonce']}")
+    metadata = os.lstat(directory)
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != identity["uid"]
+            or stat.S_IMODE(metadata.st_mode) != 0o700):
+        raise RuntimeError("unsafe update mailbox")
+    try:
+        request = _update_read_json(os.path.join(directory, "request.json"), owner=identity["uid"])
+    except FileNotFoundError:
+        return None
+    if (set(request) != {"schema_version", "nonce", "sequence", "action"}
+            or type(request["schema_version"]) is not int or request["schema_version"] != 1
+            or request["nonce"] != identity["nonce"]
+            or type(request["sequence"]) is not int or not 1 <= request["sequence"] <= 9007199254740991
+            or request["action"] not in {"activate", "commit", "abort"}):
+        raise RuntimeError("invalid update request")
+    if request["sequence"] <= journal["accepted_sequence"]:
+        return None
+    return request
+
+
+def _daemon_update_activate(journal):
+    operation, _ = _daemon_update_paths(journal["identity"]["nonce"])
+    identity = journal["identity"]
+    # Reject drift before touching the old service. The actual snapshot is
+    # copied only after all old daemon/probe writers have been drained.
+    _, plist_sha = _daemon_update_read_plist()
+    _daemon_update_require_enabled_intent()
+    if plist_sha != journal["old_plist_sha256"]:
+        raise RuntimeError("installed launch intent changed")
+    _daemon_update_runtime_proof(identity["old_daemon_sha256"])
+    _daemon_update_verify_app(os.path.join(operation, "new.app"), identity, "new")
+    _daemon_update_publish(journal, phase="activating", writer_quiescent=False)
+    if not _disable_and_cleanup_install(PROXY_PORT, remove_runtime=False):
+        raise RuntimeError("old daemon quiescence incomplete")
+    snapshot = os.path.join(operation, "private", "old-runtime")
+    digest = _daemon_update_tree(INSTALL_DIR, copy_to=snapshot)
+    if _daemon_update_tree(snapshot, exclude_names=("tgws-secret",)) != journal["old_payload_sha256"]:
+        raise RuntimeError("old installed runtime drifted")
+    _daemon_update_publish(journal, snapshot_ready=True, old_runtime_sha256=digest)
+    new_app = os.path.join(operation, "new.app")
+    secret = _daemon_update_retained_secret(journal)
+    if not do_install(
+        PROXY_PORT, frozen_source=_daemon_update_daemon(new_app),
+        browser_worker_override=_daemon_update_probe(new_app), secret_backup=secret,
+        program_tail=journal["old_plist"]["ProgramArguments"][1:],
+    ):
+        raise RuntimeError("new daemon installation failed")
+    proof = _daemon_update_runtime_proof(identity["new_daemon_sha256"])
+    _daemon_update_publish(journal, phase="ready", writer_quiescent=True,
+                          selected_payload_sha256=_daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",)), **proof)
+
+
+def _daemon_update_restore_old(journal):
+    operation, _ = _daemon_update_paths(journal["identity"]["nonce"])
+    identity = journal["identity"]
+    old_app = os.path.join(operation, "old.app")
+    _daemon_update_verify_app(old_app, identity, "old")
+    if not _disable_and_cleanup_install(PROXY_PORT, remove_runtime=False):
+        raise RuntimeError("abort could not drain installed writers")
+    if journal["snapshot_ready"]:
+        snapshot = os.path.join(operation, "private", "old-runtime")
+        if _daemon_update_tree(snapshot) != journal["old_runtime_sha256"]:
+            raise RuntimeError("retained old runtime changed")
+        _replace_tree_resilient(snapshot, INSTALL_DIR, preserve_symlinks=True)
+        if _daemon_update_tree(INSTALL_DIR) != journal["old_runtime_sha256"]:
+            raise RuntimeError("restored old runtime identity mismatch")
+    elif _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",)) != journal["old_payload_sha256"]:
+        raise RuntimeError("unsnapshotted old runtime changed")
+    # Preserve the exact old launch intent except its probe now points to a
+    # sealed full old app, even while /Applications contains the new version.
+    plist = dict(journal["old_plist"])
+    environment = dict(plist.get("EnvironmentVariables", {}))
+    environment["SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER"] = _daemon_update_probe(old_app)
+    plist["EnvironmentVariables"] = environment
+    _write_launchd_plist_atomic(plistlib.dumps(plist).decode("utf-8"))
+    _require_command("old daemon enable failed", "/bin/launchctl", "enable", _launchd_target())
+    _require_command("old daemon bootstrap failed", "/bin/launchctl", "bootstrap", "system", LAUNCHD_PLIST)
+    if not _wait_for_installed_daemon(PROXY_PORT):
+        raise RuntimeError("restored old daemon readiness missing")
+    _write_install_attestation(os.path.join(INSTALL_DIR, "slipstreamd"), identity["old_daemon_sha256"], 0o700, PROXY_PORT)
+    return _daemon_update_runtime_proof(identity["old_daemon_sha256"])
+
+
+def _daemon_update_resolve(journal):
+    if journal["decision"] == "commit":
+        try:
+            proof = _daemon_update_runtime_proof(journal["identity"]["new_daemon_sha256"])
+        except Exception:
+            operation, _ = _daemon_update_paths(journal["identity"]["nonce"])
+            app = os.path.join(operation, "new.app")
+            _daemon_update_verify_app(app, journal["identity"], "new")
+            if not do_install(PROXY_PORT, frozen_source=_daemon_update_daemon(app),
+                              browser_worker_override=_daemon_update_probe(app),
+                              secret_backup=_daemon_update_retained_secret(journal),
+                              program_tail=journal["old_plist"]["ProgramArguments"][1:]):
+                raise RuntimeError("committed daemon recovery incomplete")
+            proof = _daemon_update_runtime_proof(journal["identity"]["new_daemon_sha256"])
+        journal["selected_payload_sha256"] = _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",))
+        _daemon_update_publish(journal, phase="committed", writer_quiescent=True, error=None, **proof)
+    else:
+        _daemon_update_publish(journal, phase="aborting", decision="abort", writer_quiescent=False)
+        # Even a pre-activation abort verifies old readiness. It does not
+        # restart healthy old traffic just because the user canceled an update.
+        if not journal["snapshot_ready"] and journal.get("activation_started") is not True:
+            try:
+                proof = _daemon_update_runtime_proof(journal["identity"]["old_daemon_sha256"])
+            except Exception:
+                proof = _daemon_update_restore_old(journal)
+        else:
+            proof = _daemon_update_restore_old(journal)
+        _daemon_update_publish(journal, phase="aborted", writer_quiescent=True, error=None,
+                              selected_payload_sha256=journal["old_payload_sha256"], **proof)
+
+
+def _daemon_update_retained_secret(journal):
+    if not journal["snapshot_ready"]:
+        return None
+    operation, _ = _daemon_update_paths(journal["identity"]["nonce"])
+    snapshot = os.path.join(operation, "private", "old-runtime")
+    if _daemon_update_tree(snapshot) != journal["old_runtime_sha256"]:
+        raise RuntimeError("retained old runtime identity changed")
+    path = os.path.join(snapshot, "tgws-secret")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "r") as handle:
+        metadata = os.fstat(handle.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
+            raise RuntimeError("invalid retained secret file")
+        return handle.read(4097)
+
+
+def _daemon_update_refresh_terminal(journal):
+    """Refresh an owned receipt after daemon PID rollover; never reinstall."""
+    index = _update_read_json(os.path.join(_DAEMON_UPDATE_ROOT, "active.json"), mode=0o644)
+    if index.get("nonce") != journal["identity"]["nonce"]:
+        return
+    expected_payload = journal.get("selected_payload_sha256")
+    if not expected_payload or _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",)) != expected_payload:
+        return  # A later manual install superseded this historical decision.
+    side = "new" if journal["decision"] == "commit" else "old"
+    expected_sha = journal["identity"][side + "_daemon_sha256"]
+    ready, _, _, _ = _installed_daemon_readiness_snapshot(PROXY_PORT)
+    if not ready:
+        raise RuntimeError("terminal selected daemon is not ready")
+    _write_install_attestation(os.path.join(INSTALL_DIR, "slipstreamd"), expected_sha, 0o700, PROXY_PORT)
+    _daemon_update_publish(journal, **_daemon_update_runtime_proof(expected_sha))
+
+
+def _daemon_update_worker_loop(journal):
+    if journal["phase"] in {"committed", "aborted"} and journal["writer_quiescent"]:
+        _daemon_update_refresh_terminal(journal)
+        _daemon_update_publish(journal)
+        return True
+    previous_worker = journal["worker_pid"]
+    _daemon_update_publish(journal, worker_pid=os.getpid(), writer_quiescent=journal["phase"] == "prepared")
+    # A restarted worker follows its durable decision. Before commit, crash
+    # recovery selects abort, so an interrupted activation never replays late.
+    if previous_worker and journal["decision"] is None:
+        _daemon_update_publish(journal, decision="abort", phase="aborting")
+    live_deadline = time.monotonic() + max(0, min(_DAEMON_UPDATE_TTL, journal["deadline_unix"] - time.time()))
+    while True:
+        try:
+            if journal["decision"] is not None:
+                _daemon_update_resolve(journal)
+                return True
+            if time.time() >= journal["deadline_unix"] or time.monotonic() >= live_deadline:
+                _daemon_update_publish(journal, decision="abort", phase="aborting")
+                continue
+            request = _daemon_update_request(journal)
+            if request is None:
+                time.sleep(0.1)
+                continue
+            action = request["action"]
+            _daemon_update_publish(journal, accepted_sequence=request["sequence"])
+            if action == "abort":
+                _daemon_update_publish(journal, decision="abort", phase="aborting")
+            elif action == "activate" and journal["phase"] == "prepared":
+                _daemon_update_publish(journal, activation_started=True)
+                _daemon_update_activate(journal)
+            elif action == "commit" and journal["phase"] == "ready":
+                _daemon_update_runtime_proof(journal["identity"]["new_daemon_sha256"])
+                if time.time() >= journal["deadline_unix"] or time.monotonic() >= live_deadline:
+                    _daemon_update_publish(journal, decision="abort", phase="aborting")
+                else:
+                    _daemon_update_publish(journal, decision="commit", phase="committing", writer_quiescent=False)
+            else:
+                raise RuntimeError("update request is invalid for phase")
+        except Exception:
+            # Failure before commit always converges on exact old restoration.
+            # Failure after commit must finish new, never roll back the app.
+            decision = journal["decision"] or "abort"
+            _daemon_update_publish(journal, decision=decision, phase="recovery_incomplete",
+                                   error="daemon_update_recovery_required", writer_quiescent=False)
+            try:
+                _daemon_update_resolve(journal)
+                return True
+            except Exception:
+                _daemon_update_publish(journal, phase="recovery_incomplete",
+                                       error="daemon_update_recovery_required", writer_quiescent=False)
+                return False  # launchd retries this same root-owned operation.
+
+
+def do_update_worker(nonce):
+    operation, path = _daemon_update_paths(nonce)
+    worker_runtime = os.path.join(operation, "private", "worker-runtime")
+    expected = os.path.join(worker_runtime, "slipstreamd")
+    if not getattr(sys, "frozen", False) or os.path.realpath(sys.executable) != os.path.realpath(expected):
+        raise RuntimeError("update worker must run from its sealed operation")
+    with _installer_operation_lock(nonce, allow_unindexed=True):
+        journal = _update_read_json(path)
+        identity = _daemon_update_identity(journal["identity"])
+        if identity["nonce"] != nonce or journal["manifest_sha256"] != _daemon_update_manifest(journal):
+            raise RuntimeError("update worker manifest mismatch")
+        if _daemon_update_tree(worker_runtime) != journal["worker_runtime_sha256"]:
+            raise RuntimeError("update worker runtime identity changed")
+        _daemon_update_verify_app(os.path.join(operation, "old.app"), identity, "old")
+        index_path = os.path.join(_DAEMON_UPDATE_ROOT, "active.json")
+        index = _update_read_json(index_path, mode=0o644) if os.path.lexists(index_path) else None
+        if index is None or index.get("nonce") != nonce:
+            if journal["phase"] in {"committed", "aborted"}:
+                return True  # Historical operation superseded by a later one.
+            _daemon_update_check_predecessor(journal)
+            # Reboot can load the persistent worker plist after its fsync but
+            # before prepare publishes the index. Claim only an untouched,
+            # sealed operation whose current installed generation still fits.
+            if journal["phase"] != "prepared" or journal["snapshot_ready"] or journal["decision"] is not None:
+                raise RuntimeError("unindexed update is not an untouched preparation")
+            _daemon_update_runtime_proof(identity["old_daemon_sha256"])
+            if _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",)) != journal["old_payload_sha256"]:
+                raise RuntimeError("unindexed installed generation changed")
+            _update_write_json(index_path, {"schema_version": 1, "nonce": nonce}, 0o644)
+        return _daemon_update_worker_loop(journal)
+
+
+def do_install(port, *, frozen_source=None, browser_worker_override=None,
+               secret_backup=None, program_tail=None):
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
     #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
     #  - script (dev): copy local runtime modules + build a venv with dependencies
-    frozen = getattr(sys, "frozen", False)
+    frozen = frozen_source is not None or getattr(sys, "frozen", False)
     try:
         if not frozen:
             # Validate before stopping a working installed daemon.
@@ -16620,13 +17503,13 @@ def do_install(port):
             source_identity = os.path.abspath(__file__)
             installed_identity_name = "tproxy.py"
             installed_identity_mode = 0o600
-        elif not os.path.isfile(sys.executable) or not os.access(sys.executable, os.X_OK):
+        elif not os.path.isfile(frozen_source or sys.executable) or not os.access(frozen_source or sys.executable, os.X_OK):
             raise RuntimeError("frozen daemon payload is not executable")
         else:
-            source_identity = os.path.abspath(sys.executable)
-            installed_identity_name = os.path.basename(sys.executable)
+            source_identity = os.path.abspath(frozen_source or sys.executable)
+            installed_identity_name = os.path.basename(source_identity)
             installed_identity_mode = 0o700
-        browser_worker = (
+        browser_worker = browser_worker_override or (
             _packaged_browser_worker_executable(source_identity)
             if frozen
             else None
@@ -16647,14 +17530,16 @@ def do_install(port):
                 tgws_secret_backup = handle.read()
         except Exception:
             tgws_secret_backup = None
+        if secret_backup is not None:
+            tgws_secret_backup = secret_backup
         mutated = True
         if not _disable_and_cleanup_install(port, remove_runtime=False):
             raise RuntimeError("existing daemon could not be quiesced safely")
         if frozen:
-            src = os.path.dirname(os.path.abspath(sys.executable))
+            src = os.path.dirname(source_identity)
             _replace_tree_resilient(src, INSTALL_DIR)
-            binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
-            prog_args = [binary, "--port", str(port)]
+            binary = os.path.join(INSTALL_DIR, installed_identity_name)
+            prog_args = [binary, *(program_tail or ["--port", str(port)])]
             uninstall_hint = f"sudo {binary} --uninstall"
         else:
             script = os.path.join(INSTALL_DIR, "tproxy.py")
@@ -16723,7 +17608,7 @@ def do_install(port):
     except Exception as error:
         rollback_clean = True
         if mutated:
-            rollback_clean = _disable_and_cleanup_install(port)
+            rollback_clean = _disable_and_cleanup_install(port, remove_runtime=frozen_source is None)
         if rollback_clean:
             print(f"install failed safely: {error}", file=sys.stderr)
         else:
@@ -16736,8 +17621,79 @@ def do_install(port):
     return True
 
 
-def do_uninstall():
+def _daemon_update_remove_retained():
+    """Called under the installer lock, after the ordinary daemon is absent."""
+    if not os.path.isdir(_DAEMON_UPDATE_ROOT):
+        return True
+    retained = []
+    partial = []
+    # Prove every worker quiescent before removing the active index or a slot.
+    # An error halfway through this pass retains all recovery identities.
+    for nonce in os.listdir(_DAEMON_UPDATE_ROOT):
+        if re.fullmatch(r"\.prepare-[0-9a-f]{32}", nonce):
+            path = os.path.join(_DAEMON_UPDATE_ROOT, nonce)
+            metadata = os.lstat(path)
+            if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0:
+                return False
+            # No published worker may refer to the fixed unpublished slot;
+            # the global lock excludes a prepare that is still copying it.
+            partial.append(path)
+            continue
+        if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+            continue
+        operation, journal_path = _daemon_update_paths(nonce)
+        try:
+            journal = _update_read_json(journal_path)
+            identity = _daemon_update_identity(journal["identity"])
+            if identity["nonce"] != nonce or journal["phase"] not in {"committed", "aborted"} or not journal["writer_quiescent"]:
+                return False
+            mailbox = os.path.join(_DAEMON_UPDATE_REQUESTS, f"{identity['uid']}-{nonce}")
+            if os.path.lexists(mailbox):
+                metadata = os.lstat(mailbox)
+                if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != identity["uid"]:
+                    return False
+            target = "system/" + _daemon_update_label(nonce)
+            loaded = _run("/bin/launchctl", "print", target)
+            if loaded.returncode == 0:
+                _run("/bin/launchctl", "bootout", target)
+            if not _launchd_job_absent(_run("/bin/launchctl", "print", target)):
+                return False
+            expected = os.path.join(operation, "private", "worker-runtime", "slipstreamd")
+            pid = journal.get("worker_pid")
+            command = _process_command_for_pid(pid) if pid else None
+            if command is not None and shlex.split(command) == [expected, "--update-worker", nonce]:
+                return False
+            retained.append((nonce, operation, mailbox))
+        except (OSError, RuntimeError, ValueError, KeyError):
+            return False
+    try:
+        for nonce, _, _ in retained:
+            try:
+                os.unlink(_daemon_update_worker_plist(nonce))
+            except FileNotFoundError:
+                pass
+        try:
+            os.unlink(os.path.join(_DAEMON_UPDATE_ROOT, "active.json"))
+        except FileNotFoundError:
+            pass
+        _update_sync_directory(_DAEMON_UPDATE_ROOT)
+        for _, operation, mailbox in retained:
+            shutil.rmtree(operation)
+            if os.path.lexists(mailbox):
+                shutil.rmtree(mailbox)
+        for path in partial:
+            shutil.rmtree(path)
+    except OSError:
+        return False
+    # Keep the fixed installer lock inode: removing an inode while holding its
+    # flock would let another installer lock a different file concurrently.
+    return True
+
+
+def do_uninstall(*, cleanup_updater=False):
     clean = _disable_and_cleanup_install(PROXY_PORT)
+    if clean and cleanup_updater:
+        clean = _daemon_update_remove_retained()
     if clean:
         print("uninstalled + Slipstream pf anchor cleared")
     else:
@@ -17102,6 +18058,8 @@ def main():
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    ap.add_argument("--update-prepare", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--update-worker", default="", help=argparse.SUPPRESS)
     args = ap.parse_args()
     VERBOSE = args.verbose
 
@@ -17173,12 +18131,23 @@ def main():
         print("must run as root:  sudo python3 tproxy.py", file=sys.stderr)
         sys.exit(1)
 
-    if args.install:
-        sys.exit(0 if do_install(args.port) else 1)
-    if args.uninstall:
-        sys.exit(0 if do_uninstall() else 1)
-    if args.recover_network:
-        sys.exit(0 if recover_owned_network_state() else 1)
+    if args.update_prepare or args.update_worker or args.install or args.uninstall or args.recover_network:
+        try:
+            if args.update_prepare:
+                result = do_update_prepare(args.update_prepare)
+            elif args.update_worker:
+                result = do_update_worker(args.update_worker)
+            else:
+                with _installer_operation_lock():
+                    result = (do_install(args.port) if args.install else
+                              do_uninstall(cleanup_updater=True) if args.uninstall else recover_owned_network_state())
+        except DaemonUpdateNoOperation:
+            print("daemon_update_no_operation", file=sys.stderr)
+            sys.exit(77)
+        except Exception:
+            print("privileged installation operation failed; inspect retained update state", file=sys.stderr)
+            result = False
+        sys.exit(0 if result else 1)
 
     # A transparent proxy carries ALL system TCP/443 — hundreds of concurrent FDs.
     # The default 256-fd soft limit is far too low ("Too many open files"); raise it.
