@@ -17,6 +17,22 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
+[PR398](https://github.com/aiwaki/slipstream/pull/398) merged at
+`ddfca43ff9d34e8d917bab5cb68cec2b8ff9203b`. Its tested head
+`df43790048123e8d709e99c33de7be5f8c408f94` has the same Git tree. Full
+CI39264508089 and audit39264508049 passed, including packaged browser and
+lifecycle checks; independent review found no blockers and review threads are
+resolved. Receipt `output/updater-daemon-identity/pr398-verification/receipt.json`
+SHA256: `a2a61efd6298edff4904284cbfa1a9a35d0db9d08a006b76dd63ec4a7b7b80de`.
+Exact-main CI39266691016 is building the repaired originating `.26` candidate;
+audit39266690990 passed. This change bumps the normal source version to `.27`
+using `scripts/sync_version.py`, so the successor has different compiled tray
+and frozen-daemon version inputs. Neither candidate is a public release.
+The older PR395/PR396 `.25`/`.26` pair remains retained evidence, but it cannot
+qualify PR398: its originating daemon still contains the rejected comparison.
+Five untracked adapter/observer drafts remain excluded. No workstation runtime
+or privileged state is changed.
+
 PR391 merged at `77ac92713760cd4996aa74204233889b7a77f8c6` after final-head
 CI38768966095 / audit38768965965 passed. Its 14 updater tests and packaged checks
 passed. Main CI38770908107 and audit38770908316 passed. The
@@ -246,15 +262,13 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Reuse the retained and verified exact-main PR395 `.25` candidate above. The
-  earlier rejected pair remains immutable.
-- Reuse the verified exact-main `.26` candidate and binary inequality proof above.
-- Open the reviewed scoped PR for the historical-health comparison repair and
-  bounded preparation-stage diagnostics, then wait for its required CI. Retain all
-  fresh runtime readiness and stable identity checks. The precise native
-  run39261398050 refusal remains unproven. After required CI and merge, build a
-  normal fresh originating candidate and successor; do not rerun the unchanged
-  failing pair or modify its signed archives.
+- Finish exact-main CI39266691016 and authenticate its repaired originating
+  `.26` candidate. Finish the normal `.27` successor PR and exact-main build,
+  then verify both manifests, signatures, provenance, archive modes and actual
+  tray/daemon binary inequality before one native root qualification dispatch.
+  All older failed pairs remain immutable and must not be retried to qualify
+  the new originating code. The precise native run39261398050 refusal remains
+  unproven; preparation now reports its bounded stage if it fails again.
 - Continue the separate app/watchdog gate only after the native root gate. The
   draft transaction adapter and unfinished observer are excluded from this
   version change and have no native qualification yet.
