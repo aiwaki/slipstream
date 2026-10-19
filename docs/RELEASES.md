@@ -165,9 +165,13 @@ SHA256. [Materialization](../scripts/materialize_pair.py) verifies those pins,
 GitHub attestation and all manifest files before extracting either app. The
 [driver](../scripts/native_root_update.py) checks the pair again before the first
 install. Different versions, tray executables and daemon bytes are mandatory.
-The first main build containing PR393 is the bridge; the normal source bump to
-`0.1.9-preview.25` supplies the successor. The public `.24` assets are unchanged.
-Use retained candidates within the existing 14-day artifact window.
+The first PR393/PR394 pair failed before installation because the bundled Geph
+executable had mode `0700`. Keep that evidence; do not repair signed archives in
+place. Build a fresh bridge with corrected packaging and a normal version-bumped
+successor. Both must pass the existing updater artifact verifier, including
+root-readable file/directory modes and console-executable entry points. The
+same mode check runs on the built app tree before candidate assembly. The public `.24` assets
+are unchanged. Use retained candidates within the existing 14-day artifact window.
 
 The driver has a 720-second total budget including preparation and teardown;
 the production authorization lease remains 300 seconds. Both cases uninstall

@@ -40,6 +40,54 @@ MAX_SIGNATURE_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 1024 * 1024
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TAURI_CONFIG = ROOT / "app-tauri/src-tauri/tauri.conf.json"
+# These shipped entry points run as the console user even when a retained
+# application tree is owned by root. Owner-only executable bits are insufficient.
+PUBLIC_EXECUTABLES = frozenset(
+    (
+        "Contents/MacOS/slipstream",
+        "Contents/MacOS/geph5-client",
+        "Contents/MacOS/slipstream-browser-probe",
+        "Contents/MacOS/slipstream-update-watchdog",
+        "Contents/Resources/slipstreamd/slipstreamd",
+        "Contents/Resources/chromium-headless-shell/chrome-headless-shell",
+    )
+)
+
+
+def _validate_update_mode(
+    name: str, mode: int, *, directory: bool, symlink: bool = False
+) -> None:
+    """Match the root updater's readable tree, without changing signed modes."""
+    if mode & 0o7000:
+        raise ValueError(f"updater tree contains unsafe mode bits: {name} ({mode:04o})")
+    # Symlink permissions do not control access to their target. Its real entry
+    # is checked separately; the archive's existing link validator still applies.
+    if symlink:
+        return
+    required = 0o055 if directory else 0o044
+    if mode & 0o022 or mode & required != required:
+        raise ValueError(f"updater tree mode is not root-retainable: {name} ({mode:04o})")
+    if not directory and name in PUBLIC_EXECUTABLES and mode & 0o111 != 0o111:
+        raise ValueError(
+            f"updater tree executable is not runnable by the console user: {name} ({mode:04o})"
+        )
+
+
+def validate_app_tree_modes(app: Path) -> None:
+    """Read-only app-tree check before release-candidate assembly."""
+    root_info = app.lstat()
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise ValueError("updater app must be a real directory")
+    _validate_update_mode(".", stat.S_IMODE(root_info.st_mode), directory=True)
+    for path in sorted(app.rglob("*")):
+        info = path.lstat()
+        name = path.relative_to(app).as_posix()
+        is_directory, is_symlink = stat.S_ISDIR(info.st_mode), stat.S_ISLNK(info.st_mode)
+        if not (is_directory or is_symlink or stat.S_ISREG(info.st_mode)):
+            raise ValueError(f"unsupported updater tree entry: {name}")
+        _validate_update_mode(
+            name, stat.S_IMODE(info.st_mode), directory=is_directory, symlink=is_symlink
+        )
 
 
 # RFC 8032 Ed25519 verification.  This deliberately uses only Python's
@@ -381,8 +429,12 @@ def _inspect_archive(
                         _safe_link_target(name, member.linkname)
                     if member.size < 0:
                         raise ValueError(f"updater archive contains invalid size: {name}")
-                    if member.mode & 0o7000:
-                        raise ValueError(f"updater archive contains unsafe mode bits: {name}")
+                    _validate_update_mode(
+                        name.removeprefix(APP_ROOT + "/"),
+                        member.mode,
+                        directory=member.isdir(),
+                        symlink=member.issym(),
+                    )
                     if member.size > MAX_ARCHIVE_ENTRY_BYTES:
                         raise ValueError(
                             f"updater archive entry exceeds its size limit: {name}"

@@ -56,10 +56,17 @@ one lock across virtual time; the separate concurrency test still covers the
 public nonblocking path. That fixture explicitly releases its own test lock and
 waits at most two seconds only for inherited-FD contention. The required single
 write and budget assertions remain intact. Independent source review passed.
-Production lock/skip behavior is unchanged. Hosted Rust
-verification is pending; no local Rust build/test ran. The failed main attempt
-cannot qualify the old candidate. A full exact-source retry is necessary to bind
-the candidate manifest and successful CI to the same run attempt.
+Production lock/skip behavior is unchanged. All 191 app tests passed in hosted
+CI39243566954 at `7300671f895ee529ee966229753ca4238f1a5bc4`; no local Rust
+build/test ran. The failed main attempt
+cannot qualify the old candidate. Full exact-source attempt2 of CI39241525733
+passed and produced the verified bridge candidate. Its manifest SHA256 is
+`2e0dfe677325376e9d9d6bdd34ca9289a4bd8146e0824d3d9e61ea220364d3ba`;
+the seven retained files passed canonical manifest and exact-main hosted GitHub
+attestation verification. Receipt
+`output/updater-daemon-identity/main393-attempt2-verification/receipt.json`
+SHA256: `e1225430bf8151afff68528ce96a05355181cc26f079a735cb65f2b098e9d521`.
+No candidate payload was executed locally.
 
 After daemon PID rollover, the exact mailbox can wake the exited root worker
 without changing the durable decision. Its 330-second/33-attempt consumer budget
@@ -69,10 +76,14 @@ in hosted CI. The same PR fixed a reproduced BSD `tail -c` concurrent-append
 race in Geph log rotation; fixed-count copy now bounds the archive and preserves
 the live log if publication fails. The unchanged Rust live-process test passed.
 
-The active `readme-humanizer` checkout is now on
-`codex/native-root-update-qualification`,
-[PR394](https://github.com/aiwaki/slipstream/pull/394), retargeted to main after
-PR393 merged. This change incorporates the reviewed disposable native driver,
+[PR394](https://github.com/aiwaki/slipstream/pull/394) merged at
+`1fc6130ddecfde06895cf0102f5cb9d007bd4e04` after exact-head CI39243566954 and
+audit39243567046 passed, including packaged browser and lifecycle checks.
+The retained `output/updater-daemon-identity/pr394-green-730-receipt.json` has
+SHA256 `61bf6de7de42c3b07d45671b21890c5ab9f2b7686ca80fc812e304da7939c87c`.
+Main CI39245442918 attempt1 and audit39245442978 passed. The active
+`readme-humanizer` checkout is now on `codex/packaged-geph-update-permissions`.
+The merged change incorporates the reviewed disposable native driver,
 materializer, workflow and 45 hermetic tests. Its normal source version is
 `0.1.9-preview.25`; synchronization and scoped integration review passed.
 The new source supplies a successor whose compiled tray and frozen daemon differ
@@ -84,8 +95,26 @@ was superseded by the runner correction. Review found that GitHub is retiring
 retaining its architecture guard. Scoped workflow tests (8) and actionlint passed;
 independent review found no macOS-14-only assumption. CI39242530303 is superseded
 by the deterministic-test repair; audit39242530364 passed.
-No native case has been dispatched and no preview.25 release is published.
-The installed workstation app and public preview.24 remain unchanged.
+Native run39248727837 (attempt1, source1fc6130d) failed in both `commit` and
+`crash-before-commit` before installation: `unsafe update file mode`. Both
+results contain no transaction events and no cleanup errors. Read-only archive
+inspection found the same single offending file in both ZIP/TAR candidates:
+`Contents/MacOS/geph5-client`, mode `0700`. Under the build's `umask 077`, `cp`
+followed by `chmod +x` creates that mode. The root updater correctly rejects it;
+a root-owned retained executable must remain accessible to the console user.
+The fix uses explicit `0755` before packaging and adds mode validation to the
+existing `scripts/verify_updater_artifacts.py` boundary and early build check.
+It does not alter candidate bytes, retained artifacts or production validation.
+Evidence: `output/updater-daemon-identity/native-pair-file-modes.json` and
+`native-root-39248727837/receipt.json`, receipt SHA256:
+`309e87b195c445a9a23d1663db0ce46b7985bb50305245aeccb1f8bef9c6687e`.
+Focused verification passed: 56 build-config tests with three mode subcases,
+29 updater/release-verifier tests with 21 subcases, actionlint and whitespace
+checks. An independent review found no blocking issue. Only the packaging-mode
+fix, shared verifier, their tests and these docs belong to this change.
+The old candidates remain intact but cannot qualify the native update. A new
+normally built pair is required. No preview.25 release is published, and the
+installed workstation app and public preview.24 remain unchanged.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -106,8 +135,8 @@ at head996e (the latter failed only the existing Geph rotation test). They were
 not executed locally; format and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
-PR393 passed full exact-head CI. Its main build and disposable native
-qualification remain open. The new workflow's 45 integrated hermetic tests,
+PR393 passed full exact-head and main CI. Disposable native qualification
+failed before installation as described above and remains open. The new workflow's 45 integrated hermetic tests,
 actionlint and source/path wiring review passed. No local Rust build, privileged runtime test or workstation
 installation ran. The unchanged release checks are not repeated.
 
@@ -121,14 +150,17 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish the main393 exact-source retry and retain its successful release
-  candidate as the old protocol-capable build. The retained failed-attempt
-  evidence remains explicit; do not substitute a mixed-attempt candidate.
-- Land the separate native qualification/version change and retain its successful
-  main candidate as the successor. Dispatch the two source-pinned native cases;
-  do not substitute public.24, edit packaged metadata or preinstall the successor.
+- Merge the packaging-mode fix after focused tests, independent review and
+  required exact-head CI. Preserve all old candidates and failure evidence.
+- Retain its successful main preview.25 build as the new bridge. A subsequent
+  normal preview.26 source bump must produce distinct tray and daemon bytes.
+  Verify both candidate manifests and attestations, then repeat the two native
+  cases with their new pins. Do not rerun the unchanged rejected pair.
+- Continue the separate app/watchdog gate only after the native root gate. The
+  draft transaction adapter and unfinished observer remain untracked and are
+  excluded from this packaging fix. They have no native qualification yet.
 - Reuse the unchanged preview.24 release/readiness baseline. Public app-update
-  qualification remains separate from the root protocol cases.
+  qualification remains separate; no public assets or workstation state change.
 
 ## External Gates
 

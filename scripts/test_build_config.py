@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -106,6 +107,50 @@ class BuildConfigTests(unittest.TestCase):
         # The helper compiles with --no-run, then runs exact reviewed cases in
         # the OS sandbox. The workflow must not execute the upstream lib suite.
         self.assertNotIn('cargo test --manifest-path "$source_root/Cargo.toml"', workflow)
+
+    def test_packaged_geph_is_readable_and_executable_under_private_download_umask(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        # Execute the actual pre-bundle staging commands, not a duplicate of
+        # the intended chmod. The authenticated download step uses umask 077;
+        # bare chmod +x preserves owner-only access under that mask.
+        match = re.search(
+            r"(?m)^          cp /tmp/geph/geph5-client \\\n"
+            r"            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin\n"
+            r"          chmod [^\n]+\n",
+            workflow,
+        )
+        self.assertIsNotNone(match)
+        commands = textwrap.dedent(match.group(0))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "authenticated-geph"
+            payload = b"authenticated vendor executable bytes\x00\xff"
+            source.write_bytes(payload)
+            target = root / "app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin"
+            target.parent.mkdir(parents=True)
+            for inherited_mode in (0o600, 0o700, 0o755):
+                with self.subTest(inherited_mode=oct(inherited_mode)):
+                    source.chmod(inherited_mode)
+                    target.unlink(missing_ok=True)
+                    result = subprocess.run(
+                        ["/bin/bash", "-c", "set -eu\numask 077\n" + commands.replace(
+                            "/tmp/geph/geph5-client", shlex.quote(str(source)))],
+                        cwd=root, capture_output=True, text=True, check=False, timeout=5,
+                        env={"PATH": "/usr/bin:/bin"},
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+                    self.assertEqual(target.read_bytes(), payload)
+                    self.assertEqual(source.stat().st_mode & 0o777, inherited_mode)
+
+    def test_packaged_permissions_use_common_verifier_before_resource_checks(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        start = workflow.index("      - name: Verify packaged resources\n")
+        gate = workflow[start:workflow.index("\n      - ", start + 1)]
+        check = 'verify_updater_artifacts.validate_app_tree_modes(Path(sys.argv[1]))\' "$app"'
+        self.assertIn("PYTHONPATH=scripts python3 -c", gate)
+        self.assertLess(gate.index('test -d "$app"'), gate.index(check))
+        self.assertLess(gate.index(check), gate.index('Print :CFBundleExecutable'))
 
     def test_local_build_disables_updater_artifacts(self) -> None:
         config = json.loads(
