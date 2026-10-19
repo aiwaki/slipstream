@@ -17,6 +17,64 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
+[PR398](https://github.com/aiwaki/slipstream/pull/398) merged at
+`ddfca43ff9d34e8d917bab5cb68cec2b8ff9203b`. Its tested head
+`df43790048123e8d709e99c33de7be5f8c408f94` has the same Git tree. Full
+CI39264508089 and audit39264508049 passed, including packaged browser and
+lifecycle checks; independent review found no blockers and review threads are
+resolved. Receipt `output/updater-daemon-identity/pr398-verification/receipt.json`
+SHA256: `a2a61efd6298edff4904284cbfa1a9a35d0db9d08a006b76dd63ec4a7b7b80de`.
+Exact-main CI39266691016 and audit39266690990 passed. Its repaired originating
+`.26` candidate (artifact12193253991) passed all seven file hashes, GitHub
+attestation, updater signature and 897 archive mode checks; Geph is `0755`.
+Manifest SHA256: `f81c42054519ab75a176ba279c70af67df52a0647671110e42c17fcde290ed63`.
+Receipt `main398-verification/receipt.json` SHA256:
+`b8d6d38c29ce9f2a0ccc2c4777768dcdda1f116eb256c8fc1e76e42ec9d873ab`.
+The app payload was neither extracted nor executed locally.
+This change bumps the normal source version to `.27`
+using `scripts/sync_version.py`, so the successor has different compiled tray
+and frozen-daemon version inputs. Neither candidate is a public release.
+The older PR395/PR396 `.25`/`.26` pair remains retained evidence, but it cannot
+qualify PR398: its originating daemon still contains the rejected comparison.
+Five untracked adapter/observer drafts remain excluded. No workstation runtime
+or privileged state is changed.
+
+The `.27` change also repairs the initial app watchdog handoff. Production
+preparation held its transaction flock while `RunAtLoad` could immediately start
+the helper; a busy helper exits successfully and launchd need not restart it.
+The handoff function now consumes the real lock guard, writes the LaunchAgent and retires
+the old registration while locked, then releases the guard before bootstrap.
+After handoff, a rejected or uncertain launch preserves the durable journal and
+original root lease for normal recovery instead of cancelling from a stale
+snapshot. LaunchAgent write failure also retains that evidence. Three hermetic
+Rust regressions cover immediate launch, publication failure and all three
+bootstrap-inspection outcomes. Hosted CI39270118315 compiled and passed all
+three regressions (194 app tests total). Source review and rustfmt passed. The scheduling defect is established in source,
+but no native occurrence has been attributed to it yet.
+The same run passed packaged build and browser qualification, but failed at
+`active-worker-uninstall:active`: the aggregate status-cleanup error did not
+identify its component. Audit39270118342 passed. Retained receipt under
+`pr399-handoff-verification/receipt.json` SHA256:
+`f0f27ed0b2da6ea6946dd279a3a5a8014aad3873db8efbe537e29c619671c9c8`.
+No unchanged rerun was requested. Hermetic reproductions then demonstrated
+worker-cleanup rejection when a one-shot worker exits between launchd and `ps`,
+or completes naturally while SIGTERM is sent. Cleanup now checks a fresh
+terminal job result, accepts exit zero or an explicit known cleanup-safe worker
+error, and retains evidence for unknown, changed or unclean states. Five fixed
+component labels identify future status/attestation/socket/worker failures
+without exposing paths or exception text. This is a source-proven repair;
+the old native failure cannot be attributed to one of these branches.
+Independent review and 32 integrated focused Python tests passed in 1.00s;
+new exact-head packaged qualification is required before merge. The unchanged
+194-test Rust result is retained; no local Rust build or native operation ran. The existing root `.26 -> .27` cases
+have no active browser worker and keep their original scope; active-worker
+teardown is covered by packaged lifecycle, not inferred from the root gate.
+
+PR399's original version-only head `80fe59ffa2eb86380e4b4f36a028fde4af3ea79d`
+passed CI39267467781 and audit39267467740; that baseline does not qualify the
+new handoff repair. Receipt `pr399-verification/receipt.json` SHA256:
+`c12231a62647c35d378bf565b4910490dd4b05c53552f813d8986f69c087e6f2`.
+
 PR391 merged at `77ac92713760cd4996aa74204233889b7a77f8c6` after final-head
 CI38768966095 / audit38768965965 passed. Its 14 updater tests and packaged checks
 passed. Main CI38770908107 and audit38770908316 passed. The
@@ -246,15 +304,13 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Reuse the retained and verified exact-main PR395 `.25` candidate above. The
-  earlier rejected pair remains immutable.
-- Reuse the verified exact-main `.26` candidate and binary inequality proof above.
-- Open the reviewed scoped PR for the historical-health comparison repair and
-  bounded preparation-stage diagnostics, then wait for its required CI. Retain all
-  fresh runtime readiness and stable identity checks. The precise native
-  run39261398050 refusal remains unproven. After required CI and merge, build a
-  normal fresh originating candidate and successor; do not rerun the unchanged
-  failing pair or modify its signed archives.
+- Reuse the authenticated repaired `.26` candidate from CI39266691016.
+  Finish the `.27` successor/handoff PR and exact-main build,
+  then verify both manifests, signatures, provenance, archive modes and actual
+  tray/daemon binary inequality before one native root qualification dispatch.
+  All older failed pairs remain immutable and must not be retried to qualify
+  the new originating code. The precise native run39261398050 refusal remains
+  unproven; preparation now reports its bounded stage if it fails again.
 - Continue the separate app/watchdog gate only after the native root gate. The
   draft transaction adapter and unfinished observer are excluded from this
   version change and have no native qualification yet.

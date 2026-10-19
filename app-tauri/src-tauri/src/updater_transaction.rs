@@ -1230,7 +1230,16 @@ fn authorize_prepared(
     Ok(())
 }
 
-fn start_prepared_watchdog(path: &Path, journal: &UpdateJournalV1) -> Result<(), String> {
+// The production entrypoint consumes the real flock; a drop marker lets tests
+// prove the launch ordering without depending on process/fork scheduling.
+fn start_prepared_watchdog_with<G>(
+    path: &Path,
+    journal: &UpdateJournalV1,
+    transaction_lock: G,
+    bootout: impl FnOnce(u32),
+    bootstrap: impl FnOnce(u32, &Path) -> Result<(), String>,
+    service_loaded: impl FnOnce(u32) -> Result<bool, String>,
+) -> Result<(), String> {
     write_launch_agent_atomic(
         &journal.launch_agent,
         &launch_agent_bytes(
@@ -1239,8 +1248,36 @@ fn start_prepared_watchdog(path: &Path, journal: &UpdateJournalV1) -> Result<(),
             path.parent().ok_or("journal parent missing")?,
         ),
     )?;
-    bootout_watchdog(journal.uid);
-    bootstrap_watchdog(journal.uid, &journal.launch_agent)
+    bootout(journal.uid);
+    // RunAtLoad may start the helper before bootstrap returns. It must be able
+    // to acquire the transaction lock on that first invocation.
+    drop(transaction_lock);
+    if let Err(error) = bootstrap(journal.uid, &journal.launch_agent) {
+        // A lost reply may still mean launchd accepted the exact helper. Once
+        // the lock is handed off, never abort from our stale journal snapshot.
+        // A rejected launch retains Prepared for the existing recovery path;
+        // the root operation still has its original bounded lease.
+        if service_loaded(journal.uid)? {
+            return Ok(());
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn start_prepared_watchdog(
+    path: &Path,
+    journal: &UpdateJournalV1,
+    transaction_lock: File,
+) -> Result<(), String> {
+    start_prepared_watchdog_with(
+        path,
+        journal,
+        transaction_lock,
+        bootout_watchdog,
+        bootstrap_watchdog,
+        watchdog_service_loaded,
+    )
 }
 
 pub fn prepare_transaction(
@@ -1258,7 +1295,7 @@ pub fn prepare_transaction(
     }
     ensure_user_directory(state_dir, true)
         .map_err(|error| format!("update state directory is unsafe: {error}"))?;
-    let _lock =
+    let transaction_lock =
         try_transaction_lock(state_dir)?.ok_or("another update owns the transaction lock")?;
     let journal_path = state_dir.join(JOURNAL_FILE);
     match fs::symlink_metadata(&journal_path) {
@@ -1362,15 +1399,7 @@ pub fn prepare_transaction(
     // Root prepare is synchronous; cancellation is distinguished from an
     // unknown result before considering the absence of root-owned evidence.
     authorize_prepared(&journal_path, &mut journal, authorize)?;
-    if let Err(error) = start_prepared_watchdog(&journal_path, &journal) {
-        // If launchd accepted the helper despite a lost response, let it own
-        // recovery and have the old tray exit, rather than racing an abort.
-        if watchdog_service_loaded(uid)? {
-            return Ok(PreparedTransaction { journal_path });
-        }
-        cancel_prepared(&journal_path, &mut journal)?;
-        return Err(error);
-    }
+    start_prepared_watchdog(&journal_path, &journal, transaction_lock)?;
     Ok(PreparedTransaction { journal_path })
 }
 
@@ -3835,6 +3864,143 @@ mod tests {
         let root = TempDir::new().unwrap();
         let (_, value) = journal(root.path());
         assert!(find_exact_successor(&value).unwrap().is_none());
+    }
+
+    struct PreparationLockMarker<'a> {
+        held: &'a Cell<bool>,
+        events: &'a RefCell<Vec<&'static str>>,
+    }
+
+    impl Drop for PreparationLockMarker<'_> {
+        fn drop(&mut self) {
+            assert!(self.held.replace(false));
+            self.events.borrow_mut().push("released");
+        }
+    }
+
+    #[test]
+    fn prepared_handoff_releases_lock_before_immediate_watchdog_launch() {
+        let root = TempDir::new().unwrap();
+        let (path, value) = journal(root.path());
+        fs::create_dir_all(value.launch_agent.parent().unwrap()).unwrap();
+        write_journal(&path, &value).unwrap();
+        let held = Cell::new(true);
+        let events = RefCell::new(Vec::new());
+        let lock = PreparationLockMarker {
+            held: &held,
+            events: &events,
+        };
+        start_prepared_watchdog_with(
+            &path,
+            &value,
+            lock,
+            |uid| {
+                assert_eq!(uid, value.uid);
+                assert!(held.get(), "retire the old registration before handoff");
+                assert!(value.launch_agent.is_file());
+                assert_eq!(
+                    read_journal(&path).unwrap().phase,
+                    TransactionPhase::Prepared
+                );
+                events.borrow_mut().push("bootout");
+            },
+            |uid, plist| {
+                assert_eq!(uid, value.uid);
+                assert_eq!(plist, value.launch_agent);
+                assert!(
+                    !held.get(),
+                    "an immediately started helper must not see our lock"
+                );
+                assert_eq!(*events.borrow(), ["bootout", "released"]);
+                events.borrow_mut().push("bootstrap");
+                Ok(())
+            },
+            |_| panic!("successful bootstrap needs no lost-reply inspection"),
+        )
+        .unwrap();
+        assert_eq!(*events.borrow(), ["bootout", "released", "bootstrap"]);
+    }
+
+    #[test]
+    fn prepared_handoff_retains_evidence_on_rejected_or_uncertain_bootstrap() {
+        // false: rejected; true: accepted despite lost reply; Err: unknown.
+        for loaded in [
+            Ok(false),
+            Ok(true),
+            Err("inspection unavailable".to_string()),
+        ] {
+            let root = TempDir::new().unwrap();
+            let (path, mut value) = journal(root.path());
+            value.new_executable_sha256 = executable(&value.stage, b"staged successor");
+            fs::create_dir_all(value.launch_agent.parent().unwrap()).unwrap();
+            write_journal(&path, &value).unwrap();
+            let prepared = fs::read(&path).unwrap();
+            let held = Cell::new(true);
+            let events = RefCell::new(Vec::new());
+            let lock = PreparationLockMarker {
+                held: &held,
+                events: &events,
+            };
+            let accepted = loaded == Ok(true);
+            let inspected = Cell::new(false);
+            let result = start_prepared_watchdog_with(
+                &path,
+                &value,
+                lock,
+                |_| assert!(held.get()),
+                |_, _| {
+                    assert!(!held.get());
+                    Err("bootstrap reply unavailable".into())
+                },
+                |_| {
+                    assert!(!held.get());
+                    inspected.set(true);
+                    loaded
+                },
+            );
+            assert_eq!(result.is_ok(), accepted);
+            assert!(inspected.get());
+            assert_eq!(fs::read(&path).unwrap(), prepared);
+            assert_eq!(
+                sha256_file(&bundle_executable(&value.stage)).unwrap(),
+                value.new_executable_sha256
+            );
+            assert!(value.launch_agent.is_file());
+            assert_eq!(*events.borrow(), ["released"]);
+        }
+    }
+
+    #[test]
+    fn prepared_handoff_retains_evidence_when_launch_agent_write_fails() {
+        let root = TempDir::new().unwrap();
+        let (path, mut value) = journal(root.path());
+        value.new_executable_sha256 = executable(&value.stage, b"staged successor");
+        let invalid_parent = root.path().join("not-a-directory");
+        fs::write(&invalid_parent, b"existing file").unwrap();
+        value.launch_agent = invalid_parent.join("watchdog.plist");
+        write_journal(&path, &value).unwrap();
+        let prepared = fs::read(&path).unwrap();
+        let held = Cell::new(true);
+        let events = RefCell::new(Vec::new());
+        let result = start_prepared_watchdog_with(
+            &path,
+            &value,
+            PreparationLockMarker {
+                held: &held,
+                events: &events,
+            },
+            |_| panic!("failed publication must not unload the existing job"),
+            |_, _| panic!("failed publication must not launch a helper"),
+            |_| panic!("no launch was attempted"),
+        );
+        assert!(result.is_err());
+        assert!(!held.get());
+        assert_eq!(fs::read(&path).unwrap(), prepared);
+        assert_eq!(
+            sha256_file(&bundle_executable(&value.stage)).unwrap(),
+            value.new_executable_sha256
+        );
+        assert_eq!(fs::read(invalid_parent).unwrap(), b"existing file");
     }
 
     #[test]

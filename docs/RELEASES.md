@@ -151,6 +151,21 @@ change the compiled app version and frozen daemon bytes. Do not manufacture the
 pair by editing only `Info.plist`, repacking the same daemon, modifying a public
 release, or installing the successor daemon before triggering the update.
 
+The initial app handoff releases its transaction lock before bootstrapping the
+watchdog: a RunAtLoad helper may start before `launchctl` returns. LaunchAgent
+publication and retirement of the previous registration remain under the lock.
+If publication or bootstrap fails, durable Prepared evidence and the original
+root lease remain available to the existing recovery path. Once the lock has
+been released, the preparer never cancels using its stale journal snapshot.
+
+Packaged lifecycle also uninstalls while an owned browser worker is active.
+If that one-shot worker finishes between process snapshots or while SIGTERM is
+sent, cleanup requires a fresh terminal launchd result. Exit zero or an explicit
+known worker error whose Chrome/profile cleanup succeeded is accepted; unknown
+or replaced processes and unconfirmed cleanup retain their evidence and fail.
+Cleanup failures identify only a fixed component name, without private paths
+or exception text. This check is separate from ordinary updater commit/rollback.
+
 Qualification must observe the real installed daemon identity, fresh PID and
 attestation on success and forced rollback, and inject failures before/after
 runtime replacement and durable commit. App and watchdog exit before/after ACK

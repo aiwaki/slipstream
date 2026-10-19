@@ -1747,6 +1747,105 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
         assert term_index < exit_index < bootout_index
 
 
+@pytest.mark.parametrize("boundary,exit_code,worker_error,expected", [
+    ("snapshot-before-ps", 0, "", True),
+    ("during-term", 0, "", True),
+    ("during-term", 1, "socket_unavailable", True),
+    ("during-term", 1, "chrome_cleanup_failed", False),
+    ("during-term", 1, "profile_cleanup_failed", False),
+    ("during-term", 1, "profile_create_failed", False),
+    ("during-term", 1, "new_unknown_error", False),
+    ("during-term", 1, "", False),
+    ("during-term", -15, "worker_terminated", False),
+    ("snapshot-before-ps", 1, "chrome_cleanup_failed", False),
+    ("snapshot-before-ps", None, "worker_terminated", False),
+    ("replaced-before-ps", 0, "", False),
+    ("before-snapshot", 0, "", True),
+    ("before-snapshot", 1, "socket_unavailable", True),
+    ("before-snapshot", 1, "chrome_cleanup_failed", False),
+    ("before-snapshot", None, "worker_terminated", False),
+    ("during-term", 1, "worker_terminated", True),
+])
+def test_cleanup_accepts_only_proven_completed_worker(
+    tmp_path, boundary, exit_code, worker_error, expected,
+):
+    account = pwd.getpwuid(os.getuid())
+    identity = probe_runtime.ConsoleUserIdentity(
+        uid=os.getuid(), gid=os.getgid(),
+        username=account.pw_name, home=account.pw_dir,
+    )
+    executable = tmp_path / "slipstream-browser-probe"
+    executable.write_text("not executable fixture payload")
+    executable.chmod(0o755)
+    label = probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX + ".0123456789abcdef"
+    state = {"running": True, "loaded": True, "first_ps": True, "pid": 4242}
+    events = []
+    paths = None
+
+    def completed(command, code=0, stdout="", stderr=""):
+        return subprocess.CompletedProcess(command, code, stdout, stderr)
+
+    def mark_exited():
+        state["running"] = False
+        if worker_error:
+            paths.stderr.write_text(
+                "slipstream browser probe failed: " + worker_error + "\n"
+            )
+            paths.stderr.chmod(0o600)
+
+    def run(command):
+        events.append(command[:3])
+        if command[:2] == ("/bin/launchctl", "print"):
+            if not state["loaded"]:
+                return completed(command, 113, stderr="Could not find service")
+            if state["running"]:
+                return completed(command, stdout=f"pid = {state['pid']}\n")
+            return completed(command, stdout=f"last exit code = {exit_code}\n")
+        if command[:2] == ("/bin/ps", "-p"):
+            if boundary == "replaced-before-ps":
+                state["pid"] = 4299
+                return completed(command, stdout="999 /unrelated/process\n")
+            if boundary == "snapshot-before-ps" and state["first_ps"]:
+                state["first_ps"] = False
+                mark_exited()
+            if not state["running"]:
+                return completed(command, 1)
+            return completed(command, stdout=(
+                f"{identity.uid} {executable} "
+                f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT}\n"
+            ))
+        if command[:2] == ("/bin/launchctl", "kill"):
+            mark_exited()
+            return completed(command)
+        if command[:2] == ("/bin/launchctl", "bootout"):
+            state["loaded"] = False
+            return completed(command)
+        raise AssertionError(command)
+
+    launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+        executable=executable, runtime_root=tmp_path / "runtime",
+        identity_probe=lambda: identity, command_runner=run,
+        sleep=lambda _: None,
+    )
+    paths = launcher._prepare_launch(identity, label)
+    if boundary == "before-snapshot":
+        mark_exited()
+    result = launcher.cleanup_stale(remove_root=True)
+    assert result is expected, {
+        "boundary": boundary, "exit_code": exit_code,
+        "worker_error": worker_error, "actual": result,
+        "events": events,
+        "runtime_remains": paths.directory.exists(),
+        "job_loaded": state["loaded"], "worker_running": state["running"],
+    }
+    if expected:
+        assert not paths.directory.exists()
+        assert not state["loaded"]
+    else:
+        assert paths.directory.exists()
+        assert state["loaded"]
+
+
 def test_stale_cleanup_accepts_only_persisted_closed_ci_environment(monkeypatch):
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-stale-ci-",

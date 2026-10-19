@@ -1585,6 +1585,41 @@ def test_install_never_replaces_runtime_when_quiescence_is_unproven(
     assert marker.read_text() == "old runtime"
 
 
+@pytest.mark.parametrize("component", [
+    "daemon-status", "install-attestation", "semantic-socket",
+    "pending-socket", "browser-worker",
+])
+def test_status_cleanup_diagnostic_is_component_only(component, monkeypatch, capsys):
+    def remove(_path):
+        if component == "daemon-status":
+            raise OSError("must-not-leak secret path/credential")
+
+    monkeypatch.setattr(tproxy.os, "remove", remove)
+    monkeypatch.setattr(tproxy, "STATUS_PATH", "private-path")
+    monkeypatch.setattr(
+        tproxy, "_remove_install_attestation_artifacts",
+        lambda: component != "install-attestation",
+    )
+    monkeypatch.setattr(
+        tproxy.semantic_route_signal_runtime, "remove_stale_owned_socket",
+        lambda _: component != "semantic-socket",
+    )
+    monkeypatch.setattr(
+        tproxy.pending_navigation_probe_runtime, "remove_stale_owned_socket",
+        lambda _: component != "pending-socket",
+    )
+    monkeypatch.setattr(
+        tproxy.pending_navigation_probe_runtime, "cleanup_stale_browser_worker_runtime",
+        lambda **_: component != "browser-worker",
+    )
+    monkeypatch.setattr(
+        tproxy, "_installed_browser_worker_from_launchd", lambda: "private-worker",
+    )
+
+    assert tproxy._remove_daemon_status_artifacts() is False
+    assert capsys.readouterr().err == f"cleanup_component={component}\n"
+
+
 def test_reinstall_quiescence_preserves_runtime_but_removes_stale_status(
     monkeypatch, tmp_path
 ):
