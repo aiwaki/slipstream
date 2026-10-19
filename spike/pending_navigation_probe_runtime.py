@@ -60,6 +60,28 @@ PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 120.0
 _BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
 _BROWSER_WORKER_FORCE_REAP_SECONDS = 1.0
 _BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
+# Explicit errors emitted by the packaged worker before Chrome exists or only
+# after ChromeSession.cleanup succeeded. Unknown/future symbols are not proof.
+_BROWSER_WORKER_CLEANUP_CONFIRMED_ERRORS = frozenset((
+    "chrome_main_exited_before_devtools", "chrome_ownership_ambiguous",
+    "chrome_untrusted", "ci_origin_invalid", "claim_rejected",
+    "claim_response_invalid", "claimed_job_invalid",
+    "classification_deadline_exceeded", "clock_invalid",
+    "devtools_file_invalid", "devtools_http_invalid",
+    "devtools_message_invalid", "devtools_target_ambiguous",
+    "devtools_target_unavailable", "devtools_unavailable",
+    "devtools_websocket_invalid", "dom_classification_invalid",
+    "dom_classification_timeout", "headless_runtime_digest_invalid",
+    "headless_runtime_launch_failed", "headless_runtime_manifest_invalid",
+    "headless_runtime_signature_invalid", "headless_runtime_unavailable",
+    "headless_runtime_untrusted", "ipc_encode_failed", "ipc_request_invalid",
+    "ipc_response_invalid", "ipc_unavailable", "launch_id_invalid",
+    "owned_geph_proxy_invalid", "process_enumeration_failed",
+    "random_unavailable", "socket_replaced",
+    "socket_unavailable", "socket_unowned", "submit_rejected",
+    "termination_handler_failed", "uid_invalid", "uid_unavailable",
+    "worker_terminated",
+))
 _BROWSER_WORKER_UNCONFIRMED_CLEANUP_ERRORS = frozenset((
     "chrome_cleanup_failed",
     "profile_cleanup_failed",
@@ -1692,8 +1714,12 @@ class PendingNavigationBrowserWorkerLauncher:
                     )
                     continue
                 pid = _launchd_job_pid(state)
-                if pid is not None:
-                    self._validate_process(pid, identity)
+                if pid is None and not self._worker_exit_cleanup_confirmed(
+                    _launchd_last_exit_code(state), paths, identity,
+                ):
+                    raise PendingNavigationProbeRuntimeError(
+                        "browser_worker_cleanup_unconfirmed"
+                    )
                 self._cleanup_launch(target, paths, pid, identity)
             except (
                 OSError,
@@ -1842,12 +1868,36 @@ class PendingNavigationBrowserWorkerLauncher:
             "browser_worker_cleanup_failed"
         )
 
+    def _worker_exit_cleanup_confirmed(self, exit_code, paths, identity):
+        if type(exit_code) is not int:
+            return False
+        if exit_code == 0:
+            return True
+        return (
+            exit_code == 1
+            and self._read_worker_error(paths.stderr, identity)
+            in _BROWSER_WORKER_CLEANUP_CONFIRMED_ERRORS
+        )
+
     def _cleanup_launch(self, target, paths, pid, identity):
         if pid is not None:
             try:
                 self._validate_process(pid, identity)
             except PendingNavigationProbeRuntimeError:
-                pass
+                # A completed one-shot worker can disappear between launchd's
+                # PID snapshot and ps. Require a fresh terminal job receipt;
+                # a changed/live PID or unknown state must not be booted out.
+                state = self._print(target)
+                if (
+                    _launchd_job_absent(state)
+                    or _launchd_job_pid(state) is not None
+                    or not self._worker_exit_cleanup_confirmed(
+                        _launchd_last_exit_code(state), paths, identity,
+                    )
+                ):
+                    raise PendingNavigationProbeRuntimeError(
+                        "browser_worker_cleanup_unconfirmed"
+                    )
             else:
                 self._run((
                     "/bin/launchctl",
@@ -1859,16 +1909,15 @@ class PendingNavigationBrowserWorkerLauncher:
                 # already-validated Chrome process tree and private profile.
                 # Keep the job loaded until that bounded cleanup has exited;
                 # bootout first would bypass the worker's owned cleanup.
-                self._wait_for_exit(
+                exit_code = self._wait_for_exit(
                     target,
                     pid,
                     identity,
                     timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
                 )
-                if self._read_worker_error(
-                    paths.stderr,
-                    identity,
-                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                if not self._worker_exit_cleanup_confirmed(
+                    exit_code, paths, identity,
+                ):
                     raise PendingNavigationProbeRuntimeError(
                         "browser_worker_cleanup_failed"
                     )

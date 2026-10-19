@@ -16414,6 +16414,7 @@ def _remove_daemon_status_artifacts():
         except FileNotFoundError:
             pass
         except OSError:
+            print("cleanup_component=daemon-status", file=sys.stderr)
             return False
     attestation_clean = _remove_install_attestation_artifacts()
     semantic_socket_clean = (
@@ -16433,12 +16434,16 @@ def _remove_daemon_status_artifacts():
             executable=_installed_browser_worker_from_launchd(),
         )
     )
-    return all((
-        attestation_clean,
-        semantic_socket_clean,
-        pending_socket_clean,
-        pending_worker_clean,
-    ))
+    components = (
+        ("install-attestation", attestation_clean),
+        ("semantic-socket", semantic_socket_clean),
+        ("pending-socket", pending_socket_clean),
+        ("browser-worker", pending_worker_clean),
+    )
+    for component, clean in components:
+        if not clean:
+            print(f"cleanup_component={component}", file=sys.stderr)
+    return all(clean for _component, clean in components)
 
 
 def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):

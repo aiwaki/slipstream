@@ -48,9 +48,28 @@ After handoff, a rejected or uncertain launch preserves the durable journal and
 original root lease for normal recovery instead of cancelling from a stale
 snapshot. LaunchAgent write failure also retains that evidence. Three hermetic
 Rust regressions cover immediate launch, publication failure and all three
-bootstrap-inspection outcomes. Source review and rustfmt passed; compilation
-and execution await hosted CI. The scheduling defect is established in source,
+bootstrap-inspection outcomes. Hosted CI39270118315 compiled and passed all
+three regressions (194 app tests total). Source review and rustfmt passed. The scheduling defect is established in source,
 but no native occurrence has been attributed to it yet.
+The same run passed packaged build and browser qualification, but failed at
+`active-worker-uninstall:active`: the aggregate status-cleanup error did not
+identify its component. Audit39270118342 passed. Retained receipt under
+`pr399-handoff-verification/receipt.json` SHA256:
+`f0f27ed0b2da6ea6946dd279a3a5a8014aad3873db8efbe537e29c619671c9c8`.
+No unchanged rerun was requested. Hermetic reproductions then demonstrated
+worker-cleanup rejection when a one-shot worker exits between launchd and `ps`,
+or completes naturally while SIGTERM is sent. Cleanup now checks a fresh
+terminal job result, accepts exit zero or an explicit known cleanup-safe worker
+error, and retains evidence for unknown, changed or unclean states. Five fixed
+component labels identify future status/attestation/socket/worker failures
+without exposing paths or exception text. This is a source-proven repair;
+the old native failure cannot be attributed to one of these branches.
+Independent review and 32 integrated focused Python tests passed in 1.00s;
+new exact-head packaged qualification is required before merge. The unchanged
+194-test Rust result is retained; no local Rust build or native operation ran. The existing root `.26 -> .27` cases
+have no active browser worker and keep their original scope; active-worker
+teardown is covered by packaged lifecycle, not inferred from the root gate.
+
 PR399's original version-only head `80fe59ffa2eb86380e4b4f36a028fde4af3ea79d`
 passed CI39267467781 and audit39267467740; that baseline does not qualify the
 new handoff repair. Receipt `pr399-verification/receipt.json` SHA256:
