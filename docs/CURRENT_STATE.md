@@ -17,6 +17,31 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
+The stacked `codex/packaged-update-commit-gate` change is based on PR399 head
+`1b2e4c2c6280d053b363be9c1b1c618251352e4d`. Its cleanup repair passed 32
+focused tests; hosted CI39275694290 is still running and audit39275694232 passed.
+Do not merge this successor ahead of PR399's exact-main candidate or dispatch
+app qualification before both root cases pass. Keep the root qualification run
+at the exact `.27` main source before advancing main to this `.28` successor.
+
+This change integrates the reviewed trigger/observer drafts and commit-only
+workflow. It compiles an isolated adapter around authenticated OLD production
+preparation code; the actual packaged OLD watchdog and NEW app perform activation,
+ACK and commit. The observer attaches before preparation and cannot synthesize
+transaction state. Eight immutable pair pins plus two successful root-run pins
+are checked before install; root NEW must equal app OLD. Only a proven committed
+transaction permits exact-successor cleanup. Unknown outcomes retain evidence
+and fail on the disposable runner. No Geph secret or workstation operation is
+used. The ordinary `.28` version bump produces a byte-distinct successor; it is
+not a public release.
+
+All 107 integrated trigger/observer/driver Python tests passed in 0.29s;
+workflow lint, rustfmt and version sync checks passed. Independent source review
+found no blockers. Hosted adapter compilation and native execution remain open.
+The workflow covers commit only; app/watchdog failure before/after ACK, app
+rollback, the normal tray click/Quit, administrator UI and public discovery are
+not qualified by this check. The unchanged public `.24` remains manual-download.
+
 [PR398](https://github.com/aiwaki/slipstream/pull/398) merged at
 `ddfca43ff9d34e8d917bab5cb68cec2b8ff9203b`. Its tested head
 `df43790048123e8d709e99c33de7be5f8c408f94` has the same Git tree. Full

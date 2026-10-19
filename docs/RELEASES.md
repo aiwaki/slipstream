@@ -210,6 +210,36 @@ watchdog recovery, administrator dialogs, public discovery and an actual release
 update pair still need their own existing evidence. A passing root case must
 not be reported as a passing public auto-update.
 
+### Packaged app commit observation
+
+The dispatch-only [packaged commit workflow](../.github/workflows/packaged-update-commit-qualification.yml)
+uses a second, normally built pair after the root gate. Its eight candidate pins
+are supplemented by the successful root run ID and attempt. Both root cases
+must pass with clean teardown at the app OLD source, and root NEW must match app
+OLD by source, manifest, CI identity and payload hashes before installation.
+
+The [adapter builder](../scripts/build_packaged_update_trigger.py) compiles the
+exact authenticated OLD preparation modules and locked dependencies into an
+isolated helper. It preserves both signed app bundles. This helper calls
+production preparation; the installed OLD watchdog and real NEW app own bundle
+replacement, acknowledgement and root commit. Ordinary PR CI compiles and tests
+the helper with an intentionally non-executable fixture plan and never starts
+an installer.
+
+The [observer](../scripts/packaged_update_observer.py) attaches before preparation
+and requires the real successor ACK, exact process identity and committed root
+proof. The [driver](../scripts/qualify_packaged_update_commit.py) permits cleanup
+only after this result and completed app transaction cleanup. It revalidates
+the exact successor PID, UID, birth and command before terminating that fixture
+process, then uses ordinary uninstall. Unknown outcomes fail with retained
+bounded evidence; they never trigger speculative abort or removal.
+
+This qualifies preparation through commit only. It does not qualify the tray
+update click, Quit, administrator dialog, public discovery, app/watchdog exit
+before or after ACK, or app rollback. Root rollback evidence cannot substitute
+for restoration of the app bundle. Native execution remains restricted to a
+disposable macOS runner; it is never a workstation prerequisite experiment.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
