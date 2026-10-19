@@ -45,8 +45,21 @@ packaged build, browser qualification and packaged lifecycle. The terminal
 receipt P1 is resolved. Retained receipt
 `output/updater-daemon-identity/pr393-green-b062-receipt.json` SHA256:
 `7aebe7cb8d46b66219cbd843c98c6cc0057cac592f1c48dccbc64d3218a1cdd2`.
-Main CI39241525733 is running; audit39241525729 passed. Retain its exact
-candidate as the first protocol-capable build once the complete CI run passes.
+Main audit39241525729 passed. CI39241525733 exposed a timing-dependent test
+failure: 190 app tests passed, while the virtual refresh-budget loop received a
+valid transient lock-busy result. A bounded macOS fork fixture demonstrated that
+a close-on-exec descriptor can retain its flock in a forked child after the
+parent closes it. The exact CI child PID was not retained. Evidence:
+`output/updater-daemon-identity/main393-product.log` and
+`refresh-lock-inheritance-20261019.json` in the same directory. The test now holds
+one lock across virtual time; the separate concurrency test still covers the
+public nonblocking path. That fixture explicitly releases its own test lock and
+waits at most two seconds only for inherited-FD contention. The required single
+write and budget assertions remain intact. Independent source review passed.
+Production lock/skip behavior is unchanged. Hosted Rust
+verification is pending; no local Rust build/test ran. The failed main attempt
+cannot qualify the old candidate. A full exact-source retry is necessary to bind
+the candidate manifest and successful CI to the same run attempt.
 
 After daemon PID rollover, the exact mailbox can wake the exited root worker
 without changing the durable decision. Its 330-second/33-attempt consumer budget
@@ -68,7 +81,9 @@ before packaging because strict main-base refresh required new exact-head CI;
 audit39240828853 passed. The base refresh passed audit39241690945; CI39241690927
 was superseded by the runner correction. Review found that GitHub is retiring
 `macos-14`; the new native workflow now uses supported ARM64 `macos-15` while
-retaining its architecture guard. Scoped workflow tests and actionlint passed.
+retaining its architecture guard. Scoped workflow tests (8) and actionlint passed;
+independent review found no macOS-14-only assumption. CI39242530303 is superseded
+by the deterministic-test repair; audit39242530364 passed.
 No native case has been dispatched and no preview.25 release is published.
 The installed workstation app and public preview.24 remain unchanged.
 
@@ -106,8 +121,9 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish main393 CI and retain its successful release candidate as the old
-  protocol-capable build; do not repeat the green PR checks.
+- Finish the main393 exact-source retry and retain its successful release
+  candidate as the old protocol-capable build. The retained failed-attempt
+  evidence remains explicit; do not substitute a mixed-attempt candidate.
 - Land the separate native qualification/version change and retain its successful
   main candidate as the successor. Dispatch the two source-pinned native cases;
   do not substitute public.24, edit packaged metadata or preinstall the successor.

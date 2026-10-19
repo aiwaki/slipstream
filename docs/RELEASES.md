@@ -52,7 +52,8 @@ identity check is incomplete: source now requires bundled-daemon attestation and
 the same PID across fresh advancing heartbeat observations. A pending successor
 with a mismatched daemon refuses startup without spawning a privileged installer;
 the watchdog restores the previous application. Coordinated replacement of both
-daemon and app still needs implementation and public qualification.
+daemon and app is implemented in source; native and public qualification remain
+open.
 In updated clients, a restored rollback app also waits for the watchdog's lock,
 terminal cleanup and exact old-app receipt before resuming daemon installation.
 It emits no successor ACK. Existing published clients retain their old behavior.
