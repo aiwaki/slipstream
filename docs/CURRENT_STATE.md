@@ -49,18 +49,25 @@ Earlier compile/lint issues are fixed. A failing live Geph log test exposed BSD
 copy now bounds the archive and failed publication preserves the live log.
 Scoped append/truncate/failure tests and the unchanged hosted Rust test passed.
 
-The new terminal-receipt review finding is fixed in this revision: after daemon PID rollover,
-a successfully exited terminal root worker needs an explicit wake to refresh
-its receipt. The root fix watches only the exact transaction mailbox, preserves
-the durable decision, and exits before expensive tree hashes while the daemon
-is unready. Its 44 focused Python tests passed. The app consumer persists its
-330-second, 33-attempt budget under a separate nonblocking mailbox lock; an
-automatic watchdog restart cannot reset it. Only a verified new PID/birth starts
-another episode. Seven Rust regressions cover stale proof, persisted exhaustion,
-generation changes, fresh read-only behavior, unsafe files and concurrent clients.
-Independent scoped review, formatting and whitespace checks passed. Fresh
-exact-head CI is pending; Rust tests were not run locally. The installed
-workstation app and published preview remain unchanged.
+The terminal-receipt finding is fixed at
+`b06299cc535120c7d279d4aed5a93d51b5d5b92d`: after daemon PID rollover,
+the exact mailbox can wake the exited worker without changing the durable
+decision. The 330-second/33-attempt consumer budget survives automatic watchdog
+restart and resets only for a verified new process birth. Root tests passed
+44 cases locally; hosted product job118016915052 passed all 191 app tests,
+including seven new regressions. CI39239577378 is still completing packaging;
+audit39239577363 passed. The P1 thread is resolved after scoped review and tests.
+Product log SHA256:
+`619a5555cfafc1d203fed9114f78ca3d83e0723bec67c70bc9aaa3aa54b2e1d3`.
+
+The active `readme-humanizer` checkout is now on
+`codex/native-root-update-qualification`, based on that reviewed PR393 head.
+The next change incorporates the already reviewed disposable native driver,
+materializer, workflow and 45 hermetic tests. Its normal source version is
+`0.1.9-preview.25`; version synchronization passed. This supplies a successor
+whose compiled tray and frozen daemon differ from the main393 bridge candidate.
+The protected workflow is not dispatched yet; no preview.25 release is published.
+The installed workstation app and public preview.24 remain unchanged.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -81,12 +88,11 @@ at head996e (the latter failed only the existing Geph rotation test). They were
 not executed locally; format and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
-The preceding head passed full CI. Fresh CI for the terminal-receipt fix
-and disposable native qualification remain open. A root-protocol driver draft
-under `output/updater-daemon-identity/native-driver-draft/` is being reviewed;
-its 37 hermetic checks plus 8 early-failure artifact checks and actionlint passed.
-It has not executed native operations and does not qualify app/public updates.
-No local Rust build, privileged runtime test, or workstation installation ran.
+The preceding PR393 head passed full CI. The final terminal fix passed product
+checks; packaging and disposable native qualification remain open. The native
+workflow's 45 integrated hermetic tests and actionlint passed; source/path wiring
+review passed. No local Rust build, privileged runtime test or workstation
+installation ran. The unchanged release checks are not repeated.
 
 | Milestone | Current boundary |
 |---|---|
@@ -98,13 +104,13 @@ No local Rust build, privileged runtime test, or workstation installation ran.
 
 ## Next Verified Action
 
-- Run PR393 exact-head hosted CI for the reviewed terminal refresh fix; resolve
-  the addressed P1 after passing evidence and merge through normal protection. Reuse main2640's
-  unchanged baseline; do not rebuild or republish `.24` or rerun its readiness.
-- Qualify the coordinated path on disposable macOS with a supporting bridge
-  build and a successor whose normal version bump changes the frozen daemon.
-  A copied app with only edited metadata or an unchanged daemon is insufficient.
-  No fixture may preinstall the successor daemon to conceal an updater defect.
+- Finish PR393 exact-head CI and merge through normal protection. Retain the
+  resulting successful main release candidate as the old protocol-capable build.
+- Land the separate native qualification/version change and retain its successful
+  main candidate as the successor. Dispatch the two source-pinned native cases;
+  do not substitute public.24, edit packaged metadata or preinstall the successor.
+- Reuse the unchanged preview.24 release/readiness baseline. Public app-update
+  qualification remains separate from the root protocol cases.
 
 ## External Gates
 

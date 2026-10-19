@@ -1,0 +1,169 @@
+name: Native coordinated root update qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      old_run_id:
+        description: Old candidate main CI run ID
+        required: true
+        type: string
+      old_run_attempt:
+        description: Old candidate CI run attempt
+        required: true
+        type: string
+      old_source_sha:
+        description: Old candidate full main source SHA
+        required: true
+        type: string
+      old_manifest_sha:
+        description: Old release-candidate-manifest.json SHA256
+        required: true
+        type: string
+      new_run_id:
+        description: Successor candidate main CI run ID
+        required: true
+        type: string
+      new_run_attempt:
+        description: Successor candidate CI run attempt
+        required: true
+        type: string
+      new_source_sha:
+        description: Successor candidate full main source SHA
+        required: true
+        type: string
+      new_manifest_sha:
+        description: Successor release-candidate-manifest.json SHA256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+
+jobs:
+  root-protocol:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [commit, crash-before-commit]
+    env:
+      SLIPSTREAM_DISPOSABLE_CI: "1"
+    steps:
+      - id: checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Install locked observer dependencies
+        id: dependencies
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          python3 -m venv "$RUNNER_TEMP/root-update-python"
+          "$RUNNER_TEMP/root-update-python/bin/python" -m pip install \
+            --disable-pip-version-check --only-binary=:all: --require-hashes \
+            -r spike/requirements.txt
+      - id: old_download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.old_run_id }}
+          name: release-candidate-${{ inputs.old_source_sha }}
+          path: ${{ runner.temp }}/root-update/old-candidate
+      - id: new_download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.new_run_id }}
+          name: release-candidate-${{ inputs.new_source_sha }}
+          path: ${{ runner.temp }}/root-update/new-candidate
+      - name: Authenticate pins and unpack exact candidates
+        id: materialize
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_RUN_ID: ${{ inputs.old_run_id }}
+          OLD_RUN_ATTEMPT: ${{ inputs.old_run_attempt }}
+          OLD_SOURCE_SHA: ${{ inputs.old_source_sha }}
+          OLD_MANIFEST_SHA: ${{ inputs.old_manifest_sha }}
+          NEW_RUN_ID: ${{ inputs.new_run_id }}
+          NEW_RUN_ATTEMPT: ${{ inputs.new_run_attempt }}
+          NEW_SOURCE_SHA: ${{ inputs.new_source_sha }}
+          NEW_MANIFEST_SHA: ${{ inputs.new_manifest_sha }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/root-update-python/bin/python" scripts/materialize_pair.py \
+            --repo "$GITHUB_WORKSPACE" --root "$RUNNER_TEMP/root-update" \
+            --gh "$(command -v gh)"
+      - name: Qualify the native root decision and cleanup
+        id: qualify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CASE_MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/root-update-python/bin/python" scripts/native_root_update.py \
+            --repo "$GITHUB_WORKSPACE" --mode "$CASE_MODE" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pair-manifest "$RUNNER_TEMP/root-update/pair.json" \
+            --old-candidate-dir "$RUNNER_TEMP/root-update/old-candidate" \
+            --new-candidate-dir "$RUNNER_TEMP/root-update/new-candidate" \
+            --old-app "$RUNNER_TEMP/root-update/old-app/Slipstream.app" \
+            --new-app "$RUNNER_TEMP/root-update/new-app/Slipstream.app" \
+            --gh "$(command -v gh)" \
+            --output "$RUNNER_TEMP/root-update/result.json"
+      - name: Record outcome even when preparation failed
+        if: always()
+        env:
+          OUTCOME_RUN_SHA: ${{ github.sha }}
+          OUTCOME_RUN_ID: ${{ github.run_id }}
+          OUTCOME_RUN_ATTEMPT: ${{ github.run_attempt }}
+          OUTCOME_MODE: ${{ matrix.mode }}
+          OUTCOME_JOB_STATUS: ${{ job.status }}
+          OUTCOME_CHECKOUT: ${{ steps.checkout.outcome }}
+          OUTCOME_PYTHON: ${{ steps.python.outcome }}
+          OUTCOME_DEPENDENCIES: ${{ steps.dependencies.outcome }}
+          OUTCOME_OLD_DOWNLOAD: ${{ steps.old_download.outcome }}
+          OUTCOME_NEW_DOWNLOAD: ${{ steps.new_download.outcome }}
+          OUTCOME_MATERIALIZE: ${{ steps.materialize.outcome }}
+          OUTCOME_QUALIFY: ${{ steps.qualify.outcome }}
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          # Host Python and stdlib only: checkout/setup/dependency steps may have failed.
+          def value(name):
+              return os.environ.get("OUTCOME_" + name, "")[:256]
+
+          record = {
+              "schema_version": 1,
+              "source_sha": value("RUN_SHA"),
+              "run_id": value("RUN_ID"),
+              "run_attempt": value("RUN_ATTEMPT"),
+              "mode": value("MODE"),
+              "job_status_before_upload": value("JOB_STATUS"),
+              "steps": {name.lower(): value(name) for name in (
+                  "CHECKOUT", "PYTHON", "DEPENDENCIES", "OLD_DOWNLOAD",
+                  "NEW_DOWNLOAD", "MATERIALIZE", "QUALIFY")},
+          }
+          directory = Path(os.environ["RUNNER_TEMP"]) / "root-update"
+          directory.mkdir(parents=True, exist_ok=True)
+          (directory / "workflow-outcome.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+      - name: Retain exact candidate identity and outcome
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-root-update-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-update/*.json
+          if-no-files-found: error
+          retention-days: 14
