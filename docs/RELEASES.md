@@ -72,7 +72,7 @@ previous tag and verified artifacts remain unchanged.
 
 ## Coordinated app and daemon update qualification
 
-The coordinated implementation is being developed after PR392. It is not in
+The coordinated implementation merged in PR393. It is not in
 preview `.24`, and the evidence for PR392 covers the refusal/rollback guard,
 not this new protocol. The supported updater must already be present in the
 originating app and root daemon; a successor cannot repair an older watchdog

@@ -37,36 +37,36 @@ were rehashed on 2026-10-19; receipt SHA256:
 `output/updater-daemon-identity/main-2640/`. Reuse this baseline; it does not
 qualify the coordinated work below or change the published `.24` binary.
 
-[PR393](https://github.com/aiwaki/slipstream/pull/393), branch
-`codex/coordinated-daemon-update` in the attached `readme-humanizer` worktree,
-starts from main2640. Pushed head
-`958949ccfd4e6ae3d3691d9cf7a67501c2317408` passed CI39236170033 and
-audit39236170106, including 184 app tests, Rust lint, Python/Windows checks,
-packaged build, browser qualification and packaged lifecycle. The retained
-`output/updater-daemon-identity/pr393-green-9589-receipt.json` binds those runs.
-Earlier compile/lint issues are fixed. A failing live Geph log test exposed BSD
-`tail -c` reading concurrent appends beyond its requested length; fixed-count
-copy now bounds the archive and failed publication preserves the live log.
-Scoped append/truncate/failure tests and the unchanged hosted Rust test passed.
+[PR393](https://github.com/aiwaki/slipstream/pull/393) merged at
+`e2f728b006c22d0fcb233cadc834ce29c7d32fa8`. Final head
+`b06299cc535120c7d279d4aed5a93d51b5d5b92d` passed CI39239577378 and
+audit39239577363, including 191 app tests, Rust lint, Python/Windows checks,
+packaged build, browser qualification and packaged lifecycle. The terminal
+receipt P1 is resolved. Retained receipt
+`output/updater-daemon-identity/pr393-green-b062-receipt.json` SHA256:
+`7aebe7cb8d46b66219cbd843c98c6cc0057cac592f1c48dccbc64d3218a1cdd2`.
+Main CI39241525733 and audit39241525729 are running; retain their exact candidate
+as the first protocol-capable build once the complete run passes.
 
-The terminal-receipt finding is fixed at
-`b06299cc535120c7d279d4aed5a93d51b5d5b92d`: after daemon PID rollover,
-the exact mailbox can wake the exited worker without changing the durable
-decision. The 330-second/33-attempt consumer budget survives automatic watchdog
-restart and resets only for a verified new process birth. Root tests passed
-44 cases locally; hosted product job118016915052 passed all 191 app tests,
-including seven new regressions. CI39239577378 is still completing packaging;
-audit39239577363 passed. The P1 thread is resolved after scoped review and tests.
-Product log SHA256:
-`619a5555cfafc1d203fed9114f78ca3d83e0723bec67c70bc9aaa3aa54b2e1d3`.
+After daemon PID rollover, the exact mailbox can wake the exited root worker
+without changing the durable decision. Its 330-second/33-attempt consumer budget
+survives automatic watchdog restart and resets only for a verified new process
+birth. Root tests passed 44 cases locally; seven new Rust regressions passed
+in hosted CI. The same PR fixed a reproduced BSD `tail -c` concurrent-append
+race in Geph log rotation; fixed-count copy now bounds the archive and preserves
+the live log if publication fails. The unchanged Rust live-process test passed.
 
 The active `readme-humanizer` checkout is now on
-`codex/native-root-update-qualification`, based on that reviewed PR393 head.
-The next change incorporates the already reviewed disposable native driver,
+`codex/native-root-update-qualification`,
+[PR394](https://github.com/aiwaki/slipstream/pull/394), retargeted to main after
+PR393 merged. This change incorporates the reviewed disposable native driver,
 materializer, workflow and 45 hermetic tests. Its normal source version is
-`0.1.9-preview.25`; version synchronization passed. This supplies a successor
-whose compiled tray and frozen daemon differ from the main393 bridge candidate.
-The protected workflow is not dispatched yet; no preview.25 release is published.
+`0.1.9-preview.25`; synchronization and scoped integration review passed.
+The new source supplies a successor whose compiled tray and frozen daemon differ
+from the main393 bridge candidate. Initial CI39240828886 was deliberately stopped
+before packaging because strict main-base refresh required new exact-head CI;
+audit39240828853 passed. Fresh CI follows this base update.
+No native case has been dispatched and no preview.25 release is published.
 The installed workstation app and public preview.24 remain unchanged.
 
 The implementation seals full app trees and the installed worker runtime in
@@ -88,24 +88,23 @@ at head996e (the latter failed only the existing Geph rotation test). They were
 not executed locally; format and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
-The preceding PR393 head passed full CI. The final terminal fix passed product
-checks; packaging and disposable native qualification remain open. The native
-workflow's 45 integrated hermetic tests and actionlint passed; source/path wiring
-review passed. No local Rust build, privileged runtime test or workstation
+PR393 passed full exact-head CI. Its main build and disposable native
+qualification remain open. The new workflow's 45 integrated hermetic tests,
+actionlint and source/path wiring review passed. No local Rust build, privileged runtime test or workstation
 installation ran. The unchanged release checks are not repeated.
 
 | Milestone | Current boundary |
 |---|---|
 | M0 - Safe Base | Candidate cleanup passed; public update/rollback unqualified. |
 | M1 - Autonomous Routing V1 | Hosted browser/soak passed; no new workstation qualification. |
-| M2 - Contracts And Code | Discovery and daemon ACK repairs merged; coordinated update in progress. |
+| M2 - Contracts And Code | Coordinated update merged; native qualification pending. |
 | M3 - Release-Grade macOS | Preview .24 public; stable and public updater gates open. |
 | M4 - Cross-Platform Core | No new platform qualification in this change. |
 
 ## Next Verified Action
 
-- Finish PR393 exact-head CI and merge through normal protection. Retain the
-  resulting successful main release candidate as the old protocol-capable build.
+- Finish main393 CI and retain its successful release candidate as the old
+  protocol-capable build; do not repeat the green PR checks.
 - Land the separate native qualification/version change and retain its successful
   main candidate as the successor. Dispatch the two source-pinned native cases;
   do not substitute public.24, edit packaged metadata or preinstall the successor.
