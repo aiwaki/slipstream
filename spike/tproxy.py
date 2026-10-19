@@ -17205,12 +17205,16 @@ def _daemon_update_ensure_worker(journal):
     operation, _ = _daemon_update_paths(nonce)
     _daemon_update_check_predecessor(journal)
     _update_private_directory(_DAEMON_UPDATE_REQUESTS, 0o755)
-    _update_private_directory(os.path.join(_DAEMON_UPDATE_REQUESTS, f"{identity['uid']}-{nonce}"), owner=identity["uid"])
+    mailbox = os.path.join(_DAEMON_UPDATE_REQUESTS, f"{identity['uid']}-{nonce}")
+    _update_private_directory(mailbox, owner=identity["uid"])
     worker = os.path.join(operation, "private", "worker-runtime", "slipstreamd")
     plist = {
         "Label": _daemon_update_label(nonce),
         "ProgramArguments": [worker, "--update-worker", nonce],
         "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False},
+        # Atomic user mailbox writes also wake an exited terminal worker. Do
+        # not watch live StatusV2: every heartbeat would rehash retained trees.
+        "WatchPaths": [mailbox],
         "ThrottleInterval": 2, "WorkingDirectory": operation,
         "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null",
         "EnvironmentVariables": {"PATH": "/sbin:/usr/sbin:/bin:/usr/bin", "PYTHONUNBUFFERED": "1"},
@@ -17391,22 +17395,28 @@ def _daemon_update_refresh_terminal(journal):
     index = _update_read_json(os.path.join(_DAEMON_UPDATE_ROOT, "active.json"), mode=0o644)
     if index.get("nonce") != journal["identity"]["nonce"]:
         return
+    ready, _, _, _ = _installed_daemon_readiness_snapshot(PROXY_PORT)
+    if not ready:
+        raise RuntimeError("terminal selected daemon is not ready")
     expected_payload = journal.get("selected_payload_sha256")
     if not expected_payload or _daemon_update_tree(INSTALL_DIR, exclude_names=("tgws-secret",)) != expected_payload:
         return  # A later manual install superseded this historical decision.
     side = "new" if journal["decision"] == "commit" else "old"
     expected_sha = journal["identity"][side + "_daemon_sha256"]
-    ready, _, _, _ = _installed_daemon_readiness_snapshot(PROXY_PORT)
-    if not ready:
-        raise RuntimeError("terminal selected daemon is not ready")
     _write_install_attestation(os.path.join(INSTALL_DIR, "slipstreamd"), expected_sha, 0o700, PROXY_PORT)
     _daemon_update_publish(journal, **_daemon_update_runtime_proof(expected_sha))
 
 
 def _daemon_update_worker_loop(journal):
     if journal["phase"] in {"committed", "aborted"} and journal["writer_quiescent"]:
-        _daemon_update_refresh_terminal(journal)
-        _daemon_update_publish(journal)
+        try:
+            _daemon_update_refresh_terminal(journal)
+        except Exception:
+            # This durable decision is already complete. A transient daemon
+            # startup failure leaves the old receipt unqualified by live proof;
+            # exit successfully instead of a launchd KeepAlive rehash loop.
+            # The consumer can request another bounded mailbox wake when stale.
+            pass
         return True
     previous_worker = journal["worker_pid"]
     _daemon_update_publish(journal, worker_pid=os.getpid(), writer_quiescent=journal["phase"] == "prepared")
@@ -17468,6 +17478,12 @@ def do_update_worker(nonce):
         identity = _daemon_update_identity(journal["identity"])
         if identity["nonce"] != nonce or journal["manifest_sha256"] != _daemon_update_manifest(journal):
             raise RuntimeError("update worker manifest mismatch")
+        if (journal["phase"] in {"committed", "aborted"} and journal["writer_quiescent"]
+                and not _installed_daemon_readiness_snapshot(PROXY_PORT)[0]):
+            # No mutation or new claim is possible on this path. Let the
+            # bounded consumer wake us again after startup, without hashing
+            # every retained tree while the selected daemon is clearly unready.
+            return True
         if _daemon_update_tree(worker_runtime) != journal["worker_runtime_sha256"]:
             raise RuntimeError("update worker runtime identity changed")
         _daemon_update_verify_app(os.path.join(operation, "old.app"), identity, "old")

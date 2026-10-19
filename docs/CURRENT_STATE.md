@@ -39,26 +39,28 @@ qualify the coordinated work below or change the published `.24` binary.
 
 [PR393](https://github.com/aiwaki/slipstream/pull/393), branch
 `codex/coordinated-daemon-update` in the attached `readme-humanizer` worktree,
-starts from that merge. Source commit `66d3f2e4151341802c415bdd54c2dfe2ef743477`
-is pushed. After a test-fixture API fix, head
-`2462fd7e68fbae18de67f36ccbf7ac07a01e6745` passed 184 app tests, 29 browser-probe
-tests, 3 updater installer tests, Python suites, Windows checks and dependency
-audit39232771857. CI39232771871 stopped at two narrow Clippy findings; those
-are corrected at head `996e4aa12dc704bdd3b88f1c41f3683ba95e25a5`.
-At that head, dependency audit39233841112, packaged build, browser qualification
-and Windows checks passed. CI39233841163 failed one existing Geph log-rotation
-test (183 app tests passed): an archive exceeded its asserted 512-byte bound.
-The exact failure is retained in `pr393-product-996e.log`. A bounded native
-reproduction proved BSD `tail -c` can read concurrent appends past its requested
-length. The narrow correction snapshots the byte range and copies it with a
-fixed count; failed archive publication now preserves the live log. Reproducible shell
-checks covered appends after the snapshot, concurrent truncation, copy/chmod/mv
-failures, and eight concurrent-writer bursts. Each successful burst archive
-contained exactly 512 bytes. Independent scoped review found no blocker. The
-existing Rust live-process test remains unchanged. Final source CI is next. The superseded failed CI runs were
-cancelled after their decisive logs were retained. Rust and Python join the watchdog and
-privileged daemon installer into one recoverable transaction. The installed
-workstation app and the published release are unchanged.
+starts from main2640. Pushed head
+`958949ccfd4e6ae3d3691d9cf7a67501c2317408` passed CI39236170033 and
+audit39236170106, including 184 app tests, Rust lint, Python/Windows checks,
+packaged build, browser qualification and packaged lifecycle. The retained
+`output/updater-daemon-identity/pr393-green-9589-receipt.json` binds those runs.
+Earlier compile/lint issues are fixed. A failing live Geph log test exposed BSD
+`tail -c` reading concurrent appends beyond its requested length; fixed-count
+copy now bounds the archive and failed publication preserves the live log.
+Scoped append/truncate/failure tests and the unchanged hosted Rust test passed.
+
+The new terminal-receipt review finding is fixed in this revision: after daemon PID rollover,
+a successfully exited terminal root worker needs an explicit wake to refresh
+its receipt. The root fix watches only the exact transaction mailbox, preserves
+the durable decision, and exits before expensive tree hashes while the daemon
+is unready. Its 44 focused Python tests passed. The app consumer persists its
+330-second, 33-attempt budget under a separate nonblocking mailbox lock; an
+automatic watchdog restart cannot reset it. Only a verified new PID/birth starts
+another episode. Seven Rust regressions cover stale proof, persisted exhaustion,
+generation changes, fresh read-only behavior, unsafe files and concurrent clients.
+Independent scoped review, formatting and whitespace checks passed. Fresh
+exact-head CI is pending; Rust tests were not run locally. The installed
+workstation app and published preview remain unchanged.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -79,11 +81,11 @@ at head996e (the latter failed only the existing Geph rotation test). They were
 not executed locally; format and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
-Independent final source review found no remaining concrete blockers.
-Compilation and tests passed at the preceding head; the final product gate and
-disposable native qualification remain pending. A root-protocol driver draft
+The preceding head passed full CI. Fresh CI for the terminal-receipt fix
+and disposable native qualification remain open. A root-protocol driver draft
 under `output/updater-daemon-identity/native-driver-draft/` is being reviewed;
-it has not executed native operations and does not qualify app/public updates.
+its 37 hermetic checks plus 8 early-failure artifact checks and actionlint passed.
+It has not executed native operations and does not qualify app/public updates.
 No local Rust build, privileged runtime test, or workstation installation ran.
 
 | Milestone | Current boundary |
@@ -96,8 +98,8 @@ No local Rust build, privileged runtime test, or workstation installation ran.
 
 ## Next Verified Action
 
-- Finish PR393 exact-head hosted CI, fix any concrete failures, and retain
-  matching evidence. Reuse main2640's
+- Run PR393 exact-head hosted CI for the reviewed terminal refresh fix; resolve
+  the addressed P1 after passing evidence and merge through normal protection. Reuse main2640's
   unchanged baseline; do not rebuild or republish `.24` or rerun its readiness.
 - Qualify the coordinated path on disposable macOS with a supporting bridge
   build and a successor whose normal version bump changes the frozen daemon.

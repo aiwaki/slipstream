@@ -18,6 +18,31 @@ const ROOT_BASE: &str = "/var/db/dev.slipstream-update";
 const REQUEST_BASE: &str = "/var/run/slipstream-update-requests";
 const MAX_STATUS_BYTES: u64 = 16 * 1024;
 const MAX_SEQUENCE: u64 = (1u64 << 53) - 1;
+const TERMINAL_REFRESH_INTERVAL_SECS: u64 = 10;
+const TERMINAL_REFRESH_EPISODE_SECS: u64 = 330;
+const MAX_TERMINAL_REFRESH_ATTEMPTS: u32 = 33;
+const MAX_REFRESH_BYTES: u64 = 4096;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeGeneration {
+    pid: u32,
+    started: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TerminalRefreshEpisode {
+    schema_version: u8,
+    nonce: String,
+    manifest_sha256: String,
+    decision: String,
+    receipt_pid: u32,
+    observed_generation: Option<RuntimeGeneration>,
+    started_unix: u64,
+    last_sent_unix: u64,
+    attempts: u32,
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -336,6 +361,14 @@ impl Client {
     }
 
     pub fn status(&self, binding: &Binding) -> Result<Status, String> {
+        self.status_with_runtime_check(binding, |status| self.live_runtime_matches(status))
+    }
+
+    fn status_with_runtime_check(
+        &self,
+        binding: &Binding,
+        runtime_matches: impl FnOnce(&Status) -> bool,
+    ) -> Result<Status, String> {
         binding.validate()?;
         Self::checked_directory(&self.root, self.owner, false)?;
         let directory = self.root.join(&binding.identity.nonce);
@@ -399,8 +432,205 @@ impl Client {
         };
         status.validate(binding)?;
         status.runtime_fresh = matches!(status.phase.as_str(), "ready" | "committed" | "aborted")
-            && self.live_runtime_matches(&status);
+            && runtime_matches(&status);
+        // A successful terminal worker exits. Its root-owned WatchPaths job
+        // needs a new mailbox event after a normal selected-daemon restart.
+        // This is only a wake hint: stale proof stays untrusted until root
+        // republishes it and all live-runtime checks pass on a later read.
+        self.request_terminal_refresh(binding, &status)?;
         Ok(status)
+    }
+
+    fn request_terminal_refresh(&self, binding: &Binding, status: &Status) -> Result<bool, String> {
+        if status.runtime_fresh || !matches!(status.phase.as_str(), "committed" | "aborted") {
+            return Ok(false);
+        }
+        let generation = self.observed_runtime_generation();
+        self.request_terminal_refresh_at(binding, status, generation, unix_now())
+    }
+
+    fn request_terminal_refresh_at(
+        &self,
+        binding: &Binding,
+        status: &Status,
+        generation: Option<RuntimeGeneration>,
+        now: u64,
+    ) -> Result<bool, String> {
+        if status.runtime_fresh || !matches!(status.phase.as_str(), "committed" | "aborted") {
+            return Ok(false);
+        }
+        status.validate(binding)?;
+        let directory = self.requests.join(format!(
+            "{}-{}",
+            binding.identity.uid, binding.identity.nonce
+        ));
+        let marker = directory.join("refresh.json");
+        Self::checked_directory(&self.requests, self.owner, false)?;
+        Self::checked_directory(&directory, binding.identity.uid, true)?;
+        // Reuse the nonblocking private lock primitive. Never replace/unlink its
+        // inode: tray and automatically restarted watchdogs share one episode.
+        let Some(lock) = super::try_transaction_lock(&directory)? else {
+            return Ok(false);
+        };
+        let metadata = lock.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file()
+            || metadata.uid() != binding.identity.uid
+            || metadata.mode() & 0o7777 != 0o600
+            || metadata.nlink() != 1
+        {
+            return Err("unsafe terminal refresh lock".into());
+        }
+        let mut episode = self.read_refresh_episode(&marker, binding, status)?;
+        let receipt_pid = status
+            .daemon_pid
+            .filter(|pid| *pid > 1)
+            .ok_or("terminal receipt has no daemon PID")?;
+        // Heartbeat ticks, temporarily absent status and receipt refresh itself
+        // cannot renew the budget. Only an independently observed process birth
+        // starts another episode; the first verified birth also replaces None.
+        let reset = episode.as_ref().is_none_or(|episode| {
+            generation
+                .as_ref()
+                .is_some_and(|generation| episode.observed_generation.as_ref() != Some(generation))
+        });
+        if reset {
+            episode = Some(TerminalRefreshEpisode {
+                schema_version: 1,
+                nonce: binding.identity.nonce.clone(),
+                manifest_sha256: status.manifest_sha256.clone(),
+                decision: status
+                    .decision
+                    .clone()
+                    .ok_or("terminal receipt has no decision")?,
+                receipt_pid,
+                observed_generation: generation,
+                started_unix: now,
+                last_sent_unix: now,
+                attempts: 0,
+            });
+        }
+        let episode = episode
+            .as_mut()
+            .ok_or("terminal refresh episode is missing")?;
+        if now < episode.started_unix || now < episode.last_sent_unix {
+            return Err(
+                "terminal refresh clock moved backwards; transaction guard retained".into(),
+            );
+        }
+        if now - episode.started_unix >= TERMINAL_REFRESH_EPISODE_SECS
+            || episode.attempts >= MAX_TERMINAL_REFRESH_ATTEMPTS
+        {
+            return Err("terminal daemon proof refresh exhausted (330s/33 attempts); transaction guard retained pending recovery".into());
+        }
+        if episode.attempts > 0 && now - episode.last_sent_unix < TERMINAL_REFRESH_INTERVAL_SECS {
+            return Ok(false);
+        }
+        episode.attempts += 1;
+        episode.last_sent_unix = now;
+        // This private marker is only a WatchPaths wake hint. Root never uses
+        // these user-owned fields as commit/abort or runtime proof authority.
+        let bytes = serde_json::to_vec(episode).map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > MAX_REFRESH_BYTES {
+            return Err("terminal refresh episode exceeded limit".into());
+        }
+        Self::checked_directory(&self.requests, self.owner, false)?;
+        Self::checked_directory(&directory, binding.identity.uid, true)?;
+        write_private_atomic(&marker, &bytes)?;
+        Ok(true)
+    }
+
+    fn read_refresh_episode(
+        &self,
+        path: &Path,
+        binding: &Binding,
+        status: &Status,
+    ) -> Result<Option<TerminalRefreshEpisode>, String> {
+        let mut file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("cannot read terminal refresh episode: {error}")),
+        };
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file()
+            || metadata.uid() != binding.identity.uid
+            || metadata.mode() & 0o7777 != 0o600
+            || metadata.len() > MAX_REFRESH_BYTES
+            || metadata.nlink() != 1
+        {
+            return Err("unsafe terminal refresh episode".into());
+        }
+        let mut bytes = Vec::new();
+        file.by_ref()
+            .take(MAX_REFRESH_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > MAX_REFRESH_BYTES {
+            return Err("terminal refresh episode exceeded limit".into());
+        }
+        let episode: TerminalRefreshEpisode = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("invalid terminal refresh episode: {e}"))?;
+        if episode.schema_version != 1
+            || episode.nonce != binding.identity.nonce
+            || episode.manifest_sha256 != status.manifest_sha256
+            || Some(episode.decision.as_str()) != status.decision.as_deref()
+            || episode.receipt_pid <= 1
+            || episode.started_unix == 0
+            || episode.last_sent_unix < episode.started_unix
+            || episode.last_sent_unix - episode.started_unix >= TERMINAL_REFRESH_EPISODE_SECS
+            || !(1..=MAX_TERMINAL_REFRESH_ATTEMPTS).contains(&episode.attempts)
+            || episode
+                .observed_generation
+                .as_ref()
+                .is_some_and(|generation| {
+                    generation.pid <= 1 || !super::is_safe_process_start(&generation.started)
+                })
+        {
+            return Err("terminal refresh episode identity or budget is invalid".into());
+        }
+        Ok(Some(episode))
+    }
+
+    fn observed_runtime_generation(&self) -> Option<RuntimeGeneration> {
+        #[cfg(test)]
+        if test_client_active() {
+            return None;
+        }
+        let path = Path::new("/var/run/slipstream.status");
+        let age = fs::symlink_metadata(path)
+            .ok()?
+            .modified()
+            .ok()?
+            .elapsed()
+            .ok()?;
+        if age > Duration::from_secs(6) {
+            return None;
+        }
+        let bytes = self.read_root_file(path, 1024 * 1024).ok()?;
+        let value = serde_json::from_slice(&bytes).ok()?;
+        let daemon = slipstream_core::status_v2::status_v2_from_value(value)
+            .ok()?
+            .daemon?;
+        if !matches!(daemon.state.as_deref(), Some("active" | "dormant"))
+            || daemon.heartbeat_seq.unwrap_or(0) == 0
+        {
+            return None;
+        }
+        let pid = u32::try_from(daemon.pid?).ok().filter(|pid| *pid > 1)?;
+        let process = super::process_snapshot(pid)?;
+        if process.uid != 0
+            || process.is_zombie()
+            || process.command.split_whitespace().next()? != "/usr/local/slipstream/slipstreamd"
+        {
+            return None;
+        }
+        Some(RuntimeGeneration {
+            pid,
+            started: process.started,
+        })
     }
 
     fn live_runtime_matches(&self, status: &Status) -> bool {
@@ -689,6 +919,382 @@ mod tests {
         let path = root.join(&binding.identity.nonce).join("status.json");
         fs::write(&path, serde_json::to_vec(value).unwrap()).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    fn create_mailbox(client: &Client, binding: &Binding) -> PathBuf {
+        let directory = client.requests.join(format!(
+            "{}-{}",
+            binding.identity.uid, binding.identity.nonce
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        directory
+    }
+
+    fn generation(pid: u32, seconds: u32) -> RuntimeGeneration {
+        RuntimeGeneration {
+            pid,
+            started: format!("Mon Oct 19 12:00:{seconds:02} 2026"),
+        }
+    }
+
+    fn read_episode(mailbox: &Path) -> TerminalRefreshEpisode {
+        serde_json::from_slice(&fs::read(mailbox.join("refresh.json")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn stale_terminal_status_wakes_worker_without_acknowledging_or_changing_decision() {
+        for phase in ["committed", "aborted"] {
+            let directory = TempDir::new().unwrap();
+            let root = directory.path().join("root");
+            let requests = directory.path().join("requests");
+            let binding = binding(); // No pending action is needed after app cleanup.
+            with_test_client(&root, &requests, || {
+                let client = Client::system();
+                let mailbox = create_mailbox(&client, &binding);
+                let action_path = mailbox.join("request.json");
+                fs::write(&action_path, b"existing durable action").unwrap();
+                let original = wire(&binding, phase);
+                write_status(&root, &binding, &original);
+
+                let status = client
+                    .status_with_runtime_check(&binding, |_| false)
+                    .unwrap();
+                assert!(!status.committed() && !status.aborted());
+                assert_eq!(serde_json::to_value(&status).unwrap(), original);
+                let marker = mailbox.join("refresh.json");
+                let episode = read_episode(&mailbox);
+                assert_eq!(episode.nonce, binding.identity.nonce);
+                assert_eq!(episode.manifest_sha256, status.manifest_sha256);
+                assert_eq!(Some(episode.decision.as_str()), status.decision.as_deref());
+                assert_eq!(episode.attempts, 1);
+                assert_eq!(
+                    fs::metadata(&marker).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+                assert_eq!(fs::read(&action_path).unwrap(), b"existing durable action");
+
+                // A fresh root reply is consumed without touching the watched mailbox.
+                let before = fs::read(&marker).unwrap();
+                let marker_inode = fs::metadata(&marker).unwrap().ino();
+                let mut refreshed_wire = original;
+                refreshed_wire["daemon_pid"] = json!(44);
+                refreshed_wire["heartbeat_seq"] = json!(20);
+                refreshed_wire["install_attestation_sha256"] = json!("5".repeat(64));
+                write_status(&root, &binding, &refreshed_wire);
+                let refreshed = client
+                    .status_with_runtime_check(&binding, |_| true)
+                    .unwrap();
+                assert_eq!(refreshed.committed(), phase == "committed");
+                assert_eq!(refreshed.aborted(), phase == "aborted");
+                assert_eq!(fs::metadata(&marker).unwrap().ino(), marker_inode);
+                assert_eq!(fs::read(&marker).unwrap(), before);
+            });
+        }
+    }
+
+    #[test]
+    fn terminal_refresh_retries_missed_wakes_and_preserves_exhaustion_across_clients() {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path().join("root");
+        let requests = directory.path().join("requests");
+        let binding = binding();
+        with_test_client(&root, &requests, || {
+            let client = Client::system();
+            let mailbox = create_mailbox(&client, &binding);
+            write_status(&root, &binding, &wire(&binding, "committed"));
+            let mut status = client.status(&binding).unwrap();
+            status.runtime_fresh = false;
+            let observed = Some(generation(44, 0));
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1000)
+                .unwrap());
+            let initial_inode = fs::metadata(mailbox.join("refresh.json")).unwrap().ino();
+            assert!(!client
+                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1009)
+                .unwrap());
+            assert_eq!(
+                fs::metadata(mailbox.join("refresh.json")).unwrap().ino(),
+                initial_inode
+            );
+            // No root reply: a missed WatchPaths event gets another bounded wake.
+            for attempt in 1..MAX_TERMINAL_REFRESH_ATTEMPTS {
+                status.heartbeat_seq = Some(20 + u64::from(attempt));
+                assert!(client
+                    .request_terminal_refresh_at(
+                        &binding,
+                        &status,
+                        observed.clone(),
+                        1000 + u64::from(attempt) * 10
+                    )
+                    .unwrap());
+            }
+            let before = fs::read(mailbox.join("refresh.json")).unwrap();
+            assert_eq!(
+                read_episode(&mailbox).attempts,
+                MAX_TERMINAL_REFRESH_ATTEMPTS
+            );
+            // A new helper/client reads the same persisted budget. Missing heartbeat,
+            // fresh-then-stale proof and a refreshed receipt PID cannot replenish it.
+            let next_client = Client::system();
+            let error = next_client
+                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1330)
+                .unwrap_err();
+            assert!(error.contains("exhausted"));
+            assert!(next_client
+                .request_terminal_refresh_at(&binding, &status, None, 1340)
+                .is_err());
+            status.runtime_fresh = true;
+            assert!(!next_client
+                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1350)
+                .unwrap());
+            status.runtime_fresh = false;
+            status.daemon_pid = Some(44);
+            assert!(next_client
+                .request_terminal_refresh_at(&binding, &status, observed, 1360)
+                .is_err());
+            assert_eq!(fs::read(mailbox.join("refresh.json")).unwrap(), before);
+        });
+    }
+
+    #[test]
+    fn terminal_refresh_resets_only_for_a_verified_process_birth() {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path().join("root");
+        let requests = directory.path().join("requests");
+        let binding = binding();
+        with_test_client(&root, &requests, || {
+            let client = Client::system();
+            let mailbox = create_mailbox(&client, &binding);
+            write_status(&root, &binding, &wire(&binding, "aborted"));
+            let mut status = client.status(&binding).unwrap();
+            status.runtime_fresh = false;
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1000)
+                .unwrap());
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1330)
+                .unwrap_err()
+                .contains("exhausted"));
+            // First verified generation after None permits a new bounded attempt.
+            let observed = generation(44, 0);
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, Some(observed.clone()), 1400)
+                .unwrap());
+            assert_eq!(read_episode(&mailbox).started_unix, 1400);
+            assert!(!client
+                .request_terminal_refresh_at(&binding, &status, None, 1401)
+                .unwrap());
+            assert_eq!(
+                read_episode(&mailbox).observed_generation,
+                Some(observed.clone())
+            );
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, Some(observed), 1730)
+                .is_err());
+            // PID reuse with a different verified process start is a genuine restart.
+            let restarted = generation(44, 1);
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, Some(restarted.clone()), 1800)
+                .unwrap());
+            let episode = read_episode(&mailbox);
+            assert_eq!(episode.started_unix, 1800);
+            assert_eq!(episode.attempts, 1);
+            assert_eq!(episode.observed_generation, Some(restarted));
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, Some(generation(45, 2)), 2200)
+                .unwrap());
+            assert_eq!(read_episode(&mailbox).attempts, 1);
+        });
+    }
+
+    #[test]
+    fn nonterminal_or_fresh_status_never_requests_terminal_refresh() {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path().join("root");
+        let requests = directory.path().join("requests");
+        let binding = binding();
+        with_test_client(&root, &requests, || {
+            let client = Client::system();
+            for phase in ["prepared", "ready", "activating", "recovery_incomplete"] {
+                write_status(&root, &binding, &wire(&binding, phase));
+                let _ = client
+                    .status_with_runtime_check(&binding, |_| false)
+                    .unwrap();
+                assert!(!requests.exists(), "{phase}");
+            }
+            for phase in ["committed", "aborted"] {
+                write_status(&root, &binding, &wire(&binding, phase));
+                let _ = client
+                    .status_with_runtime_check(&binding, |_| true)
+                    .unwrap();
+                assert!(!requests.exists(), "{phase}");
+            }
+        });
+    }
+
+    #[test]
+    fn terminal_refresh_rejects_unsafe_mailbox_without_accepting_stale_proof() {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path().join("root");
+        let requests = directory.path().join("requests");
+        let binding = binding();
+        with_test_client(&root, &requests, || {
+            let client = Client::system();
+            let mailbox = create_mailbox(&client, &binding);
+            write_status(&root, &binding, &wire(&binding, "committed"));
+            let mut status = client.status(&binding).unwrap();
+            status.runtime_fresh = false;
+            fs::set_permissions(&mailbox, fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1000)
+                .is_err());
+            assert!(client
+                .status_with_runtime_check(&binding, |_| false)
+                .is_err());
+            assert!(!mailbox.join("refresh.json").exists());
+            fs::set_permissions(&mailbox, fs::Permissions::from_mode(0o700)).unwrap();
+            let moved = directory.path().join("foreign-mailbox");
+            fs::rename(&mailbox, &moved).unwrap();
+            symlink(&moved, &mailbox).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1000)
+                .is_err());
+            assert!(!moved.join("refresh.json").exists());
+            fs::remove_file(&mailbox).unwrap();
+            fs::rename(&moved, &mailbox).unwrap();
+            let mut foreign_binding = binding.clone();
+            foreign_binding.identity.uid += 1;
+            let foreign_mailbox = create_mailbox(&client, &foreign_binding);
+            status.identity = foreign_binding.identity.clone();
+            assert!(client
+                .request_terminal_refresh_at(&foreign_binding, &status, None, 1000)
+                .is_err());
+            assert!(!foreign_mailbox.join("refresh.json").exists());
+        });
+    }
+
+    #[test]
+    fn terminal_refresh_rejects_unsafe_or_unbounded_persisted_episode() {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path().join("root");
+        let requests = directory.path().join("requests");
+        let binding = binding();
+        with_test_client(&root, &requests, || {
+            let client = Client::system();
+            let mailbox = create_mailbox(&client, &binding);
+            write_status(&root, &binding, &wire(&binding, "committed"));
+            let mut status = client.status(&binding).unwrap();
+            status.runtime_fresh = false;
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1000)
+                .unwrap());
+            let marker = mailbox.join("refresh.json");
+            let valid = fs::read(&marker).unwrap();
+            fs::set_permissions(&marker, fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+            fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
+            fs::write(&marker, vec![b' '; MAX_REFRESH_BYTES as usize + 1]).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+            let mut extra: Value = serde_json::from_slice(&valid).unwrap();
+            extra["completed"] = json!(true);
+            fs::write(&marker, serde_json::to_vec(&extra).unwrap()).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+            extra.as_object_mut().unwrap().remove("completed");
+            extra["manifest_sha256"] = json!("6".repeat(64));
+            fs::write(&marker, serde_json::to_vec(&extra).unwrap()).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+            fs::write(&marker, &valid).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 999)
+                .is_err());
+            let linked = directory.path().join("linked-episode");
+            fs::hard_link(&marker, &linked).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+            fs::remove_file(&linked).unwrap();
+            let target = directory.path().join("unrelated");
+            fs::write(&target, b"preserve").unwrap();
+            fs::remove_file(&marker).unwrap();
+            symlink(&target, &marker).unwrap();
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+            assert_eq!(fs::read(&target).unwrap(), b"preserve");
+            fs::remove_file(&marker).unwrap();
+            use std::os::unix::ffi::OsStrExt;
+            let fifo_path = std::ffi::CString::new(marker.as_os_str().as_bytes()).unwrap();
+            // SAFETY: CString keeps a valid NUL-terminated fixture path alive.
+            assert_eq!(unsafe { libc::mkfifo(fifo_path.as_ptr(), 0o600) }, 0);
+            // O_NONBLOCK must permit rejecting a FIFO without waiting for a writer.
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .is_err());
+        });
+    }
+
+    #[test]
+    fn terminal_refresh_serializes_clients_with_a_stable_nonblocking_mailbox_lock() {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path().join("root");
+        let requests = directory.path().join("requests");
+        let binding = binding();
+        with_test_client(&root, &requests, || {
+            let client = Client::system();
+            let mailbox = create_mailbox(&client, &binding);
+            write_status(&root, &binding, &wire(&binding, "committed"));
+            let mut status = client.status(&binding).unwrap();
+            status.runtime_fresh = false;
+            let lock = super::super::try_transaction_lock(&mailbox)
+                .unwrap()
+                .unwrap();
+            let lock_inode = lock.metadata().unwrap().ino();
+            assert!(!client
+                .request_terminal_refresh_at(&binding, &status, None, 1000)
+                .unwrap());
+            assert!(!mailbox.join("refresh.json").exists());
+            drop(lock);
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let workers = (0..2)
+                .map(|_| {
+                    let client = client.clone();
+                    let binding = binding.clone();
+                    let status = status.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        client
+                            .request_terminal_refresh_at(&binding, &status, None, 1000)
+                            .unwrap()
+                    })
+                })
+                .collect::<Vec<_>>();
+            let sent = workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .filter(|sent| *sent)
+                .count();
+            assert_eq!(sent, 1);
+            assert_eq!(read_episode(&mailbox).attempts, 1);
+            let lock = super::super::try_transaction_lock(&mailbox)
+                .unwrap()
+                .unwrap();
+            assert_eq!(lock.metadata().unwrap().ino(), lock_inode);
+            drop(lock);
+            assert!(client
+                .request_terminal_refresh_at(&binding, &status, None, 1010)
+                .unwrap());
+            assert_eq!(read_episode(&mailbox).attempts, 2);
+        });
     }
 
     #[test]

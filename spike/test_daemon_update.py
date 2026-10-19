@@ -169,6 +169,22 @@ def test_terminal_worker_never_reinstalls_or_consumes_request(machine, monkeypat
     assert machine[0][0] == ("refresh",)
 
 
+@pytest.mark.parametrize("phase,decision", [("committed", "commit"), ("aborted", "abort")])
+def test_terminal_wake_unready_exits_success_without_keepalive_or_decision_replay(machine, monkeypatch, phase, decision):
+    value = journal()
+    value.update(phase=phase, decision=decision, writer_quiescent=True, accepted_sequence=2)
+    before = copy.deepcopy(value)
+    calls = []
+    def unavailable(_):
+        calls.append("refresh")
+        raise RuntimeError("selected daemon is still starting")
+    monkeypatch.setattr(tproxy, "_daemon_update_refresh_terminal", unavailable)
+    monkeypatch.setattr(tproxy, "_daemon_update_request", lambda _: pytest.fail("late decision consumed"))
+    monkeypatch.setattr(tproxy, "_daemon_update_resolve", lambda _: pytest.fail("terminal runtime reinstalled"))
+    assert tproxy._daemon_update_worker_loop(value) is True
+    assert calls == ["refresh"] and value == before and machine[1] == []
+
+
 def test_snapshot_is_copied_only_after_quiescence_and_before_new_install(monkeypatch, tmp_path):
     events = []
     value = journal()
@@ -336,14 +352,41 @@ def test_terminal_refresh_does_not_overwrite_later_payload(monkeypatch):
     value = journal()
     value.update(phase="committed", decision="commit", selected_payload_sha256="c" * 64)
     monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: {"nonce": NONCE})
+    monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (True, "ready", {}, False))
     monkeypatch.setattr(tproxy, "_daemon_update_tree", lambda *a, **k: "d" * 64)
     monkeypatch.setattr(tproxy, "_write_install_attestation", lambda *a, **k: pytest.fail("overwriting later manual install"))
     tproxy._daemon_update_refresh_terminal(value)
 
 
-def test_terminal_refresh_rebinds_same_payload_new_pid_without_reinstall(monkeypatch):
+def test_terminal_refresh_checks_readiness_before_hashing_installed_tree(monkeypatch):
     value = journal()
-    value.update(phase="aborted", decision="abort", selected_payload_sha256="c" * 64)
+    value.update(phase="committed", decision="commit", selected_payload_sha256="c" * 64)
+    monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: {"nonce": NONCE})
+    monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (False, "starting", None, False))
+    monkeypatch.setattr(tproxy, "_daemon_update_tree", lambda *a, **k: pytest.fail("unready daemon caused full tree hash"))
+    with pytest.raises(RuntimeError, match="not ready"):
+        tproxy._daemon_update_refresh_terminal(value)
+
+
+def test_terminal_worker_entry_exits_unready_before_hashing_retained_trees(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+    value = journal()
+    value.update(phase="aborted", decision="abort", writer_quiescent=True)
+    monkeypatch.setattr(tproxy, "_DAEMON_UPDATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(tmp_path / NONCE / "private/worker-runtime/slipstreamd"))
+    monkeypatch.setattr(tproxy, "_installer_operation_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: value)
+    monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (False, "starting", None, False))
+    monkeypatch.setattr(tproxy, "_daemon_update_tree", lambda *a, **k: pytest.fail("unready daemon caused retained tree hash"))
+    monkeypatch.setattr(tproxy, "_daemon_update_publish", lambda *a, **k: pytest.fail("unready terminal receipt changed"))
+    assert tproxy.do_update_worker(NONCE) is True
+
+
+@pytest.mark.parametrize("phase,decision,side", [("committed", "commit", "new"), ("aborted", "abort", "old")])
+def test_terminal_wake_rebinds_same_payload_new_pid_without_reinstall(monkeypatch, phase, decision, side):
+    value = journal()
+    value.update(phase=phase, decision=decision, selected_payload_sha256="c" * 64, accepted_sequence=2)
     monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: {"nonce": NONCE})
     monkeypatch.setattr(tproxy, "_daemon_update_tree", lambda *a, **k: "c" * 64)
     monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (True, "ready", {"pid": 202}, False))
@@ -352,8 +395,12 @@ def test_terminal_refresh_rebinds_same_payload_new_pid_without_reinstall(monkeyp
     monkeypatch.setattr(tproxy, "_daemon_update_runtime_proof", lambda sha: {**proof(sha), "daemon_pid": 202})
     monkeypatch.setattr(tproxy, "_daemon_update_publish", lambda v, **k: v.update(k))
     monkeypatch.setattr(tproxy, "do_install", lambda *a, **k: pytest.fail("reinstall forbidden"))
-    tproxy._daemon_update_refresh_terminal(value)
-    assert value["daemon_pid"] == 202 and value["decision"] == "abort" and len(writes) == 1
+    monkeypatch.setattr(tproxy, "_daemon_update_request", lambda _: pytest.fail("late decision consumed"))
+    assert tproxy._daemon_update_worker_loop(value)
+    assert value["daemon_pid"] == 202 and value["decision"] == decision and len(writes) == 1
+    assert value["phase"] == phase and value["accepted_sequence"] == 2 and value["writer_quiescent"]
+    assert value["daemon_sha256"] == identity()[side + "_daemon_sha256"]
+    assert writes[0][1] == identity()[side + "_daemon_sha256"]
 
 
 @pytest.mark.parametrize("absent", [True, False])
@@ -480,6 +527,20 @@ def test_prepare_seals_actual_installed_worker_before_index_and_releases_lock_be
     retried = json.loads((root / NONCE / "private/journal.json").read_text())
     assert retried["deadline_unix"] == private["deadline_unix"]
     assert retried["manifest_sha256"] == private["manifest_sha256"]
+
+
+def test_prepare_persists_mailbox_wake_without_heartbeat_watch_or_periodic_worker(prepared_filesystem):
+    import plistlib
+    value, _, _, _ = prepared_filesystem
+    assert tproxy.do_update_prepare(json.dumps(value))
+    with open(tproxy._daemon_update_worker_plist(NONCE), "rb") as handle:
+        worker = plistlib.load(handle)
+    mailbox = os.path.join(tproxy._DAEMON_UPDATE_REQUESTS, f"{value['uid']}-{NONCE}")
+    assert worker["WatchPaths"] == [mailbox]
+    assert Path(mailbox).is_dir()
+    assert worker["KeepAlive"] == {"SuccessfulExit": False}
+    assert "StartInterval" not in worker and "QueueDirectories" not in worker
+    assert tproxy.STATUS_PATH not in worker["WatchPaths"]
 
 
 def test_expired_authorization_is_definitive_noop_before_staging(prepared_filesystem):

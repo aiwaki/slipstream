@@ -116,6 +116,17 @@ for an explicit retry. Retry does not renew its deadline. A committed root
 decision requires recovery of the new app, including a fresh acknowledgement
 after relaunch; it cannot authorize restoration of the old app.
 
+If the selected daemon restarts after that decision, a stale runtime proof
+causes the app to request a rate-limited mailbox wake. The retained root worker
+refreshes the proof for the same selected payload without replaying an action
+or reinstalling a runtime. It exits after that attempt; normal heartbeats do
+not wake it. The consumer records its 330-second retry window in the private
+transaction mailbox, so automatic watchdog restarts cannot renew that window.
+Only a newly verified daemon process generation starts another episode; a
+missing heartbeat does not reset it. Exhaustion retains the transaction guard
+and reports the recovery failure. A fresh proof remains mandatory before app
+recovery can finish.
+
 | Code owner | Responsibility | Useful failure boundary |
 |---|---|---|
 | [`lib.rs`](../app-tauri/src-tauri/src/lib.rs), `authorize_daemon_update` | Administrator authorization and guarded tray controls | Rejected authorization versus an uncertain privileged outcome |
