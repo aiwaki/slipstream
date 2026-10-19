@@ -15,7 +15,7 @@ use super::{sha256_bytes, sha256_file, unix_now, write_private_atomic};
 pub const BUNDLE_DAEMON: &str = "Contents/Resources/slipstreamd/slipstreamd";
 pub const TARGET: &str = "/Applications/Slipstream.app";
 const ROOT_BASE: &str = "/var/db/dev.slipstream-update";
-const REQUEST_BASE: &str = "/var/run/slipstream-update-requests";
+const REQUEST_BASE: &str = "/var/db/dev.slipstream-update/requests";
 const MAX_STATUS_BYTES: u64 = 16 * 1024;
 const MAX_SEQUENCE: u64 = (1u64 << 53) - 1;
 const TERMINAL_REFRESH_INTERVAL_SECS: u64 = 10;
