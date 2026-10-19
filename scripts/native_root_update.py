@@ -26,6 +26,28 @@ class Refused(RuntimeError):
     pass
 
 
+class CommandFailure(Refused):
+    def __init__(self, diagnostic):
+        self.diagnostic = diagnostic
+        outcome = "timed out" if diagnostic["timed_out"] else f"exited {diagnostic['returncode']}"
+        super().__init__(f"{diagnostic['stage']}: {diagnostic['executable']} {diagnostic['operation']} {outcome}")
+
+
+def bounded_output(value, limit=4096):
+    raw = value if isinstance(value, bytes) else (value or "").encode("utf-8", "replace")
+    truncated = len(raw) > limit
+    if truncated:
+        raw = raw[:limit // 2] + b"\n[...truncated...]\n" + raw[-limit // 2:]
+    return {"text": raw.decode("utf-8", "replace"), "truncated": truncated}
+
+
+def failure_detail(error, stage):
+    detail = {"type": type(error).__name__, "reason": str(error)[:512], "stage": stage}
+    if isinstance(error, CommandFailure):
+        detail.update(stage=error.diagnostic["stage"], command=error.diagnostic)
+    return detail
+
+
 def require(ok, message):
     if not ok:
         raise Refused(message)
@@ -130,6 +152,7 @@ class Native:
         self.args, self.uid, self.tproxy, self.candidate = args, uid, tproxy, candidate
         self.deadline = time.monotonic() + 720
         self.events, self.created, self.install_attempted = [], [], False
+        self.diagnostic_stage = "preflight"
         self.identity = self.manifest = None
         self.target = Path(tproxy._DAEMON_UPDATE_TARGET)
         self.root = Path(tproxy._DAEMON_UPDATE_ROOT)
@@ -139,17 +162,77 @@ class Native:
         self.env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         self.fields = set(document(args.repo / "contracts/update-daemon-status-v1.json")["vectors"][0]["status"])
 
+    def command_identity(self, argv):
+        """Describe fixed native commands without retaining argv, identity JSON, or env."""
+        args = [str(x) for x in argv]
+        sudo = args[:2] == ["/usr/bin/sudo", "-n"]
+        command = args[2:] if sudo else args
+        executable = command[0]
+        operation = "unclassified"
+        if command == ["/usr/bin/true"]:
+            operation = "privilege-check"
+        elif executable == str(self.target / "Contents/Resources/slipstreamd/slipstreamd") and command[1:] == ["--install"]:
+            operation = "install"
+        elif executable == str(self.installed):
+            if command[1:] == ["--uninstall"]:
+                operation = "uninstall"
+            elif len(command) == 3 and command[1] == "--update-prepare":
+                operation = "update-prepare"
+        elif executable == "/bin/launchctl" and len(command) >= 3 and command[1] in {"print", "kill"}:
+            operation = "launchctl-" + command[1]
+        elif executable == "/usr/bin/shasum" and command[1:3] == ["-a", "256"]:
+            operation = "installed-sha256"
+        elif executable == "/usr/bin/codesign" and command[1:4] == ["--verify", "--deep", "--strict"]:
+            operation = "codesign-verify"
+        elif executable == "/usr/bin/lipo" and command[-2:] == ["-verify_arch", "arm64"]:
+            operation = "verify-architecture"
+        elif executable == "/usr/bin/pgrep" and command[1:] == ["-x", "slipstream(d)?"]:
+            operation = "process-absence"
+        elif executable == "/bin/ps" and command[1:3] == ["-ww", "-p"]:
+            operation = "process-identity"
+        elif executable == "/usr/bin/env":
+            identity = self.identity or {}
+            prefix = ["/usr/bin/env", "CI=true", "GITHUB_ACTIONS=true", "SLIPSTREAM_DISPOSABLE_CI=1",
+                      "RUNNER_OS=macOS", sys.executable, str(Path(__file__).resolve()),
+                      "--repo", str(self.args.repo), "--root-proof"]
+            if (len(command) == 13 and command[:10] == prefix and command[11] == "--nonce"
+                    and re.fullmatch(r"[0-9a-f]{64}", command[10])
+                    and command[10] in {identity.get("old_daemon_sha256"), identity.get("new_daemon_sha256")}
+                    and re.fullmatch(r"[0-9a-f]{32}", command[12]) and command[12] == identity.get("nonce")):
+                executable, operation = sys.executable, "root-proof"
+        # Unknown commands (including authenticated gh and env wrappers) never
+        # contribute their output or arguments to the retained diagnostic.
+        return {"launcher": "sudo" if sudo else "direct", "executable": Path(executable).name,
+                "operation": operation}
+
+    def command_failure(self, argv, *, returncode=None, stdout=None, stderr=None,
+                        timed_out=False, timeout=None, capture=False):
+        command = self.command_identity(argv)
+        diagnostic = {**command, "stage": self.diagnostic_stage, "returncode": returncode,
+                      "timed_out": timed_out, "timeout_seconds": timeout}
+        if capture and command["operation"] != "unclassified":
+            diagnostic.update(stdout=bounded_output(stdout), stderr=bounded_output(stderr))
+        else:
+            diagnostic["output_omitted"] = True
+        return CommandFailure(diagnostic)
+
     def run(self, argv, *, timeout=30, check=True, github=False, env=None):
         remaining = self.deadline - time.monotonic()
         require(remaining > 0, "driver deadline exhausted; runner destruction required")
         actual_env = dict(self.env if env is None else env)
         if github:
             actual_env.update({k: os.environ[k] for k in ("GH_TOKEN", "GITHUB_TOKEN") if k in os.environ})
-        result = subprocess.run([str(x) for x in argv], capture_output=True, env=actual_env,
-                                timeout=min(timeout, remaining), check=False)
+        effective_timeout = min(timeout, remaining)
+        try:
+            result = subprocess.run([str(x) for x in argv], capture_output=True, env=actual_env,
+                                    timeout=effective_timeout, check=False)
+        except subprocess.TimeoutExpired as error:
+            raise self.command_failure(argv, stdout=error.stdout, stderr=error.stderr,
+                timed_out=True, timeout=effective_timeout, capture=not github and env is None) from None
+        if check and result.returncode != 0:
+            raise self.command_failure(argv, returncode=result.returncode, stdout=result.stdout,
+                stderr=result.stderr, capture=not github and env is None)
         require(len(result.stdout) <= 4 * 1024 * 1024, "command output exceeded bound")
-        if check:
-            require(result.returncode == 0, "command failed: " + Path(str(argv[0])).name)
         return result
 
     def sudo(self, *argv, **kwargs):
@@ -224,19 +307,28 @@ class Native:
         # Reject an ineffective pair before creating an installation.
         make_identity(self.tproxy, old, new, nonce, self.uid, time.time())
         self.approved_hashes = {old["daemon_sha256"], new["daemon_sha256"]}
+        self.diagnostic_stage = "copy-old-app"
         self.copy_app(self.args.old_app, self.target, old["bundle_tree_sha256"])
         self.install_attempted = True
+        self.diagnostic_stage = "install-old-daemon"
+        self.events.append({"kind": "operation", "operation": "install", "state": "started"})
         self.sudo(self.target / "Contents/Resources/slipstreamd/slipstreamd", "--install", timeout=110)
+        self.events.append({"kind": "operation", "operation": "install", "state": "completed"})
         self.operation = self.root / nonce
         self.stage = self.target.parent / (".Slipstream.app.slipstream-stage-" + nonce)
         self.mailbox = Path(self.tproxy._DAEMON_UPDATE_REQUESTS) / f"{self.uid}-{nonce}"
+        self.diagnostic_stage = "stage-new-app"
         self.copy_app(self.args.new_app, self.stage, new["bundle_tree_sha256"])
         # The immutable lease begins after installation/staging, before prepare.
         self.identity = make_identity(self.tproxy, old, new, nonce, self.uid, time.time())
         return self.identity
 
     def prepare(self, identity):
+        self.diagnostic_stage = "prepare-update"
+        self.events.append({"kind": "operation", "operation": "update-prepare", "state": "started"})
         self.sudo(self.installed, "--update-prepare", json.dumps(identity, separators=(",", ":")), timeout=90)
+        self.events.append({"kind": "operation", "operation": "update-prepare", "state": "completed"})
+        self.diagnostic_stage = "observe-root-protocol"
 
     def status(self):
         value = self.tproxy._update_read_json(str(self.operation / "status.json"), mode=0o644)
@@ -350,6 +442,7 @@ class Native:
         self.events.append({"kind": "daemon_proof", "side": side, "first": first, "second": second})
 
     def teardown(self):
+        self.diagnostic_stage = "cleanup"
         if self.identity and self.operation.exists():
             value = self.status()
             if value["decision"] is None:
@@ -496,12 +589,13 @@ def main():
         identity = backend.setup()
         result.update(qualify(backend, identity, args.mode), status="passed", identity=identity)
     except Exception as error:
-        result.update(error_type=type(error).__name__, reason=str(error)[:512])
+        detail = failure_detail(error, backend.diagnostic_stage)
+        result.update(error_type=detail.pop("type"), **detail)
     finally:
         try:
             backend.teardown()
         except Exception as error:
-            result["cleanup_errors"].append({"type": type(error).__name__, "reason": str(error)[:512]})
+            result["cleanup_errors"].append(failure_detail(error, backend.diagnostic_stage))
             result.update(status="failed", root_protocol_qualified=False)
         result["events"] = backend.events
         output.parent.mkdir(parents=True, exist_ok=True)

@@ -82,7 +82,7 @@ audit39243567046 passed, including packaged browser and lifecycle checks.
 The retained `output/updater-daemon-identity/pr394-green-730-receipt.json` has
 SHA256 `61bf6de7de42c3b07d45671b21890c5ab9f2b7686ca80fc812e304da7939c87c`.
 Main CI39245442918 attempt1 and audit39245442978 passed. The active
-`readme-humanizer` checkout is now on `codex/native-update-successor-26`.
+`readme-humanizer` checkout is now on `codex/packaged-update-observation`.
 The merged change incorporates the reviewed disposable native driver,
 materializer, workflow and 45 hermetic tests. Its normal source version is
 `0.1.9-preview.25`; synchronization and scoped integration review passed.
@@ -122,13 +122,60 @@ installed workstation app and public preview.24 remain unchanged.
 audit39250716533, including the new bundle-mode gate, packaged browser and
 lifecycle checks. Receipt `output/updater-daemon-identity/pr395-green-74c-receipt.json`
 SHA256: `8d07fe1de4c7390c4593ed7020c91ebd3bb3c3178fe7b5b3fa64ba4692abb656`.
-Main CI39252308451 and audit39252308394 are building the fixed `.25` bridge.
-The current change is only the normal `.26` version bump through
+Main CI39252308451 attempt1 and audit39252308394 passed for the fixed `.25`
+bridge. Its seven candidate files passed manifest, hosted attestation, updater
+signature and read-only archive-mode verification (897 entries; Geph `0755`).
+Artifact ID: `12187190345`; manifest SHA256:
+`6da2a455bac8f952f0e226e5811d2f1c6b33ba2b9aa7a1269ff3bc85159abc87`.
+Receipt `output/updater-daemon-identity/main395-verification/receipt.json` SHA256:
+`b36be15d555672d41928fd78c574d194960a10b5df2a6596e33dc5757303e426`.
+The payload was not extracted or executed on the workstation.
+[PR396](https://github.com/aiwaki/slipstream/pull/396) merged at
+`0f26a274a5d26b778be470bc4ed5c73c65c32f03` after CI39252751017 and
+audit39252750901 passed at `85cf8a6cd98a22805856479a0993bc02e2fdfacf`.
+Receipt `output/updater-daemon-identity/pr396-green-85c-receipt.json` SHA256:
+`0fc979f2cfe1ce417b04c272f398a6787ccfcd1601b96a1cb0982bb119bb4ae7`.
+Main successor CI39254420455 attempt1 and audit39254420270 passed. Its seven
+files, hosted attestation, updater signature and all 897 archive-mode entries
+passed verification. Artifact ID `12186723921`; manifest SHA256:
+`cdb58cf988035c72e3e7953b84a4294991b5d3cfefa82d6a4351a6da0514dd35`.
+Receipt `output/updater-daemon-identity/main396-verification/receipt.json` SHA256:
+`cf1f8851730948b6142f3bc428aec70deec3948cc89471d7d1d2a5673082bb11`.
+Streaming the actual tray and daemon members proved both pairs differ. Pair
+receipt `native-root-25-26-pair-receipt.json` SHA256:
+`d609ca2d90a5ec4e18c175db597b7ba404a9646ebb1312b2182f58926bfe1ca1`.
+The exact eight dispatch pins are retained in
+`output/updater-daemon-identity/native-root-25-26-dispatch.json`; SHA256:
+`87cb0987d21029889fadcb7e26476d465b6c30ef80bead3549f73a3e44ea789b`.
+Parent verified main still matches `0f26a274` before dispatch. The merged
+change contains only the normal `.26` version bump through
 `scripts/sync_version.py` plus this checkpoint. It changes compiled tray and
-frozen-daemon inputs; actual binary inequality remains an artifact check.
+frozen-daemon inputs; actual binary inequality passed as recorded above.
 Version synchronization and the existing daemon-version regression passed.
-The adapter/observer drafts remain untracked and excluded. Neither `.25` nor
+The adapter/observer drafts remain untracked and excluded. The read-only commit
+observer passed 67 hermetic tests and independent review; it cannot install,
+launch, signal or clean up the transaction, and refuses fault mode. Native
+execution and adapter compilation remain unverified. The test log is
+`output/updater-daemon-identity/packaged-observer-tests.log`. Neither `.25` nor
 `.26` is published; no workstation operation is requested by this change.
+
+Native run39256896555 attempt1 at `0f26a274` authenticated and unpacked both
+fresh candidates, then failed in both cases with `Refused: command failed: sudo`.
+Only the two artifact-identity events were retained; there is no root-status
+observation and both cleanup-error lists are empty. The driver captured but
+discarded the failing command's return code/stdout/stderr, so the current
+result does not distinguish installation from root preparation. This is not
+sufficient evidence to change production behavior or claim rollback coverage.
+Receipt `output/updater-daemon-identity/native-root-39256896555/receipt.json`
+SHA256: `8117d8e25ed2f2120e930d1c3767d7b09496bd833da427b8bbdb475a3b1b4cb2`.
+The driver change adds bounded native-command diagnostics and install/prepare
+stage observations, preserving the primary failure separately from cleanup.
+Authenticated GitHub commands, unknown commands and custom environments omit
+output; only the exact generated root-proof command has its own explicit
+allowlist entry. Forty hermetic driver tests passed in 0.08 seconds; log:
+`output/updater-daemon-identity/native-root-39256896555/diagnostic-tests.log`.
+No native command ran locally. Reuse the unchanged signed `.25`/`.26` pair;
+there is no reason to rebuild or modify these candidates for that change.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -164,13 +211,13 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Retain the successful exact-main PR395 `.25` candidate, its manifest, artifact
-  hashes and hosted attestation. The earlier rejected pair remains immutable.
-- Merge the normal `.26` version change after its required exact-head CI. Its
-  build may proceed alongside the `.25` bridge build. Retain the successful
-  exact-main `.26` candidate and require different tray and daemon hashes.
-- Dispatch the two native root cases with the fresh source/run/attempt/manifest
-  pins. Do not reuse or modify the old rejected archives.
+- Reuse the retained and verified exact-main PR395 `.25` candidate above. The
+  earlier rejected pair remains immutable.
+- Reuse the verified exact-main `.26` candidate and binary inequality proof above.
+- Fix the native driver's missing command diagnostics, review and verify the
+  narrow change, then repeat the two root cases with the unchanged verified
+  pair. Run39256896555 failed as recorded above; do not infer a product cause
+  from the generic sudo error or modify signed archives.
 - Continue the separate app/watchdog gate only after the native root gate. The
   draft transaction adapter and unfinished observer are excluded from this
   version change and have no native qualification yet.
