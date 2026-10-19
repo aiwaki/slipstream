@@ -37,30 +37,55 @@ were rehashed on 2026-10-19; receipt SHA256:
 `output/updater-daemon-identity/main-2640/`. Reuse this baseline; it does not
 qualify the coordinated work below or change the published `.24` binary.
 
-[PR393](https://github.com/aiwaki/slipstream/pull/393), branch
-`codex/coordinated-daemon-update` in the attached `readme-humanizer` worktree,
-starts from main2640. Pushed head
-`958949ccfd4e6ae3d3691d9cf7a67501c2317408` passed CI39236170033 and
-audit39236170106, including 184 app tests, Rust lint, Python/Windows checks,
-packaged build, browser qualification and packaged lifecycle. The retained
-`output/updater-daemon-identity/pr393-green-9589-receipt.json` binds those runs.
-Earlier compile/lint issues are fixed. A failing live Geph log test exposed BSD
-`tail -c` reading concurrent appends beyond its requested length; fixed-count
-copy now bounds the archive and failed publication preserves the live log.
-Scoped append/truncate/failure tests and the unchanged hosted Rust test passed.
+[PR393](https://github.com/aiwaki/slipstream/pull/393) merged at
+`e2f728b006c22d0fcb233cadc834ce29c7d32fa8`. Final head
+`b06299cc535120c7d279d4aed5a93d51b5d5b92d` passed CI39239577378 and
+audit39239577363, including 191 app tests, Rust lint, Python/Windows checks,
+packaged build, browser qualification and packaged lifecycle. The terminal
+receipt P1 is resolved. Retained receipt
+`output/updater-daemon-identity/pr393-green-b062-receipt.json` SHA256:
+`7aebe7cb8d46b66219cbd843c98c6cc0057cac592f1c48dccbc64d3218a1cdd2`.
+Main audit39241525729 passed. CI39241525733 exposed a timing-dependent test
+failure: 190 app tests passed, while the virtual refresh-budget loop received a
+valid transient lock-busy result. A bounded macOS fork fixture demonstrated that
+a close-on-exec descriptor can retain its flock in a forked child after the
+parent closes it. The exact CI child PID was not retained. Evidence:
+`output/updater-daemon-identity/main393-product.log` and
+`refresh-lock-inheritance-20261019.json` in the same directory. The test now holds
+one lock across virtual time; the separate concurrency test still covers the
+public nonblocking path. That fixture explicitly releases its own test lock and
+waits at most two seconds only for inherited-FD contention. The required single
+write and budget assertions remain intact. Independent source review passed.
+Production lock/skip behavior is unchanged. Hosted Rust
+verification is pending; no local Rust build/test ran. The failed main attempt
+cannot qualify the old candidate. A full exact-source retry is necessary to bind
+the candidate manifest and successful CI to the same run attempt.
 
-The new terminal-receipt review finding is fixed in this revision: after daemon PID rollover,
-a successfully exited terminal root worker needs an explicit wake to refresh
-its receipt. The root fix watches only the exact transaction mailbox, preserves
-the durable decision, and exits before expensive tree hashes while the daemon
-is unready. Its 44 focused Python tests passed. The app consumer persists its
-330-second, 33-attempt budget under a separate nonblocking mailbox lock; an
-automatic watchdog restart cannot reset it. Only a verified new PID/birth starts
-another episode. Seven Rust regressions cover stale proof, persisted exhaustion,
-generation changes, fresh read-only behavior, unsafe files and concurrent clients.
-Independent scoped review, formatting and whitespace checks passed. Fresh
-exact-head CI is pending; Rust tests were not run locally. The installed
-workstation app and published preview remain unchanged.
+After daemon PID rollover, the exact mailbox can wake the exited root worker
+without changing the durable decision. Its 330-second/33-attempt consumer budget
+survives automatic watchdog restart and resets only for a verified new process
+birth. Root tests passed 44 cases locally; seven new Rust regressions passed
+in hosted CI. The same PR fixed a reproduced BSD `tail -c` concurrent-append
+race in Geph log rotation; fixed-count copy now bounds the archive and preserves
+the live log if publication fails. The unchanged Rust live-process test passed.
+
+The active `readme-humanizer` checkout is now on
+`codex/native-root-update-qualification`,
+[PR394](https://github.com/aiwaki/slipstream/pull/394), retargeted to main after
+PR393 merged. This change incorporates the reviewed disposable native driver,
+materializer, workflow and 45 hermetic tests. Its normal source version is
+`0.1.9-preview.25`; synchronization and scoped integration review passed.
+The new source supplies a successor whose compiled tray and frozen daemon differ
+from the main393 bridge candidate. Initial CI39240828886 was deliberately stopped
+before packaging because strict main-base refresh required new exact-head CI;
+audit39240828853 passed. The base refresh passed audit39241690945; CI39241690927
+was superseded by the runner correction. Review found that GitHub is retiring
+`macos-14`; the new native workflow now uses supported ARM64 `macos-15` while
+retaining its architecture guard. Scoped workflow tests (8) and actionlint passed;
+independent review found no macOS-14-only assumption. CI39242530303 is superseded
+by the deterministic-test repair; audit39242530364 passed.
+No native case has been dispatched and no preview.25 release is published.
+The installed workstation app and public preview.24 remain unchanged.
 
 The implementation seals full app trees and the installed worker runtime in
 root-owned storage, preserves the original authorization deadline, and waits
@@ -81,30 +106,29 @@ at head996e (the latter failed only the existing Geph rotation test). They were
 not executed locally; format and whitespace checks passed. The reviewed cleanup crash window is closed by
 a durable intent that pins each validated directory device/inode before removal.
 Retries accept a partial original directory but reject a substituted slot.
-The preceding head passed full CI. Fresh CI for the terminal-receipt fix
-and disposable native qualification remain open. A root-protocol driver draft
-under `output/updater-daemon-identity/native-driver-draft/` is being reviewed;
-its 37 hermetic checks plus 8 early-failure artifact checks and actionlint passed.
-It has not executed native operations and does not qualify app/public updates.
-No local Rust build, privileged runtime test, or workstation installation ran.
+PR393 passed full exact-head CI. Its main build and disposable native
+qualification remain open. The new workflow's 45 integrated hermetic tests,
+actionlint and source/path wiring review passed. No local Rust build, privileged runtime test or workstation
+installation ran. The unchanged release checks are not repeated.
 
 | Milestone | Current boundary |
 |---|---|
 | M0 - Safe Base | Candidate cleanup passed; public update/rollback unqualified. |
 | M1 - Autonomous Routing V1 | Hosted browser/soak passed; no new workstation qualification. |
-| M2 - Contracts And Code | Discovery and daemon ACK repairs merged; coordinated update in progress. |
+| M2 - Contracts And Code | Coordinated update merged; native qualification pending. |
 | M3 - Release-Grade macOS | Preview .24 public; stable and public updater gates open. |
 | M4 - Cross-Platform Core | No new platform qualification in this change. |
 
 ## Next Verified Action
 
-- Run PR393 exact-head hosted CI for the reviewed terminal refresh fix; resolve
-  the addressed P1 after passing evidence and merge through normal protection. Reuse main2640's
-  unchanged baseline; do not rebuild or republish `.24` or rerun its readiness.
-- Qualify the coordinated path on disposable macOS with a supporting bridge
-  build and a successor whose normal version bump changes the frozen daemon.
-  A copied app with only edited metadata or an unchanged daemon is insufficient.
-  No fixture may preinstall the successor daemon to conceal an updater defect.
+- Finish the main393 exact-source retry and retain its successful release
+  candidate as the old protocol-capable build. The retained failed-attempt
+  evidence remains explicit; do not substitute a mixed-attempt candidate.
+- Land the separate native qualification/version change and retain its successful
+  main candidate as the successor. Dispatch the two source-pinned native cases;
+  do not substitute public.24, edit packaged metadata or preinstall the successor.
+- Reuse the unchanged preview.24 release/readiness baseline. Public app-update
+  qualification remains separate from the root protocol cases.
 
 ## External Gates
 

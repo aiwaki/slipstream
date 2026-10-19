@@ -233,7 +233,7 @@ _PENDING_NAVIGATION_FIXTURE_ENVIRONMENT = (
 )
 STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
-DAEMON_VERSION = "0.1.9-preview.24"
+DAEMON_VERSION = "0.1.9-preview.25"
 _conn_count = 0                # live proxied connections
 _connection_tasks = set()
 _status_write_lock = threading.RLock()

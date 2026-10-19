@@ -464,7 +464,6 @@ impl Client {
             "{}-{}",
             binding.identity.uid, binding.identity.nonce
         ));
-        let marker = directory.join("refresh.json");
         Self::checked_directory(&self.requests, self.owner, false)?;
         Self::checked_directory(&directory, binding.identity.uid, true)?;
         // Reuse the nonblocking private lock primitive. Never replace/unlink its
@@ -472,6 +471,26 @@ impl Client {
         let Some(lock) = super::try_transaction_lock(&directory)? else {
             return Ok(false);
         };
+        self.request_terminal_refresh_locked(&lock, binding, status, generation, now)
+    }
+
+    fn request_terminal_refresh_locked(
+        &self,
+        lock: &std::fs::File,
+        binding: &Binding,
+        status: &Status,
+        generation: Option<RuntimeGeneration>,
+        now: u64,
+    ) -> Result<bool, String> {
+        if status.runtime_fresh || !matches!(status.phase.as_str(), "committed" | "aborted") {
+            return Ok(false);
+        }
+        status.validate(binding)?;
+        let directory = self.requests.join(format!(
+            "{}-{}",
+            binding.identity.uid, binding.identity.nonce
+        ));
+        let marker = directory.join("refresh.json");
         let metadata = lock.metadata().map_err(|e| e.to_string())?;
         if !metadata.is_file()
             || metadata.uid() != binding.identity.uid
@@ -942,6 +961,15 @@ mod tests {
         serde_json::from_slice(&fs::read(mailbox.join("refresh.json")).unwrap()).unwrap()
     }
 
+    fn release_fixture_lock(lock: std::fs::File) {
+        use std::os::fd::AsRawFd;
+        // Test-only: an unrelated parallel test's fork may retain this open
+        // description after drop. Production deliberately retains lock inheritance.
+        // SAFETY: this fixture owns the live descriptor and has finished its writes.
+        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) }, 0);
+        drop(lock);
+    }
+
     #[test]
     fn stale_terminal_status_wakes_worker_without_acknowledging_or_changing_decision() {
         for phase in ["committed", "aborted"] {
@@ -1006,12 +1034,19 @@ mod tests {
             let mut status = client.status(&binding).unwrap();
             status.runtime_fresh = false;
             let observed = Some(generation(44, 0));
+            // Test the virtual clock under one held lock. Parallel tests spawn
+            // processes; a fork can retain an inherited flock briefly after the
+            // parent's close, so reacquiring it on every tick is not guaranteed.
+            // The separate concurrency test exercises the public nonblocking path.
+            let lock = super::super::try_transaction_lock(&mailbox)
+                .unwrap()
+                .unwrap();
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1000)
+                .request_terminal_refresh_locked(&lock, &binding, &status, observed.clone(), 1000)
                 .unwrap());
             let initial_inode = fs::metadata(mailbox.join("refresh.json")).unwrap().ino();
             assert!(!client
-                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1009)
+                .request_terminal_refresh_locked(&lock, &binding, &status, observed.clone(), 1009)
                 .unwrap());
             assert_eq!(
                 fs::metadata(mailbox.join("refresh.json")).unwrap().ino(),
@@ -1020,14 +1055,20 @@ mod tests {
             // No root reply: a missed WatchPaths event gets another bounded wake.
             for attempt in 1..MAX_TERMINAL_REFRESH_ATTEMPTS {
                 status.heartbeat_seq = Some(20 + u64::from(attempt));
-                assert!(client
-                    .request_terminal_refresh_at(
-                        &binding,
-                        &status,
-                        observed.clone(),
-                        1000 + u64::from(attempt) * 10
-                    )
-                    .unwrap());
+                assert!(
+                    client
+                        .request_terminal_refresh_locked(
+                            &lock,
+                            &binding,
+                            &status,
+                            observed.clone(),
+                            1000 + u64::from(attempt) * 10
+                        )
+                        .unwrap(),
+                    "wake {attempt} at virtual time {} was skipped; persisted episode: {:?}",
+                    1000 + u64::from(attempt) * 10,
+                    read_episode(&mailbox),
+                );
             }
             let before = fs::read(mailbox.join("refresh.json")).unwrap();
             assert_eq!(
@@ -1038,20 +1079,20 @@ mod tests {
             // fresh-then-stale proof and a refreshed receipt PID cannot replenish it.
             let next_client = Client::system();
             let error = next_client
-                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1330)
+                .request_terminal_refresh_locked(&lock, &binding, &status, observed.clone(), 1330)
                 .unwrap_err();
             assert!(error.contains("exhausted"));
             assert!(next_client
-                .request_terminal_refresh_at(&binding, &status, None, 1340)
+                .request_terminal_refresh_locked(&lock, &binding, &status, None, 1340)
                 .is_err());
             status.runtime_fresh = true;
             assert!(!next_client
-                .request_terminal_refresh_at(&binding, &status, observed.clone(), 1350)
+                .request_terminal_refresh_locked(&lock, &binding, &status, observed.clone(), 1350)
                 .unwrap());
             status.runtime_fresh = false;
             status.daemon_pid = Some(44);
             assert!(next_client
-                .request_terminal_refresh_at(&binding, &status, observed, 1360)
+                .request_terminal_refresh_locked(&lock, &binding, &status, observed, 1360)
                 .is_err());
             assert_eq!(fs::read(mailbox.join("refresh.json")).unwrap(), before);
         });
@@ -1262,7 +1303,7 @@ mod tests {
                 .request_terminal_refresh_at(&binding, &status, None, 1000)
                 .unwrap());
             assert!(!mailbox.join("refresh.json").exists());
-            drop(lock);
+            release_fixture_lock(lock);
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
             let workers = (0..2)
                 .map(|_| {
@@ -1285,11 +1326,22 @@ mod tests {
                 .count();
             assert_eq!(sent, 1);
             assert_eq!(read_episode(&mailbox).attempts, 1);
-            let lock = super::super::try_transaction_lock(&mailbox)
-                .unwrap()
-                .unwrap();
+            // Only retry a diagnosed busy flock, not a skipped refresh result:
+            // the winning worker's descriptor may still be inherited until exec.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let lock = loop {
+                if let Some(lock) = super::super::try_transaction_lock(&mailbox).unwrap() {
+                    break lock;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "mailbox lock stayed busy after both refresh workers finished; episode: {:?}",
+                    read_episode(&mailbox),
+                );
+                thread::sleep(Duration::from_millis(1));
+            };
             assert_eq!(lock.metadata().unwrap().ino(), lock_inode);
-            drop(lock);
+            release_fixture_lock(lock);
             assert!(client
                 .request_terminal_refresh_at(&binding, &status, None, 1010)
                 .unwrap());

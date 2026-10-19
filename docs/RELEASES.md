@@ -52,7 +52,8 @@ identity check is incomplete: source now requires bundled-daemon attestation and
 the same PID across fresh advancing heartbeat observations. A pending successor
 with a mismatched daemon refuses startup without spawning a privileged installer;
 the watchdog restores the previous application. Coordinated replacement of both
-daemon and app still needs implementation and public qualification.
+daemon and app is implemented in source; native and public qualification remain
+open.
 In updated clients, a restored rollback app also waits for the watchdog's lock,
 terminal cleanup and exact old-app receipt before resuming daemon installation.
 It emits no successor ACK. Existing published clients retain their old behavior.
@@ -72,7 +73,7 @@ previous tag and verified artifacts remain unchanged.
 
 ## Coordinated app and daemon update qualification
 
-The coordinated implementation is being developed after PR392. It is not in
+The coordinated implementation merged in PR393. It is not in
 preview `.24`, and the evidence for PR392 covers the refusal/rollback guard,
 not this new protocol. The supported updater must already be present in the
 originating app and root daemon; a successor cannot repair an older watchdog
@@ -147,6 +148,38 @@ must converge to that same durable decision. Hermetic state-machine tests and a
 CI driver that directly invokes the transaction are useful protocol evidence;
 they do not establish public discovery, tray activation, or released-pair
 compatibility. Preserve those distinctions in the result and release notes.
+
+### Native root decision gate
+
+The dispatch-only [native root update workflow](../.github/workflows/native-root-update-qualification.yml)
+runs two cases on separate disposable macOS runners. `commit` installs the old
+runtime, activates the successor, verifies its live identity and commits.
+`crash-before-commit` stops the exact update-worker launchd job after readiness,
+requires restoration of the old runtime, then sends a late commit and verifies
+that the mailbox wake preserves the abort decision. It never preinstalls the
+successor or uses `kickstart` to manufacture the terminal wake.
+
+Provide two successful main CI `release-candidate-<source SHA>` artifacts.
+Each side is pinned by run ID, attempt, full source SHA and candidate-manifest
+SHA256. [Materialization](../scripts/materialize_pair.py) verifies those pins,
+GitHub attestation and all manifest files before extracting either app. The
+[driver](../scripts/native_root_update.py) checks the pair again before the first
+install. Different versions, tray executables and daemon bytes are mandatory.
+The first main build containing PR393 is the bridge; the normal source bump to
+`0.1.9-preview.25` supplies the successor. The public `.24` assets are unchanged.
+Use retained candidates within the existing 14-day artifact window.
+
+The driver has a 720-second total budget including preparation and teardown;
+the production authorization lease remains 300 seconds. Both cases uninstall
+through the ordinary installed command and verify owned service, worker and
+retained-state cleanup. Result JSON contains source/payload identities, bounded
+observations and cleanup failures. A separate outcome JSON is uploaded even if
+checkout, dependencies or download fail. No Geph account is required.
+
+These cases qualify the native root protocol only. App renames, successor ACK,
+watchdog recovery, administrator dialogs, public discovery and an actual released
+update pair still need their own existing evidence. A passing root case must
+not be reported as a passing public auto-update.
 
 ## Legacy App Releases
 
