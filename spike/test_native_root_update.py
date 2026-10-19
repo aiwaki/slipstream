@@ -267,3 +267,167 @@ def test_closed_ready_window_does_not_signal():
     native.sudo = lambda *args: pytest.fail("must not signal outside undecided Ready")
     with pytest.raises(driver.Refused, match="window closed"):
         native.kill_ready_worker({"worker_pid": 101})
+
+
+@pytest.fixture
+def diagnostic_native(tmp_path):
+    native = object.__new__(driver.Native)
+    native.target = tmp_path / "Slipstream.app"
+    native.installed = tmp_path / "installed/slipstreamd"
+    native.deadline = driver.time.monotonic() + 720
+    native.env = {"PATH": "/usr/bin:/bin"}
+    native.diagnostic_stage = "test-stage"
+    native.events = []
+    return native
+
+
+def test_prepare_failure_records_underlying_action_without_identity_argv(monkeypatch, diagnostic_native):
+    native = diagnostic_native
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k:
+        SimpleNamespace(returncode=77, stdout=b"preflight rejected\n", stderr=b"expired deadline\n"))
+    with pytest.raises(driver.CommandFailure) as failure:
+        native.prepare({"private_argument": "must-not-be-retained"})
+    detail = failure.value.diagnostic
+    assert detail["stage"] == "prepare-update" and detail["launcher"] == "sudo"
+    assert detail["executable"] == "slipstreamd" and detail["operation"] == "update-prepare"
+    assert detail["returncode"] == 77 and not detail["timed_out"]
+    assert detail["stderr"]["text"] == "expired deadline\n"
+    assert "must-not-be-retained" not in json.dumps(detail)
+    assert native.events == [{"kind": "operation", "operation": "update-prepare", "state": "started"}]
+
+
+def test_prepare_success_records_completed_boundary(monkeypatch, diagnostic_native):
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k:
+        SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    diagnostic_native.prepare(IDENTITY)
+    assert [e["state"] for e in diagnostic_native.events] == ["started", "completed"]
+    assert diagnostic_native.diagnostic_stage == "observe-root-protocol"
+
+
+def test_failed_native_output_is_bounded_and_keeps_error_tail(monkeypatch, diagnostic_native):
+    data = b"start" + b"x" * 10000 + b"decisive-error\xff"
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k:
+        SimpleNamespace(returncode=1, stdout=data, stderr=data))
+    with pytest.raises(driver.CommandFailure) as failure:
+        diagnostic_native.sudo(diagnostic_native.installed, "--uninstall")
+    for key in ("stdout", "stderr"):
+        output = failure.value.diagnostic[key]
+        assert output["truncated"] and len(output["text"]) < 4200
+        assert output["text"].startswith("start") and "decisive-error" in output["text"]
+
+
+@pytest.mark.parametrize("kind", ["github", "unknown", "custom-env"])
+def test_untrusted_or_authenticated_command_output_is_not_retained(monkeypatch, diagnostic_native, kind):
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k:
+        SimpleNamespace(returncode=1, stdout=b"private-token", stderr=b"private-token"))
+    command = ["/usr/bin/true"] if kind != "unknown" else ["/usr/bin/unknown", "private-token"]
+    kwargs = {"github": True} if kind == "github" else {"env": {"TOKEN": "private-token"}} if kind == "custom-env" else {}
+    with pytest.raises(driver.CommandFailure) as failure:
+        diagnostic_native.run(command, **kwargs)
+    detail = failure.value.diagnostic
+    assert detail["output_omitted"] and "stdout" not in detail and "stderr" not in detail
+    assert "private-token" not in json.dumps(detail)
+
+
+def test_timeout_preserves_partial_native_output_without_exception_argv(monkeypatch, diagnostic_native):
+    def timed_out(*args, **kwargs):
+        raise driver.subprocess.TimeoutExpired(["sudo", "private-identity-json"], kwargs["timeout"],
+                                               output=b"installed\n", stderr=b"readiness pending\n")
+    monkeypatch.setattr(driver.subprocess, "run", timed_out)
+    with pytest.raises(driver.CommandFailure) as failure:
+        diagnostic_native.sudo(diagnostic_native.installed, "--update-prepare", "private-identity-json", timeout=7)
+    detail = failure.value.diagnostic
+    assert detail["returncode"] is None and detail["timed_out"] and detail["timeout_seconds"] == 7
+    assert detail["stderr"]["text"] == "readiness pending\n"
+    assert "private-identity-json" not in json.dumps(driver.failure_detail(failure.value, "cleanup"))
+    assert driver.failure_detail(failure.value, "cleanup")["stage"] == "test-stage"
+
+
+def test_check_false_preserves_expected_nonzero_observations(monkeypatch, diagnostic_native):
+    result = SimpleNamespace(returncode=113, stdout=b"", stderr=b"not loaded")
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k: result)
+    assert diagnostic_native.run(["/bin/launchctl", "print", "system/dev.slipstream.tproxy"], check=False) is result
+
+
+@pytest.mark.parametrize("extra_environment", [False, True])
+def test_root_proof_capture_requires_exact_generated_wrapper(monkeypatch, diagnostic_native, extra_environment):
+    native = diagnostic_native
+    native.identity, native.args = IDENTITY, SimpleNamespace(repo=REPO)
+    command = ["/usr/bin/env", "CI=true", "GITHUB_ACTIONS=true", "SLIPSTREAM_DISPOSABLE_CI=1", "RUNNER_OS=macOS",
+        driver.sys.executable, PATH.resolve(), "--repo", REPO, "--root-proof", IDENTITY["old_daemon_sha256"],
+        "--nonce", IDENTITY["nonce"]]
+    if extra_environment:
+        command.insert(5, "TOKEN=must-not-be-retained")
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k:
+        SimpleNamespace(returncode=1, stdout=b"", stderr=b"readonly proof failed"))
+    with pytest.raises(driver.CommandFailure) as failure:
+        native.sudo(*command)
+    detail = failure.value.diagnostic
+    if extra_environment:
+        assert detail["operation"] == "unclassified" and detail["output_omitted"]
+        assert "stderr" not in detail and "must-not-be-retained" not in json.dumps(detail)
+    else:
+        assert detail["operation"] == "root-proof" and detail["executable"] == Path(driver.sys.executable).name
+        assert detail["stderr"]["text"] == "readonly proof failed"
+        assert IDENTITY["nonce"] not in json.dumps(detail)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_setup_records_install_boundary_before_staging(monkeypatch, tmp_path, diagnostic_native, returncode):
+    native = diagnostic_native
+    native.root = tmp_path / "operations"
+    native.uid = 501
+    native.args = SimpleNamespace(pair_manifest=tmp_path / "pair.json", old_app=tmp_path / "old", new_app=tmp_path / "new",
+                                  old_candidate_dir=tmp_path / "old-candidate", new_candidate_dir=tmp_path / "new-candidate")
+    native.args.pair_manifest.write_text(json.dumps({"schema_version": 1, "old": {}, "new": {}}))
+    native.tproxy = SimpleNamespace(INSTALL_DIR=str(native.installed.parent),
+        LAUNCHD_PLIST=str(tmp_path / "job.plist"), STATUS_PATH=str(tmp_path / "status.json"),
+        _DAEMON_UPDATE_REQUESTS=str(tmp_path / "mailbox"), INSTALL_ATTESTATION_DIR=str(tmp_path / "attestation"),
+        LAUNCHD_LABEL="dev.slipstream.tproxy")
+    native.absence = lambda label: None
+    native.artifact = lambda *args: {"daemon_sha256": "a" * 64, "bundle_tree_sha256": "b" * 64}
+    copied = []
+    native.copy_app = lambda source, *rest: copied.append(source)
+    monkeypatch.setattr(driver, "make_identity", lambda *args: IDENTITY)
+
+    def run(argv, **kwargs):
+        code = 1 if argv[0] == "/usr/bin/pgrep" else returncode if "--install" in argv else 0
+        return SimpleNamespace(returncode=code, stdout=b"install attempted", stderr=b"readiness failed")
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    if returncode:
+        with pytest.raises(driver.CommandFailure) as failure:
+            native.setup()
+        assert failure.value.diagnostic["stage"] == "install-old-daemon"
+        assert failure.value.diagnostic["operation"] == "install"
+        assert copied == [native.args.old_app]
+        assert [e["state"] for e in native.events] == ["started"]
+    else:
+        assert native.setup() == IDENTITY
+        assert copied == [native.args.old_app, native.args.new_app]
+        assert [e["state"] for e in native.events] == ["started", "completed"]
+
+
+def test_main_retains_original_failure_when_cleanup_also_fails(monkeypatch, tmp_path):
+    native = SimpleNamespace(diagnostic_stage="install-old-daemon", events=[])
+    original = driver.CommandFailure({"stage": "install-old-daemon", "executable": "slipstreamd",
+        "operation": "install", "returncode": 1, "timed_out": False})
+    cleanup = driver.CommandFailure({"stage": "cleanup", "executable": "slipstreamd",
+        "operation": "uninstall", "returncode": 2, "timed_out": False})
+    def setup(): raise original
+    def teardown():
+        native.diagnostic_stage = "cleanup"
+        raise cleanup
+    native.setup, native.teardown = setup, teardown
+    output = tmp_path / "result.json"
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(driver, "guard", lambda: 501)
+    monkeypatch.setattr(driver, "modules", lambda repo: (None, None))
+    monkeypatch.setattr(driver, "Native", lambda *args: native)
+    monkeypatch.setattr(driver.sys, "argv", [str(PATH), "--repo", str(REPO), "--mode", "commit",
+        "--pair-manifest", "pair", "--old-app", "old", "--new-app", "new",
+        "--old-candidate-dir", "old-candidate", "--new-candidate-dir", "new-candidate", "--output", str(output)])
+    assert driver.main() == 2
+    result = json.loads(output.read_text())
+    assert result["stage"] == "install-old-daemon" and result["command"]["returncode"] == 1
+    assert result["cleanup_errors"][0]["stage"] == "cleanup"
+    assert result["cleanup_errors"][0]["command"]["returncode"] == 2
