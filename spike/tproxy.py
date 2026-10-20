@@ -16956,13 +16956,43 @@ class DaemonUpdateNoOperation(RuntimeError):
 
 
 def _daemon_update_manifest(journal):
-    return hashlib.sha256(_update_json_bytes({
+    bound = {
         "identity": journal["identity"],
         "old_plist_sha256": journal["old_plist_sha256"],
         "old_payload_sha256": journal["old_payload_sha256"],
         "worker_runtime_sha256": journal["worker_runtime_sha256"],
         "predecessor_nonce": journal["predecessor_nonce"],
-    })).hexdigest()
+    }
+    # Preserve legacy terminal manifests; an undecided legacy operation cannot
+    # acquire a fresh lease. This field is root-created, never a CLI argument.
+    if "root_lease" in journal:
+        bound["root_lease"] = journal["root_lease"]
+    return hashlib.sha256(_update_json_bytes(bound)).hexdigest()
+
+
+def _daemon_update_boot_session():
+    try:
+        result = _run("/usr/sbin/sysctl", "-n", "kern.bootsessionuuid")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip().lower()
+    if result.returncode != 0 or not re.fullmatch(
+            r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
+        return None
+    return value
+
+
+def _daemon_update_lease_remaining(journal, boot_session):
+    lease = journal.get("root_lease")
+    if (not isinstance(lease, dict)
+            or set(lease) != {"boot_session_uuid", "deadline_monotonic"}
+            or boot_session is None or lease["boot_session_uuid"] != boot_session
+            or type(lease["deadline_monotonic"]) not in (int, float)
+            or not 0 <= lease["deadline_monotonic"] <= 2 ** 53
+            or not math.isfinite(lease["deadline_monotonic"])):
+        return 0
+    return min(journal["deadline_unix"] - time.time(),
+               lease["deadline_monotonic"] - time.monotonic())
 
 
 def _daemon_update_label(nonce):
@@ -17190,6 +17220,11 @@ def do_update_prepare(raw_identity):
     if len(raw_identity.encode("utf-8")) > _DAEMON_UPDATE_LIMIT:
         raise RuntimeError("update identity too large")
     identity = _daemon_update_identity(json.loads(raw_identity))
+    # Sealing and worker validation share the original authorization budget.
+    # A wall-clock rollback must not renew that budget while this call waits.
+    startup_deadline = time.monotonic() + max(
+        0, min(_DAEMON_UPDATE_TTL, identity["prepare_deadline_unix"] - time.time()))
+    boot_session = _daemon_update_boot_session()
     console = _console_probe_identity()
     if console is None or console[0] != identity["uid"]:
         raise RuntimeError("update owner is not the console user")
@@ -17207,9 +17242,10 @@ def do_update_prepare(raw_identity):
             # Idempotent retry never renews the deadline or resets a decision.
             _daemon_update_publish(journal)
             if journal["phase"] not in {"committed", "aborted"}:
-                _daemon_update_ensure_worker(journal)
+                _daemon_update_ensure_worker(journal, boot_session)
         else:
-            if not time.time() < identity["prepare_deadline_unix"] <= time.time() + _DAEMON_UPDATE_TTL:
+            if (boot_session is None
+                    or not time.time() < identity["prepare_deadline_unix"] <= time.time() + _DAEMON_UPDATE_TTL):
                 raise DaemonUpdateNoOperation("lease")
             stage = "runtime-proof"
             try:
@@ -17258,6 +17294,8 @@ def do_update_prepare(raw_identity):
                     "identity": identity, "manifest_sha256": "",
                     "phase": "prepared", "decision": None, "accepted_sequence": 0,
                     "deadline_unix": identity["prepare_deadline_unix"],
+                    "root_lease": {"boot_session_uuid": boot_session,
+                                   "deadline_monotonic": startup_deadline},
                     "worker_pid": 0, "writer_quiescent": True, "error": None,
                     "old_plist": old_plist, "old_plist_sha256": plist_sha,
                     "old_runtime_sha256": None, "old_payload_sha256": payload_sha,
@@ -17268,14 +17306,14 @@ def do_update_prepare(raw_identity):
                 }
                 journal["manifest_sha256"] = _daemon_update_manifest(journal)
                 _update_write_json(os.path.join(temporary, "private", "journal.json"), journal)
-                if time.time() >= identity["prepare_deadline_unix"]:
+                if _daemon_update_lease_remaining(journal, boot_session) <= 0:
                     stage = "lease"
                     raise RuntimeError("update authorization lease expired while sealing")
                 os.chmod(temporary, 0o755)
                 os.rename(temporary, operation)
                 _update_sync_directory(_DAEMON_UPDATE_ROOT)
                 _daemon_update_publish(journal)
-                _daemon_update_ensure_worker(journal)
+                _daemon_update_ensure_worker(journal, boot_session)
             except Exception:
                 if os.path.lexists(temporary):
                     shutil.rmtree(temporary)
@@ -17285,16 +17323,22 @@ def do_update_prepare(raw_identity):
                     raise DaemonUpdateNoOperation(stage) from None
                 raise
     # The worker cannot acquire the installer lock until prepare releases it.
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
+    # Its sealed-runtime and app checks may legitimately take more than ten
+    # seconds; only the existing lease bounds startup, not a separate timer.
+    while True:
         status = _update_read_json(os.path.join(operation, "status.json"), mode=0o644)
-        if status.get("worker_pid", 0) > 0 or status.get("phase") in {"committed", "aborted"}:
+        if status.get("phase") in {"committed", "aborted"}:
             return True
-        time.sleep(0.05)
+        remaining = _daemon_update_lease_remaining(journal, boot_session)
+        if remaining <= 0:
+            break
+        if status.get("worker_pid", 0) > 0:
+            return True
+        time.sleep(min(0.05, remaining))
     raise RuntimeError("update worker startup unconfirmed")
 
 
-def _daemon_update_ensure_worker(journal):
+def _daemon_update_ensure_worker(journal, boot_session):
     identity = journal["identity"]
     nonce = identity["nonce"]
     operation, _ = _daemon_update_paths(nonce)
@@ -17319,7 +17363,7 @@ def _daemon_update_ensure_worker(journal):
     # index-before-bootstrap crashes recover at boot; identical prepare retries
     # reconcile every earlier publication boundary without renewing its lease.
     _update_write_json(os.path.join(_DAEMON_UPDATE_ROOT, "active.json"), {"schema_version": 1, "nonce": nonce}, 0o644)
-    if time.time() >= journal["deadline_unix"] and journal["decision"] is None:
+    if journal["decision"] is None and _daemon_update_lease_remaining(journal, boot_session) <= 0:
         _daemon_update_publish(journal, phase="aborting", decision="abort")
     _daemon_update_prune_retired(nonce)
     _daemon_update_bootstrap(nonce)
@@ -17383,7 +17427,10 @@ def _daemon_update_activate(journal):
         raise RuntimeError("installed launch intent changed")
     _daemon_update_runtime_proof(identity["old_daemon_sha256"])
     _daemon_update_verify_app(os.path.join(operation, "new.app"), identity, "new")
-    _daemon_update_publish(journal, phase="activating", writer_quiescent=False)
+    if _daemon_update_lease_remaining(journal, _daemon_update_boot_session()) <= 0:
+        raise RuntimeError("update authorization lease expired before activation")
+    _daemon_update_publish(journal, phase="activating", writer_quiescent=False,
+                           activation_started=True)
     if not _disable_and_cleanup_install(PROXY_PORT, remove_runtime=False):
         raise RuntimeError("old daemon quiescence incomplete")
     snapshot = os.path.join(operation, "private", "old-runtime")
@@ -17519,13 +17566,13 @@ def _daemon_update_worker_loop(journal):
     # recovery selects abort, so an interrupted activation never replays late.
     if previous_worker and journal["decision"] is None:
         _daemon_update_publish(journal, decision="abort", phase="aborting")
-    live_deadline = time.monotonic() + max(0, min(_DAEMON_UPDATE_TTL, journal["deadline_unix"] - time.time()))
+    boot_session = _daemon_update_boot_session() if journal["decision"] is None else None
     while True:
         try:
             if journal["decision"] is not None:
                 _daemon_update_resolve(journal)
                 return True
-            if time.time() >= journal["deadline_unix"] or time.monotonic() >= live_deadline:
+            if _daemon_update_lease_remaining(journal, boot_session) <= 0:
                 _daemon_update_publish(journal, decision="abort", phase="aborting")
                 continue
             request = _daemon_update_request(journal)
@@ -17537,11 +17584,10 @@ def _daemon_update_worker_loop(journal):
             if action == "abort":
                 _daemon_update_publish(journal, decision="abort", phase="aborting")
             elif action == "activate" and journal["phase"] == "prepared":
-                _daemon_update_publish(journal, activation_started=True)
                 _daemon_update_activate(journal)
             elif action == "commit" and journal["phase"] == "ready":
                 _daemon_update_runtime_proof(journal["identity"]["new_daemon_sha256"])
-                if time.time() >= journal["deadline_unix"] or time.monotonic() >= live_deadline:
+                if _daemon_update_lease_remaining(journal, boot_session) <= 0:
                     _daemon_update_publish(journal, decision="abort", phase="aborting")
                 else:
                     _daemon_update_publish(journal, decision="commit", phase="committing", writer_quiescent=False)

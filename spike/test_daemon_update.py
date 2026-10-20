@@ -12,12 +12,15 @@ import tproxy
 
 ROOT = Path(__file__).resolve().parents[1]
 NONCE = "0123456789abcdef0123456789abcdef"
+BOOT_SESSION = "01234567-89ab-cdef-0123-456789abcdef"
 REAL_READINESS_SNAPSHOT = tproxy._installed_daemon_readiness_snapshot
+REAL_BOOT_SESSION = tproxy._daemon_update_boot_session
 
 
 @pytest.fixture(autouse=True)
 def no_native_effects(monkeypatch):
     monkeypatch.setattr(tproxy, "_run", lambda *a: pytest.fail("native command forbidden in updater unit tests"))
+    monkeypatch.setattr(tproxy, "_daemon_update_boot_session", lambda: BOOT_SESSION)
 
 
 def identity():
@@ -36,7 +39,7 @@ def proof(sha):
             "install_attestation_sha256": "8" * 64}
 
 
-def journal():
+def journal(*, legacy=False):
     value = {
         "identity": identity(), "phase": "prepared", "decision": None,
         "accepted_sequence": 0, "deadline_unix": 4102444800,
@@ -47,6 +50,9 @@ def journal():
         "predecessor_nonce": None,
         "snapshot_ready": False, **proof(identity()["old_daemon_sha256"]),
     }
+    if not legacy:
+        value["root_lease"] = {"boot_session_uuid": BOOT_SESSION,
+                               "deadline_monotonic": tproxy.time.monotonic() + 200}
     value["manifest_sha256"] = tproxy._daemon_update_manifest(value)
     return value
 
@@ -585,6 +591,11 @@ def test_manifest_binds_privileged_runtime_and_launch_intent():
         changed = copy.deepcopy(value)
         changed[key] = "f" * 64
         assert tproxy._daemon_update_manifest(changed) != original
+    for key, replacement in (("boot_session_uuid", "f" * 36),
+                             ("deadline_monotonic", value["root_lease"]["deadline_monotonic"] + 1)):
+        changed = copy.deepcopy(value)
+        changed["root_lease"][key] = replacement
+        assert tproxy._daemon_update_manifest(changed) != original
 
 
 @pytest.mark.parametrize("key,bad", [("uid", True), ("prepare_deadline_unix", 0), ("prepare_deadline_unix", True), ("prepare_deadline_unix", 2**64), ("nonce", "../bad"), ("old_daemon_sha256", "G" * 64)])
@@ -601,7 +612,7 @@ def test_actual_public_status_projection_matches_rust_wire_vectors(monkeypatch):
     vectors = json.loads((ROOT / "contracts/update-daemon-status-v1.json").read_text())["vectors"]
     for vector in vectors:
         expected = vector["status"]
-        value = journal()
+        value = journal(legacy=True)
         side = "new" if expected["phase"] in {"ready", "committed"} else "old"
         tproxy._daemon_update_publish(value, phase=expected["phase"], decision=expected["decision"],
                                      worker_pid=101, writer_quiescent=True,
@@ -831,6 +842,236 @@ def test_prepare_seals_actual_installed_worker_before_index_and_releases_lock_be
     assert retried["manifest_sha256"] == private["manifest_sha256"]
 
 
+@pytest.fixture
+def starting_worker(prepared_filesystem, monkeypatch):
+    """Delay the worker's validated receipt without waiting in real time."""
+    from contextlib import contextmanager
+    value, root, boots, held = prepared_filesystem
+    clock = SimpleNamespace(elapsed=0.0, offset=0.0, rollback_at=None,
+                            worker_at=None, worker_published=False, sealing_delay=0.0)
+    monkeypatch.setattr(tproxy.time, "time", lambda: 4102444600 + clock.elapsed + clock.offset)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: clock.elapsed)
+
+    @contextmanager
+    def lock(*args, **kwargs):
+        held.append(True)
+        try:
+            yield
+        finally:
+            held.pop()
+    monkeypatch.setattr(tproxy, "_installer_operation_lock", lock)
+    bootstrap = tproxy._daemon_update_bootstrap
+
+    def delayed_bootstrap(nonce):
+        bootstrap(nonce)
+        clock.elapsed += clock.sealing_delay
+    monkeypatch.setattr(tproxy, "_daemon_update_bootstrap", delayed_bootstrap)
+
+    def sleep(seconds):
+        assert boots == [NONCE] and not held
+        clock.elapsed = round(clock.elapsed + seconds, 9)
+        if clock.rollback_at is not None and clock.elapsed >= clock.rollback_at:
+            clock.offset = -3600
+        if (not clock.worker_published and clock.worker_at is not None
+                and clock.elapsed >= clock.worker_at):
+            current = tproxy._update_read_json(root / NONCE / "private/journal.json")
+            tproxy._daemon_update_publish(current, worker_pid=101)
+            clock.worker_published = True
+    monkeypatch.setattr(tproxy.time, "sleep", sleep)
+    return value, root, clock
+
+
+def test_prepare_waits_for_validated_worker_after_ten_seconds_within_original_lease(starting_worker):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444630
+    clock.worker_at = 15.5
+    installed_before = Path(tproxy.INSTALL_DIR, "slipstreamd").read_bytes()
+    assert tproxy.do_update_prepare(json.dumps(value))
+    current = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert 15.5 <= clock.elapsed < 15.6
+    assert current["worker_pid"] == 101 and current["phase"] == "prepared"
+    assert current["decision"] is None and current["accepted_sequence"] == 0
+    assert current["deadline_unix"] == value["prepare_deadline_unix"]
+    assert Path(tproxy.INSTALL_DIR, "slipstreamd").read_bytes() == installed_before
+
+
+@pytest.mark.parametrize("sealing_delay,rollback_at", [(0, None), (0, 1), (2.5, None)])
+def test_prepare_worker_wait_expires_without_renewing_original_budget(
+        starting_worker, sealing_delay, rollback_at):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444603
+    clock.sealing_delay = sealing_delay
+    clock.rollback_at = rollback_at
+    with pytest.raises(RuntimeError, match="update worker startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
+    assert clock.elapsed == pytest.approx(3.0)
+    current = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert current["worker_pid"] == 0 and current["decision"] is None
+    assert current["deadline_unix"] == value["prepare_deadline_unix"]
+    assert (root / "active.json").is_file()
+
+
+def test_prepare_does_not_accept_worker_first_observed_at_lease_expiry(starting_worker):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444603
+    clock.worker_at = 3.0
+    with pytest.raises(RuntimeError, match="update worker startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
+    assert clock.elapsed == pytest.approx(3.0)
+    assert json.loads((root / NONCE / "status.json").read_text())["worker_pid"] == 101
+
+
+@pytest.mark.parametrize("phase,decision", [("committed", "commit"), ("aborted", "abort")])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_prepare_terminal_receipt_remains_idempotent_after_lease_expiry(
+        starting_worker, monkeypatch, phase, decision, legacy):
+    value, root, clock = starting_worker
+    clock.worker_at = 0
+    assert tproxy.do_update_prepare(json.dumps(value))
+    current = tproxy._update_read_json(root / NONCE / "private/journal.json")
+    if legacy:
+        current.pop("root_lease")
+        current["manifest_sha256"] = tproxy._daemon_update_manifest(current)
+        monkeypatch.setattr(tproxy, "_daemon_update_boot_session", lambda: None)
+    tproxy._daemon_update_publish(current, phase=phase, decision=decision, worker_pid=0)
+    clock.elapsed = value["prepare_deadline_unix"] - 4102444600 + 1
+    assert tproxy.do_update_prepare(json.dumps(value))
+    retained = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert retained["phase"] == phase and retained["decision"] == decision
+    assert retained["worker_pid"] == 0
+
+
+@pytest.mark.parametrize("stdout,code,expected", [
+    (BOOT_SESSION.upper() + "\n", 0, BOOT_SESSION),
+    ("", 0, None), ("not-a-uuid", 0, None),
+    (BOOT_SESSION + "\nextra", 0, None), (BOOT_SESSION, 1, None),
+])
+def test_boot_session_uses_only_validated_kernel_uuid(monkeypatch, stdout, code, expected):
+    def run(*args):
+        assert args == ("/usr/sbin/sysctl", "-n", "kern.bootsessionuuid")
+        return SimpleNamespace(returncode=code, stdout=stdout)
+    monkeypatch.setattr(tproxy, "_run", run)
+    assert REAL_BOOT_SESSION() == expected
+
+
+def test_prepare_retry_preserves_private_monotonic_lease_after_clock_rollback(starting_worker):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444630
+    clock.worker_at = 0
+    assert tproxy.do_update_prepare(json.dumps(value))
+    private = root / NONCE / "private/journal.json"
+    original = json.loads(private.read_text())
+    clock.elapsed, clock.offset = 20, -3600
+    assert tproxy.do_update_prepare(json.dumps(value))
+    retried = json.loads(private.read_text())
+    assert retried["root_lease"] == original["root_lease"]
+    assert retried["manifest_sha256"] == original["manifest_sha256"]
+    clock.elapsed = 30
+    with pytest.raises(RuntimeError, match="startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
+    assert json.loads(private.read_text())["decision"] == "abort"
+
+
+def test_sealing_clock_rollback_cannot_publish_expired_monotonic_lease(
+        starting_worker, monkeypatch):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444603
+    verify = tproxy._daemon_update_verify_app
+    def delayed_verify(*args):
+        verify(*args)
+        clock.elapsed, clock.offset = 4, -3600
+    monkeypatch.setattr(tproxy, "_daemon_update_verify_app", delayed_verify)
+    with pytest.raises(tproxy.DaemonUpdateNoOperation) as rejected:
+        tproxy.do_update_prepare(json.dumps(value))
+    assert rejected.value.stage == "lease"
+    assert not (root / NONCE).exists() and not (root / "active.json").exists()
+
+
+@pytest.mark.parametrize("previous_pid", [0, 999])
+def test_validated_worker_uses_original_lease_after_clock_rollback(
+        machine, monkeypatch, tmp_path, previous_pid):
+    from contextlib import nullcontext
+    clock = SimpleNamespace(elapsed=290)
+    monkeypatch.setattr(tproxy.time, "time", lambda: 1000 + clock.elapsed - 300)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: clock.elapsed)
+    value = journal()
+    value.update(worker_pid=previous_pid, deadline_unix=1300, worker_runtime_sha256="a" * 64)
+    value["root_lease"]["deadline_monotonic"] = 300
+    value["manifest_sha256"] = tproxy._daemon_update_manifest(value)
+    monkeypatch.setattr(tproxy, "_DAEMON_UPDATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(tmp_path / NONCE / "private/worker-runtime/slipstreamd"))
+    monkeypatch.setattr(tproxy, "_installer_operation_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(tproxy, "_update_read_json", lambda path, **k:
+                        {"nonce": NONCE} if str(path).endswith("active.json") else value)
+    monkeypatch.setattr(tproxy.os.path, "lexists", lambda _: True)
+    def validation(*args):
+        clock.elapsed += 20
+    monkeypatch.setattr(tproxy, "_daemon_update_verify_app", validation)
+    monkeypatch.setattr(tproxy, "_daemon_update_request", lambda _: pytest.fail("late activation/commit read"))
+    assert tproxy.do_update_worker(NONCE)
+    assert value["phase"] == "aborted" and value["decision"] == "abort"
+    assert value["root_lease"]["deadline_monotonic"] == 300
+
+
+@pytest.mark.parametrize("lease", [
+    None, {}, {"boot_session_uuid": BOOT_SESSION, "deadline_monotonic": True},
+    {"boot_session_uuid": BOOT_SESSION, "deadline_monotonic": float("nan")},
+    {"boot_session_uuid": BOOT_SESSION, "deadline_monotonic": 10**400},
+    {"boot_session_uuid": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "deadline_monotonic": 10**12},
+])
+def test_unproven_or_other_boot_lease_aborts_without_reading_mailbox(machine, monkeypatch, lease):
+    value = journal(legacy=True)
+    if lease is not None:
+        value["root_lease"] = lease
+    monkeypatch.setattr(tproxy, "_daemon_update_request", lambda _: pytest.fail("unproven lease used"))
+    assert tproxy._daemon_update_worker_loop(value)
+    assert value["decision"] == "abort" and value["phase"] == "aborted"
+
+
+@pytest.mark.parametrize("decision", ["commit", "abort"])
+def test_durable_legacy_decision_is_not_reversed_when_boot_identity_unavailable(
+        machine, monkeypatch, decision):
+    value = journal(legacy=True)
+    value.update(decision=decision, phase="committing" if decision == "commit" else "aborting")
+    monkeypatch.setattr(tproxy, "_daemon_update_boot_session", lambda: pytest.fail("decided lease rechecked"))
+    monkeypatch.setattr(tproxy, "_daemon_update_request", lambda _: pytest.fail("decided mailbox read"))
+    assert tproxy._daemon_update_worker_loop(value)
+    assert value["decision"] == decision
+    assert value["phase"] == ("committed" if decision == "commit" else "aborted")
+
+
+def test_delayed_activation_validation_cannot_stop_old_runtime_after_lease(machine, monkeypatch):
+    clock = SimpleNamespace(now=0)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: clock.now)
+    value = journal()
+    value["root_lease"]["deadline_monotonic"] = 3
+    monkeypatch.setattr(tproxy, "_daemon_update_read_plist", lambda: ({}, value["old_plist_sha256"]))
+    monkeypatch.setattr(tproxy, "_daemon_update_require_enabled_intent", lambda: None)
+    monkeypatch.setattr(tproxy, "_daemon_update_verify_app", lambda *args: setattr(clock, "now", 4))
+    monkeypatch.setattr(tproxy, "_disable_and_cleanup_install", lambda *a, **k: pytest.fail("expired activation stopped old"))
+    requests(monkeypatch, ["activate"])
+    assert tproxy._daemon_update_worker_loop(value)
+    assert value["decision"] == "abort" and value["phase"] == "aborted"
+    assert not value.get("activation_started") and not value["snapshot_ready"]
+    assert not any(event[0] == "restore" for event in machine[0])
+
+
+def test_delayed_commit_proof_cannot_commit_past_private_monotonic_lease(machine, monkeypatch):
+    clock = SimpleNamespace(now=0)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: clock.now)
+    value = journal()
+    value.update(phase="ready", snapshot_ready=True)
+    value["root_lease"]["deadline_monotonic"] = 3
+    def delayed_proof(sha):
+        clock.now = 4
+        return proof(sha)
+    monkeypatch.setattr(tproxy, "_daemon_update_runtime_proof", delayed_proof)
+    requests(monkeypatch, ["commit"])
+    assert tproxy._daemon_update_worker_loop(value)
+    assert value["decision"] == "abort" and value["phase"] == "aborted"
+
+
 def test_prepare_persists_mailbox_wake_without_heartbeat_watch_or_periodic_worker(prepared_filesystem):
     import plistlib
     value, _, _, _ = prepared_filesystem
@@ -960,8 +1201,11 @@ def test_expired_existing_prepare_indexes_before_selecting_abort(prepared_filesy
             selected.append(True)
         return publish(current, **changes)
     monkeypatch.setattr(tproxy, "_daemon_update_publish", checked)
-    assert tproxy.do_update_prepare(json.dumps(value))
+    with pytest.raises(RuntimeError, match="update worker startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
     assert selected
+    retained = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert retained["phase"] == "aborting" and retained["decision"] == "abort"
 
 
 def test_orphan_prepared_operation_cannot_overwrite_new_installed_payload(prepared_filesystem, monkeypatch):
