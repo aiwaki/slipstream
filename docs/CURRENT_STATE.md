@@ -41,13 +41,16 @@ directory modes must be applied after children. Keep staging root0700, use owned
 file/directory handles, do not follow links or change process-global umask.
 macOS link permissions also contribute to the existing bundle-tree contract.
 
-The source repair and three regression tests are ready. Independent review found
-no blockers in frozen Rust file SHA256
+The source repair and three regression tests are in [PR409](https://github.com/aiwaki/slipstream/pull/409).
+Independent review found no blockers in initial Rust file SHA256
 `3d1f41d01eecd5db2dffa57857abb6419093c39f2ea34fe7ea3e1e75fdc3127e`.
 `rustfmt --check`, `git diff --check` and the project-state continuity check pass.
-Compilation and native tests are still pending in existing disposable macOS PR
-CI. There is no new workflow, local Rust build, app launch, installation or
-privileged network mutation.
+CI39446121024 at source `688110ce653df0956f3ae42bc72e06a020cad7ac`
+compiled and passed all 199 tray tests, including the three new regressions.
+Its subsequent lint step rejected an unused production `symlink` import;
+that import is now scoped to the tests that use it. Audit39446121163 passed.
+Required checks for the corrected head are pending. There is no new workflow,
+local Rust build, app launch, installation or privileged network mutation.
 
 The subprocess regression compares actual extracted modes and contract tree
 hashes under masks 022 and 077, including implicit parents, late directory
@@ -440,9 +443,8 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Open the reviewed archive-mode repair on `codex/updater-archive-modes`;
-  execute its native regression through existing disposable macOS PR CI,
-  not on the workstation.
+- Complete existing PR409 CI after scoping the unused import to tests. Native
+  regressions already passed; the corrected head still needs required checks.
 - Record exact PR/head/results, then integrate only after required checks pass.
 - Preserve manual preview .30 and all retained qualification evidence. Do not
   re-open completed release publication or repeat unattended authorization runs.
