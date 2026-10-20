@@ -21,55 +21,74 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-Branch `codex/updater-tray-process-group` starts at merged main
-`0f0af398bdac9999dc6923639b6a52f92d243f28`. PR405 passed exact-head
-CI39398301982/audit39398302009, resolved review and merged; source tree equality
-was verified. The historical root checkout is a locator; preserve its user files.
-Evidence paths below are relative to `output/updater-daemon-identity/`.
+Current branch `codex/idle-startup-qualification`, base
+`bbce6e0834e1e9096f0b4c161910959d167fa900` (corrected ordinary `.29`).
+The narrow idle-harness change passed focused tests and independent review;
+disposable macOS CI is next. Historical root checkout is a
+locator; preserve its dirty user files. Evidence below is under
+`output/updater-daemon-identity/` unless a full path is given.
 
-- Signed OLD `.28` at01fcd4c and NEW `.29` at087c passed main CI/audit and
-  candidate authentication. Root39390234434/1 passed commit and crash-before-
-  commit for that exact pair. Receipt `root28-to29-qualification/receipt.json`
-  SHA256 `b874ac1c9d9fb5eb52d75d7fea7253eb5ef0ed702b3090ece35d810a40af91ce`.
-- Initial app39391446170 failed both cases at the deadline without final
-  diagnostics. PR405 repaired an independently proven observer false negative:
-  a successfully exited registered watchdog can be terminal. Its strict
-  identity, policy, files and lock checks passed157 focused tests, with120
-  source/driver/workflow tests. Reuse those checks for unchanged code.
-- Repaired app39400501344/1 **failed both cases**. Watch32909 completed1;
-  no watcher or duplicate run remains. Both ZIPs were authenticated against
-  GitHub size/digests and only bounded JSON/log files extracted. Failure receipt
-  `app28-to29-repaired-qualification/failure-receipt.json` SHA256
+- PR406 merged at the base after all 17 checks passed in CI39404198732 and
+  audit39404198742. Hosted product-checks118566087791 executed both actual
+  successor/rollback process-group tests: suite: 196 passed, zero failed/ignored.
+  The app launch command now uses a separate process group so normal watchdog
+  cleanup does not own the successor or restored OLD app. Full packaged
+  update/rollback still needs proof; source/unit tests alone do not provide it.
+  `process-group-fix/pr-verification.json` SHA256
+  `7fcf86383f4c7b32f9da5d9de74050c5a1ee8ab57dffa0ac9209da7a6ddce298`;
+  `merge-verification.json` SHA256
+  `9d83b80d2a61c5da821c4e1514a129734d3e1425aeba23eecb8ec5e0767acbba`.
+- Main406 CI39406040764/1 FAILED `packaged-app-lifecycle-heavy` at
+  `pending-navigation:idle`: CPU 1.090 s exceeds the existing 1.000 s limit around
+  nominal sleep 3 s. Audit39406040799 and product/build/sign/browser/notification/
+  attestation passed. Watch 56900 completed; no candidate download/qualification.
+  Failure receipt `main406-verification/failure-receipt.json` SHA256
+  `baa783fc2dc6693d08fbb9802aaa562b16b9272277334cbf59094813772ae676`.
+  The failure is BEFORE tray-start/updater; it does not exercise the PGID fix.
+- Source establishes a startup/idle measurement overlap: amain publishes first
+  active before starting the network monitor; that thread imports Scapy,
+  starts packet observation and schedules startup canaries/DNS diagnostics.
+  Broker readiness does not establish their completion. Actual elapsed was
+  not measured. The exact contributor to the observed 1.090 s is still unknown.
+  The retained `idle-guard-source-review.md` records this distinction.
+- The narrow fix waits for existing fresh health data from the exact daemon and
+  completed startup canaries, ages cached `next_due_in` by health snapshot age,
+  and retains ONE 3 s observation with the original 1.000 s CPU limit. Pin process
+  birth, reject CPU counter decreases, keep worker/socket/runtime checks during
+  bounded settling and across the sample, and report actual elapsed on failure
+  as well as success. No production readiness API or routing change, threshold
+  increase, repeated CPU sampling until pass, or new broad audit is authorized.
+  Focused verification: 92 tests and 64 subtests passed in 1.43 s with
+  `.audit-venv/bin/python -m pytest -q
+  scripts/test_composed_pending_navigation_smoke.py
+  scripts/test_pf_installed_lifecycle_smoke.py`; full log:
+  `idle-startup-fix/focused-tests.log`. Independent final source/test review
+  found no blockers. Original main failure and broad green PR406 checks are
+  retained; unchanged local broad tests were not repeated.
+- PR407 remains OPEN at `1c44c419ec41ff3b3eabe742e55d7e798c1a1872`, branch
+  `codex/preview30-release-pair`. CI39406676206/audit39406676332 passed all
+  required checks; watcher 30859 completed0. Its version/pair/publisher source
+  remains unchanged and reviewed. Merge waits for qualified corrected `.29`.
+  Applied checks: 122 focused pair/source/workflow tests plus publisher test,
+  version sync, actionlint and whitespace. Receipt/logs:
+  `preview30-preparation/applied-verification.json`, `watch.log`.
+- The originating updater helper is sealed from OLD. Do not retry historical
+  `.28 -> .29` app39400501344/1: both final-tray cases failed after watchdog
+  cleanup. Root39390234434/1 passed but its receipts bind that obsolete pair.
+  Its app failure receipt SHA256 is
   `9baffdd645090112034745b6338b0a6a2ae1970df491c12f23dc8af108618324`.
-- Both cases now prove terminal watchdog cleanup: absent transaction files,
-  available lock, stopped watchdog. Commit observed live exact NEW17380 through
-  ACK immediately before cleanup, then failed `one final tray must be alive`.
-  Pre-ACK STOP/KILL observed quiescent root abort, restored OLD daemon and
-  `old_relaunched` receipt, then failed the equivalent OLD-tray requirement.
-  Neither case qualifies. Final pgrep return data, PGID and termination signals
-  were not retained; do not claim a directly observed launchd kill.
-- Source review identifies a product lifecycle defect consistent with both:
-  shared `bundle_launch_command` lets NEW and rollback OLD inherit the watchdog
-  process group. Default launchd cleanup kills remaining members when its job
-  dies. The narrow fix gives the app its own process group and preserves normal
-  watchdog cleanup and exact PID controls. Two real subprocess regressions
-  check actual child PGID for NEW/OLD; hosted execution is pending. Final-tray
-  diagnostics now retain bounded PID/group metadata without relaxing any
-  acceptance rule. Independent source review found no blockers. The289 focused
-  observer/pre-ACK/source/driver/workflow Python tests, project continuity and
-  whitespace checks passed; no local native test or build was run.
-- The helper is sealed from OLD. Fixing only NEW cannot qualify the retained
-  `.28 -> .29` pair, so never rerun it unchanged. Next use corrected ordinary
-  `.29` OLD and `.30` NEW. Both full identities must bind fresh root and app
-  gates. Include the minimal publisher/pair admission changes in the ordinary
-  `.30` bump before candidate creation, avoiding an extra release rebuild.
-- Previously prepared `preview29-publication-preparation.patch` is parked;
-  do not apply it blindly. Publication still follows exact-source CI/audit,
-  packaged commit/rollback and protected readiness. Real public discovery and
-  public upgrade/rollback remain after publication under the authorized order;
-  do not turn every future crash scenario into a new preview blocker.
-- No local Rust/native build, product execution, workstation installation or
-  network mutation. Public `.24`, installed app, settings and learning unchanged.
+  Those identities cannot authorize a corrected pair.
+- Next: submit this reviewed idle-harness fix on ordinary `.29` to required CI,
+  merge after fresh check verification, then obtain a
+  qualified exact-main `.29` candidate; merge ready PR407 and obtain exact-main
+  `.30`. Run root commit/crash cases and packaged app commit/pre-ACK kill cases
+  on that one pair. Protected readiness and publisher consume the same `.30`;
+  publisher admission is already prepared, so no publisher-only rebuild.
+  Public discovery/upgrade/rollback remain AFTER publication; use the DMG until
+  they are proven. Do not add every future fault scenario as a preview blocker.
+- No live watcher remains. No local Rust/native build, product execution,
+  workstation installation, .app extraction, or network mutation. Public `.24`,
+  installed app, settings/learning/backups and user AGENTS remain unchanged.
 
 The retained records below are historical and superseded by this live checkpoint.
 
@@ -442,10 +461,10 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Review and run hosted CI for the shared app process-group repair and focused
-  final-tray diagnostics. Do not weaken the requirement for a surviving exact app.
-- After merge, authenticate corrected `.29` once, then prepare ordinary `.30`
-  with pair/publisher admission already synchronized and authenticate its build.
+- Finish the existing corrected `.29` main watcher and authenticate its exact
+  candidate once. Preserve the PR406 green baseline and native test evidence.
+- Review and pass `.30` successor PR checks; merge only after corrected `.29`
+  proof, then authenticate one exact-main `.30` candidate.
 - Qualify root and app commit/rollback on that exact pair, then protected
   readiness and publish the final preview. Do not rerun immutable failed pairs.
 - Preserve the workstation and retained public `.24` evidence. Public updater,

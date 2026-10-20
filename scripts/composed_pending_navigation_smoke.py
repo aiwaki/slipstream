@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
 import http.server
+import math
 import os
 from pathlib import Path
 import re
@@ -35,6 +38,8 @@ COMPOSED_READY_MARKER = b"User-agent: slipstream-composed-ready"
 MAX_COMPOSED_NAVIGATION_SECONDS = 35.0
 IDLE_OBSERVATION_SECONDS = 3.0
 MAX_IDLE_CPU_DELTA_SECONDS = 1.0
+IDLE_STARTUP_TIMEOUT_SECONDS = 120.0
+MAX_IDLE_HEALTH_AGE_SECONDS = 15.0
 DAEMON_FIXTURE_HOST_ENV = "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST"
 DAEMON_FIXTURE_IP_ENV = "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP"
 DAEMON_FIXTURE_PORT_ENV = "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT"
@@ -448,12 +453,21 @@ def _worker_profiles(root: Path = Path("/tmp")) -> tuple[Path, ...]:
     )
 
 
-def _worker_processes(uid: int) -> tuple[int, ...]:
+def _idle_query_timeout(deadline: float | None) -> float:
+    if deadline is None:
+        return 10.0
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ComposedQualificationError("first canary batch readiness timed out; idle unproved")
+    return min(10.0, remaining)
+
+
+def _worker_processes(uid: int, *, deadline: float | None = None) -> tuple[int, ...]:
     result = subprocess.run(
         ("/bin/ps", "-axo", "pid=,uid=,command="),
         capture_output=True,
         text=True,
-        timeout=10.0,
+        timeout=_idle_query_timeout(deadline),
         check=False,
     )
     if result.returncode != 0:
@@ -529,11 +543,17 @@ def _cpu_seconds(value: str) -> float:
         raise ComposedQualificationError(
             f"invalid daemon CPU time: {value!r}"
         ) from error
+    if any(not math.isfinite(number) or number < 0 for number in numbers):
+        raise ComposedQualificationError(f"invalid daemon CPU time: {value!r}")
     if len(numbers) == 2:
         minutes, seconds = numbers
-        return minutes * 60.0 + seconds
-    hours, minutes, seconds = numbers
-    return hours * 3600.0 + minutes * 60.0 + seconds
+        total = minutes * 60.0 + seconds
+    else:
+        hours, minutes, seconds = numbers
+        total = hours * 3600.0 + minutes * 60.0 + seconds
+    if not math.isfinite(total):
+        raise ComposedQualificationError(f"invalid daemon CPU time: {value!r}")
+    return total
 
 
 def _daemon_cpu_seconds(pid: int) -> float:
@@ -549,6 +569,22 @@ def _daemon_cpu_seconds(pid: int) -> float:
     if not result.stdout.strip():
         raise ComposedQualificationError("daemon disappeared during idle sample")
     return _cpu_seconds(result.stdout)
+
+
+def _daemon_process_identity(pid: int, *, deadline: float | None = None) -> tuple[int, str]:
+    result = subprocess.run(
+        ("/bin/ps", "-p", str(pid), "-o", "pid=,lstart="),
+        capture_output=True, text=True, timeout=_idle_query_timeout(deadline), check=False,
+    )
+    fields = result.stdout.split()
+    if (
+        result.returncode != 0 or len(fields) != 6
+        or fields[0] != str(pid)
+        or re.fullmatch(r"[A-Za-z]{3} [A-Za-z]{3} [0-9]{1,2} "
+                        r"[0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}", " ".join(fields[1:])) is None
+    ):
+        raise ComposedQualificationError("daemon PID/birth observation failed")
+    return pid, " ".join(fields[1:])
 
 
 def _assert_broker_socket(uid: int) -> None:
@@ -569,52 +605,162 @@ def _assert_broker_socket(uid: int) -> None:
         )
 
 
-def assert_worker_idle(uid: int, daemon_pid: int) -> dict[str, object]:
-    """Measure the normal idle boundary before the first browser job."""
-    require_disposable_ci()
-    deadline = time.monotonic() + 10.0
-    while True:
-        try:
-            _assert_broker_socket(uid)
-            break
-        except ComposedQualificationError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.1)
-    baseline_profiles = _worker_profiles()
-    if baseline_profiles:
+def _assert_idle_worker_boundary(
+    uid: int, *, deadline: float | None = None, allow_missing_socket: bool = False,
+) -> bool:
+    broker_present = True
+    try:
+        _assert_broker_socket(uid)
+    except ComposedQualificationError as error:
+        if not allow_missing_socket or not isinstance(error.__cause__, FileNotFoundError):
+            raise
+        broker_present = False
+    if _worker_profiles():
         raise ComposedQualificationError(
-            f"browser worker profiles predate the idle sample: {baseline_profiles!r}"
+            "browser worker profile exists without a live job"
         )
     if PRODUCTION_WORKER_RUNTIME.exists() and any(
         PRODUCTION_WORKER_RUNTIME.iterdir()
     ):
         raise ComposedQualificationError(
-            "browser worker runtime is non-empty before a live job"
+            "browser worker runtime is non-empty without a live job"
         )
-    if _worker_processes(uid):
+    if _worker_processes(uid, deadline=deadline):
         raise ComposedQualificationError(
-            "browser worker process exists before a live job"
+            "browser worker process exists without a live job"
         )
-    before = _daemon_cpu_seconds(daemon_pid)
-    time.sleep(IDLE_OBSERVATION_SECONDS)
-    after = _daemon_cpu_seconds(daemon_pid)
-    delta = max(0.0, after - before)
-    if delta > MAX_IDLE_CPU_DELTA_SECONDS:
-        raise ComposedQualificationError(
-            f"idle daemon consumed {delta:.3f}s CPU during the sample"
-        )
-    if _worker_profiles() or _worker_processes(uid):
-        raise ComposedQualificationError(
-            "idle daemon started a browser worker without a live job"
-        )
-    return {
-        "observation_ms": int(IDLE_OBSERVATION_SECONDS * 1000),
-        "daemon_cpu_delta_ms": int(delta * 1000),
-        "worker_processes": 0,
-        "worker_profiles": 0,
-        "broker_mode": "0600",
+    return broker_present
+
+
+def _idle_canary_readiness(status: dict | None, daemon_pid: int, *, minimum_due: float) -> dict:
+    """Use slow health age, never the independently refreshed heartbeat."""
+    evidence = {"ready": False, "reason": "missing_status_v2"}
+    if not isinstance(status, dict) or status.get("schema_version") != 2:
+        return evidence
+    daemon, recovery, canaries = (status.get(key) for key in ("daemon", "recovery", "canaries"))
+    if not isinstance(daemon, dict):
+        return evidence
+    if type(daemon.get("pid")) is not int:
+        return evidence
+    if daemon["pid"] != daemon_pid:
+        raise ComposedQualificationError("daemon PID changed during idle qualification")
+    if daemon.get("state") != "active" or daemon.get("phase") != "active":
+        raise ComposedQualificationError("daemon is not active during idle qualification")
+    if not isinstance(recovery, dict):
+        return evidence
+    if recovery.get("state") != "idle":
+        raise ComposedQualificationError("daemon recovery is not idle during idle qualification")
+    if type(recovery.get("count")) is not int or recovery["count"] < 0:
+        evidence["reason"] = "invalid_recovery_count"
+        return evidence
+    evidence.update(reason="incomplete_canary_batch", recovery_count=recovery["count"])
+    if not isinstance(canaries, dict):
+        return evidence
+    health_updated_at = daemon.get("health_updated_at")
+    try:
+        health = datetime.fromisoformat(health_updated_at.replace("Z", "+00:00"))
+        if health.tzinfo is None:
+            return evidence
+        health_age = time.time() - health.timestamp()
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return evidence
+    evidence["health_age_seconds"] = health_age
+    if not math.isfinite(health_age) or not 0 <= health_age < MAX_IDLE_HEALTH_AGE_SECONDS:
+        evidence["reason"] = "stale_health"
+        return evidence
+    total, due = canaries.get("total"), canaries.get("next_due_in")
+    if (type(total) is not int or total <= 0 or canaries.get("running") is not False
+            or type(due) not in (int, float) or not math.isfinite(due)):
+        return evidence
+    remaining = due - health_age
+    evidence.update(next_due_in_seconds=remaining, total=total)
+    if remaining <= minimum_due:
+        evidence["reason"] = "canary_due_too_soon"
+        return evidence
+    evidence.update(ready=True, reason="first_canary_batch_completed")
+    return evidence
+
+
+def assert_worker_idle(
+    uid: int, daemon_pid: int, *, read_status: Callable[[], dict | None],
+) -> dict[str, object]:
+    """Take one CPU sample after a fresh, completed first canary batch."""
+    require_disposable_ci()
+    started = time.monotonic()
+    deadline = started + IDLE_STARTUP_TIMEOUT_SECONDS
+    sample_started = None
+    evidence = {
+        "daemon_pid": daemon_pid, "settle_ms": None, "observation_ms": None,
+        "daemon_cpu_before_seconds": None, "daemon_cpu_after_seconds": None,
+        "daemon_cpu_delta_ms": None,
     }
+    try:
+        identity = _daemon_process_identity(daemon_pid, deadline=deadline)
+        evidence["daemon_started_at"] = identity[1]
+        recovery_count = None
+        broker_seen = False
+        while True:
+            _idle_query_timeout(deadline)
+            if _daemon_process_identity(daemon_pid, deadline=deadline) != identity:
+                raise ComposedQualificationError("daemon PID/birth changed during idle qualification")
+            broker_ready = _assert_idle_worker_boundary(
+                uid, deadline=deadline, allow_missing_socket=not broker_seen,
+            )
+            broker_seen = broker_seen or broker_ready
+            evidence["broker_ready"] = broker_ready
+            readiness = _idle_canary_readiness(read_status(), daemon_pid,
+                                              minimum_due=IDLE_OBSERVATION_SECONDS)
+            evidence["startup_readiness"] = readiness
+            if readiness.get("recovery_count") is not None:
+                if recovery_count is not None and readiness["recovery_count"] != recovery_count:
+                    raise ComposedQualificationError("daemon recovery changed during idle qualification")
+                recovery_count = readiness["recovery_count"]
+            ready_at = time.monotonic()
+            evidence["settle_ms"] = int((ready_at - started) * 1000)
+            if ready_at >= deadline:
+                raise ComposedQualificationError("first canary batch readiness timed out; idle unproved")
+            if readiness["ready"] and broker_ready:
+                break
+            time.sleep(min(0.5, deadline - ready_at))
+
+        sample_started = time.monotonic()
+        before = _daemon_cpu_seconds(daemon_pid)
+        evidence["daemon_cpu_before_seconds"] = before if math.isfinite(before) else str(before)
+        if not math.isfinite(before) or before < 0:
+            raise ComposedQualificationError("invalid daemon CPU counter before idle sample")
+        time.sleep(IDLE_OBSERVATION_SECONDS)
+        after = _daemon_cpu_seconds(daemon_pid)
+        sample_finished = time.monotonic()
+        evidence["observation_ms"] = int((sample_finished - sample_started) * 1000)
+        evidence["daemon_cpu_after_seconds"] = after if math.isfinite(after) else str(after)
+        if _daemon_process_identity(daemon_pid) != identity:
+            raise ComposedQualificationError("daemon PID/birth changed during idle sample")
+        _assert_idle_worker_boundary(uid)
+        final = _idle_canary_readiness(read_status(), daemon_pid, minimum_due=0.0)
+        evidence["final_readiness"] = final
+        if not final["ready"] or final.get("recovery_count") != recovery_count:
+            raise ComposedQualificationError("daemon became non-idle during the single CPU sample")
+        if sample_finished - ready_at >= readiness["next_due_in_seconds"]:
+            raise ComposedQualificationError("canary quiet window elapsed during idle sample")
+        if not math.isfinite(after) or after < before:
+            raise ComposedQualificationError("daemon CPU counter decreased or became nonfinite")
+        delta = after - before
+        evidence["daemon_cpu_delta_ms"] = int(delta * 1000)
+        if delta > MAX_IDLE_CPU_DELTA_SECONDS:
+            raise ComposedQualificationError(
+                f"idle daemon consumed {delta:.3f}s CPU during the sample"
+            )
+        evidence.update(worker_processes=0, worker_profiles=0, worker_runtime_directories=0,
+                        broker_mode="0600")
+        return evidence
+    except Exception as error:
+        if sample_started is None:
+            evidence["settle_ms"] = int((time.monotonic() - started) * 1000)
+        if sample_started is not None and evidence["observation_ms"] is None:
+            evidence["observation_ms"] = int((time.monotonic() - sample_started) * 1000)
+        failure = ComposedQualificationError(f"{error}; idle_evidence={evidence!r}")
+        failure.idle_evidence = evidence
+        raise failure from error
 
 
 def assert_worker_clean(uid: int, *, timeout: float = 10.0) -> None:
