@@ -2,8 +2,28 @@
 
 ## Verified Checkpoint
 
+[Preview .30](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.30)
+is published from `86dd9393f671120f9ad6adb887ebb0e29d56467b`, release ID418378834.
+Publisher39422953280/1 and independent public delivery verification passed.
+All12 public files passed canonical size/hash, updater signature, archive,
+appcast and remote identity checks. Seven candidate files match retained
+CI39414812044/1 byte-for-byte; no rebuild occurred. Dependency audit39414812025/1,
+root39417619778/1 and packaged app39418547089/1 (both cases each) passed.
+Protected readiness39417627050/1 passed8 Safari/Chrome cases, transport3/3 and
+1800.114seconds of measured soak with successful teardown.
+
+Public evidence: `output/updater-daemon-identity/preview30-public-verification/`.
+Receipt SHA256 `1dd881ff2d34847b045a65d8717daa75ed7eb2f54732168ecf9dc622806590c0`.
+Parent verified all18 referenced evidence hashes and read both canonical reports.
+Use the manual DMG for this preview. Public normal tray discovery/menu/admin/Quit
+and public installed update/forced rollback remain unqualified. No local product
+execution, native build, .app extraction or workstation installation occurred.
+The broader goal remains active; this preview publication milestone is complete.
+
+### Previous published checkpoint (retained)
+
 [Preview .24](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.24)
-is public from `e5791a4d7f42e000bb37732f8aa4b9698e62dd9f`, release ID 413914811.
+remains public, now marked archival, from `e5791a4d7f42e000bb37732f8aa4b9698e62dd9f`, release ID 413914811.
 All 12 public assets passed independent size/hash, signature, bundle, appcast and
 remote-identity verification. Its exact-source CI38739537809, audit38739537827,
 protected readiness38745936996 and publisher38752022135 passed. Readiness covered
@@ -21,67 +41,133 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-Branch `codex/preview30-release-pair`, PR407: integrating main408
-`4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37` into the prepared `.30` successor.
+Local branch `codex/public-preview30-update-qualification`, HEAD
+`86dd9393f671120f9ad6adb887ebb0e29d56467b`. PR407 is MERGED into main
+`86dd9393f671120f9ad6adb887ebb0e29d56467b`; both trees equal
+`a14e9767b2fb62ccdc7745ecfb026b9ff148e5d5`. Version is `.30`.
 The historical root checkout is a locator; preserve its dirty user files.
 Evidence paths below are relative to `output/updater-daemon-identity/`.
 
-- PR408 merged at `4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37`; merge tree equals
-  tested head `fcafc9194ae57fc455e3f04100d0d6250c4e8132`. All 17 checks passed or
-  were conditionally skipped in CI39410904218/1 and audit39410903935/1; all
-  three required checks passed, with no unresolved review threads.
-  `idle-startup-fix/pr408-verification/merge-verification.json` SHA256
-  `9f99325904f94c0cbd1c2161f2274fdbb82ae529459bc311374d1e07ad90f26a`.
-- Actual hosted idle evidence: startup settling 6113 ms, one 3153 ms observation,
-  CPU 1.47 -> 1.54 s (70 ms), with the original 1000 ms ceiling. Both health
-  snapshots prove completed first canary batch, total 10, recovery count 0;
-  workers/profiles/runtime absent. `idle-boundary-evidence.json` under the same
-  verification directory has SHA256
+Current next work: run the prepared public UI harness against actual OLD `.29`
+normal tray -> public `.30` discovery and menu activation, reusing the existing
+schema2/root/ACK/rollback observers. No product source has changed.
+`app_update_implementation` owns public Python drivers and focused tests;
+`explain_remaining_errors` owns the hosted-only workflow;
+`coordinated_update_review` reviews authorization and observer boundaries.
+Parent owns docs/integration. No candidate or product code is being rebuilt.
+First hosted execution will be commit-only; the pre-ACK failure case follows
+successful genuine activation to avoid duplicate failures at an unknown UI step.
+The actual administrator authorization path is unqualified: NOPASSWD sudo on
+GitHub is not proof that AppleScript authorization succeeds. A visible pending
+prompt must be retained as evidence, never replaced by a direct prepare call.
+All existing source/candidate/root/app/readiness/public evidence below is reused.
+Graph discovery was unavailable (`unsupported call`); bounded source reads are
+used for the known updater paths without indexing or installing new tooling.
+The previous goal turn was progress: `.30` was published and public bytes verified.
+The first execution is the branch-push commit case in
+`.github/workflows/public-update-qualification.yml`. After it succeeds, the same
+workflow ID can dispatch `kill-successor-before-ack` on the same branch.
+The separate `qualified-source` checkout remains exact main86dd; the harness
+records its own source SHA and requires unchanged shared observer bytes.
+Focused pure tests cover real OLD identity/exit and one actual menu action;
+the visibility sampler reports bounded observations and excludes explicit menu
+interaction from background-invisibility claims. Parent source review caught
+and corrected the phase boundary before the first menu-open action.
+Workflow actionlint, Python syntax and project-state continuity checks passed.
+Candidate/full/native/readiness gates are not rerun for these observer changes.
+
+- Corrected OLD `.29` is authenticated and its complete exact-main CI/audit
+  passed: source `4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37`,
+  CI39412657264/1, audit39412657214/1, manifest SHA256
+  `9dbac35693cddbf8d1c86eaead4586c18d665402ab1e76b7a38a2991fcbc7238`.
+  `main408-verification/receipt.json` SHA256
+  `703e4cacc32afc4ede0e19fdb05ea491a43f0128cf728c31726c455845b74e8e`.
+  Seven signed candidate files, hosted attestation, updater signature and 897
+  archive modes were verified. This does not qualify update/rollback. Retain
+  `main408-candidate/`; no repeat download or app-tree extraction is needed.
+- PR407 integration CI39413071777/1 and audit39413071656/1 passed. All three
+  required checks passed; all 17 checks passed or were conditional skips;
+  review threads were empty. Exact-head merge and matching trees verified.
+  `preview30-preparation/integrated407-verification/merge-verification.json`
+  SHA256 `03956c3099825d37cf4cba601a4702edff55c8fae2628163a6cfaa366a435e96`.
+  All 14 prepared preview files and three main408 idle files were preserved;
+  focused 122 tests and publisher admission are reused without repetition.
+- Final NEW `.30` is authenticated; complete CI39414812044/1 and
+  audit39414812025/1 passed. Source86dd above, manifest SHA256
+  `63215717ad7fa005ecf44fc1355160acb0af2cad7d759be191a043b5a1c01954`.
+  `main407-preview30-verification/receipt.json` SHA256
+  `8684d3a7a28e01cf61dc3afc8e1ff0394c6b1e271673ac3ff4a1845ae788bfe3`.
+  All seven files, signature, exact-run attestation and 897 modes passed.
+  One download ended with unexpected EOF; its partial and failure are retained.
+  One bounded retry of the SAME artifact12261352438 succeeded; no CI rerun.
+  Parent reverified both receipts and their 18/21 referenced evidence hashes.
+  Watch/auth sessions7375/4331/24935 are terminal. Preserve both candidates.
+- Root39417619778/1 PASSED both commit and crash-before-commit. Canonical
+  prerequisite verified against independent archive full-tree expectations and
+  the same complete pair. Commit retained a live NEW daemon (heartbeat3->4);
+  crash restored OLD (4->5), and late commit did not overwrite abort. Both
+  cleanup_errors lists are empty. `root29-to30-qualification/receipt.json`
+  SHA256 `906ddd1dce949e5d31bbd8827711124761de959535fa5c638cd7c9ad77e2b44f`.
+  Parent reverified metadata/case hashes and fresh whole run success before app.
+  Root watcher14081 and evidence download90950 are terminal.
+- Packaged app39418547089/1 PASSED both commit and pre-ACK successor-kill,
+  plus aggregate. `app29-to30-qualification/receipt.json` SHA256
+  `f16b1aad5fad4390b5f6d200026295fd39b83f74396894f71bdece58df315de3`.
+  Commit: actual ACK, NEW tray PID/PGID16663 survives watchdog exit, NEW daemon
+  heartbeat64->65. Fault: actual STOP/T-state/KILL before ACK, root abort and
+  complete OLD runtime restored, tray PID/PGID19497 survives, heartbeat24->25.
+  Both watchdogs exited0 with no PID, available lock, no transaction files and
+  cleanup_errors=[]. Parent verified all43 evidence hashes and pair/root identity.
+  Watch67078/download30733/offline22921 are terminal. This qualifies the packaged
+  prepare/watchdog transaction, not public discovery, old tray Quit or admin UI.
+- Protected readiness39417627050/1 PASSED; canonical reports and both exact-run
+  attestations verified. `preview30-readiness/receipt.json` SHA256
+  `88b4b10c088ed5fcb4c81f0e75b15beddb251eaa81f0851dae133649d0ef86be`.
+  Safari/Chrome8/8 usable; measured soak1800.114s/3600 samples/maxgap0.658s,
+  all11 invisibility counters zero, heartbeat advances and PID stable;
+  transport3/3; cleanup_failures=[] and both system cleanup steps succeeded.
+  Parent verified raw report hashes and exact candidate/provenance identities.
+  Watcher68383 and evidence verification are complete.
+- Publisher39422953280/1 PASSED and published `.30` at12:34:28 UTC.
+  Release ID418378834, draft=false/prerelease=true; lightweight tag points to
+  exact main86dd. All12 assets are uploaded, all publisher postconditions passed.
+  `.24` remains available and is marked archival. Parent verified publisher
+  receipt SHA256 `116b4b0b63efbd82dbd93952a61848bcc3329efa6a0547212ceae55fe69fdbea`
+  and all six referenced evidence files in `preview30-publisher/`.
+  Independent public delivery verification PASSED ONCE, session22921 complete0.
+  `preview30-public-verification/` retains12 downloaded files and canonical outputs.
+  Receipt `public-verification-receipt.json` SHA256
+  `1dd881ff2d34847b045a65d8717daa75ed7eb2f54732168ecf9dc622806590c0`.
+  All12 file hashes, signature, archive/appcast and remote identity passed;
+  seven files are byte-identical to retained candidate. Parent verified18
+  evidence hashes and both canonical reports. Public UI update remains separate.
+- PR406 fixed a real app lifetime bug: both successor and restored OLD start
+  in their own process group, retaining normal launchd watchdog cleanup.
+  Hosted checks passed real PGID tests (196 tests, zero failures/ignored).
+  The helper is sealed from OLD, so both corrected .29 and .30 are required.
+- PR408 fixes an observation boundary, not product routing: main406 idle CPU
+  failed at 1.090 s because first-active readiness can precede startup canaries.
+  The precise contributor to that old sample is unknown. Hosted corrected
+  evidence: 6113 ms settling, ONE 3153 ms sample, 70 ms CPU with unchanged
+  1000 ms ceiling; both health snapshots show first canaries complete, zero
+  recovery and no worker/profile/runtime. 92 tests plus 64 subtests passed.
+  `idle-startup-fix/pr408-verification/idle-boundary-evidence.json` SHA256
   `6af063447907e65de0f15db2a7600da3463e609e7e5087d6ea009cecef0c036b`.
-  Focused tests: 92 passed and 64 subtests passed; independent review no blockers.
-  This is installed lifecycle evidence, not updater transition qualification.
-- Exact-main `.29` at main408 must now pass its full CI/audit and signed candidate
-  authentication. Agent `app_update_implementation` owns the only main watcher
-  and authentication under `main408-verification/` and `main408-candidate/`.
-  Read its live handle/receipt before any observation or download. No main408
-  candidate is qualified yet. PR408 watcher 72888 completed successfully.
-- PR406 already repaired the shared app launch command: successor and rollback
-  OLD get their own process group, preserving normal watchdog cleanup. Hosted
-  product-checks118566087791 passed both real PGID tests (196 tests, no failures
-  or ignored tests). The corrected originating helper must still be qualified
-  through the complete packaged update/rollback path. Reuse its unchanged tests.
-- Main406 CI39406040764/1 failed BEFORE tray-start/updater at idle CPU 1.090 s.
-  Source proved that first active/broker readiness could overlap Scapy/startup
-  canaries and DNS work. The precise contributor to that old sample is unknown.
-  PR408 corrects the observation boundary using fresh existing health data and
-  aged next-due values, exact process identity, bounded startup waiting and one
-  CPU sample. It changes no product routing/readiness and does not raise the
-  CPU limit or retry samples until pass. Original failure receipt remains in
-  `main406-verification/failure-receipt.json`.
-- PR407 preparation at `1c44c419ec41ff3b3eabe742e55d7e798c1a1872` passed
-  CI39406676206/audit39406676332 and focused 122 pair/source/workflow tests plus
-  publisher admission. Its version/pair/publisher changes remain unchanged.
-  Integrating main408 conflicts only in this checkpoint; driver/workflow SHA256
-  pins still match their reviewed files. Existing green PR407 checks do not
-  qualify the new integration head: require ordinary new-head CI. No new feature
-  or release gate is added. Merge waits for authenticated corrected `.29`.
-  See `idle-startup-fix/pr407-integration-review.json` and
-  `preview30-preparation/applied-verification.json`.
-- Do not retry obsolete `.28 -> .29` app39400501344/1. Both cases failed final
-  tray survival after proven watchdog cleanup; root39390234434/1 receipts bind
-  that old pair. The helper is sealed from OLD, so a successor-only repair cannot
-  fix that origin. These identities cannot authorize a corrected pair.
-- Next: in parallel finish corrected `.29` main qualification and new PR407 CI;
-  then merge PR407 and authenticate exact-main `.30`. Run root commit/crash and
-  packaged app commit/pre-ACK kill on that same complete `.29 -> .30` pair.
-  Protected readiness and publisher consume the same `.30`; publisher admission
-  is already included, avoiding a publisher-only rebuild. Public discovery,
-  upgrade and rollback remain AFTER publication; use the DMG until proven.
-  Do not add every future fault scenario as a new preview blocker.
+- Publication and independent delivery verification are complete. Provide actual
+  release/DMG links, keeping public auto-update explicitly unverified. Next open
+  scope is normal-tray discovery/menu/admin/Quit and public update/forced rollback.
+  `preview30-preparation/post-publication-update-path.md` records existing source
+  and exact limits: main has no ready driver; historical release-delivery .23/.24
+  workflow hardcodes old versions/schema1 and cannot just dispatch .29/.30.
+  Do not rebuild or repeat unchanged candidate/root/app/readiness/public checks.
+- Do not rerun obsolete `.28 -> .29` app39400501344/1 or reuse root39390234434/1
+  for the new pair. No new feature, general audit, release gate or future fault
+  scenario is added. Public discovery/upgrade/rollback are after publication;
+  auto-update remains unverified until then. Public `.24` is already available.
 - No local Rust/native build, product execution, workstation installation,
-  .app extraction or network mutation. Public `.24`, installed app,
-  settings/learning/backups and user AGENTS remain unchanged. No redundant
-  broad local tests or obsolete workflow reruns are needed.
+  .app extraction or network mutation. Preserve settings/learning/backups and
+  user AGENTS. This operational checkpoint is local; do not add a source-only
+  rebuild to the fixed final candidate merely to commit live status.
 
 The retained records below are historical and superseded by this live checkpoint.
 

@@ -301,6 +301,31 @@ points or general rollback coverage. Root rollback evidence cannot substitute
 for restoration of the app bundle. Native execution remains hosted-only;
 hermetic tests and a merged workflow do not satisfy either native app case.
 
+### Public preview update observation
+
+The public UI harness reuses the authenticated `.29` CI origin and the published
+`.30` assets. `.29` is a CI origin, not a second public release. The existing
+exact-source candidate and release verifiers authenticate the unchanged files;
+this workflow does not rebuild either application.
+
+The OLD app must perform its ordinary public discovery and expose the exact
+`.30` offer. Activation uses the real tray menu, followed by the production
+administrator authorization and OLD exit. Calling preparation directly cannot
+substitute for this path. The schema2 root, ACK, app identity and terminal cleanup
+observers from the packaged checks are reused.
+
+First exercise commit on a disposable hosted Mac. Run the pre-ACK failure case
+only after that activation path succeeds. Preserve a blocked administrator
+request as evidence; passwordless `sudo` does not establish that the app's
+AppleScript authorization succeeded. A passing transaction does not by itself
+prove notification visibility, ordinary Quit, or administrator dialog interaction.
+Report those observations separately and keep full public auto-update
+qualification open wherever evidence is missing.
+
+The public `.30` preview remains available for manual DMG installation while
+these checks are completed. Its candidate, root, packaged, readiness and public
+delivery results remain reusable; no new release is needed for harness changes.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF

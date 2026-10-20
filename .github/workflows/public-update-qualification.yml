@@ -1,0 +1,226 @@
+name: Published preview .30 UI update and pre-ACK rollback
+
+on:
+  push:
+    branches: ["codex/public-preview30-update-qualification"]
+    paths:
+      - ".github/workflows/public-update-qualification.yml"
+      - "scripts/public_update_*.py"
+      - "scripts/test_public_update_*.py"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run pre-ACK rollback only after the real public commit path succeeds
+        type: choice
+        required: true
+        default: commit
+        options:
+          - commit
+          - kill-successor-before-ack
+
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+
+concurrency:
+  group: public-preview30-update-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  public-update:
+    name: Public UI update (${{ inputs.mode || 'commit' }})
+    if: github.repository == 'aiwaki/slipstream' && github.ref == 'refs/heads/codex/public-preview30-update-qualification'
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      SLIPSTREAM_DISPOSABLE_CI: "1"
+      CASE_MODE: ${{ inputs.mode || 'commit' }}
+      OLD_RUN_ID: "39412657264"
+      OLD_RUN_ATTEMPT: "1"
+      OLD_SOURCE_SHA: "4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37"
+      OLD_MANIFEST_SHA: "9dbac35693cddbf8d1c86eaead4586c18d665402ab1e76b7a38a2991fcbc7238"
+      NEW_RUN_ID: "39414812044"
+      NEW_RUN_ATTEMPT: "1"
+      NEW_SOURCE_SHA: "86dd9393f671120f9ad6adb887ebb0e29d56467b"
+      NEW_MANIFEST_SHA: "63215717ad7fa005ecf44fc1355160acb0af2cad7d759be191a043b5a1c01954"
+      ROOT_GATE_RUN_ID: "39417619778"
+      ROOT_GATE_ATTEMPT: "1"
+    steps:
+      - id: checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 64
+      - name: Observe console and Accessibility capability without prompting
+        id: capability
+        run: |
+          python3 scripts/public_update_ui_preflight.py \
+            --output "$RUNNER_TEMP/public-update-capability.json"
+      - name: Check out the qualified authentication and materialization helpers
+        id: qualified_source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: "86dd9393f671120f9ad6adb887ebb0e29d56467b"
+          path: qualified-source
+          persist-credentials: false
+      - id: python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Install locked observer dependencies
+        id: dependencies
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          python3 -m venv "$RUNNER_TEMP/public-update-python"
+          "$RUNNER_TEMP/public-update-python/bin/python" -m pip install \
+            --disable-pip-version-check --only-binary=:all: --require-hashes \
+            -r qualified-source/spike/requirements.txt
+      - name: Download the authenticated OLD candidate
+        id: old_download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: "39412657264"
+          name: release-candidate-4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37
+          path: ${{ runner.temp }}/public-update-pair/old-candidate
+      - name: Download and verify the actual published NEW assets
+        id: public_download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          public="$RUNNER_TEMP/public-release"
+          source="$GITHUB_WORKSPACE/qualified-source"
+          python="$RUNNER_TEMP/public-update-python/bin/python"
+          mkdir "$public"
+          gh api repos/aiwaki/slipstream/releases/tags/v0.1.9-preview.30 > "$public/release.json"
+          gh api repos/aiwaki/slipstream/git/ref/tags/v0.1.9-preview.30 > "$public/tag.json"
+          "$python" "$source/scripts/download_github_release_assets.py" \
+            --repo aiwaki/slipstream --tag v0.1.9-preview.30 \
+            --output "$public/assets" --pattern '*' \
+            > "$public/download.log" 2>&1
+          jq -j '.body' "$public/release.json" > "$public/assets/release-notes.md"
+          "$python" "$source/scripts/verify_release_artifacts.py" \
+            --release-dir "$public/assets" --repository aiwaki/slipstream \
+            --tag v0.1.9-preview.30 --version 0.1.9-preview.30 --channel preview \
+            --source-commit "$NEW_SOURCE_SHA" --target aarch64-apple-darwin \
+            --tauri-config "$source/app-tauri/src-tauri/tauri.conf.json" \
+            > "$public/artifacts-verification.json" 2> "$public/artifacts-verification.log"
+          "$python" "$source/scripts/verify_published_release.py" \
+            --release-metadata "$public/release.json" --tag-ref "$public/tag.json" \
+            --release-dir "$public/assets" --repository aiwaki/slipstream \
+            --version 0.1.9-preview.30 --tag v0.1.9-preview.30 --channel preview \
+            --release-name "Slipstream 0.1.9-preview.30" --source-commit "$NEW_SOURCE_SHA" \
+            --target aarch64-apple-darwin --release-id 418378834 --state published \
+            > "$public/published-verification.json" 2> "$public/published-verification.log"
+          # These public bytes are authenticated against the original CI pins below.
+          mkdir "$RUNNER_TEMP/public-update-pair/new-candidate"
+          for asset in release-candidate-manifest.json Slipstream-macos-arm64.zip \
+            Slipstream.app.tar.gz Slipstream.app.tar.gz.sig Slipstream.spdx.json \
+            Slipstream_0.1.9-preview.30_aarch64.dmg dependency-audit.json
+          do
+            cp "$public/assets/$asset" "$RUNNER_TEMP/public-update-pair/new-candidate/$asset"
+          done
+      - name: Authenticate both exact candidates and materialize their unchanged bundles
+        id: materialize
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/public-update-python/bin/python" \
+            qualified-source/scripts/materialize_pair.py \
+            --repo "$GITHUB_WORKSPACE/qualified-source" \
+            --root "$RUNNER_TEMP/public-update-pair" --gh "$(command -v gh)"
+      - name: Retain the successful root prerequisite for this same pair
+        id: root_gate_download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: "39417619778"
+          pattern: native-root-update-*-39417619778-1
+          path: ${{ runner.temp }}/root-gate-prerequisite
+      - name: Exercise normal public discovery, update UI and transaction
+        id: qualify
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/public-update-python/bin/python" scripts/public_update_pair_smoke.py \
+            --repo "$GITHUB_WORKSPACE/qualified-source" \
+            --pair-manifest "$RUNNER_TEMP/public-update-pair/pair.json" \
+            --old-candidate-dir "$RUNNER_TEMP/public-update-pair/old-candidate" \
+            --new-candidate-dir "$RUNNER_TEMP/public-update-pair/new-candidate" \
+            --old-app "$RUNNER_TEMP/public-update-pair/old-app/Slipstream.app" \
+            --new-app "$RUNNER_TEMP/public-update-pair/new-app/Slipstream.app" \
+            --root-gate-dir "$RUNNER_TEMP/root-gate-prerequisite" \
+            --root-gate-run-id "$ROOT_GATE_RUN_ID" --root-gate-attempt "$ROOT_GATE_ATTEMPT" \
+            --public-dir "$RUNNER_TEMP/public-release/assets" \
+            --public-release-metadata "$RUNNER_TEMP/public-release/release.json" \
+            --public-tag-ref "$RUNNER_TEMP/public-release/tag.json" \
+            --gh "$(command -v gh)" --mode "$CASE_MODE" \
+            --output-dir "$RUNNER_TEMP/public-update"
+          # The driver owns identity-bound cleanup in finally. Unknown transaction
+          # outcomes remain evidence for runner destruction, never speculative removal.
+      - name: Record every outcome, including preparation and capability failures
+        if: always()
+        env:
+          OUTCOME_RUN_SHA: ${{ github.sha }}
+          OUTCOME_RUN_ID: ${{ github.run_id }}
+          OUTCOME_RUN_ATTEMPT: ${{ github.run_attempt }}
+          OUTCOME_MODE: ${{ env.CASE_MODE }}
+          OUTCOME_JOB_STATUS: ${{ job.status }}
+          OUTCOME_CHECKOUT: ${{ steps.checkout.outcome }}
+          OUTCOME_CAPABILITY: ${{ steps.capability.outcome }}
+          OUTCOME_QUALIFIED_SOURCE: ${{ steps.qualified_source.outcome }}
+          OUTCOME_PYTHON: ${{ steps.python.outcome }}
+          OUTCOME_DEPENDENCIES: ${{ steps.dependencies.outcome }}
+          OUTCOME_OLD_DOWNLOAD: ${{ steps.old_download.outcome }}
+          OUTCOME_PUBLIC_DOWNLOAD: ${{ steps.public_download.outcome }}
+          OUTCOME_MATERIALIZE: ${{ steps.materialize.outcome }}
+          OUTCOME_ROOT_GATE_DOWNLOAD: ${{ steps.root_gate_download.outcome }}
+          OUTCOME_QUALIFY: ${{ steps.qualify.outcome }}
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def value(name):
+              return os.environ.get("OUTCOME_" + name, "")[:256]
+
+          record = {
+              "schema_version": 1,
+              "harness_sha": value("RUN_SHA"),
+              "qualified_source_sha": os.environ["NEW_SOURCE_SHA"],
+              "run_id": value("RUN_ID"),
+              "run_attempt": value("RUN_ATTEMPT"),
+              "mode": value("MODE"),
+              "job_status_before_upload": value("JOB_STATUS"),
+              "steps": {name.lower(): value(name) for name in (
+                  "CHECKOUT", "CAPABILITY", "QUALIFIED_SOURCE", "PYTHON", "DEPENDENCIES",
+                  "OLD_DOWNLOAD", "PUBLIC_DOWNLOAD", "MATERIALIZE", "ROOT_GATE_DOWNLOAD", "QUALIFY")},
+          }
+          directory = Path(os.environ["RUNNER_TEMP"]) / "public-update-outcome"
+          directory.mkdir(parents=True, exist_ok=True)
+          (directory / "workflow-outcome.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+      - name: Retain public identities, UI observations and cleanup evidence on every path
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-update-${{ env.CASE_MODE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/public-update-outcome/*.json
+            ${{ runner.temp }}/public-update-capability.json
+            ${{ runner.temp }}/public-update-pair/*.json
+            ${{ runner.temp }}/public-update-pair/*-candidate/release-candidate-manifest.json
+            ${{ runner.temp }}/public-release/*.json
+            ${{ runner.temp }}/public-release/*.log
+            ${{ runner.temp }}/public-release/assets/*.json
+            ${{ runner.temp }}/public-update/**/*.json
+            ${{ runner.temp }}/public-update/**/*.log
+          if-no-files-found: error
+          retention-days: 14
