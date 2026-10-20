@@ -42,16 +42,37 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-Local branch `codex/public-preview30-update-qualification`, HEAD
-`4913cb636902eb900f59b1ddc93f8e4826a146a7`. PR407 is MERGED into main
+Local branch `codex/public-preview30-update-qualification`, base harness
+`527ec2975286ababe2678a36af5130d852e44e03`; the next scoped commit adds only the
+standalone authorization probe and this checkpoint. PR407 is MERGED into main
 `86dd9393f671120f9ad6adb887ebb0e29d56467b`; both trees equal
 `a14e9767b2fb62ccdc7745ecfb026b9ff148e5d5`. Version is `.30`.
 The historical root checkout is a locator; preserve its dirty user files.
 Evidence paths below are relative to `output/updater-daemon-identity/`.
 
-Current next work: one hosted commit-path execution after the reviewed fixture
-launch correction. It reuses the same signed OLD/public NEW and all green
-prerequisites; this is not a quota-reset retry or candidate rebuild.
+Current next work: one standalone, bounded hosted authorization capability
+probe, not another full update run. Corrected public run39435615487/1 is terminal:
+discovery/menu and staging passed, but authorization/prepare did not finish.
+The harmless fixed `/usr/bin/id -u` probe uses ordinary AppleScript admin
+execution, a30-second bound, metadata/read-only AX roles, no credentials or
+security-policy changes. It cannot qualify production prepare. Script, focused
+hermetic tests and separate workflow are reviewed and ready for one branch-push
+execution. All33 pure tests passed; actionlint and independent source review
+passed. The reviewer caught a swallowed outer-deadline exception before launch;
+it is fixed and covered. Evidence owner will watch/download once; parent owns
+docs and receipt verification.
+No product/candidate rebuild or local native execution. The existing public
+workflow must not be triggered by probe-only changes.
+
+Probe test log: `public-preview30-ui/authorization-probe-tests.log`, SHA256
+`25dd78ee05bffb971ea7e8b983c20ad460ad54448a811748d3f768ac7d4f37be`.
+Script SHA256 `2cecd82dcb5a0caec664b1c0641fbaad59a589beda45b4e61ec8ead680bec59d`.
+The probe-only push cannot trigger the full public updater workflow.
+
+The preceding goal turn made progress: the reviewed driver correction and real
+Python-child regression were committed527ec and run39435615487 executed. This
+turn verified that run terminal and all34 evidence hashes; its result changes
+the next action from permissions to authorization/prepare diagnosis.
 Run39430167830/2 reached genuine discovery/menu activation, but OLD refused its
 staging tree before authorization: the new driver set umask077 for private
 reports and accidentally passed it to the ordinary app. The corrected Popen
@@ -75,7 +96,7 @@ prompt must be retained as evidence, never replaced by a direct prepare call.
 All existing source/candidate/root/app/readiness/public evidence below is reused.
 Graph discovery was unavailable (`unsupported call`); bounded source reads are
 used for the known updater paths without indexing or installing new tooling.
-The previous goal turn was progress: `.30` was published and public bytes verified.
+The published `.30` milestone and all unchanged prerequisites remain complete.
 The first execution is the branch-push commit case in
 `.github/workflows/public-update-qualification.yml`. After it succeeds, the same
 workflow ID can dispatch `kill-successor-before-ack` on the same branch.
@@ -145,6 +166,23 @@ are correctly packaged (90 directories0755,736 files0644,71 files0755). The
 narrow fix must set the normal OLD child launch mask explicitly to022 while
 keeping reports private. Do not chmod product staging trees or weaken the
 validator. Product restrictive-umask robustness is still an explicit limitation.
+
+Corrected harness run39435615487/1 FAILED at the driver deadline (job11m58s).
+All public12/candidate/root prerequisite bindings passed. Real discovery and one
+successful AXPress were observed. App journal reached `prepared`,
+`daemon_update.authorization_started=true`, sequence0, action=null. OLD PID2944
+and its owned `/usr/bin/osascript` child4300 remained alive. No root status or
+OLD exit was observed. The old cross-owner refusal and secondary TypeError did
+not recur. These facts do not prove a visible prompt, user cancellation, OS
+timeout, or whether the privileged helper was executing before root publication.
+Production `.output()` spans authorization and shell completion. The300-second
+root admission lease does not close an unanswered authorization request.
+Cleanup is NOT qualified: stage+journal retained for disposable runner teardown;
+agent/ACK/backup absent, no root transaction identity. Sole watcher33745 terminal;
+artifact12272711677 downloaded once. Receipt
+`public-preview30-ui/run39435615487-receipt.json`, SHA256
+`855574fb9edf3f6e3708844832d806d8b28467d7e75c5967340235ac2e16274a`;
+parent verified all34 hashes. Do not rerun this full path without a new cause.
 
 - Corrected OLD `.29` is authenticated and its complete exact-main CI/audit
   passed: source `4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37`,

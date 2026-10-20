@@ -1,0 +1,77 @@
+name: macOS administrator authorization capability
+
+on:
+  push:
+    branches: ["codex/public-preview30-update-qualification"]
+    paths:
+      - ".github/workflows/macos-authorization-probe.yml"
+      - "scripts/ci_macos_authorization_probe.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-authorization-probe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorization-probe:
+    name: Harmless AppleScript administrator authorization probe
+    if: github.repository == 'aiwaki/slipstream' && github.ref == 'refs/heads/codex/public-preview30-update-qualification'
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - id: checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Observe the fixed id -u administrator request
+        id: probe
+        timeout-minutes: 2
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/ci_macos_authorization_probe.py \
+            --output "$RUNNER_TEMP/slipstream-authorization-probe.json"
+      - name: Record the workflow outcome even if the probe stops early
+        if: always()
+        env:
+          OUTCOME_RUN_SHA: ${{ github.sha }}
+          OUTCOME_RUN_ID: ${{ github.run_id }}
+          OUTCOME_RUN_ATTEMPT: ${{ github.run_attempt }}
+          OUTCOME_JOB_STATUS: ${{ job.status }}
+          OUTCOME_CHECKOUT: ${{ steps.checkout.outcome }}
+          OUTCOME_PROBE: ${{ steps.probe.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          os.umask(0o077)
+          directory = Path(os.environ["RUNNER_TEMP"])
+          record = {
+              "schema_version": 1,
+              "harness_sha": os.environ["OUTCOME_RUN_SHA"],
+              "run_id": os.environ["OUTCOME_RUN_ID"],
+              "run_attempt": os.environ["OUTCOME_RUN_ATTEMPT"],
+              "job_status_before_upload": os.environ["OUTCOME_JOB_STATUS"],
+              "steps": {
+                  "checkout": os.environ["OUTCOME_CHECKOUT"],
+                  "probe": os.environ["OUTCOME_PROBE"],
+              },
+              "probe_report_present": (directory / "slipstream-authorization-probe.json").is_file(),
+          }
+          (directory / "slipstream-authorization-workflow-outcome.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+      - name: Retain the probe and workflow outcome on every path
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-authorization-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/slipstream-authorization-probe.json
+            ${{ runner.temp }}/slipstream-authorization-workflow-outcome.json
+          if-no-files-found: error
+          retention-days: 14

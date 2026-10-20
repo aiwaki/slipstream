@@ -335,6 +335,15 @@ Changing the launch condition does not repair or qualify the released extractor
 under custom restrictive masks. The permission validator remains unchanged;
 never chmod signed archives or staged product files to make this check pass.
 
+The corrected run39435615487 reached `prepared` and started ordinary AppleScript
+authorization. OLD and its `osascript` remained alive without a root decision
+until the driver's deadline. This does not distinguish an unanswered prompt from
+a helper waiting before root-state publication. A separate bounded, disposable
+`id -u` authorization probe may diagnose this OS boundary without installing the
+product or changing credentials, users, TCC or authorization policy. Its success
+does not qualify the production update transaction. Do not repeat the full
+update path until this observation changes the next action.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
