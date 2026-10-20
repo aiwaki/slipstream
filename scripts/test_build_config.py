@@ -997,8 +997,8 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn('tag="v${v}"', workflow)
         self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
-        self.assertIn('[ "$preview_sequence" = 24 ]', workflow)
-        self.assertIn('default: "24"', workflow)
+        self.assertIn('[ "$preview_sequence" = 30 ]', workflow)
+        self.assertIn('default: "30"', workflow)
         self.assertIn("release or Git tag already exists", workflow)
         self.assertIn("git/matching-refs/tags/$tag", workflow)
         self.assertIn("releases?per_page=100", workflow)

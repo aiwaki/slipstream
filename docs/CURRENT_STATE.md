@@ -21,10 +21,20 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-Branch `codex/updater-tray-process-group` starts at merged main
-`0f0af398bdac9999dc6923639b6a52f92d243f28`. PR405 passed exact-head
-CI39398301982/audit39398302009, resolved review and merged; source tree equality
-was verified. The historical root checkout is a locator; preserve its user files.
+Branch `codex/preview30-release-pair` starts at merged main
+`bbce6e0834e1e9096f0b4c161910959d167fa900`. PR406 passed all17 checks in
+CI39404198732/audit39404198742, including both real process-group tests,
+packaged lifecycle and browser checks. Watch23960 completed0. Review threads
+were empty; fresh merge verification confirmed tree equality. Receipts under
+`process-group-fix/`: `pr-verification.json` SHA256
+`7fcf86383f4c7b32f9da5d9de74050c5a1ee8ab57dffa0ac9209da7a6ddce298`,
+`merge-verification.json` SHA256
+`9d83b80d2a61c5da821c4e1514a129734d3e1425aeba23eecb8ec5e0767acbba`.
+Corrected `.29` main CI39406040764/1 is running; audit39406040799/1 passed.
+Agent `app_update_implementation` owns the only watcher56900 and candidate
+verification under `main406-verification/`; do not start another watcher or
+candidate download. Main source helpers are pinned tobbce6e. The historical
+root checkout remains a locator; preserve its user files.
 Evidence paths below are relative to `output/updater-daemon-identity/`.
 
 - Signed OLD `.28` at01fcd4c and NEW `.29` at087c passed main CI/audit and
@@ -53,7 +63,9 @@ Evidence paths below are relative to `output/updater-daemon-identity/`.
   process group. Default launchd cleanup kills remaining members when its job
   dies. The narrow fix gives the app its own process group and preserves normal
   watchdog cleanup and exact PID controls. Two real subprocess regressions
-  check actual child PGID for NEW/OLD; hosted execution is pending. Final-tray
+  check actual child PGID for NEW/OLD. Hosted product-checks118566087791 passed
+  both exact tests (suite196 passed, zero failures/ignored); independently
+  verified in `process-group-fix/pr406-product-checks-evidence.json`. Final-tray
   diagnostics now retain bounded PID/group metadata without relaxing any
   acceptance rule. Independent source review found no blockers. The289 focused
   observer/pre-ACK/source/driver/workflow Python tests, project continuity and
@@ -63,11 +75,19 @@ Evidence paths below are relative to `output/updater-daemon-identity/`.
   `.29` OLD and `.30` NEW. Both full identities must bind fresh root and app
   gates. Include the minimal publisher/pair admission changes in the ordinary
   `.30` bump before candidate creation, avoiding an extra release rebuild.
-- Previously prepared `preview29-publication-preparation.patch` is parked;
-  do not apply it blindly. Publication still follows exact-source CI/audit,
-  packaged commit/rollback and protected readiness. Real public discovery and
-  public upgrade/rollback remain after publication under the authorized order;
-  do not turn every future crash scenario into a new preview blocker.
+- Prepared `preview30-preparation.patch` was applied after PR406 merge;
+  SHA256 `804bdc18bceb1484a41715aa2c21d8cbecbc1fa0be6e5455c59dcb78a451a693`.
+  It synchronizes versions, exact `.29 -> .30` pair admission/pins and publisher
+  before the `.30` build. The daemon diff changes only its version string; no
+  dependency or routing policy changes. Applied-source checks passed:122 focused
+  source/pair/workflow tests, the publisher-admission test, version sync,
+  actionlint and whitespace. Logs are under `preview30-preparation/`.
+- `.30` PR preparation can proceed while corrected `.29` main CI finishes.
+  Merge and exact-main signing wait for the authenticated `.29` receipt and
+  successful required successor checks. No `.30` candidate is qualified yet.
+  The old preview29 publication patch is superseded and must not be applied.
+  Real public discovery/upgrade/rollback remain after publication; do not turn
+  every future crash scenario into a new preview blocker.
 - No local Rust/native build, product execution, workstation installation or
   network mutation. Public `.24`, installed app, settings and learning unchanged.
 
@@ -442,10 +462,10 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Review and run hosted CI for the shared app process-group repair and focused
-  final-tray diagnostics. Do not weaken the requirement for a surviving exact app.
-- After merge, authenticate corrected `.29` once, then prepare ordinary `.30`
-  with pair/publisher admission already synchronized and authenticate its build.
+- Finish the existing corrected `.29` main watcher and authenticate its exact
+  candidate once. Preserve the PR406 green baseline and native test evidence.
+- Review and pass `.30` successor PR checks; merge only after corrected `.29`
+  proof, then authenticate one exact-main `.30` candidate.
 - Qualify root and app commit/rollback on that exact pair, then protected
   readiness and publish the final preview. Do not rerun immutable failed pairs.
 - Preserve the workstation and retained public `.24` evidence. Public updater,
