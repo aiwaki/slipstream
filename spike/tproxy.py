@@ -16035,7 +16035,7 @@ def _installed_daemon_readiness_snapshot(port):
         )
     rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
     if rules_loaded != (status.get("state") == "active"):
-        return False, "PF state does not match daemon state", None, rules_loaded
+        return False, "PF state does not match daemon state", status, rules_loaded
     return True, "ready", status, rules_loaded
 
 
@@ -16119,6 +16119,7 @@ def _install_attestation_record(
     *,
     witness_path,
     expected_uid=0,
+    readiness_reader=None,
 ):
     path_stat = os.lstat(installed_path)
     witness_stat = os.lstat(witness_path)
@@ -16151,24 +16152,7 @@ def _install_attestation_record(
     installed_sha256 = _sha256_regular_file(installed_path)
     if installed_sha256 != source_sha256:
         raise RuntimeError("installed daemon SHA-256 does not match its source artifact")
-    deadline = time.monotonic() + 5.0
-    ready = False
-    reason = "status missing"
-    status = None
-    pf_active = False
-    while time.monotonic() < deadline:
-        ready, reason, status, pf_active = _installed_daemon_readiness_snapshot(
-            port
-        )
-        if ready:
-            break
-        if "baseline HTTPS qualification failed" in reason:
-            break
-        time.sleep(0.05)
-    if not ready or status is None:
-        raise RuntimeError(f"installed daemon lost readiness before attestation: {reason}")
-    state = status.get("state")
-    return {
+    record = {
         "schema_version": INSTALL_ATTESTATION_SCHEMA_VERSION,
         "source_sha256": source_sha256,
         "daemon": {
@@ -16188,16 +16172,39 @@ def _install_attestation_record(
         },
         "launchd": {
             "label": LAUNCHD_LABEL,
-            "pid": status.get("pid"),
         },
         "listener": {
             "host": "127.0.0.1",
             "hosts": ["127.0.0.1", "::1"],
             "port": port,
         },
-        "state": state,
-        "pf_active": pf_active,
     }
+    deadline = time.monotonic() + 5.0
+    ready = False
+    reason = "status missing"
+    status = None
+    pf_active = False
+    resampled = False
+    while time.monotonic() < deadline:
+        if readiness_reader is None:
+            ready, reason, status, pf_active = _installed_daemon_readiness_snapshot(port)
+        else:
+            ready, reason, status, pf_active = readiness_reader(port, record)
+            remaining = deadline - time.monotonic()
+            # Preserve a healthy first observation; only PF convergence retries
+            # are subject to the original deadline after a slow OS read.
+            if remaining <= 0 and (resampled or not ready):
+                ready, reason = False, "readiness observation timed out"
+                break
+        if ready or "baseline HTTPS qualification failed" in reason:
+            break
+        resampled = True
+        time.sleep(0.05 if readiness_reader is None else min(0.05, remaining))
+    if not ready or status is None:
+        raise RuntimeError(f"installed daemon lost readiness before attestation: {reason}")
+    record["launchd"]["pid"] = status.get("pid")
+    record.update(state=status.get("state"), pf_active=pf_active)
+    return record
 
 
 def _install_attestation_witness_path(evidence_path):
@@ -16992,31 +16999,73 @@ def _daemon_update_publish(journal, **changes):
 
 
 def _daemon_update_runtime_proof(expected_sha, port=PROXY_PORT):
-    ready, _, status, _ = _installed_daemon_readiness_snapshot(port)
-    if not ready or status is None:
-        raise RuntimeError("update daemon readiness missing")
     attestation = _update_read_json(INSTALL_ATTESTATION_PATH, mode=0o644)
     installed = os.path.join(INSTALL_DIR, "slipstreamd")
+    pid = attestation.get("launchd", {}).get("pid")
     if (attestation.get("schema_version") != INSTALL_ATTESTATION_SCHEMA_VERSION
             or attestation.get("source_sha256") != expected_sha
             or attestation.get("daemon", {}).get("sha256") != expected_sha
-            or attestation.get("launchd", {}).get("pid") != status.get("pid")
+            or type(pid) is not int or pid <= 1
             or _sha256_regular_file(installed) != expected_sha):
         raise RuntimeError("update daemon identity mismatch")
+
+    def process_identity():
+        result = _run("/bin/ps", "-ww", "-p", str(pid), "-o", "uid=,lstart=,command=")
+        fields = result.stdout.strip().split(None, 6)
+        if result.returncode != 0 or len(fields) != 7 or fields[0] != "0":
+            raise RuntimeError("update daemon process identity mismatch")
+        try:
+            argv = shlex.split(fields[6])
+        except ValueError:
+            argv = []
+        if not argv or argv[0] != installed:
+            raise RuntimeError("update daemon process identity mismatch")
+        return fields[0], tuple(fields[1:6]), tuple(argv)
+
+    status = None
+    process = None
+    def readiness_reader(observed_port, identity_record):
+        nonlocal status, process
+        # File/witness checks precede any waiting. Only live health may differ
+        # from this retained receipt; even unknown identity fields stay pinned.
+        expected_record = {
+            **identity_record, "launchd": {**identity_record["launchd"], "pid": pid},
+        }
+        if (not _install_attestation_identity_matches(attestation, attestation)
+                or {k: v for k, v in attestation.items() if k not in {"state", "pf_active"}}
+                != expected_record):
+            raise RuntimeError("update daemon attestation drift")
+        current = process_identity()
+        if process is None:
+            process = current
+        if current != process:
+            raise RuntimeError("update daemon process identity mismatch")
+        ready, reason, sampled, pf_active = _installed_daemon_readiness_snapshot(observed_port)
+        if not ready and reason != "PF state does not match daemon state":
+            raise RuntimeError("update daemon readiness missing")
+        if sampled is None or sampled.get("pid") != pid or process_identity() != process:
+            raise RuntimeError("update daemon identity mismatch")
+        heartbeat = sampled.get("heartbeat_seq")
+        if type(heartbeat) is not int or heartbeat < 0:
+            raise RuntimeError("update daemon heartbeat missing")
+        status = sampled
+        return ready, reason, sampled, pf_active
+
     # Rebuild the witness proof with current file ownership, inode, listener,
-    # launchd PID and PF state rather than trusting a previous receipt alone.
+    # PID and PF state. The existing single five-second loop may resample only
+    # PF/status transitions on this exact process; it never retries a mutation.
     fresh = _install_attestation_record(
         installed, expected_sha, 0o700, port,
         witness_path=_install_attestation_witness_path(INSTALL_ATTESTATION_PATH),
+        readiness_reader=readiness_reader,
     )
     if not _install_attestation_identity_matches(attestation, fresh):
         raise RuntimeError("update daemon attestation drift")
-    heartbeat = status.get("heartbeat_seq")
-    if type(heartbeat) is not int or heartbeat < 0:
-        raise RuntimeError("update daemon heartbeat missing")
+    if status is None or process_identity() != process:
+        raise RuntimeError("update daemon identity mismatch")
     return {
         "daemon_pid": status["pid"], "daemon_sha256": expected_sha,
-        "heartbeat_seq": heartbeat,
+        "heartbeat_seq": status["heartbeat_seq"],
         "install_attestation_sha256": _sha256_regular_file(INSTALL_ATTESTATION_PATH),
     }
 

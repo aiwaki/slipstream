@@ -17,53 +17,63 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
-PR402 merged at `b1a44685347b1aade89d63cc779ae6b60b0db005` with the same tree
-as tested head `5076364e386ed44f67c82126ff62f449cfab798a`. Whole CI39298318597
-and audit39298318588 passed; review threads were empty. Its real-validator
-regression reproduces the old mailbox ancestry failure and passes with the
-new root-owned `/var/db/dev.slipstream-update/requests` path. All 97 scoped
-updater/lock/ancestry tests passed. Strict ownership checks remain unchanged.
-Receipt `pr402-verification/receipt.json` SHA256:
-`2cf4e8422ca2602ee3d816301eb86bafa04ce38c94dd0203fc65f8e73198c582`.
+PR402 (mailbox ancestry repair) and PR400 (two packaged app modes) merged.
+Current main is `6eac5d34bbd082568ba481c2b89f88779d364c5a`; its tree matches
+PR400's tested head `6259ccfbeb3c0826b33be37da537141d092ff71f`.
+Exact-main CI39303200265 and audit39303200111 passed. The corrected `.27`
+origin at `b1a44685347b1aade89d63cc779ae6b60b0db005` also passed exact-main
+CI39300234381 and audit39300234464. Both signed candidates were authenticated
+once, including all seven files, signature, provenance and archive modes.
+Retain them; do not download or rebuild the same source again.
 
-The corrected `.27` main candidate is being built by CI39300234381; audit39300234464
-passed. One watcher owns the CI run, and source-pinned read-only authentication
-is under `main402-verification`. No native transition is qualified by PR checks.
-The previous authentic main401 `.27` candidate predates this repair and must not
-be substituted for the corrected origin.
+Evidence under `output/updater-daemon-identity/`:
+- `main402-verification/receipt.json`, SHA256
+  `b2c031ec2e6eff9958b0d555e14e96452c1f92c5d48829c77e7282898fb43264`.
+- `main400-union-verification/receipt.json`, SHA256
+  `c43da2633929a249b27a61363524b916e119e72629157ada8317811fa6b3fc58`.
 
-PR400 (`codex/packaged-update-commit-gate`) retains normal version `.28` and
-incorporates PR402 through merge `00aa8cf98`. The reviewed same-pair and pre-ACK
-rollback drafts are now integrated together before the NEW build. Both app modes
-require successful root commit/crash cases for the same complete `.27 -> .28`
-pair. Root source, app workflow SHA and actual checkout HEAD must equal NEW;
-eight candidate pins, both full artifact records and transaction hashes must
-match. The adapter still compiles authenticated OLD preparation modules with
-OLD Cargo.lock and updater key. It never fabricates a journal, ACK or root state.
+Native root run39381512115 attempt1 used this exact `.27 -> .28` pair at
+main `6eac5d34`. Crash-before-commit passed; commit failed in the read-only
+observer after NEW readiness, before any commit request. Both cases cleaned
+up without errors. The commit observer reported `daemon PF state mismatch`;
+the run did not retain the two sampled values, so their direction is unknown.
+Receipt `root27-to28-qualification/receipt.json`, SHA256
+`763b8ab0d7cd01305e7278a35c1a69a00f0838087a1e581d61d37925ddc82585`.
+This failed run does not authorize the app gate. Do not retry it unchanged.
 
-The app workflow runs commit and kill-successor-before-ack on separate disposable
-Macs. The fault case checks the exact NEW process and undecided transaction before
-injecting exit, then requires the real watchdog to restore the full OLD app,
-live OLD tray and fresh OLD daemon proof. A missed window fails without retry.
-Each mode requires its own terminal proof before cleanup; unknown outcomes retain
-evidence. Both cases must pass. Native app execution is still pending, as are
-ordinary tray/admin flows and public update qualification.
+Source review found a real observation race: status publication and PF changes
+are separate, but both the observer and `_daemon_update_runtime_proof` reject
+the first mismatched sample. A fresh cached status can describe the preceding
+PF state. In the updater this can cause unnecessary abort/restore or a redundant
+reinstall during committed recovery; this is a source-proven possibility, not
+proof that every historical network interruption had this cause.
 
-The combined source patch passed 229 scoped tests, actionlint, whitespace and
-apply checks plus independent review. Integrated code is checked byte-for-byte
-against that reviewed candidate; the inherited 97-test mailbox baseline is reused.
-Patch SHA256: `2825c4dc485244f77801ae51ec890e1bcc53b80a87079fb35c4afee470ef92c3`.
-Evidence: `output/updater-daemon-identity/packaged-update-union-draft`.
-PR400's earlier green head `9a9b0c38` does not qualify the integrated changes;
-required CI must pass again before merge. No redundant `.29` candidate is needed.
+Branch `codex/update-readiness-observation` repairs both readers. Only PF/status
+mismatch may be resampled within the existing five-second readiness budget;
+identity, ownership, witness, hash, listener and recovery failures still fail.
+PID, root UID, process birth and command remain pinned across observations.
+No transaction retry or lease extension is introduced. The observer retains
+sampled health evidence and rejects permanent mismatch or late convergence.
+Its 51 focused tests passed, including both transition directions, identity
+change and permanent failure; independent observer review found no blockers.
+The product regression file passed 108 tests; 11 existing installer/attestation
+tests and 94 pair/workflow tests also passed. Project-state contract, actionlint
+and whitespace checks passed. Independent product and observer review found
+no blockers. The default installer keeps its prior slow-first-read semantics;
+the updater also accepts a healthy first sample, but never late convergence
+after a retry. Evidence: `readiness-product-fix/final-retry-budget.log`,
+`readiness-product-fix/default-attestation.log`,
+`root27-to28-qualification/readiness-after.log`,
+`next-pair-admission-tests.log`. These focused results reuse the unchanged
+green main CI baseline; new required PR/main CI remains pending.
 
-The failed native run39295979689 is retained in `root26-to-main401-qualification`:
-OLD `.26` published Prepared but no mailbox/worker, before activation or crash
-injection; cleanup also failed. Exact runner exception/metadata was not retained,
-so the independently reproduced ancestry defect is not retroactively asserted as
-its proven inner error. The immutable origin cannot be repaired by its successor;
-do not rerun that pair. Failed receipt SHA256:
-`78fce0c5c600b81300daeedfa76a33c97382d24664be81e71b6d9f807c2f6953`.
+The corrected originating product now needs a new normal `.28` main candidate,
+followed by a normal `.29` successor. The previous no-`.29` plan applied only to
+a harness change; the newly found product defect also lives in OLD's sealed
+worker and cannot be fixed by substituting NEW. Include the observer, product,
+pair admission and both app modes before building the corrected origin. Both
+root cases and then both app cases must use the same complete `.28 -> .29`
+pins at NEW source. Signed older candidates remain unchanged evidence.
 
 No local Rust/native execution, workstation installation or routing change was
 performed. Public `.24`, its signed assets, settings and learning are unchanged.
@@ -357,12 +367,11 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish the corrected `.27` whole main CI39300234381 and authenticate its exact
-  signed candidate once. Do not substitute the pre-repair main401 candidate.
-- Complete PR400's integrated commit/pre-ACK workflow checks, merge after required
-  CI, then authenticate the normal `.28` exact-main candidate. Both modes must be
-  present before building NEW because the harness must use that same source.
-- Run root commit + crash-before-commit on the corrected `.27 -> .28` pair, then
+- Create the readiness-repair PR from the reviewed patch and require its
+  exact-head CI before merge; do not repeat unchanged focused tests.
+- Authenticate one corrected normal `.28` exact-main candidate. Then make the
+  ordinary version bump to `.29` and authenticate that exact-main successor.
+- Run root commit + crash-before-commit on the corrected `.28 -> .29` pair, then
   both packaged app modes using those exact pins and successful root receipts.
   A failed or missed fault window is not rollback evidence and is not auto-retried.
 - Reuse unchanged public `.24` release/readiness evidence. Public update,
