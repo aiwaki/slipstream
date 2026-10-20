@@ -19,6 +19,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{symlink, DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -1614,6 +1615,9 @@ fn bundle_launch_command(
     rollback_receipt: Option<&Path>,
 ) -> Command {
     let mut command = Command::new(bundle_executable(bundle));
+    // launchd cleans up the watchdog's process group when the job exits.
+    // Both the successor and restored app must outlive that cleanup.
+    command.process_group(0);
     // Old clients use this marker to skip Prepared recovery while the watchdog
     // still holds the lock. Removing it on rollback can make that old app exit.
     command.env(TRANSACTION_ENV, journal_path);
@@ -3265,6 +3269,7 @@ mod tests {
         assert!(text.contains("<string>Background</string>"));
         assert!(text.contains("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>"));
         assert!(!text.contains("<key>KeepAlive</key><true/>"));
+        assert!(!text.contains("AbandonProcessGroup"));
         assert!(!text.contains("open -"));
         assert!(!text.contains("Aqua"));
     }
@@ -3315,6 +3320,53 @@ mod tests {
             Some(None),
             "a successor must not inherit a prior rollback context"
         );
+    }
+
+    fn assert_app_launch_has_its_own_process_group(rollback: bool) {
+        struct ReapedChild(Child);
+        impl Drop for ReapedChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        let root = TempDir::new().unwrap();
+        let (journal_path, value) = journal(root.path());
+        executable(&value.target, b"#!/bin/sh\nexec /bin/sleep 30\n");
+        fs::set_permissions(
+            bundle_executable(&value.target),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        let receipt = failed_receipt_path(&journal_path, &value.nonce);
+        let child = ReapedChild(
+            bundle_launch_command(
+                &value.target,
+                &journal_path,
+                rollback.then_some(receipt.as_path()),
+            )
+            .spawn()
+            .unwrap(),
+        );
+        let child_pid = child.0.id() as libc::pid_t;
+        let child_group = unsafe { libc::getpgid(child_pid) };
+        let parent_group = unsafe { libc::getpgrp() };
+        assert_eq!(child_group, child_pid, "app must lead a new process group");
+        assert_ne!(
+            child_group, parent_group,
+            "app must not share the watchdog's process group"
+        );
+    }
+
+    #[test]
+    fn successor_launch_has_its_own_process_group() {
+        assert_app_launch_has_its_own_process_group(false);
+    }
+
+    #[test]
+    fn rollback_launch_has_its_own_process_group() {
+        assert_app_launch_has_its_own_process_group(true);
     }
 
     #[test]

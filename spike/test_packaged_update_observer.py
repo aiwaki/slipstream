@@ -619,6 +619,10 @@ def test_observes_real_fixture_journal_ack_receipt_then_cleanup_without_mutation
         queries.append(argv)
         if argv[:2] == ["/bin/launchctl", "print"]:
             return SimpleNamespace(returncode=0, stdout=b"\tpid = 333\n")
+        if argv[0] == "/bin/ps":
+            assert argv == ["/bin/ps", "-p", "222", "-o", "pid=,pgid=,uid=,state=,lstart="]
+            assert _kwargs == {"check": False, "timeout": 1}
+            return SimpleNamespace(returncode=0, stdout=f"222 333 {UID} S {START}\n".encode())
         assert argv == ["/usr/bin/pgrep", "-x", "slipstream"]
         return SimpleNamespace(returncode=0, stdout=b"222\n")
     backend.run = query
@@ -655,7 +659,74 @@ def test_observes_real_fixture_journal_ack_receipt_then_cleanup_without_mutation
     assert len([entry for entry in backend.events if entry["kind"] == "successor_ack"]) == 1
     assert helper.read_bytes() == b"inert-watchdog"
     assert json.loads((backend.args.trigger_dir / "prepare-result.json").read_text()) == receipt
-    assert all(argv[0] in {"/bin/launchctl", "/usr/bin/pgrep"} for argv in queries)
+    assert all(argv[0] in {"/bin/launchctl", "/usr/bin/pgrep", "/bin/ps"} for argv in queries)
+    sample = backend.last_event["final_tray_processes"]
+    assert sample["outcome"] == "observed"
+    assert sample["processes"] == [{"pid": 222, "pgid": 333, "uid": UID, "state": "S", "started": START}]
+
+
+@pytest.mark.parametrize("returncode,stdout,outcome", [
+    (1, b"", "no_candidates"),
+    (0, b"222\n444\n", "multiple_candidates"),
+    (2, b"", "query_error"),
+])
+def test_final_tray_refusal_retains_query_without_relaxing_acceptance(journal, tmp_path, returncode, stdout, outcome):
+    backend = bare_observer(journal)
+    backend.target, backend.stage = Path(journal["target"]), Path(journal["stage"])
+    backend.journal_path, backend.ack_path, backend.agent = (tmp_path / name for name in ("journal", "ack", "agent"))
+    backend.tproxy = SimpleNamespace(_daemon_update_tree=lambda *args, **kwargs: EXPECTED["new"]["bundle_tree_sha256"])
+    backend.watchdog_finished = lambda: True
+    queries = []
+    def query(argv, **kwargs):
+        queries.append(argv)
+        if argv[0] == "/usr/bin/pgrep":
+            return SimpleNamespace(returncode=returncode, stdout=stdout)
+        raise observer.Refused("inert optional diagnostic failure")
+    backend.run = query
+    with pytest.raises(observer.Refused, match="one final tray must be alive"):
+        backend.final_app()
+    assert backend.last_event["final_tray_query"]["returncode"] == returncode
+    assert backend.last_event["final_tray_query"]["outcome"] == outcome
+    assert sum(argv[0] == "/usr/bin/pgrep" for argv in queries) == 1
+
+
+def test_final_tray_diagnostics_bound_candidates_and_omit_raw_output(journal):
+    backend = bare_observer(journal)
+    queries = []
+    def query(argv, **kwargs):
+        queries.append(argv)
+        assert kwargs == {"check": False, "timeout": 1}
+        # Extra/foreign output must not leak into the retained process metadata.
+        return SimpleNamespace(returncode=0, stdout=b"222 333 501 S Mon Oct 19 12:34:56 2026\nprivate argv\n",
+                               stderr=b"private stderr")
+    backend.run = query
+    result = SimpleNamespace(returncode=0, stdout=("\n".join(map(str, range(222, 232))) + "\n").encode())
+    backend.retain_final_tray_query("new", result)
+    assert backend.last_event["final_tray_query"] == {"side": "new", "returncode": 0,
+        "outcome": "multiple_candidates", "candidate_count": 10, "pids": list(range(222, 230)), "pids_truncated": True}
+    assert queries == [["/bin/ps", "-p", ",".join(map(str, range(222, 230))), "-o",
+                        "pid=,pgid=,uid=,state=,lstart="]]
+    assert backend.last_event["final_tray_processes"]["processes"] == []
+    assert backend.last_event["final_tray_processes"]["outcome"] == "invalid_output"
+    backend.retain_final_tray_query("new", SimpleNamespace(returncode=2, stdout=b"private pgrep stderr"))
+    assert backend.last_event["final_tray_query"]["outcome"] == "query_error"
+    assert "private" not in json.dumps(backend.events)
+
+
+@pytest.mark.parametrize("failure", ["query", "timeout", "gone", "invalid", "evidence_bound"])
+def test_optional_final_process_diagnostic_failure_does_not_fail_observation(journal, failure):
+    backend = bare_observer(journal)
+    def query(argv, **kwargs):
+        if failure == "timeout":
+            raise observer.Refused("inert diagnostic timeout")
+        if failure == "query":
+            raise OSError("inert query error")
+        return SimpleNamespace(returncode=1 if failure == "gone" else 0,
+                               stdout=b"" if failure == "gone" else b"\xff")
+    backend.run = query
+    if failure == "evidence_bound":
+        backend.events = [{}] * 512
+    backend.retain_final_tray_query("new", SimpleNamespace(returncode=0, stdout=b"222\n"))
 
 
 def test_main_failure_writes_only_private_evidence_without_teardown(tmp_path, monkeypatch):

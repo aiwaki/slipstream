@@ -368,6 +368,56 @@ class Observer(Native):
         require(process["pid"] == process_id, "process query returned another PID")
         return process
 
+    def retain_final_tray_query(self, side, result):
+        """Diagnostics only: bounded PID metadata, never argv or an identity proof."""
+        values = result.stdout.decode(errors="replace").split()
+        valid = [int(value) for value in values if re.fullmatch(r"[0-9]{1,10}", value) and pid(int(value))]
+        candidates = list(dict.fromkeys(valid))[:8]
+        outcome = ("query_error" if result.returncode not in (0, 1) or (result.returncode == 1 and values)
+                   else "invalid_output" if len(valid) != len(values)
+                   else "no_candidates" if not values
+                   else "one_candidate" if len(values) == 1 else "multiple_candidates")
+        try:
+            self.record("final_tray_query", {"side": side, "returncode": result.returncode,
+                "outcome": outcome, "candidate_count": len(values), "pids": candidates,
+                "pids_truncated": len(set(valid)) > 8})
+            if not candidates:
+                return
+            diagnostic = {"side": side, "returncode": None, "outcome": "unavailable", "processes": []}
+            try:
+                sample = self.run(["/bin/ps", "-p", ",".join(map(str, candidates)), "-o",
+                                   "pid=,pgid=,uid=,state=,lstart="], check=False, timeout=1)
+                diagnostic["returncode"] = sample.returncode
+                if sample.returncode == 1 and not sample.stdout.strip():
+                    diagnostic["outcome"] = "no_processes"
+                elif sample.returncode != 0:
+                    diagnostic["outcome"] = "query_error"
+                else:
+                    diagnostic["outcome"] = "invalid_output"
+                    require(len(sample.stdout) <= 8192, "diagnostic process output exceeded bound")
+                    rows = sample.stdout.decode("ascii").splitlines()
+                    require(0 < len(rows) <= len(candidates), "diagnostic process count invalid")
+                    processes = []
+                    for row in rows:
+                        fields = row.split()
+                        require(len(fields) == 9 and all(re.fullmatch(r"[0-9]{1,10}", field)
+                                for field in fields[:3]) and re.fullmatch(r"[A-Za-z+<>]+", fields[3]),
+                                "diagnostic process fields invalid")
+                        process = {"pid": int(fields[0]), "pgid": int(fields[1]), "uid": int(fields[2]),
+                                   "state": fields[3][0], "started": " ".join(fields[4:])}
+                        require(process["pid"] in candidates and integer(process["pgid"], 1, 2**31 - 1)
+                                and integer(process["uid"], 0, 2**32 - 1) and birth(process["started"])
+                                and all(item["pid"] != process["pid"] for item in processes),
+                                "diagnostic process metadata invalid")
+                        processes.append(process)
+                    diagnostic.update(outcome="observed", processes=processes)
+            except (Refused, OSError, UnicodeError, ValueError):
+                pass
+            self.record("final_tray_processes", diagnostic)
+        except Refused:
+            # Optional diagnostics must not replace the original qualification refusal.
+            pass
+
     def watchdog_absent(self):
         value = self.run(["/bin/launchctl", "print", f"gui/{self.uid}/{WATCHDOG}"], check=False)
         if value.returncode == 0:
@@ -557,6 +607,7 @@ class Observer(Native):
             require(not os.path.lexists(path), "app transaction cleanup incomplete: " + str(path))
         require(self.watchdog_finished(), "app watchdog is not terminal")
         result = self.run(["/usr/bin/pgrep", "-x", "slipstream"], check=False)
+        self.retain_final_tray_query("new", result)
         values = result.stdout.decode().split()
         require(result.returncode == 0 and len(values) == 1 and values[0].isdigit(), "one final tray must be alive")
         tray = self.process_snapshot(int(values[0]))
