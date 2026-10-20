@@ -1,5 +1,23 @@
 # Decisions
 
+### 2026-10-20: measure steady idle after startup work
+
+The disposable pending-navigation lifecycle check uses existing StatusV2 health
+snapshots to wait for completed startup canaries before its one CPU observation.
+The first `active` publication and broker socket can precede the network
+monitor's Scapy initialization and canaries/DNS diagnostics. Heartbeat freshness
+alone is insufficient: `health_updated_at` governs health age, and cached
+`next_due_in` must be reduced by that age before reserving the observation window.
+Keep the original three-second observation and one-second total CPU ceiling;
+never repeat CPU samples until one passes or scale the ceiling after a delayed
+sample. Bound waiting for that first batch to 120 seconds; a timeout proves missing
+readiness, not high idle CPU. This milestone does not assert that every unrelated
+background task has finished. Preserve exact daemon identity and worker
+invisibility, reject CPU counter resets, and retain actual elapsed and CPU
+values on success and failure. This changes measurement, not production routing
+or readiness. A startup overlap is established by source; the existing failed
+sample does not identify which startup operation consumed its CPU time.
+
 ### 2026-10-20: app lifetime after updater cleanup
 
 The shared updater launch command starts both the successor and restored OLD

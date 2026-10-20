@@ -2674,6 +2674,7 @@ def run_lifecycle(
                 browser_worker_idle = composed.assert_worker_idle(
                     uid,
                     int(active["pid"]),
+                    read_status=_read_status,
                 )
                 stage = "pending-navigation:composed-original"
                 composed_navigation = _run_composed_navigation(
