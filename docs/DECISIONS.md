@@ -76,6 +76,23 @@ root and app gates may use the same normally built, byte-distinct pair when both
 full candidate identities and the exact successful root cases are bound. This
 does not qualify public discovery, ordinary tray/admin flows or app rollback.
 
+### 2026-10-20: corrected-origin qualification and preview .30
+
+The tray process-group repair must be present in the originating `.29`
+watchdog. Qualify that normally built origin and an ordinary `.30` successor
+with complete exact-main CI and candidate authentication, then run both root
+and packaged app cases on the same pair. Earlier `.28 -> .29` receipts cannot
+authorize different payloads. Prepare the `.30` publisher admission in that
+successor source so its qualified candidate also feeds protected readiness
+and publication without a later publisher-only rebuild.
+
+Publish preview `.30` after those packaged checks and its exact-candidate CI,
+dependency audit, protected readiness and publisher verification pass. Public
+discovery, upgrade and forced rollback remain post-publication qualification;
+until they pass, use the DMG and describe public auto-update as unverified.
+The historical `.23` publisher-repair override and existing release gates
+remain unchanged. This records the next required evidence, not a passing run.
+
 ### 2026-10-15: preview publication before public updater qualification
 
 Publish preview `.24` after its existing exact-candidate CI, dependency-audit,

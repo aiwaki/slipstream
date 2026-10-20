@@ -21,74 +21,67 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-Current branch `codex/idle-startup-qualification`, base
-`bbce6e0834e1e9096f0b4c161910959d167fa900` (corrected ordinary `.29`).
-The narrow idle-harness change passed focused tests and independent review;
-disposable macOS CI is next. Historical root checkout is a
-locator; preserve its dirty user files. Evidence below is under
-`output/updater-daemon-identity/` unless a full path is given.
+Branch `codex/preview30-release-pair`, PR407: integrating main408
+`4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37` into the prepared `.30` successor.
+The historical root checkout is a locator; preserve its dirty user files.
+Evidence paths below are relative to `output/updater-daemon-identity/`.
 
-- PR406 merged at the base after all 17 checks passed in CI39404198732 and
-  audit39404198742. Hosted product-checks118566087791 executed both actual
-  successor/rollback process-group tests: suite: 196 passed, zero failed/ignored.
-  The app launch command now uses a separate process group so normal watchdog
-  cleanup does not own the successor or restored OLD app. Full packaged
-  update/rollback still needs proof; source/unit tests alone do not provide it.
-  `process-group-fix/pr-verification.json` SHA256
-  `7fcf86383f4c7b32f9da5d9de74050c5a1ee8ab57dffa0ac9209da7a6ddce298`;
-  `merge-verification.json` SHA256
-  `9d83b80d2a61c5da821c4e1514a129734d3e1425aeba23eecb8ec5e0767acbba`.
-- Main406 CI39406040764/1 FAILED `packaged-app-lifecycle-heavy` at
-  `pending-navigation:idle`: CPU 1.090 s exceeds the existing 1.000 s limit around
-  nominal sleep 3 s. Audit39406040799 and product/build/sign/browser/notification/
-  attestation passed. Watch 56900 completed; no candidate download/qualification.
-  Failure receipt `main406-verification/failure-receipt.json` SHA256
-  `baa783fc2dc6693d08fbb9802aaa562b16b9272277334cbf59094813772ae676`.
-  The failure is BEFORE tray-start/updater; it does not exercise the PGID fix.
-- Source establishes a startup/idle measurement overlap: amain publishes first
-  active before starting the network monitor; that thread imports Scapy,
-  starts packet observation and schedules startup canaries/DNS diagnostics.
-  Broker readiness does not establish their completion. Actual elapsed was
-  not measured. The exact contributor to the observed 1.090 s is still unknown.
-  The retained `idle-guard-source-review.md` records this distinction.
-- The narrow fix waits for existing fresh health data from the exact daemon and
-  completed startup canaries, ages cached `next_due_in` by health snapshot age,
-  and retains ONE 3 s observation with the original 1.000 s CPU limit. Pin process
-  birth, reject CPU counter decreases, keep worker/socket/runtime checks during
-  bounded settling and across the sample, and report actual elapsed on failure
-  as well as success. No production readiness API or routing change, threshold
-  increase, repeated CPU sampling until pass, or new broad audit is authorized.
-  Focused verification: 92 tests and 64 subtests passed in 1.43 s with
-  `.audit-venv/bin/python -m pytest -q
-  scripts/test_composed_pending_navigation_smoke.py
-  scripts/test_pf_installed_lifecycle_smoke.py`; full log:
-  `idle-startup-fix/focused-tests.log`. Independent final source/test review
-  found no blockers. Original main failure and broad green PR406 checks are
-  retained; unchanged local broad tests were not repeated.
-- PR407 remains OPEN at `1c44c419ec41ff3b3eabe742e55d7e798c1a1872`, branch
-  `codex/preview30-release-pair`. CI39406676206/audit39406676332 passed all
-  required checks; watcher 30859 completed0. Its version/pair/publisher source
-  remains unchanged and reviewed. Merge waits for qualified corrected `.29`.
-  Applied checks: 122 focused pair/source/workflow tests plus publisher test,
-  version sync, actionlint and whitespace. Receipt/logs:
-  `preview30-preparation/applied-verification.json`, `watch.log`.
-- The originating updater helper is sealed from OLD. Do not retry historical
-  `.28 -> .29` app39400501344/1: both final-tray cases failed after watchdog
-  cleanup. Root39390234434/1 passed but its receipts bind that obsolete pair.
-  Its app failure receipt SHA256 is
-  `9baffdd645090112034745b6338b0a6a2ae1970df491c12f23dc8af108618324`.
-  Those identities cannot authorize a corrected pair.
-- Next: submit this reviewed idle-harness fix on ordinary `.29` to required CI,
-  merge after fresh check verification, then obtain a
-  qualified exact-main `.29` candidate; merge ready PR407 and obtain exact-main
-  `.30`. Run root commit/crash cases and packaged app commit/pre-ACK kill cases
-  on that one pair. Protected readiness and publisher consume the same `.30`;
-  publisher admission is already prepared, so no publisher-only rebuild.
-  Public discovery/upgrade/rollback remain AFTER publication; use the DMG until
-  they are proven. Do not add every future fault scenario as a preview blocker.
-- No live watcher remains. No local Rust/native build, product execution,
-  workstation installation, .app extraction, or network mutation. Public `.24`,
-  installed app, settings/learning/backups and user AGENTS remain unchanged.
+- PR408 merged at `4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37`; merge tree equals
+  tested head `fcafc9194ae57fc455e3f04100d0d6250c4e8132`. All 17 checks passed or
+  were conditionally skipped in CI39410904218/1 and audit39410903935/1; all
+  three required checks passed, with no unresolved review threads.
+  `idle-startup-fix/pr408-verification/merge-verification.json` SHA256
+  `9f99325904f94c0cbd1c2161f2274fdbb82ae529459bc311374d1e07ad90f26a`.
+- Actual hosted idle evidence: startup settling 6113 ms, one 3153 ms observation,
+  CPU 1.47 -> 1.54 s (70 ms), with the original 1000 ms ceiling. Both health
+  snapshots prove completed first canary batch, total 10, recovery count 0;
+  workers/profiles/runtime absent. `idle-boundary-evidence.json` under the same
+  verification directory has SHA256
+  `6af063447907e65de0f15db2a7600da3463e609e7e5087d6ea009cecef0c036b`.
+  Focused tests: 92 passed and 64 subtests passed; independent review no blockers.
+  This is installed lifecycle evidence, not updater transition qualification.
+- Exact-main `.29` at main408 must now pass its full CI/audit and signed candidate
+  authentication. Agent `app_update_implementation` owns the only main watcher
+  and authentication under `main408-verification/` and `main408-candidate/`.
+  Read its live handle/receipt before any observation or download. No main408
+  candidate is qualified yet. PR408 watcher 72888 completed successfully.
+- PR406 already repaired the shared app launch command: successor and rollback
+  OLD get their own process group, preserving normal watchdog cleanup. Hosted
+  product-checks118566087791 passed both real PGID tests (196 tests, no failures
+  or ignored tests). The corrected originating helper must still be qualified
+  through the complete packaged update/rollback path. Reuse its unchanged tests.
+- Main406 CI39406040764/1 failed BEFORE tray-start/updater at idle CPU 1.090 s.
+  Source proved that first active/broker readiness could overlap Scapy/startup
+  canaries and DNS work. The precise contributor to that old sample is unknown.
+  PR408 corrects the observation boundary using fresh existing health data and
+  aged next-due values, exact process identity, bounded startup waiting and one
+  CPU sample. It changes no product routing/readiness and does not raise the
+  CPU limit or retry samples until pass. Original failure receipt remains in
+  `main406-verification/failure-receipt.json`.
+- PR407 preparation at `1c44c419ec41ff3b3eabe742e55d7e798c1a1872` passed
+  CI39406676206/audit39406676332 and focused 122 pair/source/workflow tests plus
+  publisher admission. Its version/pair/publisher changes remain unchanged.
+  Integrating main408 conflicts only in this checkpoint; driver/workflow SHA256
+  pins still match their reviewed files. Existing green PR407 checks do not
+  qualify the new integration head: require ordinary new-head CI. No new feature
+  or release gate is added. Merge waits for authenticated corrected `.29`.
+  See `idle-startup-fix/pr407-integration-review.json` and
+  `preview30-preparation/applied-verification.json`.
+- Do not retry obsolete `.28 -> .29` app39400501344/1. Both cases failed final
+  tray survival after proven watchdog cleanup; root39390234434/1 receipts bind
+  that old pair. The helper is sealed from OLD, so a successor-only repair cannot
+  fix that origin. These identities cannot authorize a corrected pair.
+- Next: in parallel finish corrected `.29` main qualification and new PR407 CI;
+  then merge PR407 and authenticate exact-main `.30`. Run root commit/crash and
+  packaged app commit/pre-ACK kill on that same complete `.29 -> .30` pair.
+  Protected readiness and publisher consume the same `.30`; publisher admission
+  is already included, avoiding a publisher-only rebuild. Public discovery,
+  upgrade and rollback remain AFTER publication; use the DMG until proven.
+  Do not add every future fault scenario as a new preview blocker.
+- No local Rust/native build, product execution, workstation installation,
+  .app extraction or network mutation. Public `.24`, installed app,
+  settings/learning/backups and user AGENTS remain unchanged. No redundant
+  broad local tests or obsolete workflow reruns are needed.
 
 The retained records below are historical and superseded by this live checkpoint.
 

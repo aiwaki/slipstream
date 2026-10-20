@@ -222,13 +222,14 @@ all transaction hashes. The app workflow SHA and actual checkout HEAD must
 match. Normally this is the candidate NEW source; an observer-only repair may
 use its audited main descendant under the bounded source proof below.
 
-For the current bridge, first build the corrected `.28` origin with its ordinary
-whole main CI. The ordinary `.29` successor PR and its checks may be prepared
-in parallel; merge and exact-main signing wait for the qualified `.28` receipt.
-Then build the normal `.29` successor. Run both root
-cases on `.29` for that exact `.28 -> .29` pair, followed by both app cases
-with the same eight pins. Product changes require new normally built candidates;
-observer-only changes can reuse the authenticated pair and its root proof.
+For the current bridge, first qualify a corrected `.29` origin that contains
+the tray process-group repair. The ordinary `.30` successor PR and its checks
+may be prepared in parallel; merge and exact-main signing wait for that `.29`
+receipt. Run both root cases on `.30` for the exact corrected `.29 -> .30`
+pair, followed by both app cases with the same eight pins. The earlier
+`.28 -> .29` root proof does not transfer to these different candidates.
+Product changes require new normally built candidates; observer-only changes
+can reuse the authenticated pair and its root proof.
 
 `verify_packaged_observer_source.py` checks full ancestry, clean tracked bytes
 and its explicit file allowlist before dependencies, downloads, materialization
@@ -512,10 +513,10 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.24`, with
-  `VERSION` and `preview_sequence=24` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.30`, with
+  `VERSION` and `preview_sequence=30` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.24`; the new preview requires its own
+  `.23` source and is rejected for `.30`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact
