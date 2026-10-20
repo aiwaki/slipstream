@@ -219,15 +219,24 @@ must pass with clean teardown at the NEW main source. Both complete candidate
 pins and their observed source, version, archive, app, daemon and bundle-tree
 hashes must match the app pair. The root identity must bind both versions and
 all transaction hashes. The app workflow SHA and actual checkout HEAD must
-equal that same NEW source before installation.
+match. Normally this is the candidate NEW source; an observer-only repair may
+use its audited main descendant under the bounded source proof below.
 
 For the current bridge, first build the corrected `.28` origin with its ordinary
 whole main CI. The ordinary `.29` successor PR and its checks may be prepared
 in parallel; merge and exact-main signing wait for the qualified `.28` receipt.
 Then build the normal `.29` successor. Run both root
 cases on `.29` for that exact `.28 -> .29` pair, followed by both app cases
-with the same eight pins. Include this workflow and both cases before building
-NEW, because the app harness must run from that exact NEW source.
+with the same eight pins. Product changes require new normally built candidates;
+observer-only changes can reuse the authenticated pair and its root proof.
+
+`verify_packaged_observer_source.py` checks full ancestry, clean tracked bytes
+and its explicit file allowlist before dependencies, downloads, materialization
+or trigger compilation. The driver repeats that proof before installation.
+The receipt separates harness SHA/tree/run/attempt and exact diff from candidate
+NEW source. Product, dependency, build, materializer, signature-helper and OLD
+trigger-builder changes fail this allowance. The root prerequisite remains at
+exact candidate NEW, never the later harness SHA.
 
 The earlier `.27 -> .28` root run39381512115 passed crash-before-commit but
 failed commit observation before a commit request; both cleanups passed.
@@ -255,6 +264,13 @@ Macs with fail-fast disabled; its aggregate requires both cases to succeed.
 The [read-only observer](../scripts/packaged_update_observer.py) attaches before
 preparation. The commit case requires the real successor ACK, exact process
 identity, committed root proof and completed app transaction cleanup.
+The final watchdog check accepts proven absence or the exact previously
+observed job after successful exit under its captured non-restarting policy.
+It requires the process gone, existing private lock available, transaction
+files removed and exact launchd program/arguments, idle state and zero exit
+code. A live, failed, foreign or restartable job cannot qualify. Timeout evidence
+retains the final job, process, lock and file predicates without launchd
+environment data.
 
 The [pre-ACK case](../scripts/packaged_update_preack.py) observes a live exact NEW
 process, sends STOP, rechecks its PID, UID, birth and command along with the

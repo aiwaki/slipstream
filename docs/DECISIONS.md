@@ -1,5 +1,31 @@
 # Decisions
 
+### 2026-10-20: observer repair with unchanged packaged candidates
+
+The packaged app observer may run from an audited main descendant of candidate
+NEW when `verify_packaged_observer_source.py` proves a clean exact workflow
+checkout and restricts the complete diff to its explicit observer, driver,
+focused-test, app-workflow and documentation paths. Deletions, renames, mode
+changes and changes to product code, dependencies, build inputs, candidate
+authentication, materialization or the OLD trigger builder are refused. Missing
+ancestry in the bounded checkout is a failure. Verify before dependencies or
+candidate handling, then again immediately before installation; retain harness
+SHA, tree, run/attempt and diff separately from the signed candidate source.
+The successful root prerequisite must still match exact candidate NEW and both
+complete immutable candidate identities. An observer repair does not authorize
+relabeling candidates or transferring root evidence to another payload.
+
+Production removes the watchdog LaunchAgent plist and transaction files before
+best-effort self-bootout. Terminal observation may therefore accept either
+proven job absence or the exact previously observed watchdog's loaded but
+successfully exited job. Require its PID gone, captured `SuccessfulExit=false`
+policy, exact program/arguments, no launchd PID, zero active count/exit code,
+completed runs, absent transaction files and the existing private transaction
+lock available. Root terminal and real successor ACK/restored OLD proofs remain
+separate requirements. Preflight still requires no preexisting watchdog.
+Retain decisive completion diagnostics; an observation timeout alone does not
+establish a product cleanup failure.
+
 ### 2026-10-19: updater mailbox ancestry
 
 Both updater protocol sides use `/var/db/dev.slipstream-update/requests`. The

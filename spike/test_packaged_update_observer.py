@@ -294,7 +294,7 @@ def waiting(journal, *, complete=True):
         return current
     backend.observe_once = observe_once
     backend.status = lambda: copy.deepcopy(backend.root_status)
-    backend.watchdog_absent = lambda: True
+    backend.watchdog_finished = lambda: True
     backend.process_snapshot = lambda _pid: None
     return backend
 
@@ -307,6 +307,148 @@ def test_bounded_wait_consumes_real_observation_not_only_absent_journal(journal)
     backend.ack = None
     with pytest.raises(observer.Refused, match="real successor ACK"):
         backend.wait_transaction(clock=clock, sleep=clock.sleep)
+
+
+def terminal_watchdog_fixture(journal):
+    backend = waiting(journal)
+    backend.uid = os.getuid()
+    backend.state = Path(journal["helper"]).parent.parent
+    backend.journal_path = backend.state / observer.JOURNAL
+    backend.ack_path = backend.journal_path.with_suffix(".ack.json")
+    backend.agent = backend.state / "absent-agent.plist"
+    backend.stage = Path(journal["stage"])
+    helper = private(Path(journal["helper"]), b"inert watchdog")
+    helper.chmod(0o700)
+    backend.watchdog_hash = observer.digest(helper)
+    backend.observed_watchdog_policy = {
+        "Label": observer.WATCHDOG, "ProgramArguments": [str(helper), "--journal", str(backend.journal_path)],
+        "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}, "ProcessType": "Background",
+        "StandardOutPath": str(backend.state / "update-watchdog.stdout.log"),
+        "StandardErrorPath": str(backend.state / "update-watchdog.stderr.log")}
+    private(backend.journal_path.with_suffix(".lock"), b"")
+    backend.job_text = (f"gui/{backend.uid}/{observer.WATCHDOG} = {{\n"
+        f"\tactive count = 0\n\tprogram = {helper}\n\targuments = {{\n"
+        f"\t\t{helper}\n\t\t--journal\n\t\t{backend.journal_path}\n\t}}\n"
+        "\tstate = not running\n\truns = 1\n\tlast exit code = 0\n}\n").encode()
+    backend.run = lambda *_a, **_k: SimpleNamespace(returncode=0, stdout=backend.job_text, stderr=b"")
+    backend.watchdog_absent = lambda: False  # Exact allowed loaded, successfully exited job.
+    del backend.watchdog_finished
+    return backend
+
+
+def test_commit_accepts_exact_successfully_exited_loaded_watchdog(journal):
+    backend, clock = terminal_watchdog_fixture(journal), Clock()
+    assert backend.wait_transaction(clock=clock, sleep=clock.sleep)["decision"] == "commit"
+    assert clock.now == 0.02
+    assert backend.events[-1]["kind"] == "watchdog_completion"
+    assert backend.events[-1]["value"]["lock"] == "available"
+
+
+def test_preack_rollback_accepts_same_terminal_watchdog_contract(journal):
+    from packaged_update_preack import PreAckObserver
+    backend, clock = terminal_watchdog_fixture(journal), Clock()
+    backend.args = SimpleNamespace(mode="kill-successor-before-ack")
+    backend.fault_process, backend.ack = process_for(journal), None
+    backend.root_status = copy.deepcopy(STATUSES["aborted"])
+    backend.observe_once = lambda: None
+    backend.final_old_app = lambda: backend.events.append({"kind": "old-proof"})
+    backend.prove = lambda *_a, **_k: backend.events.append({"kind": "daemon-proof"})
+    result = PreAckObserver.qualify_app(backend, clock=clock, sleep=clock.sleep)
+    assert result["successor_exit_before_ack_rollback_qualified"] is True
+    assert [event["kind"] for event in backend.events][-3:] == ["old-proof", "daemon-proof", "old-proof"]
+
+
+@pytest.mark.parametrize("before,after", [
+    ("gui/", "system/"), ("program = ", "program = /foreign/"),
+    ("\t\t--journal", "\t\t--foreign"), ("last exit code = 0", "last exit code = 1"),
+    ("active count = 0", "active count = 1"), ("runs = 1", "runs = 0"),
+    ("state = not running", "state = waiting"),
+])
+def test_terminal_job_wrong_identity_or_restartable_outcome_refused(journal, before, after):
+    backend = terminal_watchdog_fixture(journal)
+    backend.job_text = backend.job_text.replace(before.encode(), after.encode())
+    with pytest.raises(observer.Refused):
+        backend.watchdog_finished()
+    assert backend.events[-1]["kind"] == "completion_diagnostic"
+
+
+def test_terminal_running_job_and_busy_lock_remain_pending(journal):
+    backend = terminal_watchdog_fixture(journal)
+    original = backend.job_text
+    backend.job_text = original.replace(b"state = not running", b"state = running\n\tpid = 333")
+    assert backend.watchdog_finished() is False
+    backend.job_text = original
+    with backend.journal_path.with_suffix(".lock").open("rb") as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        try:
+            assert backend.watchdog_finished() is False
+            assert backend.completion_diagnostic["lock"] == "busy"
+        finally:
+            observer.fcntl.flock(held, observer.fcntl.LOCK_UN)
+    assert backend.watchdog_finished() is True
+
+
+@pytest.mark.parametrize("change", ["missing", "mode", "symlink", "hardlink", "fifo", "owner"])
+def test_terminal_lock_must_be_existing_private_owned_regular_file(journal, change):
+    backend = terminal_watchdog_fixture(journal)
+    lock = backend.journal_path.with_suffix(".lock")
+    if change == "mode":
+        lock.chmod(0o644)
+    elif change == "owner":
+        backend.uid += 1
+        backend.job_text = backend.job_text.replace(f"gui/{os.getuid()}/".encode(), f"gui/{backend.uid}/".encode())
+    elif change == "hardlink":
+        os.link(lock, lock.with_suffix(".alias"))
+    else:
+        lock.unlink()
+        if change == "symlink":
+            lock.symlink_to(private(lock.with_suffix(".other"), b""))
+        elif change == "fifo":
+            os.mkfifo(lock, 0o600)
+    with pytest.raises(observer.Refused):
+        backend.watchdog_finished()
+    if change == "missing":
+        assert not lock.exists()
+
+
+def test_terminal_watchdog_reused_pid_is_not_proven_gone(journal):
+    backend = terminal_watchdog_fixture(journal)
+    backend.watchdog = {"pid": 333, "uid": backend.uid, "state": "S", "started": START, "command": "/old"}
+    backend.process_snapshot = lambda _pid: {**backend.watchdog, "started": "Tue Oct 20 12:00:00 2026"}
+    with pytest.raises(observer.Refused, match="PID was reused"):
+        backend.watchdog_finished()
+
+
+def test_terminal_loaded_job_requires_captured_exact_policy(journal):
+    backend = terminal_watchdog_fixture(journal)
+    backend.observed_watchdog_policy["KeepAlive"] = True
+    with pytest.raises(observer.Refused, match="policy differs"):
+        backend.watchdog_finished()
+    backend.observed_watchdog_policy = None
+    with pytest.raises(observer.Refused, match="not captured"):
+        backend.watchdog_finished()
+
+
+def test_terminal_proven_absence_still_requires_quiescent_files_and_lock(journal):
+    backend = terminal_watchdog_fixture(journal)
+    backend.run = lambda *_a, **_k: SimpleNamespace(returncode=113, stdout=b"", stderr=b"owned job absent")
+    backend.tproxy = SimpleNamespace(_launchd_job_absent=lambda reply: reply.returncode == 113)
+    assert backend.watchdog_finished() is True
+    private(backend.ack_path, b"retained ACK")
+    assert backend.watchdog_finished() is False
+
+
+def test_timeout_retains_decisive_snapshot_without_environment(journal):
+    backend, clock = terminal_watchdog_fixture(journal), Clock()
+    private(backend.agent, b"retained LaunchAgent")
+    backend.job_text = backend.job_text.replace(b"\truns", b"\tenvironment = {\n\t\tPRIVATE = not-retained\n\t}\n\truns")
+    with pytest.raises(observer.Refused, match="deadline exhausted"):
+        backend.wait_transaction(clock=clock, sleep=clock.sleep)
+    evidence = backend.events[-1]
+    assert evidence["kind"] == "completion_diagnostic"
+    assert evidence["value"]["paths_present"]["agent"] is True
+    assert evidence["value"]["lock"] == "available"
+    assert "PRIVATE" not in json.dumps(evidence)
 
 
 def test_wait_timeout_and_abort_are_deterministic(journal):
@@ -454,9 +596,14 @@ def test_observes_real_fixture_journal_ack_receipt_then_cleanup_without_mutation
     backend.target, backend.root = Path(journal["target"]), tmp_path / "root"
     backend.journal_path = backend.state / observer.JOURNAL
     backend.ack_path = backend.journal_path.with_suffix(".ack.json")
-    backend.agent = tmp_path / "absent-agent.plist"
+    backend.agent = tmp_path / "agent.plist"
     helper = private(Path(journal["helper"]), b"inert-watchdog")
     backend.watchdog_hash = observer.digest(helper)
+    private(backend.agent, observer.plistlib.dumps({
+        "Label": observer.WATCHDOG, "ProgramArguments": [str(helper), "--journal", str(backend.journal_path)],
+        "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}, "ProcessType": "Background",
+        "StandardOutPath": str(backend.state / "update-watchdog.stdout.log"),
+        "StandardErrorPath": str(backend.state / "update-watchdog.stderr.log")}))
     journal["watchdog_sha256"] = backend.watchdog_hash
     current_root = [copy.deepcopy(PREPARED)]
     backend.tproxy = SimpleNamespace(_daemon_update_identity=lambda value: value,
@@ -478,6 +625,8 @@ def test_observes_real_fixture_journal_ack_receipt_then_cleanup_without_mutation
     # Fixture file owner may differ from the inert UID in the shared wire vector.
     real_reader = observer.private_json
     monkeypatch.setattr(observer, "private_json", lambda path, _uid, **kwargs: real_reader(path, os.getuid(), **kwargs))
+    real_bytes = observer.private_bytes
+    monkeypatch.setattr(observer, "private_bytes", lambda path, _uid, **kwargs: real_bytes(path, os.getuid(), **kwargs))
     prepared = {**journal, "phase": "prepared", "successor_pid": None, "successor_started": None}
     private(backend.journal_path, prepared)
     private(backend.root / IDENTITY["nonce"] / "status.json", {})
@@ -495,8 +644,9 @@ def test_observes_real_fixture_journal_ack_receipt_then_cleanup_without_mutation
     backend.journal_path.unlink()
     backend.ack_path.unlink()
     processes.pop(111)
+    backend.agent.unlink()
     current_root[0] = copy.deepcopy(STATUSES["committed"])
-    backend.watchdog_absent = lambda: True
+    backend.watchdog_finished = lambda: True
     clock = Clock()
     assert backend.wait_transaction(clock=clock, sleep=clock.sleep)["decision"] == "commit"
     backend.final_app()

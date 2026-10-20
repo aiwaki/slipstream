@@ -66,6 +66,15 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          fetch-depth: 64
+      - name: Verify observer source before dependencies or candidate handling
+        id: source_preflight
+        env:
+          CANDIDATE_NEW_SOURCE: ${{ inputs.new_source_sha }}
+        run: |
+          python3 scripts/verify_packaged_observer_source.py \
+            --repo "$GITHUB_WORKSPACE" --candidate-source "$CANDIDATE_NEW_SOURCE" \
+            --output "$RUNNER_TEMP/app-observer-source.json"
       - id: python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -164,6 +173,7 @@ jobs:
           OUTCOME_MODE: ${{ matrix.mode }}
           OUTCOME_JOB_STATUS: ${{ job.status }}
           OUTCOME_CHECKOUT: ${{ steps.checkout.outcome }}
+          OUTCOME_SOURCE_PREFLIGHT: ${{ steps.source_preflight.outcome }}
           OUTCOME_PYTHON: ${{ steps.python.outcome }}
           OUTCOME_DEPENDENCIES: ${{ steps.dependencies.outcome }}
           OUTCOME_OLD_DOWNLOAD: ${{ steps.old_download.outcome }}
@@ -191,7 +201,7 @@ jobs:
               "mode": value("MODE"),
               "job_status_before_upload": value("JOB_STATUS"),
               "steps": {name.lower(): value(name) for name in (
-                  "CHECKOUT", "PYTHON", "DEPENDENCIES", "OLD_DOWNLOAD",
+                  "CHECKOUT", "SOURCE_PREFLIGHT", "PYTHON", "DEPENDENCIES", "OLD_DOWNLOAD",
                   "NEW_DOWNLOAD", "MATERIALIZE", "ROOT_GATE_DOWNLOAD", "OLD_SOURCE", "TRIGGER", "QUALIFY")},
           }
           directory = Path(os.environ["RUNNER_TEMP"]) / "app-update"
@@ -207,6 +217,7 @@ jobs:
           path: |
             ${{ runner.temp }}/app-update/*.json
             ${{ runner.temp }}/packaged-commit-result.json
+            ${{ runner.temp }}/app-observer-source.json
             ${{ runner.temp }}/app-update-trigger/build-receipt.json
             ${{ runner.temp }}/app-update-trigger/prepare-result.json
             ${{ runner.temp }}/app-update-trigger/build.log

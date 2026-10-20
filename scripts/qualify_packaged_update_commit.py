@@ -16,6 +16,7 @@ from build_packaged_update_trigger import pins
 from native_root_update import Native, Refused, digest, document, guard, modules, require
 from packaged_update_observer import Observer, exact_equal, exact_successor, same_process
 from packaged_update_preack import PreAckObserver
+from verify_packaged_observer_source import verify_source
 
 
 MODES = ("commit", "crash-before-commit")
@@ -75,11 +76,8 @@ def prerequisite(metadata, directory, pair, expected, run_id, attempt):
 
 
 def verify_harness_source(backend, pair):
-    """The app observer runs from the same main source as the successor/root gate."""
-    expected = pair["new"]["source_commit"]
-    require(os.environ.get("GITHUB_SHA") == expected, "app workflow SHA differs from exact NEW source")
-    head = backend.run(["/usr/bin/git", "-C", str(backend.args.repo), "rev-parse", "HEAD"]).stdout.decode("ascii").strip()
-    require(head == expected, "app checkout HEAD differs from exact NEW source")
+    """An observer-only descendant cannot change any candidate/runtime input."""
+    return verify_source(backend.args.repo, pair["new"]["source_commit"])
 
 
 def install_old(backend):
@@ -190,13 +188,17 @@ def main(argv=None):
     with os.fdopen(fd, "w") as output:
         try:
             pair = pins(document(args.pair_manifest))
-            verify_harness_source(backend, pair)
+            result["harness_source"] = verify_harness_source(backend, pair)
             for side in ("old", "new"):
                 backend.expected[side] = backend.artifact(side, pair[side], getattr(args, side + "_app"),
                                                            getattr(args, side + "_candidate_dir"))
             metadata = json.loads(backend.run([args.gh, "api",
                 f"repos/{args.repository}/actions/runs/{run_id}/attempts/{attempt}"], github=True).stdout)
             result["root_prerequisite"] = prerequisite(metadata, args.root_gate_dir, pair, backend.expected, run_id, attempt)
+            # Repeat immediately before the first ordinary install. Preparation
+            # and observation must consume the same reviewed source snapshot.
+            require(exact_equal(result["harness_source"], verify_harness_source(backend, pair)),
+                    "observer source changed before installation")
             result.update(drive(backend), status="passed")
         except Exception as error:
             result.update(error_type=type(error).__name__, reason=str(error)[:512])

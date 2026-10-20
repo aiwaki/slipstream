@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import copy
+import fcntl
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import stat
 import time
@@ -68,7 +70,7 @@ def reject_constant(_value):
     raise Refused("nonfinite observation value")
 
 
-def private_json(path, uid, *, limit=32768, writing=False):
+def private_bytes(path, uid, *, limit=32768, writing=False):
     """Bounded no-follow regular-file read; only the trigger writes in place."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -93,6 +95,13 @@ def private_json(path, uid, *, limit=32768, writing=False):
     if changed and writing:
         return None
     require(not changed, "private observation changed during read")
+    return raw
+
+
+def private_json(path, uid, *, limit=32768, writing=False):
+    raw = private_bytes(path, uid, limit=limit, writing=writing)
+    if raw is None:
+        return None
     try:
         value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
     except (json.JSONDecodeError, UnicodeError) as error:
@@ -101,6 +110,40 @@ def private_json(path, uid, *, limit=32768, writing=False):
         raise Refused("incomplete private observation: " + path.name) from error
     require(isinstance(value, dict), "private observation must be an object")
     return value
+
+
+def watchdog_policy(raw, helper, journal, state):
+    """Only the production unsuccessful-exit policy, with no extra triggers."""
+    require(raw is not None, "watchdog LaunchAgent policy was not observed")
+    value = plistlib.loads(raw)
+    expected = {"Label": WATCHDOG, "ProgramArguments": [str(helper), "--journal", str(journal)],
+                "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}, "ProcessType": "Background",
+                "StandardOutPath": str(state / "update-watchdog.stdout.log"),
+                "StandardErrorPath": str(state / "update-watchdog.stderr.log")}
+    require(exact_equal(value, expected), "watchdog LaunchAgent policy differs from production")
+    return value
+
+
+def exited_watchdog_job(raw, uid, helper, journal):
+    """A loaded job is terminal only after successful exit of the exact helper."""
+    require(len(raw) <= 65536, "watchdog job observation exceeds bound")
+    text = raw.decode("utf-8")
+    require(text.splitlines()[0] == f"gui/{uid}/{WATCHDOG} = {{", "watchdog job domain/label mismatch")
+    def field(name):
+        values = re.findall(r"^\s+" + re.escape(name) + r" = (.*?)\s*$", text, re.M)
+        require(len(values) == 1, "watchdog job field missing/ambiguous: " + name)
+        return values[0]
+    require(field("program") == str(helper), "watchdog job executable mismatch")
+    blocks = re.findall(r"(?m)^([ \t]+)arguments = \{\n(.*?)^\1\}", text, re.S)
+    require(len(blocks) == 1 and blocks[0][1].strip().splitlines(), "watchdog job arguments missing")
+    arguments = [line.strip() for line in blocks[0][1].strip().splitlines()]
+    require(arguments == [str(helper), "--journal", str(journal)], "watchdog job arguments mismatch")
+    require(field("runs").isdigit() and int(field("runs")) > 0, "watchdog never ran")
+    if re.search(r"^\s+pid = ", text, re.M) or field("state") in {"running", "spawn scheduled"}:
+        return False
+    require(field("state") == "not running" and field("active count") == "0"
+            and field("last exit code") == "0", "watchdog job is not successfully quiescent")
+    return True
 
 
 def validate_journal(value, expected, identity, uid, state, target, watchdog_hash):
@@ -256,6 +299,7 @@ class Observer(Native):
         self.last_journal = self.ack = self.ack_process = self.receipt = self.watchdog = None
         self.initiator = self.root_status = self.tray = None
         self.expected, self.last_event = {}, {}
+        self.observed_watchdog_policy = self.completion_diagnostic = None
 
     def record(self, kind, value):
         if self.last_event.get(kind) != value:
@@ -333,6 +377,88 @@ class Observer(Native):
                 stdout=value.stdout.decode(), stderr=value.stderr.decode())), "app watchdog absence unproven")
         return True
 
+    def watchdog_finished(self):
+        try:
+            return self._watchdog_finished()
+        except Exception as error:
+            diagnostic = getattr(self, "completion_diagnostic", None) or {}
+            diagnostic.update(error_type=type(error).__name__, reason=str(error)[:256])
+            self.completion_diagnostic = diagnostic
+            self.record("completion_diagnostic", diagnostic)
+            raise
+
+    def _watchdog_finished(self):
+        """Terminal proof permits production's loaded-but-successfully-exited job.
+
+        Preflight still requires absence. This method neither unloads a job nor
+        creates a lock; it only observes the previously authenticated watchdog.
+        """
+        paths = {"journal": self.journal_path, "ack": self.ack_path, "agent": self.agent,
+                 "stage": self.stage, "backup": Path(self.last_journal["backup"])}
+        diagnostic = {"paths_present": {name: os.path.lexists(path) for name, path in paths.items()},
+                      "lock": "not_checked", "watchdog_process": "not_checked"}
+        self.completion_diagnostic = diagnostic
+        require(self.watchdog is not None, "terminal watchdog was not observed")
+        value = self.run(["/bin/launchctl", "print", f"gui/{self.uid}/{WATCHDOG}"], check=False)
+        diagnostic["launchctl_returncode"] = value.returncode
+        require(len(value.stdout) <= 65536, "watchdog job observation exceeds bound")
+        # Retain only decisive fields, never launchctl's environment/other jobs.
+        diagnostic["job"] = {name: re.findall(rb"^\s+" + re.escape(name.encode()) + rb" = (.*?)\s*$",
+            value.stdout, re.M)[:2] for name in ("state", "active count", "pid", "runs", "last exit code")}
+        diagnostic["job"] = {name: [item.decode("utf-8", "replace")[:128] for item in items]
+                             for name, items in diagnostic["job"].items()}
+        if value.returncode == 0:
+            helper = self.state / "runtime/slipstream-update-watchdog"
+            require(self.observed_watchdog_policy is not None, "watchdog launch policy was not captured")
+            watchdog_policy(plistlib.dumps(self.observed_watchdog_policy), helper, self.journal_path, self.state)
+            require(digest(helper) == self.watchdog_hash, "terminal watchdog executable changed")
+            job_finished = exited_watchdog_job(value.stdout, self.uid, helper, self.journal_path)
+        else:
+            from types import SimpleNamespace
+            require(self.tproxy._launchd_job_absent(SimpleNamespace(returncode=value.returncode,
+                stdout=value.stdout.decode(), stderr=value.stderr.decode())), "terminal watchdog absence unproven")
+            job_finished = True
+        current = self.process_snapshot(self.watchdog["pid"])
+        diagnostic["watchdog_process"] = current
+        require(current is None or same_process(current, self.watchdog), "terminal watchdog PID was reused")
+        if not job_finished or current is not None:
+            return False
+        lock_path = self.journal_path.with_suffix(".lock")
+        try:
+            fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as error:
+            diagnostic["lock"] = "open_refused"
+            raise Refused("cannot inspect existing transaction lock") from error
+        with os.fdopen(fd, "rb") as lock:
+            info = os.fstat(lock.fileno())
+            require(stat.S_ISREG(info.st_mode) and info.st_uid == self.uid and info.st_nlink == 1
+                    and stat.S_IMODE(info.st_mode) == 0o600, "unsafe terminal transaction lock")
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                diagnostic["lock"] = "busy"
+                return False
+            try:
+                named = lock_path.lstat()
+                require((info.st_dev, info.st_ino) == (named.st_dev, named.st_ino), "transaction lock identity changed")
+                diagnostic["lock"] = "available"
+                diagnostic["paths_present"] = {name: os.path.lexists(path) for name, path in paths.items()}
+                complete = not any(diagnostic["paths_present"].values())
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+        if complete:
+            self.record("watchdog_completion", diagnostic)
+        return complete
+
+    def retain_completion_diagnostic(self):
+        try:
+            self.watchdog_finished()
+        except Exception as error:
+            diagnostic = getattr(self, "completion_diagnostic", None) or {}
+            diagnostic.update(error_type=type(error).__name__, reason=str(error)[:256])
+            self.completion_diagnostic = diagnostic
+        self.record("completion_diagnostic", getattr(self, "completion_diagnostic", None))
+
     def observe_watchdog(self):
         if self.watchdog is not None:
             return
@@ -347,7 +473,10 @@ class Observer(Native):
         require(process is not None and process["uid"] == self.uid and process["state"] not in {"Z", "T"}
                 and process["command"] == f"{helper} --journal {self.journal_path}"
                 and digest(helper) == self.watchdog_hash, "packaged watchdog process mismatch")
+        self.observed_watchdog_policy = watchdog_policy(
+            private_bytes(self.agent, self.uid), helper, self.journal_path, self.state)
         self.watchdog = process
+        self.record("watchdog_policy", self.observed_watchdog_policy)
         self.record("packaged_watchdog", process)
 
     def status(self):
@@ -412,12 +541,13 @@ class Observer(Native):
                 require(self.root_status["decision"] != "abort", "production transaction aborted; commit not qualified")
             if self.receipt is not None and journal is None and self.identity is not None:
                 root = self.status()
-                if root["phase"] == "committed" and root["writer_quiescent"] and self.watchdog_absent():
+                if root["phase"] == "committed" and root["writer_quiescent"] and self.watchdog_finished():
                     committed(root, self.ack)
                     require(not same_process(self.initiator, self.process_snapshot(self.initiator["pid"])),
                             "trigger still running after transaction cleanup")
                     return root
             sleep(0.02)
+        self.retain_completion_diagnostic()
         raise Refused("packaged transaction deadline exhausted; observation incomplete")
 
     def final_app(self):
@@ -425,7 +555,7 @@ class Observer(Native):
         require(self.tproxy._daemon_update_tree(self.target, readable=True) == expected["bundle_tree_sha256"], "final app tree mismatch")
         for path in (self.journal_path, self.ack_path, self.stage, Path(self.last_journal["backup"]), self.agent):
             require(not os.path.lexists(path), "app transaction cleanup incomplete: " + str(path))
-        require(self.watchdog_absent(), "app watchdog remains loaded")
+        require(self.watchdog_finished(), "app watchdog is not terminal")
         result = self.run(["/usr/bin/pgrep", "-x", "slipstream"], check=False)
         values = result.stdout.decode().split()
         require(result.returncode == 0 and len(values) == 1 and values[0].isdigit(), "one final tray must be alive")
