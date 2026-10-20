@@ -1,5 +1,27 @@
 # Decisions
 
+### 2026-10-20: deliver the updater startup repair through a fixed origin
+
+The ordinary public `.29 -> .30` attempt authorized successfully but aborted
+before replacement because the validated worker appeared after the old
+ten-second startup wait. PR409 and PR410 repair extraction permissions and that
+startup lease. Both must be in the originating app and daemon.
+
+Reuse the normally built, signed exact-main candidate at
+`5385b89add415c531276ba43f5c06c50293ffb17` as a private fixed `.30` bridge after
+candidate authentication and installed-runtime verification. Its source and
+payload identity differ from public `.30`; retain that distinction in receipts.
+Never replace, relabel or republish the existing public `.30` assets.
+
+Build an ordinary `.31` successor and qualify the exact fixed `.30 -> .31`
+pair with both native root cases, then both packaged app cases. Publish `.31`
+only after its existing exact-candidate CI, dependency audit, protected
+readiness and publisher checks pass. The local tray/admin update from the
+private bridge is an installed product check; it does not establish an update
+between two publicly released builds. Public-pair update/forced rollback
+remains unverified until a later released pair passes. Reuse unchanged passing
+checks, but do not transfer pair-specific or exact-candidate evidence.
+
 ### 2026-10-20: validated updater startup uses the original lease
 
 Preparation, sealing and worker startup share the immutable operation deadline.
