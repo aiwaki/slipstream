@@ -72,12 +72,35 @@ the separate runtime receipt above uses fresh post-install samples.
 
 The source fix gives preparation and validated worker startup the remaining
 original lease, bounded by both its wall deadline and a monotonic deadline
-anchored before sealing. It does not extend the lease, publish PID early, bypass
-signature/hash checks or alter Rust uncertain-authorization/abort handling.
+anchored before sealing. It does not publish PID early, bypass signature/hash
+checks or alter production Rust uncertain-authorization/abort handling.
 Regression evidence: old source6 expected failures; repaired module115 passing,
 adjacent lock/mailbox/native-root tests59 passing; strengthened terminal cases2
 passing. Results were captured in tool output, not standalone log files.
-Independent review found no blockers. Exact-source required PR CI is pending.
+Initial independent review found no blockers. [PR410](https://github.com/aiwaki/slipstream/pull/410)
+head `06651c55f4462c7c8a5a7d17b985247b094ba173` passed CI39458986680/1 and
+audit39458986897/1, including all three required contexts. Receipt in the same
+private directory: `pr410-ci-receipt.json`, SHA256
+`e83d0083fbe80325680e84ec591b4fbc9784eabcce69c1435e0b08dfaf2a8f38`.
+
+PR review then found that the local monotonic bound did not survive handoff to
+the worker: it recomputed a deadline after validation, allowing a backward wall
+clock change to extend an undecided operation. Sealing could also publish after
+the original monotonic budget expired. The follow-up persists a root-generated,
+manifest-bound boot-session identity and monotonic deadline in the private
+journal, checks them before publication and first activation mutation, and
+preserves them across retries. A changed boot session or invalid/missing lease
+aborts an undecided operation; durable commit/abort still completes. Legacy
+terminal manifest hashes remain unchanged. Boot identity is not polled per tick.
+The disposable packaged trigger also replaces its separate90-second timeout
+with the remaining original lease and a distinct five-second cleanup bound.
+Final focused verification passed136 daemon-update tests plus59 adjacent tests
+(195 total,2.37s), with12 existing packaged-trigger Python tests and rustfmt
+passing. Six new inert Rust trigger tests run in the existing CI adapter job.
+The focused log is `output/updater-daemon-identity/worker-startup-lease-fix/private-lease-final-tests.log`,
+SHA256 `3e958e5e479d537f8a7545ddaee9b0e8ae77cc4fefa336e38163f0cce8f5e4e7`.
+Independent review of both follow-ups found no blockers. Exact-source CI for
+these follow-ups remains pending; the initial-head green receipt is retained.
 
 The old `.23 --quit` returned without ending its process; only its verified PID
 was terminated after owned service absence was established. `.29` was later
@@ -87,7 +110,7 @@ performed Restart Proxy and the ordinary update/admin action. Do not repeat the
 known-stalled unattended hosted authorization path. Public update/forced rollback
 and normal Quit remain open; manual `.30` installation does not close them.
 
-Next: publish the focused startup-lease PR, retain its exact-source required CI
+Next: finish PR410 review follow-ups, retain the new exact-source required CI
 receipt, and carry both unreleased repairs into a normally built originating
 candidate before qualifying another public update. A successor alone cannot
 repair the worker sealed from an older origin. Do not start another workstation
@@ -462,8 +485,8 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Submit the startup-lease repair and obtain its exact-source required CI.
-  Reuse completed focused tests and the PR409 baseline where unchanged.
+- Finish PR410's clock-boundary and disposable-trigger review follow-ups and
+  obtain their exact-source required CI. Preserve the green initial-head receipt.
 - The corrected originating candidate must contain both unreleased repairs
   before another public transition can qualify them. Preserve current manual
   `.30` and all private backups; no repeated local install is needed now.

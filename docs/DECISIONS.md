@@ -6,12 +6,19 @@ Preparation, sealing and worker startup share the immutable operation deadline.
 Do not add a shorter independent startup timer: the worker publishes its PID
 only after verifying sealed runtime and application files. Bound the remaining
 wait by both the original wall deadline and a monotonic deadline anchored before
-sealing; a backward clock change must not renew this call's budget. Reject a
-nonterminal worker first observed at expiry. Previously committed or aborted
-operations remain idempotent. Keep all file/signature validation and existing
+sealing. Persist the root-generated monotonic deadline and kernel boot-session
+identity in the private manifest-bound journal, and carry that same bound across
+sealing, worker validation, retries and decisions. A backward clock change must
+not renew it. Reject publication or first activation mutation after expiry.
+A missing/invalid lease or different boot session selects abort for an undecided
+operation; durable committed or aborted decisions still finish, including legacy
+journals with their original manifest hash. Reject a nonterminal worker first
+observed at expiry. Keep all file/signature validation and existing
 uncertain-authorization cancellation behavior; a longer valid startup is not
 permission to publish readiness early or extend the transaction. The fix must
 be present in the originating daemon that supplies the sealed worker.
+The disposable packaged trigger uses the same original deadline, with a separate
+bounded grace only to terminate/reap its child after an uncertain outcome.
 
 ### 2026-10-20: measure steady idle after startup work
 

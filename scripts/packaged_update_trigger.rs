@@ -9,9 +9,12 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const PREPARATION_LEASE_LIMIT: Duration = Duration::from_secs(300);
+const AUTHORIZATION_CLEANUP_LIMIT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -144,11 +147,69 @@ fn authorization_exit(code: Option<i32>) -> AuthorizationOutcome {
     }
 }
 
+fn unix_seconds() -> u64 {
+    // A clock before the epoch cannot establish a live authorization lease.
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|time| time.as_secs())
+        .unwrap_or(u64::MAX)
+}
+
+fn authorization_remaining(
+    deadline_unix: u64,
+    started_unix: u64,
+    elapsed: Duration,
+    now_unix: u64,
+) -> Duration {
+    Duration::from_secs(deadline_unix.saturating_sub(started_unix))
+        .min(PREPARATION_LEASE_LIMIT)
+        .saturating_sub(elapsed)
+        .min(Duration::from_secs(deadline_unix.saturating_sub(now_unix)))
+}
+
+fn wait_for_authorization(
+    mut remaining: impl FnMut() -> Duration,
+    mut poll: impl FnMut() -> std::io::Result<Option<ExitStatus>>,
+    mut sleep: impl FnMut(Duration),
+) -> Result<ExitStatus, String> {
+    loop {
+        let budget = remaining();
+        if budget.is_zero() {
+            return Err("root preparation lease expired".into());
+        }
+        match poll().map_err(|error| format!("root preparation wait failed: {error}"))? {
+            Some(status) => {
+                // A completed child first observed after expiry is not ready.
+                if remaining().is_zero() {
+                    return Err("root preparation lease expired".into());
+                }
+                return Ok(status);
+            }
+            None => sleep(budget.min(Duration::from_millis(100))),
+        }
+    }
+}
+
 fn authorize(identity: &daemon_update::PrepareIdentity) -> AuthorizationOutcome {
     let argument = match serde_json::to_string(identity) {
         Ok(value) => value,
         Err(error) => return AuthorizationOutcome::NotExecuted(error.to_string()),
     };
+    // Include spawn time in the immutable preparation budget, and never grant
+    // another full lease when the clock moves backwards.
+    let started = Instant::now();
+    let started_unix = unix_seconds();
+    let remaining = || {
+        authorization_remaining(
+            identity.prepare_deadline_unix,
+            started_unix,
+            started.elapsed(),
+            unix_seconds(),
+        )
+    };
+    if remaining().is_zero() {
+        return AuthorizationOutcome::NotExecuted("preparation lease expired before spawn".into());
+    }
     let mut child = match Command::new("/usr/bin/sudo")
         .args([
             "-n",
@@ -164,19 +225,20 @@ fn authorize(identity: &daemon_update::PrepareIdentity) -> AuthorizationOutcome 
         Ok(child) => child,
         Err(error) => return AuthorizationOutcome::Uncertain(error.to_string()),
     };
-    let deadline = Instant::now() + Duration::from_secs(90);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return authorization_exit(status.code()),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
-            result => {
-                // Killing sudo cannot prove a privileged descendant stopped.
-                // The production immutable lease/reconciliation remains in force.
-                let _ = child.kill();
-                return AuthorizationOutcome::Uncertain(format!(
-                    "root preparation did not finish within its bound: {result:?}"
-                ));
-            }
+    match wait_for_authorization(remaining, || child.try_wait(), thread::sleep) {
+        Ok(status) => authorization_exit(status.code()),
+        Err(error) => {
+            // This grace is only for terminating/reaping our child. It cannot
+            // make an expired preparation successful or renew its root lease.
+            // Killing sudo does not prove privileged descendants have stopped.
+            let cleanup_started = Instant::now();
+            let _ = child.kill();
+            let _ = wait_for_authorization(
+                || AUTHORIZATION_CLEANUP_LIMIT.saturating_sub(cleanup_started.elapsed()),
+                || child.try_wait(),
+                thread::sleep,
+            );
+            AuthorizationOutcome::Uncertain(error)
         }
     }
 }
@@ -342,6 +404,8 @@ pub fn main() {
 mod tests {
     use super::*;
     use base64::Engine;
+    use std::cell::Cell;
+    use std::os::unix::process::ExitStatusExt;
 
     #[test]
     fn only_disposable_console_user_can_prepare() {
@@ -373,6 +437,95 @@ mod tests {
                 AuthorizationOutcome::Uncertain(_)
             ));
         }
+    }
+
+    #[test]
+    fn preparation_completed_after_ninety_seconds_still_uses_original_lease() {
+        let elapsed = Cell::new(Duration::ZERO);
+        let status = wait_for_authorization(
+            || authorization_remaining(1300, 1000, elapsed.get(), 1000 + elapsed.get().as_secs()),
+            || Ok((elapsed.get() >= Duration::from_secs(150)).then(|| ExitStatus::from_raw(0))),
+            |duration| elapsed.set(elapsed.get() + duration),
+        )
+        .unwrap();
+        assert_eq!(elapsed.get(), Duration::from_secs(150));
+        assert!(matches!(
+            authorization_exit(status.code()),
+            AuthorizationOutcome::Completed
+        ));
+    }
+
+    #[test]
+    fn preparation_wait_preserves_remaining_lease_across_clock_changes() {
+        for (wall_shift, expected_seconds) in [(0i64, 7), (-600, 7), (600, 2)] {
+            let elapsed = Cell::new(Duration::ZERO);
+            let result = wait_for_authorization(
+                || {
+                    let seconds = elapsed.get().as_secs();
+                    let shift = if seconds >= 2 { wall_shift } else { 0 };
+                    authorization_remaining(
+                        1007,
+                        1000,
+                        elapsed.get(),
+                        (1000 + seconds as i64 + shift) as u64,
+                    )
+                },
+                || Ok(None),
+                |duration| elapsed.set(elapsed.get() + duration),
+            );
+            assert_eq!(result.unwrap_err(), "root preparation lease expired");
+            assert_eq!(elapsed.get(), Duration::from_secs(expected_seconds));
+        }
+    }
+
+    #[test]
+    fn expired_preparation_never_polls_and_future_clock_cannot_grant_extra_lease() {
+        assert_eq!(
+            authorization_remaining(u64::MAX, 1000, Duration::ZERO, 1000),
+            PREPARATION_LEASE_LIMIT
+        );
+        let result = wait_for_authorization(
+            || authorization_remaining(1000, 1000, Duration::ZERO, 1000),
+            || panic!("expired preparation must not poll a child"),
+            |_| panic!("expired preparation must not wait"),
+        );
+        assert_eq!(result.unwrap_err(), "root preparation lease expired");
+    }
+
+    #[test]
+    fn child_success_first_observed_after_expiry_stays_uncertain() {
+        let elapsed = Cell::new(Duration::ZERO);
+        let result = wait_for_authorization(
+            || authorization_remaining(1007, 1000, elapsed.get(), 1000),
+            || {
+                elapsed.set(Duration::from_secs(7));
+                Ok(Some(ExitStatus::from_raw(0)))
+            },
+            |_| panic!("completed child should not sleep"),
+        );
+        assert_eq!(result.unwrap_err(), "root preparation lease expired");
+    }
+
+    #[test]
+    fn child_poll_failure_does_not_consume_a_new_preparation_budget() {
+        let result = wait_for_authorization(
+            || Duration::from_secs(300),
+            || Err(std::io::Error::other("fixture wait failure")),
+            |_| panic!("poll failure should not sleep"),
+        );
+        assert!(result.unwrap_err().contains("fixture wait failure"));
+    }
+
+    #[test]
+    fn child_cleanup_has_its_own_short_bound_even_if_child_never_exits() {
+        let elapsed = Cell::new(Duration::ZERO);
+        assert!(wait_for_authorization(
+            || AUTHORIZATION_CLEANUP_LIMIT.saturating_sub(elapsed.get()),
+            || Ok(None),
+            |duration| elapsed.set(elapsed.get() + duration),
+        )
+        .is_err());
+        assert_eq!(elapsed.get(), Duration::from_secs(5));
     }
 
     #[test]
