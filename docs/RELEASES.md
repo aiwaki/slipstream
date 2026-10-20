@@ -326,6 +326,15 @@ The public `.30` preview remains available for manual DMG installation while
 these checks are completed. Its candidate, root, packaged, readiness and public
 delivery results remain reusable; no new release is needed for harness changes.
 
+The harness keeps evidence private with parent `umask 077`, but launches the
+normal OLD process with child-only `umask 022`. The report mask must not alter
+the application under observation. Run39430167830/2 reached the real update
+action, then exposed this fixture leak: the extractor inherited `077` and
+created inaccessible staged children despite correct signed archive modes.
+Changing the launch condition does not repair or qualify the released extractor
+under custom restrictive masks. The permission validator remains unchanged;
+never chmod signed archives or staged product files to make this check pass.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF

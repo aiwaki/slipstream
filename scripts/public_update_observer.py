@@ -89,7 +89,13 @@ class PublicInitiator:
                                        "signal_sent_by_driver": False})
 
     def retain_public_diagnostic(self):
-        self.retain_completion_diagnostic()
+        if self.last_journal is not None:
+            self.retain_completion_diagnostic()
+        else:
+            self.record("completion_diagnostic", {"journal_observed": False,
+                "paths_present": {"journal": os.path.lexists(self.journal_path),
+                                  "ack": os.path.lexists(self.ack_path)},
+                "watchdog": "not_checked_before_journal"})
         self.record("public_completion", {"original_exited": getattr(self, "original_exited", False),
             "original_returncode": self.original_process.poll() if hasattr(self, "original_process") else None,
             "root_phase": self.root_status.get("phase") if self.root_status else None,

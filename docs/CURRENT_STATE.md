@@ -15,8 +15,9 @@ Protected readiness39417627050/1 passed8 Safari/Chrome cases, transport3/3 and
 Public evidence: `output/updater-daemon-identity/preview30-public-verification/`.
 Receipt SHA256 `1dd881ff2d34847b045a65d8717daa75ed7eb2f54732168ecf9dc622806590c0`.
 Parent verified all18 referenced evidence hashes and read both canonical reports.
-Use the manual DMG for this preview. Public normal tray discovery/menu/admin/Quit
-and public installed update/forced rollback remain unqualified. No local product
+Use the manual DMG for this preview. Public discovery and the exact-version
+menu action were observed in run39430167830/2. Public installed update, admin
+authorization, normal Quit and forced rollback remain unqualified. No local product
 execution, native build, .app extraction or workstation installation occurred.
 The broader goal remains active; this preview publication milestone is complete.
 
@@ -42,15 +43,26 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
 Local branch `codex/public-preview30-update-qualification`, HEAD
-`3399c955228d827925093629a82fa1fea0cc8eeb`. PR407 is MERGED into main
+`4913cb636902eb900f59b1ddc93f8e4826a146a7`. PR407 is MERGED into main
 `86dd9393f671120f9ad6adb887ebb0e29d56467b`; both trees equal
 `a14e9767b2fb62ccdc7745ecfb026b9ff148e5d5`. Version is `.30`.
 The historical root checkout is a locator; preserve its dirty user files.
 Evidence paths below are relative to `output/updater-daemon-identity/`.
 
-Current next work: run the prepared public UI harness against actual OLD `.29`
-normal tray -> public `.30` discovery and menu activation, reusing the existing
-schema2/root/ACK/rollback observers. No product source has changed.
+Current next work: one hosted commit-path execution after the reviewed fixture
+launch correction. It reuses the same signed OLD/public NEW and all green
+prerequisites; this is not a quota-reset retry or candidate rebuild.
+Run39430167830/2 reached genuine discovery/menu activation, but OLD refused its
+staging tree before authorization: the new driver set umask077 for private
+reports and accidentally passed it to the ordinary app. The corrected Popen
+sets child-only umask022; evidence retains077. Three changed-path tests passed,
+including a real inert Python child through PublicMenu.launch and the absent-
+journal diagnostic. Independent review and parent diff/state checks passed.
+Log: `public-preview30-ui/umask-launch-tests.log`, SHA256
+`01c9dcf6ee84ef02e28f54b32aeeefecb1edd421d9d58d241e73908b6d22762a`.
+The earlier green33/22/16 scoped tests are reused. Restrictive umask remains a
+known limitation in the shipped extractor; this fixture correction does not
+fix the product for every custom umask. No local native/product execution.
 `app_update_implementation` owns public Python drivers and focused tests;
 `explain_remaining_errors` owns the hosted-only workflow;
 `coordinated_update_review` reviews authorization and observer boundaries.
@@ -76,7 +88,7 @@ and corrected the phase boundary before the first menu-open action.
 Workflow actionlint, Python syntax and project-state continuity checks passed.
 Candidate/full/native/readiness gates are not rerun for these observer changes.
 
-First public UI run39428074672/1 FAILED on exact harness3399c955 above,
+First public UI run39428074672/1 FAILED on harness3399c955,
 workflow385683802, mode `commit`. All preparation passed. Actual OLD logged
 `preview discovery returned HTTP 403 Forbidden`; no update offer/click or
 transaction started (identity=null, transaction_observed=false). Cleanup passed,
@@ -98,6 +110,41 @@ inject credentials into the app or repeat the pre-ACK case before commit succeed
 Focused driver33 and visibility22 pure tests passed before first hosted run;
 independent source review corrected the menu phase and owned zombie/reap race.
 `public-preview30-ui/prepush-review.json` records the first harness hashes.
+Second diagnostic run39430167830/1 FAILED before offer/click; all preparation
+passed and cleanup_errors=[]. Exact harness4913cb above, source86dd, unchanged
+pair. Parent verified29 evidence hashes; receipt
+`public-preview30-ui/run39430167830-receipt.json`, SHA256
+`edaca9ee1e4942cdf2e2c960043f16751b74a61ca7f87c4b67c30c95c1a1563c`.
+The separate after-failure first-page probe returned403, limit60, remaining0,
+message `API rate limit exceeded`, reset1792503110 (2026-10-20T13:31:50Z).
+The original app log contains only403 (its failed page is unknown). This proves
+anonymous API quota exhaustion for the diagnostic sample on that hosted runner,
+not a failed app replacement. Public discovery/upgrade remains unqualified.
+Watcher7128 and one artifact download12268036949 are terminal. Next one retry
+is justified only after the reported quota reset; reuse exact same harness and
+candidates, do not modify the product or inject an API token into it.
+The reported reset elapsed and the one quota-reset retry ran39430167830/2,
+exact harness4913cb, commit mode. It is terminal FAILURE. Genuine background
+discovery persisted `.30` and one enabled exact-version AXPress returned0.
+OLD then logged `bundle directory lacks safe cross-owner access`; no app/root
+journal or authorization child was observed, and OLD stayed alive. The driver
+retained the uncertain post-click outcome for disposable runner destruction:
+cleanup was NOT proved. A secondary absent-journal diagnostic TypeError does
+not replace the earlier product refusal. Watcher38428 is terminal; artifact
+12268617668 was downloaded once. Parent verified all33 receipt file hashes:
+`public-preview30-ui/run39430167830-attempt2-receipt.json`, SHA256
+`e46c3efde6458e8327ca5c24d5015d310289131b15818e91a1129dd5eed5546a`.
+No further quota-reset retry is authorized by this checkpoint.
+
+Two independent source reviews established the fixture cause: driver main sets
+umask077, and the ordinary OLD Popen inherited it. Production extraction uses
+create_dir_all and OpenOptions.mode, so signed755 directories become0700 and
+signed644 files0600 under that mask. bundle_tree_sha256 rejects the resulting
+stage before journal/admin. Read-only archive metadata confirms all897 entries
+are correctly packaged (90 directories0755,736 files0644,71 files0755). The
+narrow fix must set the normal OLD child launch mask explicitly to022 while
+keeping reports private. Do not chmod product staging trees or weaken the
+validator. Product restrictive-umask robustness is still an explicit limitation.
 
 - Corrected OLD `.29` is authenticated and its complete exact-main CI/audit
   passed: source `4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37`,

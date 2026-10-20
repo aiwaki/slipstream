@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import textwrap
 from types import SimpleNamespace
 
 import pytest
@@ -22,11 +23,13 @@ from test_packaged_update_observer import (journal, IDENTITY, EXPECTED, STATUSES
 
 @pytest.fixture(autouse=True)
 def no_native(monkeypatch):
+    python_process = SimpleNamespace(start=subprocess.Popen, kill=os.kill)
     def forbidden(*_args, **_kwargs):
         pytest.fail("native command/signal forbidden in public fixture")
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(os, "kill", forbidden)
+    return python_process  # Only the explicit inert-Python launch regression uses this.
 
 
 def original(target):
@@ -162,6 +165,20 @@ def test_commit_accepts_complete_real_evidence(journal, tmp_path):
     assert value.wait_transaction(clock=lambda: 0)["decision"] == "commit"
 
 
+def test_no_journal_timeout_preserves_actual_failure_and_useful_diagnostic(journal, tmp_path):
+    value = public_backend(journal, tmp_path)
+    value.original_process = SimpleNamespace(poll=lambda: None)
+    value.deadline = 90
+    with pytest.raises(Refused, match="normal public update deadline exhausted"):
+        value.wait_transaction(clock=lambda: 1)
+    completion = next(event["value"] for event in value.events if event["kind"] == "completion_diagnostic")
+    assert completion == {"journal_observed": False,
+        "paths_present": {"journal": False, "ack": False}, "watchdog": "not_checked_before_journal"}
+    assert value.events[-1]["kind"] == "public_completion"
+    assert value.events[-1]["value"]["app_phase"] is None
+    assert value.events[-1]["value"]["root_phase"] is None
+
+
 def ax_report(process, executable, *, pressed=False):
     title = f"Install Slipstream {menu.VERSION}…"
     return {"status": "update_pressed" if pressed else "inspected",
@@ -212,13 +229,64 @@ def test_launch_is_ordinary_executable_with_no_flags_or_ci_env(journal, tmp_path
     ui = menu.PublicMenu(value)
     calls = []
     def start(argv, **kwargs):
-        calls.append((argv, kwargs["env"]))
+        calls.append((argv, kwargs["env"], kwargs["umask"]))
         return SimpleNamespace(pid=111)
     (tmp_path / "normal-old-tray.log").unlink()
     ui.launch(start=start)
     ui.close()
-    assert calls == [([str(value.target / "Contents/MacOS/slipstream")], value.env)]
+    assert calls == [([str(value.target / "Contents/MacOS/slipstream")], value.env, 0o022)]
     assert captured == [111]
+
+
+def test_normal_launch_child_permissions_do_not_inherit_private_driver_umask(tmp_path, no_native):
+    # Isolate the private umask in an inert Python driver, not the pytest process.
+    # It invokes the real PublicMenu.launch/Popen boundary with a Python fixture
+    # executable at the expected relative path; no Slipstream payload is used.
+    script = textwrap.dedent("""
+        import json, os, stat, sys
+        from pathlib import Path
+        from types import SimpleNamespace
+        sys.path.insert(0, sys.argv[1])
+        from public_update_menu_smoke import PublicMenu
+        root = Path(sys.argv[2])
+        executable = root / "inert-python/Contents/MacOS/slipstream"
+        executable.parent.mkdir(parents=True)
+        executable.write_text("#!" + sys.executable + "\\n"
+            "import os\\nfrom pathlib import Path\\n"
+            "p = Path(os.environ['FIXTURE_ROOT']) / 'child-dir'\\np.mkdir()\\n"
+            "(p / 'data').write_text('inert')\\n")
+        executable.chmod(0o755)
+        os.umask(0o077)
+        backend = SimpleNamespace(target=root / "inert-python",
+            args=SimpleNamespace(output_dir=root),
+            env={"FIXTURE_ROOT": str(root)}, capture_original=lambda child: None)
+        menu = PublicMenu(backend)
+        child = menu.launch()
+        try:
+            assert child.wait(timeout=5) == 0
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+            menu.close()
+        parent_umask = os.umask(0o077)
+        (root / "parent-report").write_text("private")
+        modes = {name: stat.S_IMODE((root / name).stat().st_mode)
+                 for name in ("child-dir", "child-dir/data", "normal-old-tray.log", "parent-report")}
+        print(json.dumps({"parent_umask": parent_umask, "modes": modes}))
+    """)
+    child = no_native.start([sys.executable, "-c", script, str(REPO / "scripts"), str(tmp_path)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        stdout, stderr = child.communicate(timeout=15)
+    finally:
+        if child.poll() is None:
+            no_native.kill(child.pid, 9)
+            child.wait(timeout=5)
+    assert child.returncode == 0, stderr.decode()
+    assert json.loads(stdout) == {"parent_umask": 0o077, "modes": {
+        "child-dir": 0o755, "child-dir/data": 0o644,
+        "normal-old-tray.log": 0o600, "parent-report": 0o600}}
 
 
 def test_click_is_async_one_shot_and_outcome_required(journal, tmp_path):

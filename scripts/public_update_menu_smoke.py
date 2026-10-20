@@ -120,7 +120,9 @@ class PublicMenu:
         self.handles.append(log)
         backend.old_launch_attempted = True
         # Ordinary executable, no flags, injected updater environment or adapter.
-        child = start([str(executable)], env=backend.env, stdout=log, stderr=subprocess.STDOUT)
+        # Keep the driver's private-report umask out of the normal app process.
+        child = start([str(executable)], env=backend.env, stdout=log, stderr=subprocess.STDOUT,
+                      umask=0o022)
         backend.original_process = child
         backend.capture_original(child)
         return child
