@@ -51,6 +51,7 @@ def public_backend(journal, tmp_path):
     value.tproxy = SimpleNamespace(_daemon_update_identity=lambda item: item,
         _daemon_update_tree=lambda *_a, **_k: EXPECTED["old"]["bundle_tree_sha256"])
     (tmp_path / "normal-old-tray.log").touch()
+    (tmp_path / "normal-old-tray.log").chmod(0o600)
     return value
 
 
@@ -351,3 +352,143 @@ def test_zombie_exit_between_poll_and_ps_reaps_then_rechecks_identity(journal, t
     else:
         value.read_receipt()
         assert value.original_exited
+
+
+class DiscoveryResponse:
+    def __init__(self, status=403, headers=None, body=b'{"message":"API rate limit exceeded"}'):
+        from email.message import Message
+        self.status, self.body, self.read_sizes = status, body, []
+        self.headers = Message()
+        for key, value in (headers or {}).items():
+            self.headers[key] = value
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def read(self, size):
+        self.read_sizes.append(size)
+        return self.body[:size]
+
+
+def diagnostic_opener(response):
+    calls = []
+    def opened(request, timeout):
+        calls.append((request, timeout))
+        return response
+    return SimpleNamespace(open=opened), calls
+
+
+def test_discovery_diagnostic_matches_public_request_without_auth_or_redirects(monkeypatch):
+    response = DiscoveryResponse(headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Limit": "60",
+        "X-RateLimit-Reset": "1792500000", "Retry-After": "10", "X-GitHub-Request-Id": "public-id",
+        "Content-Type": "application/json", "Set-Cookie": "do-not-retain", "Authorization": "do-not-retain"})
+    opener, calls = diagnostic_opener(response)
+    handlers = []
+    def build(*values):
+        handlers.extend(values)
+        return opener
+    monkeypatch.setattr(menu.urllib.request, "build_opener", build)
+    monkeypatch.setenv("GH_TOKEN", "not-a-real-token")
+    monkeypatch.setenv("HTTPS_PROXY", "http://invalid.example")
+    result = menu.discovery_http_diagnostic()
+    assert len(calls) == 1
+    request, timeout = calls[0]
+    assert request.full_url == "https://api.github.com/repos/aiwaki/slipstream/releases?per_page=10&page=1"
+    assert request.method == "GET" and timeout == 5
+    assert {name.lower(): value for name, value in request.header_items()} == {
+        "user-agent": "Slipstream-Updater/1", "accept": "application/vnd.github+json", "x-github-api-version": "2022-11-28"}
+    assert handlers[0].proxies == {}
+    assert isinstance(handlers[1], menu.NoRedirect)
+    assert handlers[1].redirect_request(None, None, 302, None, {}, "https://invalid.example") is None
+    assert set(result["headers"]) == set(menu.DIAGNOSTIC_HEADERS)
+    assert result["rate_limit_indicated_by_probe"] is True
+    assert result["original_page_unknown"] is True and result["authenticated"] is False
+    assert result["attempts"] == 1 and response.read_sizes == [16385]
+
+
+@pytest.mark.parametrize("status,headers,message,indicated", [
+    (403, {}, "Forbidden", False), (403, {"X-RateLimit-Remaining": "59"}, "Forbidden", False),
+    (429, {}, "secondary rate limit", True), (403, {"X-RateLimit-Remaining": "0"}, "Forbidden", True),
+    (200, {"X-RateLimit-Remaining": "0"}, "API rate limit exceeded", False),
+    (302, {"Location": "https://invalid.example"}, "Found", False)])
+def test_discovery_diagnostic_does_not_call_every_403_rate_limit(status, headers, message, indicated):
+    response = DiscoveryResponse(status, headers, json.dumps({"message": message}).encode())
+    opener, calls = diagnostic_opener(response)
+    result = menu.discovery_http_diagnostic(opener=opener)
+    assert len(calls) == 1 and result["status"] == status
+    assert result["rate_limit_indicated_by_probe"] is indicated
+    assert "location" not in result["headers"]
+
+
+def test_discovery_diagnostic_bounds_message_headers_and_body():
+    response = DiscoveryResponse(headers={"X-GitHub-Request-Id": "x" * 400},
+                                 body=json.dumps({"message": "m" * 900, "other": "omit"}).encode())
+    opener, _ = diagnostic_opener(response)
+    result = menu.discovery_http_diagnostic(opener=opener)
+    assert len(result["message"]) == 512 and len(result["headers"]["x-github-request-id"]) == 256
+    response = DiscoveryResponse(body=b"x" * 20000)
+    opener, _ = diagnostic_opener(response)
+    result = menu.discovery_http_diagnostic(opener=opener)
+    assert result["body_truncated"] and result["message"] is None and response.read_sizes == [16385]
+
+
+def test_discovery_diagnostic_transport_failure_is_fixed_and_not_retried():
+    calls = []
+    def opened(*_args, **_kwargs):
+        calls.append(True)
+        raise TimeoutError("freeform diagnostic must not be retained")
+    result = menu.discovery_http_diagnostic(opener=SimpleNamespace(open=opened))
+    assert calls == [True] and result["error_type"] == "TimeoutError" and result["status"] is None
+    assert "freeform" not in json.dumps(result)
+
+
+def test_logged_discovery_failure_probes_once_without_waiting_or_clicking(journal, tmp_path, monkeypatch):
+    value = public_backend(journal, tmp_path)
+    value.uid = os.getuid()
+    value.initiator = original(value.target)
+    value.original_process = SimpleNamespace(poll=lambda: None)
+    value.process_snapshot = lambda _pid: value.initiator
+    value.env = {"HOME": "/fixture", "PATH": "/usr/bin"}
+    value.deadline = 720
+    monkeypatch.setenv("GH_TOKEN", "not-a-real-token")
+    (tmp_path / "normal-old-tray.log").write_text(
+        "update discovery unavailable: preview discovery returned HTTP 403 Forbidden\n")
+    calls = []
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(stdout=b'{"kind":"after_failure_probe","status":200}')
+    value.run = run
+    ui = menu.PublicMenu(value)
+    def no_sleep(_seconds): pytest.fail("known discovery failure must not wait")
+    with pytest.raises(Refused, match="public discovery failed"):
+        ui.discover(clock=lambda: 0, sleep=no_sleep)
+    with pytest.raises(Refused, match="public discovery failed"):
+        ui.refuse_logged_discovery_failure()
+    assert len(calls) == 1
+    assert calls[0][0][-1] == "--diagnose-discovery" and "--press-update" not in calls[0][0]
+    assert calls[0][1] == {"timeout": 10, "env": value.env}
+    assert "GH_TOKEN" not in calls[0][1]["env"]
+    assert value.events[0]["value"]["http_status"] == 403
+    assert value.events[-1]["value"]["status"] == 200  # Later success cannot turn original failure into pass.
+
+
+@pytest.mark.parametrize("text", ["", "ordinary background startup\n",
+    "other update discovery unavailable: injected text\n", "update discovery unavailable: partial line"])
+def test_logged_discovery_diagnostic_requires_complete_owned_failure_line(journal, tmp_path, text):
+    value = public_backend(journal, tmp_path)
+    value.uid = os.getuid()
+    (tmp_path / "normal-old-tray.log").write_text(text)
+    value.run = lambda *_a, **_k: pytest.fail("no actual failure: no probe allowed")
+    ui = menu.PublicMenu(value)
+    ui.refuse_logged_discovery_failure()
+    assert not ui.discovery_diagnosed
+
+
+def test_logged_discovery_diagnostic_refuses_symlink_log_before_any_probe(journal, tmp_path):
+    value = public_backend(journal, tmp_path)
+    value.uid = os.getuid()
+    log = tmp_path / "normal-old-tray.log"
+    log.unlink()
+    other = private(tmp_path / "other.log", b"update discovery unavailable: failure\n")
+    log.symlink_to(other)
+    value.run = lambda *_a, **_k: pytest.fail("unsafe log must not trigger probe")
+    with pytest.raises(Refused):
+        menu.PublicMenu(value).refuse_logged_discovery_failure()

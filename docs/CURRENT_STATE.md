@@ -42,7 +42,7 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
 Local branch `codex/public-preview30-update-qualification`, HEAD
-`86dd9393f671120f9ad6adb887ebb0e29d56467b`. PR407 is MERGED into main
+`3399c955228d827925093629a82fa1fea0cc8eeb`. PR407 is MERGED into main
 `86dd9393f671120f9ad6adb887ebb0e29d56467b`; both trees equal
 `a14e9767b2fb62ccdc7745ecfb026b9ff148e5d5`. Version is `.30`.
 The historical root checkout is a locator; preserve its dirty user files.
@@ -75,6 +75,29 @@ interaction from background-invisibility claims. Parent source review caught
 and corrected the phase boundary before the first menu-open action.
 Workflow actionlint, Python syntax and project-state continuity checks passed.
 Candidate/full/native/readiness gates are not rerun for these observer changes.
+
+First public UI run39428074672/1 FAILED on exact harness3399c955 above,
+workflow385683802, mode `commit`. All preparation passed. Actual OLD logged
+`preview discovery returned HTTP 403 Forbidden`; no update offer/click or
+transaction started (identity=null, transaction_observed=false). Cleanup passed,
+cleanup_errors=[]. Visibility's missing terminal phase is secondary to this
+pre-install discovery stop, not a proved product window/focus defect.
+Single watcher session1353 and one artifact download12267166208 are terminal.
+Parent verified all29 evidence hashes in
+`public-preview30-ui/run39428074672-receipt.json`, SHA256
+`8f50631b746d91f51eeb5ddba80768a22dfe78c67475c372c7d14e76db040682`.
+The 403 alone does not establish rate limiting; product logs omit HTTP headers.
+Prepared next action: one diagnostic-enabled hosted run of the same unchanged
+candidates. An actual discovery failure now triggers one unauthenticated
+first-page sample, retaining allowlisted HTTP metadata and a bounded public
+message; it never changes the original failure into a pass. The extra request
+uses no token/proxy/redirect, is limited to10seconds and16KiB, and is not retried.
+Focused changed-path tests16 passed (32 unchanged cases deselected); independent
+review and parent readback passed. No product source or workflow changed. Do not
+inject credentials into the app or repeat the pre-ACK case before commit succeeds.
+Focused driver33 and visibility22 pure tests passed before first hosted run;
+independent source review corrected the menu phase and owned zombie/reap race.
+`public-preview30-ui/prepush-review.json` records the first harness hashes.
 
 - Corrected OLD `.29` is authenticated and its complete exact-main CI/audit
   passed: source `4c6209e3a0ceb1c099ec9f7ff63b2782aa410c37`,
