@@ -17,6 +17,81 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
+### Live qualification checkpoint, 2026-10-20
+
+PR403 and PR404 are merged. Corrected `.28` source
+`01fcd4c7d91043e58d7c777ebfc4a94264caa5fa` and ordinary `.29` source
+`087c540d837eb8c37a079c273e6d6a390f8a4f88` passed their complete exact-main
+CI/audit runs and signed-candidate authentication. The retained candidates are
+byte-distinct and independently bound; do not rebuild or download them again.
+Evidence below is relative to `output/updater-daemon-identity/`.
+
+- OLD CI39385463713/audit39385463601; receipt
+  `main403-verification/receipt.json` SHA256
+  `f711bf480f0269ba771c8a93a4169408b0a2b49ad2355c4224b30e8ddeccb4c1`.
+- NEW CI39387811737/audit39387811789; receipt
+  `main404-verification/receipt.json` SHA256
+  `011f9f1d5cf7e13b64c4dcbb1ce08db6fbbe4dbb0fd68e2ff7472c5520f35c1c`.
+- Root run39390234434 attempt1 passed both commit and crash-before-commit.
+  Canonical prerequisite validation and independent review confirmed NEW commit,
+  OLD restoration after the crash, rejection of a late commit after abort, and
+  empty cleanup errors. Receipt `root28-to29-qualification/receipt.json` SHA256
+  `b874ac1c9d9fb5eb52d75d7fea7253eb5ef0ed702b3090ece35d810a40af91ce`.
+- App run39391446170 attempt1 failed both cases at the observation deadline.
+  Watch46266 completed1. Both artifacts were downloaded once and verified
+  against GitHub transport digests; pair and root prerequisite match.
+  Failure receipt `app28-to29-qualification/failure-receipt.json` SHA256
+  `b27463e7775c8cf2be5e16eba3bc67e274548de55570d2247795ad62f495d665`.
+- Commit observed the real successor ACK, quiescent root commit and last app
+  journal phase acknowledged. The injected pre-ACK STOP/KILL observed quiescent
+  root abort and last app journal phase old_relaunched. Neither case proved
+  complete app cleanup; both require disposable runner destruction. Existing
+  event deduplication does not record journal absence, and no final launchd
+  snapshot was retained. These partial results do not identify the failed
+  completion predicate or prove a product cleanup fault.
+- Source review established an observer false negative: production removes the
+  LaunchAgent plist/journal/ACK before best-effort self-bootout and permits a
+  loaded, successfully exited watchdog. The old observer demanded job absence.
+  This defect is reproduced by a hermetic before/after test; missing terminal
+  diagnostics prevent attributing the historical run to it conclusively.
+- Repair branch `codex/packaged-terminal-observer` starts at main087c and changes
+  only observers, their source guard/driver/workflow, focused tests and docs.
+  Terminal proof now checks the exact exited watchdog, captured non-restarting
+  policy, absent files and available existing private lock. Preflight absence,
+  real ACK/restored OLD and root terminal proof remain mandatory. Timeout now
+  retains decisive terminal predicates. Independent observer review found no
+  blockers; its 157 scoped tests passed, including the prior failing case.
+- The separate source guard permits only an audited clean main descendant with
+  an explicit observer-only diff. It runs before dependencies/materialization
+  and again before installation. Harness SHA/tree/run/attempt are recorded
+  separately; signed NEW087c and root39390234434 remain unchanged. The 115
+  source/history, driver and workflow tests passed. Parent retained logs
+  `app28-to29-qualification/observer-{before,after}.log` and
+  `app28-to29-qualification/source-proof-tests.log`.
+- Independent review found no blockers in the complete observer/source-guard
+  diff. Project-state continuity, actionlint and whitespace checks passed.
+- PR405 first head `ff9da1f374a717e0466972d9f366ea2df8019da2` passed whole
+  CI39396219080 and audit39396219086; watch47290 completed0. An automated P2
+  correctly found that allowlisting the whole driver also allowed future changes
+  to prerequisite/install/cleanup. Merge was blocked and did not occur.
+- The follow-up pins full reviewed driver/workflow Git bytes by SHA256. Changes
+  to either now require an explicit reviewed pin update. Five new cases cover
+  exact acceptance and altered auth/install/cleanup/materializer commands;
+  the 120 source/driver/workflow tests passed. Reuse the unchanged157 observer
+  tests and green baseline; required exact-head CI remains necessary after push.
+  Both native app cases still need the repaired main harness. No other gate is
+  restarted and candidates/root proof remain unchanged.
+- Next: complete PR checks, merge the observer repair, then dispatch the two app cases once from that audited main harness
+  with the same ten inputs in `app28-to29-qualification/workflow-inputs.json`.
+  Reuse candidates and root proof. Do not repeat run39391446170 unchanged.
+  Public discovery, tray/admin and after-ACK gates remain separate.
+
+The following preparation record is historical; the live checkpoint above
+supersedes its pending statuses. No native code or application was executed on
+the workstation. Public preview `.24` and the user's installed app are unchanged.
+
+### Retained preparation record
+
 PR403 merged the PF/status observation repair at
 `01fcd4c7d91043e58d7c777ebfc4a94264caa5fa`. Its tree is identical to tested
 head `8959af1bc75a896c1fea91dbd8e9719c12487c31`; whole CI39384063074 and

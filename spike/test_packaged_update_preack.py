@@ -163,7 +163,7 @@ def terminal_backend(window):
     backend.args = SimpleNamespace(mode=fault.MODE)
     backend.root_status = {"phase":"aborted", "decision":"abort", "writer_quiescent":True}
     backend.ack = None; backend.receipt = {"prepared":True}; backend.initiator = {**process,"pid":111}
-    backend.watchdog_absent = lambda: True
+    backend.watchdog_finished = lambda: True
     backend.process_snapshot = lambda pid: None
     backend.observe_once = lambda: None
     backend.final_old_app = lambda: backend.events.append(("old-tree-tray", {}))
@@ -283,7 +283,7 @@ def restored(tmp_path,monkeypatch):
     backend.tray=backend.rollback_receipt=None; backend.events=[]
     backend.record=lambda name,value:backend.events.append((name,copy.deepcopy(value)))
     backend.process_snapshot=lambda pid:copy.deepcopy(old) if pid==555 else None
-    backend.watchdog_absent=lambda:True
+    backend.watchdog_finished=lambda:True
     backend.run=lambda argv,**kw:SimpleNamespace(returncode=0,stdout=b'555\n')
     backend.tproxy=SimpleNamespace(_daemon_update_tree=lambda *a,**kw:expected['old']['bundle_tree_sha256'],
         _DAEMON_UPDATE_REQUESTS=str(tmp_path/'requests'))
@@ -320,7 +320,7 @@ def test_incomplete_actual_rollback_proof_rejected(restored,change):
     elif change=='old_absent': backend.run=lambda *a,**kw:SimpleNamespace(returncode=1,stdout=b'')
     elif change=='old_zombie': old['state']='Z'
     elif change=='old_stopped': old['state']='T'
-    elif change=='watchdog': backend.watchdog_absent=lambda:False
+    elif change=='watchdog': backend.watchdog_finished=lambda:False
     elif change=='active_journal': write_private(backend.journal_path,receipt)
     elif change=='stage': backend.stage.mkdir()
     elif change=='backup': Path(receipt['backup']).mkdir()

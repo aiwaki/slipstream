@@ -125,7 +125,7 @@ class PreAckObserver(Observer):
                 "restored app tree differs from authenticated OLD")
         for path in (self.journal_path, self.ack_path, self.stage, Path(receipt["backup"]), self.agent):
             require(not os.path.lexists(path), "rollback cleanup incomplete: " + str(path))
-        require(self.watchdog_absent(), "rollback watchdog remains loaded")
+        require(self.watchdog_finished(), "rollback watchdog is not terminal")
         require(self.process_snapshot(self.fault_process["pid"]) is None,
                 "failed NEW PID remains or has been reused")
         result = self.run(["/usr/bin/pgrep", "-x", "slipstream"], check=False)
@@ -152,7 +152,7 @@ class PreAckObserver(Observer):
                     self.inject_pre_ack_exit()
             elif (journal is None and self.receipt is not None and root is not None
                   and root["phase"] == "aborted" and root["decision"] == "abort"
-                  and root["writer_quiescent"] is True and self.watchdog_absent()):
+                  and root["writer_quiescent"] is True and self.watchdog_finished()):
                 require(not same_process(self.initiator, self.process_snapshot(self.initiator["pid"])),
                         "trigger remains alive after rollback")
                 self.final_old_app()
@@ -161,6 +161,7 @@ class PreAckObserver(Observer):
                 return {"packaged_transaction_qualified": True, "public_pair_qualified": False,
                         "successor_exit_before_ack_rollback_qualified": True, "side": "old"}
             sleep(0.02)
+        self.retain_completion_diagnostic()
         raise Refused("pre-ACK rollback deadline exhausted; observation incomplete")
 
     def cleanup_rollback(self, *, send=None, clock=time.monotonic, sleep=time.sleep):

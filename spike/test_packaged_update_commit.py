@@ -156,29 +156,22 @@ def test_root_identity_binds_both_versions_and_all_transaction_hashes(tmp_path, 
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
 
 
-@pytest.mark.parametrize("head,workflow_sha", [("c", "c"), ("b", "c"), ("c", "b"), ("c", None)])
-def test_harness_requires_actual_checkout_and_workflow_sha_to_match_successor(tmp_path, monkeypatch, head, workflow_sha):
+def test_driver_verifies_candidate_source_without_rebinding_root_source(tmp_path, monkeypatch):
     _, pair, _ = fixture(tmp_path)
-    if workflow_sha is None:
-        monkeypatch.delenv("GITHUB_SHA", raising=False)
-    else:
-        monkeypatch.setenv("GITHUB_SHA", workflow_sha * 40)
+    proof = {"harness_source_sha": "d" * 40, "candidate_new_source_sha": "c" * 40}
     calls = []
-    def run(argv):
-        calls.append(argv)
-        return SimpleNamespace(stdout=(head * 40 + "\n").encode("ascii"))
-    backend = SimpleNamespace(args=SimpleNamespace(repo=tmp_path), run=run)
-    if head == workflow_sha == "c":
-        gate.verify_harness_source(backend, pair)
-    else:
-        with pytest.raises(Refused, match="exact NEW source"):
-            gate.verify_harness_source(backend, pair)
-    assert calls == ([["/usr/bin/git", "-C", str(tmp_path), "rev-parse", "HEAD"]] if workflow_sha == "c" else [])
+    def verify(repo, candidate):
+        calls.append((repo, candidate))
+        return proof
+    monkeypatch.setattr(gate, "verify_source", verify)
+    backend = SimpleNamespace(args=SimpleNamespace(repo=tmp_path))
+    assert gate.verify_harness_source(backend, pair) is proof
+    assert calls == [(tmp_path, pair["new"]["source_commit"])]
 
 
 @pytest.mark.parametrize("mode", ["commit", "kill-successor-before-ack"])
-@pytest.mark.parametrize("head,workflow_sha", [("b", "c"), ("c", "b")])
-def test_harness_source_mismatch_stops_main_before_artifact_or_install(tmp_path, monkeypatch, head, workflow_sha, mode):
+@pytest.mark.parametrize("mismatch", ["initial", "before_install"])
+def test_harness_source_mismatch_stops_main_before_artifact_or_install(tmp_path, monkeypatch, mismatch, mode):
     _, pair, _ = fixture(tmp_path)
     (tmp_path / "pair.json").write_text(json.dumps(pair))
     paths = {name: tmp_path / name for name in ("repo", "old-candidate-dir", "new-candidate-dir", "old-app",
@@ -186,12 +179,21 @@ def test_harness_source_mismatch_stops_main_before_artifact_or_install(tmp_path,
     for path in paths.values():
         path.mkdir()
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SHA", workflow_sha * 40)
     monkeypatch.setattr(gate, "guard", lambda: 501)
     monkeypatch.setattr(gate, "modules", lambda repo: (None, None))
+    calls = []
+    def verify(repo, candidate):
+        calls.append(candidate)
+        if mismatch == "initial":
+            raise ValueError("harness checkout differs from workflow SHA")
+        return {"harness_source_sha": ("c" if len(calls) == 1 else "d") * 40}
+    monkeypatch.setattr(gate, "verify_source", verify)
+    monkeypatch.setattr(gate, "prerequisite", lambda *args: {"source": "c" * 40})
+    def artifact(*args):
+        assert calls == ["c" * 40]
+        return {}
     backend = SimpleNamespace(expected={}, events=[], identity=None,
-        run=lambda argv: SimpleNamespace(stdout=(head * 40 + "\n").encode("ascii")),
-        artifact=lambda *a: pytest.fail("artifact processing before source proof"))
+        run=lambda argv, **kwargs: SimpleNamespace(stdout=b"{}"), artifact=artifact)
     def observer(args, *unused):
         backend.args = args
         return backend
@@ -206,7 +208,9 @@ def test_harness_source_mismatch_stops_main_before_artifact_or_install(tmp_path,
              "--root-gate-run-id", "200", "--root-gate-attempt", "2", "--gh", "/unused/gh", "--mode", mode]
     assert gate.main(argv) == 2
     result = json.loads(output.read_text())
-    assert "exact NEW source" in result["reason"] and result["cleanup_errors"] == []
+    assert ("workflow SHA" if mismatch == "initial" else "source changed before installation") in result["reason"]
+    assert len(calls) == (1 if mismatch == "initial" else 2)
+    assert result["cleanup_errors"] == []
     assert result["mode"] == mode
     assert not result["transaction_observed"] and cleaned == [backend]
 

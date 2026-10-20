@@ -41,6 +41,18 @@ def test_two_isolated_hosted_cases_no_failfast_or_shared_runtime():
     assert 'name: packaged-update-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}' in SOURCE
 
 
+def test_source_proof_precedes_dependencies_and_all_candidate_handling():
+    assert 'fetch-depth: 64' in SOURCE
+    preflight = SOURCE.index('id: source_preflight')
+    assert SOURCE.index('id: checkout') < preflight < SOURCE.index('id: python')
+    for step in ('dependencies', 'old_download', 'new_download', 'materialize', 'trigger', 'qualify'):
+        assert preflight < SOURCE.index('id: ' + step)
+    assert 'CANDIDATE_NEW_SOURCE: ${{ inputs.new_source_sha }}' in SOURCE
+    assert '--candidate-source "$CANDIDATE_NEW_SOURCE"' in SOURCE
+    assert '${{ runner.temp }}/app-observer-source.json' in SOURCE
+    assert 'OUTCOME_SOURCE_PREFLIGHT: ${{ steps.source_preflight.outcome }}' in SOURCE
+
+
 def test_existing_candidate_authentication_and_old_source_build_commands_unchanged():
     start='      - name: Authenticate pins and unpack exact candidates\n'
     end='      - name: Observe '
@@ -71,6 +83,7 @@ def test_actual_always_writer_retains_exact_case_and_harness_source(tmp_path,mon
     env={'RUNNER_TEMP':str(tmp_path),'OUTCOME_RUN_SHA':'a'*40,'OUTCOME_RUN_ID':'111',
          'OUTCOME_RUN_ATTEMPT':'2','OUTCOME_MODE':mode,'OUTCOME_JOB_STATUS':status,
          'OUTCOME_CHECKOUT':'failure' if status=='failure' else 'success',
+         'OUTCOME_SOURCE_PREFLIGHT':'skipped' if status=='failure' else 'success',
          'OUTCOME_QUALIFY':'skipped' if status=='failure' else 'success'}
     monkeypatch.setattr(os,'environ',env)
     exec(compile(code,'workflow-outcome','exec'),{})
@@ -79,6 +92,7 @@ def test_actual_always_writer_retains_exact_case_and_harness_source(tmp_path,mon
     assert result['run_id']=='111' and result['run_attempt']=='2'
     assert result['job_status_before_upload']==status
     assert result['steps']['qualify']==env['OUTCOME_QUALIFY']
+    assert result['steps']['source_preflight']==env['OUTCOME_SOURCE_PREFLIGHT']
     assert set(result)=={'schema_version','source_sha','run_id','run_attempt','mode','job_status_before_upload','steps'}
 
 
