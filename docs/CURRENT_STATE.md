@@ -43,31 +43,43 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
 Local branch `codex/public-preview30-update-qualification`, base harness
-`527ec2975286ababe2678a36af5130d852e44e03`; the next scoped commit adds only the
-standalone authorization probe and this checkpoint. PR407 is MERGED into main
+`527ec2975286ababe2678a36af5130d852e44e03`. Current probe harness HEAD
+`6fb6a60e5f37ba725a985b72abd5df2f35bfe6da` adds only the standalone diagnostic
+and checkpoint; product/candidate bytes are unchanged. PR407 is MERGED into main
 `86dd9393f671120f9ad6adb887ebb0e29d56467b`; both trees equal
 `a14e9767b2fb62ccdc7745ecfb026b9ff148e5d5`. Version is `.30`.
 The historical root checkout is a locator; preserve its dirty user files.
 Evidence paths below are relative to `output/updater-daemon-identity/`.
 
-Current next work: one standalone, bounded hosted authorization capability
-probe, not another full update run. Corrected public run39435615487/1 is terminal:
-discovery/menu and staging passed, but authorization/prepare did not finish.
-The harmless fixed `/usr/bin/id -u` probe uses ordinary AppleScript admin
-execution, a30-second bound, metadata/read-only AX roles, no credentials or
-security-policy changes. It cannot qualify production prepare. Script, focused
-hermetic tests and separate workflow are reviewed and ready for one branch-push
-execution. All33 pure tests passed; actionlint and independent source review
-passed. The reviewer caught a swallowed outer-deadline exception before launch;
-it is fixed and covered. Evidence owner will watch/download once; parent owns
-docs and receipt verification.
-No product/candidate rebuild or local native execution. The existing public
-workflow must not be triggered by probe-only changes.
+Current next work: the ordinary public update needs one attended validation on
+an appropriate disposable Mac. Stop unattended full-updater retries: the same
+hosted environment did not complete even the standalone harmless administrator
+request. Manual `.30` delivery is complete; public update/admin/Quit/rollback
+remain explicitly unqualified. No workstation installation is authorized by this
+checkpoint, and no credentials/security-policy workaround is part of this work.
 
-Probe test log: `public-preview30-ui/authorization-probe-tests.log`, SHA256
+Standalone probe39440467834/1 is terminal FAILURE on harness6fb6a60e5, the only
+workflow triggered by that scoped push. The real fixed `id -u` administrator
+request timed out at25.058seconds; no root UID or stderr was returned. It killed
+and reaped only its own osascript1237 (returncode-9). GUI/AX preflight passed,
+but all three role observations failed `process_executable_mismatch`; a visible
+system dialog, its controls and the reason for pending authorization are unknown.
+This is the probe's deadline, not a proved macOS timeout or user cancellation.
+It demonstrates the stalled capability without executing product prepare; it
+neither qualifies nor disproves the production update transaction.
+
+Receipt: `public-preview30-ui/authorization-probe-39440467834/receipt.json`, SHA256
+`165fcd38ba50ba915c1a585ce0fda468a8da5651a9e56aafb934011157c24820`.
+Parent verified all10 evidence hashes and read the original probe report.
+Artifact12274291258 was downloaded once; watcher11003 is terminal. No retry,
+full update run, native build, local product execution or workstation mutation.
+33 hermetic probe tests, actionlint and independent source review passed before
+execution. Test log: `public-preview30-ui/authorization-probe-tests.log`, SHA256
 `25dd78ee05bffb971ea7e8b983c20ad460ad54448a811748d3f768ac7d4f37be`.
 Script SHA256 `2cecd82dcb5a0caec664b1c0641fbaad59a589beda45b4e61ec8ead680bec59d`.
-The probe-only push cannot trigger the full public updater workflow.
+The reviewer caught a swallowed outer-deadline exception before launch; it was
+fixed and covered. Do not expand the observer merely to repeat the same blocked
+unattended boundary. Preserve all unchanged candidate/root/app/readiness evidence.
 
 The preceding goal turn made progress: the reviewed driver correction and real
 Python-child regression were committed527ec and run39435615487 executed. This

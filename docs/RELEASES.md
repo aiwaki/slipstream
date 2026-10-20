@@ -344,6 +344,14 @@ product or changing credentials, users, TCC or authorization policy. Its success
 does not qualify the production update transaction. Do not repeat the full
 update path until this observation changes the next action.
 
+Standalone probe39440467834/1 also did not finish the harmless administrator
+request within its25-second work budget. Its own child was killed/reaped; no
+root UID was returned. GUI/AX preflight succeeded, but system-agent identity
+checks prevented all role observations, so no visible prompt was established.
+Stop unattended public-update retries in this environment. The remaining normal
+public update gate needs attended validation on an appropriate disposable Mac;
+manual `.30` delivery remains available and does not claim that gate passed.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
