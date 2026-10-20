@@ -831,6 +831,100 @@ def test_prepare_seals_actual_installed_worker_before_index_and_releases_lock_be
     assert retried["manifest_sha256"] == private["manifest_sha256"]
 
 
+@pytest.fixture
+def starting_worker(prepared_filesystem, monkeypatch):
+    """Delay the worker's validated receipt without waiting in real time."""
+    from contextlib import contextmanager
+    value, root, boots, held = prepared_filesystem
+    clock = SimpleNamespace(elapsed=0.0, offset=0.0, rollback_at=None,
+                            worker_at=None, worker_published=False, sealing_delay=0.0)
+    monkeypatch.setattr(tproxy.time, "time", lambda: 4102444600 + clock.elapsed + clock.offset)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: clock.elapsed)
+
+    @contextmanager
+    def lock(*args, **kwargs):
+        held.append(True)
+        try:
+            yield
+        finally:
+            held.pop()
+    monkeypatch.setattr(tproxy, "_installer_operation_lock", lock)
+    bootstrap = tproxy._daemon_update_bootstrap
+
+    def delayed_bootstrap(nonce):
+        bootstrap(nonce)
+        clock.elapsed += clock.sealing_delay
+    monkeypatch.setattr(tproxy, "_daemon_update_bootstrap", delayed_bootstrap)
+
+    def sleep(seconds):
+        assert boots == [NONCE] and not held
+        clock.elapsed = round(clock.elapsed + seconds, 9)
+        if clock.rollback_at is not None and clock.elapsed >= clock.rollback_at:
+            clock.offset = -3600
+        if (not clock.worker_published and clock.worker_at is not None
+                and clock.elapsed >= clock.worker_at):
+            current = tproxy._update_read_json(root / NONCE / "private/journal.json")
+            tproxy._daemon_update_publish(current, worker_pid=101)
+            clock.worker_published = True
+    monkeypatch.setattr(tproxy.time, "sleep", sleep)
+    return value, root, clock
+
+
+def test_prepare_waits_for_validated_worker_after_ten_seconds_within_original_lease(starting_worker):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444630
+    clock.worker_at = 15.5
+    installed_before = Path(tproxy.INSTALL_DIR, "slipstreamd").read_bytes()
+    assert tproxy.do_update_prepare(json.dumps(value))
+    current = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert 15.5 <= clock.elapsed < 15.6
+    assert current["worker_pid"] == 101 and current["phase"] == "prepared"
+    assert current["decision"] is None and current["accepted_sequence"] == 0
+    assert current["deadline_unix"] == value["prepare_deadline_unix"]
+    assert Path(tproxy.INSTALL_DIR, "slipstreamd").read_bytes() == installed_before
+
+
+@pytest.mark.parametrize("sealing_delay,rollback_at", [(0, None), (0, 1), (2.5, None)])
+def test_prepare_worker_wait_expires_without_renewing_original_budget(
+        starting_worker, sealing_delay, rollback_at):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444603
+    clock.sealing_delay = sealing_delay
+    clock.rollback_at = rollback_at
+    with pytest.raises(RuntimeError, match="update worker startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
+    assert clock.elapsed == pytest.approx(3.0)
+    current = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert current["worker_pid"] == 0 and current["decision"] is None
+    assert current["deadline_unix"] == value["prepare_deadline_unix"]
+    assert (root / "active.json").is_file()
+
+
+def test_prepare_does_not_accept_worker_first_observed_at_lease_expiry(starting_worker):
+    value, root, clock = starting_worker
+    value["prepare_deadline_unix"] = 4102444603
+    clock.worker_at = 3.0
+    with pytest.raises(RuntimeError, match="update worker startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
+    assert clock.elapsed == pytest.approx(3.0)
+    assert json.loads((root / NONCE / "status.json").read_text())["worker_pid"] == 101
+
+
+@pytest.mark.parametrize("phase,decision", [("committed", "commit"), ("aborted", "abort")])
+def test_prepare_terminal_receipt_remains_idempotent_after_lease_expiry(
+        starting_worker, phase, decision):
+    value, root, clock = starting_worker
+    clock.worker_at = 0
+    assert tproxy.do_update_prepare(json.dumps(value))
+    current = tproxy._update_read_json(root / NONCE / "private/journal.json")
+    tproxy._daemon_update_publish(current, phase=phase, decision=decision, worker_pid=0)
+    clock.elapsed = value["prepare_deadline_unix"] - 4102444600 + 1
+    assert tproxy.do_update_prepare(json.dumps(value))
+    retained = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert retained["phase"] == phase and retained["decision"] == decision
+    assert retained["worker_pid"] == 0
+
+
 def test_prepare_persists_mailbox_wake_without_heartbeat_watch_or_periodic_worker(prepared_filesystem):
     import plistlib
     value, _, _, _ = prepared_filesystem
@@ -960,8 +1054,11 @@ def test_expired_existing_prepare_indexes_before_selecting_abort(prepared_filesy
             selected.append(True)
         return publish(current, **changes)
     monkeypatch.setattr(tproxy, "_daemon_update_publish", checked)
-    assert tproxy.do_update_prepare(json.dumps(value))
+    with pytest.raises(RuntimeError, match="update worker startup unconfirmed"):
+        tproxy.do_update_prepare(json.dumps(value))
     assert selected
+    retained = json.loads((root / NONCE / "private/journal.json").read_text())
+    assert retained["phase"] == "aborting" and retained["decision"] == "abort"
 
 
 def test_orphan_prepared_operation_cannot_overwrite_new_installed_payload(prepared_filesystem, monkeypatch):

@@ -17190,6 +17190,10 @@ def do_update_prepare(raw_identity):
     if len(raw_identity.encode("utf-8")) > _DAEMON_UPDATE_LIMIT:
         raise RuntimeError("update identity too large")
     identity = _daemon_update_identity(json.loads(raw_identity))
+    # Sealing and worker validation share the original authorization budget.
+    # A wall-clock rollback must not renew that budget while this call waits.
+    startup_deadline = time.monotonic() + max(
+        0, min(_DAEMON_UPDATE_TTL, identity["prepare_deadline_unix"] - time.time()))
     console = _console_probe_identity()
     if console is None or console[0] != identity["uid"]:
         raise RuntimeError("update owner is not the console user")
@@ -17285,12 +17289,19 @@ def do_update_prepare(raw_identity):
                     raise DaemonUpdateNoOperation(stage) from None
                 raise
     # The worker cannot acquire the installer lock until prepare releases it.
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
+    # Its sealed-runtime and app checks may legitimately take more than ten
+    # seconds; only the existing lease bounds startup, not a separate timer.
+    while True:
         status = _update_read_json(os.path.join(operation, "status.json"), mode=0o644)
-        if status.get("worker_pid", 0) > 0 or status.get("phase") in {"committed", "aborted"}:
+        if status.get("phase") in {"committed", "aborted"}:
             return True
-        time.sleep(0.05)
+        remaining = min(identity["prepare_deadline_unix"] - time.time(),
+                        startup_deadline - time.monotonic())
+        if remaining <= 0:
+            break
+        if status.get("worker_pid", 0) > 0:
+            return True
+        time.sleep(min(0.05, remaining))
     raise RuntimeError("update worker startup unconfirmed")
 
 

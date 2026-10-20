@@ -2,77 +2,96 @@
 
 ## Verified Checkpoint
 
-[Preview .30](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.30)
-is published from `86dd9393f671120f9ad6adb887ebb0e29d56467b` (release418378834).
-Manual DMG delivery is complete. Exact-source CI39414812044/1, audit39414812025/1,
-root commit/rollback39417619778/1 and packaged app39418547089/1 passed.
+Public [preview .30](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.30)
+is now installed at `/Applications/Slipstream.app` on the user's Mac by manual
+replacement from its verified public artifact. Normal launch installed the
+matching root daemon. Fresh StatusV2 reported version `.30`, active daemon
+PID46244 and increasing heartbeat; launchd and the root attestation/witness
+matched daemon SHA256 `364a138776fc4ffa0872426c105dfc5f8ffd86118442a1b20de4219ef6210069`.
+Canonical full-tree verification and codesign passed. The tray is PID45868,
+uid502, at the canonical path. Recheck live state before a new action; PIDs are
+observations, not permanent identities. This is manual delivery, not successful
+automatic update or physical browser qualification.
+
+Private local evidence:
+`output/updater-daemon-identity/local-attended-20261020-204654/installed30-runtime-receipt.json`,
+SHA256 `ba9b27a5afaa006a2ab03d5f76f833771a904764c2b15e771070803f33e160e6`.
+Direct root-runtime bytes were not reread as the console user; the proof binds
+the verified app payload to root attestation, hardlink witness metadata,
+launchd identity and two fresh heartbeat samples.
+
+The public release source is `86dd9393f671120f9ad6adb887ebb0e29d56467b`.
+CI39414812044/1, audit39414812025/1, root commit/rollback39417619778/1,
+packaged app39418547089/1 and publisher39422953280/1 passed.
 Readiness39417627050/1 passed eight Safari/Chrome cases, transport3/3 and a
-measured1800.114-second soak with cleanup. Publisher39422953280/1 passed.
-All12 public assets passed canonical hashes, signatures, archive and appcast
-checks; seven candidate files matched CI byte-for-byte. Public receipt:
-`output/updater-daemon-identity/preview30-public-verification/public-verification-receipt.json`,
+measured1800.114-second soak with cleanup. All12 public assets passed canonical
+hashes/signatures/archive/appcast checks; seven candidate files matched CI.
+Public receipt: `output/updater-daemon-identity/preview30-public-verification/public-verification-receipt.json`,
 SHA256 `1dd881ff2d34847b045a65d8717daa75ed7eb2f54732168ecf9dc622806590c0`.
 
-Ordinary public update/admin/Quit and its forced rollback remain unqualified.
-Do not retry the unattended hosted UI path: even a standalone harmless
-administrator request stalled. Manual preview delivery does not imply those
-gates passed. Existing .24 artifacts, installed application, settings and
-backups remain preserved. No local native build or workstation install.
+PR409 is merged at `6ce1534714ba570eb374901c517bfb740c72c5fb`, with the same
+tree as tested head `c16a2f901c21f380251a4b29ac331d404e1f33a2`.
+CI39447367306/1 and audit39447367341/1 passed all three required contexts,
+199 tray tests, packaged browser and lifecycle/crash checks. Reuse this baseline
+for unchanged components. Receipt:
+`output/updater-daemon-identity/archive-modes-fix/pr409-c16a2f901-ci-receipt.json`,
+SHA256 `6890e2d547c0bcd262bb7eeccc157edec29cd077f4b5c2aa95830f9bc95a2da3`.
+PR409's extraction-permission fix and the startup repair below are not in `.30`.
 
 ## Current Change
 
-### Live qualification checkpoint, 2026-10-20
+### Attended update and worker startup, 2026-10-20
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
-Branch `codex/updater-archive-modes` starts from exact main86dd above. Prior
-public-UI diagnostic branch `codex/public-preview30-update-qualification` is
-preserved and pushed through `343119bda990ea1af0b4d32817b45b3157a3aae6`.
-The historical root checkout is a locator; preserve its dirty user files.
-Evidence paths below are relative to `output/updater-daemon-identity/`.
+Branch `codex/updater-worker-startup-lease`, based on merged PR409 above.
+The historical root checkout remains a locator with its dirty files preserved.
+The user explicitly authorized this local attended check. No local native build.
+Standalone Geph remains external and untouched. Original `.23`, actual `.29`,
+user app-state and all earlier private backups are retained under the local
+evidence directory above and at their previous locations.
 
-The preceding turn produced new evidence and stopped unproductive unattended
-update retries. Current work repairs a separate confirmed product limitation:
-`extract_archive_with_sync` applies process umask to files/implicit directories
-and ignores directory header modes. A valid signed archive then fails the
-unchanged cross-owner bundle validator under restrictive masks. File permissions
-must come from the archive, implicit parents need safe defaults, and explicit
-directory modes must be applied after children. Keep staging root0700, use owned
-file/directory handles, do not follow links or change process-global umask.
-macOS link permissions also contribute to the existing bundle-tree contract.
+The user's ordinary `.29 -> .30` update/admin attempt failed safely:
 
-The source repair and three regression tests are in [PR409](https://github.com/aiwaki/slipstream/pull/409).
-Independent review found no blockers in initial Rust file SHA256
-`3d1f41d01eecd5db2dffa57857abb6419093c39f2ea34fe7ea3e1e75fdc3127e`.
-`rustfmt --check`, `git diff --check` and the project-state continuity check pass.
-CI39446121024 at source `688110ce653df0956f3ae42bc72e06a020cad7ac`
-compiled and passed all 199 tray tests, including the three new regressions.
-Its subsequent lint step rejected an unused production `symlink` import;
-that import is now scoped to the tests that use it. Audit39446121163 passed.
-Required checks for the corrected head are pending. There is no new workflow,
-local Rust build, app launch, installation or privileged network mutation.
-
-The subprocess regression compares actual extracted modes and contract tree
-hashes under masks 022 and 077, including implicit parents, late directory
-records and safe links. Two error tests cover cleanup after syncing a read-only
-directory fails and rejection of an injected symlink parent without changing
-its external target. Existing sync-order tests check file permissions before
-fsync. The public .30 artifact is unchanged; source repair is not a claim that
-the installed app already contains it.
-
-| Observation | Result and retained evidence |
+| UTC event | Observation |
 |---|---|
-| Public UI39430167830/2 | Real discovery/click; staging rejected. Test driver leaked parent077 into OLD. Harness527ec corrected child-only022, reports stayed private; actual product restrictive-mask defect remains. Archive897 entries had correct modes. |
-| Corrected public UI39435615487/1 | Real discovery/click and prepared journal; authorization_started, OLD and owned osascript alive, no root decision by driver deadline. Receipt `public-preview30-ui/run39435615487-receipt.json`, SHA256 `855574fb9edf3f6e3708844832d806d8b28467d7e75c5967340235ac2e16274a`; parent verified34 hashes. |
-| Standalone authorization39440467834/1 | Fixed id-u request timed out25.058s, no root UID; owned child killed/reaped. All three role observations failed process_executable_mismatch, so visible dialog remains unknown. Receipt `public-preview30-ui/authorization-probe-39440467834/receipt.json`, SHA256 `165fcd38ba50ba915c1a585ce0fda468a8da5651a9e56aafb934011157c24820`; parent verified10 hashes. |
+| 16:05:07.281 | Root prepared operation, worker PID0. Administrator authorization succeeded. |
+| 16:05:17.263 | App selected abort, sequence1, after about10 seconds. |
+| 16:05:22.783 | Validated worker PID40061 appeared and accepted the abort. |
+| 16:05:22.986 | Root terminal aborted, writer quiescent; `.29` daemon remained active. |
+| 16:05:25.226 | App journal cleaned. No successor ACK or replacement occurred. |
 
-All diagnostic watchers are terminal, artifacts downloaded once, no retries
-pending. The remaining ordinary public update gate needs attended validation on
-an appropriate disposable Mac. No password/TCC/authdb/user changes or direct
-prepare substitution. Candidate/root/app/readiness evidence remains reusable;
-the new source repair requires its own scoped native regression and required PR
-checks. Graph discovery was unavailable; bounded source reads locate this exact
-extractor without indexing or installing more tooling.
+Operation `7e495bea6b34a9ce8bfa8790bade5758` had an original deadline of
+16:09:47Z: about270 seconds still remained when cancellation was sent. Source
+confirms that prepare waited only10 seconds, while the worker publishes its
+PID after sealed-runtime/app validation. The observed publication took15.5
+seconds; individual hashing/signature costs were not profiled. No worker crash
+or restart loop was observed. Retain `events.jsonl` and `observations/` in the
+private local evidence directory. Its observer ended before manual `.30` launch;
+the separate runtime receipt above uses fresh post-install samples.
+
+The source fix gives preparation and validated worker startup the remaining
+original lease, bounded by both its wall deadline and a monotonic deadline
+anchored before sealing. It does not extend the lease, publish PID early, bypass
+signature/hash checks or alter Rust uncertain-authorization/abort handling.
+Regression evidence: old source6 expected failures; repaired module115 passing,
+adjacent lock/mailbox/native-root tests59 passing; strengthened terminal cases2
+passing. Results were captured in tool output, not standalone log files.
+Independent review found no blockers. Exact-source required PR CI is pending.
+
+The old `.23 --quit` returned without ending its process; only its verified PID
+was terminated after owned service absence was established. `.29` was later
+terminated only after its failed transaction was proven aborted/quiescent.
+Neither action qualifies normal Quit. Native UI automation timed out; the user
+performed Restart Proxy and the ordinary update/admin action. Do not repeat the
+known-stalled unattended hosted authorization path. Public update/forced rollback
+and normal Quit remain open; manual `.30` installation does not close them.
+
+Next: publish the focused startup-lease PR, retain its exact-source required CI
+receipt, and carry both unreleased repairs into a normally built originating
+candidate before qualifying another public update. A successor alone cannot
+repair the worker sealed from an older origin. Do not start another workstation
+replacement or broad suite merely to restate these limits.
 
 ### Retained preparation record
 
@@ -437,23 +456,26 @@ installation ran. The unchanged release checks are not repeated.
 |---|---|
 | M0 - Safe Base | Candidate cleanup passed; public update/rollback unqualified. |
 | M1 - Autonomous Routing V1 | Hosted browser/soak passed; no new workstation qualification. |
-| M2 - Contracts And Code | Coordinated update merged; native qualification pending. |
-| M3 - Release-Grade macOS | Preview .24 public; stable and public updater gates open. |
+| M2 - Contracts And Code | Recorded .29/.30 root/app pair passed; attended public attempt exposed startup timer defect. |
+| M3 - Release-Grade macOS | Preview .30 public and manually installed; stable and public updater gates open. |
 | M4 - Cross-Platform Core | No new platform qualification in this change. |
 
 ## Next Verified Action
 
-- Complete existing PR409 CI after scoping the unused import to tests. Native
-  regressions already passed; the corrected head still needs required checks.
-- Record exact PR/head/results, then integrate only after required checks pass.
-- Preserve manual preview .30 and all retained qualification evidence. Do not
-  re-open completed release publication or repeat unattended authorization runs.
+- Submit the startup-lease repair and obtain its exact-source required CI.
+  Reuse completed focused tests and the PR409 baseline where unchanged.
+- The corrected originating candidate must contain both unreleased repairs
+  before another public transition can qualify them. Preserve current manual
+  `.30` and all private backups; no repeated local install is needed now.
+- Do not reopen completed `.30` publication or repeat the stalled unattended
+  hosted authorization probe. Attended authorization itself succeeded locally.
 
 ## External Gates
 
-- Ordinary public update/admin/Quit/rollback needs attended disposable-Mac
-  validation. Hosted authorization capability did not complete; its precise
-  UI state remains unknown. See the terminal evidence above and [RELEASES.md](RELEASES.md).
+- Ordinary public update/forced rollback and normal Quit remain unqualified.
+  The local attempt reached root preparation but cancelled on the short startup
+  timer; the subsequent manual install is separate evidence. Hosted
+  authorization still lacks a successful probe. See [RELEASES.md](RELEASES.md).
 - Stable publication still requires Developer ID signing, hardened runtime,
   notarization, stapling and the existing stable-channel gates.
 - Native/source-owned work in PR384 and Telegram work in PR386 remain separate.

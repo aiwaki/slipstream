@@ -1,5 +1,18 @@
 # Decisions
 
+### 2026-10-20: validated updater startup uses the original lease
+
+Preparation, sealing and worker startup share the immutable operation deadline.
+Do not add a shorter independent startup timer: the worker publishes its PID
+only after verifying sealed runtime and application files. Bound the remaining
+wait by both the original wall deadline and a monotonic deadline anchored before
+sealing; a backward clock change must not renew this call's budget. Reject a
+nonterminal worker first observed at expiry. Previously committed or aborted
+operations remain idempotent. Keep all file/signature validation and existing
+uncertain-authorization cancellation behavior; a longer valid startup is not
+permission to publish readiness early or extend the transaction. The fix must
+be present in the originating daemon that supplies the sealed worker.
+
 ### 2026-10-20: measure steady idle after startup work
 
 The disposable pending-navigation lifecycle check uses existing StatusV2 health
