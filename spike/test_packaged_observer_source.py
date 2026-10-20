@@ -6,7 +6,9 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from verify_packaged_observer_source import verify_source
+from verify_packaged_observer_source import PINNED_SHA256, verify_source
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -126,3 +128,31 @@ def test_missing_candidate_object_refuses(history):
     repo, _, _, _, _, env = history
     with pytest.raises(subprocess.CalledProcessError):
         verify_source(repo, "f" * 40, env)
+
+
+def test_only_exact_reviewed_candidate_handling_bytes_are_reusable(history):
+    repo, _, write, commit, base, env = history
+    for path in PINNED_SHA256:
+        write(path, (ROOT / path).read_text())
+    write("scripts/packaged_update_observer.py", "observer repair\n")
+    env["GITHUB_SHA"] = commit()
+    proof = verify_source(repo, base, env)
+    assert len(proof["changes"]) == 3
+
+
+@pytest.mark.parametrize("path,before,after", [
+    ("scripts/qualify_packaged_update_commit.py", 'metadata.get("head_sha") == pair["new"]["source_commit"]', "True"),
+    ("scripts/qualify_packaged_update_commit.py", "def install_old(backend):", "def install_unchecked(backend):"),
+    ("scripts/qualify_packaged_update_commit.py", "cleanup(backend)", "pass"),
+    (".github/workflows/packaged-update-commit-qualification.yml", "scripts/materialize_pair.py", "scripts/unsafe_materializer.py"),
+])
+def test_allowlisted_candidate_handling_mutations_are_not_observer_repairs(history, path, before, after):
+    repo, _, write, commit, base, env = history
+    original = (ROOT / path).read_text()
+    assert before in original
+    write(path, original.replace(before, after, 1))
+    write("scripts/packaged_update_observer.py", "observer repair\n")
+    write("docs/CURRENT_STATE.md", "valid accompanying docs\n")
+    env["GITHUB_SHA"] = commit()
+    with pytest.raises(ValueError, match="candidate handling differs"):
+        verify_source(repo, base, env)

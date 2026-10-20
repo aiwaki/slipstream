@@ -7,8 +7,13 @@ NEW when `verify_packaged_observer_source.py` proves a clean exact workflow
 checkout and restricts the complete diff to its explicit observer, driver,
 focused-test, app-workflow and documentation paths. Deletions, renames, mode
 changes and changes to product code, dependencies, build inputs, candidate
-authentication, materialization or the OLD trigger builder are refused. Missing
-ancestry in the bounded checkout is a failure. Verify before dependencies or
+authentication, materialization or the OLD trigger builder are refused.
+The allowlisted driver and app workflow also contain candidate handling, so
+their changed Git blobs must match explicit SHA256 pins for the reviewed wiring.
+Any future edit to those files requires review of a pin update; the allowance
+does not permit arbitrary changes to authentication, installation or cleanup.
+This guards against accidental reuse, not malicious changes to reviewed main.
+Missing ancestry in the bounded checkout is a failure. Verify before dependencies or
 candidate handling, then again immediately before installation; retain harness
 SHA, tree, run/attempt and diff separately from the signed candidate source.
 The successful root prerequisite must still match exact candidate NEW and both

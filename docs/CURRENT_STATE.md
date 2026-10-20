@@ -70,6 +70,17 @@ Evidence below is relative to `output/updater-daemon-identity/`.
   `app28-to29-qualification/source-proof-tests.log`.
 - Independent review found no blockers in the complete observer/source-guard
   diff. Project-state continuity, actionlint and whitespace checks passed.
+- PR405 first head `ff9da1f374a717e0466972d9f366ea2df8019da2` passed whole
+  CI39396219080 and audit39396219086; watch47290 completed0. An automated P2
+  correctly found that allowlisting the whole driver also allowed future changes
+  to prerequisite/install/cleanup. Merge was blocked and did not occur.
+- The follow-up pins full reviewed driver/workflow Git bytes by SHA256. Changes
+  to either now require an explicit reviewed pin update. Five new cases cover
+  exact acceptance and altered auth/install/cleanup/materializer commands;
+  the 120 source/driver/workflow tests passed. Reuse the unchanged157 observer
+  tests and green baseline; required exact-head CI remains necessary after push.
+  Both native app cases still need the repaired main harness. No other gate is
+  restarted and candidates/root proof remain unchanged.
 - Next: complete PR checks, merge the observer repair, then dispatch the two app cases once from that audited main harness
   with the same ten inputs in `app28-to29-qualification/workflow-inputs.json`.
   Reuse candidates and root proof. Do not repeat run39391446170 unchanged.

@@ -22,6 +22,15 @@ ALLOWED = frozenset({
     ".github/workflows/packaged-update-commit-qualification.yml",
     "docs/CURRENT_STATE.md", "docs/RELEASES.md", "docs/DECISIONS.md",
 })
+# These files also authenticate candidates and install/clean up applications.
+# A path allowance alone is insufficient: only this reviewed observer wiring
+# delta may be reused. Future changes need an explicit reviewed pin update.
+PINNED_SHA256 = {
+    "scripts/qualify_packaged_update_commit.py":
+        "ad1d87d6abae7074192424fc592de89a43352fc7fbc603272bcdfaabc62c3df5",
+    ".github/workflows/packaged-update-commit-qualification.yml":
+        "869452d0e6ad445d3442cdc721c24a32a8ced5069d9b98d659caa7434f212989",
+}
 
 
 def verify_source(repo, candidate_source, env=None):
@@ -64,6 +73,9 @@ def verify_source(repo, candidate_source, env=None):
         require(status in {"A", "M"}, "observer source removal/rename is not allowed")
         require(new_mode == "100644" and (status == "A" or old_mode == new_mode),
                 "observer source mode changed or is not a regular data file")
+        if path in PINNED_SHA256:
+            require(hashlib.sha256(git("cat-file", "blob", new_blob)).hexdigest() == PINNED_SHA256[path],
+                    "candidate handling differs from reviewed observer wiring: " + path)
         changes.append({"path": path, "status": status, "old_blob": old_blob,
                         "new_blob": new_blob, "mode": new_mode})
     return {"schema_version": 1, "candidate_new_source_sha": candidate_source,

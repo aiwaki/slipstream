@@ -237,6 +237,10 @@ The receipt separates harness SHA/tree/run/attempt and exact diff from candidate
 NEW source. Product, dependency, build, materializer, signature-helper and OLD
 trigger-builder changes fail this allowance. The root prerequisite remains at
 exact candidate NEW, never the later harness SHA.
+Because the allowlisted driver and workflow also handle candidates, changed
+versions of those two files must match explicit reviewed full-file SHA256 pins.
+Another edit requires a reviewed pin update; path membership alone cannot
+authorize altered authentication, installation, cleanup or workflow commands.
 
 The earlier `.27 -> .28` root run39381512115 passed crash-before-commit but
 failed commit observation before a commit request; both cleanups passed.
