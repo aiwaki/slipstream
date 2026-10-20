@@ -12,6 +12,7 @@ import tproxy
 
 ROOT = Path(__file__).resolve().parents[1]
 NONCE = "0123456789abcdef0123456789abcdef"
+REAL_READINESS_SNAPSHOT = tproxy._installed_daemon_readiness_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -230,7 +231,13 @@ def test_real_status_unwrap_heartbeat_is_used(monkeypatch, tmp_path):
               "state": "dormant", "pf_active": False}
     monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: record)
     monkeypatch.setattr(tproxy, "_sha256_regular_file", lambda _: sha)
-    monkeypatch.setattr(tproxy, "_install_attestation_record", lambda *a, **k: record)
+    def fresh_record(*args, **kwargs):
+        kwargs["readiness_reader"](tproxy.PROXY_PORT, {
+            k: v for k, v in record.items() if k not in {"state", "pf_active"}})
+        return record
+    monkeypatch.setattr(tproxy, "_install_attestation_record", fresh_record)
+    monkeypatch.setattr(tproxy, "_run", lambda *a: SimpleNamespace(
+        returncode=0, stdout=f"0 Mon Oct 19 12:34:56 2026 {tproxy.INSTALL_DIR}/slipstreamd\n"))
     assert tproxy._daemon_update_runtime_proof(sha)["heartbeat_seq"] == 7
 
 
@@ -260,6 +267,8 @@ def attested_runtime(monkeypatch, tmp_path):
     evidence.write_text(json.dumps(stored))
     monkeypatch.setattr(tproxy, "_update_read_json", lambda *a, **k: copy.deepcopy(stored))
     monkeypatch.setattr(tproxy, "_write_install_attestation", lambda *a, **k: pytest.fail("receipt rewritten"))
+    monkeypatch.setattr(tproxy, "_run", lambda *a: SimpleNamespace(
+        returncode=0, stdout=f"0 Mon Oct 19 12:34:56 2026 {installed} --port 1080\n"))
     return SimpleNamespace(sha=sha, stored=stored, current=current, evidence=evidence,
                            installed=installed, witness=witness)
 
@@ -313,7 +322,6 @@ def test_identity_comparison_rejects_malformed_health(attested_runtime, state, p
 def test_runtime_proof_rejects_current_readiness_failure(attested_runtime, monkeypatch):
     monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", lambda _: (
         False, "listener or PF readiness failed", None, False))
-    monkeypatch.setattr(tproxy, "_install_attestation_record", lambda *a, **k: pytest.fail("unready proof accepted"))
     with pytest.raises(RuntimeError, match="readiness missing"):
         tproxy._daemon_update_runtime_proof(attested_runtime.sha)
 
@@ -332,6 +340,199 @@ def test_runtime_proof_rejects_actual_retained_file_change(attested_runtime, mut
         runtime.witness.chmod(0o700)
     with pytest.raises(RuntimeError, match="identity mismatch|rejected mode|witness"):
         tproxy._daemon_update_runtime_proof(runtime.sha)
+
+
+@pytest.fixture
+def runtime_health(attested_runtime, monkeypatch):
+    """Exercise the real status/PF readiness reader with deterministic OS inputs."""
+    runtime = attested_runtime
+    health = SimpleNamespace(
+        runtime=runtime, now=1000.0, sleeps=[], recovery={}, pf=True, listeners=[100],
+        addresses={"127.0.0.1", "::1"}, uid="0", birth="Mon Oct 19 12:34:56 2026",
+        command=str(runtime.installed) + " --port 1080", after_sleep=lambda: None,
+    )
+    # The ordinary fixture stubs this reader; retain its real implementation here.
+    monkeypatch.setattr(tproxy, "_installed_daemon_readiness_snapshot", REAL_READINESS_SNAPSHOT)
+    monkeypatch.setattr(tproxy.time, "time", lambda: health.now)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: health.now)
+    def sleep(seconds):
+        health.sleeps.append(seconds)
+        health.now += seconds
+        health.after_sleep()
+    monkeypatch.setattr(tproxy.time, "sleep", sleep)
+    monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: {
+        **runtime.current, "updated_at": health.now})
+    monkeypatch.setattr(tproxy, "_daemon_recovery_record", lambda: health.recovery)
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _: health.command)
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned",
+                        lambda command: command.startswith(str(runtime.installed) + " "))
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _: health.listeners)
+    monkeypatch.setattr(tproxy, "_listener_bind_addresses", lambda *a: health.addresses)
+    monkeypatch.setattr(tproxy, "pf_state_snapshot", lambda _: {"rules_loaded": health.pf})
+    def run(*args):
+        assert args == ("/bin/ps", "-ww", "-p", "100", "-o", "uid=,lstart=,command=")
+        return SimpleNamespace(returncode=0, stdout=f"{health.uid} {health.birth} {health.command}\n")
+    monkeypatch.setattr(tproxy, "_run", run)
+    return health
+
+
+def test_runtime_proof_waits_for_same_process_pf_status_convergence(runtime_health):
+    health = runtime_health
+    before = health.runtime.evidence.read_bytes()
+    def converge():
+        health.runtime.current.update(state="active", heartbeat_seq=8)
+    health.after_sleep = converge
+    result = tproxy._daemon_update_runtime_proof(health.runtime.sha)
+    assert result["daemon_pid"] == 100 and result["heartbeat_seq"] == 8
+    assert health.sleeps == [0.05]
+    assert health.runtime.evidence.read_bytes() == before
+
+
+def test_runtime_proof_permanent_pf_mismatch_is_bounded(runtime_health):
+    health = runtime_health
+    with pytest.raises(RuntimeError, match="readiness"):
+        tproxy._daemon_update_runtime_proof(health.runtime.sha)
+    assert 4.99 <= health.now - 1000.0 <= 5.001
+    assert 1 <= len(health.sleeps) <= 101
+
+
+@pytest.mark.parametrize("field,value", [
+    ("birth", "Mon Oct 19 12:35:56 2026"), ("uid", "501"),
+    ("command", "/unowned/slipstreamd --port 1080"),
+])
+def test_runtime_proof_rejects_process_change_during_pf_wait(runtime_health, field, value):
+    health = runtime_health
+    def change():
+        setattr(health, field, value)
+        health.runtime.current["state"] = "active"
+    health.after_sleep = change
+    with pytest.raises(RuntimeError, match="identity"):
+        tproxy._daemon_update_runtime_proof(health.runtime.sha)
+    assert health.sleeps == [0.05]
+
+
+def test_runtime_proof_rejects_status_pid_change_during_pf_wait(runtime_health):
+    health = runtime_health
+    def change():
+        health.runtime.current.update(pid=101, state="active")
+        health.listeners = [101]
+    health.after_sleep = change
+    with pytest.raises(RuntimeError, match="identity"):
+        tproxy._daemon_update_runtime_proof(health.runtime.sha)
+    assert health.sleeps == [0.05]
+
+
+@pytest.mark.parametrize("reason", [
+    tproxy.BASELINE_GUARD_BLOCK_REASON, tproxy.BASELINE_GUARD_ROLLBACK_REASON,
+    tproxy.PF_LOOPBACK_UNAVAILABLE_REASON,
+])
+def test_runtime_proof_recovery_refusal_never_waits(runtime_health, reason):
+    runtime_health.recovery = {"reason": reason}
+    with pytest.raises(RuntimeError, match="readiness"):
+        tproxy._daemon_update_runtime_proof(runtime_health.runtime.sha)
+    assert runtime_health.sleeps == []
+
+
+def test_runtime_proof_late_ready_retry_does_not_extend_budget(runtime_health, monkeypatch):
+    health = runtime_health
+    samples = []
+    def late_pf(_):
+        samples.append(True)
+        if len(samples) == 1:
+            return {"rules_loaded": True}
+        health.now += 5.01
+        return {"rules_loaded": False}
+    monkeypatch.setattr(tproxy, "pf_state_snapshot", late_pf)
+    with pytest.raises(RuntimeError, match="readiness"):
+        tproxy._daemon_update_runtime_proof(health.runtime.sha)
+    assert health.sleeps == [0.05] and len(samples) == 2
+
+
+def test_runtime_proof_accepts_slow_first_ready_snapshot(runtime_health, monkeypatch):
+    health = runtime_health
+    def late_pf(_):
+        health.now += 5.01
+        return {"rules_loaded": False}
+    monkeypatch.setattr(tproxy, "pf_state_snapshot", late_pf)
+    assert tproxy._daemon_update_runtime_proof(health.runtime.sha)["heartbeat_seq"] == 7
+    assert health.sleeps == []
+
+
+def test_default_attestation_keeps_its_slow_first_ready_snapshot(runtime_health, monkeypatch):
+    health = runtime_health
+    def late_pf(_):
+        health.now += 5.01
+        return {"rules_loaded": False}
+    monkeypatch.setattr(tproxy, "pf_state_snapshot", late_pf)
+    record = tproxy._install_attestation_record(
+        str(health.runtime.installed), health.runtime.sha, 0o700, tproxy.PROXY_PORT,
+        witness_path=str(health.runtime.witness))
+    assert record["state"] == "dormant" and not record["pf_active"]
+    assert health.sleeps == []
+
+
+@pytest.mark.parametrize("mutation", ["payload", "mode", "witness", "receipt"])
+def test_runtime_proof_identity_refusal_precedes_pf_wait(runtime_health, mutation):
+    health = runtime_health
+    runtime = health.runtime
+    if mutation == "payload":
+        runtime.installed.write_bytes(b"changed daemon")
+    elif mutation == "mode":
+        runtime.installed.chmod(0o600)
+    elif mutation == "witness":
+        runtime.witness.unlink()
+        runtime.witness.write_bytes(runtime.installed.read_bytes())
+        runtime.witness.chmod(0o700)
+    else:
+        runtime.stored["witness"]["ino"] += 1
+    with pytest.raises(RuntimeError, match="identity|mode|witness|attestation drift"):
+        tproxy._daemon_update_runtime_proof(runtime.sha)
+    assert health.sleeps == []
+
+
+def test_committed_resolve_transient_pf_mismatch_does_not_reinstall(runtime_health, monkeypatch):
+    health = runtime_health
+    health.after_sleep = lambda: health.runtime.current.update(state="active")
+    value = journal()
+    value["identity"]["new_daemon_sha256"] = health.runtime.sha
+    value.update(decision="commit", phase="committing")
+    monkeypatch.setattr(tproxy, "do_install", lambda *a, **k: pytest.fail("unneeded reinstall"))
+    monkeypatch.setattr(tproxy, "_daemon_update_verify_app", lambda *a: None)
+    monkeypatch.setattr(tproxy, "_daemon_update_retained_secret", lambda _: None)
+    monkeypatch.setattr(tproxy, "_daemon_update_tree", lambda *a, **k: "a" * 64)
+    monkeypatch.setattr(tproxy, "_daemon_update_publish", lambda v, **k: v.update(k))
+    tproxy._daemon_update_resolve(value)
+    assert value["phase"] == "committed" and value["decision"] == "commit"
+    assert health.sleeps == [0.05]
+
+
+@pytest.mark.parametrize("permanent", [False, True])
+def test_commit_pf_observation_converges_or_aborts_without_extending_lease(
+        runtime_health, monkeypatch, permanent):
+    health = runtime_health
+    if not permanent:
+        health.after_sleep = lambda: health.runtime.current.update(state="active")
+    value = journal()
+    value["identity"]["new_daemon_sha256"] = health.runtime.sha
+    value.update(phase="ready", snapshot_ready=True, deadline_unix=1100)
+    original_deadline = value["deadline_unix"]
+    requests(monkeypatch, ["commit"])
+    writes, restores = [], []
+    def publish(v, **changes):
+        v.update(changes)
+        writes.append(copy.deepcopy(v))
+    monkeypatch.setattr(tproxy, "_daemon_update_publish", publish)
+    monkeypatch.setattr(tproxy, "_daemon_update_tree", lambda *a, **k: "a" * 64)
+    def restore(v):
+        restores.append(v["decision"])
+        return proof(v["identity"]["old_daemon_sha256"])
+    monkeypatch.setattr(tproxy, "_daemon_update_restore_old", restore)
+    monkeypatch.setattr(tproxy, "do_install", lambda *a, **k: pytest.fail("transaction retried"))
+    assert tproxy._daemon_update_worker_loop(value)
+    assert value["phase"] == ("aborted" if permanent else "committed")
+    assert restores == (["abort"] if permanent else [])
+    assert all(item["deadline_unix"] == original_deadline for item in writes)
+    assert sum(health.sleeps) <= 5.001
 
 
 @pytest.mark.parametrize("vector", json.loads((ROOT / "contracts/update-bundle-tree-v1.json").read_text())["vectors"], ids=lambda v: v["name"])

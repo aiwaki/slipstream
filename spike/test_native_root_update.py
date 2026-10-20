@@ -172,12 +172,19 @@ def readonly_observations(monkeypatch):
     state = SimpleNamespace(raw=raw, attestation=attestation, witness=witness,
         command=" ".join(arguments), job_pid=101, listener_pids=[101],
         addresses={"127.0.0.1", "::1"}, pf=True, installed_sha=sha, process_reads=0,
-        birth="Mon Oct 19 12:34:56 2026")
+        birth="Mon Oct 19 12:34:56 2026", clock=0.0, sleeps=[])
     original_lstat = driver.os.lstat
     monkeypatch.setattr(driver.os, "lstat", lambda path, *a, **k:
         metadata if str(path) == installed else witness if str(path) == evidence + ".daemon"
         else original_lstat(path, *a, **k))
     monkeypatch.setattr(driver.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(driver.time, "monotonic", lambda: state.clock)
+
+    def sleep(delay):
+        state.sleeps.append(delay)
+        state.clock += delay
+
+    monkeypatch.setattr(driver.time, "sleep", sleep)
 
     def run(*args):
         if args[0] == "/bin/ps":
@@ -192,7 +199,7 @@ def readonly_observations(monkeypatch):
         if path == evidence:
             return state.attestation
         if path == status_path:
-            return state.raw
+            return copy.deepcopy(state.raw)
         assert path == "/fake/private/journal.json"
         return {"snapshot_ready": True, "old_runtime_sha256": "d" * 64}
 
@@ -259,6 +266,83 @@ def test_readonly_proof_refuses_missing_runtime_evidence(readonly_observations, 
     elif fault == "attestation": state.attestation["launchd"]["pid"] = 102
     with pytest.raises(driver.Refused):
         driver.readonly_runtime_proof(tproxy, sha)
+
+
+@pytest.mark.parametrize("before,after", [("dormant", "active"), ("active", "dormant")])
+def test_readonly_proof_resamples_status_when_live_pf_changed(readonly_observations, monkeypatch, before, after):
+    tproxy, state, sha = readonly_observations
+    state.raw["daemon"]["state"] = before
+    state.pf = after == "active"
+    sleep = driver.time.sleep
+
+    def publish_status(delay):
+        sleep(delay)
+        state.raw["daemon"].update(state=after, heartbeat_seq=18)
+
+    monkeypatch.setattr(driver.time, "sleep", publish_status)
+    value = driver.readonly_runtime_proof(tproxy, sha)
+    assert value["proof"]["heartbeat_seq"] == 18
+    observation = value["readiness_observation"]
+    assert observation["attempts"] == 2
+    assert observation["samples"][0]["state"] == before
+    assert observation["samples"][0]["pf_active"] == (after == "active")
+    assert observation["samples"][1]["state"] == after
+    assert state.sleeps and state.process_reads == 4
+
+
+def test_readonly_proof_permanent_pf_mismatch_is_bounded(readonly_observations):
+    tproxy, state, sha = readonly_observations
+    state.pf = False
+    with pytest.raises(driver.Refused, match="PF/status did not settle") as caught:
+        driver.readonly_runtime_proof(tproxy, sha)
+    assert 5 <= state.clock <= 5.1
+    assert '"state": "active"' in str(caught.value)
+    assert '"pf_active": false' in str(caught.value)
+
+
+@pytest.mark.parametrize("fault", ["hash", "witness", "attestation", "recovery"])
+def test_pf_mismatch_does_not_defer_identity_or_recovery_failure(readonly_observations, fault):
+    tproxy, state, sha = readonly_observations
+    state.pf = False
+    if fault == "hash": state.installed_sha = "c" * 64
+    elif fault == "witness": state.witness.st_ino = 99
+    elif fault == "attestation": state.attestation["launchd"]["pid"] = 102
+    else: state.raw["recovery"]["reason"] = "baseline-block"
+    with pytest.raises(driver.Refused):
+        driver.readonly_runtime_proof(tproxy, sha)
+    assert state.sleeps == []
+
+
+def test_readonly_proof_rejects_replaced_process_between_samples(readonly_observations, monkeypatch):
+    tproxy, state, sha = readonly_observations
+    state.pf = False
+    sleep = driver.time.sleep
+
+    def replacement(delay):
+        sleep(delay)
+        state.pf = True
+        state.birth = "Mon Oct 19 12:35:56 2026"
+
+    monkeypatch.setattr(driver.time, "sleep", replacement)
+    with pytest.raises(driver.Refused, match="process changed between observations"):
+        driver.readonly_runtime_proof(tproxy, sha)
+
+
+def test_readonly_proof_rejects_readiness_after_retry_deadline(readonly_observations):
+    tproxy, state, sha = readonly_observations
+    calls = []
+
+    def delayed_pf(port):
+        calls.append(port)
+        if len(calls) == 1:
+            return {"rules_loaded": False}
+        state.clock = 6.0
+        return {"rules_loaded": True}
+
+    tproxy.pf_state_snapshot = delayed_pf
+    with pytest.raises(driver.Refused, match="PF/status did not settle"):
+        driver.readonly_runtime_proof(tproxy, sha)
+    assert len(calls) == 2
 
 
 def test_fault_injection_signals_exact_launchd_job_not_numeric_pid():

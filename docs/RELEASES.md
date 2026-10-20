@@ -221,15 +221,24 @@ hashes must match the app pair. The root identity must bind both versions and
 all transaction hashes. The app workflow SHA and actual checkout HEAD must
 equal that same NEW source before installation.
 
-For the current bridge, first build the corrected `.27` origin with its ordinary
-whole main CI. Then merge and build the normal `.28` successor. Run both root
-cases on `.28` for that exact `.27 -> .28` pair, followed by both app cases
+For the current bridge, first build the corrected `.28` origin with its ordinary
+whole main CI. Then merge and build the normal `.29` successor. Run both root
+cases on `.29` for that exact `.28 -> .29` pair, followed by both app cases
 with the same eight pins. Include this workflow and both cases before building
-NEW, because the app harness must run from that exact NEW source. No third
-candidate or `.29` version is needed.
-The immutable `.26` origin cannot qualify this transition: its mailbox ancestry
-check predates the repair. The failed `.26 -> .27` run is retained evidence,
-not authorization for the app gate. Do not alter either signed candidate.
+NEW, because the app harness must run from that exact NEW source.
+
+The earlier `.27 -> .28` root run39381512115 passed crash-before-commit but
+failed commit observation before a commit request; both cleanups passed.
+Source review found an immediate PF/status comparison in both the observer and
+the originating updater. These independently sampled values can temporarily
+differ on the same healthy process. The repair resamples only that mismatch
+within the readiness budget, preserving identity checks and permanent failure.
+The immutable `.27` origin still runs its own old prepare/worker, so the new
+product repair requires a corrected `.28` origin and ordinary `.29` successor.
+The earlier no-third-candidate plan covered only harness changes and is
+superseded by this product defect. Never relabel or alter signed candidates.
+The failed `.26 -> .27` mailbox-ancestry run and `.27 -> .28` observer run remain
+evidence; neither authorizes the app gate.
 
 The [adapter builder](../scripts/build_packaged_update_trigger.py) compiles the
 exact authenticated OLD preparation modules and locked dependencies into an

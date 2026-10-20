@@ -473,7 +473,7 @@ class Native:
         # Fixed root installer.lock inode and empty roots are intentionally kept.
 
 
-def readonly_runtime_proof(tproxy, expected_sha):
+def _readonly_runtime_observation(tproxy, expected_sha):
     """Verify a frozen installed daemon from Python, without executable guessing.
 
     The production installer proof assumes it runs inside the frozen launcher.
@@ -515,7 +515,6 @@ def readonly_runtime_proof(tproxy, expected_sha):
             and tproxy._listener_bind_addresses(port, pid) == {"127.0.0.1", "::1"},
             "daemon does not exclusively own both loopback listeners")
     pf_active = bool(tproxy.pf_state_snapshot(port).get("rules_loaded"))
-    require(pf_active == (status["state"] == "active"), "daemon PF state mismatch")
     evidence = tproxy.INSTALL_ATTESTATION_PATH
     attestation = tproxy._update_read_json(evidence, mode=0o644)
     witness_path = tproxy._install_attestation_witness_path(evidence)
@@ -535,15 +534,49 @@ def readonly_runtime_proof(tproxy, expected_sha):
                     "ino": witness.st_ino, "size": witness.st_size, "mtime": int(witness.st_mtime),
                     "mtime_nsec": witness.st_mtime_ns % 1_000_000_000},
         "launchd": {"label": tproxy.LAUNCHD_LABEL, "pid": pid},
-        "listener": {"host": "127.0.0.1", "hosts": ["127.0.0.1", "::1"], "port": port},
-        "state": status["state"], "pf_active": pf_active}
-    require(tproxy._install_attestation_identity_matches(attestation, fresh),
+        "listener": {"host": "127.0.0.1", "hosts": ["127.0.0.1", "::1"], "port": port}}
+    # Validate the retained receipt and every immutable identity field before
+    # classifying a live health mismatch as potentially transient.
+    require(tproxy._install_attestation_identity_matches(attestation, attestation)
+            and {k: v for k, v in attestation.items() if k not in {"state", "pf_active"}} == fresh,
             "installed daemon attestation drift")
     require(process() == birth, "daemon process changed during proof")
     return {"proof": {"daemon_pid": pid, "daemon_sha256": expected_sha,
                       "heartbeat_seq": heartbeat,
                       "install_attestation_sha256": tproxy._sha256_regular_file(evidence)},
-            "process": birth}
+            "process": birth,
+            "health": {"state": status["state"], "pf_active": pf_active,
+                       "pid": pid, "heartbeat_seq": heartbeat, "updated_at": updated,
+                       "health_updated_at": status.get("health_updated_at")}}
+
+
+def readonly_runtime_proof(tproxy, expected_sha):
+    """Allow bounded PF/status convergence on the same verified installed process.
+
+    Status publication and PF changes are separate operations. Only that health
+    mismatch is resampled; identity, ownership and recovery failures remain fatal.
+    The budget bounds retries, while existing subprocess timeouts bound each read.
+    """
+    started, budget = time.monotonic(), 5.0
+    identity, samples = None, []
+    while True:
+        value = _readonly_runtime_observation(tproxy, expected_sha)
+        current = {"pid": value["proof"]["daemon_pid"], "process": value["process"],
+                   "attestation": value["proof"]["install_attestation_sha256"]}
+        require(identity is None or current == identity, "daemon process changed between observations")
+        identity = current
+        sample = value.pop("health")
+        samples.append(sample)
+        elapsed = time.monotonic() - started
+        if sample["pf_active"] == (sample["state"] == "active") and (len(samples) == 1 or elapsed < budget):
+            value["readiness_observation"] = {
+                "attempts": len(samples), "elapsed_seconds": elapsed, "samples": samples}
+            return value
+        if elapsed >= budget:
+            raise Refused("daemon PF/status did not settle: " + json.dumps({
+                "attempts": len(samples), "elapsed_seconds": elapsed,
+                "first": samples[0], "last": samples[-1]}, sort_keys=True))
+        time.sleep(min(0.1, budget - elapsed))
 
 
 def root_proof(args):

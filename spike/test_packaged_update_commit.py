@@ -14,7 +14,7 @@ import qualify_packaged_update_commit as gate
 from native_root_update import Refused
 
 
-def fixture(tmp_path):
+def fixture(tmp_path, *, old_version=28, new_version=29):
     def pin(char, run):
         return {"source_commit": char * 40, "candidate_manifest_sha256": char * 64, "run_id": run, "run_attempt": 1}
     pair = {"schema_version": 1, "old": pin("b", 102), "new": pin("c", 103)}
@@ -22,7 +22,7 @@ def fixture(tmp_path):
     def artifact(version, char):
         return {"version": "0.1.9-preview." + str(version), "source_commit": char * 40,
                 **{key: char * 64 for key in ("archive_sha256", "app_executable_sha256", "daemon_sha256", "bundle_tree_sha256")}}
-    expected = {"old": artifact(27, "b"), "new": artifact(28, "c")}
+    expected = {"old": artifact(old_version, "b"), "new": artifact(new_version, "c")}
     metadata = {"id": 200, "run_attempt": 2, "head_sha": pair["new"]["source_commit"], "head_branch": "main",
                 "event": "workflow_dispatch", "path": ".github/workflows/native-root-update-qualification.yml",
                 "status": "completed", "conclusion": "success"}
@@ -78,10 +78,10 @@ def test_each_root_receipt_must_match_and_finish_cleanup(tmp_path, name, field, 
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
 
 
-def test_root_pass_cannot_qualify_unfixed_origin(tmp_path):
-    metadata, pair, expected = fixture(tmp_path)
-    expected["old"]["version"] = "0.1.9-preview.26"
-    with pytest.raises(Refused, match=".27 -> .28"):
+@pytest.mark.parametrize("old_version,new_version", [(26, 27), (27, 28), (28, 30)])
+def test_root_pass_cannot_qualify_unfixed_or_unreviewed_pair(tmp_path, old_version, new_version):
+    metadata, pair, expected = fixture(tmp_path, old_version=old_version, new_version=new_version)
+    with pytest.raises(Refused, match=r"\.28 -> \.29"):
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
 
 
@@ -297,7 +297,7 @@ def test_workflow_uses_exact_pair_builder_and_observer_without_repair_hooks():
         assert script in source
     assert "ref: ${{ inputs.old_source_sha }}" in source
     assert "native-root-update-*-${{ inputs.root_gate_run_id }}-${{ inputs.root_gate_attempt }}" in source
-    assert "Successful exact NEW main root-gate run ID for the same .27 to .28 pair" in source
+    assert "Successful exact NEW main root-gate run ID for the same .28 to .29 pair" in source
     assert "kickstart" not in source and "--update-prepare" not in source
     assert "if: always()" in source and "prepare-result.json" in source
 
