@@ -1,5 +1,17 @@
 # Decisions
 
+### 2026-10-20: app lifetime after updater cleanup
+
+The shared updater launch command starts both the successor and restored OLD
+app in a new process group. Keep normal launchd cleanup for the watchdog;
+do not set `AbandonProcessGroup` for the whole job. Apple documents that
+[launchd terminates remaining members of a finished job's process group](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5).
+The tray must survive that cleanup, while rollback still controls the exact
+successor PID and birth identity. Real subprocess tests must verify the child
+group, and packaged commit/rollback must independently prove a surviving app.
+A successful spawn or ACK before watchdog exit is insufficient. The updater
+is sealed from OLD, so this repair requires a corrected originating candidate.
+
 ### 2026-10-20: observer repair with unchanged packaged candidates
 
 The packaged app observer may run from an audited main descendant of candidate

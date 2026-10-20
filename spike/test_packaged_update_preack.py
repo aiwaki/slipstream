@@ -284,7 +284,15 @@ def restored(tmp_path,monkeypatch):
     backend.record=lambda name,value:backend.events.append((name,copy.deepcopy(value)))
     backend.process_snapshot=lambda pid:copy.deepcopy(old) if pid==555 else None
     backend.watchdog_finished=lambda:True
-    backend.run=lambda argv,**kw:SimpleNamespace(returncode=0,stdout=b'555\n')
+    def query(argv, **kwargs):
+        if argv[0] == "/bin/ps":
+            assert argv == ["/bin/ps", "-p", "555", "-o", "pid=,pgid=,uid=,state=,lstart="]
+            assert kwargs == {"check": False, "timeout": 1}
+            return SimpleNamespace(returncode=0,
+                stdout=f"555 333 {backend.uid} S {old['started']}\n".encode())
+        assert argv == ["/usr/bin/pgrep", "-x", "slipstream"]
+        return SimpleNamespace(returncode=0, stdout=b"555\n")
+    backend.run=query
     backend.tproxy=SimpleNamespace(_daemon_update_tree=lambda *a,**kw:expected['old']['bundle_tree_sha256'],
         _DAEMON_UPDATE_REQUESTS=str(tmp_path/'requests'))
     backend.status=lambda:{'phase':'aborted','decision':'abort','writer_quiescent':True}
@@ -300,7 +308,29 @@ def test_actual_private_failed_receipt_and_independent_old_tray_proof(restored):
     backend.final_old_app()
     assert backend.rollback_receipt['successor_pid']==222
     assert backend.tray==old and backend.tray['pid']==555
-    assert [name for name,_ in backend.events]==['rollback_receipt','final_old_app']
+    assert [name for name,_ in backend.events]==[
+        'rollback_receipt','final_tray_query','final_tray_processes','final_old_app']
+    assert backend.events[2][1]["processes"] == [
+        {"pid": 555, "pgid": 333, "uid": backend.uid, "state": "S", "started": old["started"]}]
+
+
+@pytest.mark.parametrize("returncode,stdout,outcome", [
+    (1, b"", "no_candidates"),
+    (0, b"555\n556\n", "multiple_candidates"),
+    (2, b"", "query_error"),
+])
+def test_old_tray_refusal_keeps_sanitized_query_diagnostic(restored, returncode, stdout, outcome):
+    backend, receipt, path, old = restored
+    def query(argv, **kwargs):
+        if argv[0] == "/bin/ps":
+            raise fault.Refused("inert optional process diagnostic failure")
+        return SimpleNamespace(returncode=returncode, stdout=stdout)
+    backend.run = query
+    with pytest.raises(fault.Refused, match="one independently observed OLD tray must be alive"):
+        backend.final_old_app()
+    diagnostic = next(value for kind, value in backend.events if kind == "final_tray_query")
+    assert diagnostic["side"] == "old"
+    assert diagnostic["returncode"] == returncode and diagnostic["outcome"] == outcome
 
 
 @pytest.mark.parametrize('change',['phase','new_pid','new_birth','manifest','decision','nonce','archive','private_mode',

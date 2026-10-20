@@ -19,76 +19,59 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ### Live qualification checkpoint, 2026-10-20
 
-PR403 and PR404 are merged. Corrected `.28` source
-`01fcd4c7d91043e58d7c777ebfc4a94264caa5fa` and ordinary `.29` source
-`087c540d837eb8c37a079c273e6d6a390f8a4f88` passed their complete exact-main
-CI/audit runs and signed-candidate authentication. The retained candidates are
-byte-distinct and independently bound; do not rebuild or download them again.
-Evidence below is relative to `output/updater-daemon-identity/`.
+Active physical checkout:
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`.
+Branch `codex/updater-tray-process-group` starts at merged main
+`0f0af398bdac9999dc6923639b6a52f92d243f28`. PR405 passed exact-head
+CI39398301982/audit39398302009, resolved review and merged; source tree equality
+was verified. The historical root checkout is a locator; preserve its user files.
+Evidence paths below are relative to `output/updater-daemon-identity/`.
 
-- OLD CI39385463713/audit39385463601; receipt
-  `main403-verification/receipt.json` SHA256
-  `f711bf480f0269ba771c8a93a4169408b0a2b49ad2355c4224b30e8ddeccb4c1`.
-- NEW CI39387811737/audit39387811789; receipt
-  `main404-verification/receipt.json` SHA256
-  `011f9f1d5cf7e13b64c4dcbb1ce08db6fbbe4dbb0fd68e2ff7472c5520f35c1c`.
-- Root run39390234434 attempt1 passed both commit and crash-before-commit.
-  Canonical prerequisite validation and independent review confirmed NEW commit,
-  OLD restoration after the crash, rejection of a late commit after abort, and
-  empty cleanup errors. Receipt `root28-to29-qualification/receipt.json` SHA256
-  `b874ac1c9d9fb5eb52d75d7fea7253eb5ef0ed702b3090ece35d810a40af91ce`.
-- App run39391446170 attempt1 failed both cases at the observation deadline.
-  Watch46266 completed1. Both artifacts were downloaded once and verified
-  against GitHub transport digests; pair and root prerequisite match.
-  Failure receipt `app28-to29-qualification/failure-receipt.json` SHA256
-  `b27463e7775c8cf2be5e16eba3bc67e274548de55570d2247795ad62f495d665`.
-- Commit observed the real successor ACK, quiescent root commit and last app
-  journal phase acknowledged. The injected pre-ACK STOP/KILL observed quiescent
-  root abort and last app journal phase old_relaunched. Neither case proved
-  complete app cleanup; both require disposable runner destruction. Existing
-  event deduplication does not record journal absence, and no final launchd
-  snapshot was retained. These partial results do not identify the failed
-  completion predicate or prove a product cleanup fault.
-- Source review established an observer false negative: production removes the
-  LaunchAgent plist/journal/ACK before best-effort self-bootout and permits a
-  loaded, successfully exited watchdog. The old observer demanded job absence.
-  This defect is reproduced by a hermetic before/after test; missing terminal
-  diagnostics prevent attributing the historical run to it conclusively.
-- Repair branch `codex/packaged-terminal-observer` starts at main087c and changes
-  only observers, their source guard/driver/workflow, focused tests and docs.
-  Terminal proof now checks the exact exited watchdog, captured non-restarting
-  policy, absent files and available existing private lock. Preflight absence,
-  real ACK/restored OLD and root terminal proof remain mandatory. Timeout now
-  retains decisive terminal predicates. Independent observer review found no
-  blockers; its 157 scoped tests passed, including the prior failing case.
-- The separate source guard permits only an audited clean main descendant with
-  an explicit observer-only diff. It runs before dependencies/materialization
-  and again before installation. Harness SHA/tree/run/attempt are recorded
-  separately; signed NEW087c and root39390234434 remain unchanged. The 115
-  source/history, driver and workflow tests passed. Parent retained logs
-  `app28-to29-qualification/observer-{before,after}.log` and
-  `app28-to29-qualification/source-proof-tests.log`.
-- Independent review found no blockers in the complete observer/source-guard
-  diff. Project-state continuity, actionlint and whitespace checks passed.
-- PR405 first head `ff9da1f374a717e0466972d9f366ea2df8019da2` passed whole
-  CI39396219080 and audit39396219086; watch47290 completed0. An automated P2
-  correctly found that allowlisting the whole driver also allowed future changes
-  to prerequisite/install/cleanup. Merge was blocked and did not occur.
-- The follow-up pins full reviewed driver/workflow Git bytes by SHA256. Changes
-  to either now require an explicit reviewed pin update. Five new cases cover
-  exact acceptance and altered auth/install/cleanup/materializer commands;
-  the 120 source/driver/workflow tests passed. Reuse the unchanged157 observer
-  tests and green baseline; required exact-head CI remains necessary after push.
-  Both native app cases still need the repaired main harness. No other gate is
-  restarted and candidates/root proof remain unchanged.
-- Next: complete PR checks, merge the observer repair, then dispatch the two app cases once from that audited main harness
-  with the same ten inputs in `app28-to29-qualification/workflow-inputs.json`.
-  Reuse candidates and root proof. Do not repeat run39391446170 unchanged.
-  Public discovery, tray/admin and after-ACK gates remain separate.
+- Signed OLD `.28` at01fcd4c and NEW `.29` at087c passed main CI/audit and
+  candidate authentication. Root39390234434/1 passed commit and crash-before-
+  commit for that exact pair. Receipt `root28-to29-qualification/receipt.json`
+  SHA256 `b874ac1c9d9fb5eb52d75d7fea7253eb5ef0ed702b3090ece35d810a40af91ce`.
+- Initial app39391446170 failed both cases at the deadline without final
+  diagnostics. PR405 repaired an independently proven observer false negative:
+  a successfully exited registered watchdog can be terminal. Its strict
+  identity, policy, files and lock checks passed157 focused tests, with120
+  source/driver/workflow tests. Reuse those checks for unchanged code.
+- Repaired app39400501344/1 **failed both cases**. Watch32909 completed1;
+  no watcher or duplicate run remains. Both ZIPs were authenticated against
+  GitHub size/digests and only bounded JSON/log files extracted. Failure receipt
+  `app28-to29-repaired-qualification/failure-receipt.json` SHA256
+  `9baffdd645090112034745b6338b0a6a2ae1970df491c12f23dc8af108618324`.
+- Both cases now prove terminal watchdog cleanup: absent transaction files,
+  available lock, stopped watchdog. Commit observed live exact NEW17380 through
+  ACK immediately before cleanup, then failed `one final tray must be alive`.
+  Pre-ACK STOP/KILL observed quiescent root abort, restored OLD daemon and
+  `old_relaunched` receipt, then failed the equivalent OLD-tray requirement.
+  Neither case qualifies. Final pgrep return data, PGID and termination signals
+  were not retained; do not claim a directly observed launchd kill.
+- Source review identifies a product lifecycle defect consistent with both:
+  shared `bundle_launch_command` lets NEW and rollback OLD inherit the watchdog
+  process group. Default launchd cleanup kills remaining members when its job
+  dies. The narrow fix gives the app its own process group and preserves normal
+  watchdog cleanup and exact PID controls. Two real subprocess regressions
+  check actual child PGID for NEW/OLD; hosted execution is pending. Final-tray
+  diagnostics now retain bounded PID/group metadata without relaxing any
+  acceptance rule. Independent source review found no blockers. The289 focused
+  observer/pre-ACK/source/driver/workflow Python tests, project continuity and
+  whitespace checks passed; no local native test or build was run.
+- The helper is sealed from OLD. Fixing only NEW cannot qualify the retained
+  `.28 -> .29` pair, so never rerun it unchanged. Next use corrected ordinary
+  `.29` OLD and `.30` NEW. Both full identities must bind fresh root and app
+  gates. Include the minimal publisher/pair admission changes in the ordinary
+  `.30` bump before candidate creation, avoiding an extra release rebuild.
+- Previously prepared `preview29-publication-preparation.patch` is parked;
+  do not apply it blindly. Publication still follows exact-source CI/audit,
+  packaged commit/rollback and protected readiness. Real public discovery and
+  public upgrade/rollback remain after publication under the authorized order;
+  do not turn every future crash scenario into a new preview blocker.
+- No local Rust/native build, product execution, workstation installation or
+  network mutation. Public `.24`, installed app, settings and learning unchanged.
 
-The following preparation record is historical; the live checkpoint above
-supersedes its pending statuses. No native code or application was executed on
-the workstation. Public preview `.24` and the user's installed app are unchanged.
+The retained records below are historical and superseded by this live checkpoint.
 
 ### Retained preparation record
 
@@ -459,17 +442,14 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish corrected `.28` CI39385463713/audit39385463601 and authenticate its
-  exact-source signed candidate once. Do not substitute the old `.28` artifact.
-- Complete the ordinary `.29` successor PR checks in parallel. Merge only after
-  the corrected `.28` receipt is qualified and required successor CI passes.
-  Then authenticate one `.29` exact-main candidate.
-- Run root commit + crash-before-commit on the corrected `.28 -> .29` pair, then
-  both packaged app modes using those exact pins and successful root receipts.
-  A failed or missed fault window is not rollback evidence and is not auto-retried.
-- Reuse unchanged public `.24` release/readiness evidence. Public update,
-  ordinary tray/admin flows and other crash boundaries remain open; preserve
-  workstation state and all retained evidence.
+- Review and run hosted CI for the shared app process-group repair and focused
+  final-tray diagnostics. Do not weaken the requirement for a surviving exact app.
+- After merge, authenticate corrected `.29` once, then prepare ordinary `.30`
+  with pair/publisher admission already synchronized and authenticate its build.
+- Qualify root and app commit/rollback on that exact pair, then protected
+  readiness and publish the final preview. Do not rerun immutable failed pairs.
+- Preserve the workstation and retained public `.24` evidence. Public updater,
+  ordinary tray/admin and additional fault cases remain separately reported.
 
 ## External Gates
 

@@ -129,6 +129,7 @@ class PreAckObserver(Observer):
         require(self.process_snapshot(self.fault_process["pid"]) is None,
                 "failed NEW PID remains or has been reused")
         result = self.run(["/usr/bin/pgrep", "-x", "slipstream"], check=False)
+        self.retain_final_tray_query("old", result)
         values = result.stdout.decode().split()
         require(result.returncode == 0 and len(values) == 1 and values[0].isdigit(),
                 "one independently observed OLD tray must be alive")
