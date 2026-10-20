@@ -17,23 +17,39 @@ Receipt SHA256: `1fc311510d89b6cbb975dcb5565fdb950b147f90208ab508523066f6d84f43f
 
 ## Current Change
 
-PR402 (mailbox ancestry repair) and PR400 (two packaged app modes) merged.
-Current main is `6eac5d34bbd082568ba481c2b89f88779d364c5a`; its tree matches
-PR400's tested head `6259ccfbeb3c0826b33be37da537141d092ff71f`.
-Exact-main CI39303200265 and audit39303200111 passed. The corrected `.27`
-origin at `b1a44685347b1aade89d63cc779ae6b60b0db005` also passed exact-main
-CI39300234381 and audit39300234464. Both signed candidates were authenticated
-once, including all seven files, signature, provenance and archive modes.
-Retain them; do not download or rebuild the same source again.
+PR403 merged the PF/status observation repair at
+`01fcd4c7d91043e58d7c777ebfc4a94264caa5fa`. Its tree is identical to tested
+head `8959af1bc75a896c1fea91dbd8e9719c12487c31`; whole CI39384063074 and
+audit39384063098 passed, including installed lifecycle and packaged browser
+qualification. All three required checks passed; review threads were empty.
+Receipt `pr403-verification/receipt.json`, SHA256
+`ed6e6f8edd49951065e4964ba66e1f908ccae02747381572f5ba427da9405c62`;
+merge receipt SHA256
+`2fec23ac4afecb4b16d83b8e7129e59a524b6a391343dbbaa8a74a5ede424307`.
+Evidence paths here are relative to `output/updater-daemon-identity/`.
 
-Evidence under `output/updater-daemon-identity/`:
-- `main402-verification/receipt.json`, SHA256
-  `b2c031ec2e6eff9958b0d555e14e96452c1f92c5d48829c77e7282898fb43264`.
-- `main400-union-verification/receipt.json`, SHA256
+The corrected `.28` exact-main CI39385463713 and audit39385463601 are running.
+One owner watches them and authenticates the signed candidate using source
+helpers pinned to `01fcd4c7`, not the mutable checkout. Its final receipt is
+not available yet. The earlier `.28` artifact from main400 predates this fix.
+
+This change prepares the ordinary `.29` successor with `scripts/sync_version.py`:
+VERSION plus the existing tray/daemon version inputs and generated metadata.
+It changes no routing logic or dependencies. Preparing its PR and CI in parallel
+saves a serial build wait; merge remains conditional on a fully qualified
+corrected `.28` origin. Version equality or a green PR is not a signed-candidate
+proof. Authenticate the `.29` exact-main candidate after merge, then run both
+root modes followed by both app modes on the same complete pair at NEW source.
+No native transition has passed for the corrected pair yet.
+
+Retain the older candidates and authenticated receipts, without redownloading:
+- corrected mailbox `.27`, `main402-verification/receipt.json`, SHA256
+  `b2c031ec2e6eff9958b0d555e14e96452c1f92c5d48829c77e7282898fb43264`;
+- pre-readiness-fix `.28`, `main400-union-verification/receipt.json`, SHA256
   `c43da2633929a249b27a61363524b916e119e72629157ada8317811fa6b3fc58`.
 
 Native root run39381512115 attempt1 used this exact `.27 -> .28` pair at
-main `6eac5d34`. Crash-before-commit passed; commit failed in the read-only
+pre-repair main `6eac5d34`. Crash-before-commit passed; commit failed in the read-only
 observer after NEW readiness, before any commit request. Both cases cleaned
 up without errors. The commit observer reported `daemon PF state mismatch`;
 the run did not retain the two sampled values, so their direction is unknown.
@@ -48,7 +64,7 @@ PF state. In the updater this can cause unnecessary abort/restore or a redundant
 reinstall during committed recovery; this is a source-proven possibility, not
 proof that every historical network interruption had this cause.
 
-Branch `codex/update-readiness-observation` repairs both readers. Only PF/status
+Merged PR403 repairs both readers. Only PF/status
 mismatch may be resampled within the existing five-second readiness budget;
 identity, ownership, witness, hash, listener and recovery failures still fail.
 PID, root UID, process birth and command remain pinned across observations.
@@ -65,7 +81,8 @@ after a retry. Evidence: `readiness-product-fix/final-retry-budget.log`,
 `readiness-product-fix/default-attestation.log`,
 `root27-to28-qualification/readiness-after.log`,
 `next-pair-admission-tests.log`. These focused results reuse the unchanged
-green main CI baseline; new required PR/main CI remains pending.
+green baseline. Exact-head PR403 CI also passed; corrected-origin main
+qualification and successor CI remain pending.
 
 The corrected originating product now needs a new normal `.28` main candidate,
 followed by a normal `.29` successor. The previous no-`.29` plan applied only to
@@ -367,10 +384,11 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Create the readiness-repair PR from the reviewed patch and require its
-  exact-head CI before merge; do not repeat unchanged focused tests.
-- Authenticate one corrected normal `.28` exact-main candidate. Then make the
-  ordinary version bump to `.29` and authenticate that exact-main successor.
+- Finish corrected `.28` CI39385463713/audit39385463601 and authenticate its
+  exact-source signed candidate once. Do not substitute the old `.28` artifact.
+- Complete the ordinary `.29` successor PR checks in parallel. Merge only after
+  the corrected `.28` receipt is qualified and required successor CI passes.
+  Then authenticate one `.29` exact-main candidate.
 - Run root commit + crash-before-commit on the corrected `.28 -> .29` pair, then
   both packaged app modes using those exact pins and successful root receipts.
   A failed or missed fault window is not rollback evidence and is not auto-retried.

@@ -1,6 +1,6 @@
 {
   "name": "slipstream-tray",
-  "version": "0.1.9-preview.28",
+  "version": "0.1.9-preview.29",
   "private": true,
   "description": "Slipstream menu-bar tray (Tauri v2)",
   "scripts": {
