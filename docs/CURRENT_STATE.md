@@ -2,8 +2,52 @@
 
 ## Verified Checkpoint
 
+Delivery resumed on branch `codex/preview31-updater-delivery`, based on main
+`5385b89add415c531276ba43f5c06c50293ffb17`, in the physical checkout below.
+Its exact-main CI39465376685/1 and audit39465376697/1 are already green.
+CI produced signed candidate `release-candidate-5385b89add415c531276ba43f5c06c50293ffb17`
+(artifact12285485917). Authentication passed: pinned canonical verifier,
+production updater signature, GitHub provenance, complete staged app tree,
+archive modes and codesign. Receipt:
+`output/updater-daemon-identity/main410-fixed-origin-verification/receipt.json`,
+SHA256 `0db64df877713f51efc2e9d22bf521aea40caff70aed01847aa312a867b94caa`.
+Manifest SHA256 `f73109946205e4b0ad11568850473feafe502ff46e8c523c30eecaa0d2983696`;
+daemon SHA256 `e1eca39ef0b07f6b7890f35e86e225c03d32f6fcdcc294cbf7fe8ec685968e96`.
+The ordinary `.31` successor changes version metadata, publisher admission
+and the exact packaged pair admission (`.30 -> .31`) with matching reviewed
+observer-source pins. Three version contracts and111 pair/source-proof tests
+passed. No production behavior change beyond the daemon version constant.
+No local native build.
+The fixed origin is now manually installed at `/Applications/Slipstream.app`;
+the copied canonical bundle verifier and codesign passed. Normal app startup
+replaced the owned daemon. Fresh StatusV2 reported active PID80303,
+heartbeat39; root attestation matched the fixed daemon SHA above. Tray PID80188
+runs at the canonical path as uid502. These PIDs are observations only.
+The actual previous public `.30` app and user state are retained at
+`output/updater-daemon-identity/main410-fixed-origin-verification/local-install-backup/`.
+Installation receipt: `main410-fixed-origin-verification/manual-install.json`
+under the same evidence base. The ordinary updater transaction was absent;
+the earlier root operation was durably aborted/quiescent with its worker exited.
+This was a manual bridge install, not ordinary updater or normal Quit proof.
+Next: qualify the exact pair and publish/test `.31` under the recorded release
+gates. Private-bridge and public-pair evidence remain distinct. Preserve every
+previous app/state backup and private receipt.
+
+PR410 is merged at `5385b89add415c531276ba43f5c06c50293ffb17`, with the same
+Git tree `4bfa0a784fc05d06985ab73a9c7cdd1001723591` as tested head
+`f24dd9cc1f2fedb96044df976e6f69786173df4a`. CI39463378717/1 and
+audit39463378736/1 passed all three required contexts, including packaged
+browser/lifecycle and11 Rust adapter tests (all six new regressions passed).
+Final independent review had no blockers; all three PR review threads were
+resolved. Local evidence directory below contains `pr410-final-ci-receipt.json`,
+SHA256 `e7dab40c2fe3c9e498f60a7d7413282b10f59d4a346c1bef034e4ce38a4a6f67`,
+and `pr410-merge-receipt.json`, SHA256
+`b1af8d9a14943f5ae810623658241231ded3309961f41780269a505bee535778`.
+This final post-merge checkpoint is local; no further product change or repeat
+of the green suite is needed merely to publish the checkpoint.
+
 Public [preview .30](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.30)
-is now installed at `/Applications/Slipstream.app` on the user's Mac by manual
+was previously installed at `/Applications/Slipstream.app` on the user's Mac by manual
 replacement from its verified public artifact. Normal launch installed the
 matching root daemon. Fresh StatusV2 reported version `.30`, active daemon
 PID46244 and increasing heartbeat; launchd and the root attestation/witness
@@ -99,8 +143,8 @@ Final focused verification passed136 daemon-update tests plus59 adjacent tests
 passing. Six new inert Rust trigger tests run in the existing CI adapter job.
 The focused log is `output/updater-daemon-identity/worker-startup-lease-fix/private-lease-final-tests.log`,
 SHA256 `3e958e5e479d537f8a7545ddaee9b0e8ae77cc4fefa336e38163f0cce8f5e4e7`.
-Independent review of both follow-ups found no blockers. Exact-source CI for
-these follow-ups remains pending; the initial-head green receipt is retained.
+Independent review of both follow-ups found no blockers. Final exact-source CI
+passed and PR410 merged as recorded above; the initial-head receipt is retained.
 
 The old `.23 --quit` returned without ending its process; only its verified PID
 was terminated after owned service absence was established. `.29` was later
@@ -110,8 +154,7 @@ performed Restart Proxy and the ordinary update/admin action. Do not repeat the
 known-stalled unattended hosted authorization path. Public update/forced rollback
 and normal Quit remain open; manual `.30` installation does not close them.
 
-Next: finish PR410 review follow-ups, retain the new exact-source required CI
-receipt, and carry both unreleased repairs into a normally built originating
+Next: carry merged PR409 and PR410 into a normally built originating
 candidate before qualifying another public update. A successor alone cannot
 repair the worker sealed from an older origin. Do not start another workstation
 replacement or broad suite merely to restate these limits.
@@ -485,8 +528,8 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish PR410's clock-boundary and disposable-trigger review follow-ups and
-  obtain their exact-source required CI. Preserve the green initial-head receipt.
+- PR410 implementation, reviews, required CI and merge are complete. Reuse its
+  exact tested tree and retain both CI receipts; do not reopen the source fix.
 - The corrected originating candidate must contain both unreleased repairs
   before another public transition can qualify them. Preserve current manual
   `.30` and all private backups; no repeated local install is needed now.

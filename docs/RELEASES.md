@@ -80,6 +80,14 @@ originating app and root daemon; a successor cannot repair an older watchdog
 that was copied before replacement. Existing `.23` and `.24` users therefore
 need a manual DMG or separately qualified bridge transition.
 
+The next delivery uses the signed exact-main candidate at `5385b89add415c531276ba43f5c06c50293ffb17`
+as a private fixed `.30` origin, with PR409's extraction repair and PR410's
+original startup lease. Public `.30` remains unchanged and lacks those fixes.
+Qualify that exact origin with the normally built `.31` successor before
+publication, then check the ordinary tray/admin transition locally. Report
+private-bridge success separately from a future fully public release-pair
+update and forced rollback.
+
 The protocol orders effects as follows. The root worker's durable decision
 controls recovery; a missing reply is not evidence that an operation stopped.
 
@@ -222,12 +230,12 @@ all transaction hashes. The app workflow SHA and actual checkout HEAD must
 match. Normally this is the candidate NEW source; an observer-only repair may
 use its audited main descendant under the bounded source proof below.
 
-For the current bridge, first qualify a corrected `.29` origin that contains
-the tray process-group repair. The ordinary `.30` successor PR and its checks
-may be prepared in parallel; merge and exact-main signing wait for that `.29`
-receipt. Run both root cases on `.30` for the exact corrected `.29 -> .30`
-pair, followed by both app cases with the same eight pins. The earlier
-`.28 -> .29` root proof does not transfer to these different candidates.
+For the current bridge, authenticate the corrected private `.30` origin at
+`5385b89add415c531276ba43f5c06c50293ffb17`. The ordinary `.31` successor PR and
+its checks may be prepared in parallel; merge and exact-main signing wait for
+that origin's receipt. Run both root cases on `.31` for the exact fixed
+`.30 -> .31` pair, followed by both app cases with the same eight pins.
+The earlier `.29 -> .30` root proof does not transfer to these candidates.
 Product changes require new normally built candidates; observer-only changes
 can reuse the authenticated pair and its root proof.
 
@@ -531,10 +539,10 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.30`, with
-  `VERSION` and `preview_sequence=30` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.31`, with
+  `VERSION` and `preview_sequence=31` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.30`; the new preview requires its own
+  `.23` source and is rejected for `.31`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact

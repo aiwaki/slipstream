@@ -15,9 +15,9 @@ on:
         description: "Optional package version override; must match VERSION including preview sequence. Manual runs produce prereleases."
         required: false
       preview_sequence:
-        description: "Preview sequence. This release must be 30."
+        description: "Preview sequence. This release must be 31."
         required: true
-        default: "30"
+        default: "31"
       release_candidate_run_id:
         description: "Optional successful ci.yml main run ID for this exact SHA."
         required: false
@@ -108,8 +108,8 @@ jobs:
             case "$preview_sequence" in
               ''|*[!0-9]*) echo "preview_sequence must be a positive integer"; exit 1 ;;
             esac
-            [ "$preview_sequence" = 30 ] || {
-              echo "this release must use preview sequence 30"
+            [ "$preview_sequence" = 31 ] || {
+              echo "this release must use preview sequence 31"
               exit 1
             }
             [ "$v" = "0.1.9-preview.${preview_sequence}" ] || {
