@@ -15,9 +15,12 @@
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::ffi::{CString, OsStr};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{symlink, DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
@@ -672,6 +675,120 @@ where
     sync(path).map_err(|error| format!("cannot sync staged directory: {error}"))
 }
 
+fn staged_name(name: &OsStr) -> Result<CString, String> {
+    CString::new(name.as_bytes()).map_err(|_| "staged name contains NUL".into())
+}
+
+fn staged_directory_at(parent: &File, name: &OsStr, create: bool) -> Result<File, String> {
+    let name = staged_name(name)?;
+    if create {
+        // All extraction directories start owner-private. Restore owner access
+        // without changing the process umask, even if it masks owner bits.
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } == 0 {
+            if unsafe {
+                libc::fchmodat(
+                    parent.as_raw_fd(),
+                    name.as_ptr(),
+                    0o700,
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } != 0
+            {
+                return Err(format!(
+                    "cannot protect staged directory: {}",
+                    io::Error::last_os_error()
+                ));
+            }
+        } else if io::Error::last_os_error().kind() != io::ErrorKind::AlreadyExists {
+            return Err(format!(
+                "cannot create staged directory: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(format!(
+            "cannot open real staged directory: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: openat returned a new owned descriptor; symlinks were not followed.
+    let directory = unsafe { File::from_raw_fd(fd) };
+    let metadata = directory.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_dir() || metadata.uid() != current_uid() {
+        return Err("staged directory is not owned by the updater".into());
+    }
+    Ok(directory)
+}
+
+fn staged_directory(
+    root: &File,
+    relative: &Path,
+    mut created_modes: Option<&mut BTreeMap<PathBuf, u32>>,
+) -> Result<File, String> {
+    let mut directory = root.try_clone().map_err(|error| error.to_string())?;
+    let mut path = PathBuf::new();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err("staged directory component is unsafe".into());
+        };
+        directory = staged_directory_at(&directory, name, created_modes.is_some())?;
+        path.push(name);
+        if let Some(modes) = created_modes.as_mut() {
+            // Archives may omit parent entries; keep the previous normal 0755
+            // layout, independently of the process umask.
+            modes.entry(path.clone()).or_insert(0o755);
+        }
+    }
+    Ok(directory)
+}
+
+fn staged_archive_mode(header: &tar::Header) -> Result<u32, String> {
+    // Admission remains the complete staged-bundle validator's responsibility.
+    header
+        .mode()
+        .map(|mode| mode & 0o777)
+        .map_err(|_| "staged entry mode is invalid".into())
+}
+
+fn staged_symlink_mode(parent: &File, name: &OsStr, mode: u32) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let name = staged_name(name)?;
+        // macOS masks a new symlink's own mode with umask. This changes only the
+        // link, never its target, and remains anchored to its checked parent.
+        if unsafe {
+            libc::fchmodat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                mode as libc::mode_t,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(format!(
+                "cannot restore staged link mode: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (parent, name);
+        if mode != 0o777 {
+            return Err("platform cannot preserve this symlink mode".into());
+        }
+    }
+    Ok(())
+}
+
 fn extract_archive_with_sync<F, D>(
     archive: &[u8],
     stage: &Path,
@@ -682,13 +799,32 @@ where
     F: Fn(&File) -> io::Result<()>,
     D: Fn(&Path) -> io::Result<()>,
 {
-    fs::create_dir(stage)
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(stage)
         .map_err(|error| format!("cannot create update staging bundle: {error}"))?;
-    fs::set_permissions(stage, fs::Permissions::from_mode(0o700))
-        .map_err(|error| format!("cannot protect update staging bundle: {error}"))?;
+    let mut directory_modes = BTreeMap::new();
     let decoder = GzDecoder::new(archive);
     let mut tar = tar::Archive::new(decoder);
     let result = (|| {
+        let stage_parent =
+            open_directory_nofollow(stage.parent().ok_or("staging parent missing")?)?;
+        let stage_name = staged_name(stage.file_name().ok_or("staging name missing")?)?;
+        if unsafe {
+            libc::fchmodat(
+                stage_parent.as_raw_fd(),
+                stage_name.as_ptr(),
+                0o700,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(format!(
+                "cannot protect update staging bundle: {}",
+                io::Error::last_os_error()
+            ));
+        }
+        let stage_handle = staged_directory_at(&stage_parent, stage.file_name().unwrap(), false)?;
         for entry in tar
             .entries()
             .map_err(|_| "update archive is unreadable".to_string())?
@@ -701,29 +837,43 @@ where
             let Some(relative) = relative_archive_path(&archive_path)? else {
                 continue;
             };
-            let destination = stage.join(&relative);
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|error| format!("cannot create staged directory: {error}"))?;
-            }
+            let parent = staged_directory(
+                &stage_handle,
+                relative.parent().unwrap_or_else(|| Path::new("")),
+                Some(&mut directory_modes),
+            )?;
+            let name = staged_name(relative.file_name().ok_or("staged name missing")?)?;
             let entry_type = entry.header().entry_type();
+            let mode = staged_archive_mode(entry.header())?;
             if entry_type.is_dir() {
-                fs::create_dir_all(&destination)
-                    .map_err(|error| format!("cannot create staged directory: {error}"))?;
+                staged_directory_at(&parent, relative.file_name().unwrap(), true)?;
+                directory_modes.insert(relative, mode);
             } else if entry_type.is_file() {
-                let mode = entry
-                    .header()
-                    .mode()
-                    .map_err(|_| "staged file mode is invalid".to_string())?
-                    & 0o777;
-                let mut output = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(mode)
-                    .open(&destination)
-                    .map_err(|error| format!("cannot create staged file: {error}"))?;
+                let fd = unsafe {
+                    libc::openat(
+                        parent.as_raw_fd(),
+                        name.as_ptr(),
+                        libc::O_WRONLY
+                            | libc::O_CREAT
+                            | libc::O_EXCL
+                            | libc::O_NOFOLLOW
+                            | libc::O_CLOEXEC,
+                        0o600,
+                    )
+                };
+                if fd < 0 {
+                    return Err(format!(
+                        "cannot create staged file: {}",
+                        io::Error::last_os_error()
+                    ));
+                }
+                // SAFETY: openat returned a new exclusive regular file descriptor.
+                let mut output = unsafe { File::from_raw_fd(fd) };
                 io::copy(&mut entry, &mut output)
                     .map_err(|error| format!("cannot extract staged file: {error}"))?;
+                output
+                    .set_permissions(fs::Permissions::from_mode(mode))
+                    .map_err(|error| format!("cannot restore staged file mode: {error}"))?;
                 sync_file(&output).map_err(|error| format!("cannot sync staged file: {error}"))?;
             } else if entry_type.is_symlink() {
                 let target = entry
@@ -734,15 +884,50 @@ where
                 {
                     return Err("staged symlink escapes the application".into());
                 }
-                symlink(&target, &destination)
-                    .map_err(|error| format!("cannot create staged symlink: {error}"))?;
+                let target = staged_name(target.as_os_str())?;
+                if unsafe { libc::symlinkat(target.as_ptr(), parent.as_raw_fd(), name.as_ptr()) }
+                    != 0
+                {
+                    return Err(format!(
+                        "cannot create staged symlink: {}",
+                        io::Error::last_os_error()
+                    ));
+                }
+                staged_symlink_mode(&parent, relative.file_name().unwrap(), mode)?;
             } else {
                 return Err("update archive entry type is unsupported".into());
             }
         }
+        // Apply explicit (including late/read-only) directory headers only after
+        // writing children. Never apply an archive mode to the private root.
+        for (path, mode) in directory_modes.iter().rev() {
+            staged_directory(&stage_handle, path, None)?
+                .set_permissions(fs::Permissions::from_mode(*mode))
+                .map_err(|error| format!("cannot restore staged directory mode: {error}"))?;
+        }
         sync_staged_directories_with(stage, sync_directory_entry)
     })();
     if result.is_err() {
+        // A late sync failure may follow read-only directory restoration.
+        // Restore access only to staged directories, through checked parents;
+        // symlink parents cannot redirect cleanup chmod to another tree.
+        if let Ok(root) = open_directory_nofollow(stage) {
+            for path in directory_modes.keys() {
+                if let (Ok(parent), Ok(name)) = (
+                    staged_directory(&root, path.parent().unwrap_or_else(|| Path::new("")), None),
+                    staged_name(path.file_name().unwrap()),
+                ) {
+                    unsafe {
+                        libc::fchmodat(
+                            parent.as_raw_fd(),
+                            name.as_ptr(),
+                            0o700,
+                            libc::AT_SYMLINK_NOFOLLOW,
+                        );
+                    }
+                }
+            }
+        }
         let _ = fs::remove_dir_all(stage);
     }
     result
@@ -2734,6 +2919,41 @@ mod tests {
         builder.into_inner().unwrap().finish().unwrap()
     }
 
+    fn archive_from_tree_nodes(nodes: &[serde_json::Value]) -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for node in nodes {
+            let mut header = tar::Header::new_gnu();
+            header
+                .set_path(format!("Slipstream.app/{}", node["path"].as_str().unwrap()))
+                .unwrap();
+            header.set_mode(node["mode"].as_u64().unwrap() as u32);
+            let contents = match node["kind"].as_str().unwrap() {
+                "directory" => {
+                    header.set_entry_type(tar::EntryType::Directory);
+                    ""
+                }
+                "symlink" => {
+                    header.set_entry_type(tar::EntryType::Symlink);
+                    header
+                        .set_link_name(node["target"].as_str().unwrap())
+                        .unwrap();
+                    ""
+                }
+                "file" => node["content"].as_str().unwrap(),
+                kind => panic!("unknown inert fixture kind: {kind}"),
+            };
+            header.set_size(contents.len() as u64);
+            header.set_cksum();
+            builder.append(&header, contents.as_bytes()).unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn extracted_mode(path: &Path) -> u32 {
+        fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
     fn coordinated_journal(root: &Path) -> (PathBuf, UpdateJournalV1) {
         let (path, mut journal) = journal(root);
         journal.schema_version = JOURNAL_VERSION;
@@ -3770,6 +3990,108 @@ mod tests {
     }
 
     #[test]
+    fn archive_modes_ignore_process_umask() {
+        const CHILD_MASK: &str = "SLIPSTREAM_ARCHIVE_MODE_CHILD";
+        const CHILD_ROOT: &str = "SLIPSTREAM_ARCHIVE_MODE_ROOT";
+        if let Ok(mask) = std::env::var(CHILD_MASK) {
+            assert!(matches!(mask.as_str(), "022" | "077"));
+            let root = PathBuf::from(std::env::var_os(CHILD_ROOT).unwrap());
+            // This branch runs only in the isolated test executable. The
+            // concurrently running parent test process never changes its mask.
+            unsafe { libc::umask(u32::from_str_radix(&mask, 8).unwrap() as libc::mode_t) };
+            let vectors: serde_json::Value = serde_json::from_str(include_str!(
+                "../../../contracts/update-bundle-tree-v1.json"
+            ))
+            .unwrap();
+            let mut hashes = Vec::new();
+            for vector in vectors["vectors"].as_array().unwrap() {
+                let stage = root.join(vector["name"].as_str().unwrap());
+                let mut nodes = vector["nodes"].as_array().unwrap().clone();
+                // Explicit headers arrive after files/symlinks created their
+                // parents implicitly, matching valid late directory records.
+                nodes.sort_by_key(|node| node["kind"] == "directory");
+                extract_archive(&archive_from_tree_nodes(&nodes), &stage).unwrap();
+                assert_eq!(extracted_mode(&stage), 0o700);
+                for node in &nodes {
+                    assert_eq!(
+                        extracted_mode(&stage.join(node["path"].as_str().unwrap())),
+                        node["mode"].as_u64().unwrap() as u32,
+                        "wrong mode for {} under umask {mask}",
+                        node["path"],
+                    );
+                }
+                let hash = daemon_update::bundle_tree_sha256(&stage).unwrap();
+                assert_eq!(hash, vector["expected_sha256"].as_str().unwrap());
+                hashes.push(hash);
+            }
+            let stage = root.join("implicit");
+            extract_archive(&archive_with_executable(b"inert"), &stage).unwrap();
+            assert_eq!(extracted_mode(&stage), 0o700);
+            assert_eq!(extracted_mode(&stage.join("Contents")), 0o755);
+            assert_eq!(extracted_mode(&stage.join("Contents/MacOS")), 0o755);
+            assert_eq!(extracted_mode(&bundle_executable(&stage)), 0o700);
+            fs::write(
+                root.join("hashes.json"),
+                serde_json::to_vec(&hashes).unwrap(),
+            )
+            .unwrap();
+            return;
+        }
+
+        struct ReapedChild(Child);
+        impl Drop for ReapedChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let root = TempDir::new().unwrap();
+        let mut reports = Vec::new();
+        for mask in ["022", "077"] {
+            let case = root.path().join(mask);
+            fs::create_dir(&case).unwrap();
+            let log_path = case.join("child.log");
+            let log = File::create(&log_path).unwrap();
+            let mut child = ReapedChild(
+                Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "updater_transaction::tests::archive_modes_ignore_process_umask",
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env(CHILD_MASK, mask)
+                    .env(CHILD_ROOT, &case)
+                    .stdout(log.try_clone().unwrap())
+                    .stderr(log)
+                    .spawn()
+                    .unwrap(),
+            );
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            let status = loop {
+                if let Some(status) = child.0.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inert archive fixture child timed out under umask {mask}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            };
+            assert!(
+                status.success(),
+                "archive fixture child failed under umask {mask}: {}",
+                fs::read_to_string(&log_path).unwrap()
+            );
+            reports.push(fs::read(case.join("hashes.json")).unwrap());
+        }
+        assert_eq!(
+            reports[0], reports[1],
+            "umask changed the complete bundle identity"
+        );
+    }
+
+    #[test]
     fn staged_files_and_directories_are_synced_before_extract_returns() {
         let root = TempDir::new().unwrap();
         let stage = root.path().join("stage/Slipstream.app");
@@ -3779,7 +4101,8 @@ mod tests {
         extract_archive_with_sync(
             &archive_with_executable(b"new"),
             &stage,
-            &|_| {
+            &|file| {
+                assert_eq!(file.metadata()?.permissions().mode() & 0o777, 0o700);
                 file_syncs.set(file_syncs.get() + 1);
                 Ok(())
             },
@@ -3817,6 +4140,73 @@ mod tests {
         );
         assert!(result.unwrap_err().contains("sync staged file"));
         assert!(!stage.exists());
+    }
+
+    #[test]
+    fn readonly_staged_directory_sync_failure_removes_unpublished_stage() {
+        let root = TempDir::new().unwrap();
+        let stage = root.path().join("Slipstream.app");
+        let nodes = serde_json::json!([
+            {"path":"Contents/file","kind":"file","mode":420,"content":"inert"},
+            {"path":"Contents","kind":"directory","mode":365}
+        ]);
+        let saw_readonly = Cell::new(false);
+        let result = extract_archive_with_sync(
+            &archive_from_tree_nodes(nodes.as_array().unwrap()),
+            &stage,
+            &|_| Ok(()),
+            &|path| {
+                if path == stage.join("Contents") {
+                    assert_eq!(extracted_mode(path), 0o555);
+                    saw_readonly.set(true);
+                    return Err(io::Error::other("injected directory sync failure"));
+                }
+                Ok(())
+            },
+        );
+        assert!(
+            saw_readonly.get(),
+            "explicit late directory mode was not restored"
+        );
+        assert!(result.unwrap_err().contains("sync staged directory"));
+        assert!(
+            !stage.exists(),
+            "read-only staging directory prevented cleanup"
+        );
+    }
+
+    #[test]
+    fn staged_symlink_parent_is_rejected_without_changing_its_target() {
+        let root = TempDir::new().unwrap();
+        let stage = root.path().join("Slipstream.app");
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+        let sentinel = outside.join("sentinel");
+        fs::write(&sentinel, b"untouched").unwrap();
+        fs::set_permissions(&sentinel, fs::Permissions::from_mode(0o600)).unwrap();
+        let nodes = serde_json::json!([
+            {"path":"Contents/first","kind":"file","mode":420,"content":"inert"},
+            {"path":"Contents/redirect/new","kind":"file","mode":420,"content":"never written"}
+        ]);
+        let injected = Cell::new(false);
+        let result = extract_archive_with_sync(
+            &archive_from_tree_nodes(nodes.as_array().unwrap()),
+            &stage,
+            &|_| {
+                assert!(!injected.replace(true));
+                symlink(&outside, stage.join("Contents/redirect"))?;
+                Ok(())
+            },
+            &|_| Ok(()),
+        );
+        assert!(injected.get());
+        assert!(result.unwrap_err().contains("real staged directory"));
+        assert!(!stage.exists());
+        assert!(!outside.join("new").exists());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+        assert_eq!(extracted_mode(&outside), 0o700);
+        assert_eq!(extracted_mode(&sentinel), 0o600);
     }
 
     #[test]

@@ -301,6 +301,24 @@ points or general rollback coverage. Root rollback evidence cannot substitute
 for restoration of the app bundle. Native execution remains hosted-only;
 hermetic tests and a merged workflow do not satisfy either native app case.
 
+### Archive permissions during staging
+
+The updater must restore each accepted archive entry's ordinary permission bits
+independently of the launching process's umask. The staging root stays `0700`;
+implicit directories use `0755`, while explicit directory modes are deferred until
+their children are extracted. Apply file modes through the owned file handle
+before its sync, and never follow a symlink while changing directory or link
+permissions. Keep the existing cross-owner bundle validator unchanged. Do not
+change the process-global umask, including in the parallel test parent.
+
+Public UI run 39430167830/2 exposed this product limitation when the test driver
+leaked its private `077` mask into the application. Correcting that driver's launch
+condition allowed staging, but did not repair the released extractor for users
+with restrictive masks. A source regression must compare complete extracted
+modes and tree hashes in isolated `022`/`077` child processes, including symlinks,
+implicit parents and late directory records. This test does not claim an
+installed public update or an administrator authorization result.
+
 ## Legacy App Releases
 
 `v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
