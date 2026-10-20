@@ -1,6 +1,6 @@
 [package]
 name = "slipstream"
-version = "0.1.9-preview.28"
+version = "0.1.9-preview.29"
 description = "Slipstream — local DPI-bypass tray"
 authors = ["Slipstream"]
 edition = "2021"

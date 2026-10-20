@@ -222,7 +222,9 @@ all transaction hashes. The app workflow SHA and actual checkout HEAD must
 equal that same NEW source before installation.
 
 For the current bridge, first build the corrected `.28` origin with its ordinary
-whole main CI. Then merge and build the normal `.29` successor. Run both root
+whole main CI. The ordinary `.29` successor PR and its checks may be prepared
+in parallel; merge and exact-main signing wait for the qualified `.28` receipt.
+Then build the normal `.29` successor. Run both root
 cases on `.29` for that exact `.28 -> .29` pair, followed by both app cases
 with the same eight pins. Include this workflow and both cases before building
 NEW, because the app harness must run from that exact NEW source.
