@@ -633,9 +633,20 @@ explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 
-`Quit Slipstream` closes the tray UI but intentionally leaves its background
-routing service and owned Geph LaunchAgent running. This preserves routing if
-the menu process exits or crashes.
+The menu-only exit closes the tray UI but intentionally leaves its background
+routing service and owned Geph LaunchAgent running. Older builds call it
+`Quit Slipstream`, which does not mean that routing has stopped. The updated
+label explicitly says that routing continues. This preserves routing if the
+menu process exits or crashes; a separate stop-without-uninstall action is not
+yet implemented.
+
+Turning off `Enable Geph` stops only Slipstream's own Geph job. A failed or
+unreadable `launchctl print` response must not be treated as proof of absence.
+Only a response identifying the exact missing job and user, or a validated
+loaded job, establishes state; other results remain unknown. On stop failure,
+keep the enabled setting and checkbox and show the failure. A successful stop
+also requires removing the owned RunAtLoad plist so a later login cannot
+silently bring it back. Never kill a standalone Geph process by its name.
 
 `Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
 daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does
@@ -808,6 +819,38 @@ the test on Slipstream's transparent `pf` path instead of a browser or shell
 proxy.
 
 ## ChatGPT Or Codex Reconnecting
+
+### Distinguish lookup failures from HTTP refusals
+
+The October22 report included both Safari's "Cannot Find Server" for
+`www.youtube.com` and a Codex HTTP403 response. These are separate observations:
+the former requires evidence about resolution at the time of failure; the
+latter means that the specific request reached an HTTP responder. A generic
+block page and a Cloudflare Ray suffix do not identify the block rule, the
+selected Slipstream route, or the client's exit country.
+
+After the user removed Slipstream, read-only checks found neither owned launchd
+job and no StatusV2; only standalone Geph was running. System lookup of
+`www.youtube.com` and `chatgpt.com` succeeded. Safari then rendered YouTube
+without an agent refresh. These later observations cannot retroactively prove
+the route or cause of the earlier failure. The root log was not readable in
+that session; no DNS, proxy, VPN, extension, or external Geph settings changed.
+
+Slipstream's transparent path receives TCP/443 after the client has an address.
+Its per-connection DoH fallback cannot repair a browser lookup that failed
+before any TCP connection reached it. At recurrence, capture the time, exact
+hostname and current owned-service status, then make a bounded system lookup
+for that hostname. A later cached success is insufficient. Compare DNS
+transports only if that contemporaneous lookup fails; do not replace the user's
+resolver as a diagnostic shortcut.
+
+Separately, the source audit reproduced a DoH fallback defect: an exception
+while creating or configuring the first resolver connection escaped before
+the fallback loop could try its second resolver. Setup and query now share
+the exception boundary, with socket cleanup in `finally`. Offline regressions
+cover connection, socket setup, TLS setup/handshake and malformed responses.
+This repair does not change the routing policy and is not proof of the cause
+of the October22 screenshots.
 
 The native ChatGPT/Codex client uses long-lived streaming connections. A loop
 such as `Reconnecting 2/2` with `websocket closed by server before

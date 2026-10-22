@@ -1,5 +1,21 @@
 # Decisions
 
+### 2026-10-22: Geph off state requires observed shutdown
+
+An unsuccessful launchd query is unknown, not proof that Slipstream's Geph job
+is absent. Confirm the exact user job after stop requests, preserve ownership
+on unreadable process state or a surviving owned process, and report failures
+to the user. Persist the disabled preference only after owned cleanup succeeds;
+verify the saved preference before clearing its menu checkmark. Stop requests
+target only Slipstream's label, never a job selected by an unchecked plist.
+
+The existing menu-only exit remains non-disruptive, but its label must say that
+routing continues. It is not a full stop, and the process list after that action
+alone does not prove a leak. A future stop-without-uninstall action must retain
+the existing order: quiesce private interception and drain the owned daemon
+before stopping its Geph backend, preserve settings, and leave external Geph
+and network configuration untouched.
+
 ### 2026-10-20: deliver the updater startup repair through a fixed origin
 
 The ordinary public `.29 -> .30` attempt authorized successfully but aborted

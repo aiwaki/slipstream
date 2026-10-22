@@ -2,6 +2,78 @@
 
 ## Verified Checkpoint
 
+2026-10-22: current incident work is in the physical checkout
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/geph-stop-doh-fallback`, based on
+`e918906069dddc722aa0c6283b94c1a16af8954e`.
+The user removed Slipstream after ordinary Quit left background processes.
+Live read-only checks confirmed that `/Applications/Slipstream.app`, the owned
+root and user launchd jobs, their plists, and StatusV2 are absent. Only the
+separate Geph application was running. Do not reinstall or stop that external
+application as part of diagnosis. Prior app/state backups remain retained.
+
+Safari initially had a blank loading YouTube page and subsequently rendered
+the homepage without an agent refresh. System resolution of the exact hostname
+was successful at observation time. This does not establish the cause of the
+earlier "Cannot Find Server" screenshot. Codex logs contain generic HTTP403
+responses, but neither the block rule nor the historical route is established;
+the screenshot's exact Ray ID was not found. Root daemon logs need administrator
+access. Read-only evidence and focused DoH red/green receipts are under
+`output/incidents-20261022/`. See troubleshooting notes for the separate failure
+boundaries. Source fixes cover a failed DoH endpoint aborting the fallback loop
+and unverified Geph shutdown being reported as off. DoH regressions reproduced
+five failures before repair; all11 focused Python cases then passed. Two old
+Geph false-absence cases reproduced; the new pure Rust boundary passes11 tests.
+Rust formatting, diff whitespace and independent source review passed. Legacy
+signal integration, native compilation and installed UI remain unqualified.
+The menu-only exit now explicitly says routing continues; no full-stop action
+was added. These fixes are not installed. Graph tools were unavailable;
+discovery used bounded direct reads. Next: native CI for this source change;
+keep the retained `.31` release candidate and its outstanding observer gate
+separate from these new production changes.
+
+PR411 merged at `e918906069dddc722aa0c6283b94c1a16af8954e`; its tree matches
+tested head `5fd85aa9dbe2176c3f2788fd5b3f60aad1d23174`.
+CI39472457430/1 and audit39472457537/1 passed all required checks; review
+threads were empty. CI receipt SHA256
+`81debb249ae1834e9cdf43204c0e8fbccaf268fa8ccf0cabdf8c7c520b9bbf7e`,
+merge receipt SHA256
+`92c17eb5d972f706bd1cff1a638da2af45f162af3eccdc284b6284a531bd2734`,
+both under `output/updater-daemon-identity/preview31-preparation/pr411-verification/`.
+Exact-main CI39474188992/1 and audit39474189024/1 passed. The signed
+`.31` candidate authenticated with full-tree verification and codesign; receipt
+`main411-preview31-verification/receipt.json` SHA256
+`6fe5cc986c42dcaabea871a7ce336994c6df8b780a14f937bee8f4e3f3434cf5`.
+Manifest SHA256 `c972c8f3b731ad997fa9f6ace7155e639116808bc74a913ac2f7f617232d6d83`.
+Native root run39477202342/1 and protected readiness39477208645/1 were
+dispatched once from exact main at18:43Z. Inputs and the refreshed daily budget
+are recorded in `output/updater-daemon-identity/preview31-pair/dispatch-receipt.json`.
+The readiness run is the second account-backed dispatch of2026-10-20UTC.
+Native root both cases passed and their authenticated proof receipt is
+`preview31-pair/root/receipt.json`, SHA256
+`52cdbd89180bbc488f49e22c6a992e384be2b29fdbcbad8ba469dff28c53ef1d`.
+Packaged app run39478010009/1 failed its successor-kill cleanup with
+`rollback watchdog is not terminal`; its commit case passed. Earlier events
+showed terminal watchdog, restored OLD tree and progressing OLD heartbeat,
+but the final false predicate was not persisted. Do not relabel this failure
+as a pass or claim the proposed transient lock contention as its proven cause.
+Authenticated receipt: `preview31-pair/app/receipt.json`, SHA256
+`6f4f534d47a9a91a92745c94dea9e561c4178821281c00466b8b16efe231cb57`.
+Protected readiness39477208645/1 completed successfully at2026-10-20T19:18:50Z,
+confirmed through GitHub on October22. Its final artifact authentication is
+still pending; do not repeat the account-backed run. No watchers remain active.
+No publisher or packaged-pair retry has been dispatched. Publication remains
+pending. Reuse retained candidates and unchanged proofs. Observer-only fixes
+and production changes need separate evidence; do not overwrite the candidate.
+Post-install runtime receipt:
+`output/updater-daemon-identity/main410-fixed-origin-verification/installed-runtime-receipt.json`,
+SHA256 `6be7b031348fa86fd54a94c2e56051dd6cc4b07a0ccbee3c0649b0eac3d4068f`.
+It binds canonical installed verification to root attestation and its hardlink
+witness, exact tray/daemon identities and active heartbeat202 -> 204.
+This receipt records the October20 installation, not the current workstation:
+the application was removed by the user on October22. The earlier tray CUA
+timeout is historical; Safari UI access worked during the October22 diagnosis.
+
 Delivery resumed on branch `codex/preview31-updater-delivery`, based on main
 `5385b89add415c531276ba43f5c06c50293ffb17`, in the physical checkout below.
 Its exact-main CI39465376685/1 and audit39465376697/1 are already green.

@@ -11362,14 +11362,15 @@ def _doh_request(host, doh_sni):
 
 
 def _doh_query(doh_ip, doh_sni, host, timeout=3):
-    ctx = _doh_ssl_context()
-    inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
-    obj = ctx.wrap_bio(inbio, outbio, server_hostname=doh_sni)
-    s = socket.create_connection((doh_ip, 443), timeout=timeout)
-    s.settimeout(timeout)
-    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    sent = [False]
+    s = None
     try:
+        ctx = _doh_ssl_context()
+        inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
+        obj = ctx.wrap_bio(inbio, outbio, server_hostname=doh_sni)
+        s = socket.create_connection((doh_ip, 443), timeout=timeout)
+        s.settimeout(timeout)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sent = [False]
         while True:                                   # handshake (tlsrec first flight)
             try:
                 obj.do_handshake()
@@ -11414,17 +11415,19 @@ def _doh_query(doh_ip, doh_sni, host, timeout=3):
                 buf += dec
             if not data:
                 break
-        s.close()
         j = buf.find(b"{")
         doc = json.loads(buf[j:buf.rfind(b"}") + 1])
         ips = [a["data"] for a in doc.get("Answer", []) if a.get("type") == 1]
         if ips:
             return ips
     except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
+        pass
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
     return None
 
 

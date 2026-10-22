@@ -10,6 +10,7 @@
 mod app_update;
 mod diagnostics;
 mod geph_config;
+mod geph_lifecycle;
 mod install_attestation;
 mod native_messaging;
 mod native_update_notification;
@@ -44,6 +45,10 @@ use diagnostics::{
 use geph_config::{
     geph_config_set, geph_enabled, geph_field, geph_secret, geph_secret_availability,
     keychain_delete, keychain_set, GephSecretAvailability,
+};
+use geph_lifecycle::{
+    classify_launch_agent, classify_process, stop_launch_agent, LaunchAgentState,
+    ProcessObservation,
 };
 use install_attestation::{
     install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
@@ -181,9 +186,15 @@ fn tr(en: &str) -> String {
         "Open Status" => "Открыть статус",
         "Copy Diagnostics" => "Скопировать диагностику",
         "Unable to save Geph account" => "Не удалось сохранить аккаунт Geph",
+        "Unable to stop bundled Geph. It may still be running." => {
+            "Не удалось подтвердить остановку встроенного Geph. Возможно, он ещё работает."
+        }
+        "Bundled Geph stopped, but its setting could not be saved. It may restart when Slipstream opens." => {
+            "Встроенный Geph остановлен, но настройку не удалось сохранить. При запуске Slipstream он может включиться снова."
+        }
         "Check for Updates…" => "Проверить обновления…",
         "Uninstall Slipstream…" => "Удалить Slipstream…",
-        "Quit Slipstream" => "Выйти из Slipstream",
+        "Quit menu bar app (keep routing)" => "Закрыть значок (прокси продолжит работать)",
         other => other,
     }
     .to_string()
@@ -751,7 +762,9 @@ fn open_status_snapshot(app: &AppHandle) -> bool {
         geph_lifecycle_diagnostic_value(
             Path::new(INSTALLED_DAEMON).exists() && Path::new(LAUNCHD_PLIST).exists(),
             daemon_status_present,
-            current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
+            current_numeric_id("-u")
+                .map(|uid| geph_launch_agent_state(&uid))
+                .unwrap_or(LaunchAgentState::Unknown),
         ),
         unix_now_secs(),
         None,
@@ -800,7 +813,9 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
         geph_lifecycle_diagnostic_value(
             Path::new(INSTALLED_DAEMON).exists() && Path::new(LAUNCHD_PLIST).exists(),
             daemon_status_present,
-            current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
+            current_numeric_id("-u")
+                .map(|uid| geph_launch_agent_state(&uid))
+                .unwrap_or(LaunchAgentState::Unknown),
         ),
         unix_now_secs(),
         Some(diagnostic_log_tail_with_admin_fallback(
@@ -3064,9 +3079,15 @@ fn geph_ownership_path(dir: &Path) -> PathBuf {
     dir.join(GEPH_OWNERSHIP_FILE)
 }
 
-fn read_geph_ownership(dir: &Path) -> Option<Value> {
-    let raw = fs::read(geph_ownership_path(dir)).ok()?;
-    serde_json::from_slice(&raw).ok()
+fn read_geph_ownership(dir: &Path) -> Result<Option<Value>, String> {
+    let raw = match fs::read(geph_ownership_path(dir)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("geph ownership read unavailable".into()),
+    };
+    serde_json::from_slice(&raw)
+        .map(Some)
+        .map_err(|_| "geph ownership record invalid".into())
 }
 
 fn xml_escape(value: &str) -> String {
@@ -3197,12 +3218,22 @@ fn geph_launch_target(uid: &str) -> String {
     format!("{}/{GEPH_LAUNCHD_LABEL}", geph_launch_domain(uid))
 }
 
-fn geph_launch_agent_loaded(uid: &str) -> bool {
-    Command::new("/bin/launchctl")
+fn geph_launch_agent_state(uid: &str) -> LaunchAgentState {
+    let Ok(output) = Command::new("/bin/launchctl")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .args(["print", &geph_launch_target(uid)])
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    else {
+        return LaunchAgentState::Unknown;
+    };
+    classify_launch_agent(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+        uid,
+        GEPH_LAUNCHD_LABEL,
+    )
 }
 
 /// Diagnostics may report the app-owned launch job, but never infer PF state
@@ -3210,7 +3241,7 @@ fn geph_launch_agent_loaded(uid: &str) -> bool {
 fn geph_lifecycle_diagnostic_value(
     daemon_installed: bool,
     daemon_status_present: bool,
-    launch_agent_loaded: bool,
+    launch_agent: LaunchAgentState,
 ) -> Value {
     let root_daemon = if daemon_status_present {
         "running"
@@ -3219,38 +3250,38 @@ fn geph_lifecycle_diagnostic_value(
     } else {
         "absent"
     };
-    let state = if !daemon_installed && !daemon_status_present && launch_agent_loaded {
-        "sidecar_only"
-    } else if launch_agent_loaded {
-        "managed"
-    } else {
-        "off"
+    let state = match launch_agent {
+        LaunchAgentState::Loaded if !daemon_installed && !daemon_status_present => "sidecar_only",
+        LaunchAgentState::Loaded => "managed",
+        LaunchAgentState::Absent => "off",
+        LaunchAgentState::Unknown => "unknown",
     };
     json!({
         "state": state,
         "root_daemon": root_daemon,
-        "owned_launch_agent": if launch_agent_loaded { "loaded" } else { "absent" },
+        "owned_launch_agent": match launch_agent {
+            LaunchAgentState::Loaded => "loaded",
+            LaunchAgentState::Absent => "absent",
+            LaunchAgentState::Unknown => "unknown",
+        },
     })
 }
 
-fn geph_launch_agent_bootout(uid: &str, plist: &Path) -> bool {
-    let _ = Command::new("/bin/launchctl")
-        .args(["bootout", &geph_launch_target(uid)])
-        .output();
-    if geph_launch_agent_loaded(uid) {
-        let _ = Command::new("/bin/launchctl")
-            .arg("bootout")
-            .arg(geph_launch_domain(uid))
-            .arg(plist)
-            .output();
-    }
-    for _ in 0..20 {
-        if !geph_launch_agent_loaded(uid) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    false
+fn geph_launch_agent_bootout(uid: &str) -> Result<(), String> {
+    stop_launch_agent(
+        || geph_launch_agent_state(uid),
+        || {
+            // Use only the exact owned label, never a plist whose Label could
+            // name a different job. Completion alone is not proof of absence.
+            let _ = Command::new("/bin/launchctl")
+                .args(["bootout", &geph_launch_target(uid)])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        },
+        || std::thread::sleep(Duration::from_millis(100)),
+    )
+    .map_err(str::to_string)
 }
 
 fn geph_launch_agent_bootstrap(uid: &str, plist: &Path) -> bool {
@@ -3281,20 +3312,43 @@ fn geph_listener_pid() -> Option<u32> {
     listener_pid(GEPH_SOCKS_PORT)
 }
 
+fn geph_process_observation(pid: u32) -> ProcessObservation {
+    let Ok(output) = Command::new("/bin/ps")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+    else {
+        return ProcessObservation::Unknown;
+    };
+    classify_process(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+fn remove_owned_geph_file(path: &Path, component: &str) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(format!("geph {component} cleanup unavailable")),
+    }
+}
+
 /// Stop only a process whose PID, executable, config, and listener all match the
 /// private ownership record. Unknown listeners are external state.
-fn geph_kill_owned(dir: &Path) {
-    let Some(state) = read_geph_ownership(dir) else {
-        let _ = fs::remove_file(geph_ownership_path(dir));
-        return;
+fn geph_kill_owned(dir: &Path) -> Result<(), String> {
+    let Some(state) = read_geph_ownership(dir)? else {
+        return Ok(());
     };
     let Some(pid) = state
         .get("pid")
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
+        .filter(|pid| *pid > 0)
     else {
-        let _ = fs::remove_file(geph_ownership_path(dir));
-        return;
+        return Err("geph ownership process invalid".into());
     };
     let executable = state
         .get("executable")
@@ -3304,48 +3358,40 @@ fn geph_kill_owned(dir: &Path) {
         .get("config")
         .and_then(Value::as_str)
         .map(PathBuf::from);
-    let initially_owned =
-        executable
-            .as_deref()
-            .zip(config.as_deref())
-            .is_some_and(|(executable, config)| {
-                geph_listener_pid() == Some(pid)
-                    && process_command(pid)
-                        .is_some_and(|command| command_matches_geph(&command, executable, config))
-            });
-    if !initially_owned {
-        let _ = fs::remove_file(geph_ownership_path(dir));
-        return;
-    }
+    let (Some(executable), Some(config)) = (executable.as_deref(), config.as_deref()) else {
+        return Err("geph ownership paths invalid".into());
+    };
+    let still_owned = || match geph_process_observation(pid) {
+        ProcessObservation::Present(command) => {
+            Ok(command_matches_geph(&command, executable, config))
+        }
+        ProcessObservation::Absent => Ok(false),
+        ProcessObservation::Unknown => Err("geph process stop unconfirmed".to_string()),
+    };
     let pid_string = pid.to_string();
-    let _ = Command::new("/bin/kill")
-        .args(["-TERM", &pid_string])
-        .status();
-    for _ in 0..20 {
-        if Command::new("/bin/kill")
-            .args(["-0", &pid_string])
-            .status()
-            .map(|status| !status.success())
-            .unwrap_or(true)
-        {
-            break;
+    for signal in ["-TERM", "-KILL"] {
+        if !still_owned()? {
+            // Absent or reused PID: forget only the stale private record.
+            return remove_owned_geph_file(&geph_ownership_path(dir), "ownership");
         }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    if let (Some(executable), Some(config), Some(command)) = (
-        executable.as_deref(),
-        config.as_deref(),
-        process_command(pid),
-    ) {
-        // Revalidate immediately before SIGKILL so a rapidly recycled PID can
-        // never turn an owned-process shutdown into a broad process kill.
-        if geph_listener_pid() == Some(pid) && command_matches_geph(&command, executable, config) {
-            let _ = Command::new("/bin/kill")
-                .args(["-KILL", &pid_string])
-                .status();
+        // Preserve the original listener/command proof before each signal.
+        // Unknown observations retain the record and cannot report success.
+        if geph_listener_pid() != Some(pid) || !still_owned()? {
+            return Err("geph process ownership unconfirmed".into());
+        }
+        let _ = Command::new("/bin/kill")
+            .args([signal, &pid_string])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        for _ in 0..20 {
+            if !still_owned()? {
+                return remove_owned_geph_file(&geph_ownership_path(dir), "ownership");
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
-    let _ = fs::remove_file(geph_ownership_path(dir));
+    Err("geph process remains running".into())
 }
 
 fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPaths, String> {
@@ -3363,14 +3409,13 @@ fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPat
 fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
     let paths = geph_launch_agent_paths_for_app(app)?;
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
-    if !geph_launch_agent_bootout(&uid, &paths.plist) {
-        return Err("geph LaunchAgent bootout unavailable".into());
-    }
+    geph_launch_agent_bootout(&uid)?;
     // One-time migration can leave the old detached process outside launchd.
     // Stop it only through the existing PID/executable/config/listener proof.
-    geph_kill_owned(&paths.config_dir);
-    let _ = fs::remove_file(&paths.ownership);
-    let _ = fs::remove_file(&paths.plist);
+    geph_kill_owned(&paths.config_dir)?;
+    for (path, component) in [(&paths.ownership, "ownership"), (&paths.plist, "plist")] {
+        remove_owned_geph_file(path, component)?;
+    }
     Ok(())
 }
 
@@ -3404,6 +3449,12 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
         return Ok(false);
     };
     let paths = geph_launch_agent_paths_for_app(app)?;
+    let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
+    let mut loaded = match geph_launch_agent_state(&uid) {
+        LaunchAgentState::Loaded => true,
+        LaunchAgentState::Absent => false,
+        LaunchAgentState::Unknown => return Err("geph LaunchAgent status unavailable".into()),
+    };
     harden_geph_dir(&paths.config_dir)
         .map_err(|error| format!("geph config permissions unavailable: {error}"))?;
     for log_path in [&paths.stdout_log, &paths.stderr_log] {
@@ -3429,20 +3480,18 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     let plist_changed = write_atomic_if_changed(&paths.plist, plist.as_bytes(), 0o600)
         .map_err(|error| format!("geph LaunchAgent write unavailable: {error}"))?;
 
-    let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
-    let mut loaded = geph_launch_agent_loaded(&uid);
     if loaded && plist_changed {
-        if !geph_launch_agent_bootout(&uid, &paths.plist) {
-            return Err("geph LaunchAgent reload unavailable".into());
-        }
+        geph_launch_agent_bootout(&uid)?;
         loaded = false;
     }
     if !loaded {
         // Replace the legacy detached process once, after the stable runtime is
         // ready. Unknown listeners do not match ownership and are never killed;
         // the launcher waits on the occupied port instead.
-        geph_kill_owned(&paths.config_dir);
-        if !geph_launch_agent_bootstrap(&uid, &paths.plist) && !geph_launch_agent_loaded(&uid) {
+        geph_kill_owned(&paths.config_dir)?;
+        if !geph_launch_agent_bootstrap(&uid, &paths.plist)
+            && geph_launch_agent_state(&uid) != LaunchAgentState::Loaded
+        {
             return Err("geph LaunchAgent bootstrap unavailable".into());
         }
     } else if (force_restart || binary_changed || config_changed || launcher_changed)
@@ -3671,7 +3720,7 @@ pub fn run() {
                 .separator()
                 .item(&uninstall_item)
                 .item(
-                    &MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream"))
+                    &MenuItemBuilder::with_id(ID_QUIT, tr("Quit menu bar app (keep routing)"))
                         .accelerator("CmdOrCtrl+Q")
                         .build(app)?,
                 )
@@ -3766,9 +3815,9 @@ pub fn run() {
                                     }
                                 }
                             }
-                            geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
-                            let _ = enable_h.set_checked(new_on);
                             if new_on {
+                                geph_config_set(app, "enabled", "1");
+                                let _ = enable_h.set_checked(true);
                                 match ensure_geph_launch_agent(app, false) {
                                     Ok(true) => refresh_exit_menu(
                                         app.clone(),
@@ -3787,6 +3836,16 @@ pub fn run() {
                                 // clean up any verified legacy detached process.
                                 if let Err(error) = geph_launch_agent_disable(app) {
                                     eprintln!("geph disable unavailable: {error}");
+                                    let _ = enable_h.set_checked(true);
+                                    notify(app, &tr("Unable to stop bundled Geph. It may still be running."));
+                                    return;
+                                }
+                                geph_config_set(app, "enabled", "0");
+                                if geph_field(app, "enabled").as_deref() == Some("0") {
+                                    let _ = enable_h.set_checked(false);
+                                } else {
+                                    let _ = enable_h.set_checked(true);
+                                    notify(app, &tr("Bundled Geph stopped, but its setting could not be saved. It may restart when Slipstream opens."));
                                 }
                             }
                         }
@@ -4094,8 +4153,8 @@ mod tests {
         tray_status_with_hysteresis, uninstall_dialog_script_for, uninstall_ready_path,
         uninstall_shell_for_paths, valid_bundled_daemon, write_atomic_if_changed,
         write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
-        ExitMenuRefreshState, TrayLiveness, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
-        GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
+        ExitMenuRefreshState, LaunchAgentState, TrayLiveness, DAEMON_RECOVERY_STATUS_PATH,
+        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
     };
     use crate::status_client::StatusRead;
     use serde_json::json;
@@ -4932,7 +4991,7 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
                     }
                 }
             })),
-            geph_lifecycle_diagnostic_value(false, true, true),
+            geph_lifecycle_diagnostic_value(false, true, LaunchAgentState::Loaded),
             123.0,
             Some(json!({
                 "available": true,
@@ -5014,7 +5073,7 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
 
     #[test]
     fn geph_lifecycle_reports_owned_sidecar_without_claiming_pf_state() {
-        let lifecycle = geph_lifecycle_diagnostic_value(false, false, true);
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, LaunchAgentState::Loaded);
         let text = serde_json::to_string(&lifecycle).unwrap();
 
         assert_eq!(lifecycle["state"], "sidecar_only");
@@ -5027,11 +5086,19 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
 
     #[test]
     fn geph_lifecycle_marks_no_owned_sidecar_as_off() {
-        let lifecycle = geph_lifecycle_diagnostic_value(false, false, false);
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, LaunchAgentState::Absent);
 
         assert_eq!(lifecycle["state"], "off");
         assert_eq!(lifecycle["root_daemon"], "absent");
         assert_eq!(lifecycle["owned_launch_agent"], "absent");
+    }
+
+    #[test]
+    fn geph_lifecycle_does_not_report_unknown_job_as_off() {
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, LaunchAgentState::Unknown);
+
+        assert_eq!(lifecycle["state"], "unknown");
+        assert_eq!(lifecycle["owned_launch_agent"], "unknown");
     }
 
     #[test]

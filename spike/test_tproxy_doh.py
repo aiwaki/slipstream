@@ -501,6 +501,92 @@ def test_doh_ssl_context_verifies_resolver_certificate():
     assert ctx.verify_mode == ssl.CERT_REQUIRED
 
 
+def _mock_doh_transport(monkeypatch, *, failure_stage=None, reply=None):
+    if reply is None:
+        reply = b'HTTP/1.1 200 OK\r\n\r\n{"Answer":[{"type":1,"data":"203.0.113.7"}]}'
+    state = {"resolvers": [], "opened": [], "closed": []}
+
+    def fail(stage, first):
+        if first and stage == failure_stage:
+            raise TimeoutError(f"synthetic {stage} failure")
+
+    class FakeSocket:
+        def __init__(self, ip):
+            self.ip = ip
+            state["opened"].append(ip)
+
+        def settimeout(self, _timeout):
+            fail("settimeout", self.ip == "1.1.1.1")
+
+        def setsockopt(self, *_args):
+            fail("setsockopt", self.ip == "1.1.1.1")
+
+        def recv(self, _size):
+            return b""
+
+        def close(self):
+            state["closed"].append(self.ip)
+
+    class FakeTls:
+        def __init__(self, first):
+            self.first = first
+            self.reply = reply
+
+        def do_handshake(self):
+            fail("handshake", self.first)
+
+        def write(self, _data):
+            return None
+
+        def read(self, _size):
+            if self.reply is None:
+                raise ssl.SSLWantReadError()
+            result, self.reply = self.reply, None
+            return result
+
+    def connect(address, *, timeout):
+        ip, port = address
+        assert port == 443
+        assert timeout == 3
+        fail("connect", ip == "1.1.1.1")
+        return FakeSocket(ip)
+
+    def wrap_bio(_incoming, _outgoing, *, server_hostname):
+        state["resolvers"].append(server_hostname)
+        first = server_hostname == "cloudflare-dns.com"
+        fail("wrap_bio", first)
+        return FakeTls(first)
+
+    monkeypatch.setattr(tproxy.socket, "create_connection", connect)
+    monkeypatch.setattr(
+        tproxy, "_doh_ssl_context", lambda: SimpleNamespace(wrap_bio=wrap_bio)
+    )
+    monkeypatch.setattr(tproxy, "_doh_cache", OrderedDict())
+    return state
+
+
+@pytest.mark.parametrize(
+    "failure_stage", ["connect", "settimeout", "setsockopt", "wrap_bio", "handshake"]
+)
+def test_doh_resolve_advances_after_endpoint_failure(monkeypatch, failure_stage):
+    state = _mock_doh_transport(monkeypatch, failure_stage=failure_stage)
+
+    assert tproxy.doh_resolve("www.youtube.com") == ["203.0.113.7"]
+
+    assert state["resolvers"] == ["cloudflare-dns.com", "dns.google"]
+    assert state["closed"] == state["opened"]
+    assert state["closed"][-1] == "8.8.8.8"
+
+
+@pytest.mark.parametrize("reply", [b"HTTP/1.1 502 Bad Gateway\r\n\r\n", b'{"Answer":[]}'])
+def test_doh_query_closes_socket_when_reply_is_unusable(monkeypatch, reply):
+    state = _mock_doh_transport(monkeypatch, reply=reply)
+
+    assert tproxy._doh_query("1.1.1.1", "cloudflare-dns.com", "www.youtube.com") is None
+
+    assert state["opened"] == state["closed"] == ["1.1.1.1"]
+
+
 def test_local_payload_ssl_context_prefers_certifi(monkeypatch):
     calls = []
     fake_certifi = SimpleNamespace(where=lambda: "/tmp/fake-ca.pem")
