@@ -42,10 +42,20 @@ Review follow-up adds the final process observation after its last wait and
 guarded quarantine of malformed legacy ownership records. It covers both old
 and current client layouts, preserves exact bytes and rejects unknown/live
 process state, changed files and symlinks. The final-wait regressions reproduced
-two failures before repair; all 21 Rust helper/filesystem tests pass, along with
+two failures before repair; all 23 Rust helper/filesystem tests pass, along with
 formatting, diff whitespace and independent review. Logs are in
-`output/geph-disable-20261022/`. The unchanged DoH subset remains 11/11 green.
-Do not transfer the initial head's native evidence to this follow-up. Installed
+`output/geph-disable-20261022/`. A read-only native process census exposed
+Darwin's signed rendering of some system UID values. The parser now normalizes
+the signed 32-bit representation without skipping identity or completeness
+checks. The same native probe then returned `Clear` across 544 process rows;
+no process arguments were logged and no live cleanup was performed. Fixtures
+also cover signed bounds, overflow and the current-process identity witness.
+The unchanged DoH subset remains 11/11 green.
+CI39835124312 also passed native product, packaged browser and lifecycle checks
+at `3bac4b075850cac514b101c6a76c29a1238150e0`; receipt:
+`output/incidents-20261022/pr412-second-head-ci.json`. The later signed-UID
+correction still needs its own native CI; do not transfer earlier evidence.
+Installed
 UI and the historical screenshots remain unqualified. Crash interruption before
 the final preference save can retain enabled intent; no crash-atomic disable
 transaction was introduced.

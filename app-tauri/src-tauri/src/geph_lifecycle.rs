@@ -146,7 +146,12 @@ pub(crate) fn classify_process_census(
         let Some((row_uid, rest)) = line.trim_start().split_once(char::is_whitespace) else {
             return ProcessCensus::Unknown;
         };
-        let Ok(row_uid) = row_uid.parse::<u32>() else {
+        // Darwin ps can render system uid_t values as signed 32-bit numbers
+        // (for example nobody). Normalize that representation, not the row.
+        let Ok(row_uid) = row_uid
+            .parse::<u32>()
+            .or_else(|_| row_uid.parse::<i32>().map(|value| value as u32))
+        else {
             return ProcessCensus::Unknown;
         };
         // Preserve the command remainder: private paths can contain spaces.
@@ -367,6 +372,70 @@ mod tests {
             (Some(0), "502 10 S\n", ""),
         ] {
             assert_eq!(census(code, body, error), ProcessCensus::Unknown);
+        }
+    }
+
+    #[test]
+    fn census_accepts_darwin_signed_system_uid_without_skipping_identity_checks() {
+        assert_eq!(
+            census(
+                Some(0),
+                &format!("{SELF}-2 20 S /usr/libexec/system-service\n"),
+                ""
+            ),
+            ProcessCensus::Clear,
+        );
+        assert_eq!(
+            census(
+                Some(0),
+                &format!("{SELF}-2 broken S /usr/libexec/system-service\n"),
+                ""
+            ),
+            ProcessCensus::Unknown,
+        );
+        assert_eq!(
+            classify_process_census(
+                Some(0),
+                "-2 10 S /private/runtime/geph5-client\n",
+                "",
+                (-2i32) as u32,
+                10,
+                Path::new("/private/geph-active.yaml"),
+                Path::new("/private/runtime")
+            ),
+            ProcessCensus::Candidate,
+        );
+        assert_eq!(
+            census(Some(0), "-2 10 S /usr/libexec/system-service\n", ""),
+            ProcessCensus::Unknown,
+        );
+    }
+
+    #[test]
+    fn census_uid_normalization_is_bounded_to_32_bits() {
+        for (printed, uid) in [("-2147483648", 2147483648u32), ("-1", u32::MAX)] {
+            assert_eq!(
+                classify_process_census(
+                    Some(0),
+                    &format!("{printed} 10 S /private/runtime/geph5-client\n"),
+                    "",
+                    uid,
+                    10,
+                    Path::new("/private/geph-active.yaml"),
+                    Path::new("/private/runtime"),
+                ),
+                ProcessCensus::Candidate,
+            );
+        }
+        for printed in ["-2147483649", "+4294967296", "-4294966794"] {
+            assert_eq!(
+                census(
+                    Some(0),
+                    &format!("{SELF}{printed} 20 S /usr/libexec/system-service\n"),
+                    ""
+                ),
+                ProcessCensus::Unknown,
+            );
         }
     }
 
