@@ -47,8 +47,9 @@ use geph_config::{
     keychain_delete, keychain_set, GephSecretAvailability,
 };
 use geph_lifecycle::{
-    classify_launch_agent, classify_process, stop_launch_agent, LaunchAgentState,
-    ProcessObservation,
+    classify_launch_agent, classify_process, classify_process_census, guarded_ownership_quarantine,
+    quarantine_ownership_file, read_ownership_snapshot, stop_launch_agent, wait_for_process_stop,
+    LaunchAgentState, OwnershipSnapshot, ProcessCensus, ProcessObservation,
 };
 use install_attestation::{
     install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
@@ -3079,17 +3080,6 @@ fn geph_ownership_path(dir: &Path) -> PathBuf {
     dir.join(GEPH_OWNERSHIP_FILE)
 }
 
-fn read_geph_ownership(dir: &Path) -> Result<Option<Value>, String> {
-    let raw = match fs::read(geph_ownership_path(dir)) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("geph ownership read unavailable".into()),
-    };
-    serde_json::from_slice(&raw)
-        .map(Some)
-        .map_err(|_| "geph ownership record invalid".into())
-}
-
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -3336,11 +3326,57 @@ fn remove_owned_geph_file(path: &Path, component: &str) -> Result<(), String> {
     }
 }
 
+fn geph_private_process_census(dir: &Path, uid: u32) -> ProcessCensus {
+    let Ok(output) = Command::new("/bin/ps")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-axww", "-o", "uid=,pid=,stat=,command="])
+        .output()
+    else {
+        return ProcessCensus::Unknown;
+    };
+    // Never log a process census: other processes can carry private arguments.
+    let (Ok(stdout), Ok(stderr)) = (
+        std::str::from_utf8(&output.stdout),
+        std::str::from_utf8(&output.stderr),
+    ) else {
+        return ProcessCensus::Unknown;
+    };
+    classify_process_census(
+        output.status.code(),
+        stdout,
+        stderr,
+        uid,
+        std::process::id(),
+        &dir.join("geph-active.yaml"),
+        &dir.join(GEPH_RUNTIME_DIR),
+    )
+}
+
+fn geph_quarantine_malformed_ownership(
+    dir: &Path,
+    record: &OwnershipSnapshot,
+    uid: u32,
+) -> Result<(), String> {
+    let uid_text = uid.to_string();
+    guarded_ownership_quarantine(
+        || geph_launch_agent_state(&uid_text),
+        || geph_private_process_census(dir, uid),
+        || quarantine_ownership_file(&geph_ownership_path(dir), record, uid).map(|_| ()),
+    )
+}
+
 /// Stop only a process whose PID, executable, config, and listener all match the
 /// private ownership record. Unknown listeners are external state.
 fn geph_kill_owned(dir: &Path) -> Result<(), String> {
-    let Some(state) = read_geph_ownership(dir)? else {
+    let uid = current_numeric_id("-u")
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or("user id unavailable")?;
+    let Some(record) = read_ownership_snapshot(&geph_ownership_path(dir), uid)? else {
         return Ok(());
+    };
+    let Ok(state) = serde_json::from_slice::<Value>(&record.bytes) else {
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
     };
     let Some(pid) = state
         .get("pid")
@@ -3348,7 +3384,7 @@ fn geph_kill_owned(dir: &Path) -> Result<(), String> {
         .and_then(|value| u32::try_from(value).ok())
         .filter(|pid| *pid > 0)
     else {
-        return Err("geph ownership process invalid".into());
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
     };
     let executable = state
         .get("executable")
@@ -3359,8 +3395,11 @@ fn geph_kill_owned(dir: &Path) -> Result<(), String> {
         .and_then(Value::as_str)
         .map(PathBuf::from);
     let (Some(executable), Some(config)) = (executable.as_deref(), config.as_deref()) else {
-        return Err("geph ownership paths invalid".into());
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
     };
+    if !executable.is_absolute() || !config.is_absolute() {
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
+    }
     let still_owned = || match geph_process_observation(pid) {
         ProcessObservation::Present(command) => {
             Ok(command_matches_geph(&command, executable, config))
@@ -3384,11 +3423,10 @@ fn geph_kill_owned(dir: &Path) -> Result<(), String> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        for _ in 0..20 {
-            if !still_owned()? {
-                return remove_owned_geph_file(&geph_ownership_path(dir), "ownership");
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        if wait_for_process_stop(&still_owned, || {
+            std::thread::sleep(Duration::from_millis(100))
+        })? {
+            return remove_owned_geph_file(&geph_ownership_path(dir), "ownership");
         }
     }
     Err("geph process remains running".into())

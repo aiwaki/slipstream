@@ -648,6 +648,16 @@ keep the enabled setting and checkbox and show the failure. A successful stop
 also requires removing the owned RunAtLoad plist so a later login cannot
 silently bring it back. Never kill a standalone Geph process by its name.
 
+An old launcher defect could leave invalid `geph-owned.json` while its job was
+running. Once the exact job and related current-user processes are confirmed
+absent, the repaired cleanup preserves that record in a private
+`geph-ownership-quarantine-<pid>-<counter>/geph-owned.json` directory and proceeds.
+Both the old app-bundle executable with its private config and the current
+runtime/launcher are checked. Unreadable or changed files and uncertain process
+observations still stop cleanup; do not delete the record to bypass that check.
+An app crash before the final preference save can leave enabled intent for the
+next launch, so an interrupted operation is not proof of a completed stop.
+
 `Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
 daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does
 not claim an active PF redirect; it identifies the remaining user-side job so it

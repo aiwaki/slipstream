@@ -22,13 +22,36 @@ access. Read-only evidence and focused DoH red/green receipts are under
 `output/incidents-20261022/`. See troubleshooting notes for the separate failure
 boundaries. Source fixes cover a failed DoH endpoint aborting the fallback loop
 and unverified Geph shutdown being reported as off. DoH regressions reproduced
-five failures before repair; all11 focused Python cases then passed. Two old
-Geph false-absence cases reproduced; the new pure Rust boundary passes11 tests.
-Rust formatting, diff whitespace and independent source review passed. Legacy
-signal integration, native compilation and installed UI remain unqualified.
+five failures before repair; all 11 focused Python cases then passed. Two old
+Geph false-absence cases reproduced; the initial pure Rust boundary passed 11 tests.
+PR412's initial head is `b95447010296f61e60ce39216c04992fd9557623`.
+CI39828244399 passed product checks, native packaging, browser qualification
+and packaged lifecycle. The independent audit39828244341 failed on newly
+published emSign advisories in unchanged dependencies: `certifi 2026.6.17`,
+`rustls-webpki 0.103.15` and `webpki-roots 1.0.9`; the latter two also affect
+the pinned Geph source. Fixed versions are `2026.10.19`, `0.103.16` and
+`1.0.10`, respectively. RSA exceptions were accepted on the evaluation date.
+Do not repeat this unchanged audit or waive it. A separate coordinated
+dependency/vendor update is required; the current source-bootstrap contract
+does not yet admit the exact transition. The retained `.31` candidate contains
+the same affected versions; its older green audit is not a review of these new
+advisories and is not sufficient to resume publication. Evidence:
+`output/incidents-20261022/ci-audit/analysis-receipt.json` and
+`output/incidents-20261022/pr412-first-head-ci.json`.
+Review follow-up adds the final process observation after its last wait and
+guarded quarantine of malformed legacy ownership records. It covers both old
+and current client layouts, preserves exact bytes and rejects unknown/live
+process state, changed files and symlinks. The final-wait regressions reproduced
+two failures before repair; all 21 Rust helper/filesystem tests pass, along with
+formatting, diff whitespace and independent review. Logs are in
+`output/geph-disable-20261022/`. The unchanged DoH subset remains 11/11 green.
+Do not transfer the initial head's native evidence to this follow-up. Installed
+UI and the historical screenshots remain unqualified. Crash interruption before
+the final preference save can retain enabled intent; no crash-atomic disable
+transaction was introduced.
 The menu-only exit now explicitly says routing continues; no full-stop action
 was added. These fixes are not installed. Graph tools were unavailable;
-discovery used bounded direct reads. Next: native CI for this source change;
+discovery used bounded direct reads. Next: native CI for the review follow-up;
 keep the retained `.31` release candidate and its outstanding observer gate
 separate from these new production changes.
 

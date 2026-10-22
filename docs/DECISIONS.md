@@ -9,6 +9,21 @@ to the user. Persist the disabled preference only after owned cleanup succeeds;
 verify the saved preference before clearing its menu checkmark. Stop requests
 target only Slipstream's label, never a job selected by an unchecked plist.
 
+Malformed legacy ownership records must not permanently block startup or
+cleanup. Preserve their exact bytes in a private quarantine only after two
+observations of the absent exact job, separated by a successful full process
+census for the current user. The census must cover both the old app-bundle
+client using the private config and the current private runtime/launcher.
+Require the same regular, user-owned record before and after moving it; read
+errors, symlinks, changed files, live candidates and unknown process state
+cannot authorize recovery. Never infer a PID to signal from malformed data.
+Bounded process-stop waits include an observation after the final delay.
+
+This stop operation is not crash-atomic: interruption before saving the final
+disabled preference can leave the previous enabled intent. A completed stop
+is reported only after cleanup and preference readback; durable pending intent
+is a separate improvement.
+
 The existing menu-only exit remains non-disruptive, but its label must say that
 routing continues. It is not a full stop, and the process list after that action
 alone does not prove a leak. A future stop-without-uninstall action must retain
