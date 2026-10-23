@@ -30,6 +30,12 @@ uses a narrowly bound source bootstrap; both dependency audits still run.
 The two RSA client-path exceptions have a fresh exact-source review through
 2026-10-30. See `docs/ROUTING_RESEARCH.md` for evidence and limits.
 
+Revision 3 pins ctutils 0.4.4 for RUSTSEC-2026-0385. Only that lock entry
+changes; the upstream crate and source edits remain identical. Existing RSA
+review reasons bind the new source/lock identities with the same October 30
+expiry. The new immutable vendor release and its verified consumer are still
+required before this source repair reaches an app build.
+
 Revisions 3 through 5 of `0.3.9` carry explicit `source_edits` in `SOURCE.json`.
 Each edit binds the complete input and output file SHA-256 and exactly one
 literal replacement; extraction fails on drift. The contract shipped with the
