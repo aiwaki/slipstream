@@ -285,6 +285,17 @@ code. A live, failed, foreign or restartable job cannot qualify. Timeout evidenc
 retains the final job, process, lock and file predicates without launchd
 environment data.
 
+A restored OLD app may briefly hold this same transaction lock during startup.
+The pre-ACK observer waits for terminal watchdog proof within its existing
+qualification deadline; cleanup uses only the remaining original cleanup
+budget. Every false observation is retained before another poll, and all OLD
+identity, tree and receipt predicates are checked again after waiting. A real
+flock regression reproduces the earlier immediate rejection. This repairs the
+observer race; it does not establish the cause of run39478010009, whose decisive
+false snapshot was missing, or qualify a public update. Hermetic evidence is in
+`output/updater-daemon-identity/watchdog-observer-race-20261023/receipt.json`
+(181 focused and 124 adjacent tests passed).
+
 The [pre-ACK case](../scripts/packaged_update_preack.py) observes a live exact NEW
 process, sends STOP, rechecks its PID, UID, birth and command along with the
 journal, absent ACK and undecided root, then sends KILL only inside that verified

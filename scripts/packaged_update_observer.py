@@ -429,7 +429,10 @@ class Observer(Native):
 
     def watchdog_finished(self):
         try:
-            return self._watchdog_finished()
+            finished = self._watchdog_finished()
+            if not finished:
+                self.record("completion_diagnostic", self.completion_diagnostic)
+            return finished
         except Exception as error:
             diagnostic = getattr(self, "completion_diagnostic", None) or {}
             diagnostic.update(error_type=type(error).__name__, reason=str(error)[:256])
@@ -499,6 +502,21 @@ class Observer(Native):
         if complete:
             self.record("watchdog_completion", diagnostic)
         return complete
+
+    def wait_watchdog_finished(self, deadline, *, clock=time.monotonic, sleep=time.sleep):
+        # The restored OLD also uses the transaction lock during its startup
+        # proof. Reobserve pending completion without renewing the caller's budget.
+        while clock() < deadline:
+            finished = self.watchdog_finished()
+            remaining = deadline - clock()
+            if finished and remaining > 0:
+                return
+            if remaining <= 0:
+                break
+            sleep(min(0.02, remaining))
+        # watchdog_finished already retained the exact false/error snapshot.
+        # A fresh timeout sample could hide the predicate that exhausted the wait.
+        raise Refused("terminal watchdog deadline exhausted; observation incomplete")
 
     def retain_completion_diagnostic(self):
         try:

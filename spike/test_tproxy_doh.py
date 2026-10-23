@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from collections import OrderedDict, deque
@@ -17702,6 +17702,167 @@ def test_local_bypass_resolution_keeps_system_dns_even_when_doh_has_results(monk
     ips = asyncio.run(tproxy.resolve_connection_ips("gateway.discord.gg", "162.159.136.232"))
 
     assert ips == ["162.159.128.233", "162.159.136.232", "162.159.138.232"]
+
+
+@pytest.mark.parametrize("host", ["www.youtube.com", "updates.discord.com"])
+def test_local_bypass_ready_doh_survives_blocked_system_lookup(monkeypatch, tmp_path, host):
+    release = threading.Event()
+    entered = threading.Event()
+    finished = threading.Event()
+    bounded_calls = []
+
+    def blocked_getaddrinfo(*_args):
+        entered.set()
+        try:
+            assert release.wait(2.0)
+            return []
+        finally:
+            finished.set()
+
+    def timed_out_child(command, **kwargs):
+        bounded_calls.append((command, kwargs["timeout"]))
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    async def ready_doh(_host):
+        return ["203.0.113.7"]
+
+    monkeypatch.setattr(tproxy.socket, "getaddrinfo", blocked_getaddrinfo)
+    monkeypatch.setattr(tproxy.subprocess, "run", timed_out_child)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (os.getuid(), os.getgid(), str(tmp_path)))
+    monkeypatch.setattr(tproxy, "doh_resolve_async", ready_doh)
+
+    async def scenario():
+        try:
+            return await asyncio.wait_for(
+                tproxy.resolve_connection_ips(host, "198.51.100.9"), 0.3,
+            )
+        finally:
+            release.set()
+
+    try:
+        assert asyncio.run(scenario()) == ["203.0.113.7", "198.51.100.9"]
+    finally:
+        release.set()
+        if entered.is_set():
+            assert finished.wait(1.0)
+    assert not entered.is_set(), "system resolver must not block a daemon thread"
+    assert len(bounded_calls) == 1
+    assert bounded_calls[0][0] == tproxy._baseline_resolver_command(host)
+    assert 0 < bounded_calls[0][1] <= tproxy.BASELINE_RESOLVE_TIMEOUT
+
+
+def test_system_dns_child_timeout_is_reaped_before_capacity_returns(monkeypatch, tmp_path):
+    pid_path = tmp_path / "resolver.pid"
+    child = (
+        "import os, pathlib, time; "
+        f"pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid())); "
+        "time.sleep(60)"
+    )
+    slots = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "BASELINE_RESOLVE_TIMEOUT", 0.5)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (os.getuid(), os.getgid(), str(tmp_path)))
+    monkeypatch.setattr(tproxy, "_baseline_resolver_command", lambda _host: [sys.executable, "-c", child])
+
+    started = time.monotonic()
+    assert asyncio.run(tproxy.system_resolve_async("slow.example")) == []
+    assert slots.acquire(timeout=1.0), "capacity returned before the resolver completed"
+    slots.release()
+    assert time.monotonic() - started < 2.0
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_path.read_text()), 0)
+
+
+def test_system_dns_cancellation_retains_running_worker_capacity(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    slots = threading.BoundedSemaphore(1)
+    calls = []
+
+    def resolve(host, _port, _identity, *, timeout):
+        calls.append(host)
+        entered.set()
+        assert release.wait(2.0)
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.168.1.7", 443))]
+
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "_run_baseline_resolver", resolve)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (502, 20, "/fixture"))
+
+    async def scenario():
+        task = asyncio.create_task(tproxy.system_resolve_async("first.example"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1.0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert await tproxy.system_resolve_async("second.example") == []
+            assert calls == ["first.example"]
+        finally:
+            release.set()
+        assert await asyncio.to_thread(slots.acquire, True, 1.0)
+        slots.release()
+        assert await tproxy.system_resolve_async("after-cleanup.example") == ["192.168.1.7"]
+
+    asyncio.run(scenario())
+
+
+def test_system_dns_queue_time_consumes_budget_without_accumulating_cancelled_jobs(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    submitted = []
+    slots = threading.BoundedSemaphore(1)
+
+    def occupy_worker():
+        entered.set()
+        assert release.wait(2.0)
+
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "BASELINE_RESOLVE_TIMEOUT", 0.02)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (502, 20, "/fixture"))
+    monkeypatch.setattr(tproxy.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("expired lookup spawned"))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        occupied = pool.submit(occupy_worker)
+        assert entered.wait(1.0)
+
+        def submit(*args):
+            future = pool.submit(*args)
+            submitted.append(future)
+            return future
+
+        monkeypatch.setattr(tproxy, "_POOL", SimpleNamespace(submit=submit))
+        started = time.monotonic()
+        try:
+            assert asyncio.run(tproxy.system_resolve_async("queued.example")) == []
+            assert time.monotonic() - started < 0.5
+            assert not submitted[0].cancelled(), "cancelled WorkItems remain queued until dequeue"
+            assert not slots.acquire(blocking=False), "queued work must retain admission"
+            assert asyncio.run(tproxy.system_resolve_async("another.example")) == []
+            assert len(submitted) == 1
+        finally:
+            release.set()
+            occupied.result(timeout=1.0)
+        assert submitted[0].result(timeout=1.0) == []
+        assert slots.acquire(timeout=1.0)
+        slots.release()
+
+
+@pytest.mark.parametrize("uid", [0, 502])
+def test_system_dns_uses_console_or_current_identity_without_filtering_local_ips(monkeypatch, uid):
+    observed = []
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: uid)
+    monkeypatch.setattr(tproxy.os, "getegid", lambda: 20)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (503, 21, "/console"))
+
+    def resolve(host, port, identity, *, timeout):
+        observed.append((host, port, identity, timeout))
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.168.1.7", 443))] * 2
+
+    monkeypatch.setattr(tproxy, "_run_baseline_resolver", resolve)
+    assert asyncio.run(tproxy.system_resolve_async("local.example")) == ["192.168.1.7"]
+    expected = (503, 21, "/console") if uid == 0 else (502, 20, os.path.expanduser("~"))
+    assert observed[0][:3] == ("local.example", 443, expected)
+    assert 0 < observed[0][3] <= tproxy.BASELINE_RESOLVE_TIMEOUT
 
 
 def test_fake_injector_uses_discord_decoy_without_changing_video_poison(monkeypatch):

@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -166,7 +167,7 @@ def terminal_backend(window):
     backend.watchdog_finished = lambda: True
     backend.process_snapshot = lambda pid: None
     backend.observe_once = lambda: None
-    backend.final_old_app = lambda: backend.events.append(("old-tree-tray", {}))
+    backend.final_old_app = lambda **kw: backend.events.append(("old-tree-tray", {}))
     backend.prove = lambda side, **kw: backend.events.append(("daemon-proof", {"side":side, **kw}))
     return backend
 
@@ -182,12 +183,12 @@ def test_rollback_requires_old_app_and_exact_snapshot_daemon(window):
 @pytest.mark.parametrize("failure", ["old-tree", "old-daemon", "old-tray-died", "unexpected-ack", "root-commit"])
 def test_rollback_proof_failure_cannot_qualify(window, failure):
     backend = terminal_backend(window)
-    def reject(): raise fault.Refused("proof missing")
+    def reject(**kw): raise fault.Refused("proof missing")
     if failure == "old-tree": backend.final_old_app = reject
     elif failure == "old-daemon": backend.prove = lambda *a, **kw: reject()
     elif failure == "old-tray-died":
         count = [0]
-        def final():
+        def final(**kw):
             count[0] += 1
             if count[0] == 2: reject()
         backend.final_old_app = final
@@ -296,7 +297,7 @@ def restored(tmp_path,monkeypatch):
     backend.tproxy=SimpleNamespace(_daemon_update_tree=lambda *a,**kw:expected['old']['bundle_tree_sha256'],
         _DAEMON_UPDATE_REQUESTS=str(tmp_path/'requests'))
     backend.status=lambda:{'phase':'aborted','decision':'abort','writer_quiescent':True}
-    backend.deadline=1000
+    backend.deadline=time.monotonic()+1000
     info=backend.target.lstat()
     backend.created=[{'path':backend.target,'sha256':expected['old']['bundle_tree_sha256'],
                       'inode':(info.st_dev,info.st_ino),'complete':True}]
@@ -350,13 +351,17 @@ def test_incomplete_actual_rollback_proof_rejected(restored,change):
     elif change=='old_absent': backend.run=lambda *a,**kw:SimpleNamespace(returncode=1,stdout=b'')
     elif change=='old_zombie': old['state']='Z'
     elif change=='old_stopped': old['state']='T'
-    elif change=='watchdog': backend.watchdog_finished=lambda:False
+    elif change=='watchdog':
+        backend.watchdog_finished=lambda:False
+        backend.deadline=90.05
     elif change=='active_journal': write_private(backend.journal_path,receipt)
     elif change=='stage': backend.stage.mkdir()
     elif change=='backup': Path(receipt['backup']).mkdir()
     write_private(path,receipt)
     if change=='private_mode': path.chmod(0o644)
-    with pytest.raises(fault.Refused): backend.final_old_app()
+    now = [0.0]
+    with pytest.raises(fault.Refused):
+        backend.final_old_app(clock=lambda: now[0], sleep=lambda seconds: now.__setitem__(0, now[0]+seconds))
 
 
 def test_rollback_receipt_and_relaunched_old_identity_must_remain_stable(restored):
@@ -384,6 +389,147 @@ def test_cleanup_requires_old_stop_and_preserves_initial_restored_inode(restored
     assert calls[0]==('signal',555,signal.SIGTERM)
     assert calls[1]==('teardown',[{'path':backend.target,'sha256':backend.expected['old']['bundle_tree_sha256'],
         'inode':(info.st_dev,info.st_ino),'complete':True}])
+
+
+def restored_with_real_terminal_watchdog(restored):
+    """Only the OS flock is real; launchd, processes and payloads stay inert."""
+    backend, receipt, path, old = restored
+    helper = Path(receipt['helper'])
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes(b'inert watchdog fixture')
+    backend.watchdog_hash = receipt['watchdog_sha256'] = observer.digest(helper)
+    write_private(path, receipt)
+    backend.last_journal = copy.deepcopy(receipt)
+    backend.watchdog = {'pid': 333}
+    backend.observed_watchdog_policy = {
+        'Label': observer.WATCHDOG,
+        'ProgramArguments': [str(helper), '--journal', str(backend.journal_path)],
+        'RunAtLoad': True, 'KeepAlive': {'SuccessfulExit': False}, 'ProcessType': 'Background',
+        'StandardOutPath': str(backend.state / 'update-watchdog.stdout.log'),
+        'StandardErrorPath': str(backend.state / 'update-watchdog.stderr.log')}
+    job = (f'gui/{backend.uid}/{observer.WATCHDOG} = {{\n'
+        f'\tactive count = 0\n\tprogram = {helper}\n\targuments = {{\n'
+        f'\t\t{helper}\n\t\t--journal\n\t\t{backend.journal_path}\n\t}}\n'
+        '\tstate = not running\n\truns = 1\n\tlast exit code = 0\n}\n').encode()
+    original_run = backend.run
+    backend.run = lambda argv, **kw: (SimpleNamespace(returncode=0, stdout=job, stderr=b'')
+        if argv[0] == '/bin/launchctl' else original_run(argv, **kw))
+    del backend.watchdog_finished
+    write_private(backend.journal_path.with_suffix('.lock'), {})
+    backend.deadline = time.monotonic() + 1000
+    backend.final_old_app()  # A successful earlier qualifier does not remove OLD's startup lock use.
+    return backend, receipt, path, old
+
+
+def test_cleanup_waits_for_restored_old_startup_lock_after_qualification(restored, monkeypatch):
+    backend, receipt, path, old = restored_with_real_terminal_watchdog(restored)
+    calls, now = [], [0.0]
+    backend.deadline = 0.05
+    monkeypatch.setattr(fault.Native, 'teardown', lambda _: calls.append('teardown'))
+    def send(pid, sig):
+        calls.append((pid, sig))
+        backend.process_snapshot = lambda _: None
+        backend.run = lambda *a, **kw: SimpleNamespace(returncode=1, stdout=b'')
+    with backend.journal_path.with_suffix('.lock').open('rb') as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        def release_after_observation(seconds):
+            assert calls == []
+            # Preserve the failed observation, even though the next snapshot will succeed.
+            diagnostic = [value for kind, value in backend.events if kind == 'completion_diagnostic'][-1]
+            assert diagnostic['lock'] == 'busy'
+            assert diagnostic['watchdog_process'] is None
+            assert not any(diagnostic['paths_present'].values())
+            observer.fcntl.flock(held, observer.fcntl.LOCK_UN)
+            now[0] += seconds
+        backend.cleanup_rollback(send=send, clock=lambda: now[0], sleep=release_after_observation)
+    assert calls == [(555, signal.SIGTERM), 'teardown']
+    assert 0 < now[0] < backend.deadline
+    diagnostics = [value for kind, value in backend.events if kind == 'completion_diagnostic']
+    assert diagnostics[-1]['lock'] == 'busy'
+    assert backend.completion_diagnostic['lock'] == 'available'
+
+
+@pytest.mark.parametrize('release_at_deadline', [False, True])
+def test_cleanup_busy_lock_uses_original_deadline_and_exact_false_diagnostic(restored, monkeypatch, release_at_deadline):
+    backend, receipt, path, old = restored_with_real_terminal_watchdog(restored)
+    now, observations = [0.0], []
+    backend.deadline = 0.05
+    original_run = backend.run
+    def run(argv, **kw):
+        if argv[0] == '/bin/launchctl':
+            observations.append(now[0])
+        return original_run(argv, **kw)
+    backend.run = run
+    monkeypatch.setattr(fault.Native, 'teardown', lambda _: pytest.fail('unsafe teardown'))
+    with backend.journal_path.with_suffix('.lock').open('rb') as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        def sleep(seconds):
+            now[0] += seconds
+            assert now[0] <= backend.deadline
+            if release_at_deadline and now[0] == backend.deadline:
+                observer.fcntl.flock(held, observer.fcntl.LOCK_UN)
+        with pytest.raises(fault.Refused, match='terminal watchdog deadline exhausted'):
+            backend.cleanup_rollback(clock=lambda: now[0], sleep=sleep)
+    assert now[0] == backend.deadline == 0.05
+    assert observations == [0.0, 0.02, 0.04]  # No timeout resample or renewed budget.
+    diagnostics = [value for kind, value in backend.events if kind == 'completion_diagnostic']
+    assert diagnostics[-1]['lock'] == 'busy'
+    assert backend.completion_diagnostic == diagnostics[-1]
+
+
+@pytest.mark.parametrize('change', ['tree', 'receipt', 'ack', 'new_alive', 'old_identity', 'root_commit', 'policy'])
+def test_cleanup_revalidates_rollback_after_startup_lock_wait(restored, monkeypatch, change):
+    backend, receipt, path, old = restored_with_real_terminal_watchdog(restored)
+    now = [0.0]
+    backend.deadline = 0.05
+    monkeypatch.setattr(fault.Native, 'teardown', lambda _: pytest.fail('unsafe teardown'))
+    with backend.journal_path.with_suffix('.lock').open('rb') as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        def release_and_change(seconds):
+            observer.fcntl.flock(held, observer.fcntl.LOCK_UN)
+            now[0] += seconds
+            if change == 'tree':
+                backend.tproxy._daemon_update_tree = lambda *a, **kw: 'f' * 64
+            elif change == 'receipt':
+                receipt['last_error'] = 'receipt changed during wait'
+                write_private(path, receipt)
+            elif change == 'ack':
+                write_private(backend.ack_path, {'unexpected': 'ACK'})
+            elif change == 'new_alive':
+                backend.process_snapshot = lambda pid: backend.fault_process if pid == 222 else old if pid == 555 else None
+            elif change == 'old_identity':
+                old['started'] = 'Tue Oct 20 12:00:00 2026'
+            elif change == 'root_commit':
+                backend.status = lambda: {'phase': 'committed', 'decision': 'commit', 'writer_quiescent': True}
+            elif change == 'policy':
+                backend.observed_watchdog_policy['KeepAlive'] = True
+        with pytest.raises(fault.Refused):
+            backend.cleanup_rollback(clock=lambda: now[0], sleep=release_and_change)
+    assert now[0] > 0
+
+
+@pytest.mark.parametrize('phase', ['watchdog', 'app'])
+def test_cleanup_rejects_proof_finishing_at_original_deadline(restored, monkeypatch, phase):
+    backend, receipt, path, old = restored_with_real_terminal_watchdog(restored)
+    now = [0.0]
+    backend.deadline = 0.05
+    if phase == 'watchdog':
+        original = backend.run
+        def run(argv, **kw):
+            value = original(argv, **kw)
+            if argv[0] == '/bin/launchctl':
+                now[0] = backend.deadline
+            return value
+        backend.run = run
+    else:
+        original = backend.tproxy._daemon_update_tree
+        def tree(*a, **kw):
+            now[0] = backend.deadline
+            return original(*a, **kw)
+        backend.tproxy._daemon_update_tree = tree
+    monkeypatch.setattr(fault.Native, 'teardown', lambda _: pytest.fail('unsafe teardown'))
+    with pytest.raises(fault.Refused, match='deadline exhausted'):
+        backend.cleanup_rollback(clock=lambda: now[0], sleep=lambda _: pytest.fail('expired wait'))
 
 
 @pytest.mark.parametrize('change',['root_commit','root_undecided','root_busy','new_alive','old_stopped','old_reused','replaced_inode'])
@@ -417,10 +563,11 @@ def test_cleanup_pid_reuse_after_sigterm_cannot_teardown(restored,monkeypatch):
 def test_old_stop_timeout_never_forces_teardown(restored,monkeypatch):
     backend,receipt,path,old=restored
     signals=[]
-    ticks=iter([0,0,16])
+    now=[0]
     monkeypatch.setattr(fault.Native,'teardown',lambda _:pytest.fail('unsafe teardown'))
     with pytest.raises(fault.Refused,match='no forced cleanup'):
-        backend.cleanup_rollback(send=lambda *a:signals.append(a),clock=lambda:next(ticks),sleep=lambda _:None)
+        backend.cleanup_rollback(send=lambda *a:signals.append(a),clock=lambda:now[0],
+            sleep=lambda _:now.__setitem__(0,16))
     assert signals==[(555,signal.SIGTERM)]
 
 

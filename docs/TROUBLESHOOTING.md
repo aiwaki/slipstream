@@ -2,6 +2,19 @@
 
 This page keeps operational checks short and current.
 
+### DNS, partial pages and HTTP403 are different failure stages
+
+| Observed symptom | Decisive evidence | Limit of the conclusion |
+|---|---|---|
+| Safari cannot find the server | System DNS result for the exact host, timestamp and whether a browser TCP connection exists | A pre-connect DNS error cannot be repaired by a TCP strategy that never ran. |
+| Connection stalls despite available addresses | Resolver completion, original destination and first connect attempt | The supplemental system lookup now has a 1.5-second budget in source; qualify the installed build separately. |
+| Codex reconnects and reports HTTP403 | Status, Ray ID, timestamp and the actual selected backend for that request | Successful DNS/TLS or a canary does not prove HTTP access; a retry is not evidence of recovery. |
+| Page has missing styles/images or a video stops | The failed resource, status, bytes/completeness and route for that request | The main HTML succeeding does not prove that subresources or a long-lived stream work. |
+
+See the October 23 entry in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) for the
+causal DNS regression and the limits of the current Safari observation. Preserve
+external Geph and user-managed network settings while collecting evidence.
+
 ## Routing Model
 
 Use local bypass for DPI/SNI interference:

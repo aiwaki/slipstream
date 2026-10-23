@@ -194,7 +194,8 @@ _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
 # floods it with slow DoH queries and the whole proxy stalls. 64 workers + DoH
 # de-dup keeps the app responsive under a browser's connection burst.
-_POOL = ThreadPoolExecutor(max_workers=64, thread_name_prefix="slip")
+BLOCKING_IO_MAX_WORKERS = 64
+_POOL = ThreadPoolExecutor(max_workers=BLOCKING_IO_MAX_WORKERS, thread_name_prefix="slip")
 _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH)
 _xbox_dns_inflight = {}        # host -> asyncio.Future (on-demand resolver only)
 # Negative cache: a host that failed the whole ladder is "dead" for a cooldown,
@@ -319,6 +320,8 @@ BASELINE_RESOLVE_TIMEOUT = 1.5
 BASELINE_PREFLIGHT_BUDGET = 10.0
 BASELINE_RESOLVER_BINARY = "/usr/bin/dscacheutil"
 BASELINE_PROBE_BINARY = "/usr/bin/curl"
+# Bound queued/running DNS submissions by the existing shared-pool capacity.
+_system_dns_slots = threading.BoundedSemaphore(BLOCKING_IO_MAX_WORKERS)
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
@@ -11518,9 +11521,41 @@ def system_resolve(host, port=443):
     return ips
 
 
+def _bounded_system_resolve(host, deadline):
+    identity = (
+        _console_probe_identity()
+        if os.geteuid() == 0
+        else (os.geteuid(), os.getegid(), os.path.expanduser("~"))
+    )
+    if identity is None:
+        return []
+    answers = _run_baseline_resolver(
+        host, 443, identity, timeout=max(0.0, deadline - time.monotonic()),
+    )
+    return _dedupe_ips(answer[4][0] for answer in answers)
+
+
 async def system_resolve_async(host):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_POOL, system_resolve, host)
+    # Reuse the killable system resolver and its existing budget, including
+    # queue time. Keep admission until the executor actually completes the job:
+    # cancelling a queued Future does not remove its WorkItem from the queue.
+    slots = _system_dns_slots
+    if not slots.acquire(blocking=False):
+        return []
+    deadline = time.monotonic() + BASELINE_RESOLVE_TIMEOUT
+    try:
+        future = _POOL.submit(_bounded_system_resolve, host, deadline)
+    except RuntimeError:
+        slots.release()
+        return []
+    future.add_done_callback(lambda _future: slots.release())
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(asyncio.wrap_future(future)),
+            timeout=max(0.0, deadline - time.monotonic()),
+        )
+    except asyncio.TimeoutError:
+        return []
 
 
 def _dedupe_ips(ips):
