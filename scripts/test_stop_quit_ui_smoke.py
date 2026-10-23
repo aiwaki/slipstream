@@ -261,12 +261,32 @@ class StopQuitObserverTests(unittest.TestCase):
             tray.process.pid = 42
             tray.process.poll.return_value = None
             with mock.patch.object(smoke, "owned_operation_snapshot", return_value={"operation_prompt_children": 0}), \
+                 mock.patch.object(smoke, "root_readiness_snapshot", return_value={}), \
                  mock.patch.object(smoke, "auth_snapshot", side_effect=smoke.QualificationError(f"AX failed {secret}")):
                 observed = smoke.failure_snapshot(tray, intent, smoke.STOP_PROMPT, (secret,))
             self.assertEqual(observed["intent"], "stopping")
             self.assertEqual(observed["authorization_ui"]["observation"], "unavailable")
             self.assertTrue(observed["tray_alive_owned"])
             self.assertNotIn(secret, json.dumps(observed))
+
+    def test_root_failure_snapshot_is_bounded_allowlisted_and_keeps_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            status, evidence = Path(temp) / "status", Path(temp) / "attestation"
+            status.write_text(json.dumps({"daemon": {"state":"active", "phase":"private-secret", "pid":42, "heartbeat_seq":9}, "secret":"private-secret"}))
+            evidence.write_text(json.dumps({"state":"dormant", "pf_active":False, "launchd":{"pid":42}, "private_path":"private-secret"}))
+            witness = Path(str(evidence) + ".daemon")
+            witness.write_bytes(b"unread private payload")
+            with mock.patch.object(smoke, "STATUS", status), mock.patch.object(smoke, "ATTESTATION", evidence):
+                observed = smoke.root_readiness_snapshot()
+                self.assertEqual(observed["status"]["heartbeat_seq"], 9)
+                self.assertEqual(observed["status"]["phase"], "unknown")
+                self.assertFalse(observed["attestation"]["pf_active"])
+                self.assertNotIn("private", json.dumps(observed))
+                self.assertIn("nlink", observed["witness"])
+                evidence.write_text("invalid json")
+                self.assertIn("metadata", smoke.root_readiness_snapshot()["attestation"])
+                evidence.write_bytes(b"x" * 4097)
+                self.assertEqual(smoke.root_readiness_snapshot()["attestation"]["observation"], "unavailable")
 
     def test_temporary_admin_cleanup_runs_on_failure_and_targets_created_user(self):
         calls = []
@@ -313,13 +333,18 @@ class StopQuitObserverTests(unittest.TestCase):
     def test_new_error_observation_does_not_accept_old_cancel_log(self):
         with tempfile.TemporaryFile() as log:
             log.write(b"administrator action failed: old\n")
+            log.write(b"Slipstream service lifecycle: Resume: old failure\n")
             log.flush()
             tray = smoke.Tray(Path("/candidate/slipstream"), log)
             offset = tray.checkpoint()
             self.assertFalse(tray.error_since(offset, "administrator action failed"))
+            self.assertFalse(tray.error_since(offset, "Slipstream service lifecycle: Resume:"))
             log.write(b"administrator action failed: new\n")
             log.flush()
             self.assertTrue(tray.error_since(offset, "administrator action failed"))
+            log.write(b"Slipstream service lifecycle: Resume: current readiness failure\n")
+            log.flush()
+            self.assertTrue(tray.error_since(offset, "Slipstream service lifecycle: Resume:"))
 
     def test_cleanup_refuses_unowned_tray_pid(self):
         tray = smoke.Tray(Path("/candidate/slipstream"), None)

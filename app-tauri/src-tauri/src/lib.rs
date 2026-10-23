@@ -88,6 +88,76 @@ struct ServiceEffects {
     expect_geph: bool,
 }
 
+fn resume_status_identity(
+    status: &Value,
+    attestation: &InstallAttestation,
+    expect_geph: bool,
+    owns_pid: impl FnOnce(i64) -> bool,
+    label_disabled: impl FnOnce() -> Option<bool>,
+) -> Result<(i64, u64), &'static str> {
+    let pid = status
+        .get("pid")
+        .and_then(Value::as_i64)
+        .ok_or("status-pid-missing")?;
+    let sequence = status
+        .get("heartbeat_seq")
+        .and_then(Value::as_u64)
+        .ok_or("heartbeat-sequence-missing")?;
+    let state = status
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let phase = status
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if !service_lifecycle::settled_service_state(
+        state,
+        phase,
+        &attestation.state,
+        attestation.pf_active,
+    ) {
+        return Err(if phase != "active" {
+            "daemon-phase-unsettled"
+        } else if state != attestation.state {
+            "live-attested-state-mismatch"
+        } else {
+            "attested-state-pf-mismatch"
+        });
+    }
+    if sequence == 0 {
+        return Err("heartbeat-sequence-zero");
+    }
+    if attestation.launchd.pid != pid {
+        return Err("attested-pid-mismatch");
+    }
+    if !owns_pid(pid) {
+        return Err("daemon-pid-ownership-unconfirmed");
+    }
+    match label_disabled() {
+        Some(false) => {}
+        Some(true) => return Err("daemon-label-disabled"),
+        None => return Err("daemon-label-state-unknown"),
+    }
+    if expect_geph && status.get("geph").and_then(Value::as_str) != Some("up") {
+        return Err("daemon-geph-not-up");
+    }
+    Ok((pid, sequence))
+}
+
+fn resume_state_label(value: Option<&str>) -> &'static str {
+    match value {
+        Some("active") => "active",
+        Some("dormant") => "dormant",
+        Some("starting") => "starting",
+        Some("recovering") => "recovering",
+        Some("stopping") => "stopping",
+        Some("conflict") => "conflict",
+        Some("off") => "off",
+        _ => "unknown",
+    }
+}
+
 impl ServiceEffects {
     fn root_command(&self, argument: &str, phase: &str) -> Result<(), String> {
         self.gate.block(phase);
@@ -107,44 +177,66 @@ impl ServiceEffects {
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut baseline: Option<(i64, u64)> = None;
         loop {
+            let mut detail = String::new();
             let observed = (|| {
-                let bundled = bundled_daemon_path(&self.app)?;
-                let attestation = daemon_install_attestation(&bundled)?;
-                let StatusRead::Fresh(status) = read_status_state() else {
-                    return None;
-                };
-                let pid = status.get("pid")?.as_i64()?;
-                let sequence = status.get("heartbeat_seq")?.as_u64()?;
-                if !service_lifecycle::settled_service_state(
-                    status
-                        .get("state")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown"),
-                    status
-                        .get("phase")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown"),
-                    &attestation.state,
+                let bundled = bundled_daemon_path(&self.app).ok_or("bundled-daemon-unavailable")?;
+                let attestation = daemon_install_attestation(&bundled)
+                    .ok_or("install-attestation-unconfirmed")?;
+                detail = format!(
+                    "att={} pf={} att_pid={}",
+                    resume_state_label(Some(&attestation.state)),
                     attestation.pf_active,
-                ) || sequence == 0
-                    || attestation.launchd.pid != pid
-                    || !daemon_pid_owned(pid)
-                    || daemon_label_disabled() != Some(false)
-                    || (with_geph
-                        && self.expect_geph
-                        && status.get("geph").and_then(Value::as_str) != Some("up"))
-                {
-                    return None;
-                }
-                Some((pid, sequence))
+                    attestation.launchd.pid
+                );
+                let status = match read_status_state() {
+                    StatusRead::Fresh(status) => status,
+                    StatusRead::Stale(_) => return Err("status-stale"),
+                    StatusRead::Missing => return Err("status-missing-or-invalid"),
+                };
+                detail.push_str(&format!(
+                    " state={} phase={} pid={} seq={}",
+                    resume_state_label(status.get("state").and_then(Value::as_str)),
+                    resume_state_label(status.get("phase").and_then(Value::as_str)),
+                    status.get("pid").and_then(Value::as_i64).unwrap_or(0),
+                    status
+                        .get("heartbeat_seq")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                ));
+                resume_status_identity(
+                    &status,
+                    &attestation,
+                    with_geph && self.expect_geph,
+                    daemon_pid_owned,
+                    daemon_label_disabled,
+                )
             })();
+            let mut reason = observed
+                .as_ref()
+                .err()
+                .copied()
+                .unwrap_or("heartbeat-not-progressing");
+            let observed = observed.ok();
             let progressing = matches!((baseline, observed), (Some((old_pid, old_sequence)), Some((pid, sequence))) if old_pid == pid && sequence > old_sequence);
+            if let Some((pid, sequence)) = baseline {
+                detail.push_str(&format!(" prev_pid={pid} prev_seq={sequence}"));
+            }
             baseline = observed;
-            if progressing && (!with_geph || !self.expect_geph || owned_geph_ready(&self.app)) {
-                return Ok(());
+            if progressing {
+                if !with_geph || !self.expect_geph || owned_geph_ready(&self.app) {
+                    return Ok(());
+                }
+                reason = "owned-geph-readiness-unconfirmed";
             }
             if Instant::now() >= deadline {
-                return Err(if with_geph { "Resume: fresh daemon and owned Geph readiness could not be confirmed; automatic repair remains blocked" } else { "Resume: fresh settled daemon heartbeat could not be confirmed; Geph was not started" }.into());
+                return Err(format!(
+                    "Resume: readiness={reason}; {detail}; {}",
+                    if with_geph {
+                        "automatic repair remains blocked"
+                    } else {
+                        "Geph was not started"
+                    }
+                ));
             }
             std::thread::sleep(Duration::from_secs(1));
         }
@@ -4622,6 +4714,98 @@ mod tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
     use std::sync::Mutex;
+
+    fn resume_readiness_attestation() -> super::InstallAttestation {
+        serde_json::from_value(json!({
+            "schema_version": 3, "source_sha256": "fixture",
+            "daemon": {"path":"/unused", "sha256":"fixture", "uid":0, "gid":0, "mode":448},
+            "witness": {"path":"/unused", "dev":1, "ino":2, "size":3, "mtime":0, "mtime_nsec":0},
+            "launchd": {"label":"dev.slipstream.tproxy", "pid":42},
+            "listener": {"host":"127.0.0.1", "hosts":["127.0.0.1","::1"], "port":1080},
+            "state":"active", "pf_active":true
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn resume_readiness_keeps_settled_identity_and_heartbeat_values() {
+        let mut attestation = resume_readiness_attestation();
+        for (state, pf) in [("active", true), ("dormant", false)] {
+            attestation.state = state.into();
+            attestation.pf_active = pf;
+            let status =
+                json!({"state":state,"phase":"active","pid":42,"heartbeat_seq":8,"geph":"up"});
+            assert_eq!(
+                super::resume_status_identity(
+                    &status,
+                    &attestation,
+                    true,
+                    |pid| pid == 42,
+                    || Some(false)
+                ),
+                Ok((42, 8))
+            );
+        }
+    }
+
+    #[test]
+    fn resume_readiness_explains_health_rejection_before_os_probes() {
+        let attestation = resume_readiness_attestation();
+        let mut status = json!({"state":"active","phase":"recovering","pid":42,"heartbeat_seq":8});
+        let no_process_probe = |_| panic!("unsettled status must not pass to ownership checks");
+        let no_label_probe = || panic!("unsettled status must not pass to label checks");
+        assert_eq!(
+            super::resume_status_identity(
+                &status,
+                &attestation,
+                false,
+                no_process_probe,
+                no_label_probe
+            ),
+            Err("daemon-phase-unsettled")
+        );
+        status["phase"] = json!("active");
+        status["state"] = json!("dormant");
+        assert_eq!(
+            super::resume_status_identity(
+                &status,
+                &attestation,
+                false,
+                no_process_probe,
+                no_label_probe
+            ),
+            Err("live-attested-state-mismatch")
+        );
+        assert_eq!(
+            super::resume_state_label(Some("private/path-or-secret")),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn resume_readiness_distinguishes_ownership_label_and_geph_failures() {
+        let attestation = resume_readiness_attestation();
+        let status =
+            json!({"state":"active","phase":"active","pid":42,"heartbeat_seq":8,"geph":"off"});
+        assert_eq!(
+            super::resume_status_identity(
+                &status,
+                &attestation,
+                true,
+                |_| false,
+                || panic!("ownership fails first")
+            ),
+            Err("daemon-pid-ownership-unconfirmed")
+        );
+        assert_eq!(
+            super::resume_status_identity(&status, &attestation, true, |_| true, || None),
+            Err("daemon-label-state-unknown")
+        );
+        assert_eq!(
+            super::resume_status_identity(&status, &attestation, true, |_| true, || Some(false)),
+            Err("daemon-geph-not-up")
+        );
+    }
 
     #[test]
     fn shell_quote_wraps_plain_argument() {

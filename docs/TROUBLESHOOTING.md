@@ -621,15 +621,17 @@ Administrator prompts:
 Slipstream asks macOS for administrator access only for privileged maintenance:
 
 - installing or upgrading the background daemon;
-- restarting or repairing the background daemon;
+- restarting, repairing, or fully stopping the background daemon;
 - copying the root-owned daemon log for `Copy Diagnostics`.
 
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
 
-Tray startup must not request administrator access when the daemon label is
-missing or disabled. An automatic upgrade prompt is valid only for an existing,
-explicitly enabled installation whose bundled daemon changed.
+Ordinary tray startup must not silently install a missing or disabled daemon.
+An explicit user opening after a recorded full stop is a separate resume action:
+it requests administrator access to start the saved configuration. Login launch
+keeps the recorded stop. An automatic upgrade prompt is valid only for an
+existing, explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 

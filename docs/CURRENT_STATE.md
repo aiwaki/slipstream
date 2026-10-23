@@ -55,7 +55,23 @@ value/name collection with that snapshot, with exact prompt, unique window and
 unique button guards. All 23 observer/containment tests, Python compilation,
 three generated AppleScript syntax compilations and bounded review passed.
 Native Stop-and-Quit runs before the unchanged packaged lifecycle smoke; both
-remain mandatory. Actual native cancellation is still pending the next run.
+remain mandatory. Run39906999203 at `7d593267614b0f17199424b73f867715c3158452`
+passed native Cancel, real installer-lock failure, partial Geph failure, actual
+menu Quit, native pre-listener orphan cleanup with the external sentinel alive,
+and stopped login. It failed ordinary reopen: root `--install` returned success,
+but production `wait_ready(false)` rejected readiness; the app retained the
+pending intent and stayed open. No Geph restart was attempted. The receipt does
+not identify the rejected predicate, so retain the same readiness requirements
+and 45-second bound while adding a bounded final rejection reason. Evidence:
+`output/stop-quit-20261023/third-native/`; cleanup passed. Other applicable
+product/build/browser checks and audit39906999405 passed. The previous packaged
+lifecycle smoke was skipped after the native failure, not newly qualified.
+The next head adds a fixed readiness rejection label and bounded state/PID/seq
+context to the final Resume error, preserving all predicates and the 45-second
+bound. Failure-only snapshots retain selected status/attestation metadata before
+cleanup; a fresh terminal Resume error ends the observer wait immediately.
+Three actual-source isolated Rust cases, 24 observer tests, eight documentation
+checks and focused formatting/compilation passed.
 
 Review then confirmed a separate pre-listener Geph orphan defect: the private
 record exists before bind, but stop required the SOCKS listener. Stop now checks

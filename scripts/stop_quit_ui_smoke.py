@@ -34,6 +34,7 @@ ROOT_TARGET = "system/" + ROOT_LABEL
 ROOT_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 INSTALL_DIR = Path("/usr/local/slipstream")
 STATUS = Path("/var/run/slipstream.status")
+ATTESTATION = Path("/Library/Application Support/dev.slipstream.tray/install-attestation.json")
 LOCK = "/var/db/dev.slipstream-update/installer.lock"
 STOP_LABELS = ["Stop Slipstream and Quit", "Остановить Slipstream и выйти"]
 STOP_PROMPT = "Stopping Slipstream background service"
@@ -352,6 +353,54 @@ def owned_operation_snapshot(pid, prompt):
     return {"observation": "known", "children": children, "osascript_children": scripts, "operation_prompt_children": operations}
 
 
+def root_readiness_snapshot():
+    """Failure-only fixed fields; never serialize source JSON or runtime paths."""
+    def read(path, limit):
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            meta = os.fstat(fd)
+            if not stat.S_ISREG(meta.st_mode) or meta.st_size > limit:
+                raise ValueError("bounded regular file required")
+            raw = os.read(fd, limit + 1)
+            if len(raw) > limit:
+                raise ValueError("bounded file required")
+            return raw, {"uid": meta.st_uid, "mode": stat.S_IMODE(meta.st_mode), "nlink": meta.st_nlink}
+        finally:
+            os.close(fd)
+    def fields(raw):
+        if not isinstance(raw, dict):
+            return {}
+        allowed = {"active", "dormant", "starting", "recovering", "stopping", "off", "conflict"}
+        values = {key: value if isinstance(value, str) and value in allowed else "unknown"
+                  for key in ("state", "phase") if (value := raw.get(key)) is not None}
+        values.update({key: raw[key] for key in ("pid", "heartbeat_seq")
+                       if type(raw.get(key)) is int and 0 <= raw[key] <= (2**64 - 1)})
+        if type(raw.get("pf_active")) is bool:
+            values["pf_active"] = raw["pf_active"]
+        return values
+    result = {}
+    for label, path, limit in (("status", STATUS, 262144), ("attestation", ATTESTATION, 4096)):
+        try:
+            meta = path.lstat()
+            result[label] = {"metadata": {"uid": meta.st_uid, "mode": stat.S_IMODE(meta.st_mode), "nlink": meta.st_nlink}}
+            raw, metadata = read(path, limit)
+            result[label] = {"metadata": metadata}
+            raw = json.loads(raw)
+            selected = raw.get("daemon", {}) if label == "status" else raw
+            result[label] = {**fields(selected), "metadata": metadata}
+            if label == "attestation" and type(raw.get("launchd", {}).get("pid")) is int and 0 <= raw["launchd"]["pid"] <= (2**63 - 1):
+                result[label]["pid"] = raw["launchd"]["pid"]
+        except (OSError, ValueError, TypeError, AttributeError):
+            result.setdefault(label, {})["observation"] = "unavailable"
+    try:
+        meta = Path(str(ATTESTATION) + ".daemon").lstat()
+        result["witness"] = {"regular": stat.S_ISREG(meta.st_mode), "uid": meta.st_uid,
+                             "mode": stat.S_IMODE(meta.st_mode), "nlink": meta.st_nlink}
+    except OSError:
+        result["witness"] = {"observation": "unavailable"}
+    return result
+
+
 def failure_snapshot(tray, intent, prompt, secrets_to_hide):
     snapshot = {"prompt": prompt}
     def collect(key, operation):
@@ -360,6 +409,7 @@ def failure_snapshot(tray, intent, prompt, secrets_to_hide):
         except Exception as error:
             snapshot[key] = {"observation": "unavailable", "reason": redacted_text(str(error), secrets_to_hide)[:400]}
     collect("intent", lambda: {b"v1 stopping\n": "stopping", b"v1 stopped\n": "stopped"}.get(intent.read_bytes(), "unrecognized") if intent.exists() else "absent")
+    collect("root_readiness", root_readiness_snapshot)
     if tray:
         collect("tray_alive_owned", tray.alive)
         collect("tray_returncode", lambda: tray.process.poll() if tray.process else None)
@@ -839,8 +889,13 @@ def run_qualification(bundle, report):
 
             result["phase"] = "ordinary_reopen"
             active_prompt = START_PROMPT
+            checkpoint = tray.checkpoint()
             tray.start()
-            authorize_until(lambda: not intent.exists(), prompt=START_PROMPT, timeout=150)
+            def resumed():
+                if tray.error_since(checkpoint, "Slipstream service lifecycle: Resume:"):
+                    raise QualificationError("ordinary reopen was rejected by production readiness; see diagnostics")
+                return not intent.exists()
+            authorize_until(resumed, prompt=START_PROMPT, timeout=150)
             resumed = wait_progress()
             if not tray.alive() or resumed[0] == initial[0]:
                 raise QualificationError("ordinary reopen did not establish a new owned daemon")
