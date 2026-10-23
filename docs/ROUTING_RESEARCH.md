@@ -17,8 +17,17 @@ would release admission while its executor WorkItem remains queued. A shielded
 waiter can time out or cancel without creating that queue-growth loophole;
 expired work exits on dequeue without launching a child. Tests exercise an
 actual occupied executor and an inert child that times out and is reaped.
-The focused 34-test result and both causal failures are retained in
+The initial 34-test result and both causal failures are retained in
 `output/network-followup-20261023/dns-stall-receipt.json`.
+
+The shared resolver also feeds Smart DNS. Admission exhaustion or child timeout
+means the lookup was not observed, rather than a completed empty answer. Its
+neutral result preserves Smart DNS health and does not consume a half-open
+circuit permit; actual empty answers and failed probes still count as failures.
+A causal pressure test exposed the original conflation. The follow-up passes
+38 resolver/canary checks and 19 traffic contracts, including recovery after
+capacity returns. Receipt:
+`output/network-followup-20261023/smart-dns-admission-receipt.json`.
 
 This is a post-connect defect, not proof of the historical Safari error: a
 browser that cannot resolve its host has not yet opened the TCP connection

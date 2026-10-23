@@ -288,7 +288,8 @@ environment data.
 A restored OLD app may briefly hold this same transaction lock during startup.
 The pre-ACK observer waits for terminal watchdog proof within its existing
 qualification deadline; cleanup uses only the remaining original cleanup
-budget. Every false observation is retained before another poll, and all OLD
+budget. Changed false diagnostics are retained before another poll; consecutive
+identical values are compacted within the existing evidence bound. All OLD
 identity, tree and receipt predicates are checked again after waiting. A real
 flock regression reproduces the earlier immediate rejection. This repairs the
 observer race; it does not establish the cause of run39478010009, whose decisive

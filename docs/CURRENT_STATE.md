@@ -12,12 +12,26 @@ audit39945675765 passed. The installed private preview31 remains source
 `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36` (the exact source is recorded in the
 completed lifecycle section below); follow-up source is not installed yet.
 
-Two causal repairs are ready for PR/CI, with independent reviews clear:
+PR415 contains the follow-up; initial head
+`4d9af272df6dcef799e7abc45572d33db1a1514c` passed product checks, the packaged
+build and packaged browser qualification in CI39953414580. The remaining native
+job must be reconciled against current GitHub state. Audit39953414800 fails
+only the Geph vendor gate: a new October 23 advisory, RUSTSEC-2026-0385, affects
+ctutils0.4.3. Existing RSA exceptions remain accepted; this is not an expiry or
+an error introduced by the DNS patch. A separate minimal dependency repair is
+being prepared in the existing `geph-rustls-02345` checkout. Do not waive the gate.
+
+Two causal repairs are in source, with independent reviews clear:
 - Supplemental system DNS can stall even with ready DoH/original addresses.
   Reuse the bounded child and existing 1.5-second budget/64-worker capacity;
   retain admission through actual worker completion after timeout/cancellation.
   Old-path and queue-growth regressions fail before the fix; 34 related tests
   pass. Receipt: `output/network-followup-20261023/dns-stall-receipt.json`.
+  PR review then exposed shared Smart DNS callers treating capacity exhaustion
+  as a backend failure. The neutral/unobserved result now preserves their health
+  and half-open permit. Causal failure reproduced; 38 resolver/canary checks and
+  19 traffic contracts pass, with one test-only state-isolation recheck passing.
+  Receipt: `output/network-followup-20261023/smart-dns-admission-receipt.json`.
 - The pre-ACK observer rejected a transient real flock after an earlier OLD
   proof. Wait only inside existing deadlines, retain the exact false snapshot
   and recheck OLD before cleanup. 181 focused and 124 adjacent checks pass.
@@ -34,8 +48,8 @@ fixed. See `output/network-incidents-20261023/browser-observation.json` and
 blocked by the locked Mac; the user unlocked it. No login/logout was attempted.
 
 The completed installed full-Quit/reopen qualification below is reusable.
-Next: submit the focused source changes and required CI, then bind any new
-candidate to canonical bundle/install verification before browser qualification.
+Next: finish PR415 review/CI and the separate ctutils dependency repair, then
+bind any new candidate to canonical bundle/install verification before browser qualification.
 Public updater transition/forced rollback and the historical HTTP403 remain open.
 
 ### Full Stop-and-Quit continuation, 2026-10-23
@@ -895,10 +909,11 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Submit `codex/network-updater-followup`: supplemental DNS deadline and
-  pre-ACK observer race are causally reproduced and repaired locally. Reuse
-  recorded focused checks; required CI and a matching candidate/install proof
-  remain before treating these source changes as delivered.
+- Finish PR415 (`codex/network-updater-followup`) and the separate ctutils
+  dependency repair blocking its Geph audit. Supplemental DNS and pre-ACK
+  observer races are causally reproduced and repaired locally. Reuse recorded
+  focused checks; current-head CI and matching candidate/install proof remain
+  before treating these source changes as delivered.
 
 - PR409/410 source repairs, PR412 full Stop-and-Quit and PR413 trust-dependency
   repairs are merged. The privately installed preview31 is authenticated source
