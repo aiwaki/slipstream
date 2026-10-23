@@ -4,26 +4,62 @@
 
 ### Full Stop-and-Quit continuation, 2026-10-23
 
-Latest verification: `fedcc0fb03124ef1473a19c121d825fe30e89ab9` passed complete
-CI39915409645 and audit39915409647, including all seven actual native Quit
-cases and the previous packaged lifecycle/Chrome/Safari smoke. Native report:
-`output/stop-quit-20261023/sixth-native/`; cleanup is empty. Normal merge was
-blocked by unresolved review threads. Four were triaged and resolved with
-source/regression evidence; see `pr412-resolved-review-receipt.json` in the same
-output directory. The remaining checkbox-disable crash window is real:
-cleanup preceded saving `enabled=0`. The narrow repair saves and reads back
-the disabled preference first, retains it on cleanup failure, and reuses the
-existing disabled-startup cleanup. Its retained actual-source regression fails
-three cases on the old block and passes all four on the repair. All 25 observer
-tests, eight documentation checks, formatting and compilation pass; independent
-review found no remaining blocker. Evidence: `geph-disable-crash-receipt.json`.
-Next: fresh exact-head CI before merge; reuse the unchanged local broad suite.
+Latest verification: PR412 merged normally as
+`1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36`, tree-identical to tested
+`cf5f51fffa86c8558a78f328b897e5526d26a19b`. PR CI39919315756 and
+audit39919315789 passed; all five review threads were reconciled and resolved.
+Main CI39921259477 and audit39921259555 also passed in full, including the
+signed/attested candidate, seven native Quit cases, previous packaged lifecycle,
+browser and update-notification gates. The exact-main candidate was authenticated
+(production updater signature, exact GitHub provenance, canonical tree/modes and
+codesign) and copied to `/Applications/Slipstream.app` as `0.1.9-preview.31`.
+Installed canonical verification and strict codesign passed; retained Geph
+configuration is byte-identical. Authentication and install receipts are in
+`output/stop-quit-20261023/candidate-verification/authenticated-1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36/`
+and `output/stop-quit-20261023/local-install-1f3ddcfb6/`.
+The checkbox crash regression fails three cases on the old block and passes
+all four after saving/readback of enabled=0 before cleanup. All 25 observer
+tests and eight documentation checks pass. Evidence:
+`output/stop-quit-20261023/geph-disable-crash-receipt.json` and `seventh-native/`.
 
 Active checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
-branch `codex/geph-stop-doh-fallback`, PR412. The user quit and deleted the app
-because Geph remained. Last read-only observation found no installed Slipstream
-or owned jobs; external Geph is running and has not been touched. Earlier
-installed-state paragraphs are historical. Preserve all apps, state and backups.
+branch `codex/geph-quit-install-verification`, based on the merge above. The user
+quit and deleted the old app because Geph remained. The private `.31` candidate
+is installed and the real workstation lifecycle now passes:
+- User selected Restart Proxy and confirmed macOS; `started-userland.json`
+  validates the production userland attestation/witness, root PID91870 and fresh
+  active health with heartbeat 683→685.
+- User selected the real full Stop-and-Quit and confirmed macOS;
+  `stopped.json` proves both owned launchd jobs absent, no owned-path processes,
+  no stop residue, and durable `stopped` intent. No CLI stop or disposable
+  harness was substituted for the actual menu action.
+- Ordinary opening of the canonical Applications app resumed it;
+  `reopened.json` validates a new root PID2853, fresh advancing heartbeat,
+  the production attestation/witness and cleared stop intent.
+- All four external Geph PID/UID/path identities were preserved throughout.
+  Owned Geph was explicitly off; this local sequence does not qualify an
+  account-backed owned Geph tunnel or its live shutdown. Disposable native CI
+  separately covers owned listener and pre-listener cleanup.
+
+Retained Geph configuration is byte-identical after the full cycle. Combined
+receipt: `output/stop-quit-20261023/local-install-1f3ddcfb6/lifecycle-result.json`;
+individual observations are in the same directory.
+The root-only CI attestation function cannot resolve the protected runtime
+path as the console user; the read-only observer instead uses the production
+userland root receipt/hardlink-witness contract. CUA can launch the exact app,
+but accessibility selection still times out (-10005); the user supplied both
+real menu actions. That installed UI gate is now complete. Preserve state,
+private evidence and backups; do not stop external Geph.
+Historical Safari DNS and Codex HTTP403/reconnecting remain separate,
+unresolved incidents; these lifecycle results do not establish their cause or
+repair. The private `.31` installation is not a public release, public updater
+transition/rollback qualification, or completion of the broader AUD-17 work.
+
+### Completed implementation evidence (historical sequence)
+
+The intermediate failures and follow-up actions below are retained history.
+Current qualification and remaining work are recorded above and in
+Next Verified Action / External Gates, not in those intermediate instructions.
 
 Dependency PR413 merged as `922973ef38d5d6d7ae2659bb9c12dc96af6f3b94` with the
 same tree as tested `e8d03e2aeb0d3a6ac853a804e41c39840353613d`.
@@ -119,8 +155,8 @@ root trampoline or group slicing was added. The causal oversized-membership
 regression and all 193 affected lifecycle/Chromium/live-site cases pass; Python
 compilation and diff-check pass. Evidence:
 `output/stop-quit-20261023/group-limit-{red,green}.log` and
-`group-limit-receipt.json`. Next: require the complete lifecycle gate before
-delivery; preserve the already passing native Quit evidence separately.
+`group-limit-receipt.json`. The later complete exact-main lifecycle gate
+passed; see the current verification at the top. No repeat is pending.
 
 Review then confirmed a separate pre-listener Geph orphan defect: the private
 record exists before bind, but stop required the SOCKS listener. Stop now checks
@@ -131,12 +167,13 @@ without any listener through actual Quit; its 17 containment tests passed.
 Evidence: `output/geph-orphan-stop-20261023/`. Geph networking is disabled in
 this fixture, so it does not qualify an account-backed tunnel.
 
-Next: run the new native Stop-and-Quit smoke in exact-head CI, then qualify
-the resulting installed application.
-The public preview30 stays immutable. Existing preview31 candidates have old
-trust dependencies and are not publishable using their older audit. Ordinary
-public update/rollback and remaining packaged observer gates stay open. Do not
-claim the user's historical DNS error or Codex403 fixed without live evidence.
+The native Stop-and-Quit smoke and the installed application cycle above are
+complete for source `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36`. Reuse them.
+Public preview30 stays immutable. The old preview31 candidates with outdated
+trust dependencies remain unsuitable; the new authenticated, privately installed
+preview31 includes merged PR413 and its passing audit. This does not publish it
+or close ordinary public update/rollback and remaining packaged observer gates.
+The historical DNS error and Codex403 remain unresolved without live evidence.
 
 ### Earlier incident evidence (superseded status; retained for traceability)
 
@@ -817,31 +854,42 @@ installation ran. The unchanged release checks are not repeated.
 | M0 - Safe Base | Candidate cleanup passed; public update/rollback unqualified. |
 | M1 - Autonomous Routing V1 | Hosted browser/soak passed; no new workstation qualification. |
 | M2 - Contracts And Code | Recorded .29/.30 root/app pair passed; attended public attempt exposed startup timer defect. |
-| M3 - Release-Grade macOS | Preview .30 public and manually installed; stable and public updater gates open. |
+| M3 - Release-Grade macOS | Preview .30 public; private .31 installed and full Quit/reopen qualified. Stable and public updater gates open. |
 | M4 - Cross-Platform Core | No new platform qualification in this change. |
 
 ## Next Verified Action
 
-- PR410 implementation, reviews, required CI and merge are complete. Reuse its
-  exact tested tree and retain both CI receipts; do not reopen the source fix.
-- The corrected originating candidate must contain both unreleased repairs
-  before another public transition can qualify them. Preserve current manual
-  `.30` and all private backups; no repeated local install is needed now.
-- Do not reopen completed `.30` publication or repeat the stalled unattended
-  hosted authorization probe. Attended authorization itself succeeded locally.
+- PR409/410 source repairs, PR412 full Stop-and-Quit and PR413 trust-dependency
+  repairs are merged. The privately installed preview31 is authenticated source
+  `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36`; it contains these repairs. Reuse
+  its green CI/audit, seven native lifecycle cases and the completed workstation
+  start/full-Quit/reopen receipts above. Do not reinstall or repeat these gates
+  without a relevant code change or new failure.
+- The next release gate is the still-unqualified ordinary public update and
+  forced rollback. Reconcile the retained packaged rollback failure and its
+  current source before another attempt; a successful manual install or Quit
+  does not prove the updater. See [RELEASES.md](RELEASES.md). Keep public preview30
+  immutable and preserve all private candidates, state and backups.
+- Historical Safari DNS and Codex403 incidents remain open. Their diagnosis
+  needs current routing/error evidence; the lifecycle fix alone is insufficient.
+  Preserve the separately running Geph and external network configuration.
 
 ## External Gates
 
-- Ordinary public update/forced rollback and normal Quit remain unqualified.
-  The local attempt reached root preparation but cancelled on the short startup
-  timer; the subsequent manual install is separate evidence. Hosted
-  authorization still lacks a successful probe. See [RELEASES.md](RELEASES.md).
+- Normal full Quit and ordinary reopen are qualified locally on preview31 with
+  owned Geph disabled, preserving the external Geph processes. Native CI also
+  qualifies owned inert listener/pre-listener cleanup. Account-backed owned
+  Geph operation/shutdown is not established by that local cycle.
+- Ordinary public update/forced rollback remains unqualified. The earlier
+  public attempt stopped on the short startup timer; source repairs and the
+  later manual installation are separate evidence. Hosted updater authorization
+  still lacks a successful probe. See [RELEASES.md](RELEASES.md).
 - Stable publication still requires Developer ID signing, hardened runtime,
   notarization, stapling and the existing stable-channel gates.
 - Native/source-owned work in PR384 and Telegram work in PR386 remain separate.
   Preserve the root checkout, user changes and all retained output.
 - External DNS/proxy/PAC/VPN and PF owners are untouched. Discord, YouTube and
-  Googlevideo remain on local bypass; this change affects no routing rule.
+  Googlevideo remain on local bypass; this lifecycle checkpoint changes no rule.
 
 ## Resume Protocol
 
