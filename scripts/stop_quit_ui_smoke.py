@@ -138,6 +138,26 @@ def menu_action(pid, labels=None):
     return response
 
 
+AUTH_WINDOW_ELEMENTS = '''
+    set elements to {w} & (entire contents of w)
+    set elementLimit to count of elements
+    if elementLimit > 256 then set elementLimit to 256
+'''
+AUTH_PROMPT_COLLECTION = '''
+    if r is "AXStaticText" or r is "AXWindow" then
+      try
+        set valueText to valueText & " " & (value of e as text)
+      end try
+      try
+        set nameText to nameText & " " & (name of e as text)
+      end try
+      try
+        set descriptionText to descriptionText & " " & (description of e as text)
+      end try
+    end if
+'''
+
+
 def auth_action(prompt, *, cancel=False, username="", password=""):
     # A native Cancel is proven only after finding this operation's prompt.
     # Read static text only, never credentials or secure field values.
@@ -158,37 +178,47 @@ def auth_action(prompt, *, cancel=False, username="", password=""):
     script = f'''
     tell application "System Events"
       if not (exists application process "SecurityAgent") then return "absent"
-      tell application process "SecurityAgent"
-        set frontmost to true
-        repeat with w in windows
-          set promptText to ""
+      set agent to application process "SecurityAgent"
+      set windowCount to count of windows of agent
+      if windowCount is 0 then return "absent"
+      if windowCount is not 1 then error "authorization window is ambiguous"
+      set frontmost of agent to true
+      set w to window 1 of agent
+          {AUTH_WINDOW_ELEMENTS}
+          if (count of elements) > 256 then error "authorization element inventory is too large"
+          set readErrors to 0
+          set valueText to ""
+          set nameText to ""
+          set descriptionText to ""
           set userFields to {{}}
           set secretFields to {{}}
           set cancelButtons to {{}}
           set confirmButtons to {{}}
-          repeat with elementRef in entire contents of w
+          repeat with elementIndex from 1 to elementLimit
+            set e to item elementIndex of elements
             try
-              set r to role of elementRef
-              if r is "AXStaticText" then set promptText to promptText & (value of elementRef as text)
+              set r to role of e
+              {AUTH_PROMPT_COLLECTION}
               if r is "AXTextField" or r is "AXComboBox" then
-                if subrole of elementRef is "AXSecureTextField" then
-                  set end of secretFields to contents of elementRef
+                if subrole of e is "AXSecureTextField" then
+                  set end of secretFields to e
                 else
-                  set end of userFields to contents of elementRef
+                  set end of userFields to e
                 end if
               end if
               if r is "AXButton" then
-                set buttonName to name of elementRef
-                if buttonName is "Cancel" or buttonName is "Отмена" then set end of cancelButtons to contents of elementRef
-                if buttonName is "OK" or buttonName is "Allow" or buttonName is "ОК" then set end of confirmButtons to contents of elementRef
+                set buttonName to name of e
+                if buttonName is "Cancel" or buttonName is "Отмена" then set end of cancelButtons to e
+                if buttonName is "OK" or buttonName is "Allow" or buttonName is "ОК" then set end of confirmButtons to e
               end if
+            on error
+              set readErrors to readErrors + 1
             end try
           end repeat
-          if promptText contains {apple_string(prompt)} then
+          if readErrors is not 0 then error "authorization elements unavailable"
+          if (valueText contains {apple_string(prompt)}) or (nameText contains {apple_string(prompt)}) then
             {action}
           end if
-        end repeat
-      end tell
     end tell
     return "absent"
     '''
@@ -219,9 +249,7 @@ def auth_snapshot(prompt):
           if windowLimit > 3 then set windowLimit to 3
           repeat with windowIndex from 1 to windowLimit
             set w to window windowIndex of agent
-            set elements to {{w}} & (entire contents of w)
-            set elementLimit to count of elements
-            if elementLimit > 256 then set elementLimit to 256
+            {AUTH_WINDOW_ELEMENTS}
             set staticCount to 0
             set textCount to 0
             set comboCount to 0
@@ -249,17 +277,7 @@ def auth_snapshot(prompt):
                   if buttonName is "Cancel" or buttonName is "Отмена" then set cancelCount to cancelCount + 1
                   if buttonName is "OK" or buttonName is "Allow" or buttonName is "ОК" then set confirmCount to confirmCount + 1
                 end if
-                if r is "AXStaticText" or r is "AXWindow" then
-                  try
-                    set valueText to valueText & " " & (value of e as text)
-                  end try
-                  try
-                    set nameText to nameText & " " & (name of e as text)
-                  end try
-                  try
-                    set descriptionText to descriptionText & " " & (description of e as text)
-                  end try
-                end if
+                {AUTH_PROMPT_COLLECTION}
               on error
                 set readErrors to readErrors + 1
               end try

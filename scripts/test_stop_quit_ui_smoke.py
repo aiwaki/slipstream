@@ -187,6 +187,26 @@ class StopQuitObserverTests(unittest.TestCase):
             self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT, username="fixture", password="secret"), "confirmed")
             self.assertTrue(apple.call_args.kwargs["sensitive"])
 
+    def test_auth_action_uses_the_observed_snapshot_traversal_before_unique_prompt_action(self):
+        # CI observed the exact prompt in one window while the old direct-repeat
+        # observer returned absent. Keep both generated AX readers identical.
+        with mock.patch.object(smoke, "applescript", return_value="cancelled") as apple:
+            smoke.auth_action(smoke.STOP_PROMPT, cancel=True)
+            action = apple.call_args.args[0]
+        with mock.patch.object(smoke, "applescript", return_value="process=SecurityAgent|present=1|windows=1") as apple:
+            smoke.auth_snapshot(smoke.STOP_PROMPT)
+            snapshot = apple.call_args.args[0]
+        for script in (action, snapshot):
+            self.assertIn(smoke.AUTH_WINDOW_ELEMENTS, script)
+            self.assertIn(smoke.AUTH_PROMPT_COLLECTION, script)
+            self.assertIn("set e to item elementIndex of elements", script)
+            self.assertNotIn("repeat with elementRef in entire contents", script)
+        click = action.index("click item 1 of cancelButtons")
+        for guard in ('if windowCount is not 1', 'if (count of cancelButtons) is not 1',
+                      'if readErrors is not 0', f'valueText contains "{smoke.STOP_PROMPT}"',
+                      f'nameText contains "{smoke.STOP_PROMPT}"'):
+            self.assertLess(action.index(guard), click)
+
     def test_disabled_native_menu_is_not_reported_as_a_successful_click(self):
         with mock.patch.object(smoke, "applescript", return_value="disabled:Stop Slipstream and Quit"):
             with self.assertRaisesRegex(smoke.QualificationError, "disabled before click"):

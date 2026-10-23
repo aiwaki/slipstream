@@ -42,6 +42,21 @@ observed. The report has no confirmed cases and cleanup passed; it does not
 establish whether the product or accessibility observer failed. Preserve
 `output/stop-quit-20261023/first-native/`; add bounded phase/UI diagnostics
 before retrying. Audit39901792141 passed.
+The diagnostic head `22a5fc27233971acffda6ab66302df59216bd3dd` passed
+build/browser/previous lifecycle checks in run39904820801, but native Cancel
+still failed. This time the receipt proves intent=stopping, a live owned tray,
+one owned administrator osascript, and one SecurityAgent window with the exact
+prompt plus unique Cancel and confirmation controls. The observer returned
+absent despite that UI. Repair its traversal/matching to use the proven bounded
+snapshot; do not call this a product failure or successful Quit. Evidence:
+`output/stop-quit-20261023/second-native/`. Cleanup passed.
+The observer now shares explicit indexed AX traversal and separated static
+value/name collection with that snapshot, with exact prompt, unique window and
+unique button guards. All 23 observer/containment tests, Python compilation,
+three generated AppleScript syntax compilations and bounded review passed.
+Native Stop-and-Quit runs before the unchanged packaged lifecycle smoke; both
+remain mandatory. Actual native cancellation is still pending the next run.
+
 Review then confirmed a separate pre-listener Geph orphan defect: the private
 record exists before bind, but stop required the SOCKS listener. Stop now checks
 fresh PID/UID/executable/config instead; the old guard failed its causal test,

@@ -1595,13 +1595,6 @@ jobs:
           swift test --package-path browser-companion/safari
           bash scripts/build_safari_companion.sh \
             "$RUNNER_TEMP/slipstream-safari-companion"
-      - name: Packaged lifecycle, tray-crash, Chrome, and Safari sentinel smoke
-        env:
-          SLIPSTREAM_DISPOSABLE_CI: "1"
-        run: |
-          bash scripts/run_packaged_lifecycle_smoke.sh \
-            "$RUNNER_TEMP/qualified-app/Slipstream.app" \
-            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}"
       - name: Native Stop-and-Quit, admin cancellation, partial-stop, and reopen smoke
         id: stop-quit-ui
         env:
@@ -1618,6 +1611,13 @@ jobs:
           path: ${{ runner.temp }}/stop-quit-ui-qualification.json
           if-no-files-found: error
           retention-days: 7
+      - name: Packaged lifecycle, tray-crash, Chrome, and Safari sentinel smoke
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          bash scripts/run_packaged_lifecycle_smoke.sh \
+            "$RUNNER_TEMP/qualified-app/Slipstream.app" \
+            "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}"
       - name: Package the qualified app
         if: github.event_name == 'pull_request'
         run: |
