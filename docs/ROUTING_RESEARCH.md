@@ -1,5 +1,48 @@
 # Routing Research Notes
 
+### ctutils constant-time repair, 2026-10-23
+
+PR415 audit39953414800 found one blocking advisory on the unchanged Geph r2
+graph: [RUSTSEC-2026-0385](https://github.com/RustSec/advisory-db/blob/main/crates/ctutils/RUSTSEC-2026-0385.md)
+was published on October 23. Its `ctutils 0.4.3` mask conversions can produce
+secret-dependent branches; additional u128 comparison issues affect 32-bit
+targets. This is a dependency defect, not evidence for the historical Safari
+or Codex connection failures. Exact Geph exploitability has not been established.
+
+The minimum fixed version is 0.4.4. Its downloaded crate matches the official
+[registry index](https://github.com/rust-lang/crates.io-index/blob/master/ct/ut/ctutils)
+SHA-256 `12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865`.
+The version is not yanked; dependencies, features and Rust 1.87 requirement
+are unchanged. `digest 0.11.3` accepts `ctutils ^0.4`; both Apple-target locked
+metadata resolutions pass. The parsed lock changes only this package's version
+and checksum; the package count remains 502 and all other entries and edges
+are preserved.
+
+Geph 0.4.3-r3 keeps the upstream crate and all 13 source edits. SOURCE SHA-256
+is `de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286`;
+lock SHA-256 is `c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0`.
+The six-package RSA reverse closure and its 65-package forward closure remain
+identical; ctutils is in neither. The two existing RSA review reasons are
+rebound to these exact identities, preserving every exception, expiry, scanner
+and rule. In particular, the RSA expiry remains October 30. A separate exact
+policy/source pair admits this transition; historical pairs cannot be mixed.
+
+The source-transition regression rejects the unrecognised pair before that
+binding is added. All 70 focused source, policy, scope and SBOM tests then pass;
+canonical extraction and transition verification also pass. One fresh local
+OSV 2.3.8 scan covers all 423 package identities with zero blocking findings,
+the same two RSA exceptions and three informational notices. The additional
+notice, RUSTSEC-2026-0386 on tokio 1.53.2, is retained as `unsound` under the
+existing informational policy. Its reachability is not assessed here and
+remains a separate open review. ctutils no longer appears in the findings.
+The bounded scan used 48.39 MiB peak footprint and 3.58 seconds.
+
+Evidence is retained in `output/ctutils-constant-time-20261023/`. This local
+scan binds the recorded working inputs and base SHA; it is not exact-commit
+CI or native/runtime qualification. Fresh required PR audits and the post-merge
+immutable r3 producer/consumer gates remain necessary. No producer, installation
+or workstation network change was performed for this repair.
+
 ### emSign trust-store and RSA client review, 2026-10-23
 
 PR412 audit39837144381 found certifi 2026.6.17
@@ -41,7 +84,7 @@ trusting broker-supplied bytes. Private APIs remain present in dependency
 source, and their elimination from the binary is not claimed.
 
 The renewed exceptions cover only CVE-2023-49092 and CVE-2026-21895 through
-2026-10-30. Current SOURCE SHA-256 is
+2026-10-30. Revision 2 SOURCE SHA-256 is
 `387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e`;
 lock SHA-256 is
 `440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe`.

@@ -2,6 +2,29 @@
 
 ## Verified Checkpoint
 
+### Geph ctutils dependency source repair, 2026-10-23
+
+Separate source branch `codex/ctutils-constant-time-fix`, physical checkout
+`/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`,
+starts from main `934476dab7c5ff2e0a50bbee47641483c25ef465`.
+PR415 audit39953414800 found newly published RUSTSEC-2026-0385 on unchanged
+ctutils 0.4.3. The r3 source contract pins minimum fixed 0.4.4, changing only
+its lock version/checksum, SOURCE lock digest/revision and the two existing
+RSA reason identities. No exception or expiry is added or extended.
+Both Apple-target locked metadata resolutions, canonical extraction/transition
+and 70 focused tests pass. One bounded local scan of all 423 identities passes
+with zero blocking findings, two existing RSA exceptions and three informational
+notices, including new tokio RUSTSEC-2026-0386. This is local input evidence,
+not exact-head CI or a native build. The independent source/policy review found
+no blocker. Full evidence: `output/ctutils-constant-time-20261023/`; details and
+source hashes: `docs/ROUTING_RESEARCH.md`, ctutils constant-time repair.
+
+Next: review/merge this dependency PR after required checks, produce immutable
+`geph-vendor-0.4.3-r3` through the existing workflow, then qualify its consumer.
+PR415 carries the separate DNS/observer changes. No producer, release,
+installation or live service action has been performed by this source repair;
+it does not establish the cause of Safari/Codex connection failures.
+
 ### Full Stop-and-Quit continuation, 2026-10-23
 
 Latest verification: PR412 merged normally as

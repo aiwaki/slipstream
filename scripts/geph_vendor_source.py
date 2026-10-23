@@ -53,6 +53,18 @@ RSA_REVISION_REVIEW_POLICY_BINDING = (
     "53d6a5865d2106437b6106b65fd443a337b2d19fccb4a52a5a696e4f0a0d3ca0",
     "467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7",
 )
+# Exact 0.4.3-r2 -> r3 ctutils repair: only the two RSA review reasons are
+# rebound to the new lock; every exception and expiry remains unchanged.
+RSA_CTUTILS_REVIEW_SOURCE_BINDING = (
+    "387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e",
+    "440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe",
+    "de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286",
+    "c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0",
+)
+RSA_CTUTILS_REVIEW_POLICY_BINDING = (
+    "467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7",
+    "e3edd0ab492b298b6e30a32e0f6cb4a20422f613e3a06880cb06d85f157506b0",
+)
 
 
 def hash_file(path: Path) -> str:
@@ -334,6 +346,13 @@ def _verify_policy_transition(
         hashlib.sha256(previous_canonical.encode("utf-8")).hexdigest(),
         hashlib.sha256(current_canonical.encode("utf-8")).hexdigest(),
     )
+    if (
+        not previous_h2_present
+        and not current_h2_present
+        and verified_source_binding == RSA_CTUTILS_REVIEW_SOURCE_BINDING
+        and policy_binding == RSA_CTUTILS_REVIEW_POLICY_BINDING
+    ):
+        return "rebound-reviewed-rsa-public-key-exceptions"
     if (
         not previous_h2_present
         and not current_h2_present
