@@ -473,7 +473,6 @@ def _browser_evidence_expression(host: str) -> str:
 def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, object]:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
-    groups = lifecycle._user_supplementary_groups(uid, gid)
     profile = Path(tempfile.mkdtemp(prefix="slipstream-release-chrome-"))
     chrome_stdout_path = profile / "chrome.stdout"
     chrome_stderr_path = profile / "chrome.stderr"
@@ -643,7 +642,6 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
                     launch,
                     uid=uid,
                     gid=gid,
-                    supplementary_groups=groups,
                     executable=executable,
                     profile=profile,
                     ownership=ownership,

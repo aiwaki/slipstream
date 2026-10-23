@@ -990,14 +990,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 lifecycle,
                 "_user_environment",
                 return_value=({"HOME": tmp}, Path(tmp)),
-            ), mock.patch.object(
-                lifecycle.pwd,
-                "getpwuid",
-                return_value=mock.Mock(pw_name="runner"),
-            ), mock.patch.object(
-                lifecycle.os,
-                "getgrouplist",
-                return_value=[20, 12, 61],
             ), mock.patch.object(lifecycle.os, "chown") as chown, mock.patch.object(
                 lifecycle,
                 "_capture_chrome_output",
@@ -1021,10 +1013,36 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertFalse(profile.exists())
         self.assertEqual(run.call_args.kwargs["uid"], 501)
         self.assertEqual(run.call_args.kwargs["gid"], 20)
-        self.assertEqual(
-            run.call_args.kwargs["supplementary_groups"],
-            (12, 61),
-        )
+
+    def test_chrome_spawn_drops_large_directory_group_list_before_exec(self) -> None:
+        payload = lifecycle.CHROME_PROBE_MARKER + b"x" * lifecycle.CHROME_PROBE_MIN_BYTES
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Chrome"
+            executable.write_bytes(b"fixture")
+            executable.chmod(0o755)
+            process = mock.Mock(pid=4242)
+            process.poll.return_value = 0
+            process.returncode = 0
+            def spawn(_command, **kwargs):
+                # CPython's Darwin fork_exec rejects this before creating a child.
+                if len(kwargs.get("extra_groups", ())) > 16:
+                    raise ValueError("too many extra_groups")
+                kwargs["stdout"].write(payload)
+                kwargs["stdout"].flush()
+                return process
+            with mock.patch.object(lifecycle, "_user_environment", return_value=({}, Path(tmp))), \
+                 mock.patch.object(lifecycle.pwd, "getpwuid", return_value=SimpleNamespace(pw_name="runner")), \
+                 mock.patch.object(lifecycle.os, "getgrouplist", return_value=[20, *range(100, 120)]) as groups, \
+                 mock.patch.object(lifecycle.os, "chown"), \
+                 mock.patch.object(lifecycle.os, "getpgid", return_value=4242), \
+                 mock.patch.object(lifecycle, "_stop_owned_chrome_process_group") as stop, \
+                 mock.patch.object(lifecycle.subprocess, "Popen", side_effect=spawn) as popen:
+                self.assertEqual(lifecycle._run_chrome_probe(501, 20, "groups", executable), len(payload))
+            self.assertEqual(popen.call_args.kwargs["user"], 501)
+            self.assertEqual(popen.call_args.kwargs["group"], 20)
+            self.assertEqual(popen.call_args.kwargs["extra_groups"], ())
+            groups.assert_not_called()
+            stop.assert_called_once_with(process, 4242, uid=501, gid=20)
 
     def test_run_chrome_probe_rejects_an_unavailable_executable(self) -> None:
         with self.assertRaisesRegex(lifecycle.LifecycleError, "unavailable"):
@@ -1051,14 +1069,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 lifecycle,
                 "_user_environment",
                 return_value=({"HOME": tmp}, Path(tmp)),
-            ), mock.patch.object(
-                lifecycle.pwd,
-                "getpwuid",
-                return_value=mock.Mock(pw_name="runner"),
-            ), mock.patch.object(
-                lifecycle.os,
-                "getgrouplist",
-                return_value=[20, 12, 61],
             ), mock.patch.object(lifecycle.os, "chown"), mock.patch.object(
                 lifecycle,
                 "_capture_chrome_output",
@@ -1098,10 +1108,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 lifecycle,
                 "_user_environment",
                 return_value=(os.environ.copy(), Path(tmp)),
-            ), mock.patch.object(
-                lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
             ), mock.patch.object(
                 lifecycle.os,
                 "chown",
@@ -1161,10 +1167,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 lifecycle,
                 "_user_environment",
                 return_value=(os.environ.copy(), Path(tmp)),
-            ), mock.patch.object(
-                lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
             ), mock.patch.object(
                 lifecycle.os,
                 "chown",
@@ -1230,7 +1232,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 environment=os.environ.copy(),
                 uid=None,
                 gid=None,
-                supplementary_groups=(),
                 timeout=3,
             )
 
@@ -1252,7 +1253,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 environment=os.environ.copy(),
                 uid=None,
                 gid=None,
-                supplementary_groups=(),
                 timeout=3,
                 completion_probe=lambda: True,
             )
@@ -1275,7 +1275,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 environment=os.environ.copy(),
                 uid=None,
                 gid=None,
-                supplementary_groups=(),
                 timeout=0.2,
             )
 
@@ -1299,7 +1298,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                     environment=os.environ.copy(),
                     uid=None,
                     gid=None,
-                    supplementary_groups=(),
                 )
 
     def test_chrome_group_signal_permission_error_names_the_signal(self) -> None:
@@ -1374,13 +1372,12 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 signal.SIGTERM,
                 uid=501,
                 gid=20,
-                supplementary_groups=(12, 61),
             )
 
         self.assertTrue(signalled)
         self.assertEqual(run.call_args.kwargs["user"], 501)
         self.assertEqual(run.call_args.kwargs["group"], 20)
-        self.assertEqual(run.call_args.kwargs["extra_groups"], (12, 61))
+        self.assertEqual(run.call_args.kwargs["extra_groups"], ())
         command = run.call_args.args[0]
         self.assertEqual(command[0:2], (sys.executable, "-I"))
         self.assertEqual(
@@ -1403,7 +1400,6 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                     signal.SIGKILL,
                     uid=501,
                     gid=20,
-                    supplementary_groups=(),
                 )
             )
         run.assert_not_called()

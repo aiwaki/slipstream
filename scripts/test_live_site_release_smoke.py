@@ -114,13 +114,6 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             )
         )
         stack.enter_context(
-            mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
-            )
-        )
-        stack.enter_context(
             mock.patch.object(smoke.tempfile, "mkdtemp", return_value=str(profile))
         )
         stack.enter_context(mock.patch.object(smoke.os, "chown"))
@@ -281,7 +274,6 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             lifecycle.launch,
             uid=501,
             gid=20,
-            supplementary_groups=(12, 61),
             executable=lifecycle.executable.resolve(),
             profile=lifecycle.profile,
             ownership=mock.ANY,

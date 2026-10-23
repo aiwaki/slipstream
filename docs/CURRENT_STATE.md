@@ -86,7 +86,26 @@ health transitions, cached heartbeat rejection and missing PF/health through the
 real projection. Eight documentation checks and focused formatting passed;
 bounded independent review found no blockers. Evidence:
 `output/stop-quit-20261023/health-transition-{red,green}.log`.
-Pending: exact-head native validation of the repaired ordinary reopen.
+Run39912212960 at `531c1abd25f485e1548b896c504684a349e0a476` passes all seven
+native cases, including ordinary reopen with a fresh daemon and retained
+preferences; cleanup is empty. Product/build/browser checks and audit39912212924
+pass. The following pre-existing packaged lifecycle smoke fails before spawning
+Chrome: `ValueError: too many extra_groups` at pending-navigation:composed-original.
+The harness passes the full `os.getgrouplist` result to CPython's bounded
+`Popen(extra_groups=...)` API. The runner's before/after group membership was not
+recorded, so do not attribute this to the temporary native-test administrator.
+Product probe launches use an empty supplementary-group tuple and are outside
+this failure. Evidence: `output/stop-quit-20261023/fifth-native/`.
+The harness now explicitly clears supplemental groups, matching its tray and
+production probe launches, while retaining the original UID and primary GID.
+Its profiles belong to that UID, its password store is basic, and its signal
+permissions depend on UID; directory group membership is not required. No
+root trampoline or group slicing was added. The causal oversized-membership
+regression and all 193 affected lifecycle/Chromium/live-site cases pass; Python
+compilation and diff-check pass. Evidence:
+`output/stop-quit-20261023/group-limit-{red,green}.log` and
+`group-limit-receipt.json`. Next: require the complete lifecycle gate before
+delivery; preserve the already passing native Quit evidence separately.
 
 Review then confirmed a separate pre-listener Geph orphan defect: the private
 record exists before bind, but stop required the SOCKS listener. Stop now checks

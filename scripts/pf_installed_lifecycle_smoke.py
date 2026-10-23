@@ -781,15 +781,6 @@ def _user_environment(uid: int) -> tuple[dict[str, str], Path]:
     return environment, Path(account.pw_dir)
 
 
-def _user_supplementary_groups(uid: int, gid: int) -> tuple[int, ...]:
-    try:
-        account = pwd.getpwuid(uid)
-        groups = os.getgrouplist(account.pw_name, gid)
-    except (KeyError, OSError) as exc:
-        raise LifecycleError(f"cannot resolve original user groups for {uid}") from exc
-    return tuple(sorted(group for group in set(groups) if group != gid))
-
-
 class PackagedTrayProcess:
     def __init__(self, executable: Path, uid: int, gid: int) -> None:
         self.executable = executable.resolve(strict=True)
@@ -1029,7 +1020,6 @@ def _signal_owned_chrome_processes(
     *,
     uid: int | None,
     gid: int | None,
-    supplementary_groups: tuple[int, ...],
 ) -> bool:
     identity = {}
     if uid is None:
@@ -1037,10 +1027,11 @@ def _signal_owned_chrome_processes(
     else:
         if gid is None:
             raise LifecycleError("Chrome signal helper requires a group ID")
+        # Signals require the exact browser UID, not directory group membership.
         identity = {
             "user": uid,
             "group": gid,
-            "extra_groups": supplementary_groups,
+            "extra_groups": (),
         }
 
     members = _chrome_process_group_members(process_group)
@@ -1085,7 +1076,6 @@ def _stop_owned_chrome_process_group(
     *,
     uid: int | None = None,
     gid: int | None = None,
-    supplementary_groups: tuple[int, ...] = (),
 ) -> None:
     if process_group != process.pid:
         with _chrome_operation("process-leader-kill-after-group-mismatch"):
@@ -1103,7 +1093,6 @@ def _stop_owned_chrome_process_group(
             signal.SIGTERM,
             uid=uid,
             gid=gid,
-            supplementary_groups=supplementary_groups,
         )
     try:
         with _chrome_operation("process-leader-wait-after-term"):
@@ -1115,7 +1104,6 @@ def _stop_owned_chrome_process_group(
                 signal.SIGKILL,
                 uid=uid,
                 gid=gid,
-                supplementary_groups=supplementary_groups,
             )
         with _chrome_operation("process-leader-wait-after-kill"):
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
@@ -1128,7 +1116,6 @@ def _stop_owned_chrome_process_group(
                 signal.SIGKILL,
                 uid=uid,
                 gid=gid,
-                supplementary_groups=supplementary_groups,
             )
 
 
@@ -1139,7 +1126,6 @@ def _capture_chrome_output(
     environment: dict[str, str],
     uid: int | None,
     gid: int | None,
-    supplementary_groups: tuple[int, ...],
     timeout: float = CHROME_PROBE_TIMEOUT,
     completion_probe=None,
 ) -> ChromeCapture:
@@ -1153,10 +1139,12 @@ def _capture_chrome_output(
     try:
         identity = {}
         if uid is not None:
+            # Profiles belong to this UID; basic password storage needs no extra
+            # groups. Match the tray/worker probes and never inherit root groups.
             identity = {
                 "user": uid,
                 "group": gid,
-                "extra_groups": supplementary_groups,
+                "extra_groups": (),
             }
         with _chrome_operation("spawn"):
             process = subprocess.Popen(
@@ -1182,7 +1170,6 @@ def _capture_chrome_output(
                     actual_process_group,
                     uid=uid,
                     gid=gid,
-                    supplementary_groups=supplementary_groups,
                 )
         deadline = time.monotonic() + timeout
         while True:
@@ -1209,7 +1196,6 @@ def _capture_chrome_output(
                     process_group,
                     uid=uid,
                     gid=gid,
-                    supplementary_groups=supplementary_groups,
                 )
         finally:
             stdout = _read_capture(stdout_capture)
@@ -1252,7 +1238,6 @@ def _run_chrome_probe(
 
     with _chrome_operation("user-identity"):
         environment, home = _user_environment(uid)
-        supplementary_groups = _user_supplementary_groups(uid, gid)
     with _chrome_operation("profile-create"):
         profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-chrome-"))
     try:
@@ -1266,7 +1251,6 @@ def _run_chrome_probe(
             timeout=CHROME_PROBE_TIMEOUT,
             uid=uid,
             gid=gid,
-            supplementary_groups=supplementary_groups,
         )
     finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
@@ -2364,7 +2348,6 @@ def _run_composed_navigation(
         )
 
     environment, home = _user_environment(uid)
-    supplementary_groups = _user_supplementary_groups(uid, gid)
     profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-composed-chrome-"))
     started_at = time.monotonic()
     try:
@@ -2377,7 +2360,6 @@ def _run_composed_navigation(
             timeout=composed.MAX_COMPOSED_NAVIGATION_SECONDS,
             uid=uid,
             gid=gid,
-            supplementary_groups=supplementary_groups,
             completion_probe=fixture.ready,
         )
     finally:
@@ -2436,7 +2418,6 @@ def _run_active_worker_uninstall(
         )
 
     environment, home = _user_environment(uid)
-    supplementary_groups = _user_supplementary_groups(uid, gid)
     profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-uninstall-chrome-"))
     stop_capture = threading.Event()
     captures: list[ChromeCapture] = []
@@ -2451,7 +2432,6 @@ def _run_active_worker_uninstall(
                 timeout=composed.MAX_COMPOSED_NAVIGATION_SECONDS,
                 uid=uid,
                 gid=gid,
-                supplementary_groups=supplementary_groups,
                 completion_probe=stop_capture.is_set,
             ))
         except BaseException as exc:
