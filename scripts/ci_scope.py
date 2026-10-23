@@ -74,7 +74,22 @@ DELIVERY_TEST_PATHS = frozenset({
     "scripts/test_make_release_manifest.py",
     "scripts/test_verify_release_artifacts.py",
 })
-GEPH_BOOTSTRAP_ALLOWED = GEPH_BOOTSTRAP_ALLOWED | DELIVERY_FILE_BINDINGS.keys() | DELIVERY_TEST_PATHS
+# Coordinate the emSign trust-store repair with the Geph producer. Every Python
+# lock must carry this exact certifi-only update; installer options, unrelated
+# dependencies and a partial runtime/test/build update take ordinary packaging.
+PYTHON_LOCK_FILE_BINDINGS = {
+    "spike/requirements-runtime.txt": (
+        "dbc2159711423ff43b87f697c62ae482869bcbe8ec7b697089606a70b910f828",
+        "540a6aae9d82fca17647fa052eb772ffb8e1d77b7c4f53c0513a3cca42a7fe74"),
+    "spike/requirements.txt": (
+        "986abfc91327d355981a05184e7b7b2f5fe6f576a84338c19c021f6bb72a5cda",
+        "2c79f2c8c826eb2203dea9b765283f57b1bab894112cc65e7a4309867435a975"),
+    "spike/requirements-build.txt": (
+        "1192b9d29eb533db2bf29733ee494448d8c12c38a8b9c49f1e06fbda424078f9",
+        "a740216126da538358eb8009447d6afc64d70819390a9c82d207be727a36179d"),
+}
+GEPH_BOOTSTRAP_ALLOWED = (GEPH_BOOTSTRAP_ALLOWED | DELIVERY_FILE_BINDINGS.keys()
+                          | DELIVERY_TEST_PATHS | PYTHON_LOCK_FILE_BINDINGS.keys())
 
 
 def reviewed_delivery_delta(deltas: dict[str, tuple[bytes, bytes]] | None) -> bool:
@@ -99,6 +114,33 @@ def delivery_delta_from_git() -> dict[str, tuple[bytes, bytes]] | None:
                 ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL,
                 timeout=10) for ref in refs)
             for path in DELIVERY_FILE_BINDINGS
+        }
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def reviewed_python_lock_delta(deltas: dict[str, tuple[bytes, bytes]] | None) -> bool:
+    if deltas is None or deltas.keys() != PYTHON_LOCK_FILE_BINDINGS.keys():
+        return False
+    try:
+        return all(
+            tuple(hashlib.sha256(value).hexdigest() for value in deltas[path]) == binding
+            for path, binding in PYTHON_LOCK_FILE_BINDINGS.items()
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def python_lock_delta_from_git() -> dict[str, tuple[bytes, bytes]] | None:
+    refs = (os.environ.get("BASE_SHA", ""), os.environ.get("GITHUB_SHA", ""))
+    if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs):
+        return None
+    try:
+        return {
+            path: tuple(subprocess.check_output(
+                ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL,
+                timeout=10) for ref in refs)
+            for path in PYTHON_LOCK_FILE_BINDINGS
         }
     except (OSError, subprocess.SubprocessError):
         return None
@@ -174,6 +216,14 @@ APP_LOCK_REPAIR_SETS = (
         ("quinn-proto", "0.11.16", "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560",
          "0.11.18", "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"),
     ),
+    # RUSTSEC-2026-0382/0381: certificate-validation and emSign root repair.
+    # Both version/checksum changes are required, with every edge preserved.
+    (
+        ("rustls-webpki", "0.103.15", "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2",
+         "0.103.16", "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"),
+        ("webpki-roots", "1.0.9", "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a",
+         "1.0.10", "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"),
+    ),
 )
 
 
@@ -215,7 +265,8 @@ def app_lock_delta_from_git() -> tuple[str, str] | None:
 
 def classify_paths(paths: list[str], *, event_name: str,
                    app_lock_delta: tuple[str, str] | None = None,
-                   delivery_delta: dict[str, tuple[bytes, bytes]] | None = None) -> CiScope:
+                   delivery_delta: dict[str, tuple[bytes, bytes]] | None = None,
+                   python_lock_delta: dict[str, tuple[bytes, bytes]] | None = None) -> CiScope:
     if event_name not in {"pull_request", "push"}:
         raise ValueError(f"unsupported CI event: {event_name}")
     changed = {_validate_path(path) for path in paths if path}
@@ -246,6 +297,9 @@ def classify_paths(paths: list[str], *, event_name: str,
         and (not (changed & DELIVERY_FILE_BINDINGS.keys()) or (
             (DELIVERY_FILE_BINDINGS.keys() | DELIVERY_TEST_PATHS | GEPH_BOOTSTRAP_REQUIRED).issubset(changed)
             and reviewed_delivery_delta(delivery_delta)))
+        and (not (changed & PYTHON_LOCK_FILE_BINDINGS.keys()) or (
+            (PYTHON_LOCK_FILE_BINDINGS.keys() | GEPH_BOOTSTRAP_REQUIRED).issubset(changed)
+            and reviewed_python_lock_delta(python_lock_delta)))
         and ("scripts/run_geph_synthetic_tests.py" not in changed or "scripts/test_run_geph_synthetic_tests.py" in changed)
         and ("scripts/geph_vendor_source.py" not in changed or "scripts/test_geph_source_edits.py" in changed)
         and (APP_LOCK not in changed or (
@@ -280,8 +334,10 @@ def main(argv: list[str] | None = None) -> int:
     delta = app_lock_delta_from_git() if args.event_name == "pull_request" and APP_LOCK in paths else None
     delivery_delta = (delivery_delta_from_git()
         if args.event_name == "pull_request" and set(paths) & DELIVERY_FILE_BINDINGS.keys() else None)
+    python_lock_delta = (python_lock_delta_from_git()
+        if args.event_name == "pull_request" and set(paths) & PYTHON_LOCK_FILE_BINDINGS.keys() else None)
     scope = classify_paths(paths, event_name=args.event_name, app_lock_delta=delta,
-                           delivery_delta=delivery_delta)
+                           delivery_delta=delivery_delta, python_lock_delta=python_lock_delta)
     write_github_output(args.github_output, scope)
     print(json.dumps(asdict(scope), sort_keys=True, separators=(",", ":")))
     return 0

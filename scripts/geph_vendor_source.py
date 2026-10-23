@@ -27,7 +27,7 @@ EXACT_SEMVER_PATTERN = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 )
 H2_TRANSITION_EXCEPTION_ID = "geph-h2-0.4.15-awaiting-vendor-r2"
-# One reviewed 0.3.9-r5 -> ordinary 0.4.3-r1 transition, not a renewal rule.
+# Historical reviewed 0.3.9-r5 -> ordinary 0.4.3-r1 transition.
 # These bind both RSA 0.8.2 reasons/expiries (2026-10-22) and every other
 # policy field. A different source graph or policy requires its own review.
 RSA_REVIEW_SOURCE_BINDING = (
@@ -39,6 +39,19 @@ RSA_REVIEW_SOURCE_BINDING = (
 RSA_REVIEW_POLICY_BINDING = (
     "1fb2186a3ec212c509137c392a0beba24b61d39f423abf911a3a99d262a98e5f",
     "53d6a5865d2106437b6106b65fd443a337b2d19fccb4a52a5a696e4f0a0d3ca0",
+)
+# Separately reviewed 0.4.3-r1 -> 0.4.3-r2 transition, with the unchanged
+# client RSA closure and two WebPKI updates. Both exact reasons and the
+# 2026-10-30 expiry are bound; these pairs are not a general renewal rule.
+RSA_REVISION_REVIEW_SOURCE_BINDING = (
+    "843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe",
+    "5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d",
+    "387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e",
+    "440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe",
+)
+RSA_REVISION_REVIEW_POLICY_BINDING = (
+    "53d6a5865d2106437b6106b65fd443a337b2d19fccb4a52a5a696e4f0a0d3ca0",
+    "467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7",
 )
 
 
@@ -317,14 +330,17 @@ def _verify_policy_transition(
 
     # Only verify_source_transition supplies identities after checking the
     # source contracts and actual lock bytes. Policy-only callers fail closed.
+    policy_binding = (
+        hashlib.sha256(previous_canonical.encode("utf-8")).hexdigest(),
+        hashlib.sha256(current_canonical.encode("utf-8")).hexdigest(),
+    )
     if (
-        verified_source_binding == RSA_REVIEW_SOURCE_BINDING
-        and not previous_h2_present
+        not previous_h2_present
         and not current_h2_present
-        and (
-            hashlib.sha256(previous_canonical.encode("utf-8")).hexdigest(),
-            hashlib.sha256(current_canonical.encode("utf-8")).hexdigest(),
-        ) == RSA_REVIEW_POLICY_BINDING
+        and (verified_source_binding, policy_binding) in (
+            (RSA_REVIEW_SOURCE_BINDING, RSA_REVIEW_POLICY_BINDING),
+            (RSA_REVISION_REVIEW_SOURCE_BINDING, RSA_REVISION_REVIEW_POLICY_BINDING),
+        )
     ):
         return "renewed-reviewed-rsa-public-key-exceptions"
 
