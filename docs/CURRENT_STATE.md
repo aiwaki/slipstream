@@ -4,6 +4,21 @@
 
 ### Full Stop-and-Quit continuation, 2026-10-23
 
+Latest verification: `fedcc0fb03124ef1473a19c121d825fe30e89ab9` passed complete
+CI39915409645 and audit39915409647, including all seven actual native Quit
+cases and the previous packaged lifecycle/Chrome/Safari smoke. Native report:
+`output/stop-quit-20261023/sixth-native/`; cleanup is empty. Normal merge was
+blocked by unresolved review threads. Four were triaged and resolved with
+source/regression evidence; see `pr412-resolved-review-receipt.json` in the same
+output directory. The remaining checkbox-disable crash window is real:
+cleanup preceded saving `enabled=0`. The narrow repair saves and reads back
+the disabled preference first, retains it on cleanup failure, and reuses the
+existing disabled-startup cleanup. Its retained actual-source regression fails
+three cases on the old block and passes all four on the repair. All 25 observer
+tests, eight documentation checks, formatting and compilation pass; independent
+review found no remaining blocker. Evidence: `geph-disable-crash-receipt.json`.
+Next: fresh exact-head CI before merge; reuse the unchanged local broad suite.
+
 Active checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
 branch `codex/geph-stop-doh-fallback`, PR412. The user quit and deleted the app
 because Geph remained. Last read-only observation found no installed Slipstream

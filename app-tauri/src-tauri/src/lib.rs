@@ -658,11 +658,11 @@ fn tr(en: &str) -> String {
         "Open Status" => "Открыть статус",
         "Copy Diagnostics" => "Скопировать диагностику",
         "Unable to save Geph account" => "Не удалось сохранить аккаунт Geph",
-        "Unable to stop bundled Geph. It may still be running." => {
-            "Не удалось подтвердить остановку встроенного Geph. Возможно, он ещё работает."
+        "Unable to save the disabled setting. Bundled Geph has not been stopped." => {
+            "Не удалось сохранить настройку отключения. Встроенный Geph не был остановлен."
         }
-        "Bundled Geph stopped, but its setting could not be saved. It may restart when Slipstream opens." => {
-            "Встроенный Geph остановлен, но настройку не удалось сохранить. При запуске Slipstream он может включиться снова."
+        "Bundled Geph is disabled in settings, but it may still be running. Slipstream will retry cleanup when it opens." => {
+            "Встроенный Geph отключён в настройках, но может ещё работать. При следующем запуске Slipstream снова попробует его остановить."
         }
         "Check for Updates…" => "Проверить обновления…",
         "Uninstall Slipstream…" => "Удалить Slipstream…",
@@ -4406,20 +4406,20 @@ pub fn run() {
                                     }
                                 }
                             } else {
+                                // Persist the user's choice before cleanup so a
+                                // crash cannot turn Geph back on at next startup.
+                                geph_config_set(app, "enabled", "0");
+                                if geph_field(app, "enabled").as_deref() != Some("0") {
+                                    let _ = enable_h.set_checked(true);
+                                    notify(app, &tr("Unable to save the disabled setting. Bundled Geph has not been stopped."));
+                                    return;
+                                }
+                                let _ = enable_h.set_checked(false);
                                 // Boot out only Slipstream's user LaunchAgent and
                                 // clean up any verified legacy detached process.
                                 if let Err(error) = geph_launch_agent_disable(app) {
                                     eprintln!("geph disable unavailable: {error}");
-                                    let _ = enable_h.set_checked(true);
-                                    notify(app, &tr("Unable to stop bundled Geph. It may still be running."));
-                                    return;
-                                }
-                                geph_config_set(app, "enabled", "0");
-                                if geph_field(app, "enabled").as_deref() == Some("0") {
-                                    let _ = enable_h.set_checked(false);
-                                } else {
-                                    let _ = enable_h.set_checked(true);
-                                    notify(app, &tr("Bundled Geph stopped, but its setting could not be saved. It may restart when Slipstream opens."));
+                                    notify(app, &tr("Bundled Geph is disabled in settings, but it may still be running. Slipstream will retry cleanup when it opens."));
                                 }
                             }
                         }

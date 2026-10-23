@@ -662,10 +662,14 @@ that its previously installed services stopped.
 Turning off `Enable Geph` stops only Slipstream's own Geph job. A failed or
 unreadable `launchctl print` response must not be treated as proof of absence.
 Only a response identifying the exact missing job and user, or a validated
-loaded job, establishes state; other results remain unknown. On stop failure,
-keep the enabled setting and checkbox and show the failure. A successful stop
-also requires removing the owned RunAtLoad plist so a later login cannot
-silently bring it back. Never kill a standalone Geph process by its name.
+loaded job, establishes state; other results remain unknown. The disabled
+preference is saved and verified before cleanup starts. A failed save leaves
+the current service untouched. A cleanup failure keeps the checkbox off and
+shows that the owned client may still be running; the checkbox reflects the
+saved choice, not confirmed shutdown. Opening Slipstream again retries cleanup
+for a disabled Geph preference. A successful stop also requires removing the
+owned RunAtLoad plist so a later login cannot silently bring it back. Never
+kill a standalone Geph process by its name.
 
 An old launcher defect could leave invalid `geph-owned.json` while its job was
 running. Once the exact job and related current-user processes are confirmed
@@ -674,8 +678,9 @@ absent, the repaired cleanup preserves that record in a private
 Both the old app-bundle executable with its private config and the current
 runtime/launcher are checked. Unreadable or changed files and uncertain process
 observations still stop cleanup; do not delete the record to bypass that check.
-An app crash before the final preference save can leave enabled intent for the
-next launch, so an interrupted operation is not proof of a completed stop.
+A crash after the preference save can still interrupt cleanup. The saved
+choice remains disabled, but process absence must be checked before calling
+the stop complete.
 
 `Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
 daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does

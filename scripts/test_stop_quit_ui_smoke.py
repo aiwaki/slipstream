@@ -12,6 +12,86 @@ import stop_quit_ui_smoke as smoke
 
 
 class StopQuitObserverTests(unittest.TestCase):
+    def test_actual_geph_disable_block_survives_crash_and_retries_disabled_cleanup(self):
+        # Compile the production arm and startup branch with inert file/process adapters.
+        # This catches effects ordering and crash behavior without a native app build.
+        source_dir = Path(__file__).resolve().parents[1] / "app-tauri/src-tauri/src"
+        source = (source_dir / "lib.rs").read_text()
+        enabled_write = source.index('geph_config_set(app, "enabled", "1");', source.index('ID_GEPH_ENABLE => {'))
+        marker = '                            } else {'
+        start = source.index(marker, enabled_write) + len(marker)
+        end = source.index('\n                            }\n                        }\n                        ID_LAUNCH', start)
+        disable = source[start:end]
+        start = source.index('    if !geph_enabled(app) {', source.index('fn ensure_geph_launch_agent('))
+        startup = source[start:source.index('    let Some(secret)', start)]
+        config = (source_dir / "geph_config.rs").read_text()
+        start = config.index('fn resolve_geph_enabled_state(')
+        resolver = config[start:config.index('/// Whether Slipstream', start)]
+        fixture = r"""
+use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[derive(Clone, Copy, PartialEq)] enum GephSecretAvailability { Present, Missing }
+struct App { path: std::path::PathBuf, save_ok: Cell<bool>, cleanup: Cell<u8>, calls: Cell<usize>, alive: Cell<bool>, notes: RefCell<Vec<String>> }
+impl App { fn new() -> Self {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path = std::path::PathBuf::from(std::env::var_os("GEPH_TEST_ROOT").unwrap()).join(format!("enabled-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::write(&path, "1").unwrap();
+    Self { path, save_ok: Cell::new(true), cleanup: Cell::new(0), calls: Cell::new(0), alive: Cell::new(true), notes: RefCell::new(vec![]) }
+} }
+struct Check(Cell<bool>);
+impl Check { fn set_checked(&self, value: bool) -> Result<(), ()> { self.0.set(value); Ok(()) } }
+fn geph_config_set(app: &App, key: &str, value: &str) {
+    assert_eq!(key, "enabled"); if app.save_ok.get() { std::fs::write(&app.path, value).unwrap(); }
+}
+fn geph_field(app: &App, key: &str) -> Option<String> { assert_eq!(key,"enabled"); std::fs::read_to_string(&app.path).ok() }
+fn geph_launch_agent_disable(app: &App) -> Result<(), String> {
+    app.calls.set(app.calls.get()+1);
+    match app.cleanup.get() {
+        1 => Err("injected cleanup failure".into()),
+        2 => { app.alive.set(false); panic!("injected crash after cleanup"); },
+        _ => { app.alive.set(false); Ok(()) }
+    }
+}
+fn notify(app: &App, text: &str) { app.notes.borrow_mut().push(text.into()); }
+fn tr(text: &str) -> String { text.into() }
+fn geph_enabled(app: &App) -> bool { resolve_geph_enabled_state(geph_field(app,"enabled").as_deref(), true, GephSecretAvailability::Present).0 }
+fn startup(app: &App) -> Result<bool, String> { STARTUP panic!("disabled preference must not reach bootstrap"); }
+fn disable(app: &App, enable_h: &Check) { DISABLE }
+#[test] fn crash_after_cleanup_retains_disabled_preference_and_reopen_cleans_only() {
+    let app=App::new(); let check=Check(Cell::new(true)); app.cleanup.set(2);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| disable(&app,&check))).is_err());
+    assert_eq!(geph_field(&app,"enabled").as_deref(), Some("0"));
+    app.cleanup.set(0); app.alive.set(true);
+    assert_eq!(startup(&app),Ok(false)); assert_eq!(app.calls.get(),2); assert!(!app.alive.get());
+}
+#[test] fn failed_persistence_does_not_begin_cleanup_or_claim_stopped() {
+    let app=App::new(); let check=Check(Cell::new(true)); app.save_ok.set(false); disable(&app,&check);
+    assert_eq!(app.calls.get(),0); assert!(app.alive.get()); assert!(check.0.get());
+    assert_eq!(geph_field(&app,"enabled").as_deref(), Some("1"));
+    assert!(!app.notes.borrow().is_empty()); assert!(app.notes.borrow().iter().all(|s| !s.contains("Geph stopped")));
+}
+#[test] fn cleanup_failure_retains_off_and_reports_possible_running_process() {
+    let app=App::new(); let check=Check(Cell::new(true)); app.cleanup.set(1); disable(&app,&check);
+    assert_eq!(geph_field(&app,"enabled").as_deref(), Some("0")); assert!(!check.0.get()); assert!(app.alive.get());
+    assert!(app.notes.borrow().iter().any(|s| s.contains("may still be running")));
+}
+#[test] fn successful_disable_persists_off_and_stops() {
+    let app=App::new(); let check=Check(Cell::new(true)); disable(&app,&check);
+    assert_eq!(geph_field(&app,"enabled").as_deref(), Some("0")); assert!(!check.0.get()); assert!(!app.alive.get());
+    assert!(app.notes.borrow().is_empty());
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            test_source = Path(temp) / "geph_disable.rs"
+            binary = Path(temp) / "geph_disable_test"
+            test_source.write_text(resolver + fixture.replace("STARTUP", startup).replace("DISABLE", disable))
+            compiled = subprocess.run(["rustc", "--test", "--edition=2021", str(test_source), "-o", str(binary)],
+                                      capture_output=True, text=True, timeout=60)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10,
+                                    env={**os.environ, "GEPH_TEST_ROOT": temp})
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_workstation_refusal_precedes_every_command(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(smoke, "run") as run:
             with self.assertRaisesRegex(smoke.QualificationError, "disposable"):

@@ -34,13 +34,17 @@ cached health is insufficient. Missing or inconsistent PF evidence cannot prove
 readiness. Login launch with `--autostart` keeps a stopped installation stopped.
 External Geph and user-managed network configuration remain outside this action.
 
-### 2026-10-22: Geph off state requires observed shutdown
+### 2026-10-23: Geph disable intent precedes observed shutdown
 
 An unsuccessful launchd query is unknown, not proof that Slipstream's Geph job
 is absent. Confirm the exact user job after stop requests, preserve ownership
 on unreadable process state or a surviving owned process, and report failures
-to the user. Persist the disabled preference only after owned cleanup succeeds;
-verify the saved preference before clearing its menu checkmark. Stop requests
+to the user. Persist and read back the disabled preference before attempting
+owned cleanup. If that save fails, do not begin cleanup. The checkbox reflects
+this saved intent; it is not proof of process absence. Cleanup failure keeps
+the disabled intent and reports that the client may still be running. Existing
+startup reconciliation retries owned cleanup when that preference is disabled,
+so a crash during stop cannot restore the previous enabled intent. Stop requests
 target only Slipstream's label, never a job selected by an unchecked plist.
 
 Malformed legacy ownership records must not permanently block startup or
@@ -53,10 +57,11 @@ errors, symlinks, changed files, live candidates and unknown process state
 cannot authorize recovery. Never infer a PID to signal from malformed data.
 Bounded process-stop waits include an observation after the final delay.
 
-This stop operation is not crash-atomic: interruption before saving the final
-disabled preference can leave the previous enabled intent. A completed stop
-is reported only after cleanup and preference readback; durable pending intent
-is a separate improvement.
+The persisted preference and process stop are separate steps. Interruption
+after the preference save does not prove completed cleanup; report a completed
+stop only after the exact job and owned processes are confirmed absent. Keep
+the shared service-action lease across preference changes and cleanup so a
+concurrent enable or exit-setting action cannot overwrite the user's choice.
 
 The existing menu-only exit remains non-disruptive, but its label must say that
 routing continues. It is not a full stop, and the process list after that action
