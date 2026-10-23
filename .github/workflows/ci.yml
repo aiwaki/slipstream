@@ -203,12 +203,14 @@ jobs:
             scripts/package_chromium_companion.py \
             scripts/pending_navigation_browser_probe_smoke.py \
             scripts/packaged_transport_mechanics_smoke.py \
+            scripts/stop_quit_ui_smoke.py \
             scripts/release_transport_matrix.py \
             scripts/check_project_state.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
             scripts/test_pf_installed_lifecycle_smoke.py \
             scripts/test_packaged_transport_mechanics_smoke.py \
+            scripts/test_stop_quit_ui_smoke.py \
             scripts/test_release_transport_matrix.py \
             scripts/test_make_appcast.py \
             scripts/test_dependency_audit.py \
@@ -1549,7 +1551,7 @@ jobs:
         )
       )
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -1600,6 +1602,22 @@ jobs:
           bash scripts/run_packaged_lifecycle_smoke.sh \
             "$RUNNER_TEMP/qualified-app/Slipstream.app" \
             "${{ steps.packaged-lifecycle-chrome.outputs.chrome-path }}"
+      - name: Native Stop-and-Quit, admin cancellation, partial-stop, and reopen smoke
+        id: stop-quit-ui
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/stop_quit_ui_smoke.py \
+            --app-bundle "$RUNNER_TEMP/qualified-app/Slipstream.app" \
+            --report "$RUNNER_TEMP/stop-quit-ui-qualification.json"
+      - name: Upload native Stop-and-Quit qualification report
+        if: always() && steps.stop-quit-ui.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Slipstream-stop-quit-ui-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/stop-quit-ui-qualification.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Package the qualified app
         if: github.event_name == 'pull_request'
         run: |

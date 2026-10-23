@@ -16,7 +16,9 @@ CI39896354602 and audit39896354628 passed; independent patch review found no
 blockers. Main producer39897443338 published immutable `geph-vendor-0.4.3-r2`.
 Main audit39897443478 passed. Main CI39897443322 attempt1 reached package
 fetch before the new release existed (HTTP404); only failed jobs were rerun
-after producer success. Its consumer verifies assets/provenance/SBOM/audit.
+after producer success. Attempt2 passed, including the authenticated consumer,
+native packaging, browser and lifecycle checks. Its consumer verifies
+assets/provenance/SBOM/audit.
 The source repair updates certifi and both WebPKI dependencies; it is not a
 claim that the historical DNS/HTTP403 incidents were caused by certificates.
 
@@ -29,11 +31,16 @@ caught and repaired dormant/VPN readiness and old login registration handling.
 Root checks: 69 focused, 23 teardown compatibility and 11 updater cases passed;
 12 isolated Rust lifecycle cases passed. Graph tools were unavailable; bounded
 direct reads were used. Evidence: `output/root-stop-20261023/` and
-`output/stop-quit-20261023/`. Native compiled UI and actual menu/admin/reopen
-qualification remain pending; the new disposable smoke is being prepared.
+`output/stop-quit-20261023/`. Integrated source `2b38afd2370aa7d53f6debff2c626033caf0e9a5`
+passed CI39899304752 and audit39899304760, including native compilation,
+packaged browser and the existing lifecycle checks. The new disposable native
+smoke adds actual tray Quit, SecurityAgent Cancel, installer-lock failure,
+partial cleanup failure, successful retry, stopped login and ordinary reopen.
+Its 14 observer/containment tests passed; actual native execution is pending.
+Geph is disabled in this fixture, so it does not qualify an account-backed tunnel.
 
-Next: integrate merged dependency main, finish the native Stop-and-Quit smoke,
-run affected exact-head CI, and qualify the resulting installed application.
+Next: run the new native Stop-and-Quit smoke in exact-head CI, then qualify
+the resulting installed application.
 The public preview30 stays immutable. Existing preview31 candidates have old
 trust dependencies and are not publishable using their older audit. Ordinary
 public update/rollback and remaining packaged observer gates stay open. Do not
