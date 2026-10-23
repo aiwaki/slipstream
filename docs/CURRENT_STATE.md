@@ -4,26 +4,56 @@
 
 ### Full Stop-and-Quit continuation, 2026-10-23
 
-Latest verification: `fedcc0fb03124ef1473a19c121d825fe30e89ab9` passed complete
-CI39915409645 and audit39915409647, including all seven actual native Quit
-cases and the previous packaged lifecycle/Chrome/Safari smoke. Native report:
-`output/stop-quit-20261023/sixth-native/`; cleanup is empty. Normal merge was
-blocked by unresolved review threads. Four were triaged and resolved with
-source/regression evidence; see `pr412-resolved-review-receipt.json` in the same
-output directory. The remaining checkbox-disable crash window is real:
-cleanup preceded saving `enabled=0`. The narrow repair saves and reads back
-the disabled preference first, retains it on cleanup failure, and reuses the
-existing disabled-startup cleanup. Its retained actual-source regression fails
-three cases on the old block and passes all four on the repair. All 25 observer
-tests, eight documentation checks, formatting and compilation pass; independent
-review found no remaining blocker. Evidence: `geph-disable-crash-receipt.json`.
-Next: fresh exact-head CI before merge; reuse the unchanged local broad suite.
+Latest verification: PR412 merged normally as
+`1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36`, tree-identical to tested
+`cf5f51fffa86c8558a78f328b897e5526d26a19b`. PR CI39919315756 and
+audit39919315789 passed; all five review threads were reconciled and resolved.
+Main CI39921259477 and audit39921259555 also passed in full, including the
+signed/attested candidate, seven native Quit cases, previous packaged lifecycle,
+browser and update-notification gates. The exact-main candidate was authenticated
+(production updater signature, exact GitHub provenance, canonical tree/modes and
+codesign) and copied to `/Applications/Slipstream.app` as `0.1.9-preview.31`.
+Installed canonical verification and strict codesign passed; retained Geph
+configuration is byte-identical. Authentication and install receipts are in
+`output/stop-quit-20261023/candidate-verification/authenticated-1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36/`
+and `output/stop-quit-20261023/local-install-1f3ddcfb6/`.
+The checkbox crash regression fails three cases on the old block and passes
+all four after saving/readback of enabled=0 before cleanup. All 25 observer
+tests and eight documentation checks pass. Evidence:
+`output/stop-quit-20261023/geph-disable-crash-receipt.json` and `seventh-native/`.
 
 Active checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
-branch `codex/geph-stop-doh-fallback`, PR412. The user quit and deleted the app
-because Geph remained. Last read-only observation found no installed Slipstream
-or owned jobs; external Geph is running and has not been touched. Earlier
-installed-state paragraphs are historical. Preserve all apps, state and backups.
+branch `codex/geph-quit-install-verification`, based on the merge above. The user
+quit and deleted the old app because Geph remained. The private `.31` candidate
+is installed and the real workstation lifecycle now passes:
+- User selected Restart Proxy and confirmed macOS; `started-userland.json`
+  validates the production userland attestation/witness, root PID91870 and fresh
+  active health with heartbeat 683→685.
+- User selected the real full Stop-and-Quit and confirmed macOS;
+  `stopped.json` proves both owned launchd jobs absent, no owned-path processes,
+  no stop residue, and durable `stopped` intent. No CLI stop or disposable
+  harness was substituted for the actual menu action.
+- Ordinary opening of the canonical Applications app resumed it;
+  `reopened.json` validates a new root PID2853, fresh advancing heartbeat,
+  the production attestation/witness and cleared stop intent.
+- All four external Geph PID/UID/path identities were preserved throughout.
+  Owned Geph was explicitly off; this local sequence does not qualify an
+  account-backed owned Geph tunnel or its live shutdown. Disposable native CI
+  separately covers owned listener and pre-listener cleanup.
+
+Retained Geph configuration is byte-identical after the full cycle. Combined
+receipt: `output/stop-quit-20261023/local-install-1f3ddcfb6/lifecycle-result.json`;
+individual observations are in the same directory.
+The root-only CI attestation function cannot resolve the protected runtime
+path as the console user; the read-only observer instead uses the production
+userland root receipt/hardlink-witness contract. CUA can launch the exact app,
+but accessibility selection still times out (-10005); the user supplied both
+real menu actions. That installed UI gate is now complete. Preserve state,
+private evidence and backups; do not stop external Geph.
+Historical Safari DNS and Codex HTTP403/reconnecting remain separate,
+unresolved incidents; these lifecycle results do not establish their cause or
+repair. The private `.31` installation is not a public release, public updater
+transition/rollback qualification, or completion of the broader AUD-17 work.
 
 Dependency PR413 merged as `922973ef38d5d6d7ae2659bb9c12dc96af6f3b94` with the
 same tree as tested `e8d03e2aeb0d3a6ac853a804e41c39840353613d`.
