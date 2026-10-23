@@ -48,9 +48,10 @@ use geph_config::{
     keychain_delete, keychain_set, GephSecretAvailability,
 };
 use geph_lifecycle::{
-    classify_launch_agent, classify_process, classify_process_census, guarded_ownership_quarantine,
-    quarantine_ownership_file, read_ownership_snapshot, stop_launch_agent, wait_for_process_stop,
-    LaunchAgentState, OwnershipSnapshot, ProcessCensus, ProcessObservation,
+    classify_launch_agent, classify_owned_process, classify_process, classify_process_census,
+    guarded_ownership_quarantine, quarantine_ownership_file, read_ownership_snapshot,
+    stop_launch_agent, stop_owned_process, LaunchAgentState, OwnershipSnapshot, ProcessCensus,
+    ProcessObservation,
 };
 use install_attestation::{
     install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
@@ -3662,6 +3663,35 @@ fn geph_process_observation(pid: u32) -> ProcessObservation {
     )
 }
 
+fn geph_owned_process_running(
+    pid: u32,
+    uid: u32,
+    executable: &Path,
+    config: &Path,
+) -> Result<bool, String> {
+    let output = Command::new("/bin/ps")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-ww", "-p", &pid.to_string(), "-o", "uid=,pid=,command="])
+        .output()
+        .map_err(|_| "geph process observation unavailable".to_string())?;
+    let (Ok(stdout), Ok(stderr)) = (
+        std::str::from_utf8(&output.stdout),
+        std::str::from_utf8(&output.stderr),
+    ) else {
+        return Err("geph process observation unavailable".into());
+    };
+    classify_owned_process(
+        output.status.code(),
+        stdout,
+        stderr,
+        pid,
+        uid,
+        executable,
+        config,
+    )
+}
+
 fn remove_owned_geph_file(path: &Path, component: &str) -> Result<(), String> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -3710,8 +3740,8 @@ fn geph_quarantine_malformed_ownership(
     )
 }
 
-/// Stop only a process whose PID, executable, config, and listener all match the
-/// private ownership record. Unknown listeners are external state.
+/// Stop only the exact PID/UID/executable/config from a private ownership record.
+/// This also covers an orphan stalled before opening its SOCKS listener.
 fn geph_kill_owned(dir: &Path) -> Result<(), String> {
     let uid = current_numeric_id("-u")
         .and_then(|value| value.parse::<u32>().ok())
@@ -3744,36 +3774,20 @@ fn geph_kill_owned(dir: &Path) -> Result<(), String> {
     if !executable.is_absolute() || !config.is_absolute() {
         return geph_quarantine_malformed_ownership(dir, &record, uid);
     }
-    let still_owned = || match geph_process_observation(pid) {
-        ProcessObservation::Present(command) => {
-            Ok(command_matches_geph(&command, executable, config))
-        }
-        ProcessObservation::Absent => Ok(false),
-        ProcessObservation::Unknown => Err("geph process stop unconfirmed".to_string()),
-    };
+    let still_owned = || geph_owned_process_running(pid, uid, executable, config);
     let pid_string = pid.to_string();
-    for signal in ["-TERM", "-KILL"] {
-        if !still_owned()? {
-            // Absent or reused PID: forget only the stale private record.
-            return remove_owned_geph_file(&geph_ownership_path(dir), "ownership");
-        }
-        // Preserve the original listener/command proof before each signal.
-        // Unknown observations retain the record and cannot report success.
-        if geph_listener_pid() != Some(pid) || !still_owned()? {
-            return Err("geph process ownership unconfirmed".into());
-        }
-        let _ = Command::new("/bin/kill")
-            .args([signal, &pid_string])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        if wait_for_process_stop(&still_owned, || {
-            std::thread::sleep(Duration::from_millis(100))
-        })? {
-            return remove_owned_geph_file(&geph_ownership_path(dir), "ownership");
-        }
-    }
-    Err("geph process remains running".into())
+    stop_owned_process(
+        &still_owned,
+        |signal| {
+            let _ = Command::new("/bin/kill")
+                .args([signal, &pid_string])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        },
+        || std::thread::sleep(Duration::from_millis(100)),
+    )?;
+    remove_owned_geph_file(&geph_ownership_path(dir), "ownership")
 }
 
 fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPaths, String> {
@@ -3793,7 +3807,7 @@ fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
     geph_launch_agent_bootout(&uid)?;
     // One-time migration can leave the old detached process outside launchd.
-    // Stop it only through the existing PID/executable/config/listener proof.
+    // Stop it only through fresh PID/UID/executable/config proof.
     geph_kill_owned(&paths.config_dir)?;
     for (path, component) in [(&paths.ownership, "ownership"), (&paths.plist, "plist")] {
         remove_owned_geph_file(path, component)?;

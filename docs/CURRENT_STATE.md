@@ -36,8 +36,15 @@ passed CI39899304752 and audit39899304760, including native compilation,
 packaged browser and the existing lifecycle checks. The new disposable native
 smoke adds actual tray Quit, SecurityAgent Cancel, installer-lock failure,
 partial cleanup failure, successful retry, stopped login and ordinary reopen.
-Its 14 observer/containment tests passed; actual native execution is pending.
-Geph is disabled in this fixture, so it does not qualify an account-backed tunnel.
+First native run39901792294 is exercising that boundary at `ae35257fb`.
+Review then confirmed a separate pre-listener Geph orphan defect: the private
+record exists before bind, but stop required the SOCKS listener. Stop now checks
+fresh PID/UID/executable/config instead; the old guard failed its causal test,
+then all 27 Geph lifecycle tests passed. A read-only native probe confirmed the
+macOS process format. The smoke now also stops a real inert owned native child
+without any listener through actual Quit; its 17 containment tests passed.
+Evidence: `output/geph-orphan-stop-20261023/`. Geph networking is disabled in
+this fixture, so it does not qualify an account-backed tunnel.
 
 Next: run the new native Stop-and-Quit smoke in exact-head CI, then qualify
 the resulting installed application.

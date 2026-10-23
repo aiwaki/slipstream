@@ -97,6 +97,52 @@ class StopQuitObserverTests(unittest.TestCase):
                 snapshot.restore()
             self.assertTrue(snapshot.path.exists())
 
+    def test_owned_fixture_refuses_existing_private_files_before_compiling_or_spawning(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            (directory / "runtime").mkdir(mode=0o700)
+            fixture = smoke.OwnedPrelistenerFixture(directory)
+            for path in (fixture.executable, fixture.config, fixture.record):
+                with self.subTest(path=path.name):
+                    path.write_bytes(b"must preserve")
+                    with mock.patch.object(smoke, "require_disposable"), mock.patch.object(smoke, "run") as run, \
+                         mock.patch.object(smoke.subprocess, "Popen") as popen:
+                        with self.assertRaisesRegex(smoke.QualificationError, "replace existing"):
+                            fixture.start()
+                        run.assert_not_called()
+                        popen.assert_not_called()
+                    self.assertEqual(path.read_bytes(), b"must preserve")
+                    path.unlink()
+
+    def test_owned_fixture_cleanup_does_not_signal_changed_identity(self):
+        fixture = smoke.OwnedPrelistenerFixture(Path("/private-fixture"))
+        fixture.process = mock.Mock()
+        fixture.process.poll.return_value = None
+        with mock.patch.object(fixture, "identity", return_value=False):
+            with self.assertRaisesRegex(smoke.QualificationError, "unowned inert"):
+                fixture.close()
+        fixture.process.terminate.assert_not_called()
+        fixture.process.kill.assert_not_called()
+
+    def test_owned_fixture_quit_proof_requires_signal_and_absence_without_signalling(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = smoke.OwnedPrelistenerFixture(Path(temp))
+            fixture.process = mock.Mock()
+            fixture.process.pid = 4242
+            fixture.process.wait.return_value = -smoke.signal.SIGTERM
+            with mock.patch.object(smoke, "run", return_value=subprocess.CompletedProcess([], 1, b"", b"")):
+                fixture.assert_stopped()
+                fixture.record.touch()
+                with self.assertRaisesRegex(smoke.QualificationError, "absence"):
+                    fixture.assert_stopped()
+                fixture.record.unlink()
+                fixture.process.wait.return_value = 0
+                with self.assertRaisesRegex(smoke.QualificationError, "real stop signal"):
+                    fixture.assert_stopped()
+            fixture.process.terminate.assert_not_called()
+            fixture.process.kill.assert_not_called()
+
     def test_heartbeat_progress_resets_after_missing_proof_and_pid_change(self):
         observations = iter([(41, 8), None, (41, 9), (42, 10), (42, 11)])
         def bounded_wait(predicate, message, timeout):

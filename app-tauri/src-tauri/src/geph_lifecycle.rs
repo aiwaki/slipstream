@@ -34,6 +34,45 @@ pub(crate) fn classify_process(
     }
 }
 
+/// A wide, single-PID query supplies fresh user and command identity. A port
+/// listener is deliberately irrelevant: an owned client can stall before bind.
+pub(crate) fn classify_owned_process(
+    exit_code: Option<i32>,
+    stdout: &str,
+    stderr: &str,
+    expected_pid: u32,
+    expected_uid: u32,
+    executable: &Path,
+    config: &Path,
+) -> Result<bool, String> {
+    let unknown = || "geph process ownership unconfirmed".to_string();
+    if exit_code == Some(1) && stdout.trim().is_empty() && stderr.trim().is_empty() {
+        return Ok(false);
+    }
+    if exit_code != Some(0) || !stderr.trim().is_empty() || stdout.lines().count() != 1 {
+        return Err(unknown());
+    }
+    let (uid, rest) = stdout
+        .trim()
+        .split_once(char::is_whitespace)
+        .ok_or_else(unknown)?;
+    let uid = uid
+        .parse::<u32>()
+        .or_else(|_| uid.parse::<i32>().map(|value| value as u32))
+        .map_err(|_| unknown())?;
+    let (pid, command) = rest
+        .trim_start()
+        .split_once(char::is_whitespace)
+        .ok_or_else(unknown)?;
+    let pid = pid.parse::<u32>().map_err(|_| unknown())?;
+    let command = command.trim();
+    if pid != expected_pid || pid == 0 || command.is_empty() {
+        return Err(unknown());
+    }
+    Ok(uid == expected_uid
+        && command == format!("{} --config {}", executable.display(), config.display()))
+}
+
 pub(crate) fn classify_launch_agent(
     exit_code: Option<i32>,
     stdout: &str,
@@ -104,6 +143,28 @@ pub(crate) fn wait_for_process_stop(
         }
     }
     Ok(false)
+}
+
+/// Stop only a freshly revalidated owned PID, then prove its terminal state.
+pub(crate) fn stop_owned_process(
+    mut still_owned: impl FnMut() -> Result<bool, String>,
+    mut signal: impl FnMut(&str),
+    mut pause: impl FnMut(),
+) -> Result<(), String> {
+    for name in ["-TERM", "-KILL"] {
+        if !still_owned()? {
+            return Ok(());
+        }
+        // Re-observe immediately before signalling; a reused PID is not ours.
+        if !still_owned()? {
+            return Ok(());
+        }
+        signal(name);
+        if wait_for_process_stop(&mut still_owned, &mut pause)? {
+            return Ok(());
+        }
+    }
+    Err("geph process remains running".into())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -565,6 +626,103 @@ mod tests {
         )
         .unwrap()
         .is_none());
+    }
+
+    #[test]
+    fn owned_orphan_without_listener_is_stopped() {
+        let alive = std::cell::Cell::new(true);
+        let mut signals = Vec::new();
+        let result = stop_owned_process(
+            || Ok(alive.get()),
+            |name| {
+                signals.push(name.to_string());
+                alive.set(false);
+            },
+            || {},
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(signals, ["-TERM"]);
+    }
+
+    #[test]
+    fn owned_process_proof_requires_exact_pid_uid_executable_and_config() {
+        let executable = Path::new("/private/Application Support/runtime/geph5-client");
+        let config = Path::new("/private/Application Support/geph-active.yaml");
+        let owned = format!(
+            "  502  42 {} --config {}\n",
+            executable.display(),
+            config.display()
+        );
+        let classify = |code, stdout: &str, stderr| {
+            classify_owned_process(code, stdout, stderr, 42, 502, executable, config)
+        };
+        assert_eq!(classify(Some(0), &owned, ""), Ok(true));
+        for foreign in [
+            owned.replace("502", "503"),
+            owned.replace("/runtime/", "/other-runtime/"),
+            owned.replace("geph-active.yaml", "geph-active.yaml.backup"),
+            owned.trim().to_string() + " --other\n",
+            "502 42 /Applications/Geph.app/Contents/MacOS/geph5-client --config /external.yaml\n"
+                .into(),
+        ] {
+            assert_eq!(classify(Some(0), &foreign, ""), Ok(false));
+        }
+        for malformed in [
+            "",
+            "502 42",
+            "uid 42 /client",
+            "502 pid /client",
+            "502 43 /client",
+            "502 42 /client\n502 42 /client\n",
+        ] {
+            assert!(classify(Some(0), malformed, "").is_err());
+        }
+        for (code, stdout, stderr) in [(None, "", ""), (Some(2), "", ""), (Some(1), "", "denied")] {
+            assert!(classify(code, stdout, stderr).is_err());
+        }
+        assert_eq!(classify(Some(1), "", ""), Ok(false));
+    }
+
+    #[test]
+    fn foreign_or_unknown_process_never_receives_a_signal() {
+        for observation in [Ok(false), Err("query unavailable".into())] {
+            let mut signals = 0;
+            let result = stop_owned_process(|| observation.clone(), |_| signals += 1, || {});
+            assert_eq!(signals, 0);
+            assert_eq!(result.is_err(), observation.is_err());
+        }
+        let mut observations = vec![Ok(true), Ok(false)].into_iter();
+        let mut signals = 0;
+        assert!(
+            stop_owned_process(|| observations.next().unwrap(), |_| signals += 1, || {}).is_ok()
+        );
+        assert_eq!(signals, 0);
+    }
+
+    #[test]
+    fn forced_stop_waits_for_exit_and_does_not_hide_survivor() {
+        let signalled = std::cell::Cell::new(false);
+        let after_kill = std::cell::Cell::new(0);
+        let mut signals = Vec::new();
+        let result = stop_owned_process(
+            || {
+                if signalled.get() {
+                    after_kill.set(after_kill.get() + 1);
+                    Ok(after_kill.get() <= 20)
+                } else {
+                    Ok(true)
+                }
+            },
+            |name| {
+                signals.push(name.to_string());
+                signalled.set(name == "-KILL");
+            },
+            || {},
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(signals, ["-TERM", "-KILL"]);
+        assert_eq!(after_kill.get(), 21);
+        assert!(stop_owned_process(|| Ok(true), |_| {}, || {}).is_err());
     }
 
     #[test]

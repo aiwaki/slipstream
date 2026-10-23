@@ -9,6 +9,10 @@ anchor, drain and stop owned runtime processes, and confirm job/listener/process
 absence. Keep the installed runtime, learning, settings and credentials. Only
 then stop the owned Geph LaunchAgent and confirm its process census is clear.
 An unreadable or ambiguous observation is a failure, never proof of absence.
+An orphaned client may not have opened its listener yet: stop permission comes
+from a private ownership record and fresh exact PID/UID/executable/config
+identity before each signal, not from a mandatory open port. Foreign processes
+and unknown identity never authorize a signal.
 Refresh an existing enabled app-owned login registration with `--autostart` and
 verify it before persisting `stopped` and exiting. A disabled login preference
 remains disabled; the separate menu-only exit explicitly keeps routing running.

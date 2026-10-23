@@ -3,7 +3,9 @@
 
 Uses the unmodified packaged application. Geph is intentionally disabled: this
 qualifies the native UI, root stop, cleanup failure and reopen path, not an
-account-backed Geph tunnel. No credentials or full accessibility trees are logged.
+account-backed Geph tunnel. An inert native child exercises real private owned
+process cleanup before any listener. No credentials or full accessibility trees
+are logged.
 """
 from __future__ import annotations
 
@@ -302,6 +304,88 @@ class NativeHostSnapshot:
             self.path.chmod(self.before[1])
 
 
+class OwnedPrelistenerFixture:
+    """Inert native child at the real ownership boundary; never opens a socket."""
+    def __init__(self, config_dir):
+        self.directory = config_dir
+        self.executable = config_dir / "runtime/geph5-client"
+        self.config = config_dir / "geph-active.yaml"
+        self.record = config_dir / "geph-owned.json"
+        self.process = None
+
+    def start(self):
+        require_disposable()
+        for directory in (self.directory, self.executable.parent):
+            metadata = directory.lstat()
+            if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
+                raise QualificationError("inert owned fixture requires owner-private directories")
+        if any(path.exists() or path.is_symlink() for path in (self.executable, self.config, self.record)):
+            raise QualificationError("refusing to replace existing owned fixture paths")
+        source = b'''#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    if (argc != 3 || strcmp(argv[1], "--config") || access(argv[2], R_OK)) return 64;
+    puts("ready"); fflush(stdout);
+    for (;;) pause();
+}
+'''
+        run(["/usr/bin/cc", "-x", "c", "-", "-o", str(self.executable)], input=source, timeout=60)
+        self.executable.chmod(0o700)
+        with self.config.open("xb") as handle:
+            handle.write(b"# inert Stop-Quit fixture: no credentials or network\n")
+        self.config.chmod(0o600)
+        self.process = subprocess.Popen([str(self.executable), "--config", str(self.config)],
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.process.stdout, selectors.EVENT_READ)
+            if not selector.select(10) or self.process.stdout.readline().strip() != b"ready":
+                raise QualificationError("inert owned process did not become ready")
+        if not self.identity():
+            raise QualificationError("inert owned process identity unconfirmed")
+        listener = run(["/usr/sbin/lsof", "-nP", "-a", "-p", str(self.process.pid), "-i", "-t"], check=False)
+        if listener.returncode != 1 or listener.stdout.strip() or listener.stderr.strip():
+            raise QualificationError("inert owned process unexpectedly has network sockets")
+        record = {"pid": self.process.pid, "uid": os.getuid(), "executable": str(self.executable),
+                  "config": str(self.config), "launchd_label": "dev.slipstream.geph"}
+        with self.record.open("xb") as handle:
+            handle.write((json.dumps(record) + "\n").encode())
+        self.record.chmod(0o600)
+
+    def identity(self):
+        if not self.process or self.process.poll() is not None:
+            return False
+        observed = run(["/bin/ps", "-ww", "-p", str(self.process.pid), "-o", "uid=,command="], check=False)
+        parts = observed.stdout.decode().strip().split(None, 1)
+        return (observed.returncode == 0 and not observed.stderr.strip() and len(parts) == 2
+                and parts[0] == str(os.getuid()) and parts[1] == f"{self.executable} --config {self.config}")
+
+    def assert_stopped(self):
+        # Waiting reaps this direct child; it does not send a signal.
+        if self.process.wait(timeout=10) not in (-signal.SIGTERM, -signal.SIGKILL):
+            raise QualificationError("owned fixture did not exit through the real stop signal")
+        observed = run(["/bin/ps", "-p", str(self.process.pid), "-o", "uid=,command="], check=False)
+        if (observed.returncode != 1 or observed.stdout.strip() or observed.stderr.strip()
+                or self.record.exists() or self.record.is_symlink()):
+            raise QualificationError("owned fixture absence was not confirmed after Quit")
+
+    def close(self):
+        if not self.process:
+            return
+        if self.process.poll() is None:
+            if not self.identity():
+                raise QualificationError("refusing cleanup of unowned inert fixture")
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if not self.identity():
+                    raise QualificationError("inert fixture identity changed before cleanup")
+                self.process.kill()
+                self.process.wait(timeout=5)
+        self.process.stdout.close()
+
+
 def preserved(settings, expected, retained):
     if settings.read_bytes() != expected or retained.read_bytes() != b"retained runtime\n":
         raise QualificationError("Stop/reopen changed settings or retained runtime")
@@ -446,9 +530,9 @@ def run_qualification(bundle, report):
     retained = config / "runtime/stop-ui-retained"
     intent = config / "service-lifecycle-v1"
     ownership = config / "geph-owned.json"
-    log = tray = sentinel = None
+    log = tray = sentinel = owned_fixture = None
     config_created = login_created = root_attempted = False
-    result = {"result": "fail", "scope": "native menu/admin/root stop and reopen; Geph intentionally disabled",
+    result = {"result": "fail", "scope": "native menu/admin/root and inert owned-process stop, reopen; Geph tunnel intentionally disabled",
               "commit": os.environ.get("GITHUB_SHA"), "app_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "cases": cases}
     try:
         if config.exists():
@@ -528,10 +612,15 @@ def run_qualification(bundle, report):
             ownership.chmod(0o600)
             ownership.unlink()
 
+            owned_fixture = OwnedPrelistenerFixture(config)
+            owned_fixture.start()
+            if not owned_fixture.identity():
+                raise QualificationError("owned pre-listener process disappeared before actual Quit")
             menu_action(pid, STOP_LABELS)
             authorize_until(lambda: tray.process.poll() is not None)
             if tray.process.returncode != 0 or not root_stopped() or intent.read_bytes() != b"v1 stopped\n":
                 raise QualificationError("successful menu Quit was not fully confirmed")
+            owned_fixture.assert_stopped()
             run(["/usr/bin/sudo", "-n", "/bin/test", "-f", str(INSTALL_DIR / "slipstreamd")])
             args = plistlib.loads(login.read_bytes())["ProgramArguments"]
             if args != [str(executable), "--autostart"]:
@@ -539,6 +628,8 @@ def run_qualification(bundle, report):
             preserved(settings, preferences, retained)
             sentinel.check()
             cases.append({"case": "menu_stop_and_quit", "result": "pass", "retained_runtime": True, "legacy_login_refreshed": True})
+            cases.append({"case": "owned_prelistener_process_cleanup", "result": "pass", "native_process_absent": True,
+                          "external_sentinel_preserved": True, "fixture_opens_network_sockets": False, "geph_account_used": False})
 
             tray.start("--autostart")
             time.sleep(6)
@@ -570,6 +661,7 @@ def run_qualification(bundle, report):
                 backup.rename(config)
         cleanups = [
             ("tray", lambda: tray.close() if tray else None),
+            ("owned inert process", lambda: owned_fixture.close() if owned_fixture else None),
             ("root", lambda: run(["/usr/bin/sudo", "-n", str(daemon), "--uninstall"], timeout=180) if root_attempted else None),
             ("sentinel", lambda: sentinel.close() if sentinel else None),
             ("user state", restore_user_state),
