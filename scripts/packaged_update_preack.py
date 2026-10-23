@@ -119,13 +119,16 @@ class PreAckObserver(Observer):
         self.record("rollback_receipt", value)
         return value
 
-    def final_old_app(self):
+    def final_old_app(self, *, deadline=None, clock=time.monotonic, sleep=time.sleep):
+        deadline = self.deadline - 90 if deadline is None else min(deadline, self.deadline)
+        self.wait_watchdog_finished(deadline, clock=clock, sleep=sleep)
+        # Recheck every app/receipt/process predicate after waiting; a previously
+        # qualified rollback cannot authorize cleanup of a changed installation.
         receipt = self.read_rollback_receipt()
         require(self.tproxy._daemon_update_tree(self.target, readable=True) == self.expected["old"]["bundle_tree_sha256"],
                 "restored app tree differs from authenticated OLD")
         for path in (self.journal_path, self.ack_path, self.stage, Path(receipt["backup"]), self.agent):
             require(not os.path.lexists(path), "rollback cleanup incomplete: " + str(path))
-        require(self.watchdog_finished(), "rollback watchdog is not terminal")
         require(self.process_snapshot(self.fault_process["pid"]) is None,
                 "failed NEW PID remains or has been reused")
         result = self.run(["/usr/bin/pgrep", "-x", "slipstream"], check=False)
@@ -137,6 +140,7 @@ class PreAckObserver(Observer):
         require(exact_old_tray(current, receipt, self.uid, self.fault_process["pid"]),
                 "restored OLD tray identity mismatch")
         require(self.tray is None or same_process(self.tray, current), "restored OLD tray changed")
+        require(clock() < deadline, "restored OLD proof deadline exhausted; observation incomplete")
         self.tray = current
         self.record("final_old_app", {"process": current, "bundle_tree_sha256": self.expected["old"]["bundle_tree_sha256"]})
 
@@ -156,9 +160,9 @@ class PreAckObserver(Observer):
                   and root["writer_quiescent"] is True and self.watchdog_finished()):
                 require(not same_process(self.initiator, self.process_snapshot(self.initiator["pid"])),
                         "trigger remains alive after rollback")
-                self.final_old_app()
+                self.final_old_app(clock=clock, sleep=sleep)
                 self.prove("old", exact_snapshot=True)
-                self.final_old_app()
+                self.final_old_app(clock=clock, sleep=sleep)
                 return {"packaged_transaction_qualified": True, "public_pair_qualified": False,
                         "successor_exit_before_ack_rollback_qualified": True, "side": "old"}
             sleep(0.02)
@@ -166,7 +170,7 @@ class PreAckObserver(Observer):
         raise Refused("pre-ACK rollback deadline exhausted; observation incomplete")
 
     def cleanup_rollback(self, *, send=None, clock=time.monotonic, sleep=time.sleep):
-        self.final_old_app()
+        self.final_old_app(deadline=self.deadline, clock=clock, sleep=sleep)
         root = self.status()
         require(root["phase"] == "aborted" and root["decision"] == "abort" and root["writer_quiescent"] is True,
                 "cleanup requires proven quiescent root abort")

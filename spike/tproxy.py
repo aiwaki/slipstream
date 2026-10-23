@@ -194,7 +194,8 @@ _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
 # floods it with slow DoH queries and the whole proxy stalls. 64 workers + DoH
 # de-dup keeps the app responsive under a browser's connection burst.
-_POOL = ThreadPoolExecutor(max_workers=64, thread_name_prefix="slip")
+BLOCKING_IO_MAX_WORKERS = 64
+_POOL = ThreadPoolExecutor(max_workers=BLOCKING_IO_MAX_WORKERS, thread_name_prefix="slip")
 _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH)
 _xbox_dns_inflight = {}        # host -> asyncio.Future (on-demand resolver only)
 # Negative cache: a host that failed the whole ladder is "dead" for a cooldown,
@@ -319,6 +320,8 @@ BASELINE_RESOLVE_TIMEOUT = 1.5
 BASELINE_PREFLIGHT_BUDGET = 10.0
 BASELINE_RESOLVER_BINARY = "/usr/bin/dscacheutil"
 BASELINE_PROBE_BINARY = "/usr/bin/curl"
+# Bound queued/running DNS submissions by the existing shared-pool capacity.
+_system_dns_slots = threading.BoundedSemaphore(BLOCKING_IO_MAX_WORKERS)
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
@@ -8053,15 +8056,25 @@ def _close_probe_result(result):
         pass
 
 
-async def _try_smart_dns_geo_connect(host, port, first_flight, probe_timeout=3.0):
+async def _try_smart_dns_geo_connect(
+    host, port, first_flight, probe_timeout=3.0, *, runtime_policy=None,
+):
+    """Return a connection, False for an observed failure, or None if unobserved."""
     if not host or not smart_dns_available():
         return None
-    ips = _dedupe_ips(await system_resolve_async(host))
-    policy = route_policy(host)
+    ips = await system_resolve_async(host)
+    if ips is None:
+        return None
+    policy = runtime_policy if runtime_policy is not None else route_policy(host)
+    # Do not consume a half-open permit until DNS could actually be observed.
+    if runtime_policy is not None and not runtime_route_circuit_allows(
+        policy, GEO_BACKEND_SMART_DNS,
+    ):
+        return None
     raced, _attempted = await _race_probe_addresses(
         host,
         port,
-        ips[:DEFAULT_IP_ATTEMPT_LIMIT],
+        _dedupe_ips(ips)[:DEFAULT_IP_ATTEMPT_LIMIT],
         lambda ip: dial_and_probe(
             ip,
             port,
@@ -8071,7 +8084,7 @@ async def _try_smart_dns_geo_connect(host, port, first_flight, probe_timeout=3.0
         policy=policy,
         backend=GEO_BACKEND_SMART_DNS,
     )
-    return raced
+    return raced or False
 
 
 async def _run_smart_dns_geo_canary(spec):
@@ -8080,6 +8093,8 @@ async def _run_smart_dns_geo_canary(spec):
     if policy["route_class"] != ROUTE_GEO_EXIT:
         return None
     result = await _try_smart_dns_geo_connect(host, 443, build_fake_clienthello(host))
+    if result is None:
+        return None
     if result:
         _ip, probe = result
         _close_probe_result(probe)
@@ -8316,6 +8331,8 @@ async def _run_geo_exit_canary(spec):
         return False
     if spec.get("smart_dns", True) and smart_dns_available():
         smart_dns_ok = await _run_smart_dns_geo_canary(spec)
+        if smart_dns_ok is None:
+            return None
         if smart_dns_ok:
             canary_health_event(
                 spec,
@@ -9553,10 +9570,12 @@ def _baseline_resolver_command(host):
     return [BASELINE_RESOLVER_BINARY, "-q", "host", "-a", "name", host]
 
 
-def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIMEOUT):
+def _run_baseline_resolver(
+    host, port, identity, *, timeout=BASELINE_RESOLVE_TIMEOUT, unavailable_result=(),
+):
     """Resolve through system DNS in a killable, time-bounded child process."""
     if timeout <= 0:
-        return ()
+        return unavailable_result
     uid, gid, home = identity
     env = dict(_RUN_ENV)
     env.update({"HOME": home, "TMPDIR": "/tmp"})
@@ -9571,9 +9590,9 @@ def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIM
     try:
         result = subprocess.run(_baseline_resolver_command(host), **kwargs)
     except (OSError, subprocess.TimeoutExpired):
-        return ()
+        return unavailable_result
     if result.returncode != 0:
-        return ()
+        return unavailable_result
     answers = []
     for line in result.stdout.splitlines():
         key, separator, raw_address = line.partition(":")
@@ -11518,9 +11537,45 @@ def system_resolve(host, port=443):
     return ips
 
 
+def _bounded_system_resolve(host, deadline):
+    identity = (
+        _console_probe_identity()
+        if os.geteuid() == 0
+        else (os.geteuid(), os.getegid(), os.path.expanduser("~"))
+    )
+    if identity is None:
+        return None
+    answers = _run_baseline_resolver(
+        host, 443, identity, timeout=max(0.0, deadline - time.monotonic()),
+        unavailable_result=None,
+    )
+    if answers is None:
+        return None
+    return _dedupe_ips(answer[4][0] for answer in answers)
+
+
 async def system_resolve_async(host):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_POOL, system_resolve, host)
+    """Return addresses (possibly empty), or None when DNS was not observed."""
+    # Reuse the killable system resolver and its existing budget, including
+    # queue time. Keep admission until the executor actually completes the job:
+    # cancelling a queued Future does not remove its WorkItem from the queue.
+    slots = _system_dns_slots
+    if not slots.acquire(blocking=False):
+        return None
+    deadline = time.monotonic() + BASELINE_RESOLVE_TIMEOUT
+    try:
+        future = _POOL.submit(_bounded_system_resolve, host, deadline)
+    except RuntimeError:
+        slots.release()
+        return None
+    future.add_done_callback(lambda _future: slots.release())
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(asyncio.wrap_future(future)),
+            timeout=max(0.0, deadline - time.monotonic()),
+        )
+    except asyncio.TimeoutError:
+        return None
 
 
 def _dedupe_ips(ips):
@@ -11541,7 +11596,7 @@ async def resolve_connection_ips(host, fallback_ip):
     # When DoH is empty or this is a zapret-scoped host, include system DNS too
     # so the strategy ladder can roll to a different edge without using Geph.
     if not doh_ips or is_local_bypass_host(host):
-        ips.extend(await system_resolve_async(host))
+        ips.extend(await system_resolve_async(host) or [])
     ips.append(fallback_ip)
     return _dedupe_ips(ips)
 
@@ -14794,11 +14849,10 @@ async def _handle_impl(reader, writer):
             not learned_owned_only
             or (geph_owned and _geph_port == GEPH_OWNED_PORT)
         )
-        if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
-            policy,
-            GEO_BACKEND_SMART_DNS,
-        ):
-            smart = await _try_smart_dns_geo_connect(host, dst_port, head + body)
+        if smart_dns_route_enabled(host):
+            smart = await _try_smart_dns_geo_connect(
+                host, dst_port, head + body, runtime_policy=policy,
+            )
             if smart:
                 runtime_route_circuit_record_result(
                     policy,
@@ -14825,16 +14879,17 @@ async def _handle_impl(reader, writer):
                     return
                 await relay_local_stream(reader, up_w, up_r, writer)
                 return
-            runtime_route_circuit_record_result(
-                policy,
-                GEO_BACKEND_SMART_DNS,
-                False,
-            )
-            _smart_dns_mark_failure(
-                host,
-                "smart dns runtime probe failed",
-                policy["service_group"],
-            )
+            if smart is False:
+                runtime_route_circuit_record_result(
+                    policy,
+                    GEO_BACKEND_SMART_DNS,
+                    False,
+                )
+                _smart_dns_mark_failure(
+                    host,
+                    "smart dns runtime probe failed",
+                    policy["service_group"],
+                )
         geph_expected = bool(
             GEPH_ENABLED
             and geph_runtime_eligible
