@@ -1,5 +1,75 @@
 # Decisions
 
+### 2026-10-23: ordinary Quit stops owned services and preserves configuration
+
+`Stop Slipstream and Quit` is the ordinary Quit action. Persist an owner-private
+`stopping` intent before requesting administrator authorization. Under the
+existing installer lock, disable the exact root job, clear only the private PF
+anchor, drain and stop owned runtime processes, and confirm job/listener/process
+absence. Keep the installed runtime, learning, settings and credentials. Only
+then stop the owned Geph LaunchAgent and confirm its process census is clear.
+An unreadable or ambiguous observation is a failure, never proof of absence.
+An orphaned client may not have opened its listener yet: stop permission comes
+from a private ownership record and fresh exact PID/UID/executable/config
+identity before each signal, not from a mandatory open port. Foreign processes
+and unknown identity never authorize a signal.
+Refresh an existing enabled app-owned login registration with `--autostart` and
+verify it before persisting `stopped` and exiting. A disabled login preference
+remains disabled; the separate menu-only exit explicitly keeps routing running.
+
+A service-action lease excludes watchdog, update, repair and Geph mutations
+through the administrator prompt and completion. Do not reinterpret updater
+handoff exits as Quit. A cancelled, failed or uncertain operation leaves the
+menu open with the phase error and retains the pending intent. On reopening an
+interrupted operation, finish stopping; never silently restart half the stack.
+A normal user opening after a confirmed stop resumes saved configuration:
+install/start root, observe matching progressing fresh status, start configured
+owned Geph, confirm readiness, then clear intent. A confirmed dormant daemon
+under an external VPN is valid settled service state, without claiming active
+interception. The retained install receipt binds runtime identity; its active or
+dormant health snapshot must not freeze the later live state. Resume uses a new
+root-published health sample with observed PF state, alongside progressing
+heartbeat and the same attested, owned PID. A heartbeat that only republishes
+cached health is insufficient. Missing or inconsistent PF evidence cannot prove
+readiness. Login launch with `--autostart` keeps a stopped installation stopped.
+External Geph and user-managed network configuration remain outside this action.
+
+### 2026-10-23: Geph disable intent precedes observed shutdown
+
+An unsuccessful launchd query is unknown, not proof that Slipstream's Geph job
+is absent. Confirm the exact user job after stop requests, preserve ownership
+on unreadable process state or a surviving owned process, and report failures
+to the user. Persist and read back the disabled preference before attempting
+owned cleanup. If that save fails, do not begin cleanup. The checkbox reflects
+this saved intent; it is not proof of process absence. Cleanup failure keeps
+the disabled intent and reports that the client may still be running. Existing
+startup reconciliation retries owned cleanup when that preference is disabled,
+so a crash during stop cannot restore the previous enabled intent. Stop requests
+target only Slipstream's label, never a job selected by an unchecked plist.
+
+Malformed legacy ownership records must not permanently block startup or
+cleanup. Preserve their exact bytes in a private quarantine only after two
+observations of the absent exact job, separated by a successful full process
+census for the current user. The census must cover both the old app-bundle
+client using the private config and the current private runtime/launcher.
+Require the same regular, user-owned record before and after moving it; read
+errors, symlinks, changed files, live candidates and unknown process state
+cannot authorize recovery. Never infer a PID to signal from malformed data.
+Bounded process-stop waits include an observation after the final delay.
+
+The persisted preference and process stop are separate steps. Interruption
+after the preference save does not prove completed cleanup; report a completed
+stop only after the exact job and owned processes are confirmed absent. Keep
+the shared service-action lease across preference changes and cleanup so a
+concurrent enable or exit-setting action cannot overwrite the user's choice.
+
+The existing menu-only exit remains non-disruptive, but its label must say that
+routing continues. It is not a full stop, and the process list after that action
+alone does not prove a leak. The full Stop-and-Quit action above retains
+the existing order: quiesce private interception and drain the owned daemon
+before stopping its Geph backend, preserve settings, and leave external Geph
+and network configuration untouched.
+
 ### 2026-10-20: deliver the updater startup repair through a fixed origin
 
 The ordinary public `.29 -> .30` attempt authorized successfully but aborted
@@ -380,7 +450,7 @@ survive across sessions and agents.
 | 2026-07-10 | Runtime recovery is selected by a pure reducer. Discord/YouTube outcomes can produce only local strategy invalidation, exact-host re-sweep, and recheck; only a verified owned Geph backend can produce a restart action; external state produces a warning only. | Active |
 | 2026-07-11 | Transparent PF interception is armed only after the local listener and the enabled geo-exit backend have a verified usable port. A runtime geo-exit failure pauses only `com.apple/slipstream`; retries use the native path until a bounded hold expires and backend readiness is re-established. | Superseded 2026-07-19: local routing no longer depends on a geo-exit backend |
 | 2026-07-11 | Geph health hysteresis may preserve a previously verified port, but it must never invent an `up` state on cold start. Endpoint failures do not let the tray restart a live Geph process; LaunchAgent `KeepAlive` handles process death, and any future live-process restart must be daemon-coordinated after routing is idle. | Active |
-| 2026-07-18 | `Quit Slipstream` keeps its non-disruptive meaning: the daemon and owned Geph LaunchAgent may continue. A separately confirmed tray uninstall publishes terminal intent before drain, prevents watchdog PF re-arm and owned-Geph restart, stops new transparent accepts, clears only the private PF anchor, and gives accepted streams a bounded drain while the verified owned Geph backend remains alive. It then removes the exact owned Geph LaunchAgent, private runtime, and Keychain entry. Only after that user cleanup succeeds does a one-shot PID-scoped privileged launchd worker stage the validated app bundle out of `Applications`, revalidate the exact tray PID, delete it, and remove its own label on every exit path. `nohup` is not a supported detach mechanism for the administrator AppleScript context. A cancelled prompt or failed Geph cleanup does not commit app removal. Cleanup reports failure when a verified daemon survives its bounded stop. External Geph, DNS, proxy, PAC, VPN, and PF state are never touched. | Active |
+| 2026-07-18 | `Quit Slipstream` keeps its non-disruptive meaning: the daemon and owned Geph LaunchAgent may continue. A separately confirmed tray uninstall publishes terminal intent before drain, prevents watchdog PF re-arm and owned-Geph restart, stops new transparent accepts, clears only the private PF anchor, and gives accepted streams a bounded drain while the verified owned Geph backend remains alive. It then removes the exact owned Geph LaunchAgent, private runtime, and Keychain entry. Only after that user cleanup succeeds does a one-shot PID-scoped privileged launchd worker stage the validated app bundle out of `Applications`, revalidate the exact tray PID, delete it, and remove its own label on every exit path. `nohup` is not a supported detach mechanism for the administrator AppleScript context. A cancelled prompt or failed Geph cleanup does not commit app removal. Cleanup reports failure when a verified daemon survives its bounded stop. External Geph, DNS, proxy, PAC, VPN, and PF state are never touched. | Quit meaning superseded 2026-10-23 by the full Stop-and-Quit decision above; uninstall ownership and preservation boundaries remain active |
 | 2026-07-13 | Root-daemon installation is transactional: enable and bootstrap must be followed by a fresh owned status, exact listener identity, and matching private-PF state. Any failure disables the launchd label, removes the plist and owned runtime, clears only `com.apple/slipstream`, and releases the owned PF token; if token release fails, its record is retained and cleanup fails visibly. An absent or disabled launchd override is durable stop intent: startup and the watchdog never reinstall or re-enable it; only an explicit `Restart Proxy` action may do so. Detached cleanup may signal only a listener PID whose command resolves to the installed Slipstream daemon; an unknown listener is never touched. | Active |
 | 2026-07-11 | Diagnostics may distinguish `sidecar_only` when Slipstream's root daemon is absent but its own user Geph LaunchAgent remains loaded. This is a lifecycle fact, not a claim about PF; it contains no PID, paths, hostnames, or secrets. | Active |
 | 2026-07-11 | Packaged lifecycle qualification installs the frozen daemon from the built `.app` and preserves an independent PF connection/state through reinstall, restart, and uninstall. Cross-version rollback may begin only from the first release that passes this safety gate; pre-anchor releases are not executable rollback fixtures. | Active |

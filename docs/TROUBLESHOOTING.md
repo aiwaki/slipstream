@@ -621,21 +621,66 @@ Administrator prompts:
 Slipstream asks macOS for administrator access only for privileged maintenance:
 
 - installing or upgrading the background daemon;
-- restarting or repairing the background daemon;
+- restarting, repairing, or fully stopping the background daemon;
 - copying the root-owned daemon log for `Copy Diagnostics`.
 
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
 
-Tray startup must not request administrator access when the daemon label is
-missing or disabled. An automatic upgrade prompt is valid only for an existing,
-explicitly enabled installation whose bundled daemon changed.
+Ordinary tray startup must not silently install a missing or disabled daemon.
+An explicit user opening after a recorded full stop is a separate resume action:
+it requests administrator access to start the saved configuration. Login launch
+keeps the recorded stop. An automatic upgrade prompt is valid only for an
+existing, explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 
-`Quit Slipstream` closes the tray UI but intentionally leaves its background
-routing service and owned Geph LaunchAgent running. This preserves routing if
-the menu process exits or crashes.
+`Stop Slipstream and Quit` stops the background routing service, then the
+bundled Geph client, and closes the menu only after both stops are confirmed.
+Settings, account and learned routes are retained. Confirm the macOS
+administrator prompt; on cancellation or failure the app stays open and shows
+the unresolved phase. Retry Stop to complete an interrupted operation. Ordinary
+opening after a completed stop starts the saved configuration; launch at login
+keeps it stopped. These changes require qualification of the packaged menu and
+administrator path before being described as an installed fix.
+
+A failed reopen reports a bounded `Resume: readiness=...` reason and keeps the
+pending intent. A retained install receipt may say `dormant` while the same
+owned daemon has already become `active`; that difference alone is not failure.
+Runtime identity still has to match, and current daemon state must agree with
+a newly observed PF health sample. A progressing heartbeat without renewed
+health evidence must not clear the pending operation. Keep the failure snapshot
+before cleanup; repeated administrator approval cannot fix a stale-health
+comparison.
+
+`Quit menu bar app (keep routing)` is a separate explicit action. Older builds
+called this `Quit Slipstream`, which is why background processes could remain
+after what appeared to be an ordinary quit. A crash of the menu process also
+keeps routing alive. Deleting the application bundle does not itself establish
+that its previously installed services stopped.
+
+Turning off `Enable Geph` stops only Slipstream's own Geph job. A failed or
+unreadable `launchctl print` response must not be treated as proof of absence.
+Only a response identifying the exact missing job and user, or a validated
+loaded job, establishes state; other results remain unknown. The disabled
+preference is saved and verified before cleanup starts. A failed save leaves
+the current service untouched. A cleanup failure keeps the checkbox off and
+shows that the owned client may still be running; the checkbox reflects the
+saved choice, not confirmed shutdown. Opening Slipstream again retries cleanup
+for a disabled Geph preference. A successful stop also requires removing the
+owned RunAtLoad plist so a later login cannot silently bring it back. Never
+kill a standalone Geph process by its name.
+
+An old launcher defect could leave invalid `geph-owned.json` while its job was
+running. Once the exact job and related current-user processes are confirmed
+absent, the repaired cleanup preserves that record in a private
+`geph-ownership-quarantine-<pid>-<counter>/geph-owned.json` directory and proceeds.
+Both the old app-bundle executable with its private config and the current
+runtime/launcher are checked. Unreadable or changed files and uncertain process
+observations still stop cleanup; do not delete the record to bypass that check.
+A crash after the preference save can still interrupt cleanup. The saved
+choice remains disabled, but process absence must be checked before calling
+the stop complete.
 
 `Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
 daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does
@@ -808,6 +853,38 @@ the test on Slipstream's transparent `pf` path instead of a browser or shell
 proxy.
 
 ## ChatGPT Or Codex Reconnecting
+
+### Distinguish lookup failures from HTTP refusals
+
+The October22 report included both Safari's "Cannot Find Server" for
+`www.youtube.com` and a Codex HTTP403 response. These are separate observations:
+the former requires evidence about resolution at the time of failure; the
+latter means that the specific request reached an HTTP responder. A generic
+block page and a Cloudflare Ray suffix do not identify the block rule, the
+selected Slipstream route, or the client's exit country.
+
+After the user removed Slipstream, read-only checks found neither owned launchd
+job and no StatusV2; only standalone Geph was running. System lookup of
+`www.youtube.com` and `chatgpt.com` succeeded. Safari then rendered YouTube
+without an agent refresh. These later observations cannot retroactively prove
+the route or cause of the earlier failure. The root log was not readable in
+that session; no DNS, proxy, VPN, extension, or external Geph settings changed.
+
+Slipstream's transparent path receives TCP/443 after the client has an address.
+Its per-connection DoH fallback cannot repair a browser lookup that failed
+before any TCP connection reached it. At recurrence, capture the time, exact
+hostname and current owned-service status, then make a bounded system lookup
+for that hostname. A later cached success is insufficient. Compare DNS
+transports only if that contemporaneous lookup fails; do not replace the user's
+resolver as a diagnostic shortcut.
+
+Separately, the source audit reproduced a DoH fallback defect: an exception
+while creating or configuring the first resolver connection escaped before
+the fallback loop could try its second resolver. Setup and query now share
+the exception boundary, with socket cleanup in `finally`. Offline regressions
+cover connection, socket setup, TLS setup/handshake and malformed responses.
+This repair does not change the routing policy and is not proof of the cause
+of the October22 screenshots.
 
 The native ChatGPT/Codex client uses long-lived streaming connections. A loop
 such as `Reconnecting 2/2` with `websocket closed by server before

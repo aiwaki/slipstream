@@ -2047,7 +2047,6 @@ def _stop_chrome_launch_agent(
     *,
     uid: int,
     gid: int,
-    supplementary_groups: tuple[int, ...],
     executable: Path,
     profile: Path,
     ownership: ChromeOwnership | None = None,
@@ -2092,7 +2091,6 @@ def _stop_chrome_launch_agent(
             signal.SIGKILL,
             uid=uid,
             gid=gid,
-            supplementary_groups=supplementary_groups,
         )
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -2363,7 +2361,6 @@ def _run_chrome(
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
-    supplementary_groups = lifecycle._user_supplementary_groups(uid, gid)
     profile = Path(tempfile.mkdtemp(prefix="slipstream-semantic-chrome-"))
     stdout_path = profile / "chrome.stdout"
     stderr_path = profile / "chrome.stderr"
@@ -2552,7 +2549,6 @@ def _run_chrome(
                     launch,
                     uid=uid,
                     gid=gid,
-                    supplementary_groups=supplementary_groups,
                     executable=executable,
                     profile=profile,
                     ownership=ownership,

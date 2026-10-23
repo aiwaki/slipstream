@@ -1435,7 +1435,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     launch,
                     uid=501,
                     gid=20,
-                    supplementary_groups=(12, 61),
                     executable=executable,
                     profile=profile,
                 )
@@ -1499,7 +1498,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 launch,
                 uid=501,
                 gid=20,
-                supplementary_groups=(12, 61),
                 executable=executable,
                 profile=profile,
                 ownership=ownership,
@@ -1565,7 +1563,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     launch,
                     uid=501,
                     gid=20,
-                    supplementary_groups=(12, 61),
                     executable=executable,
                     profile=profile,
                 )
@@ -1639,7 +1636,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     launch,
                     uid=501,
                     gid=20,
-                    supplementary_groups=(12, 61),
                     executable=executable,
                     profile=profile,
                 )
@@ -1704,7 +1700,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                         launch,
                         uid=501,
                         gid=20,
-                        supplementary_groups=(12, 61),
                         executable=executable,
                         profile=profile,
                     )
@@ -1737,10 +1732,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke.lifecycle,
                 "_user_environment",
                 return_value=({"HOME": str(root)}, root),
-            ), mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
@@ -1816,7 +1807,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 launch,
                 uid=501,
                 gid=20,
-                supplementary_groups=(12, 61),
                 executable=executable.resolve(),
                 profile=profile,
                 ownership=mock.ANY,
@@ -1852,10 +1842,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke.lifecycle,
                 "_user_environment",
                 return_value=({"HOME": str(root)}, root),
-            ), mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
@@ -1916,7 +1902,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 launch,
                 uid=501,
                 gid=20,
-                supplementary_groups=(12, 61),
                 executable=executable.resolve(),
                 profile=profile,
                 ownership=mock.ANY,
@@ -1950,10 +1935,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke.lifecycle,
                 "_user_environment",
                 return_value=({"HOME": str(root)}, root),
-            ), mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
@@ -2046,10 +2027,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_user_environment",
                 return_value=({"HOME": str(root)}, root),
             ), mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
-            ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
             ), mock.patch.object(
@@ -2135,10 +2112,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_user_environment",
                 return_value=({"HOME": str(root)}, root),
             ), mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
-            ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
             ), mock.patch.object(
@@ -2209,10 +2182,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke.lifecycle,
                 "_user_environment",
                 return_value=({"HOME": str(root)}, root),
-            ), mock.patch.object(
-                smoke.lifecycle,
-                "_user_supplementary_groups",
-                return_value=(12, 61),
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",

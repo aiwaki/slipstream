@@ -2,7 +2,258 @@
 
 ## Verified Checkpoint
 
-### Active continuation, 2026-10-23
+### Full Stop-and-Quit continuation, 2026-10-23
+
+Latest verification: `fedcc0fb03124ef1473a19c121d825fe30e89ab9` passed complete
+CI39915409645 and audit39915409647, including all seven actual native Quit
+cases and the previous packaged lifecycle/Chrome/Safari smoke. Native report:
+`output/stop-quit-20261023/sixth-native/`; cleanup is empty. Normal merge was
+blocked by unresolved review threads. Four were triaged and resolved with
+source/regression evidence; see `pr412-resolved-review-receipt.json` in the same
+output directory. The remaining checkbox-disable crash window is real:
+cleanup preceded saving `enabled=0`. The narrow repair saves and reads back
+the disabled preference first, retains it on cleanup failure, and reuses the
+existing disabled-startup cleanup. Its retained actual-source regression fails
+three cases on the old block and passes all four on the repair. All 25 observer
+tests, eight documentation checks, formatting and compilation pass; independent
+review found no remaining blocker. Evidence: `geph-disable-crash-receipt.json`.
+Next: fresh exact-head CI before merge; reuse the unchanged local broad suite.
+
+Active checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/geph-stop-doh-fallback`, PR412. The user quit and deleted the app
+because Geph remained. Last read-only observation found no installed Slipstream
+or owned jobs; external Geph is running and has not been touched. Earlier
+installed-state paragraphs are historical. Preserve all apps, state and backups.
+
+Dependency PR413 merged as `922973ef38d5d6d7ae2659bb9c12dc96af6f3b94` with the
+same tree as tested `e8d03e2aeb0d3a6ac853a804e41c39840353613d`.
+CI39896354602 and audit39896354628 passed; independent patch review found no
+blockers. Main producer39897443338 published immutable `geph-vendor-0.4.3-r2`.
+Main audit39897443478 passed. Main CI39897443322 attempt1 reached package
+fetch before the new release existed (HTTP404); only failed jobs were rerun
+after producer success. Attempt2 passed, including the authenticated consumer,
+native packaging, browser and lifecycle checks. Its consumer verifies
+assets/provenance/SBOM/audit.
+The source repair updates certifi and both WebPKI dependencies; it is not a
+claim that the historical DNS/HTTP403 incidents were caused by certificates.
+
+PR412 adds preserving root `--stop` under the existing lock, exact launchd and
+owned-process absence checks (including pre-listener orphans), and bounded
+post-KILL confirmation. Its ordinary Quit now waits for root then Geph stop,
+records stopping/stopped intent, retains settings, and resumes on ordinary
+opening after a completed stop. Login keeps the stopped state. Source review
+caught and repaired dormant/VPN readiness and old login registration handling.
+Root checks: 69 focused, 23 teardown compatibility and 11 updater cases passed;
+12 isolated Rust lifecycle cases passed. Graph tools were unavailable; bounded
+direct reads were used. Evidence: `output/root-stop-20261023/` and
+`output/stop-quit-20261023/`. Integrated source `2b38afd2370aa7d53f6debff2c626033caf0e9a5`
+passed CI39899304752 and audit39899304760, including native compilation,
+packaged browser and the existing lifecycle checks. The new disposable native
+smoke adds actual tray Quit, SecurityAgent Cancel, installer-lock failure,
+partial cleanup failure, successful retry, stopped login and ordinary reopen.
+First native run39901792294 at `ae35257fb` passed build, browser and the
+previous lifecycle smoke, but failed the new case: native Cancel was not
+observed. The report has no confirmed cases and cleanup passed; it does not
+establish whether the product or accessibility observer failed. Preserve
+`output/stop-quit-20261023/first-native/`; add bounded phase/UI diagnostics
+before retrying. Audit39901792141 passed.
+The diagnostic head `22a5fc27233971acffda6ab66302df59216bd3dd` passed
+build/browser/previous lifecycle checks in run39904820801, but native Cancel
+still failed. This time the receipt proves intent=stopping, a live owned tray,
+one owned administrator osascript, and one SecurityAgent window with the exact
+prompt plus unique Cancel and confirmation controls. The observer returned
+absent despite that UI. Repair its traversal/matching to use the proven bounded
+snapshot; do not call this a product failure or successful Quit. Evidence:
+`output/stop-quit-20261023/second-native/`. Cleanup passed.
+The observer now shares explicit indexed AX traversal and separated static
+value/name collection with that snapshot, with exact prompt, unique window and
+unique button guards. All 23 observer/containment tests, Python compilation,
+three generated AppleScript syntax compilations and bounded review passed.
+Native Stop-and-Quit runs before the unchanged packaged lifecycle smoke; both
+remain mandatory. Run39906999203 at `7d593267614b0f17199424b73f867715c3158452`
+passed native Cancel, real installer-lock failure, partial Geph failure, actual
+menu Quit, native pre-listener orphan cleanup with the external sentinel alive,
+and stopped login. It failed ordinary reopen: root `--install` returned success,
+but production `wait_ready(false)` rejected readiness; the app retained the
+pending intent and stayed open. No Geph restart was attempted. The receipt does
+not identify the rejected predicate, so retain the same readiness requirements
+and 45-second bound while adding a bounded final rejection reason. Evidence:
+`output/stop-quit-20261023/third-native/`; cleanup passed. Other applicable
+product/build/browser checks and audit39906999405 passed. The previous packaged
+lifecycle smoke was skipped after the native failure, not newly qualified.
+The next head adds a fixed readiness rejection label and bounded state/PID/seq
+context to the final Resume error, preserving all predicates and the 45-second
+bound. Failure-only snapshots retain selected status/attestation metadata before
+cleanup; a fresh terminal Resume error ends the observer wait immediately.
+Three actual-source isolated Rust cases, 24 observer tests, eight documentation
+checks and focused formatting/compilation passed.
+Run39910205318 at `fdfa52d25f43b76546d8ae1b74d9b75e237824fa` establishes the
+reopen cause: `live-attested-state-mismatch`, retained dormant/PF=false versus
+live active/phase=active on the same PID6218 with sequence28, then30. The six
+preceding native cases and cleanup passed again. Product/build/browser checks
+and audit39910205319 passed. Evidence: `output/stop-quit-20261023/fourth-native/`.
+The targeted repair uses the existing root-published PF health sample and its
+separate `health_updated_at`, rather than comparing live health to the frozen
+install receipt. Runtime identity, label, heartbeat progression and the original
+45-second bound remain required. The old helper failed the causal transition
+case; the repair passes 18 actual-source isolated Rust cases, including both
+health transitions, cached heartbeat rejection and missing PF/health through the
+real projection. Eight documentation checks and focused formatting passed;
+bounded independent review found no blockers. Evidence:
+`output/stop-quit-20261023/health-transition-{red,green}.log`.
+Run39912212960 at `531c1abd25f485e1548b896c504684a349e0a476` passes all seven
+native cases, including ordinary reopen with a fresh daemon and retained
+preferences; cleanup is empty. Product/build/browser checks and audit39912212924
+pass. The following pre-existing packaged lifecycle smoke fails before spawning
+Chrome: `ValueError: too many extra_groups` at pending-navigation:composed-original.
+The harness passes the full `os.getgrouplist` result to CPython's bounded
+`Popen(extra_groups=...)` API. The runner's before/after group membership was not
+recorded, so do not attribute this to the temporary native-test administrator.
+Product probe launches use an empty supplementary-group tuple and are outside
+this failure. Evidence: `output/stop-quit-20261023/fifth-native/`.
+The harness now explicitly clears supplemental groups, matching its tray and
+production probe launches, while retaining the original UID and primary GID.
+Its profiles belong to that UID, its password store is basic, and its signal
+permissions depend on UID; directory group membership is not required. No
+root trampoline or group slicing was added. The causal oversized-membership
+regression and all 193 affected lifecycle/Chromium/live-site cases pass; Python
+compilation and diff-check pass. Evidence:
+`output/stop-quit-20261023/group-limit-{red,green}.log` and
+`group-limit-receipt.json`. Next: require the complete lifecycle gate before
+delivery; preserve the already passing native Quit evidence separately.
+
+Review then confirmed a separate pre-listener Geph orphan defect: the private
+record exists before bind, but stop required the SOCKS listener. Stop now checks
+fresh PID/UID/executable/config instead; the old guard failed its causal test,
+then all 27 Geph lifecycle tests passed. A read-only native probe confirmed the
+macOS process format. The smoke now also stops a real inert owned native child
+without any listener through actual Quit; its 17 containment tests passed.
+Evidence: `output/geph-orphan-stop-20261023/`. Geph networking is disabled in
+this fixture, so it does not qualify an account-backed tunnel.
+
+Next: run the new native Stop-and-Quit smoke in exact-head CI, then qualify
+the resulting installed application.
+The public preview30 stays immutable. Existing preview31 candidates have old
+trust dependencies and are not publishable using their older audit. Ordinary
+public update/rollback and remaining packaged observer gates stay open. Do not
+claim the user's historical DNS error or Codex403 fixed without live evidence.
+
+### Earlier incident evidence (superseded status; retained for traceability)
+
+2026-10-22: current incident work is in the physical checkout
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/geph-stop-doh-fallback`, based on
+`e918906069dddc722aa0c6283b94c1a16af8954e`.
+The user removed Slipstream after ordinary Quit left background processes.
+Live read-only checks confirmed that `/Applications/Slipstream.app`, the owned
+root and user launchd jobs, their plists, and StatusV2 are absent. Only the
+separate Geph application was running. Do not reinstall or stop that external
+application as part of diagnosis. Prior app/state backups remain retained.
+
+Safari initially had a blank loading YouTube page and subsequently rendered
+the homepage without an agent refresh. System resolution of the exact hostname
+was successful at observation time. This does not establish the cause of the
+earlier "Cannot Find Server" screenshot. Codex logs contain generic HTTP403
+responses, but neither the block rule nor the historical route is established;
+the screenshot's exact Ray ID was not found. Root daemon logs need administrator
+access. Read-only evidence and focused DoH red/green receipts are under
+`output/incidents-20261022/`. See troubleshooting notes for the separate failure
+boundaries. Source fixes cover a failed DoH endpoint aborting the fallback loop
+and unverified Geph shutdown being reported as off. DoH regressions reproduced
+five failures before repair; all 11 focused Python cases then passed. Two old
+Geph false-absence cases reproduced; the initial pure Rust boundary passed 11 tests.
+PR412's initial head is `b95447010296f61e60ce39216c04992fd9557623`.
+CI39828244399 passed product checks, native packaging, browser qualification
+and packaged lifecycle. The independent audit39828244341 failed on newly
+published emSign advisories in unchanged dependencies: `certifi 2026.6.17`,
+`rustls-webpki 0.103.15` and `webpki-roots 1.0.9`; the latter two also affect
+the pinned Geph source. Fixed versions are `2026.10.19`, `0.103.16` and
+`1.0.10`, respectively. RSA exceptions were accepted on the evaluation date.
+Do not repeat this unchanged audit or waive it. A separate coordinated
+dependency/vendor update is required; the current source-bootstrap contract
+does not yet admit the exact transition. The retained `.31` candidate contains
+the same affected versions; its older green audit is not a review of these new
+advisories and is not sufficient to resume publication. Evidence:
+`output/incidents-20261022/ci-audit/analysis-receipt.json` and
+`output/incidents-20261022/pr412-first-head-ci.json`.
+Review follow-up adds the final process observation after its last wait and
+guarded quarantine of malformed legacy ownership records. It covers both old
+and current client layouts, preserves exact bytes and rejects unknown/live
+process state, changed files and symlinks. The final-wait regressions reproduced
+two failures before repair; all 23 Rust helper/filesystem tests pass, along with
+formatting, diff whitespace and independent review. Logs are in
+`output/geph-disable-20261022/`. A read-only native process census exposed
+Darwin's signed rendering of some system UID values. The parser now normalizes
+the signed 32-bit representation without skipping identity or completeness
+checks. The same native probe then returned `Clear` across 544 process rows;
+no process arguments were logged and no live cleanup was performed. Fixtures
+also cover signed bounds, overflow and the current-process identity witness.
+The unchanged DoH subset remains 11/11 green.
+CI39835124312 also passed native product, packaged browser and lifecycle checks
+at `3bac4b075850cac514b101c6a76c29a1238150e0`; receipt:
+`output/incidents-20261022/pr412-second-head-ci.json`. The final signed-UID
+correction at `a51383ba8b6b36b1186c1e8b71b7186eee090388` passed CI39837144364
+(native product, packaging, browser and lifecycle checks). Its receipt is
+`output/incidents-20261022/pr412-final-head-ci.json`. Audit39837144381 still
+reports the same three affected dependencies, with both Rust dependencies also
+in Geph; exact reports and summary are retained under
+`output/incidents-20261022/final-head-audit/`. Installed
+UI and the historical screenshots remain unqualified. Crash interruption before
+the final preference save can retain enabled intent; no crash-atomic disable
+transaction was introduced.
+The menu-only exit now explicitly says routing continues; no full-stop action
+was added. These fixes are not installed. Graph tools were unavailable;
+discovery used bounded direct reads. PR412 is open and unmerged: required audit
+remains red despite green product CI. Next: a separate coordinated dependency
+update, preserving the Geph source and lock provenance contracts. Keep the
+retained `.31` candidate and its outstanding observer gate separate. This final
+post-CI checkpoint is local and uncommitted; production source is the pushed
+`a51383b` head. Do not repeat unchanged green product checks merely to commit
+this status update.
+
+PR411 merged at `e918906069dddc722aa0c6283b94c1a16af8954e`; its tree matches
+tested head `5fd85aa9dbe2176c3f2788fd5b3f60aad1d23174`.
+CI39472457430/1 and audit39472457537/1 passed all required checks; review
+threads were empty. CI receipt SHA256
+`81debb249ae1834e9cdf43204c0e8fbccaf268fa8ccf0cabdf8c7c520b9bbf7e`,
+merge receipt SHA256
+`92c17eb5d972f706bd1cff1a638da2af45f162af3eccdc284b6284a531bd2734`,
+both under `output/updater-daemon-identity/preview31-preparation/pr411-verification/`.
+Exact-main CI39474188992/1 and audit39474189024/1 passed. The signed
+`.31` candidate authenticated with full-tree verification and codesign; receipt
+`main411-preview31-verification/receipt.json` SHA256
+`6fe5cc986c42dcaabea871a7ce336994c6df8b780a14f937bee8f4e3f3434cf5`.
+Manifest SHA256 `c972c8f3b731ad997fa9f6ace7155e639116808bc74a913ac2f7f617232d6d83`.
+Native root run39477202342/1 and protected readiness39477208645/1 were
+dispatched once from exact main at18:43Z. Inputs and the refreshed daily budget
+are recorded in `output/updater-daemon-identity/preview31-pair/dispatch-receipt.json`.
+The readiness run is the second account-backed dispatch of2026-10-20UTC.
+Native root both cases passed and their authenticated proof receipt is
+`preview31-pair/root/receipt.json`, SHA256
+`52cdbd89180bbc488f49e22c6a992e384be2b29fdbcbad8ba469dff28c53ef1d`.
+Packaged app run39478010009/1 failed its successor-kill cleanup with
+`rollback watchdog is not terminal`; its commit case passed. Earlier events
+showed terminal watchdog, restored OLD tree and progressing OLD heartbeat,
+but the final false predicate was not persisted. Do not relabel this failure
+as a pass or claim the proposed transient lock contention as its proven cause.
+Authenticated receipt: `preview31-pair/app/receipt.json`, SHA256
+`6f4f534d47a9a91a92745c94dea9e561c4178821281c00466b8b16efe231cb57`.
+Protected readiness39477208645/1 completed successfully at2026-10-20T19:18:50Z,
+confirmed through GitHub on October22. Its final artifact authentication is
+still pending; do not repeat the account-backed run. No watchers remain active.
+No publisher or packaged-pair retry has been dispatched. Publication remains
+pending. Reuse retained candidates and unchanged proofs. Observer-only fixes
+and production changes need separate evidence; do not overwrite the candidate.
+Post-install runtime receipt:
+`output/updater-daemon-identity/main410-fixed-origin-verification/installed-runtime-receipt.json`,
+SHA256 `6be7b031348fa86fd54a94c2e56051dd6cc4b07a0ccbee3c0649b0eac3d4068f`.
+It binds canonical installed verification to root attestation and its hardlink
+witness, exact tray/daemon identities and active heartbeat202 -> 204.
+This receipt records the October20 installation, not the current workstation:
+the application was removed by the user on October22. The earlier tray CUA
+timeout is historical; Safari UI access worked during the October22 diagnosis.
+
+### Historical dependency-source checkpoint before PR413 merge
 
 The active dependency checkout is
 `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`,
@@ -41,6 +292,9 @@ the main-only producer before packaging. The public preview30 stays immutable;
 preview31 delivery, ordinary update/rollback and full shutdown remain open.
 
 ### Historical delivery checkpoint
+
+### Historical delivery checkpoint
+
 
 Delivery resumed on branch `codex/preview31-updater-delivery`, based on main
 `5385b89add415c531276ba43f5c06c50293ffb17`, in the physical checkout below.

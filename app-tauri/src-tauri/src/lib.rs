@@ -10,10 +10,12 @@
 mod app_update;
 mod diagnostics;
 mod geph_config;
+mod geph_lifecycle;
 mod install_attestation;
 mod native_messaging;
 mod native_update_notification;
 mod notification_qualification;
+mod service_lifecycle;
 mod status_client;
 mod successor_daemon;
 mod updater_transaction;
@@ -45,6 +47,12 @@ use geph_config::{
     geph_config_set, geph_enabled, geph_field, geph_secret, geph_secret_availability,
     keychain_delete, keychain_set, GephSecretAvailability,
 };
+use geph_lifecycle::{
+    classify_launch_agent, classify_owned_process, classify_process, classify_process_census,
+    guarded_ownership_quarantine, quarantine_ownership_file, read_ownership_snapshot,
+    stop_launch_agent, stop_owned_process, LaunchAgentState, OwnershipSnapshot, ProcessCensus,
+    ProcessObservation,
+};
 use install_attestation::{
     install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
 };
@@ -68,6 +76,475 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 // blocker. Downloading an archive does not block normal daemon use; preparing
 // an authorized root operation does, including an unknown authorization result.
 struct DaemonActionsBlocked(Arc<AtomicBool>);
+
+// Held across every service mutation, including asynchronous admin prompts.
+// It is separate from the updater gate, whose poller may release its own flag.
+struct ServiceLifecycle(service_lifecycle::Gate);
+
+struct ServiceEffects {
+    app: AppHandle,
+    store: service_lifecycle::IntentStore,
+    gate: service_lifecycle::Gate,
+    expect_geph: bool,
+}
+
+fn resume_status_identity(
+    status: &Value,
+    attestation: &InstallAttestation,
+    expect_geph: bool,
+    owns_pid: impl FnOnce(i64) -> bool,
+    label_disabled: impl FnOnce() -> Option<bool>,
+) -> Result<(i64, u64, String), &'static str> {
+    let pid = status
+        .get("pid")
+        .and_then(Value::as_i64)
+        .ok_or("status-pid-missing")?;
+    let sequence = status
+        .get("heartbeat_seq")
+        .and_then(Value::as_u64)
+        .ok_or("heartbeat-sequence-missing")?;
+    let state = status
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let phase = status
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    // The receipt pins runtime identity; its health may legitimately change.
+    if !service_lifecycle::settled_service_state(
+        &attestation.state,
+        "active",
+        attestation.pf_active,
+    ) {
+        return Err("attested-state-pf-mismatch");
+    }
+    if phase != "active" {
+        return Err("daemon-phase-unsettled");
+    }
+    let pf = status
+        .get("pf_state")
+        .ok_or("daemon-pf-observation-missing")?;
+    let rules_loaded = pf
+        .get("rules_loaded")
+        .and_then(Value::as_bool)
+        .ok_or("daemon-pf-observation-missing")?;
+    // The legacy projection supplies false defaults when PF is absent. Require
+    // the explicit OS-derived state that only an actual PF observation carries.
+    match (pf.get("state").and_then(Value::as_str), rules_loaded) {
+        (Some("ready"), true) | (Some("inactive" | "off"), false) => {}
+        (None, _) => return Err("daemon-pf-observation-missing"),
+        _ => return Err("daemon-pf-state-mismatch"),
+    }
+    if !service_lifecycle::settled_service_state(state, phase, rules_loaded) {
+        return Err("live-state-pf-mismatch");
+    }
+    let health = status
+        .get("health_updated_at")
+        .and_then(Value::as_str)
+        .filter(|health| !health.is_empty())
+        .ok_or("health-sample-missing")?;
+    if sequence == 0 {
+        return Err("heartbeat-sequence-zero");
+    }
+    if attestation.launchd.pid != pid {
+        return Err("attested-pid-mismatch");
+    }
+    if !owns_pid(pid) {
+        return Err("daemon-pid-ownership-unconfirmed");
+    }
+    match label_disabled() {
+        Some(false) => {}
+        Some(true) => return Err("daemon-label-disabled"),
+        None => return Err("daemon-label-state-unknown"),
+    }
+    if expect_geph && status.get("geph").and_then(Value::as_str) != Some("up") {
+        return Err("daemon-geph-not-up");
+    }
+    Ok((pid, sequence, health.to_owned()))
+}
+
+fn resume_observations_progress(
+    previous: &(i64, u64, String),
+    current: &(i64, u64, String),
+) -> Result<(), &'static str> {
+    if previous.0 != current.0 || current.1 <= previous.1 {
+        return Err("heartbeat-not-progressing");
+    }
+    // The independent heartbeat republishes cached health. A changed sample
+    // means the same root daemon has observed OS PF again during this wait.
+    if current.2 == previous.2 {
+        return Err("health-sample-not-progressing");
+    }
+    Ok(())
+}
+
+fn resume_state_label(value: Option<&str>) -> &'static str {
+    match value {
+        Some("active") => "active",
+        Some("dormant") => "dormant",
+        Some("starting") => "starting",
+        Some("recovering") => "recovering",
+        Some("stopping") => "stopping",
+        Some("conflict") => "conflict",
+        Some("off") => "off",
+        _ => "unknown",
+    }
+}
+
+impl ServiceEffects {
+    fn root_command(&self, argument: &str, phase: &str) -> Result<(), String> {
+        self.gate.block(phase);
+        let binary = bundled_daemon_path(&self.app).ok_or("bundled daemon unavailable")?;
+        if !valid_bundled_daemon(&binary) {
+            return Err(format!("{phase}: bundled daemon is not a valid executable"));
+        }
+        if !run_admin_status(
+            &format!("{} {argument}", shell_quote(&binary.to_string_lossy())),
+            &format!("Slipstream needs administrator access. {phase}"),
+        ) {
+            return Err(format!("{phase}: administrator action failed, was cancelled, or its result is unknown. Retry Stop Slipstream before restarting."));
+        }
+        Ok(())
+    }
+    fn wait_ready(&self, with_geph: bool) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(45);
+        let mut baseline: Option<(i64, u64, String)> = None;
+        loop {
+            let mut detail = String::new();
+            let observed = (|| {
+                let bundled = bundled_daemon_path(&self.app).ok_or("bundled-daemon-unavailable")?;
+                let attestation = daemon_install_attestation(&bundled)
+                    .ok_or("install-attestation-unconfirmed")?;
+                detail = format!(
+                    "att={} pf={} att_pid={}",
+                    resume_state_label(Some(&attestation.state)),
+                    attestation.pf_active,
+                    attestation.launchd.pid
+                );
+                let status = match read_status_state() {
+                    StatusRead::Fresh(status) => status,
+                    StatusRead::Stale(_) => return Err("status-stale"),
+                    StatusRead::Missing => return Err("status-missing-or-invalid"),
+                };
+                detail.push_str(&format!(
+                    " state={} phase={} pid={} seq={} live_pf={}",
+                    resume_state_label(status.get("state").and_then(Value::as_str)),
+                    resume_state_label(status.get("phase").and_then(Value::as_str)),
+                    status.get("pid").and_then(Value::as_i64).unwrap_or(0),
+                    status
+                        .get("heartbeat_seq")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    match status
+                        .pointer("/pf_state/rules_loaded")
+                        .and_then(Value::as_bool)
+                    {
+                        Some(true) => "true",
+                        Some(false) => "false",
+                        None => "unknown",
+                    }
+                ));
+                resume_status_identity(
+                    &status,
+                    &attestation,
+                    with_geph && self.expect_geph,
+                    daemon_pid_owned,
+                    daemon_label_disabled,
+                )
+            })();
+            let mut reason = observed
+                .as_ref()
+                .err()
+                .copied()
+                .unwrap_or("heartbeat-not-progressing");
+            let observed = observed.ok();
+            let progressing = match (&baseline, &observed) {
+                (Some(previous), Some(current)) => {
+                    match resume_observations_progress(previous, current) {
+                        Ok(()) => true,
+                        Err(rejected) => {
+                            reason = rejected;
+                            false
+                        }
+                    }
+                }
+                _ => false,
+            };
+            if let Some((pid, sequence, _)) = &baseline {
+                detail.push_str(&format!(" prev_pid={pid} prev_seq={sequence}"));
+            }
+            baseline = observed;
+            if progressing {
+                if !with_geph || !self.expect_geph || owned_geph_ready(&self.app) {
+                    return Ok(());
+                }
+                reason = "owned-geph-readiness-unconfirmed";
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "Resume: readiness={reason}; {detail}; {}",
+                    if with_geph {
+                        "automatic repair remains blocked"
+                    } else {
+                        "Geph was not started"
+                    }
+                ));
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+}
+
+fn owned_geph_ready(app: &AppHandle) -> bool {
+    let Ok(paths) = geph_launch_agent_paths_for_app(app) else {
+        return false;
+    };
+    let Some(uid) = current_numeric_id("-u") else {
+        return false;
+    };
+    if geph_launch_agent_state(&uid) != LaunchAgentState::Loaded {
+        return false;
+    }
+    let Some(pid) = geph_listener_pid() else {
+        return false;
+    };
+    if listener_pid(GEPH_CONTROL_PORT) != Some(pid) {
+        return false;
+    }
+    matches!(geph_process_observation(pid), ProcessObservation::Present(command)
+        if command_matches_geph(&command, &paths.executable, &paths.config))
+        && Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "uid="])
+            .output()
+            .ok()
+            .is_some_and(|output| {
+                output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == uid
+            })
+}
+
+impl service_lifecycle::Effects for ServiceEffects {
+    fn persist(&mut self, intent: service_lifecycle::Intent) -> Result<(), String> {
+        self.store.write(intent)
+    }
+    fn stop_root(&mut self) -> Result<(), String> {
+        self.root_command("--stop", "Stopping Slipstream background service")
+    }
+    fn stop_geph(&mut self) -> Result<(), String> {
+        self.gate.block("Stopping bundled Geph");
+        geph_launch_agent_disable(&self.app).map_err(|e| format!("Geph stop unconfirmed: {e}"))?;
+        let paths = geph_launch_agent_paths_for_app(&self.app)?;
+        let uid = current_numeric_id("-u")
+            .and_then(|uid| uid.parse::<u32>().ok())
+            .ok_or("Geph stop: user identity unavailable")?;
+        if geph_launch_agent_state(&uid.to_string()) != LaunchAgentState::Absent
+            || geph_private_process_census(&paths.config_dir, uid) != ProcessCensus::Clear
+        {
+            return Err("Geph stop: owned job or process absence is not confirmed".into());
+        }
+        Ok(())
+    }
+    fn prepare_stopped(&mut self) -> Result<(), String> {
+        self.gate.block("Preserving stopped state at login");
+        refresh_stop_autostart(&self.app)
+    }
+    fn start_root(&mut self) -> Result<(), String> {
+        self.root_command("--install", "Starting Slipstream background service")
+    }
+    fn root_ready(&mut self) -> Result<(), String> {
+        self.gate.block("Waiting for Slipstream background service");
+        self.wait_ready(false)
+    }
+    fn start_geph(&mut self) -> Result<(), String> {
+        self.gate.block("Starting saved Geph configuration");
+        if geph_enabled(&self.app)
+            && geph_secret_availability(&self.app) == GephSecretAvailability::Unavailable
+        {
+            return Err("Resume: Keychain unavailable; Geph has not been restarted".into());
+        }
+        self.expect_geph =
+            ensure_geph_launch_agent(&self.app, false).map_err(|e| format!("Resume Geph: {e}"))?;
+        Ok(())
+    }
+    fn all_ready(&mut self) -> Result<(), String> {
+        self.gate.block("Confirming resumed services");
+        self.wait_ready(true)
+    }
+    fn clear(&mut self) -> Result<(), String> {
+        self.store.clear()
+    }
+}
+
+// tauri-plugin-autostart 2.5.1 / auto-launch 0.5.0 writes this exact
+// LaunchAgent on enable(), even if already enabled. Validate its ownership and
+// read back the new argument before publishing a durable stopped result.
+fn refresh_stop_autostart(app: &AppHandle) -> Result<(), String> {
+    let manager = app.autolaunch();
+    let path = app
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())?
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", app.package_info().name));
+    let expected_executable = std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .map_err(|e| e.to_string())?;
+    let inspect = |require_marker: bool| -> Result<(), String> {
+        use std::os::unix::fs::MetadataExt;
+        let directory = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(
+                path.parent()
+                    .ok_or("login registration parent unavailable")?,
+            )
+            .map_err(|e| format!("cannot inspect login registration directory: {e}"))?;
+        let parent_metadata = directory.metadata().map_err(|e| e.to_string())?;
+        let uid = unsafe { libc::geteuid() };
+        if parent_metadata.uid() != uid || parent_metadata.mode() & 0o022 != 0 {
+            return Err("login registration directory is not safely owned".into());
+        }
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+            .map_err(|e| format!("cannot inspect login registration: {e}"))?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file()
+            || metadata.uid() != uid
+            || metadata.nlink() != 1
+            || metadata.len() > 65536
+            || metadata.mode() & 0o022 != 0
+        {
+            return Err("login registration is not a bounded owned file".into());
+        }
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take(65537)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() > 65536 {
+            return Err("login registration exceeds read bound".into());
+        }
+        let value = plist::Value::from_reader(std::io::Cursor::new(bytes))
+            .map_err(|e| format!("login registration is malformed: {e}"))?;
+        let dict = value
+            .as_dictionary()
+            .ok_or("login registration is not a dictionary")?;
+        let args = dict
+            .get("ProgramArguments")
+            .and_then(plist::Value::as_array)
+            .ok_or("login arguments unavailable")?;
+        let valid_args = args.first().and_then(plist::Value::as_string)
+            == expected_executable.to_str()
+            && (args.len() == 1 && !require_marker
+                || args.len() == 2 && args[1].as_string() == Some("--autostart"));
+        if dict.get("Label").and_then(plist::Value::as_string)
+            != Some(app.package_info().name.as_str())
+            || dict.get("RunAtLoad").and_then(plist::Value::as_boolean) != Some(true)
+            || !valid_args
+        {
+            return Err("login registration does not match this Slipstream application".into());
+        }
+        if require_marker {
+            file.sync_all()
+                .and_then(|_| directory.sync_all())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    };
+    service_lifecycle::refresh_enabled_login(
+        manager
+            .is_enabled()
+            .map_err(|e| format!("login state unavailable: {e}")),
+        || {
+            inspect(false)?;
+            manager
+                .enable()
+                .map_err(|e| format!("cannot refresh login registration: {e}"))
+        },
+        || {
+            if !manager.is_enabled().map_err(|e| e.to_string())? {
+                return Err("login setting changed during stop".into());
+            }
+            inspect(true)
+        },
+    )
+}
+
+fn pending_daemon_actions_for_setup(app: &AppHandle) -> bool {
+    app.state::<DaemonActionsBlocked>()
+        .0
+        .load(Ordering::Acquire)
+}
+
+fn start_service_lifecycle(app: &AppHandle, resume: bool, quit: bool) {
+    if app
+        .state::<DaemonActionsBlocked>()
+        .0
+        .load(Ordering::Acquire)
+    {
+        notify(
+            app,
+            "Finish the current update before stopping or starting Slipstream",
+        );
+        return;
+    }
+    let gate = app.state::<ServiceLifecycle>().0.clone();
+    let Some(lease) = gate.acquire(true) else {
+        notify(
+            app,
+            "Another Slipstream service action is still running; try again when it finishes",
+        );
+        return;
+    };
+    gate.block(if resume {
+        "Starting Slipstream…"
+    } else {
+        "Stopping Slipstream…"
+    });
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let result = (|| {
+            let store = service_lifecycle::IntentStore::new(
+                app.path().app_config_dir().map_err(|e| e.to_string())?,
+            );
+            if resume && store.read()? != Some(service_lifecycle::Intent::Stopped) {
+                return Err(
+                    "Stop is incomplete. Retry Stop Slipstream before starting it again.".into(),
+                );
+            }
+            let mut effects = ServiceEffects {
+                app: app.clone(),
+                store,
+                gate: gate.clone(),
+                expect_geph: false,
+            };
+            if resume {
+                service_lifecycle::resume(&mut effects)
+            } else {
+                service_lifecycle::stop(&mut effects)
+            }
+        })();
+        match result {
+            Ok(()) if resume => {
+                gate.resumed();
+                notify(&app, "Slipstream started");
+            }
+            Ok(()) if quit => app.exit(0),
+            Ok(()) => {
+                gate.block("Slipstream stopped. Choose Start Slipstream to resume.");
+                notify(&app, "Slipstream stopped; saved settings are retained");
+            }
+            Err(error) => {
+                gate.block(error.clone());
+                eprintln!("Slipstream service lifecycle: {error}");
+                notify(&app, &error);
+            }
+        }
+    });
+}
 
 const UPDATE_INITIAL_DELAY_SECS: u64 = 30;
 const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
@@ -181,9 +658,17 @@ fn tr(en: &str) -> String {
         "Open Status" => "Открыть статус",
         "Copy Diagnostics" => "Скопировать диагностику",
         "Unable to save Geph account" => "Не удалось сохранить аккаунт Geph",
+        "Unable to save the disabled setting. Bundled Geph has not been stopped." => {
+            "Не удалось сохранить настройку отключения. Встроенный Geph не был остановлен."
+        }
+        "Bundled Geph is disabled in settings, but it may still be running. Slipstream will retry cleanup when it opens." => {
+            "Встроенный Geph отключён в настройках, но может ещё работать. При следующем запуске Slipstream снова попробует его остановить."
+        }
         "Check for Updates…" => "Проверить обновления…",
         "Uninstall Slipstream…" => "Удалить Slipstream…",
-        "Quit Slipstream" => "Выйти из Slipstream",
+        "Stop Slipstream and Quit" => "Остановить Slipstream и выйти",
+        "Start Slipstream" => "Запустить Slipstream",
+        "Quit menu bar app (keep routing)" => "Закрыть значок (прокси продолжит работать)",
         other => other,
     }
     .to_string()
@@ -198,6 +683,8 @@ const ID_DIAGNOSTICS: &str = "copy_diagnostics";
 const ID_UPDATE: &str = "check_updates";
 const ID_UNINSTALL: &str = "uninstall_slipstream";
 const ID_QUIT: &str = "quit";
+const ID_MENU_QUIT: &str = "menu_only_quit";
+const ID_START: &str = "start_slipstream";
 // Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
 // tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
 // in one click (no manual host/port/secret entry).
@@ -217,11 +704,7 @@ fn admin_shell_script(shell: &str, prompt: &str) -> String {
 
 /// Run a privileged shell line via one osascript admin prompt.
 fn run_admin(shell: &str, prompt: &str) {
-    let script = admin_shell_script(shell, prompt);
-    let _ = Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(script)
-        .spawn();
+    let _ = run_admin_status(shell, prompt);
 }
 
 fn run_admin_status(shell: &str, prompt: &str) -> bool {
@@ -751,7 +1234,9 @@ fn open_status_snapshot(app: &AppHandle) -> bool {
         geph_lifecycle_diagnostic_value(
             Path::new(INSTALLED_DAEMON).exists() && Path::new(LAUNCHD_PLIST).exists(),
             daemon_status_present,
-            current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
+            current_numeric_id("-u")
+                .map(|uid| geph_launch_agent_state(&uid))
+                .unwrap_or(LaunchAgentState::Unknown),
         ),
         unix_now_secs(),
         None,
@@ -800,7 +1285,9 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
         geph_lifecycle_diagnostic_value(
             Path::new(INSTALLED_DAEMON).exists() && Path::new(LAUNCHD_PLIST).exists(),
             daemon_status_present,
-            current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
+            current_numeric_id("-u")
+                .map(|uid| geph_launch_agent_state(&uid))
+                .unwrap_or(LaunchAgentState::Unknown),
         ),
         unix_now_secs(),
         Some(diagnostic_log_tail_with_admin_fallback(
@@ -1124,7 +1611,18 @@ fn should_request_daemon_install(
 }
 
 fn ensure_daemon_installed(app: &AppHandle) {
-    let _ = request_daemon_install(app, false);
+    let gate = app.state::<ServiceLifecycle>().0.clone();
+    let Some(lease) = gate.acquire(false) else {
+        return;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let _ = request_daemon_install(&app, false);
+        if let Err(error) = ensure_geph_launch_agent(&app, false) {
+            eprintln!("geph setup after daemon install unavailable: {error}");
+        }
+    });
 }
 
 fn app_bundle_for_bundled_daemon(bundled: &Path) -> Option<PathBuf> {
@@ -2341,6 +2839,14 @@ async fn install_or_discover_app_update(
     item: MenuItem<tauri::Wry>,
     state: Arc<Mutex<AppUpdateState>>,
 ) {
+    let lifecycle = app.state::<ServiceLifecycle>().0.clone();
+    let Some(_lifecycle_lease) = lifecycle.acquire(false) else {
+        notify(
+            &app,
+            "Slipstream is stopping, stopped, or another service action is running",
+        );
+        return;
+    };
     if app
         .state::<DaemonActionsBlocked>()
         .0
@@ -3064,11 +3570,6 @@ fn geph_ownership_path(dir: &Path) -> PathBuf {
     dir.join(GEPH_OWNERSHIP_FILE)
 }
 
-fn read_geph_ownership(dir: &Path) -> Option<Value> {
-    let raw = fs::read(geph_ownership_path(dir)).ok()?;
-    serde_json::from_slice(&raw).ok()
-}
-
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -3197,12 +3698,22 @@ fn geph_launch_target(uid: &str) -> String {
     format!("{}/{GEPH_LAUNCHD_LABEL}", geph_launch_domain(uid))
 }
 
-fn geph_launch_agent_loaded(uid: &str) -> bool {
-    Command::new("/bin/launchctl")
+fn geph_launch_agent_state(uid: &str) -> LaunchAgentState {
+    let Ok(output) = Command::new("/bin/launchctl")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .args(["print", &geph_launch_target(uid)])
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    else {
+        return LaunchAgentState::Unknown;
+    };
+    classify_launch_agent(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+        uid,
+        GEPH_LAUNCHD_LABEL,
+    )
 }
 
 /// Diagnostics may report the app-owned launch job, but never infer PF state
@@ -3210,7 +3721,7 @@ fn geph_launch_agent_loaded(uid: &str) -> bool {
 fn geph_lifecycle_diagnostic_value(
     daemon_installed: bool,
     daemon_status_present: bool,
-    launch_agent_loaded: bool,
+    launch_agent: LaunchAgentState,
 ) -> Value {
     let root_daemon = if daemon_status_present {
         "running"
@@ -3219,38 +3730,38 @@ fn geph_lifecycle_diagnostic_value(
     } else {
         "absent"
     };
-    let state = if !daemon_installed && !daemon_status_present && launch_agent_loaded {
-        "sidecar_only"
-    } else if launch_agent_loaded {
-        "managed"
-    } else {
-        "off"
+    let state = match launch_agent {
+        LaunchAgentState::Loaded if !daemon_installed && !daemon_status_present => "sidecar_only",
+        LaunchAgentState::Loaded => "managed",
+        LaunchAgentState::Absent => "off",
+        LaunchAgentState::Unknown => "unknown",
     };
     json!({
         "state": state,
         "root_daemon": root_daemon,
-        "owned_launch_agent": if launch_agent_loaded { "loaded" } else { "absent" },
+        "owned_launch_agent": match launch_agent {
+            LaunchAgentState::Loaded => "loaded",
+            LaunchAgentState::Absent => "absent",
+            LaunchAgentState::Unknown => "unknown",
+        },
     })
 }
 
-fn geph_launch_agent_bootout(uid: &str, plist: &Path) -> bool {
-    let _ = Command::new("/bin/launchctl")
-        .args(["bootout", &geph_launch_target(uid)])
-        .output();
-    if geph_launch_agent_loaded(uid) {
-        let _ = Command::new("/bin/launchctl")
-            .arg("bootout")
-            .arg(geph_launch_domain(uid))
-            .arg(plist)
-            .output();
-    }
-    for _ in 0..20 {
-        if !geph_launch_agent_loaded(uid) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    false
+fn geph_launch_agent_bootout(uid: &str) -> Result<(), String> {
+    stop_launch_agent(
+        || geph_launch_agent_state(uid),
+        || {
+            // Use only the exact owned label, never a plist whose Label could
+            // name a different job. Completion alone is not proof of absence.
+            let _ = Command::new("/bin/launchctl")
+                .args(["bootout", &geph_launch_target(uid)])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        },
+        || std::thread::sleep(Duration::from_millis(100)),
+    )
+    .map_err(str::to_string)
 }
 
 fn geph_launch_agent_bootstrap(uid: &str, plist: &Path) -> bool {
@@ -3281,20 +3792,118 @@ fn geph_listener_pid() -> Option<u32> {
     listener_pid(GEPH_SOCKS_PORT)
 }
 
-/// Stop only a process whose PID, executable, config, and listener all match the
-/// private ownership record. Unknown listeners are external state.
-fn geph_kill_owned(dir: &Path) {
-    let Some(state) = read_geph_ownership(dir) else {
-        let _ = fs::remove_file(geph_ownership_path(dir));
-        return;
+fn geph_process_observation(pid: u32) -> ProcessObservation {
+    let Ok(output) = Command::new("/bin/ps")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+    else {
+        return ProcessObservation::Unknown;
+    };
+    classify_process(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+fn geph_owned_process_running(
+    pid: u32,
+    uid: u32,
+    executable: &Path,
+    config: &Path,
+) -> Result<bool, String> {
+    let output = Command::new("/bin/ps")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-ww", "-p", &pid.to_string(), "-o", "uid=,pid=,command="])
+        .output()
+        .map_err(|_| "geph process observation unavailable".to_string())?;
+    let (Ok(stdout), Ok(stderr)) = (
+        std::str::from_utf8(&output.stdout),
+        std::str::from_utf8(&output.stderr),
+    ) else {
+        return Err("geph process observation unavailable".into());
+    };
+    classify_owned_process(
+        output.status.code(),
+        stdout,
+        stderr,
+        pid,
+        uid,
+        executable,
+        config,
+    )
+}
+
+fn remove_owned_geph_file(path: &Path, component: &str) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(format!("geph {component} cleanup unavailable")),
+    }
+}
+
+fn geph_private_process_census(dir: &Path, uid: u32) -> ProcessCensus {
+    let Ok(output) = Command::new("/bin/ps")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-axww", "-o", "uid=,pid=,stat=,command="])
+        .output()
+    else {
+        return ProcessCensus::Unknown;
+    };
+    // Never log a process census: other processes can carry private arguments.
+    let (Ok(stdout), Ok(stderr)) = (
+        std::str::from_utf8(&output.stdout),
+        std::str::from_utf8(&output.stderr),
+    ) else {
+        return ProcessCensus::Unknown;
+    };
+    classify_process_census(
+        output.status.code(),
+        stdout,
+        stderr,
+        uid,
+        std::process::id(),
+        &dir.join("geph-active.yaml"),
+        &dir.join(GEPH_RUNTIME_DIR),
+    )
+}
+
+fn geph_quarantine_malformed_ownership(
+    dir: &Path,
+    record: &OwnershipSnapshot,
+    uid: u32,
+) -> Result<(), String> {
+    let uid_text = uid.to_string();
+    guarded_ownership_quarantine(
+        || geph_launch_agent_state(&uid_text),
+        || geph_private_process_census(dir, uid),
+        || quarantine_ownership_file(&geph_ownership_path(dir), record, uid).map(|_| ()),
+    )
+}
+
+/// Stop only the exact PID/UID/executable/config from a private ownership record.
+/// This also covers an orphan stalled before opening its SOCKS listener.
+fn geph_kill_owned(dir: &Path) -> Result<(), String> {
+    let uid = current_numeric_id("-u")
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or("user id unavailable")?;
+    let Some(record) = read_ownership_snapshot(&geph_ownership_path(dir), uid)? else {
+        return Ok(());
+    };
+    let Ok(state) = serde_json::from_slice::<Value>(&record.bytes) else {
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
     };
     let Some(pid) = state
         .get("pid")
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
+        .filter(|pid| *pid > 0)
     else {
-        let _ = fs::remove_file(geph_ownership_path(dir));
-        return;
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
     };
     let executable = state
         .get("executable")
@@ -3304,48 +3913,26 @@ fn geph_kill_owned(dir: &Path) {
         .get("config")
         .and_then(Value::as_str)
         .map(PathBuf::from);
-    let initially_owned =
-        executable
-            .as_deref()
-            .zip(config.as_deref())
-            .is_some_and(|(executable, config)| {
-                geph_listener_pid() == Some(pid)
-                    && process_command(pid)
-                        .is_some_and(|command| command_matches_geph(&command, executable, config))
-            });
-    if !initially_owned {
-        let _ = fs::remove_file(geph_ownership_path(dir));
-        return;
+    let (Some(executable), Some(config)) = (executable.as_deref(), config.as_deref()) else {
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
+    };
+    if !executable.is_absolute() || !config.is_absolute() {
+        return geph_quarantine_malformed_ownership(dir, &record, uid);
     }
+    let still_owned = || geph_owned_process_running(pid, uid, executable, config);
     let pid_string = pid.to_string();
-    let _ = Command::new("/bin/kill")
-        .args(["-TERM", &pid_string])
-        .status();
-    for _ in 0..20 {
-        if Command::new("/bin/kill")
-            .args(["-0", &pid_string])
-            .status()
-            .map(|status| !status.success())
-            .unwrap_or(true)
-        {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    if let (Some(executable), Some(config), Some(command)) = (
-        executable.as_deref(),
-        config.as_deref(),
-        process_command(pid),
-    ) {
-        // Revalidate immediately before SIGKILL so a rapidly recycled PID can
-        // never turn an owned-process shutdown into a broad process kill.
-        if geph_listener_pid() == Some(pid) && command_matches_geph(&command, executable, config) {
+    stop_owned_process(
+        &still_owned,
+        |signal| {
             let _ = Command::new("/bin/kill")
-                .args(["-KILL", &pid_string])
+                .args([signal, &pid_string])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .status();
-        }
-    }
-    let _ = fs::remove_file(geph_ownership_path(dir));
+        },
+        || std::thread::sleep(Duration::from_millis(100)),
+    )?;
+    remove_owned_geph_file(&geph_ownership_path(dir), "ownership")
 }
 
 fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPaths, String> {
@@ -3363,14 +3950,13 @@ fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPat
 fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
     let paths = geph_launch_agent_paths_for_app(app)?;
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
-    if !geph_launch_agent_bootout(&uid, &paths.plist) {
-        return Err("geph LaunchAgent bootout unavailable".into());
-    }
+    geph_launch_agent_bootout(&uid)?;
     // One-time migration can leave the old detached process outside launchd.
-    // Stop it only through the existing PID/executable/config/listener proof.
-    geph_kill_owned(&paths.config_dir);
-    let _ = fs::remove_file(&paths.ownership);
-    let _ = fs::remove_file(&paths.plist);
+    // Stop it only through fresh PID/UID/executable/config proof.
+    geph_kill_owned(&paths.config_dir)?;
+    for (path, component) in [(&paths.ownership, "ownership"), (&paths.plist, "plist")] {
+        remove_owned_geph_file(path, component)?;
+    }
     Ok(())
 }
 
@@ -3404,6 +3990,12 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
         return Ok(false);
     };
     let paths = geph_launch_agent_paths_for_app(app)?;
+    let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
+    let mut loaded = match geph_launch_agent_state(&uid) {
+        LaunchAgentState::Loaded => true,
+        LaunchAgentState::Absent => false,
+        LaunchAgentState::Unknown => return Err("geph LaunchAgent status unavailable".into()),
+    };
     harden_geph_dir(&paths.config_dir)
         .map_err(|error| format!("geph config permissions unavailable: {error}"))?;
     for log_path in [&paths.stdout_log, &paths.stderr_log] {
@@ -3429,20 +4021,18 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     let plist_changed = write_atomic_if_changed(&paths.plist, plist.as_bytes(), 0o600)
         .map_err(|error| format!("geph LaunchAgent write unavailable: {error}"))?;
 
-    let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
-    let mut loaded = geph_launch_agent_loaded(&uid);
     if loaded && plist_changed {
-        if !geph_launch_agent_bootout(&uid, &paths.plist) {
-            return Err("geph LaunchAgent reload unavailable".into());
-        }
+        geph_launch_agent_bootout(&uid)?;
         loaded = false;
     }
     if !loaded {
         // Replace the legacy detached process once, after the stable runtime is
         // ready. Unknown listeners do not match ownership and are never killed;
         // the launcher waits on the occupied port instead.
-        geph_kill_owned(&paths.config_dir);
-        if !geph_launch_agent_bootstrap(&uid, &paths.plist) && !geph_launch_agent_loaded(&uid) {
+        geph_kill_owned(&paths.config_dir)?;
+        if !geph_launch_agent_bootstrap(&uid, &paths.plist)
+            && geph_launch_agent_state(&uid) != LaunchAgentState::Loaded
+        {
             return Err("geph LaunchAgent bootstrap unavailable".into());
         }
     } else if (force_restart || binary_changed || config_changed || launcher_changed)
@@ -3457,10 +4047,20 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
 pub fn run() {
     let app = tauri::Builder::default()
         // single-instance MUST be the first plugin: a second launch just exits.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|arg| arg == "--autostart") { return; }
+            let Some(lifecycle) = app.try_state::<ServiceLifecycle>() else { return; };
+            if lifecycle.0.blocked() {
+                let intent = app.path().app_config_dir().ok()
+                    .and_then(|dir| service_lifecycle::IntentStore::new(dir).read().ok()).flatten();
+                if intent == Some(service_lifecycle::Intent::Stopped) {
+                    start_service_lifecycle(app, true, false);
+                }
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -3539,7 +4139,15 @@ pub fn run() {
             let pending_daemon_actions = pending_daemon_guard.blocker();
             if retained_preparation { pending_daemon_actions.store(true, Ordering::Release); }
             app.manage(DaemonActionsBlocked(pending_daemon_actions.clone()));
-            let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire);
+            let lifecycle = service_lifecycle::Gate::default();
+            let startup_intent = service_lifecycle::IntentStore::new(app.path().app_config_dir()?).read();
+            match &startup_intent {
+                Ok(Some(_)) => lifecycle.block("Resolving saved Slipstream stop state…"),
+                Err(error) => lifecycle.block(error.clone()),
+                Ok(None) => {}
+            }
+            app.manage(ServiceLifecycle(lifecycle.clone()));
+            let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire) && !lifecycle.blocked();
 
             // notify-rust's macOS application identity is process-global and
             // immutable after the first notification. Set it before any
@@ -3652,6 +4260,13 @@ pub fn run() {
                 &app.package_info().version,
             )));
 
+            let start_item = MenuItemBuilder::with_id(ID_START, tr("Start Slipstream"))
+                .enabled(lifecycle.blocked() && !pending_daemon_actions.load(Ordering::Acquire))
+                .build(app)?;
+            let quit_item = MenuItemBuilder::with_id(ID_QUIT, tr("Stop Slipstream and Quit"))
+                .accelerator("CmdOrCtrl+Q")
+                .enabled(!pending_daemon_actions.load(Ordering::Acquire))
+                .build(app)?;
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
                 .item(&detail_item)
@@ -3670,11 +4285,9 @@ pub fn run() {
                 )
                 .separator()
                 .item(&uninstall_item)
-                .item(
-                    &MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream"))
-                        .accelerator("CmdOrCtrl+Q")
-                        .build(app)?,
-                )
+                .item(&start_item)
+                .item(&MenuItemBuilder::with_id(ID_MENU_QUIT, tr("Quit menu bar app (keep routing)")).build(app)?)
+                .item(&quit_item)
                 .build()?;
 
             let tg_offer_reset = Arc::new(AtomicU64::new(0));
@@ -3708,6 +4321,16 @@ pub fn run() {
                         && matches!(id, ID_RESTART | ID_UNINSTALL)
                     {
                         return;
+                    }
+                    let mut service_lease = None;
+                    let changes_services = id.starts_with("exit:") || matches!(id, ID_ACCOUNT | ID_GEPH_ENABLE | ID_RESTART | ID_UNINSTALL);
+                    if changes_services {
+                        if pending_daemon_menu.load(Ordering::Acquire) { return; }
+                        service_lease = app.state::<ServiceLifecycle>().0.acquire(false);
+                        if service_lease.is_none() {
+                            notify(app, "Slipstream service actions are blocked until stop or start completes");
+                            return;
+                        }
                     }
                     if let Some(val) = id.strip_prefix("exit:") {
                         {
@@ -3766,9 +4389,9 @@ pub fn run() {
                                     }
                                 }
                             }
-                            geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
-                            let _ = enable_h.set_checked(new_on);
                             if new_on {
+                                geph_config_set(app, "enabled", "1");
+                                let _ = enable_h.set_checked(true);
                                 match ensure_geph_launch_agent(app, false) {
                                     Ok(true) => refresh_exit_menu(
                                         app.clone(),
@@ -3783,10 +4406,20 @@ pub fn run() {
                                     }
                                 }
                             } else {
+                                // Persist the user's choice before cleanup so a
+                                // crash cannot turn Geph back on at next startup.
+                                geph_config_set(app, "enabled", "0");
+                                if geph_field(app, "enabled").as_deref() != Some("0") {
+                                    let _ = enable_h.set_checked(true);
+                                    notify(app, &tr("Unable to save the disabled setting. Bundled Geph has not been stopped."));
+                                    return;
+                                }
+                                let _ = enable_h.set_checked(false);
                                 // Boot out only Slipstream's user LaunchAgent and
                                 // clean up any verified legacy detached process.
                                 if let Err(error) = geph_launch_agent_disable(app) {
                                     eprintln!("geph disable unavailable: {error}");
+                                    notify(app, &tr("Bundled Geph is disabled in settings, but it may still be running. Slipstream will retry cleanup when it opens."));
                                 }
                             }
                         }
@@ -3807,12 +4440,16 @@ pub fn run() {
                                     exit_refreshing_menu.clone(),
                                 );
                             }
-                            if !request_daemon_install(app, true) {
-                                run_admin(
-                                    &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
-                                    "Slipstream needs administrator access to restart its background daemon.",
-                                );
-                            }
+                            let app = app.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let _lease = service_lease;
+                                if !request_daemon_install(&app, true) {
+                                    run_admin(
+                                        &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
+                                        "Slipstream needs administrator access to restart its background daemon.",
+                                    );
+                                }
+                            });
                         }
                         ID_LOG => {
                             if !open_status_snapshot(app) {
@@ -3877,7 +4514,13 @@ pub fn run() {
                             notify(app, "Slipstream uninstalled");
                             app.exit(0);
                         }
-                        ID_QUIT => app.exit(0),
+                        ID_QUIT => start_service_lifecycle(app, false, true),
+                        ID_START => start_service_lifecycle(app, true, false),
+                        ID_MENU_QUIT => {
+                            if let Some(_lease) = app.state::<ServiceLifecycle>().0.acquire(false) {
+                                app.exit(0);
+                            }
+                        }
                         _ => {}
                     }
                 })
@@ -3893,10 +4536,14 @@ pub fn run() {
             let pending_daemon_discovery = pending_daemon_actions.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(UPDATE_INITIAL_DELAY_SECS)).await;
-                while pending_daemon_discovery.load(Ordering::Acquire) {
+                while pending_daemon_discovery.load(Ordering::Acquire) || update_app.state::<ServiceLifecycle>().0.blocked() {
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
                 loop {
+                    if update_app.state::<ServiceLifecycle>().0.blocked() {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
                     refresh_app_update(
                         update_app.clone(),
                         update_item_watch.clone(),
@@ -3931,7 +4578,12 @@ pub fn run() {
                 let mut tray_liveness = TrayLiveness::default();
                 let mut pending_daemon_guard = pending_daemon_guard;
                 loop {
-                    let state = refresh(&s, &d, &mut tray_liveness);
+                    let lifecycle = app_handle.state::<ServiceLifecycle>().0.clone();
+                    let state = if lifecycle.blocked() {
+                        let _ = s.set_text("Slipstream — service action");
+                        let _ = d.set_text(lifecycle.detail());
+                        "off".to_string()
+                    } else { refresh(&s, &d, &mut tray_liveness) };
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
@@ -3951,6 +4603,7 @@ pub fn run() {
                         || ensure_daemon_installed(&app_handle),
                     ) {
                         Ok(true) => {
+                            ensure_daemon_installed(&app_handle);
                             let _ = restart_item.set_enabled(true);
                             let _ = uninstall_item.set_enabled(true);
                             let _ = update_item.set_enabled(true);
@@ -3958,11 +4611,12 @@ pub fn run() {
                         Ok(false) => {}
                         Err(error) => eprintln!("update successor daemon gate: {error}"),
                     }
-                    if !pending_daemon_actions.load(Ordering::Acquire) {
-                        let _ = restart_item.set_enabled(true);
-                        let _ = uninstall_item.set_enabled(true);
-                        let _ = update_item.set_enabled(true);
-                    }
+                    let service_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire) && !lifecycle.blocked();
+                    let _ = restart_item.set_enabled(service_actions_enabled);
+                    let _ = uninstall_item.set_enabled(service_actions_enabled);
+                    let _ = update_item.set_enabled(service_actions_enabled || retained_preparation);
+                    let _ = quit_item.set_enabled(!pending_daemon_actions.load(Ordering::Acquire));
+                    let _ = start_item.set_enabled(lifecycle.blocked() && !pending_daemon_actions.load(Ordering::Acquire));
                     let now = Instant::now();
                     if status.is_some() {
                         has_seen_daemon_status = true;
@@ -3986,10 +4640,15 @@ pub fn run() {
                     ) {
                         next_daemon_recovery =
                             now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
-                        run_admin(
-                            &daemon_recovery_shell(),
-                            "Slipstream needs administrator access to repair its background daemon.",
-                        );
+                        if let Some(lease) = lifecycle.acquire(false) {
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let _lease = lease;
+                                run_admin(
+                                    &daemon_recovery_shell(),
+                                    "Slipstream needs administrator access to repair its background daemon.",
+                                );
+                            });
+                        }
                     }
                     if let Some(up) = status
                         .as_ref()
@@ -4042,8 +4701,16 @@ pub fn run() {
             // Geph belongs to a user LaunchAgent, not this tray process. The first
             // call migrates the old detached sidecar to a stable private runtime;
             // later calls only sync changed app/config artifacts.
-            if let Err(error) = ensure_geph_launch_agent(app.handle(), false) {
-                eprintln!("geph LaunchAgent setup unavailable: {error}");
+            match startup_intent {
+                Ok(intent) => match service_lifecycle::startup_action(intent,
+                    pending_daemon_actions_for_setup(app.handle()),
+                    std::env::args().any(|arg| arg == "--autostart")) {
+                    service_lifecycle::StartupAction::FinishStop => start_service_lifecycle(app.handle(), false, false),
+                    service_lifecycle::StartupAction::Resume => start_service_lifecycle(app.handle(), true, false),
+                    service_lifecycle::StartupAction::RemainStopped => lifecycle.block("Slipstream stopped. Open it or choose Start Slipstream to resume."),
+                    service_lifecycle::StartupAction::None => {},
+                },
+                Err(error) => notify(app.handle(), &error),
             }
             // A fresh install may not have Geph's city catalog yet. Once its control
             // RPC is ready, replace the explicit unavailable state in this live menu.
@@ -4060,10 +4727,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Slipstream tray");
 
-    // No windows -> keep the app alive on the tray. We do not stop Geph on exit:
-    // its user LaunchAgent remains responsible for the tunnel and crash recovery.
-    // The routing daemon also outlives the tray, so a running tunnel after quit is
-    // consistent. To actually stop Geph, disable it in the menu.
+    // Stop-and-Quit exits only after its explicit service transaction succeeds.
+    // Keep updater handoffs and the separately labelled menu-only exit intact.
     app.run(|_app, event| {
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             if code.is_none() {
@@ -4094,14 +4759,163 @@ mod tests {
         tray_status_with_hysteresis, uninstall_dialog_script_for, uninstall_ready_path,
         uninstall_shell_for_paths, valid_bundled_daemon, write_atomic_if_changed,
         write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
-        ExitMenuRefreshState, TrayLiveness, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
-        GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
+        ExitMenuRefreshState, LaunchAgentState, TrayLiveness, DAEMON_RECOVERY_STATUS_PATH,
+        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
     };
     use crate::status_client::StatusRead;
     use serde_json::json;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
     use std::sync::Mutex;
+
+    fn resume_readiness_attestation() -> super::InstallAttestation {
+        serde_json::from_value(json!({
+            "schema_version": 3, "source_sha256": "fixture",
+            "daemon": {"path":"/unused", "sha256":"fixture", "uid":0, "gid":0, "mode":448},
+            "witness": {"path":"/unused", "dev":1, "ino":2, "size":3, "mtime":0, "mtime_nsec":0},
+            "launchd": {"label":"dev.slipstream.tproxy", "pid":42},
+            "listener": {"host":"127.0.0.1", "hosts":["127.0.0.1","::1"], "port":1080},
+            "state":"active", "pf_active":true
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn resume_readiness_keeps_identity_across_settled_health_transitions() {
+        let mut attestation = resume_readiness_attestation();
+        for (attested, attested_pf) in [("active", true), ("dormant", false)] {
+            attestation.state = attested.into();
+            attestation.pf_active = attested_pf;
+            for (state, pf) in [("active", true), ("dormant", false)] {
+                let status = json!({"state":state,"phase":"active","pid":42,
+                    "heartbeat_seq":8,"geph":"up","pf_state":{"state":if pf {"ready"} else {"off"},"rules_loaded":pf},
+                    "health_updated_at":"2026-10-23T10:00:00Z"});
+                assert_eq!(
+                    super::resume_status_identity(
+                        &status,
+                        &attestation,
+                        true,
+                        |pid| pid == 42,
+                        || Some(false)
+                    ),
+                    Ok((42, 8, "2026-10-23T10:00:00Z".to_owned()))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resume_readiness_requires_projected_pf_and_a_new_health_sample() {
+        let mut attestation = resume_readiness_attestation();
+        for (state, pf, next_state, next_pf) in [
+            ("active", true, "dormant", false),
+            ("dormant", false, "active", true),
+        ] {
+            attestation.state = state.into();
+            attestation.pf_active = pf;
+            let mut raw = json!({"schema_version":2,
+                "daemon":{"state":state,"phase":"active","pid":42,"heartbeat_seq":8,
+                    "health_updated_at":"2026-10-23T10:00:00Z"},
+                "environment":{"pf":{"state":if pf {"ready"} else {"off"},"rules_loaded":pf}}});
+            let observe = |raw| {
+                super::resume_status_identity(
+                    &crate::status_client::status_for_tray(raw),
+                    &attestation,
+                    false,
+                    |pid| pid == 42,
+                    || Some(false),
+                )
+            };
+            let first = observe(raw.clone()).unwrap();
+            raw["daemon"]["heartbeat_seq"] = json!(9);
+            let cached_health = observe(raw.clone()).unwrap();
+            assert_eq!(
+                super::resume_observations_progress(&first, &cached_health),
+                Err("health-sample-not-progressing")
+            );
+            raw["daemon"]["state"] = json!(next_state);
+            raw["daemon"]["health_updated_at"] = json!("2026-10-23T10:00:05Z");
+            raw["environment"]["pf"] =
+                json!({"state":if next_pf {"ready"} else {"off"},"rules_loaded":next_pf});
+            let fresh_health = observe(raw.clone()).unwrap();
+            assert_eq!(
+                super::resume_observations_progress(&first, &fresh_health),
+                Ok(())
+            );
+            assert_eq!(
+                super::resume_observations_progress(&fresh_health, &fresh_health),
+                Err("heartbeat-not-progressing")
+            );
+            let mut missing_health = raw.clone();
+            missing_health["daemon"]
+                .as_object_mut()
+                .unwrap()
+                .remove("health_updated_at");
+            assert_eq!(observe(missing_health), Err("health-sample-missing"));
+            raw["environment"].as_object_mut().unwrap().remove("pf");
+            assert_eq!(observe(raw), Err("daemon-pf-observation-missing"));
+        }
+    }
+
+    #[test]
+    fn resume_readiness_explains_health_rejection_before_os_probes() {
+        let attestation = resume_readiness_attestation();
+        let mut status = json!({"state":"active","phase":"recovering","pid":42,"heartbeat_seq":8,
+            "pf_state":{"state":"ready","rules_loaded":true},"health_updated_at":"sample"});
+        let no_process_probe = |_| panic!("unsettled status must not pass to ownership checks");
+        let no_label_probe = || panic!("unsettled status must not pass to label checks");
+        assert_eq!(
+            super::resume_status_identity(
+                &status,
+                &attestation,
+                false,
+                no_process_probe,
+                no_label_probe
+            ),
+            Err("daemon-phase-unsettled")
+        );
+        status["phase"] = json!("active");
+        status["state"] = json!("dormant");
+        assert_eq!(
+            super::resume_status_identity(
+                &status,
+                &attestation,
+                false,
+                no_process_probe,
+                no_label_probe
+            ),
+            Err("live-state-pf-mismatch")
+        );
+        assert_eq!(
+            super::resume_state_label(Some("private/path-or-secret")),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn resume_readiness_distinguishes_ownership_label_and_geph_failures() {
+        let attestation = resume_readiness_attestation();
+        let status = json!({"state":"active","phase":"active","pid":42,"heartbeat_seq":8,"geph":"off",
+                "pf_state":{"state":"ready","rules_loaded":true},"health_updated_at":"sample"});
+        assert_eq!(
+            super::resume_status_identity(
+                &status,
+                &attestation,
+                true,
+                |_| false,
+                || panic!("ownership fails first")
+            ),
+            Err("daemon-pid-ownership-unconfirmed")
+        );
+        assert_eq!(
+            super::resume_status_identity(&status, &attestation, true, |_| true, || None),
+            Err("daemon-label-state-unknown")
+        );
+        assert_eq!(
+            super::resume_status_identity(&status, &attestation, true, |_| true, || Some(false)),
+            Err("daemon-geph-not-up")
+        );
+    }
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -4932,7 +5746,7 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
                     }
                 }
             })),
-            geph_lifecycle_diagnostic_value(false, true, true),
+            geph_lifecycle_diagnostic_value(false, true, LaunchAgentState::Loaded),
             123.0,
             Some(json!({
                 "available": true,
@@ -5014,7 +5828,7 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
 
     #[test]
     fn geph_lifecycle_reports_owned_sidecar_without_claiming_pf_state() {
-        let lifecycle = geph_lifecycle_diagnostic_value(false, false, true);
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, LaunchAgentState::Loaded);
         let text = serde_json::to_string(&lifecycle).unwrap();
 
         assert_eq!(lifecycle["state"], "sidecar_only");
@@ -5027,11 +5841,19 @@ v0.2.0-preview.1/Slipstream.app.tar.gz",
 
     #[test]
     fn geph_lifecycle_marks_no_owned_sidecar_as_off() {
-        let lifecycle = geph_lifecycle_diagnostic_value(false, false, false);
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, LaunchAgentState::Absent);
 
         assert_eq!(lifecycle["state"], "off");
         assert_eq!(lifecycle["root_daemon"], "absent");
         assert_eq!(lifecycle["owned_launch_agent"], "absent");
+    }
+
+    #[test]
+    fn geph_lifecycle_does_not_report_unknown_job_as_off() {
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, LaunchAgentState::Unknown);
+
+        assert_eq!(lifecycle["state"], "unknown");
+        assert_eq!(lifecycle["owned_launch_agent"], "unknown");
     }
 
     #[test]
