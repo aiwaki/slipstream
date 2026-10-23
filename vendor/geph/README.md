@@ -23,6 +23,13 @@ OSV audit. GitHub attestations bind the payload and SBOM to the exact
 `build-geph.yml` run. The app workflow verifies all of these before embedding
 the binary.
 
+Revision 2 of 0.4.3 updates rustls-webpki and webpki-roots for the emSign
+certificate distrust advisories. It keeps the upstream crate and all 13
+source edits unchanged. The paired application/Python trust-store update
+uses a narrowly bound source bootstrap; both dependency audits still run.
+The two RSA client-path exceptions have a fresh exact-source review through
+2026-10-30. See `docs/ROUTING_RESEARCH.md` for evidence and limits.
+
 Revisions 3 through 5 of `0.3.9` carry explicit `source_edits` in `SOURCE.json`.
 Each edit binds the complete input and output file SHA-256 and exactly one
 literal replacement; extraction fails on drift. The contract shipped with the

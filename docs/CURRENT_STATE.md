@@ -154,6 +154,49 @@ This receipt records the October20 installation, not the current workstation:
 the application was removed by the user on October22. The earlier tray CUA
 timeout is historical; Safari UI access worked during the October22 diagnosis.
 
+### Historical dependency-source checkpoint before PR413 merge
+
+The active dependency checkout is
+`/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`,
+branch `codex/emsign-dependency-update`, based on main
+`e918906069dddc722aa0c6283b94c1a16af8954e`. Earlier installed-state paragraphs
+below are historical: the user quit and removed Slipstream on October 22
+because its Geph processes remained. Last read-only observation found no
+installed app or owned root/user jobs; standalone Geph is external and untouched.
+PF absence was not established. Preserve all previous apps, state and evidence.
+
+PR412 remains open at `a51383ba8b6b36b1186c1e8b71b7186eee090388` in the
+separate `readme-humanizer` checkout. CI39837144364 passed native product,
+packaging, browser and lifecycle checks. Audit39837144381 found new emSign
+trust-store advisories in certifi, rustls-webpki and webpki-roots. Its code
+fixes confirmed Geph shutdown and a DoH fallback exception boundary, but its
+Quit label change does not implement full shutdown. Full Stop-and-Quit work
+is separate and unfinished; neither that behavior nor PR412 is installed.
+
+This source-bootstrap repair changes certifi 2026.6.17 to 2026.10.19 in all
+three Python locks, rustls-webpki 0.103.15 to 0.103.16 and webpki-roots 1.0.9
+to 1.0.10 in both affected Rust locks. Geph remains 0.4.3 with the same crate,
+13 source edits, features and targets, advancing only to immutable revision 2.
+Registry archives/hashes and the fixed certifi trust bundle were checked.
+Locked metadata passed for the app and both Geph Apple targets. Five focused
+TLS/context tests passed using the fixed wheel. An old-bundle control accepts
+emSign ECC Root CA-G3; the fixed bundle rejects it while retaining three
+unaffected emSign roots. These are local checks, not installed qualification.
+
+Fresh static RSA review supports only the two existing rsa 0.8.2 client-path
+exceptions through 2026-10-30, bound to exact r1/r2 SOURCE, locks and policies.
+See ROUTING_RESEARCH.md. All163 focused source/audit/build-contract checks
+passed, and the canonical source-transition verifier accepts the actual
+base/current files. Fresh dependency audits, patch review and source PR
+checks remain pending. After merge, authenticate `geph-vendor-0.4.3-r2` from
+the main-only producer before packaging. The public preview30 stays immutable;
+preview31 delivery, ordinary update/rollback and full shutdown remain open.
+
+### Historical delivery checkpoint
+
+### Historical delivery checkpoint
+
+
 Delivery resumed on branch `codex/preview31-updater-delivery`, based on main
 `5385b89add415c531276ba43f5c06c50293ffb17`, in the physical checkout below.
 Its exact-main CI39465376685/1 and audit39465376697/1 are already green.

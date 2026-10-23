@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import hashlib
+import io
 import os
 from unittest.mock import patch
 import unittest
@@ -11,6 +12,99 @@ import ci_scope
 
 
 class CiScopeTests(unittest.TestCase):
+    def python_lock_delta(self):
+        deltas = {
+            path: (f"# {path}\ncertifi==2026.6.17\n".encode(),
+                   f"# {path}\ncertifi==2026.10.19\n".encode())
+            for path in ci_scope.PYTHON_LOCK_FILE_BINDINGS
+        }
+        bindings = {path: tuple(hashlib.sha256(value).hexdigest() for value in delta)
+                    for path, delta in deltas.items()}
+        return deltas, bindings
+
+    def test_certifi_bootstrap_requires_all_exact_locks_and_geph_contract(self):
+        deltas, bindings = self.python_lock_delta()
+        paths = [*bindings, *ci_scope.GEPH_BOOTSTRAP_REQUIRED]
+        with patch.object(ci_scope, "PYTHON_LOCK_FILE_BINDINGS", bindings):
+            self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request",
+                python_lock_delta=deltas), ci_scope.CiScope(True, True, False))
+            self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
+                python_lock_delta=deltas).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(paths,
+                event_name="pull_request").geph_bootstrap)
+            for missing in paths:
+                with self.subTest(missing=missing):
+                    self.assertFalse(ci_scope.classify_paths(
+                        [path for path in paths if path != missing],
+                        event_name="pull_request", python_lock_delta=deltas).geph_bootstrap)
+            for path, (before, after) in deltas.items():
+                for changed in ((b"unreviewed-base", after),
+                                (before, b"unreviewed-head"), (before, before),
+                                (before, after + b"extra==1.0.0\n"),
+                                (before, after + b"--index-url=https://other.invalid/simple\n")):
+                    with self.subTest(path=path, changed=changed):
+                        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request",
+                            python_lock_delta={**deltas, path: changed}).geph_bootstrap)
+            for extra in ("spike/requirements-runtime.in", "scripts/update_python_locks.sh",
+                          "spike/tproxy.py", "security/dependency-audit-policy.json"):
+                with self.subTest(extra=extra):
+                    self.assertFalse(ci_scope.classify_paths([*paths, extra],
+                        event_name="pull_request", python_lock_delta=deltas).geph_bootstrap)
+            first = next(iter(deltas))
+            for invalid in ({first: deltas[first]},
+                            {**deltas, "extra": (b"before", b"after")},
+                            {**deltas, first: ("not-bytes", deltas[first][1])}):
+                self.assertFalse(ci_scope.reviewed_python_lock_delta(invalid))
+
+    def test_python_lock_git_reader_requires_committed_base_and_head_bytes(self):
+        base, head = "1" * 40, "2" * 40
+        expected = {
+            path: tuple(f"{ref}:{path}".encode() for ref in (base, head))
+            for path in ci_scope.PYTHON_LOCK_FILE_BINDINGS
+        }
+        with patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+             patch.object(ci_scope.subprocess, "check_output",
+                          side_effect=lambda command, **kwargs: command[2].encode()) as read:
+            self.assertEqual(ci_scope.python_lock_delta_from_git(), expected)
+            self.assertCountEqual(
+                [call.args[0] for call in read.call_args_list],
+                [["git", "show", f"{ref}:{path}"]
+                 for path in ci_scope.PYTHON_LOCK_FILE_BINDINGS for ref in (base, head)],
+            )
+            for call in read.call_args_list:
+                self.assertEqual(call.kwargs, {"stderr": ci_scope.subprocess.DEVNULL, "timeout": 10})
+        for key in ("BASE_SHA", "GITHUB_SHA"):
+            for invalid in ("", "main", head + ":path"):
+                with self.subTest(key=key, invalid=invalid), \
+                     patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head, key: invalid}), \
+                     patch.object(ci_scope.subprocess, "check_output") as read:
+                    self.assertIsNone(ci_scope.python_lock_delta_from_git())
+                    read.assert_not_called()
+        for error in (OSError(), ci_scope.subprocess.CalledProcessError(1, "git"),
+                      ci_scope.subprocess.TimeoutExpired("git", 10)):
+            with self.subTest(error=error), \
+                 patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+                 patch.object(ci_scope.subprocess, "check_output", side_effect=error):
+                self.assertIsNone(ci_scope.python_lock_delta_from_git())
+
+    def test_python_lock_cli_never_admits_missing_git_evidence_or_push(self):
+        deltas, bindings = self.python_lock_delta()
+        paths = [*bindings, *ci_scope.GEPH_BOOTSTRAP_REQUIRED]
+        for event, evidence, expected in (("pull_request", deltas, True),
+                                          ("pull_request", None, False),
+                                          ("push", deltas, False)):
+            with self.subTest(event=event, evidence=evidence), tempfile.TemporaryDirectory() as tmp, \
+                 patch.object(ci_scope, "PYTHON_LOCK_FILE_BINDINGS", bindings), \
+                 patch.object(ci_scope, "python_lock_delta_from_git", return_value=evidence) as read, \
+                 patch.object(ci_scope.sys, "stdin", io.StringIO("\n".join(paths))), \
+                 patch.object(ci_scope.sys, "stdout", io.StringIO()):
+                output = Path(tmp) / "github-output"
+                self.assertEqual(ci_scope.main(["--event-name", event,
+                    "--github-output", str(output)]), 0)
+                self.assertEqual(output.read_text(),
+                    f"geph_bootstrap={str(expected).lower()}\nproduct=true\nwindows=false\n")
+                self.assertEqual(read.call_count, int(event == "pull_request"))
+
     def test_exact_delivery_bundle_never_exempts_partial_or_unreviewed_app_edits(self):
         paths = list(ci_scope.DELIVERY_FILE_BINDINGS)
         deltas = {path: (f"old:{path}".encode(), f"new:{path}".encode()) for path in paths}
@@ -78,8 +172,10 @@ class CiScopeTests(unittest.TestCase):
             event_name="pull_request").geph_bootstrap)
 
     def test_combined_tls_and_quinn_repair_keeps_exact_lock_boundaries(self):
+        repairs = next(repairs for repairs in ci_scope.APP_LOCK_REPAIR_SETS
+                       if {repair[0] for repair in repairs} == {"rustls", "quinn-proto"})
         before, after = ["version = 4"], ["version = 4"]
-        for name, old, old_hash, new, new_hash in ci_scope.APP_LOCK_REPAIR_SETS[-1]:
+        for name, old, old_hash, new, new_hash in repairs:
             for rows, version, checksum in ((before, old, old_hash), (after, new, new_hash)):
                 rows.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\nchecksum = "{checksum}"\n'
                             'source = "registry+https://github.com/rust-lang/crates.io-index"\ndependencies = ["bytes"]')
@@ -88,7 +184,7 @@ class CiScopeTests(unittest.TestCase):
         self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request",
             app_lock_delta=(before, after)).geph_bootstrap)
         bad_values = [after.replace('"0.11.18"', '"0.11.17"'),
-                      after.replace(ci_scope.APP_LOCK_REPAIR_SETS[-1][-1][-1], "0" * 64),
+                      after.replace(repairs[-1][-1], "0" * 64),
                       after.replace('dependencies = ["bytes"]', 'dependencies = []'),
                       after.replace('version = 4', 'version = 3'), before,
                       after + '\n[[package]]\nname="other"\nversion="1.0.0"']
@@ -97,6 +193,58 @@ class CiScopeTests(unittest.TestCase):
                 self.assertFalse(ci_scope.reviewed_app_lock_repair(before, actual))
         self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
             app_lock_delta=(before, after)).geph_bootstrap)
+
+    def test_emsign_rust_repair_preserves_graph_and_combines_with_exact_certifi(self):
+        repairs = next(repairs for repairs in ci_scope.APP_LOCK_REPAIR_SETS
+                       if {repair[0] for repair in repairs} == {"rustls-webpki", "webpki-roots"})
+        self.assertEqual({(name, old, new) for name, old, _, new, _ in repairs}, {
+            ("rustls-webpki", "0.103.15", "0.103.16"),
+            ("webpki-roots", "1.0.9", "1.0.10"),
+        })
+        before, after = ["version = 4"], ["version = 4"]
+        for name, old, old_hash, new, new_hash in repairs:
+            for rows, version, checksum in ((before, old, old_hash), (after, new, new_hash)):
+                rows.append(f'[[package]]\nname="{name}"\nversion="{version}"\nchecksum="{checksum}"\n'
+                            'source="registry+https://github.com/rust-lang/crates.io-index"\ndependencies=["ring"]')
+        before, after = "\n".join(before), "\n".join(after)
+        paths = [*ci_scope.GEPH_BOOTSTRAP_REQUIRED, ci_scope.APP_LOCK]
+        self.assertTrue(ci_scope.classify_paths(paths, event_name="pull_request",
+            app_lock_delta=(before, after)).geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
+            app_lock_delta=(before, after)).geph_bootstrap)
+        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+        bad_values = [before, after.replace('dependencies=["ring"]', 'dependencies=[]'),
+                      after.replace('version = 4', 'version = 3'),
+                      after + '\n[[package]]\nname="extra"\nversion="1.0.0"',
+                      after.replace('registry+https://github.com/rust-lang/crates.io-index',
+                                    'git+https://other.invalid/repository')]
+        for name, old, old_hash, new, new_hash in repairs:
+            bad_values.extend((after.replace(new_hash, "0" * 64),
+                               after.replace(f'version="{new}"', f'version="{old}"')
+                                    .replace(new_hash, old_hash)))
+            self.assertFalse(ci_scope.reviewed_app_lock_repair(
+                before.replace(old_hash, "0" * 64), after))
+            duplicate = (f'\n[[package]]\nname="{name}"\nversion="{new}"\n'
+                         f'checksum="{new_hash}"\n'
+                         'source="registry+https://github.com/rust-lang/crates.io-index"')
+            self.assertFalse(ci_scope.reviewed_app_lock_repair(before + duplicate, after + duplicate))
+        for changed in bad_values:
+            with self.subTest(changed=changed):
+                self.assertFalse(ci_scope.reviewed_app_lock_repair(before, changed))
+        deltas, bindings = self.python_lock_delta()
+        with patch.object(ci_scope, "PYTHON_LOCK_FILE_BINDINGS", bindings):
+            combined = [*paths, *bindings, "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
+            self.assertEqual(ci_scope.classify_paths(combined, event_name="pull_request",
+                app_lock_delta=(before, after), python_lock_delta=deltas),
+                ci_scope.CiScope(True, True, False))
+            self.assertFalse(ci_scope.classify_paths(combined, event_name="pull_request",
+                python_lock_delta=deltas).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(combined, event_name="pull_request",
+                app_lock_delta=(before, after)).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(
+                [path for path in combined if path != "scripts/test_ci_scope.py"],
+                event_name="pull_request", app_lock_delta=(before, after),
+                python_lock_delta=deltas).geph_bootstrap)
 
     def app_lock_delta(self):
         before, after = ["version = 4"], ["version = 4"]

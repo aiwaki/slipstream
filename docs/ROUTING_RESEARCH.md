@@ -1,5 +1,56 @@
 # Routing Research Notes
 
+### emSign trust-store and RSA client review, 2026-10-23
+
+PR412 audit39837144381 found certifi 2026.6.17
+([GHSA-6q48-6c7w-9gw2](https://github.com/advisories/GHSA-6q48-6c7w-9gw2)),
+rustls-webpki 0.103.15
+([RUSTSEC-2026-0382](https://rustsec.org/advisories/RUSTSEC-2026-0382.html))
+and webpki-roots 1.0.9
+([RUSTSEC-2026-0381](https://rustsec.org/advisories/RUSTSEC-2026-0381.html)).
+The repair pins 2026.10.19, 0.103.16 and 1.0.10 respectively. All three Python
+locks and both affected Rust locks are updated. The other four tracked Cargo
+locks contain none of these packages. Registry metadata and downloaded
+archives match the committed checksums; unrelated package entries and edges
+remain unchanged.
+
+The Python bundle authenticates payload probes, installation HTTPS checks and
+audit downloads. App reqwest authenticates release metadata/archive requests,
+in addition to the unchanged archive signature checks. Geph reqwest consumers
+include HTTP/fronted/Lambda broker requests, metadata and updates. Its native
+TLS transport is a separate backend, outside this WebPKI fix.
+
+Actual bundle checks reject the removed emSign ECC Root CA-G3, accepted by the
+old bundle, and continue accepting unaffected emSign G1/C1/C3 roots. Python
+CERT_REQUIRED and hostname verification remain enabled. These checks establish
+the trust-store change, not a forged-intermediate exploit or installed-app
+result. Geph source, CLI, credentials, routing and session edits are unchanged.
+
+#### RSA client review 2026-10-23
+
+The two rsa 0.8.2 exceptions expired on October 22. A fresh independent review
+checked the canonical Geph archive and 13 edits, all 41 client Rust files and
+five dependency archives. The complete reverse closure is rsa ->
+blind-rsa-signatures -> mizaru2 -> geph5-broker-protocol -> geph5-misc-rpc,
+plus their direct client edges. All six package entries are unchanged by this
+repair. Broker/config/RPC/cache inputs enter public-key decoding, blinding,
+finalization and verification; they do not construct/import RsaPrivateKey or
+call private signing/decryption/precomputation. The blinding-factor `Secret`
+is distinct from `SecretKey(RsaPrivateKey)`. The conclusion does not rely on
+trusting broker-supplied bytes. Private APIs remain present in dependency
+source, and their elimination from the binary is not claimed.
+
+The renewed exceptions cover only CVE-2023-49092 and CVE-2026-21895 through
+2026-10-30. Current SOURCE SHA-256 is
+`387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e`;
+lock SHA-256 is
+`440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe`.
+The transition guard binds these identities and both complete policies.
+General RSA safety, constant-time blinding and installed behavior are not
+established. Fresh audits and the immutable native vendor release remain
+required. Local supplemental evidence is retained by Codex Security under
+`findings/emsign-trust-store-repair.md` for this physical checkout.
+
 ### Quinn dependency review 2026-10-15
 
 PR388 audit run 38725912548 reached the app scan at commit `0bcfc5d70` and

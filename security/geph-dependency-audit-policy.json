@@ -28,10 +28,10 @@
         "CVE-2023-49092"
       ],
       "ecosystem": "crates.io",
-      "expires": "2026-10-22",
+      "expires": "2026-10-30",
       "id": "geph-rsa-0.8.2-marvin-public-key-only",
       "package": "rsa",
-      "reason": "Reviewed 2026-10-15 against Geph 0.4.3 SOURCE 843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe and Cargo.lock 5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d. The client and its complete RSA reverse-dependency closure use public-key parsing, blind/finalize/verify only. No client config, RPC or cache DTO constructs or imports RsaPrivateKey, and no client call enters private-key signing/decryption required by Marvin. This is a bounded reachability exception, not removal of private APIs or a blanket cryptographic safety claim. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-15.",
+      "reason": "Reviewed 2026-10-23 against Geph 0.4.3-r2 SOURCE 387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e and Cargo.lock 440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe. The verified crate, 13 source edits and complete RSA reverse-dependency closure are unchanged; only two WebPKI lock entries changed. Fresh tracing confirms public-key parsing, blind/finalize/verify only in the client. No client config, RPC or cache DTO constructs or imports RsaPrivateKey, and no client call enters the private signing/decryption required by Marvin. This bounded reachability exception does not establish constant-time blinding arithmetic, removal of private APIs or installed-artifact safety. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-23.",
       "version": "0.8.2"
     },
     {
@@ -39,10 +39,10 @@
         "CVE-2026-21895"
       ],
       "ecosystem": "crates.io",
-      "expires": "2026-10-22",
+      "expires": "2026-10-30",
       "id": "geph-rsa-0.8.2-prime-validation-public-key-only",
       "package": "rsa",
-      "reason": "Reviewed 2026-10-15 against the same Geph 0.4.3 SOURCE 843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe and Cargo.lock 5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d. Untrusted broker key bytes are parsed as RsaPublicKey (modulus/exponent), not RsaPrivateKey. The malformed-prime from_components/precompute path is not called by the client, reverse dependencies, config, RPC or cache DTO. This exception covers only this advisory and exact client graph; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-15.",
+      "reason": "Reviewed 2026-10-23 against Geph 0.4.3-r2 SOURCE 387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e and Cargo.lock 440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe. The verified crate, source edits and complete RSA reverse-dependency closure are unchanged. Fresh tracing confirms that untrusted broker/config key bytes enter RsaPublicKey modulus/exponent decoders; no client, RPC or cache DTO enters RsaPrivateKey::from_components/precompute. This exception covers only the malformed-private-prime advisory in this exact client graph, regardless of broker trust, and makes no broader cryptographic safety claim. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-23.",
       "version": "0.8.2"
     },
     {
