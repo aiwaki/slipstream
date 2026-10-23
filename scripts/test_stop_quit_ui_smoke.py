@@ -187,6 +187,67 @@ class StopQuitObserverTests(unittest.TestCase):
             self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT, username="fixture", password="secret"), "confirmed")
             self.assertTrue(apple.call_args.kwargs["sensitive"])
 
+    def test_disabled_native_menu_is_not_reported_as_a_successful_click(self):
+        with mock.patch.object(smoke, "applescript", return_value="disabled:Stop Slipstream and Quit"):
+            with self.assertRaisesRegex(smoke.QualificationError, "disabled before click"):
+                smoke.menu_action(4242, smoke.STOP_LABELS)
+
+    def test_auth_snapshot_accepts_only_known_processes_and_numeric_diagnostics(self):
+        raw = "process=SecurityAgent|present=1|windows=0\nprocess=SecurityAgentHelper-arm64|window=1|static=3|secure=1|prompt_value=0|prompt_name=1"
+        with mock.patch.object(smoke, "applescript", return_value=raw) as apple:
+            observed = smoke.auth_snapshot(smoke.STOP_PROMPT)
+            self.assertEqual(observed[1]["prompt_name"], 1)
+            self.assertEqual(observed[0]["windows"], 0)
+            self.assertTrue(apple.call_args.kwargs["sensitive"])
+            self.assertNotIn("click ", apple.call_args.args[0])
+            self.assertNotIn("set value of", apple.call_args.args[0])
+        for private in ["process=external-private-title|present=1", "process=SecurityAgent|secure=private-value", "process=SecurityAgent|field_value=0"]:
+            with mock.patch.object(smoke, "applescript", return_value=private):
+                with self.assertRaises(smoke.QualificationError):
+                    smoke.auth_snapshot(smoke.STOP_PROMPT)
+
+    def test_bounded_tray_diagnostics_redact_credentials_before_truncating(self):
+        secret = "unique-fixture-password"
+        raw = ("unrelated private output\n" + "error: " + "x" * 390 + secret + "\n"
+               + "error: password = unknown-secret with spaces\n"
+               + "execution error: administrator action failed\n")
+        excerpt = smoke.redacted_error_excerpt(raw, (secret,))
+        self.assertNotIn(secret, excerpt)
+        self.assertNotIn("unknown-secret", excerpt)
+        self.assertNotIn("unrelated private output", excerpt)
+        self.assertIn("administrator action failed", excerpt)
+        self.assertLessEqual(len(excerpt), 2000)
+
+    def test_owned_operation_diagnostics_never_return_process_arguments(self):
+        secret = "sensitive-command-argument"
+        uid = os.getuid()
+        raw = (f'{uid} 40 1 unrelated {secret}\n'
+               f'{uid} 42 41 /usr/bin/osascript -e do shell script --stop with prompt {smoke.STOP_PROMPT} {secret}\n')
+        with mock.patch.object(smoke, "run", return_value=subprocess.CompletedProcess([], 0, raw.encode(), b"")):
+            observed = smoke.owned_operation_snapshot(41, smoke.STOP_PROMPT)
+        self.assertEqual(observed["operation_prompt_children"], 1)
+        self.assertEqual(observed["children"], 1)
+        self.assertNotIn(secret, json.dumps(observed))
+
+    def test_failure_snapshot_retains_operation_boundary_when_ax_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryFile() as log:
+            intent = Path(temp) / "intent"
+            intent.write_bytes(b"v1 stopping\n")
+            secret = "private-fixture-password"
+            log.write(f"Slipstream service lifecycle: administrator action failed {secret}\n".encode())
+            log.flush()
+            tray = mock.Mock(log=log)
+            tray.alive.return_value = True
+            tray.process.pid = 42
+            tray.process.poll.return_value = None
+            with mock.patch.object(smoke, "owned_operation_snapshot", return_value={"operation_prompt_children": 0}), \
+                 mock.patch.object(smoke, "auth_snapshot", side_effect=smoke.QualificationError(f"AX failed {secret}")):
+                observed = smoke.failure_snapshot(tray, intent, smoke.STOP_PROMPT, (secret,))
+            self.assertEqual(observed["intent"], "stopping")
+            self.assertEqual(observed["authorization_ui"]["observation"], "unavailable")
+            self.assertTrue(observed["tray_alive_owned"])
+            self.assertNotIn(secret, json.dumps(observed))
+
     def test_temporary_admin_cleanup_runs_on_failure_and_targets_created_user(self):
         calls = []
         accounts = {"root"}

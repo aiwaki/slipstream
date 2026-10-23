@@ -36,7 +36,12 @@ passed CI39899304752 and audit39899304760, including native compilation,
 packaged browser and the existing lifecycle checks. The new disposable native
 smoke adds actual tray Quit, SecurityAgent Cancel, installer-lock failure,
 partial cleanup failure, successful retry, stopped login and ordinary reopen.
-First native run39901792294 is exercising that boundary at `ae35257fb`.
+First native run39901792294 at `ae35257fb` passed build, browser and the
+previous lifecycle smoke, but failed the new case: native Cancel was not
+observed. The report has no confirmed cases and cleanup passed; it does not
+establish whether the product or accessibility observer failed. Preserve
+`output/stop-quit-20261023/first-native/`; add bounded phase/UI diagnostics
+before retrying. Audit39901792141 passed.
 Review then confirmed a separate pre-listener Geph orphan defect: the private
 record exists before bind, but stop required the SOCKS listener. Stop now checks
 fresh PID/UID/executable/config instead; the old guard failed its causal test,

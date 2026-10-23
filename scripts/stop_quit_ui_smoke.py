@@ -112,6 +112,7 @@ def menu_action(pid, labels=None):
                 set labelsFound to name of every menu item of menu 1 of itemRef
                 repeat with wanted in {label_list}
                   if labelsFound contains (contents of wanted) then
+                    if not (enabled of menu item (contents of wanted) of menu 1 of itemRef) then return "disabled:" & (contents of wanted)
                     click menu item (contents of wanted) of menu 1 of itemRef
                     return "clicked:" & (contents of wanted)
                   end if
@@ -131,7 +132,10 @@ def menu_action(pid, labels=None):
     end tell
     error "Slipstream status menu/action unavailable"
     '''
-    return applescript(script)
+    response = applescript(script)
+    if response.startswith("disabled:"):
+        raise QualificationError("native Stop menu item was disabled before click")
+    return response
 
 
 def auth_action(prompt, *, cancel=False, username="", password=""):
@@ -193,6 +197,166 @@ def auth_action(prompt, *, cancel=False, username="", password=""):
         # Counts only: preserve useful AX diagnostics without reading field values.
         raise QualificationError(response)
     return response
+
+
+AUTH_PROCESS_NAMES = ("SecurityAgent", "SecurityAgentHelper-arm64", "SecurityAgentHelper-x86_64")
+
+
+def auth_snapshot(prompt):
+    """Diagnostic-only: never click helper UI or return any accessible text."""
+    names = "{" + ",".join(map(apple_string, AUTH_PROCESS_NAMES)) + "}"
+    script = f'''
+    set reportText to ""
+    tell application "System Events"
+      repeat with expectedName in {names}
+        set processName to contents of expectedName
+        try
+        if exists application process processName then
+          set agent to application process processName
+          set windowCount to count of windows of agent
+          set reportText to reportText & "process=" & processName & "|present=1|windows=" & windowCount & linefeed
+          set windowLimit to windowCount
+          if windowLimit > 3 then set windowLimit to 3
+          repeat with windowIndex from 1 to windowLimit
+            set w to window windowIndex of agent
+            set elements to {{w}} & (entire contents of w)
+            set elementLimit to count of elements
+            if elementLimit > 256 then set elementLimit to 256
+            set staticCount to 0
+            set textCount to 0
+            set comboCount to 0
+            set secureCount to 0
+            set buttonCount to 0
+            set cancelCount to 0
+            set confirmCount to 0
+            set readErrors to 0
+            set valueText to ""
+            set nameText to ""
+            set descriptionText to ""
+            repeat with elementIndex from 1 to elementLimit
+              set e to item elementIndex of elements
+              try
+                set r to role of e
+                if r is "AXStaticText" then set staticCount to staticCount + 1
+                if r is "AXTextField" then set textCount to textCount + 1
+                if r is "AXComboBox" then set comboCount to comboCount + 1
+                if r is "AXTextField" or r is "AXComboBox" then
+                  if subrole of e is "AXSecureTextField" then set secureCount to secureCount + 1
+                end if
+                if r is "AXButton" then
+                  set buttonCount to buttonCount + 1
+                  set buttonName to name of e
+                  if buttonName is "Cancel" or buttonName is "Отмена" then set cancelCount to cancelCount + 1
+                  if buttonName is "OK" or buttonName is "Allow" or buttonName is "ОК" then set confirmCount to confirmCount + 1
+                end if
+                if r is "AXStaticText" or r is "AXWindow" then
+                  try
+                    set valueText to valueText & " " & (value of e as text)
+                  end try
+                  try
+                    set nameText to nameText & " " & (name of e as text)
+                  end try
+                  try
+                    set descriptionText to descriptionText & " " & (description of e as text)
+                  end try
+                end if
+              on error
+                set readErrors to readErrors + 1
+              end try
+            end repeat
+            set pv to (valueText contains {apple_string(prompt)}) as integer
+            set pn to (nameText contains {apple_string(prompt)}) as integer
+            set pd to (descriptionText contains {apple_string(prompt)}) as integer
+            set slipstreamText to ((valueText & nameText & descriptionText) contains "Slipstream") as integer
+            set reportText to reportText & "process=" & processName & "|window=" & windowIndex & "|elements=" & (count of elements) & "|static=" & staticCount & "|text=" & textCount & "|combo=" & comboCount & "|secure=" & secureCount & "|buttons=" & buttonCount & "|cancel=" & cancelCount & "|confirm=" & confirmCount & "|prompt_value=" & pv & "|prompt_name=" & pn & "|prompt_description=" & pd & "|slipstream=" & slipstreamText & "|read_errors=" & readErrors & linefeed
+          end repeat
+        else
+          set reportText to reportText & "process=" & processName & "|present=0|windows=0" & linefeed
+        end if
+        on error
+          set reportText to reportText & "process=" & processName & "|query_error=1" & linefeed
+        end try
+      end repeat
+    end tell
+    return reportText
+    '''
+    raw = applescript(script, sensitive=True, timeout=10)
+    rows = []
+    allowed = {"present", "windows", "window", "elements", "static", "text", "combo", "secure", "buttons", "cancel", "confirm",
+               "prompt_value", "prompt_name", "prompt_description", "slipstream", "read_errors", "query_error"}
+    for line in raw.splitlines()[:15]:
+        row = {}
+        for item in line.split("|"):
+            key, value = item.split("=", 1)
+            if key == "process" and value in AUTH_PROCESS_NAMES:
+                row[key] = value
+            elif key in allowed and value.isdecimal():
+                row[key] = int(value)
+            else:
+                raise QualificationError("unexpected authorization diagnostic shape")
+        rows.append(row)
+    return rows
+
+
+def redacted_text(raw, secrets_to_hide=()):
+    text = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+    for secret in secrets_to_hide:
+        if secret:
+            text = text.replace(secret, "[redacted]")
+    lines = []
+    for line in text.splitlines():
+        if re.search(r"(?i)(?:password|secret|token|credentials?|authorization)\s*[:=]|://[^ /:]+:[^ /@]+@|BEGIN .*PRIVATE KEY", line):
+            line = "[redacted credential-bearing line]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def redacted_error_excerpt(raw, secrets_to_hide=()):
+    lines = [line[:400] for line in redacted_text(raw, secrets_to_hide).splitlines()
+             if re.search(r"(?i)error|fail|cancel|authoriz|service lifecycle|service action|redacted", line)]
+    return "\n".join(lines[-8:])[-2000:]
+
+
+def owned_operation_snapshot(pid, prompt):
+    census = run(["/bin/ps", "-axww", "-o", "uid=,pid=,ppid=,command="], check=False)
+    if census.returncode or census.stderr.strip() or not census.stdout.strip():
+        return {"observation": "unknown"}
+    children = scripts = operations = 0
+    for line in census.stdout.decode().splitlines():
+        fields = line.split(None, 3)
+        if len(fields) != 4:
+            return {"observation": "unknown"}
+        if fields[0] == str(os.getuid()) and fields[2] == str(pid):
+            children += 1
+            if fields[3].startswith("/usr/bin/osascript "):
+                scripts += 1
+                operations += int(prompt in fields[3] and "do shell script" in fields[3])
+    return {"observation": "known", "children": children, "osascript_children": scripts, "operation_prompt_children": operations}
+
+
+def failure_snapshot(tray, intent, prompt, secrets_to_hide):
+    snapshot = {"prompt": prompt}
+    def collect(key, operation):
+        try:
+            snapshot[key] = operation()
+        except Exception as error:
+            snapshot[key] = {"observation": "unavailable", "reason": redacted_text(str(error), secrets_to_hide)[:400]}
+    collect("intent", lambda: {b"v1 stopping\n": "stopping", b"v1 stopped\n": "stopped"}.get(intent.read_bytes(), "unrecognized") if intent.exists() else "absent")
+    if tray:
+        collect("tray_alive_owned", tray.alive)
+        collect("tray_returncode", lambda: tray.process.poll() if tray.process else None)
+        if tray.process:
+            collect("owned_operation", lambda: owned_operation_snapshot(tray.process.pid, prompt))
+        def log_excerpt():
+            size = os.fstat(tray.log.fileno()).st_size
+            offset = max(0, size - 16384)
+            raw = os.pread(tray.log.fileno(), 16384, offset)
+            if offset:
+                raw = raw.partition(b"\n")[2]  # never expose a partial first credential
+            return redacted_error_excerpt(raw, secrets_to_hide)
+        collect("tray_error_excerpt", log_excerpt)
+    collect("authorization_ui", lambda: auth_snapshot(prompt))
+    return snapshot
 
 
 def status_observation():
@@ -531,9 +695,20 @@ def run_qualification(bundle, report):
     intent = config / "service-lifecycle-v1"
     ownership = config / "geph-owned.json"
     log = tray = sentinel = owned_fixture = None
+    redactions = []
+    active_prompt = STOP_PROMPT
     config_created = login_created = root_attempted = False
     result = {"result": "fail", "scope": "native menu/admin/root and inert owned-process stop, reopen; Geph tunnel intentionally disabled",
-              "commit": os.environ.get("GITHUB_SHA"), "app_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "cases": cases}
+              "commit": os.environ.get("GITHUB_SHA"), "app_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "phase": "preparing", "cases": cases}
+    def click_stop(pid):
+        result["last_menu_action"] = menu_action(pid, STOP_LABELS)
+        result["last_menu_item_enabled"] = True
+    def observe_auth(prompt, **kwargs):
+        response = auth_action(prompt, **kwargs)
+        category = response if response in {"absent", "cancelled", "confirmed"} else "unrecognized"
+        counts = result.setdefault("authorization_results", {})
+        counts[category] = counts.get(category, 0) + 1
+        return response
     try:
         if config.exists():
             config.rename(backup)
@@ -552,6 +727,7 @@ def run_qualification(bundle, report):
         tray = Tray(executable, log)
         sentinel = ExternalListenerSentinel()
         with fixture_admin() as (username, password):
+            redactions.extend((username, password))
             root_attempted = True
             run(["/usr/bin/sudo", "-n", str(daemon), "--install"], timeout=180)
             initial = wait_progress()
@@ -562,9 +738,10 @@ def run_qualification(bundle, report):
                 except QualificationError:
                     return False
             wait(visible_menu, "native status menu unavailable", 20)
+            result["phase"] = "native_cancel"
             checkpoint = tray.checkpoint()
-            menu_action(pid, STOP_LABELS)
-            wait(lambda: auth_action(STOP_PROMPT, cancel=True) == "cancelled", "native Cancel was not observed", 30)
+            click_stop(pid)
+            wait(lambda: observe_auth(STOP_PROMPT, cancel=True) == "cancelled", "native Cancel was not observed", 30)
             wait(lambda: intent.exists() and intent.read_bytes() == b"v1 stopping\n", "cancel lost durable stop intent")
             wait(lambda: tray.error_since(checkpoint, "administrator action failed") and "administrator action failed" in menu_action(pid), "cancel phase error not visible")
             if not tray.alive():
@@ -577,7 +754,7 @@ def run_qualification(bundle, report):
                 deadline = time.monotonic() + timeout
                 confirmed = False
                 while time.monotonic() < deadline:
-                    response = auth_action(prompt, username=username, password=password)
+                    response = observe_auth(prompt, username=username, password=password)
                     confirmed |= response == "confirmed"
                     if (confirmed or not require_confirmation) and done():
                         return confirmed
@@ -585,9 +762,10 @@ def run_qualification(bundle, report):
                 raise QualificationError("authorized native operation did not reach its expected state")
 
             with installer_lock():
+                result["phase"] = "root_lock_failure"
                 before = wait_progress()
                 checkpoint = tray.checkpoint()
-                menu_action(pid, STOP_LABELS)
+                click_stop(pid)
                 confirmed = authorize_until(lambda: tray.error_since(checkpoint, "administrator action failed") and "administrator action failed" in menu_action(pid), require_confirmation=True)
                 # The old error may still be rendered for one status tick. Require
                 # the fresh authorization result and a settling poll before proof.
@@ -601,8 +779,9 @@ def run_qualification(bundle, report):
 
             ownership.write_bytes(b"unreadable cleanup fixture\n")
             ownership.chmod(0)
+            result["phase"] = "partial_geph_cleanup_failure"
             checkpoint = tray.checkpoint()
-            menu_action(pid, STOP_LABELS)
+            click_stop(pid)
             authorize_until(lambda: root_stopped() and tray.error_since(checkpoint, "Geph stop unconfirmed") and "Geph stop unconfirmed" in menu_action(pid))
             if not tray.alive() or intent.read_bytes() != b"v1 stopping\n":
                 raise QualificationError("partial stop exited or claimed completion")
@@ -614,9 +793,10 @@ def run_qualification(bundle, report):
 
             owned_fixture = OwnedPrelistenerFixture(config)
             owned_fixture.start()
+            result["phase"] = "menu_stop_and_quit"
             if not owned_fixture.identity():
                 raise QualificationError("owned pre-listener process disappeared before actual Quit")
-            menu_action(pid, STOP_LABELS)
+            click_stop(pid)
             authorize_until(lambda: tray.process.poll() is not None)
             if tray.process.returncode != 0 or not root_stopped() or intent.read_bytes() != b"v1 stopped\n":
                 raise QualificationError("successful menu Quit was not fully confirmed")
@@ -631,6 +811,7 @@ def run_qualification(bundle, report):
             cases.append({"case": "owned_prelistener_process_cleanup", "result": "pass", "native_process_absent": True,
                           "external_sentinel_preserved": True, "fixture_opens_network_sockets": False, "geph_account_used": False})
 
+            result["phase"] = "login_keeps_stopped"
             tray.start("--autostart")
             time.sleep(6)
             if not tray.alive() or not root_stopped() or intent.read_bytes() != b"v1 stopped\n":
@@ -638,6 +819,8 @@ def run_qualification(bundle, report):
             tray.close()
             cases.append({"case": "login_keeps_stopped", "result": "pass"})
 
+            result["phase"] = "ordinary_reopen"
+            active_prompt = START_PROMPT
             tray.start()
             authorize_until(lambda: not intent.exists(), prompt=START_PROMPT, timeout=150)
             resumed = wait_progress()
@@ -647,9 +830,11 @@ def run_qualification(bundle, report):
             sentinel.check()
             cases.append({"case": "ordinary_reopen", "result": "pass", "fresh_daemon": True, "preferences_preserved": True})
             result["result"] = "pass"
+            result["phase"] = "complete"
     except BaseException as error:
         result["result"] = "fail"
-        result["failure"] = str(error)
+        result["failure"] = redacted_text(str(error), redactions)[:1000]
+        result["diagnostics"] = failure_snapshot(tray, intent, active_prompt, redactions)
         raise
     finally:
         def restore_user_state():
