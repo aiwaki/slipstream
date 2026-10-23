@@ -12,14 +12,26 @@ audit39945675765 passed. The installed private preview31 remains source
 `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36` (the exact source is recorded in the
 completed lifecycle section below); follow-up source is not installed yet.
 
-PR415 contains the follow-up; initial head
-`4d9af272df6dcef799e7abc45572d33db1a1514c` passed product checks, the packaged
-build and packaged browser qualification in CI39953414580. The remaining native
-job must be reconciled against current GitHub state. Audit39953414800 fails
-only the Geph vendor gate: a new October 23 advisory, RUSTSEC-2026-0385, affects
-ctutils0.4.3. Existing RSA exceptions remain accepted; this is not an expiry or
-an error introduced by the DNS patch. A separate minimal dependency repair is
-being prepared in the existing `geph-rustls-02345` checkout. Do not waive the gate.
+PR415 contains the follow-up. Initial head
+`4d9af272df6dcef799e7abc45572d33db1a1514c` passed all CI39953414580 jobs.
+Current head `58a655ecc5ecf8dfe0624f1662c9d91807b1226a` passed product checks,
+the packaged build and browser qualification in CI39958585602, but its heavy
+lifecycle job timed out at `after-tray-restart:chrome` after the existing
+45-second observation. The same-stage HTTPS/status/PF checks and all seven
+native Stop-and-Quit cases passed. GitHub uses the unchanged exact system
+passthrough. Missing failure-time navigation/status evidence prevents assigning
+the cause; cleanup stderr is not proof of a preceding browser crash. One
+failed-job rerun on this same head passed as CI39958585602 attempt2. This
+establishes a non-reproducing failure, not its cause. No timeout or gate was
+relaxed. Evidence:
+`output/network-followup-20261023/lifecycle-current/triage-receipt.json`.
+
+Audit39953414800 and current-head audit39958585705 fail only the Geph vendor
+gate: a new October 23 advisory, RUSTSEC-2026-0385, affects ctutils0.4.3.
+Existing RSA exceptions remain accepted; this is not an expiry or an error
+introduced by the DNS patch. A separate minimal dependency repair is being
+prepared on `codex/ctutils-constant-time-fix` in the existing
+`geph-rustls-02345` checkout. Do not waive the gate.
 
 Two causal repairs are in source, with independent reviews clear:
 - Supplemental system DNS can stall even with ready DoH/original addresses.
