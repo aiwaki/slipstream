@@ -431,6 +431,21 @@ survive across sessions and agents.
 
 ### 2026-09-20: coordinated dependency source bootstrap
 
+2026-10-23 extension: the exact emSign repair may coordinate the app and Geph
+`rustls-webpki 0.103.15 -> 0.103.16` / `webpki-roots 1.0.9 -> 1.0.10` changes
+with `certifi 2026.6.17 -> 2026.10.19` in all three Python locks. Rust admission
+requires exact versions/checksums and unchanged remaining lock data. Python
+admission requires all three reviewed base/head file hashes; partial updates,
+changed installer options or unrelated packages use ordinary packaging. Both
+audits remain required, and main never uses this bootstrap exception.
+
+Geph revision 2 retains the 0.4.3 crate and all 13 source edits. The fresh RSA
+client review permits only the two rsa 0.8.2 exceptions through 2026-10-30;
+the source-transition verifier binds the entire previous/current policies and
+SOURCE/lock identities as one reviewed pair. Historical bindings remain
+separate; mixing them, changing another exception or extending the date again
+requires new evidence and review. No exception covers the emSign advisories.
+
 RUSTSEC-2026-0285 affects both the app and vendored Geph rustls locks. Separate
 PRs each fail the mandatory audit of the other graph (PR376 app passes/Geph
 fails; PR377 reverses that). Source bootstrap may therefore include the app
