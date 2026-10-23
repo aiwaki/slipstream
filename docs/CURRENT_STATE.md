@@ -72,6 +72,21 @@ bound. Failure-only snapshots retain selected status/attestation metadata before
 cleanup; a fresh terminal Resume error ends the observer wait immediately.
 Three actual-source isolated Rust cases, 24 observer tests, eight documentation
 checks and focused formatting/compilation passed.
+Run39910205318 at `fdfa52d25f43b76546d8ae1b74d9b75e237824fa` establishes the
+reopen cause: `live-attested-state-mismatch`, retained dormant/PF=false versus
+live active/phase=active on the same PID6218 with sequence28, then30. The six
+preceding native cases and cleanup passed again. Product/build/browser checks
+and audit39910205319 passed. Evidence: `output/stop-quit-20261023/fourth-native/`.
+The targeted repair uses the existing root-published PF health sample and its
+separate `health_updated_at`, rather than comparing live health to the frozen
+install receipt. Runtime identity, label, heartbeat progression and the original
+45-second bound remain required. The old helper failed the causal transition
+case; the repair passes 18 actual-source isolated Rust cases, including both
+health transitions, cached heartbeat rejection and missing PF/health through the
+real projection. Eight documentation checks and focused formatting passed;
+bounded independent review found no blockers. Evidence:
+`output/stop-quit-20261023/health-transition-{red,green}.log`.
+Pending: exact-head native validation of the repaired ordinary reopen.
 
 Review then confirmed a separate pre-listener Geph orphan defect: the private
 record exists before bind, but stop required the SOCKS listener. Stop now checks

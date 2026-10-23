@@ -36,17 +36,10 @@ pub(crate) fn startup_action(
     }
 }
 
-/// Match the installer's settled active/dormant contract; recovering dormant
-/// state is not readiness. The runtime observation must agree with attestation.
-pub(crate) fn settled_service_state(
-    state: &str,
-    phase: &str,
-    attested_state: &str,
-    pf_active: bool,
-) -> bool {
-    phase == "active"
-        && state == attested_state
-        && matches!((state, pf_active), ("active", true) | ("dormant", false))
+/// Match live settled health to its own PF observation, not an older receipt.
+/// Recovering dormant state is not readiness.
+pub(crate) fn settled_service_state(state: &str, phase: &str, pf_active: bool) -> bool {
+    phase == "active" && matches!((state, pf_active), ("active", true) | ("dormant", false))
 }
 
 pub(crate) fn refresh_enabled_login(
@@ -510,15 +503,14 @@ mod tests {
         assert_eq!(fs::read(&orphan).unwrap(), b"partial");
     }
     #[test]
-    fn dormant_vpn_resume_accepts_only_settled_matching_installer_evidence() {
-        assert!(settled_service_state("active", "active", "active", true));
-        assert!(settled_service_state("dormant", "active", "dormant", false));
+    fn dormant_vpn_resume_requires_settled_current_pf_evidence() {
+        assert!(settled_service_state("active", "active", true));
+        assert!(settled_service_state("dormant", "active", false));
         for phase in ["recovering", "paused", "waiting", "unknown"] {
-            assert!(!settled_service_state("dormant", phase, "dormant", false));
+            assert!(!settled_service_state("dormant", phase, false));
         }
-        assert!(!settled_service_state("dormant", "active", "active", true));
-        assert!(!settled_service_state("dormant", "active", "dormant", true));
-        assert!(!settled_service_state("active", "active", "active", false));
+        assert!(!settled_service_state("dormant", "active", true));
+        assert!(!settled_service_state("active", "active", false));
     }
     #[test]
     fn login_refresh_keeps_disabled_preference_and_requires_enabled_readback() {

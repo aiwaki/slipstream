@@ -644,6 +644,15 @@ opening after a completed stop starts the saved configuration; launch at login
 keeps it stopped. These changes require qualification of the packaged menu and
 administrator path before being described as an installed fix.
 
+A failed reopen reports a bounded `Resume: readiness=...` reason and keeps the
+pending intent. A retained install receipt may say `dormant` while the same
+owned daemon has already become `active`; that difference alone is not failure.
+Runtime identity still has to match, and current daemon state must agree with
+a newly observed PF health sample. A progressing heartbeat without renewed
+health evidence must not clear the pending operation. Keep the failure snapshot
+before cleanup; repeated administrator approval cannot fix a stale-health
+comparison.
+
 `Quit menu bar app (keep routing)` is a separate explicit action. Older builds
 called this `Quit Slipstream`, which is why background processes could remain
 after what appeared to be an ordinary quit. A crash of the menu process also

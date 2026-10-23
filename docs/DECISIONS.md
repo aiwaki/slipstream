@@ -26,7 +26,12 @@ A normal user opening after a confirmed stop resumes saved configuration:
 install/start root, observe matching progressing fresh status, start configured
 owned Geph, confirm readiness, then clear intent. A confirmed dormant daemon
 under an external VPN is valid settled service state, without claiming active
-interception. Login launch with `--autostart` keeps a stopped installation stopped.
+interception. The retained install receipt binds runtime identity; its active or
+dormant health snapshot must not freeze the later live state. Resume uses a new
+root-published health sample with observed PF state, alongside progressing
+heartbeat and the same attested, owned PID. A heartbeat that only republishes
+cached health is insufficient. Missing or inconsistent PF evidence cannot prove
+readiness. Login launch with `--autostart` keeps a stopped installation stopped.
 External Geph and user-managed network configuration remain outside this action.
 
 ### 2026-10-22: Geph off state requires observed shutdown

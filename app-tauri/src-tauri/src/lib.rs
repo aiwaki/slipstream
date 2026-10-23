@@ -94,7 +94,7 @@ fn resume_status_identity(
     expect_geph: bool,
     owns_pid: impl FnOnce(i64) -> bool,
     label_disabled: impl FnOnce() -> Option<bool>,
-) -> Result<(i64, u64), &'static str> {
+) -> Result<(i64, u64, String), &'static str> {
     let pid = status
         .get("pid")
         .and_then(Value::as_i64)
@@ -111,20 +111,39 @@ fn resume_status_identity(
         .get("phase")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
+    // The receipt pins runtime identity; its health may legitimately change.
     if !service_lifecycle::settled_service_state(
-        state,
-        phase,
         &attestation.state,
+        "active",
         attestation.pf_active,
     ) {
-        return Err(if phase != "active" {
-            "daemon-phase-unsettled"
-        } else if state != attestation.state {
-            "live-attested-state-mismatch"
-        } else {
-            "attested-state-pf-mismatch"
-        });
+        return Err("attested-state-pf-mismatch");
     }
+    if phase != "active" {
+        return Err("daemon-phase-unsettled");
+    }
+    let pf = status
+        .get("pf_state")
+        .ok_or("daemon-pf-observation-missing")?;
+    let rules_loaded = pf
+        .get("rules_loaded")
+        .and_then(Value::as_bool)
+        .ok_or("daemon-pf-observation-missing")?;
+    // The legacy projection supplies false defaults when PF is absent. Require
+    // the explicit OS-derived state that only an actual PF observation carries.
+    match (pf.get("state").and_then(Value::as_str), rules_loaded) {
+        (Some("ready"), true) | (Some("inactive" | "off"), false) => {}
+        (None, _) => return Err("daemon-pf-observation-missing"),
+        _ => return Err("daemon-pf-state-mismatch"),
+    }
+    if !service_lifecycle::settled_service_state(state, phase, rules_loaded) {
+        return Err("live-state-pf-mismatch");
+    }
+    let health = status
+        .get("health_updated_at")
+        .and_then(Value::as_str)
+        .filter(|health| !health.is_empty())
+        .ok_or("health-sample-missing")?;
     if sequence == 0 {
         return Err("heartbeat-sequence-zero");
     }
@@ -142,7 +161,22 @@ fn resume_status_identity(
     if expect_geph && status.get("geph").and_then(Value::as_str) != Some("up") {
         return Err("daemon-geph-not-up");
     }
-    Ok((pid, sequence))
+    Ok((pid, sequence, health.to_owned()))
+}
+
+fn resume_observations_progress(
+    previous: &(i64, u64, String),
+    current: &(i64, u64, String),
+) -> Result<(), &'static str> {
+    if previous.0 != current.0 || current.1 <= previous.1 {
+        return Err("heartbeat-not-progressing");
+    }
+    // The independent heartbeat republishes cached health. A changed sample
+    // means the same root daemon has observed OS PF again during this wait.
+    if current.2 == previous.2 {
+        return Err("health-sample-not-progressing");
+    }
+    Ok(())
 }
 
 fn resume_state_label(value: Option<&str>) -> &'static str {
@@ -175,7 +209,7 @@ impl ServiceEffects {
     }
     fn wait_ready(&self, with_geph: bool) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(45);
-        let mut baseline: Option<(i64, u64)> = None;
+        let mut baseline: Option<(i64, u64, String)> = None;
         loop {
             let mut detail = String::new();
             let observed = (|| {
@@ -194,14 +228,22 @@ impl ServiceEffects {
                     StatusRead::Missing => return Err("status-missing-or-invalid"),
                 };
                 detail.push_str(&format!(
-                    " state={} phase={} pid={} seq={}",
+                    " state={} phase={} pid={} seq={} live_pf={}",
                     resume_state_label(status.get("state").and_then(Value::as_str)),
                     resume_state_label(status.get("phase").and_then(Value::as_str)),
                     status.get("pid").and_then(Value::as_i64).unwrap_or(0),
                     status
                         .get("heartbeat_seq")
                         .and_then(Value::as_u64)
-                        .unwrap_or(0)
+                        .unwrap_or(0),
+                    match status
+                        .pointer("/pf_state/rules_loaded")
+                        .and_then(Value::as_bool)
+                    {
+                        Some(true) => "true",
+                        Some(false) => "false",
+                        None => "unknown",
+                    }
                 ));
                 resume_status_identity(
                     &status,
@@ -217,8 +259,19 @@ impl ServiceEffects {
                 .copied()
                 .unwrap_or("heartbeat-not-progressing");
             let observed = observed.ok();
-            let progressing = matches!((baseline, observed), (Some((old_pid, old_sequence)), Some((pid, sequence))) if old_pid == pid && sequence > old_sequence);
-            if let Some((pid, sequence)) = baseline {
+            let progressing = match (&baseline, &observed) {
+                (Some(previous), Some(current)) => {
+                    match resume_observations_progress(previous, current) {
+                        Ok(()) => true,
+                        Err(rejected) => {
+                            reason = rejected;
+                            false
+                        }
+                    }
+                }
+                _ => false,
+            };
+            if let Some((pid, sequence, _)) = &baseline {
                 detail.push_str(&format!(" prev_pid={pid} prev_seq={sequence}"));
             }
             baseline = observed;
@@ -4728,30 +4781,87 @@ mod tests {
     }
 
     #[test]
-    fn resume_readiness_keeps_settled_identity_and_heartbeat_values() {
+    fn resume_readiness_keeps_identity_across_settled_health_transitions() {
         let mut attestation = resume_readiness_attestation();
-        for (state, pf) in [("active", true), ("dormant", false)] {
+        for (attested, attested_pf) in [("active", true), ("dormant", false)] {
+            attestation.state = attested.into();
+            attestation.pf_active = attested_pf;
+            for (state, pf) in [("active", true), ("dormant", false)] {
+                let status = json!({"state":state,"phase":"active","pid":42,
+                    "heartbeat_seq":8,"geph":"up","pf_state":{"state":if pf {"ready"} else {"off"},"rules_loaded":pf},
+                    "health_updated_at":"2026-10-23T10:00:00Z"});
+                assert_eq!(
+                    super::resume_status_identity(
+                        &status,
+                        &attestation,
+                        true,
+                        |pid| pid == 42,
+                        || Some(false)
+                    ),
+                    Ok((42, 8, "2026-10-23T10:00:00Z".to_owned()))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resume_readiness_requires_projected_pf_and_a_new_health_sample() {
+        let mut attestation = resume_readiness_attestation();
+        for (state, pf, next_state, next_pf) in [
+            ("active", true, "dormant", false),
+            ("dormant", false, "active", true),
+        ] {
             attestation.state = state.into();
             attestation.pf_active = pf;
-            let status =
-                json!({"state":state,"phase":"active","pid":42,"heartbeat_seq":8,"geph":"up"});
-            assert_eq!(
+            let mut raw = json!({"schema_version":2,
+                "daemon":{"state":state,"phase":"active","pid":42,"heartbeat_seq":8,
+                    "health_updated_at":"2026-10-23T10:00:00Z"},
+                "environment":{"pf":{"state":if pf {"ready"} else {"off"},"rules_loaded":pf}}});
+            let observe = |raw| {
                 super::resume_status_identity(
-                    &status,
+                    &crate::status_client::status_for_tray(raw),
                     &attestation,
-                    true,
+                    false,
                     |pid| pid == 42,
-                    || Some(false)
-                ),
-                Ok((42, 8))
+                    || Some(false),
+                )
+            };
+            let first = observe(raw.clone()).unwrap();
+            raw["daemon"]["heartbeat_seq"] = json!(9);
+            let cached_health = observe(raw.clone()).unwrap();
+            assert_eq!(
+                super::resume_observations_progress(&first, &cached_health),
+                Err("health-sample-not-progressing")
             );
+            raw["daemon"]["state"] = json!(next_state);
+            raw["daemon"]["health_updated_at"] = json!("2026-10-23T10:00:05Z");
+            raw["environment"]["pf"] =
+                json!({"state":if next_pf {"ready"} else {"off"},"rules_loaded":next_pf});
+            let fresh_health = observe(raw.clone()).unwrap();
+            assert_eq!(
+                super::resume_observations_progress(&first, &fresh_health),
+                Ok(())
+            );
+            assert_eq!(
+                super::resume_observations_progress(&fresh_health, &fresh_health),
+                Err("heartbeat-not-progressing")
+            );
+            let mut missing_health = raw.clone();
+            missing_health["daemon"]
+                .as_object_mut()
+                .unwrap()
+                .remove("health_updated_at");
+            assert_eq!(observe(missing_health), Err("health-sample-missing"));
+            raw["environment"].as_object_mut().unwrap().remove("pf");
+            assert_eq!(observe(raw), Err("daemon-pf-observation-missing"));
         }
     }
 
     #[test]
     fn resume_readiness_explains_health_rejection_before_os_probes() {
         let attestation = resume_readiness_attestation();
-        let mut status = json!({"state":"active","phase":"recovering","pid":42,"heartbeat_seq":8});
+        let mut status = json!({"state":"active","phase":"recovering","pid":42,"heartbeat_seq":8,
+            "pf_state":{"state":"ready","rules_loaded":true},"health_updated_at":"sample"});
         let no_process_probe = |_| panic!("unsettled status must not pass to ownership checks");
         let no_label_probe = || panic!("unsettled status must not pass to label checks");
         assert_eq!(
@@ -4774,7 +4884,7 @@ mod tests {
                 no_process_probe,
                 no_label_probe
             ),
-            Err("live-attested-state-mismatch")
+            Err("live-state-pf-mismatch")
         );
         assert_eq!(
             super::resume_state_label(Some("private/path-or-secret")),
@@ -4785,8 +4895,8 @@ mod tests {
     #[test]
     fn resume_readiness_distinguishes_ownership_label_and_geph_failures() {
         let attestation = resume_readiness_attestation();
-        let status =
-            json!({"state":"active","phase":"active","pid":42,"heartbeat_seq":8,"geph":"off"});
+        let status = json!({"state":"active","phase":"active","pid":42,"heartbeat_seq":8,"geph":"off",
+                "pf_state":{"state":"ready","rules_loaded":true},"health_updated_at":"sample"});
         assert_eq!(
             super::resume_status_identity(
                 &status,

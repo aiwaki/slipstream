@@ -171,7 +171,7 @@ fn v2_status_for_tray(status: &StatusV2) -> Value {
 }
 
 #[cfg(test)]
-fn status_for_tray(status: Value) -> Value {
+pub(crate) fn status_for_tray(status: Value) -> Value {
     ParsedStatus::from_value(status)
         .map(ParsedStatus::into_tray)
         .unwrap_or(Value::Null)
