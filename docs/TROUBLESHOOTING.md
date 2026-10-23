@@ -633,12 +633,20 @@ explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 
-The menu-only exit closes the tray UI but intentionally leaves its background
-routing service and owned Geph LaunchAgent running. Older builds call it
-`Quit Slipstream`, which does not mean that routing has stopped. The updated
-label explicitly says that routing continues. This preserves routing if the
-menu process exits or crashes; a separate stop-without-uninstall action is not
-yet implemented.
+`Stop Slipstream and Quit` stops the background routing service, then the
+bundled Geph client, and closes the menu only after both stops are confirmed.
+Settings, account and learned routes are retained. Confirm the macOS
+administrator prompt; on cancellation or failure the app stays open and shows
+the unresolved phase. Retry Stop to complete an interrupted operation. Ordinary
+opening after a completed stop starts the saved configuration; launch at login
+keeps it stopped. These changes require qualification of the packaged menu and
+administrator path before being described as an installed fix.
+
+`Quit menu bar app (keep routing)` is a separate explicit action. Older builds
+called this `Quit Slipstream`, which is why background processes could remain
+after what appeared to be an ordinary quit. A crash of the menu process also
+keeps routing alive. Deleting the application bundle does not itself establish
+that its previously installed services stopped.
 
 Turning off `Enable Geph` stops only Slipstream's own Geph job. A failed or
 unreadable `launchctl print` response must not be treated as proof of absence.

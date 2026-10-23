@@ -15,6 +15,7 @@ mod install_attestation;
 mod native_messaging;
 mod native_update_notification;
 mod notification_qualification;
+mod service_lifecycle;
 mod status_client;
 mod successor_daemon;
 mod updater_transaction;
@@ -74,6 +75,330 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 // blocker. Downloading an archive does not block normal daemon use; preparing
 // an authorized root operation does, including an unknown authorization result.
 struct DaemonActionsBlocked(Arc<AtomicBool>);
+
+// Held across every service mutation, including asynchronous admin prompts.
+// It is separate from the updater gate, whose poller may release its own flag.
+struct ServiceLifecycle(service_lifecycle::Gate);
+
+struct ServiceEffects {
+    app: AppHandle,
+    store: service_lifecycle::IntentStore,
+    gate: service_lifecycle::Gate,
+    expect_geph: bool,
+}
+
+impl ServiceEffects {
+    fn root_command(&self, argument: &str, phase: &str) -> Result<(), String> {
+        self.gate.block(phase);
+        let binary = bundled_daemon_path(&self.app).ok_or("bundled daemon unavailable")?;
+        if !valid_bundled_daemon(&binary) {
+            return Err(format!("{phase}: bundled daemon is not a valid executable"));
+        }
+        if !run_admin_status(
+            &format!("{} {argument}", shell_quote(&binary.to_string_lossy())),
+            &format!("Slipstream needs administrator access. {phase}"),
+        ) {
+            return Err(format!("{phase}: administrator action failed, was cancelled, or its result is unknown. Retry Stop Slipstream before restarting."));
+        }
+        Ok(())
+    }
+    fn wait_ready(&self, with_geph: bool) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(45);
+        let mut baseline: Option<(i64, u64)> = None;
+        loop {
+            let observed = (|| {
+                let bundled = bundled_daemon_path(&self.app)?;
+                let attestation = daemon_install_attestation(&bundled)?;
+                let StatusRead::Fresh(status) = read_status_state() else {
+                    return None;
+                };
+                let pid = status.get("pid")?.as_i64()?;
+                let sequence = status.get("heartbeat_seq")?.as_u64()?;
+                if !service_lifecycle::settled_service_state(
+                    status
+                        .get("state")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown"),
+                    status
+                        .get("phase")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown"),
+                    &attestation.state,
+                    attestation.pf_active,
+                ) || sequence == 0
+                    || attestation.launchd.pid != pid
+                    || !daemon_pid_owned(pid)
+                    || daemon_label_disabled() != Some(false)
+                    || (with_geph
+                        && self.expect_geph
+                        && status.get("geph").and_then(Value::as_str) != Some("up"))
+                {
+                    return None;
+                }
+                Some((pid, sequence))
+            })();
+            let progressing = matches!((baseline, observed), (Some((old_pid, old_sequence)), Some((pid, sequence))) if old_pid == pid && sequence > old_sequence);
+            baseline = observed;
+            if progressing && (!with_geph || !self.expect_geph || owned_geph_ready(&self.app)) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(if with_geph { "Resume: fresh daemon and owned Geph readiness could not be confirmed; automatic repair remains blocked" } else { "Resume: fresh settled daemon heartbeat could not be confirmed; Geph was not started" }.into());
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+}
+
+fn owned_geph_ready(app: &AppHandle) -> bool {
+    let Ok(paths) = geph_launch_agent_paths_for_app(app) else {
+        return false;
+    };
+    let Some(uid) = current_numeric_id("-u") else {
+        return false;
+    };
+    if geph_launch_agent_state(&uid) != LaunchAgentState::Loaded {
+        return false;
+    }
+    let Some(pid) = geph_listener_pid() else {
+        return false;
+    };
+    if listener_pid(GEPH_CONTROL_PORT) != Some(pid) {
+        return false;
+    }
+    matches!(geph_process_observation(pid), ProcessObservation::Present(command)
+        if command_matches_geph(&command, &paths.executable, &paths.config))
+        && Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "uid="])
+            .output()
+            .ok()
+            .is_some_and(|output| {
+                output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == uid
+            })
+}
+
+impl service_lifecycle::Effects for ServiceEffects {
+    fn persist(&mut self, intent: service_lifecycle::Intent) -> Result<(), String> {
+        self.store.write(intent)
+    }
+    fn stop_root(&mut self) -> Result<(), String> {
+        self.root_command("--stop", "Stopping Slipstream background service")
+    }
+    fn stop_geph(&mut self) -> Result<(), String> {
+        self.gate.block("Stopping bundled Geph");
+        geph_launch_agent_disable(&self.app).map_err(|e| format!("Geph stop unconfirmed: {e}"))?;
+        let paths = geph_launch_agent_paths_for_app(&self.app)?;
+        let uid = current_numeric_id("-u")
+            .and_then(|uid| uid.parse::<u32>().ok())
+            .ok_or("Geph stop: user identity unavailable")?;
+        if geph_launch_agent_state(&uid.to_string()) != LaunchAgentState::Absent
+            || geph_private_process_census(&paths.config_dir, uid) != ProcessCensus::Clear
+        {
+            return Err("Geph stop: owned job or process absence is not confirmed".into());
+        }
+        Ok(())
+    }
+    fn prepare_stopped(&mut self) -> Result<(), String> {
+        self.gate.block("Preserving stopped state at login");
+        refresh_stop_autostart(&self.app)
+    }
+    fn start_root(&mut self) -> Result<(), String> {
+        self.root_command("--install", "Starting Slipstream background service")
+    }
+    fn root_ready(&mut self) -> Result<(), String> {
+        self.gate.block("Waiting for Slipstream background service");
+        self.wait_ready(false)
+    }
+    fn start_geph(&mut self) -> Result<(), String> {
+        self.gate.block("Starting saved Geph configuration");
+        if geph_enabled(&self.app)
+            && geph_secret_availability(&self.app) == GephSecretAvailability::Unavailable
+        {
+            return Err("Resume: Keychain unavailable; Geph has not been restarted".into());
+        }
+        self.expect_geph =
+            ensure_geph_launch_agent(&self.app, false).map_err(|e| format!("Resume Geph: {e}"))?;
+        Ok(())
+    }
+    fn all_ready(&mut self) -> Result<(), String> {
+        self.gate.block("Confirming resumed services");
+        self.wait_ready(true)
+    }
+    fn clear(&mut self) -> Result<(), String> {
+        self.store.clear()
+    }
+}
+
+// tauri-plugin-autostart 2.5.1 / auto-launch 0.5.0 writes this exact
+// LaunchAgent on enable(), even if already enabled. Validate its ownership and
+// read back the new argument before publishing a durable stopped result.
+fn refresh_stop_autostart(app: &AppHandle) -> Result<(), String> {
+    let manager = app.autolaunch();
+    let path = app
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())?
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", app.package_info().name));
+    let expected_executable = std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .map_err(|e| e.to_string())?;
+    let inspect = |require_marker: bool| -> Result<(), String> {
+        use std::os::unix::fs::MetadataExt;
+        let directory = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(
+                path.parent()
+                    .ok_or("login registration parent unavailable")?,
+            )
+            .map_err(|e| format!("cannot inspect login registration directory: {e}"))?;
+        let parent_metadata = directory.metadata().map_err(|e| e.to_string())?;
+        let uid = unsafe { libc::geteuid() };
+        if parent_metadata.uid() != uid || parent_metadata.mode() & 0o022 != 0 {
+            return Err("login registration directory is not safely owned".into());
+        }
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+            .map_err(|e| format!("cannot inspect login registration: {e}"))?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file()
+            || metadata.uid() != uid
+            || metadata.nlink() != 1
+            || metadata.len() > 65536
+            || metadata.mode() & 0o022 != 0
+        {
+            return Err("login registration is not a bounded owned file".into());
+        }
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take(65537)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() > 65536 {
+            return Err("login registration exceeds read bound".into());
+        }
+        let value = plist::Value::from_reader(std::io::Cursor::new(bytes))
+            .map_err(|e| format!("login registration is malformed: {e}"))?;
+        let dict = value
+            .as_dictionary()
+            .ok_or("login registration is not a dictionary")?;
+        let args = dict
+            .get("ProgramArguments")
+            .and_then(plist::Value::as_array)
+            .ok_or("login arguments unavailable")?;
+        let valid_args = args.first().and_then(plist::Value::as_string)
+            == expected_executable.to_str()
+            && (args.len() == 1 && !require_marker
+                || args.len() == 2 && args[1].as_string() == Some("--autostart"));
+        if dict.get("Label").and_then(plist::Value::as_string)
+            != Some(app.package_info().name.as_str())
+            || dict.get("RunAtLoad").and_then(plist::Value::as_boolean) != Some(true)
+            || !valid_args
+        {
+            return Err("login registration does not match this Slipstream application".into());
+        }
+        if require_marker {
+            file.sync_all()
+                .and_then(|_| directory.sync_all())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    };
+    service_lifecycle::refresh_enabled_login(
+        manager
+            .is_enabled()
+            .map_err(|e| format!("login state unavailable: {e}")),
+        || {
+            inspect(false)?;
+            manager
+                .enable()
+                .map_err(|e| format!("cannot refresh login registration: {e}"))
+        },
+        || {
+            if !manager.is_enabled().map_err(|e| e.to_string())? {
+                return Err("login setting changed during stop".into());
+            }
+            inspect(true)
+        },
+    )
+}
+
+fn pending_daemon_actions_for_setup(app: &AppHandle) -> bool {
+    app.state::<DaemonActionsBlocked>()
+        .0
+        .load(Ordering::Acquire)
+}
+
+fn start_service_lifecycle(app: &AppHandle, resume: bool, quit: bool) {
+    if app
+        .state::<DaemonActionsBlocked>()
+        .0
+        .load(Ordering::Acquire)
+    {
+        notify(
+            app,
+            "Finish the current update before stopping or starting Slipstream",
+        );
+        return;
+    }
+    let gate = app.state::<ServiceLifecycle>().0.clone();
+    let Some(lease) = gate.acquire(true) else {
+        notify(
+            app,
+            "Another Slipstream service action is still running; try again when it finishes",
+        );
+        return;
+    };
+    gate.block(if resume {
+        "Starting Slipstream…"
+    } else {
+        "Stopping Slipstream…"
+    });
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let result = (|| {
+            let store = service_lifecycle::IntentStore::new(
+                app.path().app_config_dir().map_err(|e| e.to_string())?,
+            );
+            if resume && store.read()? != Some(service_lifecycle::Intent::Stopped) {
+                return Err(
+                    "Stop is incomplete. Retry Stop Slipstream before starting it again.".into(),
+                );
+            }
+            let mut effects = ServiceEffects {
+                app: app.clone(),
+                store,
+                gate: gate.clone(),
+                expect_geph: false,
+            };
+            if resume {
+                service_lifecycle::resume(&mut effects)
+            } else {
+                service_lifecycle::stop(&mut effects)
+            }
+        })();
+        match result {
+            Ok(()) if resume => {
+                gate.resumed();
+                notify(&app, "Slipstream started");
+            }
+            Ok(()) if quit => app.exit(0),
+            Ok(()) => {
+                gate.block("Slipstream stopped. Choose Start Slipstream to resume.");
+                notify(&app, "Slipstream stopped; saved settings are retained");
+            }
+            Err(error) => {
+                gate.block(error.clone());
+                eprintln!("Slipstream service lifecycle: {error}");
+                notify(&app, &error);
+            }
+        }
+    });
+}
 
 const UPDATE_INITIAL_DELAY_SECS: u64 = 30;
 const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
@@ -195,6 +520,8 @@ fn tr(en: &str) -> String {
         }
         "Check for Updates…" => "Проверить обновления…",
         "Uninstall Slipstream…" => "Удалить Slipstream…",
+        "Stop Slipstream and Quit" => "Остановить Slipstream и выйти",
+        "Start Slipstream" => "Запустить Slipstream",
         "Quit menu bar app (keep routing)" => "Закрыть значок (прокси продолжит работать)",
         other => other,
     }
@@ -210,6 +537,8 @@ const ID_DIAGNOSTICS: &str = "copy_diagnostics";
 const ID_UPDATE: &str = "check_updates";
 const ID_UNINSTALL: &str = "uninstall_slipstream";
 const ID_QUIT: &str = "quit";
+const ID_MENU_QUIT: &str = "menu_only_quit";
+const ID_START: &str = "start_slipstream";
 // Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
 // tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
 // in one click (no manual host/port/secret entry).
@@ -229,11 +558,7 @@ fn admin_shell_script(shell: &str, prompt: &str) -> String {
 
 /// Run a privileged shell line via one osascript admin prompt.
 fn run_admin(shell: &str, prompt: &str) {
-    let script = admin_shell_script(shell, prompt);
-    let _ = Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(script)
-        .spawn();
+    let _ = run_admin_status(shell, prompt);
 }
 
 fn run_admin_status(shell: &str, prompt: &str) -> bool {
@@ -1140,7 +1465,18 @@ fn should_request_daemon_install(
 }
 
 fn ensure_daemon_installed(app: &AppHandle) {
-    let _ = request_daemon_install(app, false);
+    let gate = app.state::<ServiceLifecycle>().0.clone();
+    let Some(lease) = gate.acquire(false) else {
+        return;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let _ = request_daemon_install(&app, false);
+        if let Err(error) = ensure_geph_launch_agent(&app, false) {
+            eprintln!("geph setup after daemon install unavailable: {error}");
+        }
+    });
 }
 
 fn app_bundle_for_bundled_daemon(bundled: &Path) -> Option<PathBuf> {
@@ -2357,6 +2693,14 @@ async fn install_or_discover_app_update(
     item: MenuItem<tauri::Wry>,
     state: Arc<Mutex<AppUpdateState>>,
 ) {
+    let lifecycle = app.state::<ServiceLifecycle>().0.clone();
+    let Some(_lifecycle_lease) = lifecycle.acquire(false) else {
+        notify(
+            &app,
+            "Slipstream is stopping, stopped, or another service action is running",
+        );
+        return;
+    };
     if app
         .state::<DaemonActionsBlocked>()
         .0
@@ -3544,10 +3888,20 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
 pub fn run() {
     let app = tauri::Builder::default()
         // single-instance MUST be the first plugin: a second launch just exits.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|arg| arg == "--autostart") { return; }
+            let Some(lifecycle) = app.try_state::<ServiceLifecycle>() else { return; };
+            if lifecycle.0.blocked() {
+                let intent = app.path().app_config_dir().ok()
+                    .and_then(|dir| service_lifecycle::IntentStore::new(dir).read().ok()).flatten();
+                if intent == Some(service_lifecycle::Intent::Stopped) {
+                    start_service_lifecycle(app, true, false);
+                }
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -3626,7 +3980,15 @@ pub fn run() {
             let pending_daemon_actions = pending_daemon_guard.blocker();
             if retained_preparation { pending_daemon_actions.store(true, Ordering::Release); }
             app.manage(DaemonActionsBlocked(pending_daemon_actions.clone()));
-            let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire);
+            let lifecycle = service_lifecycle::Gate::default();
+            let startup_intent = service_lifecycle::IntentStore::new(app.path().app_config_dir()?).read();
+            match &startup_intent {
+                Ok(Some(_)) => lifecycle.block("Resolving saved Slipstream stop state…"),
+                Err(error) => lifecycle.block(error.clone()),
+                Ok(None) => {}
+            }
+            app.manage(ServiceLifecycle(lifecycle.clone()));
+            let daemon_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire) && !lifecycle.blocked();
 
             // notify-rust's macOS application identity is process-global and
             // immutable after the first notification. Set it before any
@@ -3739,6 +4101,13 @@ pub fn run() {
                 &app.package_info().version,
             )));
 
+            let start_item = MenuItemBuilder::with_id(ID_START, tr("Start Slipstream"))
+                .enabled(lifecycle.blocked() && !pending_daemon_actions.load(Ordering::Acquire))
+                .build(app)?;
+            let quit_item = MenuItemBuilder::with_id(ID_QUIT, tr("Stop Slipstream and Quit"))
+                .accelerator("CmdOrCtrl+Q")
+                .enabled(!pending_daemon_actions.load(Ordering::Acquire))
+                .build(app)?;
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
                 .item(&detail_item)
@@ -3757,11 +4126,9 @@ pub fn run() {
                 )
                 .separator()
                 .item(&uninstall_item)
-                .item(
-                    &MenuItemBuilder::with_id(ID_QUIT, tr("Quit menu bar app (keep routing)"))
-                        .accelerator("CmdOrCtrl+Q")
-                        .build(app)?,
-                )
+                .item(&start_item)
+                .item(&MenuItemBuilder::with_id(ID_MENU_QUIT, tr("Quit menu bar app (keep routing)")).build(app)?)
+                .item(&quit_item)
                 .build()?;
 
             let tg_offer_reset = Arc::new(AtomicU64::new(0));
@@ -3795,6 +4162,16 @@ pub fn run() {
                         && matches!(id, ID_RESTART | ID_UNINSTALL)
                     {
                         return;
+                    }
+                    let mut service_lease = None;
+                    let changes_services = id.starts_with("exit:") || matches!(id, ID_ACCOUNT | ID_GEPH_ENABLE | ID_RESTART | ID_UNINSTALL);
+                    if changes_services {
+                        if pending_daemon_menu.load(Ordering::Acquire) { return; }
+                        service_lease = app.state::<ServiceLifecycle>().0.acquire(false);
+                        if service_lease.is_none() {
+                            notify(app, "Slipstream service actions are blocked until stop or start completes");
+                            return;
+                        }
                     }
                     if let Some(val) = id.strip_prefix("exit:") {
                         {
@@ -3904,12 +4281,16 @@ pub fn run() {
                                     exit_refreshing_menu.clone(),
                                 );
                             }
-                            if !request_daemon_install(app, true) {
-                                run_admin(
-                                    &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
-                                    "Slipstream needs administrator access to restart its background daemon.",
-                                );
-                            }
+                            let app = app.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let _lease = service_lease;
+                                if !request_daemon_install(&app, true) {
+                                    run_admin(
+                                        &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
+                                        "Slipstream needs administrator access to restart its background daemon.",
+                                    );
+                                }
+                            });
                         }
                         ID_LOG => {
                             if !open_status_snapshot(app) {
@@ -3974,7 +4355,13 @@ pub fn run() {
                             notify(app, "Slipstream uninstalled");
                             app.exit(0);
                         }
-                        ID_QUIT => app.exit(0),
+                        ID_QUIT => start_service_lifecycle(app, false, true),
+                        ID_START => start_service_lifecycle(app, true, false),
+                        ID_MENU_QUIT => {
+                            if let Some(_lease) = app.state::<ServiceLifecycle>().0.acquire(false) {
+                                app.exit(0);
+                            }
+                        }
                         _ => {}
                     }
                 })
@@ -3990,10 +4377,14 @@ pub fn run() {
             let pending_daemon_discovery = pending_daemon_actions.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(UPDATE_INITIAL_DELAY_SECS)).await;
-                while pending_daemon_discovery.load(Ordering::Acquire) {
+                while pending_daemon_discovery.load(Ordering::Acquire) || update_app.state::<ServiceLifecycle>().0.blocked() {
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
                 loop {
+                    if update_app.state::<ServiceLifecycle>().0.blocked() {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
                     refresh_app_update(
                         update_app.clone(),
                         update_item_watch.clone(),
@@ -4028,7 +4419,12 @@ pub fn run() {
                 let mut tray_liveness = TrayLiveness::default();
                 let mut pending_daemon_guard = pending_daemon_guard;
                 loop {
-                    let state = refresh(&s, &d, &mut tray_liveness);
+                    let lifecycle = app_handle.state::<ServiceLifecycle>().0.clone();
+                    let state = if lifecycle.blocked() {
+                        let _ = s.set_text("Slipstream — service action");
+                        let _ = d.set_text(lifecycle.detail());
+                        "off".to_string()
+                    } else { refresh(&s, &d, &mut tray_liveness) };
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
@@ -4048,6 +4444,7 @@ pub fn run() {
                         || ensure_daemon_installed(&app_handle),
                     ) {
                         Ok(true) => {
+                            ensure_daemon_installed(&app_handle);
                             let _ = restart_item.set_enabled(true);
                             let _ = uninstall_item.set_enabled(true);
                             let _ = update_item.set_enabled(true);
@@ -4055,11 +4452,12 @@ pub fn run() {
                         Ok(false) => {}
                         Err(error) => eprintln!("update successor daemon gate: {error}"),
                     }
-                    if !pending_daemon_actions.load(Ordering::Acquire) {
-                        let _ = restart_item.set_enabled(true);
-                        let _ = uninstall_item.set_enabled(true);
-                        let _ = update_item.set_enabled(true);
-                    }
+                    let service_actions_enabled = !pending_daemon_actions.load(Ordering::Acquire) && !lifecycle.blocked();
+                    let _ = restart_item.set_enabled(service_actions_enabled);
+                    let _ = uninstall_item.set_enabled(service_actions_enabled);
+                    let _ = update_item.set_enabled(service_actions_enabled || retained_preparation);
+                    let _ = quit_item.set_enabled(!pending_daemon_actions.load(Ordering::Acquire));
+                    let _ = start_item.set_enabled(lifecycle.blocked() && !pending_daemon_actions.load(Ordering::Acquire));
                     let now = Instant::now();
                     if status.is_some() {
                         has_seen_daemon_status = true;
@@ -4083,10 +4481,15 @@ pub fn run() {
                     ) {
                         next_daemon_recovery =
                             now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
-                        run_admin(
-                            &daemon_recovery_shell(),
-                            "Slipstream needs administrator access to repair its background daemon.",
-                        );
+                        if let Some(lease) = lifecycle.acquire(false) {
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let _lease = lease;
+                                run_admin(
+                                    &daemon_recovery_shell(),
+                                    "Slipstream needs administrator access to repair its background daemon.",
+                                );
+                            });
+                        }
                     }
                     if let Some(up) = status
                         .as_ref()
@@ -4139,8 +4542,16 @@ pub fn run() {
             // Geph belongs to a user LaunchAgent, not this tray process. The first
             // call migrates the old detached sidecar to a stable private runtime;
             // later calls only sync changed app/config artifacts.
-            if let Err(error) = ensure_geph_launch_agent(app.handle(), false) {
-                eprintln!("geph LaunchAgent setup unavailable: {error}");
+            match startup_intent {
+                Ok(intent) => match service_lifecycle::startup_action(intent,
+                    pending_daemon_actions_for_setup(app.handle()),
+                    std::env::args().any(|arg| arg == "--autostart")) {
+                    service_lifecycle::StartupAction::FinishStop => start_service_lifecycle(app.handle(), false, false),
+                    service_lifecycle::StartupAction::Resume => start_service_lifecycle(app.handle(), true, false),
+                    service_lifecycle::StartupAction::RemainStopped => lifecycle.block("Slipstream stopped. Open it or choose Start Slipstream to resume."),
+                    service_lifecycle::StartupAction::None => {},
+                },
+                Err(error) => notify(app.handle(), &error),
             }
             // A fresh install may not have Geph's city catalog yet. Once its control
             // RPC is ready, replace the explicit unavailable state in this live menu.
@@ -4157,10 +4568,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Slipstream tray");
 
-    // No windows -> keep the app alive on the tray. We do not stop Geph on exit:
-    // its user LaunchAgent remains responsible for the tunnel and crash recovery.
-    // The routing daemon also outlives the tray, so a running tunnel after quit is
-    // consistent. To actually stop Geph, disable it in the menu.
+    // Stop-and-Quit exits only after its explicit service transaction succeeds.
+    // Keep updater handoffs and the separately labelled menu-only exit intact.
     app.run(|_app, event| {
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             if code.is_none() {

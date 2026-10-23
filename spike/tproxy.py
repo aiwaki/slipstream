@@ -15778,6 +15778,154 @@ def _launchd_job_absent(result):
     return "could not find service" in detail
 
 
+def _stop_launchd_observation():
+    """Exact root-job observation for the user-requested, preserving stop."""
+    result = _run("/usr/bin/env", "LC_ALL=C", "LANG=C", "/bin/launchctl",
+                  "print", _launchd_target())
+    stdout, stderr = (result.stdout or "").strip(), (result.stderr or "").strip()
+    if result.returncode == 0 and not stderr and stdout.startswith(_launchd_target() + " = {"):
+        pids = re.findall(r"^\s*pid\s*=\s*(.*?)\s*$", stdout, re.MULTILINE)
+        if len(pids) > 1 or (pids and (not pids[0].isdigit() or int(pids[0]) <= 1)):
+            return "unknown", None
+        return "loaded", int(pids[0]) if pids else None
+    missing = f'Could not find service "{LAUNCHD_LABEL}" in domain for system'
+    if result.returncode > 0 and not stdout and stderr.splitlines() in ([missing], ["Bad request.", missing]):
+        return "absent", None
+    return "unknown", None
+
+
+def _stop_process_observation(pid):
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        return "unknown", None
+    result = _run("/usr/bin/env", "LC_ALL=C", "LANG=C", "/bin/ps",
+                  "-ww", "-p", str(pid), "-o", "uid=,stat=,command=")
+    stdout, stderr = (result.stdout or "").strip(), (result.stderr or "").strip()
+    if result.returncode == 0 and stdout and not stderr and "\n" not in stdout:
+        fields = stdout.split(None, 2)
+        if len(fields) != 3 or not fields[0].isdigit() or not re.fullmatch(r"[A-Za-z+<>NnsLX]+", fields[1]):
+            return "unknown", None
+        uid, process_state, command = fields
+        if int(uid) != 0:
+            return "foreign", None
+        if process_state.startswith(("Z", "E")):
+            return "absent", None
+        # A transient `(name)`/basename display cannot prove PID reuse.
+        if not command.startswith("/"):
+            return "unknown", None
+        return "present", command
+    if result.returncode == 1 and not stdout and not stderr:
+        return "absent", None
+    return "unknown", None
+
+
+def _stop_runtime_command_owned(command):
+    """Exclude installer/probe CLI processes sharing the installed executable."""
+    if not _installed_daemon_command_owned(command):
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    script = os.path.realpath(os.path.join(INSTALL_DIR, "tproxy.py"))
+    script_index = next((i for i in (1, 2) if i < len(parts)
+                         and os.path.realpath(parts[i]) == script), None)
+    arguments = parts[script_index + 1:] if script_index is not None else parts[1:]
+    while arguments:
+        argument = arguments.pop(0)
+        if argument in {"--verbose", "--no-voice"}:
+            continue
+        if argument == "--port" and arguments:
+            port = arguments.pop(0)
+        elif argument.startswith("--port="):
+            port = argument.split("=", 1)[1]
+        else:
+            return False
+        if not port.isdigit() or not 0 < int(port) <= 65535:
+            return False
+    return True
+
+
+def _stop_owned_process_census():
+    """Return exact owned root runtime PIDs, or None when absence is unproven."""
+    result = _run("/usr/bin/env", "LC_ALL=C", "LANG=C", "/bin/ps", "-axww",
+                  "-o", "uid=,pid=,stat=,command=")
+    stdout = result.stdout or ""
+    if (result.returncode != 0 or (result.stderr or "").strip()
+            or not stdout.strip() or not stdout.endswith("\n")
+            or len(stdout) > 8 * 1024 * 1024):
+        return None
+    current_pid, current_uid = os.getpid(), os.geteuid()
+    seen, owned, saw_self = set(), set(), False
+    ambiguous_names = {"slipstreamd", os.path.basename(sys.executable)}
+    for row in stdout.splitlines():
+        fields = row.split(None, 3)
+        if len(fields) != 4 or not re.fullmatch(r"-?[0-9]+", fields[0]) or not fields[1].isdigit():
+            return None
+        uid, pid = int(fields[0]), int(fields[1])
+        process_state, command = fields[2:]
+        # Darwin ps may format the unsigned uid_t as a signed 32-bit integer.
+        if (not -(2 ** 31) <= uid < 2 ** 32 or not 0 <= pid < 2 ** 31
+                or pid in seen or not re.fullmatch(r"[A-Za-z+<>NnsLX]+", process_state)):
+            return None
+        uid %= 2 ** 32
+        seen.add(pid)
+        if pid == current_pid:
+            if uid != current_uid or process_state.startswith(("Z", "E")):
+                return None
+            saw_self = True
+            continue
+        if uid != 0 or process_state.startswith(("Z", "E")):
+            continue
+        # A transient ps basename cannot establish whether this is our runtime.
+        if not command.startswith("/"):
+            if command.split(None, 1)[0].strip("()") in ambiguous_names:
+                return None
+            continue
+        if _stop_runtime_command_owned(command):
+            owned.add(pid)
+    return owned if saw_self else None
+
+
+def _stop_listener_pids(port):
+    result = _run("/usr/sbin/lsof", "-nP", "-a", f"-iTCP:{port}",
+                  "-sTCP:LISTEN", "-t")
+    stdout, stderr = (result.stdout or "").strip(), (result.stderr or "").strip()
+    if result.returncode == 1 and not stdout and not stderr:
+        return []
+    if result.returncode != 0 or stderr or not stdout:
+        return None
+    rows = stdout.splitlines()
+    if any(not row.isdigit() or int(row) <= 1 for row in rows):
+        return None
+    return sorted({int(row) for row in rows})
+
+
+def _stop_label_disabled():
+    result = _run("/usr/bin/env", "LC_ALL=C", "LANG=C", "/bin/launchctl",
+                  "print-disabled", "system")
+    if result.returncode != 0 or (result.stderr or "").strip():
+        return False
+    matches = re.findall(r'^\s*"' + re.escape(LAUNCHD_LABEL)
+                         + r'"\s*=>\s*(true|false|disabled|enabled),?\s*$',
+                         result.stdout or "", re.MULTILINE)
+    return len(matches) == 1 and matches[0] in {"true", "disabled"}
+
+
+def _stop_bootout_installed_job():
+    state, _ = _stop_launchd_observation()
+    if state != "loaded":
+        return state == "absent"
+    # Do not let an on-disk plist select a different job during stop.
+    _run("/bin/launchctl", "bootout", _launchd_target())
+    for attempt in range(21):
+        state, _ = _stop_launchd_observation()
+        if state != "loaded":
+            return state == "absent"
+        if attempt < 20:
+            time.sleep(0.25)
+    return False
+
+
 def _wait_for_launchd_job_absent(attempts=20, delay=0.25):
     for attempt in range(max(1, attempts)):
         loaded = _run("/bin/launchctl", "print", _launchd_target())
@@ -15946,9 +16094,25 @@ def _owned_listener_pids(port):
     ]
 
 
-def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
-    command = _process_command_for_pid(pid)
-    if not _installed_daemon_command_owned(command):
+def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0, *, strict_observation=False):
+    def observe():
+        if strict_observation:
+            return _stop_process_observation(pid)
+        command = _process_command_for_pid(pid)
+        return ("present", command) if command is not None else ("absent", None)
+
+    owned_command = (_stop_runtime_command_owned if strict_observation
+                     else _installed_daemon_command_owned)
+
+    def terminal(observation):
+        state, command = observation
+        return state == "absent" or (strict_observation and (
+            state == "foreign" or (state == "present" and not owned_command(command))))
+
+    state, command = observe()
+    if strict_observation and terminal((state, command)):
+        return True
+    if not owned_command(command):
         return False
     try:
         os.kill(pid, signal.SIGTERM)
@@ -15958,8 +16122,9 @@ def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
         return False
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _process_command_for_pid(pid) is None:
-            return True
+        observation = observe()
+        if terminal(observation) or observation[0] == "unknown":
+            return terminal(observation)
         time.sleep(0.1)
     # Never force-stop the only listener while our private anchor may still
     # redirect HTTPS to it. The supervising root process can clear the same
@@ -15970,18 +16135,32 @@ def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
         return False
     grace_deadline = time.monotonic() + 1.0
     while time.monotonic() < grace_deadline:
-        if _process_command_for_pid(pid) is None:
-            return True
+        observation = observe()
+        if terminal(observation) or observation[0] == "unknown":
+            return terminal(observation)
         time.sleep(0.1)
     # Revalidate immediately before SIGKILL so a recycled PID is never touched.
-    if _installed_daemon_command_owned(_process_command_for_pid(pid)):
+    state, command = observe()
+    if state == "unknown":
+        return False
+    if owned_command(command):
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         except OSError:
             return False
-    return _process_command_for_pid(pid) is None
+    if strict_observation:
+        # SIGKILL delivery is asynchronous. Observe once after the final wait;
+        # an unknown reply is still a failure and never permits another signal.
+        for attempt in range(11):
+            observation = observe()
+            if terminal(observation) or observation[0] == "unknown":
+                return terminal(observation)
+            if attempt < 10:
+                time.sleep(0.1)
+        return False
+    return terminal(observe())
 
 
 def _wait_for_listener_state(port, present, timeout=8.0):
@@ -16458,9 +16637,29 @@ def _remove_daemon_status_artifacts():
     return all(clean for _component, clean in components)
 
 
-def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
+def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True, *, strict_observation=False):
     status = _daemon_status_record() or {}
     pid = status.get("pid")
+    observed_pids = set()
+    if strict_observation:
+        state, launch_pid = _stop_launchd_observation()
+        if state == "unknown":
+            return _cleanup_install_incomplete("root job state is unknown")
+        listener_pids = _stop_listener_pids(port)
+        if listener_pids is None:
+            return _cleanup_install_incomplete("listener state is unknown")
+        census_pids = _stop_owned_process_census()
+        if census_pids is None:
+            return _cleanup_install_incomplete("root process census is unknown")
+        observed_pids.update(census_pids)
+        observed_pids.update(listener_pids)
+        if launch_pid is not None:
+            observed_pids.add(launch_pid)
+        if isinstance(pid, int) and not isinstance(pid, bool) and pid > 1:
+            observed_pids.add(pid)
+        for observed_pid in observed_pids:
+            if _stop_process_observation(observed_pid)[0] == "unknown":
+                return _cleanup_install_incomplete("daemon process state is unknown")
     disable_result = _run("/bin/launchctl", "disable", _launchd_target())
     if disable_result.returncode != 0:
         return _cleanup_install_incomplete("launchd label could not be disabled")
@@ -16476,14 +16675,16 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     # daemon first leaves a window where launchd can replace it while cleanup is
     # still inspecting the old PID, which presents as a process that keeps
     # coming back and can leave the listener behind.
-    owned_pids = set(_owned_listener_pids(port))
-    if (
+    owned_pids = observed_pids if strict_observation else set(_owned_listener_pids(port))
+    if not strict_observation and (
         isinstance(pid, int)
         and not isinstance(pid, bool)
         and _installed_daemon_command_owned(_process_command_for_pid(pid))
     ):
         owned_pids.add(pid)
-    if not _bootout_installed_launchd_job():
+    booted_out = (_stop_bootout_installed_job() if strict_observation
+                  else _bootout_installed_launchd_job())
+    if not booted_out:
         # The loaded KeepAlive job may have re-armed after the first cleanup.
         # Restore the network boundary again, but do not signal its process
         # until launchd is proven quiescent.
@@ -16496,9 +16697,22 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
             else "launchd job absence could not be verified"
         )
         return _cleanup_install_incomplete(reason)
-    owned_pids.update(_owned_listener_pids(port))
+    if strict_observation:
+        listener_pids = _stop_listener_pids(port)
+        if listener_pids is None:
+            return _cleanup_install_incomplete("listener state is unknown after bootout")
+        census_pids = _stop_owned_process_census()
+        if census_pids is None:
+            return _cleanup_install_incomplete("root process census is unknown after bootout")
+        owned_pids.update(census_pids)
+        owned_pids.update(listener_pids)
+    else:
+        owned_pids.update(_owned_listener_pids(port))
     process_results = []
     for owned_pid in sorted(owned_pids):
+        if strict_observation:
+            process_results.append(_stop_owned_daemon_pid(owned_pid, strict_observation=True))
+            continue
         command = _process_command_for_pid(owned_pid)
         if command is None:
             continue
@@ -16518,6 +16732,13 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     pf_release_result = _pf_release_enable_token()
     if pf_release_result is not None and pf_release_result.returncode != 0:
         return _cleanup_install_incomplete("owned PF enable token was not released")
+    if strict_observation:
+        if _stop_launchd_observation()[0] != "absent" or not _stop_label_disabled():
+            return _cleanup_install_incomplete("stopped root job was not confirmed disabled and absent")
+        if _stop_listener_pids(port) != []:
+            return _cleanup_install_incomplete("listener absence is unconfirmed")
+        if _stop_owned_process_census() != set():
+            return _cleanup_install_incomplete("owned root process absence is unconfirmed")
     if not _remove_daemon_status_artifacts():
         return _cleanup_install_incomplete("daemon status could not be removed")
     listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
@@ -17850,6 +18071,14 @@ def _daemon_update_remove_retained():
     return True
 
 
+def do_stop():
+    """Stop owned routing, retaining the install, learning and account state."""
+    clean = _disable_and_cleanup_install(PROXY_PORT, remove_runtime=False, strict_observation=True)
+    if clean:
+        print("stopped + Slipstream pf anchor cleared; installed state retained")
+    return clean
+
+
 def do_uninstall(*, cleanup_updater=False):
     clean = _disable_and_cleanup_install(PROXY_PORT)
     if clean and cleanup_updater:
@@ -18203,6 +18432,8 @@ def main():
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
     ap.add_argument("--uninstall", action="store_true",
                     help="remove the LaunchDaemon and clear private pf state")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the owned LaunchDaemon, retaining the install and settings")
     ap.add_argument("--recover-network", action="store_true",
                     help=argparse.SUPPRESS)
     ap.add_argument("--status", action="store_true",
@@ -18221,6 +18452,9 @@ def main():
     ap.add_argument("--update-prepare", default="", help=argparse.SUPPRESS)
     ap.add_argument("--update-worker", default="", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.stop and (args.install or args.uninstall or args.recover_network
+                      or args.update_prepare or args.update_worker):
+        ap.error("--stop cannot be combined with another lifecycle action")
     VERBOSE = args.verbose
 
     if args.transport_mechanics_selftest:
@@ -18291,7 +18525,7 @@ def main():
         print("must run as root:  sudo python3 tproxy.py", file=sys.stderr)
         sys.exit(1)
 
-    if args.update_prepare or args.update_worker or args.install or args.uninstall or args.recover_network:
+    if args.update_prepare or args.update_worker or args.install or args.uninstall or args.stop or args.recover_network:
         try:
             if args.update_prepare:
                 result = do_update_prepare(args.update_prepare)
@@ -18300,7 +18534,8 @@ def main():
             else:
                 with _installer_operation_lock():
                     result = (do_install(args.port) if args.install else
-                              do_uninstall(cleanup_updater=True) if args.uninstall else recover_owned_network_state())
+                              do_uninstall(cleanup_updater=True) if args.uninstall else
+                              do_stop() if args.stop else recover_owned_network_state())
         except DaemonUpdateNoOperation as error:
             print("daemon_update_no_operation", file=sys.stderr)
             print(f"daemon_update_stage={error.stage}", file=sys.stderr)

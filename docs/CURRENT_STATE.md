@@ -2,6 +2,45 @@
 
 ## Verified Checkpoint
 
+### Full Stop-and-Quit continuation, 2026-10-23
+
+Active checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/geph-stop-doh-fallback`, PR412. The user quit and deleted the app
+because Geph remained. Last read-only observation found no installed Slipstream
+or owned jobs; external Geph is running and has not been touched. Earlier
+installed-state paragraphs are historical. Preserve all apps, state and backups.
+
+Dependency PR413 merged as `922973ef38d5d6d7ae2659bb9c12dc96af6f3b94` with the
+same tree as tested `e8d03e2aeb0d3a6ac853a804e41c39840353613d`.
+CI39896354602 and audit39896354628 passed; independent patch review found no
+blockers. Main producer39897443338 published immutable `geph-vendor-0.4.3-r2`.
+Main audit39897443478 passed. Main CI39897443322 attempt1 reached package
+fetch before the new release existed (HTTP404); only failed jobs were rerun
+after producer success. Its consumer verifies assets/provenance/SBOM/audit.
+The source repair updates certifi and both WebPKI dependencies; it is not a
+claim that the historical DNS/HTTP403 incidents were caused by certificates.
+
+PR412 adds preserving root `--stop` under the existing lock, exact launchd and
+owned-process absence checks (including pre-listener orphans), and bounded
+post-KILL confirmation. Its ordinary Quit now waits for root then Geph stop,
+records stopping/stopped intent, retains settings, and resumes on ordinary
+opening after a completed stop. Login keeps the stopped state. Source review
+caught and repaired dormant/VPN readiness and old login registration handling.
+Root checks: 69 focused, 23 teardown compatibility and 11 updater cases passed;
+12 isolated Rust lifecycle cases passed. Graph tools were unavailable; bounded
+direct reads were used. Evidence: `output/root-stop-20261023/` and
+`output/stop-quit-20261023/`. Native compiled UI and actual menu/admin/reopen
+qualification remain pending; the new disposable smoke is being prepared.
+
+Next: integrate merged dependency main, finish the native Stop-and-Quit smoke,
+run affected exact-head CI, and qualify the resulting installed application.
+The public preview30 stays immutable. Existing preview31 candidates have old
+trust dependencies and are not publishable using their older audit. Ordinary
+public update/rollback and remaining packaged observer gates stay open. Do not
+claim the user's historical DNS error or Codex403 fixed without live evidence.
+
+### Earlier incident evidence (superseded status; retained for traceability)
+
 2026-10-22: current incident work is in the physical checkout
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
 branch `codex/geph-stop-doh-fallback`, based on
@@ -53,17 +92,25 @@ also cover signed bounds, overflow and the current-process identity witness.
 The unchanged DoH subset remains 11/11 green.
 CI39835124312 also passed native product, packaged browser and lifecycle checks
 at `3bac4b075850cac514b101c6a76c29a1238150e0`; receipt:
-`output/incidents-20261022/pr412-second-head-ci.json`. The later signed-UID
-correction still needs its own native CI; do not transfer earlier evidence.
-Installed
+`output/incidents-20261022/pr412-second-head-ci.json`. The final signed-UID
+correction at `a51383ba8b6b36b1186c1e8b71b7186eee090388` passed CI39837144364
+(native product, packaging, browser and lifecycle checks). Its receipt is
+`output/incidents-20261022/pr412-final-head-ci.json`. Audit39837144381 still
+reports the same three affected dependencies, with both Rust dependencies also
+in Geph; exact reports and summary are retained under
+`output/incidents-20261022/final-head-audit/`. Installed
 UI and the historical screenshots remain unqualified. Crash interruption before
 the final preference save can retain enabled intent; no crash-atomic disable
 transaction was introduced.
 The menu-only exit now explicitly says routing continues; no full-stop action
 was added. These fixes are not installed. Graph tools were unavailable;
-discovery used bounded direct reads. Next: native CI for the review follow-up;
-keep the retained `.31` release candidate and its outstanding observer gate
-separate from these new production changes.
+discovery used bounded direct reads. PR412 is open and unmerged: required audit
+remains red despite green product CI. Next: a separate coordinated dependency
+update, preserving the Geph source and lock provenance contracts. Keep the
+retained `.31` candidate and its outstanding observer gate separate. This final
+post-CI checkpoint is local and uncommitted; production source is the pushed
+`a51383b` head. Do not repeat unchanged green product checks merely to commit
+this status update.
 
 PR411 merged at `e918906069dddc722aa0c6283b94c1a16af8954e`; its tree matches
 tested head `5fd85aa9dbe2176c3f2788fd5b3f60aad1d23174`.

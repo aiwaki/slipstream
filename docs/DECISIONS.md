@@ -1,5 +1,30 @@
 # Decisions
 
+### 2026-10-23: ordinary Quit stops owned services and preserves configuration
+
+`Stop Slipstream and Quit` is the ordinary Quit action. Persist an owner-private
+`stopping` intent before requesting administrator authorization. Under the
+existing installer lock, disable the exact root job, clear only the private PF
+anchor, drain and stop owned runtime processes, and confirm job/listener/process
+absence. Keep the installed runtime, learning, settings and credentials. Only
+then stop the owned Geph LaunchAgent and confirm its process census is clear.
+An unreadable or ambiguous observation is a failure, never proof of absence.
+Refresh an existing enabled app-owned login registration with `--autostart` and
+verify it before persisting `stopped` and exiting. A disabled login preference
+remains disabled; the separate menu-only exit explicitly keeps routing running.
+
+A service-action lease excludes watchdog, update, repair and Geph mutations
+through the administrator prompt and completion. Do not reinterpret updater
+handoff exits as Quit. A cancelled, failed or uncertain operation leaves the
+menu open with the phase error and retains the pending intent. On reopening an
+interrupted operation, finish stopping; never silently restart half the stack.
+A normal user opening after a confirmed stop resumes saved configuration:
+install/start root, observe matching progressing fresh status, start configured
+owned Geph, confirm readiness, then clear intent. A confirmed dormant daemon
+under an external VPN is valid settled service state, without claiming active
+interception. Login launch with `--autostart` keeps a stopped installation stopped.
+External Geph and user-managed network configuration remain outside this action.
+
 ### 2026-10-22: Geph off state requires observed shutdown
 
 An unsuccessful launchd query is unknown, not proof that Slipstream's Geph job
@@ -26,7 +51,7 @@ is a separate improvement.
 
 The existing menu-only exit remains non-disruptive, but its label must say that
 routing continues. It is not a full stop, and the process list after that action
-alone does not prove a leak. A future stop-without-uninstall action must retain
+alone does not prove a leak. The full Stop-and-Quit action above retains
 the existing order: quiesce private interception and drain the owned daemon
 before stopping its Geph backend, preserve settings, and leave external Geph
 and network configuration untouched.
