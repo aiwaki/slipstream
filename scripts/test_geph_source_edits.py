@@ -252,7 +252,63 @@ RSA_REVIEW_20261015_POLICY_JSON = r'''
 '''
 
 
+def reviewed_revision2_policy():
+    """Frozen reviewed r2 policy; later live policy changes cannot rewrite history."""
+    policy = json.loads(RSA_REVIEW_20261015_POLICY_JSON)
+    reasons = {'geph-rsa-0.8.2-marvin-public-key-only': 'Reviewed 2026-10-23 against Geph 0.4.3-r2 '
+                                              'SOURCE '
+                                              '387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e '
+                                              'and Cargo.lock '
+                                              '440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe. '
+                                              'The verified crate, 13 source edits and '
+                                              'complete RSA reverse-dependency closure are '
+                                              'unchanged; only two WebPKI lock entries '
+                                              'changed. Fresh tracing confirms public-key '
+                                              'parsing, blind/finalize/verify only in the '
+                                              'client. No client config, RPC or cache DTO '
+                                              'constructs or imports RsaPrivateKey, and no '
+                                              'client call enters the private '
+                                              'signing/decryption required by Marvin. This '
+                                              'bounded reachability exception does not '
+                                              'establish constant-time blinding '
+                                              'arithmetic, removal of private APIs or '
+                                              'installed-artifact safety. Re-review on '
+                                              'source, dependency or client-role changes; '
+                                              'see docs/ROUTING_RESEARCH.md, RSA client '
+                                              'review 2026-10-23.',
+     'geph-rsa-0.8.2-prime-validation-public-key-only': 'Reviewed 2026-10-23 against Geph '
+                                                        '0.4.3-r2 SOURCE '
+                                                        '387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e '
+                                                        'and Cargo.lock '
+                                                        '440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe. '
+                                                        'The verified crate, source edits '
+                                                        'and complete RSA '
+                                                        'reverse-dependency closure are '
+                                                        'unchanged. Fresh tracing confirms '
+                                                        'that untrusted broker/config key '
+                                                        'bytes enter RsaPublicKey '
+                                                        'modulus/exponent decoders; no '
+                                                        'client, RPC or cache DTO enters '
+                                                        'RsaPrivateKey::from_components/precompute. '
+                                                        'This exception covers only the '
+                                                        'malformed-private-prime advisory '
+                                                        'in this exact client graph, '
+                                                        'regardless of broker trust, and '
+                                                        'makes no broader cryptographic '
+                                                        'safety claim. Re-review on '
+                                                        'source, dependency or client-role '
+                                                        'changes; see '
+                                                        'docs/ROUTING_RESEARCH.md, RSA '
+                                                        'client review 2026-10-23.'}
+    for exception in policy["exceptions"]:
+        if exception["id"] in reasons:
+            exception.update(expires="2026-10-30", reason=reasons[exception["id"]])
+    return policy
+
+
 class ReviewedRsaPolicyTransitionTests(unittest.TestCase):
+    expected_policy_transition = "renewed-reviewed-rsa-public-key-exceptions"
+
     def setUp(self):
         self.current = json.loads(RSA_REVIEW_20261015_POLICY_JSON)
         self.previous = copy.deepcopy(self.current)
@@ -301,7 +357,7 @@ class ReviewedRsaPolicyTransitionTests(unittest.TestCase):
                 object_pairs_hook=lambda pairs: dict(reversed(pairs)))):
             with self.subTest(policy=policy):
                 self.assertEqual(self.verify_policy(current_policy=policy),
-                                 'renewed-reviewed-rsa-public-key-exceptions')
+                                 self.expected_policy_transition)
 
     def test_policy_only_callers_and_foreign_source_or_lock_are_rejected(self):
         bindings = [None]
@@ -422,7 +478,7 @@ class ReviewedRsaPolicyTransitionTests(unittest.TestCase):
         result = self.verify_source()
         self.assertEqual(result['transition'], self.transition)
         self.assertEqual(result['policy_transition'],
-                         'renewed-reviewed-rsa-public-key-exceptions')
+                         self.expected_policy_transition)
         for index in range(4):
             changed = list(self.binding)
             changed[index] = '1' * 64
@@ -444,10 +500,8 @@ class ReviewedRsaPolicyTransitionTests(unittest.TestCase):
 
 class ReviewedRsaRevisionPolicyTransitionTests(ReviewedRsaPolicyTransitionTests):
     def setUp(self):
-        root = Path(__file__).parents[1]
         self.previous = json.loads(RSA_REVIEW_20261015_POLICY_JSON)
-        self.current = json.loads(
-            (root / 'security/geph-dependency-audit-policy.json').read_text())
+        self.current = reviewed_revision2_policy()
         self.binding = (
             '843b3bf0a1f59bf7ddc0221500c59b97230ae3c9130949789385b70a7bcca3fe',
             '5ee1bccd3f2f063898adc002d56b0df61ca068c581e7f32ca00cd564854dff5d',
@@ -458,10 +512,7 @@ class ReviewedRsaRevisionPolicyTransitionTests(ReviewedRsaPolicyTransitionTests)
         self.revisions = (1, 2)
         self.transition = 'revision'
 
-    def test_checked_out_inputs_match_exact_review(self):
-        root = Path(__file__).parents[1]
-        self.assertEqual(source.hash_file(root / 'vendor/geph/SOURCE.json'), self.binding[2])
-        self.assertEqual(source.hash_file(root / 'vendor/geph/Cargo.lock'), self.binding[3])
+    def test_frozen_policy_digests_match_exact_review(self):
         self.assert_policy_digest(self.previous,
             '53d6a5865d2106437b6106b65fd443a337b2d19fccb4a52a5a696e4f0a0d3ca0')
         self.assert_policy_digest(self.current,
@@ -504,3 +555,72 @@ class ReviewedRsaRevisionPolicyTransitionTests(ReviewedRsaPolicyTransitionTests)
                     ValueError, 'additions or changes'):
                 self.verify_policy(previous_policy=policies[0], current_policy=policies[1],
                                    verified_source_binding=wrong_binding)
+
+
+class ReviewedCtutilsPolicyTransitionTests(ReviewedRsaPolicyTransitionTests):
+    expected_policy_transition = "rebound-reviewed-rsa-public-key-exceptions"
+
+    def setUp(self):
+        root = Path(__file__).parents[1]
+        self.previous = reviewed_revision2_policy()
+        self.current = json.loads(
+            (root / 'security/geph-dependency-audit-policy.json').read_text())
+        self.binding = (
+            '387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e',
+            '440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe',
+            'de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286',
+            'c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0',
+        )
+        self.versions = ('0.4.3', '0.4.3')
+        self.revisions = (2, 3)
+        self.transition = 'revision'
+
+    def test_checked_out_inputs_match_exact_review(self):
+        root = Path(__file__).parents[1]
+        self.assertEqual(source.hash_file(root / 'vendor/geph/SOURCE.json'), self.binding[2])
+        self.assertEqual(source.hash_file(root / 'vendor/geph/Cargo.lock'), self.binding[3])
+        self.assert_policy_digest(self.previous,
+            '467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7')
+        self.assert_policy_digest(self.current,
+            'e3edd0ab492b298b6e30a32e0f6cb4a20422f613e3a06880cb06d85f157506b0')
+
+    def test_only_two_reasons_change_without_extending_any_expiry(self):
+        previous = {e['id']: e for e in self.previous['exceptions']}
+        current = {e['id']: e for e in self.current['exceptions']}
+        reviewed_ids = {'geph-rsa-0.8.2-marvin-public-key-only',
+                        'geph-rsa-0.8.2-prime-validation-public-key-only'}
+        self.assertEqual(previous.keys(), current.keys())
+        self.assertEqual(len(self.current['exceptions']), len(current))
+        for identifier, old in previous.items():
+            new = current[identifier]
+            with self.subTest(identifier=identifier):
+                self.assertEqual(new['expires'], old['expires'])
+                if identifier in reviewed_ids:
+                    self.assertEqual(new['expires'], '2026-10-30')
+                    self.assertIn('Rebound 2026-10-23', new['reason'])
+                    self.assertIn(self.binding[2], new['reason'])
+                    self.assertIn(self.binding[3], new['reason'])
+                    self.assertNotEqual(new['reason'], old['reason'])
+                    self.assertEqual({**new, 'reason': old['reason']}, old)
+                else:
+                    self.assertEqual(new, old)
+        self.assertEqual({**self.current, 'exceptions': self.previous['exceptions']},
+                         self.previous)
+
+    def test_historical_bindings_cannot_be_swapped_or_mixed_with_rebinding(self):
+        for historical_class in (ReviewedRsaPolicyTransitionTests,
+                                 ReviewedRsaRevisionPolicyTransitionTests):
+            historical = historical_class()
+            historical.setUp()
+            for policies, wrong_binding in (
+                ((self.previous, self.current), historical.binding),
+                ((historical.previous, historical.current), self.binding),
+                ((historical.previous, self.current), self.binding),
+                ((self.previous, self.current), self.binding[2:] + self.binding[:2]),
+                ((self.current, self.previous), self.binding),
+            ):
+                with self.subTest(historical=historical_class.__name__,
+                                  binding=wrong_binding), self.assertRaisesRegex(
+                        ValueError, 'additions or changes'):
+                    self.verify_policy(previous_policy=policies[0], current_policy=policies[1],
+                                       verified_source_binding=wrong_binding)

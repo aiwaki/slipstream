@@ -501,6 +501,13 @@ survive across sessions and agents.
 
 ### 2026-09-20: coordinated dependency source bootstrap
 
+The separately reviewed ctutils 0.4.3 -> 0.4.4 repair uses Geph 0.4.3-r3.
+Only its lock entry changes. The existing RSA review is rebound to the exact
+r3 SOURCE/lock with no expiry extension or new exception; a distinct complete
+source/policy hash pair admits this change. The ordinary source bootstrap and
+post-merge producer/consumer gates remain unchanged. Evidence and limitations
+are in `docs/ROUTING_RESEARCH.md`, ctutils constant-time repair 2026-10-23.
+
 2026-10-23 extension: the exact emSign repair may coordinate the app and Geph
 `rustls-webpki 0.103.15 -> 0.103.16` / `webpki-roots 1.0.9 -> 1.0.10` changes
 with `certifi 2026.6.17 -> 2026.10.19` in all three Python locks. Rust admission

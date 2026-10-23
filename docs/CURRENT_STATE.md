@@ -6,15 +6,16 @@
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
-branch `codex/network-updater-followup`, based on merged PR414
-`934476dab7c5ff2e0a50bbee47641483c25ef465`. PR414 CI39945675797 and
-audit39945675765 passed. The installed private preview31 remains source
+branch `codex/network-updater-followup`, now integrating merged dependency PR416
+`8979935f6afa60ba90025d925127d7b997fbc58f` (tree-identical to reviewed
+`1661c15e5fb147036aaba94f829567d4702b36e8`). PR416 CI39994944972 and
+audit39994944831 passed. The installed private preview31 remains source
 `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36` (the exact source is recorded in the
 completed lifecycle section below); follow-up source is not installed yet.
 
 PR415 contains the follow-up. Initial head
 `4d9af272df6dcef799e7abc45572d33db1a1514c` passed all CI39953414580 jobs.
-Current head `58a655ecc5ecf8dfe0624f1662c9d91807b1226a` passed product checks,
+DNS/observer head `58a655ecc5ecf8dfe0624f1662c9d91807b1226a` passed product checks,
 the packaged build and browser qualification in CI39958585602, but its heavy
 lifecycle job timed out at `after-tray-restart:chrome` after the existing
 45-second observation. The same-stage HTTPS/status/PF checks and all seven
@@ -26,12 +27,13 @@ establishes a non-reproducing failure, not its cause. No timeout or gate was
 relaxed. Evidence:
 `output/network-followup-20261023/lifecycle-current/triage-receipt.json`.
 
-Audit39953414800 and current-head audit39958585705 fail only the Geph vendor
+Audit39953414800 and pre-integration audit39958585705 failed only the Geph vendor
 gate: a new October 23 advisory, RUSTSEC-2026-0385, affects ctutils0.4.3.
 Existing RSA exceptions remain accepted; this is not an expiry or an error
-introduced by the DNS patch. A separate minimal dependency repair is being
-prepared on `codex/ctutils-constant-time-fix` in the existing
-`geph-rustls-02345` checkout. Do not waive the gate.
+introduced by the DNS patch. Merged PR416 repairs the dependency without a
+waiver. Main producer39996042090 is building immutable `geph-vendor-0.4.3-r3`;
+confirm its successful publication before pushing this integrated consumer for
+fresh CI. Do not substitute the old r2 binary.
 
 Two causal repairs are in source, with independent reviews clear:
 - Supplemental system DNS can stall even with ready DoH/original addresses.
@@ -60,9 +62,33 @@ fixed. See `output/network-incidents-20261023/browser-observation.json` and
 blocked by the locked Mac; the user unlocked it. No login/logout was attempted.
 
 The completed installed full-Quit/reopen qualification below is reusable.
-Next: finish PR415 review/CI and the separate ctutils dependency repair, then
-bind any new candidate to canonical bundle/install verification before browser qualification.
+Next: finish the r3 producer and integrated PR415 review/CI, then bind any new
+candidate to canonical bundle/install verification before browser qualification.
 Public updater transition/forced rollback and the historical HTTP403 remain open.
+
+### Geph ctutils dependency source repair, 2026-10-23
+
+Separate source branch `codex/ctutils-constant-time-fix`, physical checkout
+`/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`,
+starts from main `934476dab7c5ff2e0a50bbee47641483c25ef465`.
+PR415 audit39953414800 found newly published RUSTSEC-2026-0385 on unchanged
+ctutils 0.4.3. The r3 source contract pins minimum fixed 0.4.4, changing only
+its lock version/checksum, SOURCE lock digest/revision and the two existing
+RSA reason identities. No exception or expiry is added or extended.
+Both Apple-target locked metadata resolutions, canonical extraction/transition
+and 70 focused tests pass. One bounded local scan of all 423 identities passes
+with zero blocking findings, two existing RSA exceptions and three informational
+notices, including new tokio RUSTSEC-2026-0386. This is local input evidence,
+not exact-head CI or a native build. The independent source/policy review found
+no blocker. Full evidence: `output/ctutils-constant-time-20261023/`; details and
+source hashes: `docs/ROUTING_RESEARCH.md`, ctutils constant-time repair.
+
+PR416 merged as `8979935f6afa60ba90025d925127d7b997fbc58f`, with the same tree
+as reviewed `1661c15e5fb147036aaba94f829567d4702b36e8`. CI39994944972 and
+audit39994944831 passed; the main push started producer39996042090. Its immutable
+r3 artifact and the authenticated PR415 consumer remain to be qualified.
+No new application installation or live service action has been performed;
+this dependency repair does not establish the cause of Safari/Codex failures.
 
 ### Full Stop-and-Quit continuation, 2026-10-23
 
@@ -921,8 +947,8 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish PR415 (`codex/network-updater-followup`) and the separate ctutils
-  dependency repair blocking its Geph audit. Supplemental DNS and pre-ACK
+- Finish the merged PR416 r3 producer39996042090, then push and qualify the
+  integrated PR415 (`codex/network-updater-followup`) consumer. Supplemental DNS and pre-ACK
   observer races are causally reproduced and repaired locally. Reuse recorded
   focused checks; current-head CI and matching candidate/install proof remain
   before treating these source changes as delivered.
