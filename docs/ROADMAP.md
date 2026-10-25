@@ -790,6 +790,28 @@ Only after adapters stabilize:
 
 No global UDP/443 block, broad IP guessing, or manual strategy picker.
 
+## M6 - Reusable Adaptive Bypass Module (Deferred)
+
+User-requested direction, recorded 2026-10-25. Start only after the
+cross-platform Slipstream app is ready on its supported target platforms and
+the current reliability and delivery work is complete. This is not a dependency
+of the current release; no extraction or public SDK work starts now.
+
+- Make adaptive bypass available as a module that third-party VPN clients can
+  integrate. Reuse the tested core and platform adapters instead of maintaining
+  a separate routing implementation.
+- Define a versioned integration API and prove a working reference integration
+  before promising compatibility with other VPNs. Host clients must retain
+  explicit control over their own routing and lifecycle.
+- Credit Slipstream as the source of the technology, with a visible name and
+  project link in integrating applications. Before distribution, decide the
+  attribution, branding and licensing terms separately; the existing license
+  is unchanged by this roadmap entry.
+
+Purpose: let other clients use the adaptive approach and help their users
+discover Slipstream. Platform scope and dates remain subject to the app's
+native feasibility and qualification gates.
+
 ## Milestone Checks
 
 - Unit tests and cross-language golden vectors.

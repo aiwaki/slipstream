@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import geph_backend
+import pytest
 
 
 def result(returncode=0, stdout="", stderr=""):
@@ -124,3 +125,44 @@ def test_backend_never_uses_broad_process_matching_or_process_termination():
     assert "pkill" not in source
     assert "pgrep" not in source
     assert "kill(" not in source
+
+
+@pytest.mark.parametrize("payload, expected", [
+    ('{"enabled":"1"}', True), ('{"enabled":"0"}', False),
+    ('{}', False), ('{"enabled":true}', None), ('{"enabled":null}', None),
+    ('[]', None), ('{broken', None),
+])
+def test_read_enabled_distinguishes_opt_in_disabled_and_unknown(tmp_path, payload, expected):
+    config = tmp_path / "geph.json"
+    config.write_text(payload, encoding="utf-8")
+    assert geph_backend.read_enabled(config, os.getuid()) is expected
+    config.unlink()
+    assert geph_backend.read_enabled(config, os.getuid()) is False
+
+
+@pytest.mark.parametrize("kind", ["symlink", "fifo", "large", "foreign-owner", "writable"])
+def test_read_enabled_rejects_unsafe_or_unbounded_configuration(tmp_path, kind):
+    config = tmp_path / "geph.json"
+    owner_uid = os.getuid()
+    if kind == "symlink":
+        target = tmp_path / "other.json"
+        target.write_text('{"enabled":"0"}')
+        config.symlink_to(target)
+    elif kind == "fifo":
+        os.mkfifo(config)
+    else:
+        config.write_text('{"enabled":"1"}')
+        if kind == "large":
+            config.write_bytes(b" " * (geph_backend.MAX_OWNERSHIP_BYTES + 1))
+        elif kind == "foreign-owner":
+            owner_uid += 1
+        else:
+            config.chmod(0o666)
+    assert geph_backend.read_enabled(config, owner_uid) is None
+
+
+def test_read_enabled_treats_excessively_nested_json_as_unknown(tmp_path):
+    config = tmp_path / "geph.json"
+    config.write_text("[" * 30000 + "0" + "]" * 30000, encoding="utf-8")
+    assert config.stat().st_size < geph_backend.MAX_OWNERSHIP_BYTES
+    assert geph_backend.read_enabled(config, os.getuid()) is None

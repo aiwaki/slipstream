@@ -1,5 +1,60 @@
 # Routing Research Notes
 
+### Owned Geph selection changed during health outages, 2026-10-25
+
+The installed `1f3ddcfb6` and the inspected PR415 `658b3018f` share the relevant
+`_handle_impl` geo-exit block. Before this change, only a request that actually
+attempted owned Geph and failed before receiving a target byte could take the
+existing no-system-fallback path. Cooldown, circuit rejection, restart drain,
+not-ready state and loss of transient ownership could instead reach
+`_try_system_geo_connect`. `probe_geph` can clear `_geph_owned` while retaining a
+last-known port; those health fields therefore cannot represent saved opt-in.
+The old traffic contract explicitly expected cooldown to use the system route.
+This work changes that product policy; it is not an accidental regression in
+that test or a proven explanation of the user's exact HTTP403.
+
+The final handler cases fail **9/9** on the old routing block while four
+disabled/unconfigured/global-off/external fallback cases pass. The
+failure was observable: the fake system endpoint received the retained first
+flight, or lost ownership selected the unverified external-style Geph path.
+A success → empty response → cooldown (with identity cleared) → ready sequence
+now uses a real numeric-loopback TCP upstream, verifies each original
+ClientHello, and returns through owned Geph after recovery. Only the failed
+attempt requests one existing recovery; a held request neither retries nor
+extends cooldown. A first payload followed by disconnect is not replayed.
+The core matrix runs with and without saved opt-in, including Discord, YouTube,
+direct and user-managed Smart DNS routes. Configuration cases cover explicit
+disable/re-enable, removal, unreadable data, temporary console absence, another
+console user, symlink/FIFO/writable/foreign-owner and oversized files.
+
+`owned_geph_route_required` now obtains selection from the existing `geph.json`
+preference rather than readiness fields. A single locked last-observed choice
+preserves an already-confirmed selection on an unknown read; it is not a
+route-learning cache and creates no persistent state. `geph_backend.read_enabled`
+performs bounded descriptor-based reads and reports missing versus unknown
+separately. Deeply nested JSON below the size cap also returns unknown: its
+`RecursionError` reproduced before the follow-up catch and can no longer escape
+into the monitor/handler. It reads no credential store and emits no config
+contents. The
+monitor message and route-health event distinguish retention from optional
+system fallback. Existing first-payload recovery, circuit deadlines and
+committed-stream handling are unchanged.
+
+Integration with PR415 main `2210366fa` preserves Smart DNS's neutral result
+when resolution was not observed, including no health penalty or consumed
+half-open permit. Geph selection and identity are sampled after that await.
+The integrated traffic/config/documentation tests pass 118 cases; the focused
+Geph/geo/monitor and affected DNS selection passes 147 cases (445 deselected).
+
+Evidence is under `output/geph-route-continuity-20261025/` in worktree
+`codex/geph-route-continuity`; `green-integrated-*.log` and `verification.json`
+record the combined source checks. No local build, installation,
+account request or live routing change was made. The user's external Geph was
+left running. The reported ARN Ray was not located in readable local evidence;
+a Geph exit server address is not proof of HTTP egress, and the differing client
+addresses in nearby errors are only a causal lead. This fix cannot qualify
+browser behavior or promise that an exit's reputation/region will avoid 403.
+
 ### Supplemental DNS stall and current browser evidence, 2026-10-23
 
 `resolve_connection_ips` waited for unbounded in-process `getaddrinfo` when a

@@ -2,9 +2,59 @@
 
 ## Verified Checkpoint
 
+### Owned Geph route continuity, 2026-10-25 (source work in progress)
+
+Isolated checkout:
+`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
+branch `codex/geph-route-continuity`, original base main `8979935f6` (PR416),
+now integrated with main `2210366fa` (PR415). No live
+service, account, browser, build or install action was performed; the user's
+external Geph remains untouched. The reported October 24 Codex403 is still
+unattributed: the exact ARN Ray was not found, and a logged Geph server address
+is not measured HTTP egress.
+
+The installed-source geo handler allowed system-route fallback during owned
+Geph cooldown/circuit/drain/unready states, explicitly covered by the old test.
+The new policy retains persisted owned opt-in through those health transitions,
+including temporary ownership loss, and closes the new connection rather than
+changing its route. Explicitly disabled/unconfigured/global-off/external cases
+keep the existing fallback. Existing bounded recovery and committed-stream
+handling remain; Discord/YouTube stay local. See the October 25 decision and
+routing research section for scope and superseded historical rows.
+
+Causal evidence: the final regression cases against the original `8979935f6`
+`tproxy.py` give **9 failed / 4 passed**; failures demonstrate the alternate
+route, including identity loss during an awaited Smart DNS attempt. The initial fixed
+traffic/config/documentation selection gave **117 passed**, and the initial
+Geph/geo/monitor run gave **129 passed / 452 deselected**. After integrating
+PR415, the current traffic/config/documentation selection gives **118 passed**
+and Geph/geo/monitor plus affected DNS gives **147 passed / 445 deselected**.
+The merge retains neutral Smart DNS admission and samples Geph identity after
+the Smart DNS await. Tests include real
+loopback TCP first flights through success → failure → cooldown → recovery,
+no replay after committed payload, optional fallback, saved config transitions,
+private bounded reads and no cross-user intent inheritance. Evidence:
+`output/geph-route-continuity-20261025/` (`verification.json`, red and green
+logs, original source copy). Independent review found no blocker and its 27
+selected cases passed. A follow-up malformed-config case reproduces an
+uncaught JSON `RecursionError` below the file-size cap (1 red), now treated as
+unknown intent; all 20 configuration/ownership tests pass after that repair.
+
+Independent merge review of `c6860b31b` passed: seven DNS/Smart DNS functions
+remain AST-identical to main, route continuity is preserved, and no unrelated
+source edits remain. Both README updates are published through PR417/418.
+The requested third-party adaptive module is deferred in ROADMAP until the
+cross-platform application is ready; no SDK or licensing work starts now.
+
+Next: push this reviewed branch, complete required CI and merge through normal
+branch protection. Do not install or switch the user's external Geph as part
+of this source step. Native/browser and account-backed behavior are not
+qualified by these fixtures; no claim of a universal 403 fix or device-wide
+VPN kill switch.
+
 ### Network and updater observer follow-up, 2026-10-25
 
-Active physical checkout:
+Source qualification checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
 branch `codex/network-updater-followup`, with merged dependency PR416
 `8979935f6afa60ba90025d925127d7b997fbc58f` (tree-identical to reviewed
@@ -44,9 +94,12 @@ heavy lifecycle) and dependency-audit40191917902. All review threads were
 resolved. After README PR417/418 merged, branch protection rejected the merge
 solely because the branch was behind main. One update to main
 `59576368b8b84bd36aac8c384d3a9a3cd3ba7f89` brings only both README changes;
-the application and tests are unchanged. The green 658b results are the reused
-functional baseline; branch protection requires fresh CI on this documentation
-integration. Evidence: `output/network-followup-20261025/integrated-ci-state.json`.
+the application and tests are unchanged. The green 658b results remain the reused
+functional baseline. The final head `112068961b570b79531c64ed488bb08a0439fa70`
+passed CI40195315520 and dependency-audit40195315455, then PR415 merged normally
+as `2210366fadeab258f614135c8b933ed28ed14d9a`, tree-identical to that tested head.
+README PR417/418 are also merged. Evidence:
+`output/network-followup-20261025/integrated-ci-state.json`.
 No old r2 binary is substituted.
 
 Two causal repairs are in source, with independent reviews clear:
@@ -87,8 +140,8 @@ the historical DNS failure. The October 23 PID/runtime snapshot is not current.
 Investigation evidence: `output/network-incidents-20261025/` (receipt in progress).
 
 The completed installed full-Quit/reopen qualification below is reusable.
-Next: finish integrated PR415 review/CI, then bind any new candidate to canonical
-bundle/install verification before browser qualification. No application was
+Next: bind any new candidate to canonical bundle/install verification before
+browser qualification; PR415 source integration is complete. No application was
 built or installed locally, and no live service was changed for the integration.
 Public updater transition/forced rollback and the HTTP403 incidents remain open.
 
