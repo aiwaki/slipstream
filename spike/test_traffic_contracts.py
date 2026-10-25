@@ -8,11 +8,13 @@ replaced, so no test can reach the network or mutate local routing state.
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import tproxy
@@ -214,6 +216,8 @@ async def run_handler(reader, writer):
 
 
 def isolate_runtime_state(monkeypatch):
+    monkeypatch.setattr(tproxy, "_console_user_home", lambda: None)
+    monkeypatch.setattr(tproxy, "_geph_route_intent", (None, False), raising=False)
     tproxy.reset_runtime_route_circuits()
     monkeypatch.setattr(tproxy, "_dead", {})
     monkeypatch.setattr(tproxy, "_strat_cache", {})
@@ -294,10 +298,13 @@ def seed_complete_unknown_zero_payload_proof(host, now):
     }
 
 
+@pytest.mark.parametrize("owned_configured", [False, True])
 @pytest.mark.parametrize("contract", CORE_TRAFFIC_CONTRACTS, ids=lambda item: item.name)
-def test_core_tls_traffic_contracts(monkeypatch, contract):
+def test_core_tls_traffic_contracts(monkeypatch, tmp_path, contract, owned_configured):
     """Route class, backend exclusion, and full relay must agree per user journey."""
     isolate_runtime_state(monkeypatch)
+    if owned_configured:
+        configured_geph_home(monkeypatch, tmp_path)
     policy = tproxy.route_policy(contract.policy_host)
     assert policy["route_class"] == contract.route_class
     assert policy["service_group"] == contract.service_group
@@ -416,6 +423,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
         monkeypatch.setattr(tproxy, "_geph_up", True)
         monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+        monkeypatch.setattr(tproxy, "_geph_owned", True)
         monkeypatch.setattr(tproxy, "dial_via_geph", fake_geph)
         monkeypatch.setattr(tproxy, "dial_strategy", no_local)
         monkeypatch.setattr(tproxy, "dial_plain", no_direct)
@@ -2989,8 +2997,288 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
     assert direct_calls == ["203.0.113.15"]
 
 
-def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch):
-    """A live SOCKS probe cannot bypass the owned backend failure hold."""
+
+def configured_geph_home(monkeypatch, tmp_path, enabled="1"):
+    config = Path(tproxy.geph_backend.ownership_path(str(tmp_path), "geph.json"))
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
+    monkeypatch.setattr(tproxy, "_console_user_home", lambda: str(tmp_path))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+    return config
+
+
+@pytest.mark.parametrize("outage", [
+    "hold", "circuit", "drain", "unready", "ownership-lost", "port-lost", "all-lost",
+    "ownership-lost-during-smart-dns",
+])
+def test_configured_owned_geph_outage_never_selects_system_route(
+    monkeypatch, tmp_path, outage,
+):
+    """Health/identity transitions cannot revoke the user's saved route choice."""
+    isolate_runtime_state(monkeypatch)
+    configured_geph_home(monkeypatch, tmp_path)
+    host = "ws.chatgpt.com"
+    client, first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    routes = []
+    recovery_calls = []
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy.time, "time", lambda: 100.0)
+    if outage == "hold":
+        monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 130.0)
+    elif outage == "circuit":
+        monkeypatch.setattr(tproxy, "runtime_route_circuit_allows", lambda *_a, **_kw: False)
+    elif outage == "drain":
+        monkeypatch.setattr(tproxy, "_geph_restart_draining", True)
+    elif outage == "unready":
+        monkeypatch.setattr(tproxy, "_geph_up", False)
+    elif outage == "ownership-lost":
+        monkeypatch.setattr(tproxy, "_geph_owned", False)
+    elif outage == "port-lost":
+        monkeypatch.setattr(tproxy, "_geph_port", None)
+    elif outage == "ownership-lost-during-smart-dns":
+        async def smart_dns_miss(*_args):
+            await asyncio.sleep(0)
+            tproxy._geph_owned = False
+            return None
+
+        monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
+        monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
+        monkeypatch.setattr(tproxy, "_smart_dns_mark_failure", lambda *_a, **_kw: None)
+    else:
+        monkeypatch.setattr(tproxy, "_geph_up", False)
+        monkeypatch.setattr(tproxy, "_geph_owned", False)
+        monkeypatch.setattr(tproxy, "_geph_port", None)
+
+    async def unexpected_route(destination, port, payload):
+        assert payload == first_flight
+        routes.append((destination, port))
+        return streaming_upstream_response(b"wrong-route")
+
+    async def unexpected_recovery(_host):
+        recovery_calls.append(_host)
+        return False
+
+    monkeypatch.setattr(tproxy, "dial_plain", unexpected_route)
+    monkeypatch.setattr(tproxy, "dial_via_geph", unexpected_route)
+    monkeypatch.setattr(tproxy, "_coalesced_owned_geph_recovery_for_replay", unexpected_recovery)
+    asyncio.run(run_handler(client, writer))
+    assert routes == []
+    assert bytes(writer.payload) == b""
+    assert writer.closed
+    assert recovery_calls == []
+    assert tproxy.geph_active_session_count() == 0
+    if outage == "hold":
+        assert tproxy._geph_backend_hold_until == 130.0
+
+
+def test_configured_owned_geph_success_outage_and_recovery_keep_route(
+    monkeypatch, tmp_path,
+):
+    """Exercise actual first-payload gate, cooldown and relay across new requests."""
+    isolate_runtime_state(monkeypatch)
+    configured_geph_home(monkeypatch, tmp_path)
+    host = "chatgpt.com"
+    clock = [100.0]
+    mode = ["success"]
+    routes = []
+    recoveries = []
+    response = b"server-first-and-complete-body"
+    endpoint = []
+    received_flights = []
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy.time, "time", lambda: clock[0])
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+
+    async def geph(actual_host, port, payload):
+        assert (actual_host, port, payload) == (host, 443, static_tls_fixture_record(host))
+        routes.append("owned")
+        reader, writer = await asyncio.open_connection("127.0.0.1", endpoint[0])
+        writer.write(payload)
+        await writer.drain()
+        return reader, writer
+
+    async def upstream(reader, writer):
+        try:
+            received_flights.append(await asyncio.wait_for(
+                reader.readexactly(len(static_tls_fixture_record(host))), 0.5,
+            ))
+            if mode[0] == "success":
+                writer.write(response)
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def system(*_args):
+        routes.append("system")
+        return streaming_upstream_response(b"wrong-route")
+
+    async def recovery(actual_host):
+        recoveries.append(actual_host)
+        return False
+
+    monkeypatch.setattr(tproxy, "dial_via_geph", geph)
+    monkeypatch.setattr(tproxy, "dial_plain", system)
+    monkeypatch.setattr(tproxy, "_coalesced_owned_geph_recovery_for_replay", recovery)
+
+    async def request():
+        client, _ = tls_client(host, block_after_hello=False)
+        writer = CaptureWriter()
+        await run_handler(client, writer)
+        assert tproxy.geph_active_session_count() == 0
+        return bytes(writer.payload)
+
+    async def sequence():
+        assert await request() == response
+        mode[0] = "failure"
+        assert await request() == b""
+        deadline = tproxy._geph_backend_hold_until
+        assert deadline > clock[0]
+        # The monitor may forget live identity during the same outage.
+        tproxy._geph_owned = False
+        tproxy._geph_port = None
+        assert await request() == b""
+        assert tproxy._geph_backend_hold_until == deadline
+        assert recoveries == [host]
+        clock[0] = deadline + 1
+        mode[0] = "success"
+        tproxy._geph_up = True
+        tproxy._geph_owned = True
+        tproxy._geph_port = tproxy.GEPH_OWNED_PORT
+        assert await request() == response
+        assert tproxy._geph_backend_hold_until == 0
+
+    async def with_upstream():
+        server = await asyncio.start_server(upstream, "127.0.0.1", 0)
+        endpoint.append(server.sockets[0].getsockname()[1])
+        async with server:
+            await sequence()
+
+    asyncio.run(with_upstream())
+    assert routes == ["owned", "owned", "owned"]
+    assert received_flights == [static_tls_fixture_record(host)] * 3
+    assert recoveries == [host]
+
+
+@pytest.mark.parametrize("configuration", ["disabled", "absent", "global-off", "external"])
+def test_owned_route_continuity_preserves_optional_system_fallback(
+    monkeypatch, tmp_path, configuration,
+):
+    isolate_runtime_state(monkeypatch)
+    config = configured_geph_home(monkeypatch, tmp_path)
+    if configuration == "disabled":
+        config.write_text('{"enabled":"0"}', encoding="utf-8")
+    elif configuration == "absent":
+        config.unlink()
+    elif configuration == "global-off":
+        monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    else:
+        monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_EXTERNAL_PORT])
+    host = "chatgpt.com"
+    client, first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    calls = []
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+
+    async def system(ip, port, payload):
+        calls.append((ip, port, payload))
+        return streaming_upstream_response(b"system-response")
+
+    monkeypatch.setattr(tproxy, "dial_plain", system)
+    asyncio.run(run_handler(client, writer))
+    assert calls == [("203.0.113.19", 443, first_flight)]
+    assert bytes(writer.payload) == b"system-response"
+
+
+def test_owned_route_reads_enable_disable_and_retains_intent_on_unknown_config(
+    monkeypatch, tmp_path,
+):
+    isolate_runtime_state(monkeypatch)
+    config = configured_geph_home(monkeypatch, tmp_path)
+    host = "chatgpt.com"
+    calls = []
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+
+    async def system(*_args):
+        calls.append("system")
+        return streaming_upstream_response(b"system-response")
+
+    monkeypatch.setattr(tproxy, "dial_plain", system)
+
+    async def request():
+        client, _ = tls_client(host, block_after_hello=False)
+        writer = CaptureWriter()
+        await run_handler(client, writer)
+        return bytes(writer.payload)
+
+    async def sequence():
+        assert await request() == b""
+        config.write_text("{broken", encoding="utf-8")
+        assert await request() == b""
+        monkeypatch.setattr(tproxy, "_console_user_home", lambda: None)
+        assert await request() == b""
+        monkeypatch.setattr(tproxy, "_console_user_home", lambda: str(tmp_path))
+        config.write_text('{"enabled":"0"}', encoding="utf-8")
+        assert await request() == b"system-response"
+        config.write_text('{"enabled":"1"}', encoding="utf-8")
+        assert await request() == b""
+        config.unlink()
+        assert await request() == b"system-response"
+
+    asyncio.run(sequence())
+    assert calls == ["system", "system"]
+
+
+def test_owned_geph_committed_response_is_never_replayed_after_disconnect(
+    monkeypatch, tmp_path,
+):
+    isolate_runtime_state(monkeypatch)
+    configured_geph_home(monkeypatch, tmp_path)
+    host = "chatgpt.com"
+    client, _ = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    routes = []
+    partial_response = b"committed-tls-prefix"
+
+    class DisconnectAfterPrefix(ScriptedReader):
+        async def read(self, size=-1):
+            if self._stream:
+                return await super().read(size)
+            raise ConnectionResetError("upstream reset after first payload")
+
+    async def geph(*_args):
+        routes.append("owned")
+        return DisconnectAfterPrefix(stream=(partial_response,)), CaptureWriter()
+
+    async def forbidden(*_args):
+        pytest.fail("a committed stream must not retry or change route")
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "dial_via_geph", geph)
+    monkeypatch.setattr(tproxy, "dial_plain", forbidden)
+    monkeypatch.setattr(tproxy, "_coalesced_owned_geph_recovery_for_replay", forbidden)
+    asyncio.run(run_handler(client, writer))
+    assert bytes(writer.payload) == partial_response
+    assert routes == ["owned"]
+    assert tproxy.geph_active_session_count() == 0
+
+def test_unconfigured_geo_exit_hold_uses_system_route_without_geph_redial(monkeypatch):
+    """Without saved opt-in a stale live probe is not route-selection intent."""
     isolate_runtime_state(monkeypatch)
     host = "ws.chatgpt.com"
     client, expected_first_flight = tls_client(host, block_after_hello=False)
@@ -3381,3 +3669,19 @@ def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypat
         now_ms=0,
     ) is True
     assert registry.cleared is True
+
+
+
+def test_owned_route_intent_never_transfers_to_another_console_user(monkeypatch, tmp_path):
+    isolate_runtime_state(monkeypatch)
+    configured_geph_home(monkeypatch, tmp_path)
+    assert tproxy.owned_geph_route_required()
+    other_home = tmp_path / "another-user"
+    other_home.mkdir()
+    other_config = Path(tproxy.geph_backend.ownership_path(str(other_home), "geph.json"))
+    other_config.parent.mkdir(parents=True)
+    other_config.write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(tproxy, "_console_user_home", lambda: str(other_home))
+    assert not tproxy.owned_geph_route_required()
+    monkeypatch.setattr(tproxy, "_console_user_home", lambda: None)
+    assert not tproxy.owned_geph_route_required()

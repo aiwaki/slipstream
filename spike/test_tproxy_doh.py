@@ -45,6 +45,9 @@ _PENDING_NAVIGATION_PROBE_CONTRACT = json.loads(
 
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state(monkeypatch, tmp_path):
+    # Tests must not inherit the workstation's saved Geph route preference.
+    monkeypatch.setattr(tproxy, "_console_user_home", lambda: None)
+    monkeypatch.setattr(tproxy, "_geph_route_intent", (None, False))
     shutdown_started = tproxy._shutdown_started.is_set()
     pf_teardown_complete = tproxy._pf_teardown_complete.is_set()
     route_policy_trial_generation = tproxy._route_policy_trial_generation

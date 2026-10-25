@@ -1,5 +1,45 @@
 # Decisions
 
+### 2026-10-25: preserve an opted-in owned Geph route during an outage
+
+For a captured TLS connection classified as geo exit, a saved enabled preference
+for Slipstream's owned Geph remains route-selection intent while its listener,
+monitor, circuit, restart drain or first-payload check is unavailable. After the
+existing proven Smart DNS candidate, an unavailable opted-in owned route closes
+the new connection without sending its ClientHello through the system route.
+Availability is not an implicit opt-out. Existing bounded/coalesced recovery may
+retry an uncommitted first flight once through a payload-qualified successor;
+a committed stream is never replayed. Held requests do not add another restart,
+wait or extend an active backend cooldown. Local bypass stays armed.
+
+The daemon reads the existing owner-private `geph.json` string preference from
+the console user's app configuration, with regular-file, owner, mode and size
+checks. It does not read the keychain or test an account. Missing configuration
+or an explicit disabled preference releases the choice; an invalid/unreadable
+sample retains only the last confirmed choice for the same console user.
+Transient loss of console identity also cannot revoke that choice. Another
+console user does not inherit it. No opt-in is guessed on a fresh unknown read.
+A global disabled Geph setting or explicit external-port configuration keeps
+the previous optional system fallback. Transport health never becomes ownership
+authority when the owned listener's identity has been lost.
+
+This supersedes only the **2026-07-19 optional geo-backend** decision's system
+fallback during an opted-in owned outage (including the next client retry),
+and the **2026-08-10 geo-exit first-payload** row's statement permitting direct
+replay after owned first-payload failure. The latter statement was already
+stale relative to the pre-change first-payload recovery implementation. Their
+local-engine independence, external ownership and first-payload bounds remain.
+Proven user-managed Smart DNS, disabled/unconfigured Geph and external Geph
+retain their existing behavior. Discord/YouTube never select Geph; no DNS,
+proxy, PAC, PF-owner or QUIC policy changes.
+
+This is a scoped routing-continuity rule, not a device-wide VPN kill switch or
+a promise to prevent every HTTP 403. It applies to new captured geo-exit TLS
+connections with a classifiable host. It cannot guarantee a service accepts a
+Geph exit IP, recover an already committed stream, or establish the cause of
+the reported October 24 Codex Ray. Native/account-backed qualification remains
+separate from deterministic handler evidence.
+
 ### 2026-10-23: ordinary Quit stops owned services and preserves configuration
 
 `Stop Slipstream and Quit` is the ordinary Quit action. Persist an owner-private

@@ -45,6 +45,51 @@ def read_ownership(path):
     return value if isinstance(value, dict) else None
 
 
+def read_enabled(path, owner_uid):
+    """Read only persisted opt-in; None means unknown, absence means unconfigured.
+
+    The manager atomically writes geph.json. Do not infer its intent from a
+    listener or attempt keychain access. Bound reads even if the file grows
+    after fstat, and open nonblocking so a replaced FIFO cannot stall routing.
+    """
+    if not path:
+        return None
+    flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NOFOLLOW", 0) | os.O_NONBLOCK)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    try:
+        metadata = os.fstat(fd)
+        if (not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != owner_uid
+                or metadata.st_mode & 0o022
+                or not 0 <= metadata.st_size <= MAX_OWNERSHIP_BYTES):
+            return None
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            payload = handle.read(MAX_OWNERSHIP_BYTES + 1)
+        if len(payload) > MAX_OWNERSHIP_BYTES:
+            return None
+        value = json.loads(payload)
+        if not isinstance(value, dict):
+            return None
+        if "enabled" not in value:
+            return False
+        enabled = value["enabled"]
+        # Match geph_config.rs's persisted string preference. Credentials are
+        # neither interpreted nor logged here; missing credentials are health.
+        return enabled != "0" if isinstance(enabled, str) else None
+    except (OSError, UnicodeError, ValueError):
+        return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def ownership_file_uid(path):
     try:
         metadata = os.lstat(path)

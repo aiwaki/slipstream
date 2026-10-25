@@ -262,8 +262,8 @@ SHUTDOWN_DRAIN_QUIET_SECONDS = 0.1
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
 # The hybrid route keeps local DPI bypass independent from the optional Geph
-# exit. Reviewed geo-exit services may use Geph only while its owned SOCKS
-# listener is verified; otherwise they retain their original pre-PF destination.
+# exit. An opted-in owned exit keeps its route during temporary health failures;
+# without that opt-in reviewed services may retain their pre-PF destination.
 # Russian/local-bypass services never enter Geph.
 GEPH_ENABLED = os.environ.get("SLIP_GEPH", "1") != "0"
 # Use Slipstream's owned geph5-client (:9954). A separately-running Geph.app on
@@ -273,6 +273,8 @@ GEPH_OWNED_PORT = 9954
 GEPH_EXTERNAL_PORT = 9909
 GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [GEPH_OWNED_PORT]
 GEPH_OWNERSHIP_FILE = "geph-owned.json"
+_geph_route_intent = (None, False)  # last confirmed console home and opt-in
+_geph_route_intent_lock = threading.Lock()
 GEPH_LAUNCHD_LABEL = "dev.slipstream.geph"
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
@@ -11191,9 +11193,14 @@ def network_monitor(
             conflict=_geph_port_conflict,
         )
         if _geph_up != was_geph:
+            geo_route_state = (
+                "tunnelled" if _geph_up else
+                "retaining configured owned route" if owned_geph_route_required() else
+                "using system-route fallback"
+            )
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
                   f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-exit hosts "
-                  f"{'tunnelled' if _geph_up else 'using system-route fallback'}",
+                  f"{geo_route_state}",
                   file=sys.stderr)
             if not first_tick:
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
@@ -13775,6 +13782,36 @@ def _console_user_home():
         return None
 
 
+def owned_geph_route_required():
+    """Separate persisted selection from monitor/circuit/listener availability."""
+    global _geph_route_intent
+    if not GEPH_ENABLED or GEPH_PORTS != [GEPH_OWNED_PORT]:
+        return False
+    with _geph_route_intent_lock:
+        home = _console_user_home()
+        previous_home, previous_enabled = _geph_route_intent
+        if home is None:
+            # /dev/console can temporarily have no logged-in identity. This is
+            # not an opt-out from a previously confirmed owned route.
+            return previous_enabled
+        if home != previous_home:
+            previous_enabled = False
+            _geph_route_intent = (home, False)
+        try:
+            owner_uid = os.stat(home).st_uid
+        except OSError:
+            return previous_enabled if home == previous_home else False
+        enabled = geph_backend.read_enabled(
+            geph_backend.ownership_path(home, "geph.json"), owner_uid,
+        )
+        if enabled is not None:
+            _geph_route_intent = (home, enabled)
+            return enabled
+        # Invalid/unreadable preferences cannot revoke a confirmed choice;
+        # another console user's choice is never inherited.
+        return previous_enabled if home == previous_home else False
+
+
 def geph_ownership_path(home=None):
     home = _console_user_home() if home is None else home
     return geph_backend.ownership_path(home, GEPH_OWNERSHIP_FILE)
@@ -14781,19 +14818,14 @@ async def _handle_impl(reader, writer):
         return
 
     # Split-tunnel: a reviewed geo-exit service can use a proven Smart DNS path
-    # or the verified owned Geph tunnel. Both are optional. If neither is ready,
-    # preserve the destination chosen by the user's own DNS/VPN/system route;
+    # or the verified owned Geph tunnel. With no owned opt-in, preserve the
+    # destination chosen by the user's own DNS/VPN/system route when unavailable;
     # never move the host into the local desync ladder and never disarm the
     # independent Discord/YouTube path.
     runtime_policy = runtime_route_policy(host)
     if is_tls and runtime_policy["route_class"] == ROUTE_GEO_EXIT:
         policy = runtime_policy
-        geph_owned = bool(_geph_owned)
         learned_owned_only = bool(policy.get("runtime_learned"))
-        geph_runtime_eligible = bool(
-            not learned_owned_only
-            or (geph_owned and _geph_port == GEPH_OWNED_PORT)
-        )
         if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
             policy,
             GEO_BACKEND_SMART_DNS,
@@ -14835,6 +14867,14 @@ async def _handle_impl(reader, writer):
                 "smart dns runtime probe failed",
                 policy["service_group"],
             )
+        # Smart DNS awaits may span a monitor transition. Sample owned intent
+        # and live identity after those awaits, immediately before admission.
+        geph_owned = bool(_geph_owned)
+        owned_route_required = owned_geph_route_required()
+        geph_runtime_eligible = bool(
+            not (learned_owned_only or owned_route_required)
+            or (geph_owned and _geph_port == GEPH_OWNED_PORT)
+        )
         geph_expected = bool(
             GEPH_ENABLED
             and geph_runtime_eligible
@@ -15010,13 +15050,17 @@ async def _handle_impl(reader, writer):
             geph_failure_logged = True
         if geph_expected and not geph_cooling:
             suspend_geo_exit_backend(geph_suspend)
-        if replay_safe_owned_failure:
-            # A reviewed or independently learned route is known to require a
-            # foreign exit. Sending the retained TLS request direct after its
-            # owned exit failed caused
-            # Safari's misleading HTTPS/downgrade warning.  Fail this request
-            # cleanly; the browser may reconnect after bounded recovery, but it
-            # never receives a partial or semantically wrong direct response.
+        if replay_safe_owned_failure or owned_route_required:
+            # Health/circuit/drain failures do not revoke a saved owned route.
+            # In particular, the next request during a cooldown must not change
+            # exit just because this request did not attempt a Geph dial. This
+            # does not restart or wait again; existing recovery remains bounded.
+            if owned_route_required and not geph_failure_logged:
+                route_health_event(
+                    policy["service_group"], ROUTE_GEO_EXIT, host, False,
+                    "owned Geph route retained; backend unavailable",
+                    backend=GEO_BACKEND_GEPH,
+                )
             writer.close()
             return
         if await _try_system_geo_connect(

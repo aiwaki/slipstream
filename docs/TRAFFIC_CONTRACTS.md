@@ -16,8 +16,10 @@ The test harness enters `tproxy._handle_impl` with:
 - in-process local, Geph SOCKS, or direct upstream endpoints.
 
 The policy lookup, route-class selection, first-payload forwarding, and relay
-logic are production code. The harness never opens a network connection,
-changes PF, or reads or writes system DNS/proxy/VPN state.
+logic are production code. Upstream diallers are normally in-process fixtures;
+the owned-Geph continuity sequence additionally uses a bounded numeric-loopback
+TCP server. No test contacts an external endpoint, changes PF, or reads or
+writes system DNS/proxy/VPN state.
 
 ## Core Matrix
 
@@ -30,7 +32,8 @@ changes PF, or reads or writes system DNS/proxy/VPN state.
 | Telegram raw MTProto DC | Safety passthrough | Plain direct TCP | Local desync/Geph |
 | Telegram Desktop in a blocked network | Local proxy | Bundled `tg-ws-proxy` | A direct-connect guarantee |
 | Generic HTTPS host | Unknown | Local adaptive ladder | Geph |
-| Geo backend unavailable | Geo exit | Pause only Slipstream's PF anchor | Local fallback |
+| Opted-in owned Geph unavailable | Geo exit | Retain selection; close this new connection | System/local fallback; disarming local PF |
+| Geph disabled or unconfigured | Geo exit | Preserve the original system destination | Local desync or external settings changes |
 
 These are representatives of routing **classes and service groups**, not a
 manual list of every website. A new host normally belongs to an existing
@@ -40,9 +43,11 @@ backend, payload shape, or safety rule.
 Smart DNS is a read-only, user-managed resolver path. For OpenAI and Anthropic,
 Slipstream may use it first only after the resolver has passed a fresh payload
 canary. A runtime miss falls back to owned Geph only when that backend is
-verified ready; otherwise the existing geo fail-closed path pauses only
-Slipstream's private PF anchor for the native retry. It never falls into local
-desync, and Slipstream never changes the system DNS configuration.
+verified ready. With saved owned-Geph opt-in, its temporary unavailability
+closes only this new geo connection and preserves the selected route; without
+that opt-in the original system destination remains available. Neither case
+pauses the independent local bypass engine or falls into local desync.
+Slipstream never changes the system DNS configuration.
 
 Raw Telegram MTProto passthrough is defensive: the transparent handler does not
 corrupt a protocol it cannot classify. It is not a claim that Telegram can

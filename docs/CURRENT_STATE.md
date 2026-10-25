@@ -2,6 +2,42 @@
 
 ## Verified Checkpoint
 
+### Owned Geph route continuity, 2026-10-25 (source work in progress)
+
+Isolated checkout:
+`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
+branch `codex/geph-route-continuity`, base main `8979935f6` (PR416). No live
+service, account, browser, build or install action was performed; the user's
+external Geph remains untouched. The reported October 24 Codex403 is still
+unattributed: the exact ARN Ray was not found, and a logged Geph server address
+is not measured HTTP egress.
+
+The installed-source geo handler allowed system-route fallback during owned
+Geph cooldown/circuit/drain/unready states, explicitly covered by the old test.
+The new policy retains persisted owned opt-in through those health transitions,
+including temporary ownership loss, and closes the new connection rather than
+changing its route. Explicitly disabled/unconfigured/global-off/external cases
+keep the existing fallback. Existing bounded recovery and committed-stream
+handling remain; Discord/YouTube stay local. See the October 25 decision and
+routing research section for scope and superseded historical rows.
+
+Causal evidence: the final regression cases against the original `8979935f6`
+`tproxy.py` give **9 failed / 4 passed**; failures demonstrate the alternate
+route, including identity loss during an awaited Smart DNS attempt. The fixed
+traffic/config/documentation selection currently gives **117 passed**. The
+focused Geph/geo/monitor run also gives **129 passed / 452 deselected**;
+integration with PR415 and its focused rerun are pending. Tests include real
+loopback TCP first flights through success → failure → cooldown → recovery,
+no replay after committed payload, optional fallback, saved config transitions,
+private bounded reads and no cross-user intent inheritance. Evidence:
+`output/geph-route-continuity-20261025/` (`verification.json`, red and green
+logs, original source copy). Independent review found no blocker and its 27
+selected cases passed.
+
+Next: merge the PR415 main update into this locally committed branch, run the
+affected focused selections on that exact tree, then push for CI. Native/browser and account-backed behavior are not qualified by these
+fixtures; no claim of a universal 403 fix or device-wide VPN kill switch.
+
 ### Geph ctutils dependency source repair, 2026-10-23
 
 Separate source branch `codex/ctutils-constant-time-fix`, physical checkout
