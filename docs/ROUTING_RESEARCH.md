@@ -1,5 +1,51 @@
 # Routing Research Notes
 
+### Supplemental DNS stall and current browser evidence, 2026-10-23
+
+`resolve_connection_ips` waited for unbounded in-process `getaddrinfo` when a
+local-bypass host already had DoH answers and an original destination. A blocked
+system resolver therefore delayed the connection before its local strategy
+ladder could run. The causal test fails for both YouTube and Discord on the old
+path. The repair reuses the existing killable `dscacheutil` child and one absolute
+1.5-second budget, including executor queue time. Healthy lookups return promptly;
+a stalled supplemental lookup may still add up to that budget. DoH, system and
+original-destination ordering is preserved; routing policy is unchanged.
+
+Supplemental work uses the existing 64-worker capacity. Its admission is held
+until the concurrent future actually completes: cancelling a queued future
+would release admission while its executor WorkItem remains queued. A shielded
+waiter can time out or cancel without creating that queue-growth loophole;
+expired work exits on dequeue without launching a child. Tests exercise an
+actual occupied executor and an inert child that times out and is reaped.
+The initial 34-test result and both causal failures are retained in
+`output/network-followup-20261023/dns-stall-receipt.json`.
+
+The shared resolver also feeds Smart DNS. Admission exhaustion or child timeout
+means the lookup was not observed, rather than a completed empty answer. Its
+neutral result preserves Smart DNS health and does not consume a half-open
+circuit permit; actual empty answers and failed probes still count as failures.
+A causal pressure test exposed the original conflation. The follow-up passes
+38 resolver/canary checks and 19 traffic contracts, including recovery after
+capacity returns. Receipt:
+`output/network-followup-20261023/smart-dns-admission-receipt.json`.
+
+This is a post-connect defect, not proof of the historical Safari error: a
+browser that cannot resolve its host has not yet opened the TCP connection
+intercepted by Slipstream. On the installed, unchanged source `1f3ddcfb6`, system
+DNS returned YouTube and ChatGPT addresses. A fresh physical Safari tab loaded
+YouTube with visible thumbnails and played a short, with the seek position
+advancing from 24% to 54%. External Geph was present and left untouched. This
+observation neither isolates the route nor qualifies the new source patch.
+Retained scope: `output/network-incidents-20261023/browser-observation.json`.
+
+The Codex screenshot contains an actual HTTP403, which must remain separate
+from DNS failure and TCP truncation. Reviewed `chatgpt.com` policy alone does
+not identify the backend used for that response. Transport/TLS canaries and
+receipt of payload bytes do not establish HTTP success. Retained logs do not
+match that screenshot's Ray ID; its exact route and rejection cause remain
+unknown. Do not change certificates, globally reroute traffic, or call this
+incident repaired on the strength of a healthy transport probe.
+
 ### ctutils constant-time repair, 2026-10-23
 
 PR415 audit39953414800 found one blocking advisory on the unchanged Geph r2

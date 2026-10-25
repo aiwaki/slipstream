@@ -2,6 +2,96 @@
 
 ## Verified Checkpoint
 
+### Network and updater observer follow-up, 2026-10-25
+
+Active physical checkout:
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/network-updater-followup`, with merged dependency PR416
+`8979935f6afa60ba90025d925127d7b997fbc58f` (tree-identical to reviewed
+`1661c15e5fb147036aaba94f829567d4702b36e8`). PR416 CI39994944972 and
+audit39994944831 passed. The installed private preview31 remains source
+`1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36` (the exact source is recorded in the
+completed lifecycle section below); follow-up source is not installed yet.
+
+PR415 contains the follow-up. Initial head
+`4d9af272df6dcef799e7abc45572d33db1a1514c` passed all CI39953414580 jobs.
+DNS/observer head `58a655ecc5ecf8dfe0624f1662c9d91807b1226a` passed product checks,
+the packaged build and browser qualification in CI39958585602, but its heavy
+lifecycle job timed out at `after-tray-restart:chrome` after the existing
+45-second observation. The same-stage HTTPS/status/PF checks and all seven
+native Stop-and-Quit cases passed. GitHub uses the unchanged exact system
+passthrough. Missing failure-time navigation/status evidence prevents assigning
+the cause; cleanup stderr is not proof of a preceding browser crash. One
+failed-job rerun on this same head passed as CI39958585602 attempt2. This
+establishes a non-reproducing failure, not its cause. No timeout or gate was
+relaxed. Evidence:
+`output/network-followup-20261023/lifecycle-current/triage-receipt.json`.
+
+Audit39953414800 and pre-integration audit39958585705 failed only the Geph vendor
+gate: a new October 23 advisory, RUSTSEC-2026-0385, affects ctutils0.4.3.
+Existing RSA exceptions remain accepted; this is not an expiry or an error
+introduced by the DNS patch. Merged PR416 repairs the dependency without a
+waiver. Main producer39996042090 passed at source
+`8979935f6afa60ba90025d925127d7b997fbc58f` and published immutable
+`geph-vendor-0.4.3-r3` on October 23 at 17:47 UTC. On October 25, its lightweight
+tag, all eight downloaded assets, strict manifest, reviewed source/lock/license,
+SBOM, historical audit and stored SLSA/SPDX attestations were verified against
+that exact source. Both universal architectures passed. Receipt:
+`output/network-followup-20261025/geph-r3-verification/receipt.json`.
+Integrated consumer `658b3018f06937822baf862034ec436c0347835d` passed
+CI40191917905 (including the authenticated r3 build, browser qualification and
+heavy lifecycle) and dependency-audit40191917902. All review threads were
+resolved. After README PR417/418 merged, branch protection rejected the merge
+solely because the branch was behind main. One update to main
+`59576368b8b84bd36aac8c384d3a9a3cd3ba7f89` brings only both README changes;
+the application and tests are unchanged. The green 658b results are the reused
+functional baseline; branch protection requires fresh CI on this documentation
+integration. Evidence: `output/network-followup-20261025/integrated-ci-state.json`.
+No old r2 binary is substituted.
+
+Two causal repairs are in source, with independent reviews clear:
+- Supplemental system DNS can stall even with ready DoH/original addresses.
+  Reuse the bounded child and existing 1.5-second budget/64-worker capacity;
+  retain admission through actual worker completion after timeout/cancellation.
+  Old-path and queue-growth regressions fail before the fix; 34 related tests
+  pass. Receipt: `output/network-followup-20261023/dns-stall-receipt.json`.
+  PR review then exposed shared Smart DNS callers treating capacity exhaustion
+  as a backend failure. The neutral/unobserved result now preserves their health
+  and half-open permit. Causal failure reproduced; 38 resolver/canary checks and
+  19 traffic contracts pass, with one test-only state-isolation recheck passing.
+  Receipt: `output/network-followup-20261023/smart-dns-admission-receipt.json`.
+- The pre-ACK observer rejected a transient real flock after an earlier OLD
+  proof. Wait only inside existing deadlines, retain the exact false snapshot
+  and recheck OLD before cleanup. 181 focused and 124 adjacent checks pass.
+  Receipt: `output/updater-daemon-identity/watchdog-observer-race-20261023/receipt.json`.
+  This does not prove the cause of the historical missing-diagnostic run.
+
+The following runtime observation is historical (October 23): daemon PID2853
+was active, with heartbeat advancing through2424. Physical Safari navigation
+loaded YouTube including visible thumbnails;
+a short played with seek position24%→54%. External Geph remained present and
+untouched. The new DNS patch is not installed, and this current observation
+neither isolates the backend nor proves the historical DNS/HTTP403 incidents
+fixed. See `output/network-incidents-20261023/browser-observation.json` and
+[ROUTING_RESEARCH.md](ROUTING_RESEARCH.md). Browser automation had first been
+blocked by the locked Mac; the user unlocked it. No login/logout was attempted.
+
+On October 24, the user reported another ChatGPT HTTP403 with Ray
+`a4f85e142883efdb-ARN` while owned Geph was working, then quit Slipstream and
+enabled external Geph. Fresh read-only checks on October 25 positively found
+both owned launchd jobs absent, no Slipstream processes and only external Geph.
+Preserve that working route. Owned Geph logs from October 24, 10:34:47–10:42:59
+UTC, record ChatGPT tunnels and later broker/tunnel timeouts; the HTTP403 cause
+is not established. This ARN Ray is separate from the earlier FRA incident and
+the historical DNS failure. The October 23 PID/runtime snapshot is not current.
+Investigation evidence: `output/network-incidents-20261025/` (receipt in progress).
+
+The completed installed full-Quit/reopen qualification below is reusable.
+Next: finish integrated PR415 review/CI, then bind any new candidate to canonical
+bundle/install verification before browser qualification. No application was
+built or installed locally, and no live service was changed for the integration.
+Public updater transition/forced rollback and the HTTP403 incidents remain open.
+
 ### Geph ctutils dependency source repair, 2026-10-23
 
 Separate source branch `codex/ctutils-constant-time-fix`, physical checkout
@@ -19,11 +109,13 @@ not exact-head CI or a native build. The independent source/policy review found
 no blocker. Full evidence: `output/ctutils-constant-time-20261023/`; details and
 source hashes: `docs/ROUTING_RESEARCH.md`, ctutils constant-time repair.
 
-Next: review/merge this dependency PR after required checks, produce immutable
-`geph-vendor-0.4.3-r3` through the existing workflow, then qualify its consumer.
-PR415 carries the separate DNS/observer changes. No producer, release,
-installation or live service action has been performed by this source repair;
-it does not establish the cause of Safari/Codex connection failures.
+PR416 merged as `8979935f6afa60ba90025d925127d7b997fbc58f`, with the same tree
+as reviewed `1661c15e5fb147036aaba94f829567d4702b36e8`. CI39994944972 and
+audit39994944831 passed. Producer39996042090 also passed and published r3; the
+complete downloaded release and stored attestations are verified as recorded
+above. The authenticated integrated PR415 consumer remains to be qualified.
+No new application installation or live service action has been performed;
+this dependency repair does not establish the cause of Safari/Codex failures.
 
 ### Full Stop-and-Quit continuation, 2026-10-23
 
@@ -45,8 +137,8 @@ all four after saving/readback of enabled=0 before cleanup. All 25 observer
 tests and eight documentation checks pass. Evidence:
 `output/stop-quit-20261023/geph-disable-crash-receipt.json` and `seventh-native/`.
 
-Active checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
-branch `codex/geph-quit-install-verification`, based on the merge above. The user
+Checkout at that completed qualification: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+then branch `codex/geph-quit-install-verification`, based on the merge above. The user
 quit and deleted the old app because Geph remained. The private `.31` candidate
 is installed and the real workstation lifecycle now passes:
 - User selected Restart Proxy and confirmed macOS; `started-userland.json`
@@ -882,6 +974,12 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
+- Finish the merged PR416 r3 producer39996042090, then push and qualify the
+  integrated PR415 (`codex/network-updater-followup`) consumer. Supplemental DNS and pre-ACK
+  observer races are causally reproduced and repaired locally. Reuse recorded
+  focused checks; current-head CI and matching candidate/install proof remain
+  before treating these source changes as delivered.
+
 - PR409/410 source repairs, PR412 full Stop-and-Quit and PR413 trust-dependency
   repairs are merged. The privately installed preview31 is authenticated source
   `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36`; it contains these repairs. Reuse
@@ -889,8 +987,9 @@ installation ran. The unchanged release checks are not repeated.
   start/full-Quit/reopen receipts above. Do not reinstall or repeat these gates
   without a relevant code change or new failure.
 - The next release gate is the still-unqualified ordinary public update and
-  forced rollback. Reconcile the retained packaged rollback failure and its
-  current source before another attempt; a successful manual install or Quit
+  forced rollback. The observer follow-up above retains the missing false diagnostic and
+  handles the reproduced transient lock; qualify current source before
+  another native attempt; a successful manual install or Quit
   does not prove the updater. See [RELEASES.md](RELEASES.md). Keep public preview30
   immutable and preserve all private candidates, state and backups.
 - Historical Safari DNS and Codex403 incidents remain open. Their diagnosis
