@@ -2,11 +2,11 @@
 
 ## Verified Checkpoint
 
-### Network and updater observer follow-up, 2026-10-23
+### Network and updater observer follow-up, 2026-10-25
 
 Active physical checkout:
 `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
-branch `codex/network-updater-followup`, now integrating merged dependency PR416
+branch `codex/network-updater-followup`, with merged dependency PR416
 `8979935f6afa60ba90025d925127d7b997fbc58f` (tree-identical to reviewed
 `1661c15e5fb147036aaba94f829567d4702b36e8`). PR416 CI39994944972 and
 audit39994944831 passed. The installed private preview31 remains source
@@ -31,9 +31,15 @@ Audit39953414800 and pre-integration audit39958585705 failed only the Geph vendo
 gate: a new October 23 advisory, RUSTSEC-2026-0385, affects ctutils0.4.3.
 Existing RSA exceptions remain accepted; this is not an expiry or an error
 introduced by the DNS patch. Merged PR416 repairs the dependency without a
-waiver. Main producer39996042090 is building immutable `geph-vendor-0.4.3-r3`;
-confirm its successful publication before pushing this integrated consumer for
-fresh CI. Do not substitute the old r2 binary.
+waiver. Main producer39996042090 passed at source
+`8979935f6afa60ba90025d925127d7b997fbc58f` and published immutable
+`geph-vendor-0.4.3-r3` on October 23 at 17:47 UTC. On October 25, its lightweight
+tag, all eight downloaded assets, strict manifest, reviewed source/lock/license,
+SBOM, historical audit and stored SLSA/SPDX attestations were verified against
+that exact source. Both universal architectures passed. Receipt:
+`output/network-followup-20261025/geph-r3-verification/receipt.json`.
+The integrated consumer now requires fresh exact-head CI; no old r2 binary is
+substituted.
 
 Two causal repairs are in source, with independent reviews clear:
 - Supplemental system DNS can stall even with ready DoH/original addresses.
@@ -52,8 +58,9 @@ Two causal repairs are in source, with independent reviews clear:
   Receipt: `output/updater-daemon-identity/watchdog-observer-race-20261023/receipt.json`.
   This does not prove the cause of the historical missing-diagnostic run.
 
-The installed daemon is active (PID2853; heartbeat advanced through2424).
-Fresh physical Safari navigation loaded YouTube including visible thumbnails;
+The following runtime observation is historical (October 23): daemon PID2853
+was active, with heartbeat advancing through2424. Physical Safari navigation
+loaded YouTube including visible thumbnails;
 a short played with seek position24%→54%. External Geph remained present and
 untouched. The new DNS patch is not installed, and this current observation
 neither isolates the backend nor proves the historical DNS/HTTP403 incidents
@@ -61,10 +68,21 @@ fixed. See `output/network-incidents-20261023/browser-observation.json` and
 [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md). Browser automation had first been
 blocked by the locked Mac; the user unlocked it. No login/logout was attempted.
 
+On October 24, the user reported another ChatGPT HTTP403 with Ray
+`a4f85e142883efdb-ARN` while owned Geph was working, then quit Slipstream and
+enabled external Geph. Fresh read-only checks on October 25 positively found
+both owned launchd jobs absent, no Slipstream processes and only external Geph.
+Preserve that working route. Owned Geph logs from October 24, 10:34:47–10:42:59
+UTC, record ChatGPT tunnels and later broker/tunnel timeouts; the HTTP403 cause
+is not established. This ARN Ray is separate from the earlier FRA incident and
+the historical DNS failure. The October 23 PID/runtime snapshot is not current.
+Investigation evidence: `output/network-incidents-20261025/` (receipt in progress).
+
 The completed installed full-Quit/reopen qualification below is reusable.
-Next: finish the r3 producer and integrated PR415 review/CI, then bind any new
-candidate to canonical bundle/install verification before browser qualification.
-Public updater transition/forced rollback and the historical HTTP403 remain open.
+Next: finish integrated PR415 review/CI, then bind any new candidate to canonical
+bundle/install verification before browser qualification. No application was
+built or installed locally, and no live service was changed for the integration.
+Public updater transition/forced rollback and the HTTP403 incidents remain open.
 
 ### Geph ctutils dependency source repair, 2026-10-23
 
@@ -85,8 +103,9 @@ source hashes: `docs/ROUTING_RESEARCH.md`, ctutils constant-time repair.
 
 PR416 merged as `8979935f6afa60ba90025d925127d7b997fbc58f`, with the same tree
 as reviewed `1661c15e5fb147036aaba94f829567d4702b36e8`. CI39994944972 and
-audit39994944831 passed; the main push started producer39996042090. Its immutable
-r3 artifact and the authenticated PR415 consumer remain to be qualified.
+audit39994944831 passed. Producer39996042090 also passed and published r3; the
+complete downloaded release and stored attestations are verified as recorded
+above. The authenticated integrated PR415 consumer remains to be qualified.
 No new application installation or live service action has been performed;
 this dependency repair does not establish the cause of Safari/Codex failures.
 
