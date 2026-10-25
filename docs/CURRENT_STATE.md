@@ -40,8 +40,17 @@ selected cases passed. A follow-up malformed-config case reproduces an
 uncaught JSON `RecursionError` below the file-size cap (1 red), now treated as
 unknown intent; all 20 configuration/ownership tests pass after that repair.
 
-Next: finish the independent merge review, then push this branch for CI.
-Native/browser and account-backed behavior are not qualified by these fixtures; no claim of a universal 403 fix or device-wide VPN kill switch.
+Independent merge review of `c6860b31b` passed: seven DNS/Smart DNS functions
+remain AST-identical to main, route continuity is preserved, and no unrelated
+source edits remain. Both README updates are published through PR417/418.
+The requested third-party adaptive module is deferred in ROADMAP until the
+cross-platform application is ready; no SDK or licensing work starts now.
+
+Next: push this reviewed branch, complete required CI and merge through normal
+branch protection. Do not install or switch the user's external Geph as part
+of this source step. Native/browser and account-backed behavior are not
+qualified by these fixtures; no claim of a universal 403 fix or device-wide
+VPN kill switch.
 
 ### Network and updater observer follow-up, 2026-10-25
 
