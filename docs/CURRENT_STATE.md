@@ -38,8 +38,16 @@ tag, all eight downloaded assets, strict manifest, reviewed source/lock/license,
 SBOM, historical audit and stored SLSA/SPDX attestations were verified against
 that exact source. Both universal architectures passed. Receipt:
 `output/network-followup-20261025/geph-r3-verification/receipt.json`.
-The integrated consumer now requires fresh exact-head CI; no old r2 binary is
-substituted.
+Integrated consumer `658b3018f06937822baf862034ec436c0347835d` passed
+CI40191917905 (including the authenticated r3 build, browser qualification and
+heavy lifecycle) and dependency-audit40191917902. All review threads were
+resolved. After README PR417/418 merged, branch protection rejected the merge
+solely because the branch was behind main. One update to main
+`59576368b8b84bd36aac8c384d3a9a3cd3ba7f89` brings only both README changes;
+the application and tests are unchanged. The green 658b results are the reused
+functional baseline; branch protection requires fresh CI on this documentation
+integration. Evidence: `output/network-followup-20261025/integrated-ci-state.json`.
+No old r2 binary is substituted.
 
 Two causal repairs are in source, with independent reviews clear:
 - Supplemental system DNS can stall even with ready DoH/original addresses.
