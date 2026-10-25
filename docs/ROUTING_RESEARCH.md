@@ -40,14 +40,66 @@ monitor message and route-health event distinguish retention from optional
 system fallback. Existing first-payload recovery, circuit deadlines and
 committed-stream handling are unchanged.
 
+Integration with PR415 main `2210366fa` preserves Smart DNS's neutral result
+when resolution was not observed, including no health penalty or consumed
+half-open permit. Geph selection and identity are sampled after that await.
+The integrated traffic/config/documentation tests pass 118 cases; the focused
+Geph/geo/monitor and affected DNS selection passes 147 cases (445 deselected).
+
 Evidence is under `output/geph-route-continuity-20261025/` in worktree
-`codex/geph-route-continuity`; its initial red/green logs precede the final
-focused rerun recorded in `CURRENT_STATE.md`. No local build, installation,
+`codex/geph-route-continuity`; `green-integrated-*.log` and `verification.json`
+record the combined source checks. No local build, installation,
 account request or live routing change was made. The user's external Geph was
 left running. The reported ARN Ray was not located in readable local evidence;
 a Geph exit server address is not proof of HTTP egress, and the differing client
 addresses in nearby errors are only a causal lead. This fix cannot qualify
 browser behavior or promise that an exit's reputation/region will avoid 403.
+
+### Supplemental DNS stall and current browser evidence, 2026-10-23
+
+`resolve_connection_ips` waited for unbounded in-process `getaddrinfo` when a
+local-bypass host already had DoH answers and an original destination. A blocked
+system resolver therefore delayed the connection before its local strategy
+ladder could run. The causal test fails for both YouTube and Discord on the old
+path. The repair reuses the existing killable `dscacheutil` child and one absolute
+1.5-second budget, including executor queue time. Healthy lookups return promptly;
+a stalled supplemental lookup may still add up to that budget. DoH, system and
+original-destination ordering is preserved; routing policy is unchanged.
+
+Supplemental work uses the existing 64-worker capacity. Its admission is held
+until the concurrent future actually completes: cancelling a queued future
+would release admission while its executor WorkItem remains queued. A shielded
+waiter can time out or cancel without creating that queue-growth loophole;
+expired work exits on dequeue without launching a child. Tests exercise an
+actual occupied executor and an inert child that times out and is reaped.
+The initial 34-test result and both causal failures are retained in
+`output/network-followup-20261023/dns-stall-receipt.json`.
+
+The shared resolver also feeds Smart DNS. Admission exhaustion or child timeout
+means the lookup was not observed, rather than a completed empty answer. Its
+neutral result preserves Smart DNS health and does not consume a half-open
+circuit permit; actual empty answers and failed probes still count as failures.
+A causal pressure test exposed the original conflation. The follow-up passes
+38 resolver/canary checks and 19 traffic contracts, including recovery after
+capacity returns. Receipt:
+`output/network-followup-20261023/smart-dns-admission-receipt.json`.
+
+This is a post-connect defect, not proof of the historical Safari error: a
+browser that cannot resolve its host has not yet opened the TCP connection
+intercepted by Slipstream. On the installed, unchanged source `1f3ddcfb6`, system
+DNS returned YouTube and ChatGPT addresses. A fresh physical Safari tab loaded
+YouTube with visible thumbnails and played a short, with the seek position
+advancing from 24% to 54%. External Geph was present and left untouched. This
+observation neither isolates the route nor qualifies the new source patch.
+Retained scope: `output/network-incidents-20261023/browser-observation.json`.
+
+The Codex screenshot contains an actual HTTP403, which must remain separate
+from DNS failure and TCP truncation. Reviewed `chatgpt.com` policy alone does
+not identify the backend used for that response. Transport/TLS canaries and
+receipt of payload bytes do not establish HTTP success. Retained logs do not
+match that screenshot's Ray ID; its exact route and rejection cause remain
+unknown. Do not change certificates, globally reroute traffic, or call this
+incident repaired on the strength of a healthy transport probe.
 
 ### ctutils constant-time repair, 2026-10-23
 

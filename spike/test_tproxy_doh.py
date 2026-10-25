@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from collections import OrderedDict, deque
@@ -7984,6 +7984,124 @@ def test_geo_exit_canary_uses_smart_dns_before_geph(monkeypatch):
         assert health["last_backend"] == tproxy.GEO_BACKEND_SMART_DNS
     finally:
         tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+
+
+@pytest.mark.parametrize("resolver_outcome", ["saturated", "timeout", "empty"])
+def test_smart_dns_canary_distinguishes_unobserved_dns_from_empty_answer(monkeypatch, resolver_outcome):
+    slots = threading.BoundedSemaphore(tproxy.BLOCKING_IO_MAX_WORKERS)
+    if resolver_outcome == "saturated":
+        for _ in range(tproxy.BLOCKING_IO_MAX_WORKERS):
+            assert slots.acquire(blocking=False)
+
+    def resolve(command, **kwargs):
+        assert resolver_outcome != "saturated", "full admission must not submit a lookup"
+        if resolver_outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (502, 20, "/fixture"))
+    monkeypatch.setattr(tproxy.subprocess, "run", resolve)
+    monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_route_health", {key: dict(value) for key, value in tproxy._route_health.items()})
+    monkeypatch.setattr(tproxy, "_canary_health", {})
+    monkeypatch.setattr(tproxy, "dial_and_probe", lambda *_args, **_kwargs: pytest.fail("no address to dial"))
+    expiry = time.time() + 60
+    tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] = expiry
+    health_before = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    failure_before = dict(tproxy._smart_dns_last_failure)
+
+    result = asyncio.run(tproxy._run_geo_exit_canary({"group": tproxy.SERVICE_OPENAI, "host": "chatgpt.com"}))
+
+    if resolver_outcome == "empty":
+        assert result is False
+        assert tproxy.SERVICE_OPENAI not in tproxy._smart_dns_ok_until
+        assert tproxy._smart_dns_last_failure["host"] == "chatgpt.com"
+    else:
+        assert tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] == expiry
+        assert result is None
+        assert tproxy._smart_dns_last_failure == failure_before
+        assert tproxy._route_health[tproxy.SERVICE_OPENAI] == health_before
+        assert tproxy._canary_health == {}
+
+
+def test_smart_dns_runtime_saturation_does_not_consume_recovery_permit(monkeypatch):
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def get_extra_info(self, _name):
+            return object()
+
+        def close(self):
+            pass
+
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+    async def no_direct(*_args, **_kwargs):
+        return None
+
+    async def connected(*_args, **_kwargs):
+        return object(), Writer(), b"\x16\x03\x03"
+
+    async def relay(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(tproxy, "_runtime_route_circuits", tproxy.route_circuit_registry.RouteCircuitRegistry(
+        tproxy.RUNTIME_ROUTE_CIRCUIT_CONFIG, tproxy.RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG,
+    ))
+    monkeypatch.setattr(tproxy, "_route_health", {key: dict(value) for key, value in tproxy._route_health.items()})
+    policy = tproxy.route_policy("chatgpt.com")
+    for _ in range(tproxy.RUNTIME_ROUTE_CIRCUIT_CONFIG.failure_threshold):
+        tproxy.runtime_route_circuit_record_result(policy, tproxy.GEO_BACKEND_SMART_DNS, False, now_ms=0)
+    before = tproxy.runtime_route_circuit_snapshot()
+    monkeypatch.setattr(tproxy, "_runtime_route_circuit_now_ms", lambda: 2000)
+    slots = threading.BoundedSemaphore(tproxy.BLOCKING_IO_MAX_WORKERS)
+    for _ in range(tproxy.BLOCKING_IO_MAX_WORKERS):
+        assert slots.acquire(blocking=False)
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
+    monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "dial_plain", no_direct)
+    monkeypatch.setattr(tproxy, "dial_and_probe", connected)
+    monkeypatch.setattr(tproxy, "relay_local_stream", relay)
+    expiry = time.time() + 60
+    tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] = expiry
+
+    asyncio.run(tproxy._handle_impl(Reader(), Writer()))
+
+    assert tproxy.runtime_route_circuit_snapshot() == before
+    assert tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] == expiry
+    assert tproxy._smart_dns_last_failure["host"] == ""
+
+    # A later observed answer still owns and completes the half-open probe.
+    slots.release()
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (502, 20, "/fixture"))
+    monkeypatch.setattr(tproxy.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="ip_address: 203.0.113.10\n",
+    ))
+    asyncio.run(tproxy._handle_impl(Reader(), Writer()))
+    assert tproxy.runtime_route_circuit_snapshot() == ()
+
+    # A completed empty answer remains an actual backend failure.
+    monkeypatch.setattr(tproxy.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="",
+    ))
+    asyncio.run(tproxy._handle_impl(Reader(), Writer()))
+    assert tproxy.runtime_route_circuit_snapshot()[0].state.consecutive_failures == 1
+    assert tproxy.SERVICE_OPENAI not in tproxy._smart_dns_ok_until
+    assert tproxy._smart_dns_last_failure["host"] == "chatgpt.com"
 
 
 def test_geo_exit_canary_falls_back_to_geph_when_smart_dns_fails(monkeypatch):
@@ -17705,6 +17823,167 @@ def test_local_bypass_resolution_keeps_system_dns_even_when_doh_has_results(monk
     ips = asyncio.run(tproxy.resolve_connection_ips("gateway.discord.gg", "162.159.136.232"))
 
     assert ips == ["162.159.128.233", "162.159.136.232", "162.159.138.232"]
+
+
+@pytest.mark.parametrize("host", ["www.youtube.com", "updates.discord.com"])
+def test_local_bypass_ready_doh_survives_blocked_system_lookup(monkeypatch, tmp_path, host):
+    release = threading.Event()
+    entered = threading.Event()
+    finished = threading.Event()
+    bounded_calls = []
+
+    def blocked_getaddrinfo(*_args):
+        entered.set()
+        try:
+            assert release.wait(2.0)
+            return []
+        finally:
+            finished.set()
+
+    def timed_out_child(command, **kwargs):
+        bounded_calls.append((command, kwargs["timeout"]))
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    async def ready_doh(_host):
+        return ["203.0.113.7"]
+
+    monkeypatch.setattr(tproxy.socket, "getaddrinfo", blocked_getaddrinfo)
+    monkeypatch.setattr(tproxy.subprocess, "run", timed_out_child)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (os.getuid(), os.getgid(), str(tmp_path)))
+    monkeypatch.setattr(tproxy, "doh_resolve_async", ready_doh)
+
+    async def scenario():
+        try:
+            return await asyncio.wait_for(
+                tproxy.resolve_connection_ips(host, "198.51.100.9"), 0.3,
+            )
+        finally:
+            release.set()
+
+    try:
+        assert asyncio.run(scenario()) == ["203.0.113.7", "198.51.100.9"]
+    finally:
+        release.set()
+        if entered.is_set():
+            assert finished.wait(1.0)
+    assert not entered.is_set(), "system resolver must not block a daemon thread"
+    assert len(bounded_calls) == 1
+    assert bounded_calls[0][0] == tproxy._baseline_resolver_command(host)
+    assert 0 < bounded_calls[0][1] <= tproxy.BASELINE_RESOLVE_TIMEOUT
+
+
+def test_system_dns_child_timeout_is_reaped_before_capacity_returns(monkeypatch, tmp_path):
+    pid_path = tmp_path / "resolver.pid"
+    child = (
+        "import os, pathlib, time; "
+        f"pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid())); "
+        "time.sleep(60)"
+    )
+    slots = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "BASELINE_RESOLVE_TIMEOUT", 0.5)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (os.getuid(), os.getgid(), str(tmp_path)))
+    monkeypatch.setattr(tproxy, "_baseline_resolver_command", lambda _host: [sys.executable, "-c", child])
+
+    started = time.monotonic()
+    assert asyncio.run(tproxy.system_resolve_async("slow.example")) is None
+    assert slots.acquire(timeout=1.0), "capacity returned before the resolver completed"
+    slots.release()
+    assert time.monotonic() - started < 2.0
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_path.read_text()), 0)
+
+
+def test_system_dns_cancellation_retains_running_worker_capacity(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    slots = threading.BoundedSemaphore(1)
+    calls = []
+
+    def resolve(host, _port, _identity, *, timeout, unavailable_result):
+        calls.append(host)
+        entered.set()
+        assert release.wait(2.0)
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.168.1.7", 443))]
+
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "_run_baseline_resolver", resolve)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (502, 20, "/fixture"))
+
+    async def scenario():
+        task = asyncio.create_task(tproxy.system_resolve_async("first.example"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1.0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert await tproxy.system_resolve_async("second.example") is None
+            assert calls == ["first.example"]
+        finally:
+            release.set()
+        assert await asyncio.to_thread(slots.acquire, True, 1.0)
+        slots.release()
+        assert await tproxy.system_resolve_async("after-cleanup.example") == ["192.168.1.7"]
+
+    asyncio.run(scenario())
+
+
+def test_system_dns_queue_time_consumes_budget_without_accumulating_cancelled_jobs(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    submitted = []
+    slots = threading.BoundedSemaphore(1)
+
+    def occupy_worker():
+        entered.set()
+        assert release.wait(2.0)
+
+    monkeypatch.setattr(tproxy, "_system_dns_slots", slots)
+    monkeypatch.setattr(tproxy, "BASELINE_RESOLVE_TIMEOUT", 0.02)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (502, 20, "/fixture"))
+    monkeypatch.setattr(tproxy.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("expired lookup spawned"))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        occupied = pool.submit(occupy_worker)
+        assert entered.wait(1.0)
+
+        def submit(*args):
+            future = pool.submit(*args)
+            submitted.append(future)
+            return future
+
+        monkeypatch.setattr(tproxy, "_POOL", SimpleNamespace(submit=submit))
+        started = time.monotonic()
+        try:
+            assert asyncio.run(tproxy.system_resolve_async("queued.example")) is None
+            assert time.monotonic() - started < 0.5
+            assert not submitted[0].cancelled(), "cancelled WorkItems remain queued until dequeue"
+            assert not slots.acquire(blocking=False), "queued work must retain admission"
+            assert asyncio.run(tproxy.system_resolve_async("another.example")) is None
+            assert len(submitted) == 1
+        finally:
+            release.set()
+            occupied.result(timeout=1.0)
+        assert submitted[0].result(timeout=1.0) is None
+        assert slots.acquire(timeout=1.0)
+        slots.release()
+
+
+@pytest.mark.parametrize("uid", [0, 502])
+def test_system_dns_uses_console_or_current_identity_without_filtering_local_ips(monkeypatch, uid):
+    observed = []
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: uid)
+    monkeypatch.setattr(tproxy.os, "getegid", lambda: 20)
+    monkeypatch.setattr(tproxy, "_console_probe_identity", lambda: (503, 21, "/console"))
+
+    def resolve(host, port, identity, *, timeout, unavailable_result):
+        observed.append((host, port, identity, timeout))
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.168.1.7", 443))] * 2
+
+    monkeypatch.setattr(tproxy, "_run_baseline_resolver", resolve)
+    assert asyncio.run(tproxy.system_resolve_async("local.example")) == ["192.168.1.7"]
+    expected = (503, 21, "/console") if uid == 0 else (502, 20, os.path.expanduser("~"))
+    assert observed[0][:3] == ("local.example", 443, expected)
+    assert 0 < observed[0][3] <= tproxy.BASELINE_RESOLVE_TIMEOUT
 
 
 def test_fake_injector_uses_discord_decoy_without_changing_video_poison(monkeypatch):

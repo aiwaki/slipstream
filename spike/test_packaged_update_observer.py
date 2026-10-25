@@ -351,7 +351,7 @@ def test_preack_rollback_accepts_same_terminal_watchdog_contract(journal):
     backend.fault_process, backend.ack = process_for(journal), None
     backend.root_status = copy.deepcopy(STATUSES["aborted"])
     backend.observe_once = lambda: None
-    backend.final_old_app = lambda: backend.events.append({"kind": "old-proof"})
+    backend.final_old_app = lambda **kw: backend.events.append({"kind": "old-proof"})
     backend.prove = lambda *_a, **_k: backend.events.append({"kind": "daemon-proof"})
     result = PreAckObserver.qualify_app(backend, clock=clock, sleep=clock.sleep)
     assert result["successor_exit_before_ack_rollback_qualified"] is True

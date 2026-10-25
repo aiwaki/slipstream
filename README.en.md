@@ -15,10 +15,27 @@
 
 </div>
 
-Slipstream helps you open blocked websites and connect to services in your usual
-browsers and apps. It runs from the menu bar and selects a connection method for
-each service. Local bypass requires no account, separate server, or browser
-extension.
+Open websites and apps as usual. Slipstream runs from the menu bar and
+automatically selects how to reach each service: a direct connection, local
+bypass, or a foreign route through the bundled Geph client.
+**Slipstream also tests access methods for sites outside its built-in rules
+and remembers what worked.**
+
+This is adaptive bypass: route selection uses connection checks as well as
+predefined domain lists. You don't need to sort websites into lists that
+should use or bypass a VPN.
+
+## Why Slipstream
+
+- Direct connections and local bypass reach websites without an intermediate
+  VPN server. Your public IP address stays the same.
+- An unknown site starts with a direct connection. If it fails, Slipstream
+  tests local bypass methods. It remembers a successful method and reconsiders
+  the choice when further attempts fail.
+- Local bypass works in browsers and apps without an account, a server of your
+  own, or a browser extension.
+- The bundled Geph client provides a foreign IP address for supported routes.
+  It requires a Geph account; there is no separate client to install.
 
 > [!NOTE]
 > Slipstream is a preview. Results depend on your provider and the blocking
@@ -28,14 +45,13 @@ extension.
 
 ## What it does
 
-- **YouTube and Discord:** local bypass of DPI, the connection filtering used by
-  internet providers. Your public IP address stays the same. This traffic is
-  never routed through Geph.
-- **Websites with country restrictions:** the bundled Geph client provides an IP
-  address abroad for supported routes. This requires a Geph account.
-- **Telegram:** a local proxy the app offers to configure when a direct connection
-  is unavailable.
-- **Other websites:** a direct connection when no bypass is needed.
+| What you open | How Slipstream connects |
+|---|---|
+| YouTube and Discord | Uses local bypass of ISP filtering (DPI), without Geph. |
+| A supported website with country restrictions | Uses a foreign route through Geph, if configured. |
+| Telegram | Offers to configure a local proxy when a direct connection is unavailable. |
+| A website that needs no bypass | Uses a direct connection. |
+| A site outside the built-in rules that won't load | Checks the connection and tries local bypass methods. A temporary Geph route requires separate confirmation checks. |
 
 ## Installation
 
@@ -73,6 +89,11 @@ Slipstream is not designed to anonymize all internet traffic. When it conflicts
 with a full-tunnel VPN, it pauses its own traffic interception. It does not change
 external DNS, proxy, PAC, or VPN settings. See the [routing policy](docs/DECISIONS.md)
 for details.
+
+Automatic route selection combines built-in service rules with connection
+checks. The app has domain groups and exceptions; you don't have to create
+them yourself. Successful local bypass methods are remembered and reconsidered
+when they fail.
 
 Slipstream uses Tauri and a Python background service. Routing decisions run
 locally; only traffic assigned to foreign routes passes through Geph.

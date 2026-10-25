@@ -380,7 +380,7 @@ def test_core_tls_traffic_contracts(monkeypatch, tmp_path, contract, owned_confi
         monkeypatch.setattr(tproxy, "resolve_connection_ips", no_dns)
         monkeypatch.setattr(tproxy, "_geph_up", False)
     elif contract.backend == "smart_dns":
-        async def fake_smart_dns(host, port, first_flight):
+        async def fake_smart_dns(host, port, first_flight, *, runtime_policy):
             assert first_flight == expected_first_flight
             calls.append(("smart_dns", host, port, first_flight))
             return "198.51.100.16", probed_upstream_response(contract.response)
@@ -2700,10 +2700,10 @@ def test_smart_dns_runtime_miss_falls_back_to_geph_without_local_desync(monkeypa
     calls = []
     response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
 
-    async def smart_dns_miss(actual_host, port, first_flight):
+    async def smart_dns_miss(actual_host, port, first_flight, *, runtime_policy):
         assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
         calls.append(("smart_dns", actual_host))
-        return None
+        return False
 
     async def fake_geph(actual_host, port, first_flight):
         assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
@@ -2955,10 +2955,10 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
     async def no_backend(name, *args, **kwargs):
         await forbidden_backend(name, *args, **kwargs)
 
-    async def smart_dns_miss(actual_host, port, first_flight):
+    async def smart_dns_miss(actual_host, port, first_flight, *, runtime_policy):
         assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
         smart_dns_misses.append(actual_host)
-        return None
+        return False
 
     async def system_route(ip, port, first_flight):
         assert (ip, port, first_flight) == (
@@ -3041,7 +3041,8 @@ def test_configured_owned_geph_outage_never_selects_system_route(
     elif outage == "port-lost":
         monkeypatch.setattr(tproxy, "_geph_port", None)
     elif outage == "ownership-lost-during-smart-dns":
-        async def smart_dns_miss(*_args):
+        async def smart_dns_miss(*_args, runtime_policy):
+            assert runtime_policy["route_class"] == tproxy.ROUTE_GEO_EXIT
             await asyncio.sleep(0)
             tproxy._geph_owned = False
             return None
@@ -3413,8 +3414,13 @@ def test_smart_dns_circuit_suppresses_only_smart_dns_then_uses_owned_geph(
     clock = iter(range(11))
     response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
 
-    async def smart_dns_miss(actual_host, port, _first_flight):
-        calls.append(("smart_dns", actual_host, port))
+    async def system_ips(actual_host):
+        assert actual_host == host
+        return ["198.51.100.41"]
+
+    async def smart_dns_miss(ip, port, _first_flight, probe_timeout=3.0):
+        assert ip == "198.51.100.41"
+        calls.append(("smart_dns", host, port))
         return None
 
     async def healthy_geph(actual_host, port, _first_flight):
@@ -3429,7 +3435,9 @@ def test_smart_dns_circuit_suppresses_only_smart_dns_then_uses_owned_geph(
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
-    monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
+    monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
+    monkeypatch.setattr(tproxy, "system_resolve_async", system_ips)
+    monkeypatch.setattr(tproxy, "dial_and_probe", smart_dns_miss)
     monkeypatch.setattr(
         tproxy,
         "_smart_dns_mark_failure",
