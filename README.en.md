@@ -18,14 +18,20 @@
 Open websites and apps as usual. Slipstream runs from the menu bar and
 automatically selects how to reach each service: a direct connection, local
 bypass, or a foreign route through the bundled Geph client.
-**You don't need to maintain lists of websites that should use or bypass a VPN.**
+**Slipstream also tests access methods for sites outside its built-in rules
+and remembers what worked.**
+
+This is adaptive bypass: route selection uses connection checks as well as
+predefined domain lists. You don't need to sort websites into lists that
+should use or bypass a VPN.
 
 ## Why Slipstream
 
 - Direct connections and local bypass reach websites without an intermediate
   VPN server. Your public IP address stays the same.
-- The app selects a local bypass method, remembers what worked, and tries
-  alternatives when a connection attempt fails. You don't need to try bypass settings by hand.
+- An unknown site starts with a direct connection. If it fails, Slipstream
+  tests local bypass methods. It remembers a successful method and reconsiders
+  the choice when further attempts fail.
 - Local bypass works in browsers and apps without an account, a server of your
   own, or a browser extension.
 - The bundled Geph client provides a foreign IP address for supported routes.
@@ -45,6 +51,7 @@ bypass, or a foreign route through the bundled Geph client.
 | A supported website with country restrictions | Uses a foreign route through Geph, if configured. |
 | Telegram | Offers to configure a local proxy when a direct connection is unavailable. |
 | A website that needs no bypass | Uses a direct connection. |
+| A site outside the built-in rules that won't load | Checks the connection and tries local bypass methods. A temporary Geph route requires separate confirmation checks. |
 
 ## Installation
 
