@@ -32,7 +32,10 @@ preference rather than readiness fields. A single locked last-observed choice
 preserves an already-confirmed selection on an unknown read; it is not a
 route-learning cache and creates no persistent state. `geph_backend.read_enabled`
 performs bounded descriptor-based reads and reports missing versus unknown
-separately. It reads no credential store and emits no config contents. The
+separately. Deeply nested JSON below the size cap also returns unknown: its
+`RecursionError` reproduced before the follow-up catch and can no longer escape
+into the monitor/handler. It reads no credential store and emits no config
+contents. The
 monitor message and route-health event distinguish retention from optional
 system fallback. Existing first-payload recovery, circuit deadlines and
 committed-stream handling are unchanged.

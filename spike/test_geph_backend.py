@@ -159,3 +159,10 @@ def test_read_enabled_rejects_unsafe_or_unbounded_configuration(tmp_path, kind):
         else:
             config.chmod(0o666)
     assert geph_backend.read_enabled(config, owner_uid) is None
+
+
+def test_read_enabled_treats_excessively_nested_json_as_unknown(tmp_path):
+    config = tmp_path / "geph.json"
+    config.write_text("[" * 30000 + "0" + "]" * 30000, encoding="utf-8")
+    assert config.stat().st_size < geph_backend.MAX_OWNERSHIP_BYTES
+    assert geph_backend.read_enabled(config, os.getuid()) is None

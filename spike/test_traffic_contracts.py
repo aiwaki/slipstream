@@ -2997,7 +2997,6 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
     assert direct_calls == ["203.0.113.15"]
 
 
-
 def configured_geph_home(monkeypatch, tmp_path, enabled="1"):
     config = Path(tproxy.geph_backend.ownership_path(str(tmp_path), "geph.json"))
     config.parent.mkdir(parents=True)
@@ -3669,7 +3668,6 @@ def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypat
         now_ms=0,
     ) is True
     assert registry.cleared is True
-
 
 
 def test_owned_route_intent_never_transfers_to_another_console_user(monkeypatch, tmp_path):

@@ -83,7 +83,7 @@ def read_enabled(path, owner_uid):
         # Match geph_config.rs's persisted string preference. Credentials are
         # neither interpreted nor logged here; missing credentials are health.
         return enabled != "0" if isinstance(enabled, str) else None
-    except (OSError, UnicodeError, ValueError):
+    except (OSError, UnicodeError, ValueError, RecursionError):
         return None
     finally:
         if fd >= 0:

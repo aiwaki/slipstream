@@ -32,7 +32,9 @@ no replay after committed payload, optional fallback, saved config transitions,
 private bounded reads and no cross-user intent inheritance. Evidence:
 `output/geph-route-continuity-20261025/` (`verification.json`, red and green
 logs, original source copy). Independent review found no blocker and its 27
-selected cases passed.
+selected cases passed. A follow-up malformed-config case reproduces an
+uncaught JSON `RecursionError` below the file-size cap (1 red), now treated as
+unknown intent; all 20 configuration/ownership tests pass after that repair.
 
 Next: merge the PR415 main update into this locally committed branch, run the
 affected focused selections on that exact tree, then push for CI. Native/browser and account-backed behavior are not qualified by these
