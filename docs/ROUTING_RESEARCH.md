@@ -1,5 +1,43 @@
 # Routing Research Notes
 
+### Native Quit reached an unclassified process census, 2026-10-26
+
+Main CI40319062696 (source `4ddfaf624e4f1ae1d439761bfd2933fa9e1a61d7`)
+passed native Cancel, root-lock failure and partial-Geph-cleanup failure. During
+`menu_stop_and_quit`, authorization was submitted once, the prompt disappeared,
+and no authorization uncertainty or transient error was recorded. Product stop
+then reported `root process census is unknown after bootout`; the tray correctly
+retained `stopping` and did not claim successful exit. The preceding partial-stop
+case had already proven the root job absent, so this message does not establish
+that a new bootout caused the unknown observation. The old census returned only
+`None`; its exact failure branch and raw process snapshot were not retained.
+Evidence: `output/readiness-preflight-20261026/native-auth-observation/main423/`.
+
+A separate source-backed defect is reproducible: both process parsers reject
+Darwin's legal initial `?` state. The full census rejects such a row even for a
+foreign UID before filtering ownership. Apple adv_cmds commit
+`6bed8737a34dbb54782a18f47dccf933a9967a12` defines this scheduling state in
+[tasks.c](https://github.com/apple-oss-distributions/adv_cmds/blob/6bed8737a34dbb54782a18f47dccf933a9967a12/ps/tasks.c#L45),
+continues printing after a task-info failure in
+[ps.c](https://github.com/apple-oss-distributions/adv_cmds/blob/6bed8737a34dbb54782a18f47dccf933a9967a12/ps/ps.c#L703),
+and appends modifiers after the initial state in
+[print.c](https://github.com/apple-oss-distributions/adv_cmds/blob/6bed8737a34dbb54782a18f47dccf933a9967a12/ps/print.c#L444).
+Unknown scheduling does not erase a known UID, absolute command or owned-runtime
+identity. It also does not prove process absence.
+
+Apple separately falls back to `(p_comm)` when argument lookup fails after the
+process snapshot. That name alone cannot distinguish an owned runtime from a
+foreign process. One bounded fresh full census may resolve this race; persistent
+ambiguity must remain failure, with no signal based on the unknown sample.
+Malformed output, permission errors, missing self and duplicate PIDs remain
+untrusted. Diagnostics must retain only a fixed reason and bounded metadata,
+never arguments or raw stderr. Multiline arguments are not an established cause:
+Apple applies `strvis` with `VIS_NL`/`VIS_TAB` before printing the command.
+
+The parser defect and snapshot race are concrete repair targets, not proof of
+which `None` branch occurred in main CI. Fresh native qualification remains
+required; this finding does not resolve the user's Codex403 incident.
+
 ### Installed-route sentinel isolation failed before the outage, 2026-10-26
 
 Protected run40295745334 used the authenticated main94e488785 candidate. Its

@@ -2,44 +2,46 @@
 
 ## Verified Checkpoint
 
-### Active: native authorization observation, 2026-10-26
+### Active: native Quit process-census repair, 2026-10-26
 
 Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/native-auth-observation`, based on merged PR422
-`e1ae2c6e6f7cb639e260467bd743f0b9025c0cc0`. Preserve the user's external Geph
-through this source/CI step. No workstation service, account, browser, build or
-install action was performed.
+branch `codex/root-stop-census-observation`, HEAD `4ddfaf624e4f1ae1d439761bfd2933fa9e1a61d7`.
+Preserve the user's external Geph. No workstation service/account/browser/build/install action.
 
-Main CI40301843338 failed at `partial_geph_cleanup_failure`, after native Cancel
-and the real root-lock failure had passed. The first authorization observation
-raised a redacted generic osascript error; its receipt says submitted=false,
-but the error could have occurred after the click. A later read-only snapshot
-found the matching prompt intact. Root and tray stayed active, intent remained
-stopping, and teardown passed. This is an authorization-harness observation
-failure, not proof that product cleanup failed. The exact AppleScript stage
-and code were lost. Evidence: `output/readiness-preflight-20261026/main422/`.
+PR423 merged normally at 11:58:46 UTC. Exact head `73781df7d8ba5ae04e7afc591a234693b3f54c25`
+passed CI40314113059 and audit40314113053; all three required checks and independent review
+were clear. All seven native Stop/Quit cases passed; four confirmed submissions completed,
+with no uncertain outcome or transient retries. Merged tree equals tested tree
+`1d33f00f31b9339bec338815b58f8705531a8899`. Receipts:
+`output/readiness-preflight-20261026/native-auth-observation/pr423/`.
 
-The harness now preserves fixed-stage/numeric-code observations without private
-text; only -1728/-25204 at known pre-click stages permit a bounded retry inside
-the existing 90/150-second deadline. An uncertain click disables all further
-submission and can never qualify authorization, even if fresh completion is
-observed. Unknown/permission/structural failures remain errors. Each osascript
-receives the remaining budget; late observations/completion cannot pass.
-Independent review is clear. The 9 added regressions fail against the old helper
-(8 failures/5 errors including subtests); 43 scoped offline harness tests and
-8 documentation checks pass after repair. The unchanged Rust-compilation fixture
-and full suite are reused from PR422, not rerun locally. This establishes the
-new error-handling contract, not the historical AX stage/code. Evidence:
-`output/readiness-preflight-20261026/native-auth-observation/verification.json`.
-Next: normal PR and fresh native CI; no unchanged workflow rerun.
-Product/PF, build/sign/attestation, browser, notification and audit passed, but
-the failed overall CI candidate remains ineligible. Only one of three combined
-account-backed attempts was consumed today; no second dispatch occurred.
+Main audit40319062698 passed. Main CI40319062696 failed `menu_stop_and_quit`
+after three native cases and confirmed authorization passed. Product stop returned
+`root process census is unknown after bootout`; tray retained stopping. Exact census
+reason was not recorded, and prior partial stop had already proven root absence.
+Independent Apple-source review found a real parser defect: legal initial `?` state
+is rejected by both process parsers, even in an unrelated row. Argument lookup can
+also fall back to an ambiguous basename during a process-snapshot race. Scoped repair
+is ready: accept legal state while retaining UID/command identity; retain safe
+reason codes; permit only one fresh full census for ambiguous root basename.
+No unknown result may authorize a signal or successful absence. See the October 26
+Quit entry in ROUTING_RESEARCH.md. The old-code regression gives 26 failures / 3 passes;
+the repaired root-stop selection gives 98 passes and the directly affected cleanup/identity
+selection gives 12 passes. Python compilation and independent read-only review are clear.
+Evidence: `output/readiness-preflight-20261026/root-stop-census/verification.json`.
+Next: a fresh PR/native CI; no unchanged rerun or qualification. No local native build,
+service operation, account switch or full test suite was performed for this repair.
+Only one of three account-backed attempts was consumed today at the last complete inventory;
+no subsequent protected dispatch occurred. Recheck the budget before any future dispatch.
 
-PR419's routing repair and PR422's actual native PF proof are merged. Native
-account-backed outage/recovery and a fresh root/app update pair still remain.
-The October 24 Codex403 Ray remains unattributed; a Geph server address is not
-measured HTTP egress. The detailed verified baselines follow.
+PR423 changed only the native auth harness and docs: fixed stage/numeric-code observations,
+bounded known pre-click retry, no resubmission after possible click, no late/uncertain success.
+43 scoped offline harness tests and 8 docs checks passed; 9 added cases fail against old code.
+The historical AX stage/code was unknown, so the prior green PR was not proof of its cause.
+PR419 routing continuity and PR422 real PF controls remain merged; protected outage/recovery
+and a fresh root/app update pair still remain. October 24 Codex403 Ray is unattributed.
+Next qualification plan has placeholders only and explicitly rejects stale/failed candidates:
+`output/readiness-preflight-20261026/native-auth-observation/next-qualification-plan.json`.
 
 ### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
 

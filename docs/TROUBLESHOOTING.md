@@ -15,6 +15,22 @@ See the October 23 entry in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) for the
 causal DNS regression and the limits of the current Safari observation. Preserve
 external Geph and user-managed network settings while collecting evidence.
 
+### Quit reports that root process absence is unconfirmed
+
+`cleanup incomplete: root process census is unknown` means the stop operation
+could not trust its process observation. It does not prove that the service is
+still running. The tray deliberately keeps the pending stop intent and may not
+yet have reached owned-Geph cleanup. Preserve the exact error and installed
+source identity; do not use an indiscriminate `killall` or alter external Geph.
+
+The source repair accepts Darwin's legal initial `?` scheduling state without
+weakening UID or executable checks. It also records an aggregate census reason
+without process arguments and permits one fresh full observation for a transient
+ambiguous root basename. Persistent ambiguity, incomplete output and permission
+errors still prevent successful Quit. This requires native qualification and
+installation before it describes an affected user's running build. See the
+October 26 Quit investigation in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
+
 ## Routing Model
 
 Use local bypass for DPI/SNI interference:

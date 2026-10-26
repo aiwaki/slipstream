@@ -374,3 +374,127 @@ def test_stop_census_requires_complete_owned_identity(monkeypatch, reply, expect
 def test_stop_runtime_identity_excludes_control_processes(monkeypatch, arguments, owned):
     monkeypatch.setattr(tproxy, '_installed_daemon_command_owned', lambda _: True)
     assert tproxy._stop_runtime_command_owned('/fixture/slipstreamd ' + arguments) is owned
+
+
+@pytest.mark.parametrize('row, expected', [
+    ('0 ? /fixture/slipstreamd', ('present', '/fixture/slipstreamd')),
+    ('0 ?N+ /fixture/slipstreamd', ('present', '/fixture/slipstreamd')),
+    ('502 ?s /fixture/slipstreamd', ('foreign', None)),
+    ('0 ? (slipstreamd)', ('unknown', None)),
+    ('0 S? /fixture/slipstreamd', ('unknown', None)),
+    ('0 ?? /fixture/slipstreamd', ('unknown', None)),
+])
+def test_stop_pid_unknown_scheduling_state_preserves_identity(monkeypatch, row, expected):
+    monkeypatch.setattr(tproxy, '_run', lambda *_: result(stdout=row))
+    assert tproxy._stop_process_observation(4242) == expected
+
+
+@pytest.mark.parametrize('rows, expected', [
+    ('0 10 ? /fixture/slipstreamd --stop\n', set()),
+    (SELF + '502 4242 ? /unrelated/application\n', set()),
+    (SELF + '0 4242 ?N+ /fixture/slipstreamd --port 1080\n', {4242}),
+    (SELF + '0 4242 ?s /external/slipstreamd\n', set()),
+])
+def test_stop_census_accepts_darwin_unknown_scheduling_state(monkeypatch, rows, expected):
+    monkeypatch.setattr(tproxy.os, 'getpid', lambda: 10)
+    monkeypatch.setattr(tproxy.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(tproxy, '_installed_daemon_command_owned', lambda c: c.startswith('/fixture/slipstreamd'))
+    monkeypatch.setattr(tproxy, '_run', lambda *_: result(stdout=rows))
+    monkeypatch.setattr(tproxy.time, 'sleep', lambda _: pytest.fail('valid state must not retry'))
+    assert tproxy._stop_owned_process_census() == expected
+
+
+@pytest.mark.parametrize('fresh_rows, expected', [
+    (SELF, set()),
+    (SELF + '0 4243 ? /fixture/slipstreamd --port 1080\n', {4243}),
+    (SELF + '502 4242 ? /fixture/slipstreamd --port 1080\n', set()),
+])
+def test_stop_census_retries_only_complete_ambiguous_snapshot(monkeypatch, capsys, fresh_rows, expected):
+    calls, sleeps = [], []
+    replies = iter([
+        result(stdout=SELF + '0 4241 S /fixture/slipstreamd --port 1080\n0 4242 S (slipstreamd)\n'),
+        result(stdout=fresh_rows),
+    ])
+    monkeypatch.setattr(tproxy.os, 'getpid', lambda: 10)
+    monkeypatch.setattr(tproxy.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(tproxy, '_installed_daemon_command_owned', lambda c: c.startswith('/fixture/slipstreamd'))
+    monkeypatch.setattr(tproxy, '_run', lambda *args: calls.append(args) or next(replies))
+    monkeypatch.setattr(tproxy.time, 'sleep', sleeps.append)
+    monkeypatch.setattr(tproxy.os, 'kill', lambda *_: pytest.fail('census must never signal'))
+    assert tproxy._stop_owned_process_census() == expected
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert sleeps == [0.1]
+    assert capsys.readouterr().err == 'stop_census_error=ambiguous_root_basename sample=1\n'
+
+
+def test_stop_census_persistent_ambiguity_is_bounded_and_never_empty(monkeypatch, capsys):
+    calls, sleeps = [], []
+    monkeypatch.setattr(tproxy.os, 'getpid', lambda: 10)
+    monkeypatch.setattr(tproxy.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(tproxy, '_run', lambda *args: calls.append(args) or result(stdout=SELF + '0 4242 S (slipstreamd) private-argv\n'))
+    monkeypatch.setattr(tproxy.time, 'sleep', sleeps.append)
+    assert tproxy._stop_owned_process_census() is None
+    assert len(calls) == 2 and sleeps == [0.1]
+    assert capsys.readouterr().err == ('stop_census_error=ambiguous_root_basename sample=1\n'
+                                     'stop_census_error=ambiguous_root_basename sample=2\n')
+
+
+@pytest.mark.parametrize('reply, reason', [
+    (result(124, stderr='private-timeout'), 'command_timeout'),
+    (result(1, stderr='private-permission'), 'command_failed'),
+    (result(stdout=SELF, stderr='private-stderr'), 'command_stderr'),
+    (result(), 'empty_output'),
+    (result(stdout=SELF.rstrip()), 'truncated_output'),
+    (result(stdout=SELF + 'private-malformed\n'), 'malformed_row'),
+    (result(stdout=SELF + '0 4242 S? /private-command\n'), 'invalid_state'),
+    (result(stdout=SELF + '0 10 S /private-command\n'), 'duplicate_pid'),
+    (result(stdout='502 10 S /private-command\n'), 'self_identity'),
+    (result(stdout='0 4242 S /private-command\n'), 'missing_self'),
+    (result(stdout=SELF + '0 4242 S (slipstreamd)\nprivate-malformed\n'), 'malformed_row'),
+    (result(stdout=SELF + '0 4242 S (slipstreamd)\n0 10 S /private-command\n'), 'duplicate_pid'),
+    (result(stdout='0 4242 S (slipstreamd)\n'), 'missing_self'),
+])
+def test_stop_census_other_unknown_reasons_fail_immediately_and_privately(monkeypatch, capsys, reply, reason):
+    calls = []
+    monkeypatch.setattr(tproxy.os, 'getpid', lambda: 10)
+    monkeypatch.setattr(tproxy.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(tproxy, '_run', lambda *args: calls.append(args) or reply)
+    monkeypatch.setattr(tproxy.time, 'sleep', lambda _: pytest.fail('non-identity failure must not retry'))
+    assert tproxy._stop_owned_process_census() is None
+    assert len(calls) == 1
+    assert capsys.readouterr().err == f'stop_census_error={reason} sample=1\n'
+
+
+def test_stop_waits_for_fresh_census_before_effects_and_revalidates_survivor(stopped_runtime, monkeypatch):
+    state, _ = stopped_runtime
+    state.survive = True
+    original_run, original_kill = tproxy._run, tproxy.os.kill
+    census_calls, sleep_calls, pid_checks = [], [], []
+    def run(*args):
+        if '-axww' in args:
+            census_calls.append(args)
+            if len(census_calls) == 1:
+                return result(stdout=f'{os.geteuid()} {os.getpid()} S /fixture/slipstreamd --stop\n0 4242 S (slipstreamd)\n')
+        if '-p' in args:
+            pid_checks.append(args)
+        return original_run(*args)
+    def sleep(seconds):
+        sleep_calls.append(seconds)
+        assert not state.disabled and not state.kill
+    def kill(pid, sig):
+        assert len(census_calls) >= 3  # initial retry plus fresh post-bootout census
+        assert len(pid_checks) >= 2  # initial observation and pre-signal revalidation
+        original_kill(pid, sig)
+    monkeypatch.setattr(tproxy, '_run', run)
+    monkeypatch.setattr(tproxy.time, 'sleep', sleep)
+    monkeypatch.setattr(tproxy.os, 'kill', kill)
+    assert tproxy.do_stop()
+    assert sleep_calls == [0.1]
+    assert state.kill == [signal.SIGTERM]
+
+
+def test_stop_question_state_never_authorizes_a_reused_pid(monkeypatch):
+    monkeypatch.setattr(tproxy, '_run', lambda *_: result(stdout='0 ? /external/app'))
+    monkeypatch.setattr(tproxy, '_installed_daemon_command_owned', lambda _: False)
+    monkeypatch.setattr(tproxy.os, 'kill', lambda *_: pytest.fail('signalled reused PID'))
+    assert tproxy._stop_owned_daemon_pid(4242, strict_observation=True)
