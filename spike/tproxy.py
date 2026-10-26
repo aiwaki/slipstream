@@ -15893,6 +15893,11 @@ def _stop_launchd_observation():
     return "unknown", None
 
 
+# Darwin prints '?' as the initial state when task scheduling info is unavailable;
+# UID and command still carry identity. Preserve the existing modifier policy.
+_STOP_PROCESS_STATE_PATTERN = r"(?:\?[A-Za-z+<>NnsLX]*|[A-Za-z+<>NnsLX]+)"
+
+
 def _stop_process_observation(pid):
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
         return "unknown", None
@@ -15901,7 +15906,7 @@ def _stop_process_observation(pid):
     stdout, stderr = (result.stdout or "").strip(), (result.stderr or "").strip()
     if result.returncode == 0 and stdout and not stderr and "\n" not in stdout:
         fields = stdout.split(None, 2)
-        if len(fields) != 3 or not fields[0].isdigit() or not re.fullmatch(r"[A-Za-z+<>NnsLX]+", fields[1]):
+        if len(fields) != 3 or not fields[0].isdigit() or not re.fullmatch(_STOP_PROCESS_STATE_PATTERN, fields[1]):
             return "unknown", None
         uid, process_state, command = fields
         if int(uid) != 0:
@@ -15944,33 +15949,48 @@ def _stop_runtime_command_owned(command):
     return True
 
 
-def _stop_owned_process_census():
-    """Return exact owned root runtime PIDs, or None when absence is unproven."""
+def _stop_owned_process_census_sample():
+    """Read one complete census; errors contain only fixed diagnostic codes."""
     result = _run("/usr/bin/env", "LC_ALL=C", "LANG=C", "/bin/ps", "-axww",
                   "-o", "uid=,pid=,stat=,command=")
     stdout = result.stdout or ""
-    if (result.returncode != 0 or (result.stderr or "").strip()
-            or not stdout.strip() or not stdout.endswith("\n")
-            or len(stdout) > 8 * 1024 * 1024):
-        return None
+    if result.returncode != 0:
+        return None, "command_timeout" if result.returncode == 124 else "command_failed"
+    if (result.stderr or "").strip():
+        return None, "command_stderr"
+    if len(stdout) > 8 * 1024 * 1024:
+        return None, "oversized_output"
+    if not stdout.strip():
+        return None, "empty_output"
+    if not stdout.endswith("\n"):
+        return None, "truncated_output"
     current_pid, current_uid = os.getpid(), os.geteuid()
     seen, owned, saw_self = set(), set(), False
     ambiguous_names = {"slipstreamd", os.path.basename(sys.executable)}
+    ambiguous_root_basename = False
     for row in stdout.splitlines():
         fields = row.split(None, 3)
         if len(fields) != 4 or not re.fullmatch(r"-?[0-9]+", fields[0]) or not fields[1].isdigit():
-            return None
-        uid, pid = int(fields[0]), int(fields[1])
+            return None, "malformed_row"
+        try:
+            uid, pid = int(fields[0]), int(fields[1])
+        except ValueError:
+            return None, "malformed_row"
         process_state, command = fields[2:]
         # Darwin ps may format the unsigned uid_t as a signed 32-bit integer.
-        if (not -(2 ** 31) <= uid < 2 ** 32 or not 0 <= pid < 2 ** 31
-                or pid in seen or not re.fullmatch(r"[A-Za-z+<>NnsLX]+", process_state)):
-            return None
+        if not -(2 ** 31) <= uid < 2 ** 32:
+            return None, "uid_out_of_range"
+        if not 0 <= pid < 2 ** 31:
+            return None, "pid_out_of_range"
+        if pid in seen:
+            return None, "duplicate_pid"
+        if not re.fullmatch(_STOP_PROCESS_STATE_PATTERN, process_state):
+            return None, "invalid_state"
         uid %= 2 ** 32
         seen.add(pid)
         if pid == current_pid:
             if uid != current_uid or process_state.startswith(("Z", "E")):
-                return None
+                return None, "self_identity"
             saw_self = True
             continue
         if uid != 0 or process_state.startswith(("Z", "E")):
@@ -15978,11 +15998,32 @@ def _stop_owned_process_census():
         # A transient ps basename cannot establish whether this is our runtime.
         if not command.startswith("/"):
             if command.split(None, 1)[0].strip("()") in ambiguous_names:
-                return None
+                ambiguous_root_basename = True
             continue
         if _stop_runtime_command_owned(command):
             owned.add(pid)
-    return owned if saw_self else None
+    if not saw_self:
+        return None, "missing_self"
+    if ambiguous_root_basename:
+        return None, "ambiguous_root_basename"
+    return owned, None
+
+
+def _stop_owned_process_census():
+    """Return exact owned root runtime PIDs, or None when absence is unproven."""
+    for attempt in range(2):
+        owned, reason = _stop_owned_process_census_sample()
+        if reason is None:
+            return owned
+        # Do not expose process arguments, PIDs or raw ps stderr in the tray log.
+        print(f"stop_census_error={reason} sample={attempt + 1}", file=sys.stderr)
+        if reason != "ambiguous_root_basename" or attempt:
+            return None
+        # ps can fall back to (p_comm) when argv lookup races process exit. Only
+        # an otherwise valid complete snapshot earns one fresh census; never
+        # combine its partial identities with the replacement snapshot.
+        time.sleep(0.1)
+    return None
 
 
 def _stop_listener_pids(port):
