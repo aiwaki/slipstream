@@ -506,6 +506,16 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   qualification only when the entire required CI run, including all three
   consumers, succeeds. Pull requests use an equivalent sealed local-build
   bundle because updater signing secrets are unavailable there.
+- The native Stop-and-Quit consumer must distinguish a credential submission,
+  an uncertain button action, prompt dismissal and the operation's fresh
+  completion. A click alone is not successful authorization. Authorization
+  diagnostics may contain only fixed stages and numeric error codes, never
+  credentials, dialog text or raw private AppleScript errors. Only explicitly
+  recognized pre-click AX failures may be retried within the existing overall
+  deadline; an uncertain click permits read-only observation only and cannot
+  qualify confirmed native authorization. Structural, permission and unknown
+  failures remain errors. A failed consumer blocks the whole candidate even
+  when its archive, browser and signing jobs passed.
 - The main-only update-notification consumer runs the exact candidate from its
   production `/Applications/Slipstream.app` layout on a disposable macOS host.
   The production `UNUserNotificationCenter` path must obtain promptless

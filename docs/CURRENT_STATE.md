@@ -2,16 +2,46 @@
 
 ## Verified Checkpoint
 
-### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
+### Active: native authorization observation, 2026-10-26
 
-Isolated checkout:
-`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-route-fixture-preflight`, based on merged PR421
-`94e48878598c2a2382cee7a368a6b69c62130d49`. No workstation
-service, account, browser, build or install action was performed; the user's
-external Geph remains untouched. The reported October 24 Codex403 is still
-unattributed: the exact ARN Ray was not found, and a logged Geph server address
-is not measured HTTP egress.
+Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
+branch `codex/native-auth-observation`, based on merged PR422
+`e1ae2c6e6f7cb639e260467bd743f0b9025c0cc0`. Preserve the user's external Geph
+through this source/CI step. No workstation service, account, browser, build or
+install action was performed.
+
+Main CI40301843338 failed at `partial_geph_cleanup_failure`, after native Cancel
+and the real root-lock failure had passed. The first authorization observation
+raised a redacted generic osascript error; its receipt says submitted=false,
+but the error could have occurred after the click. A later read-only snapshot
+found the matching prompt intact. Root and tray stayed active, intent remained
+stopping, and teardown passed. This is an authorization-harness observation
+failure, not proof that product cleanup failed. The exact AppleScript stage
+and code were lost. Evidence: `output/readiness-preflight-20261026/main422/`.
+
+The harness now preserves fixed-stage/numeric-code observations without private
+text; only -1728/-25204 at known pre-click stages permit a bounded retry inside
+the existing 90/150-second deadline. An uncertain click disables all further
+submission and can never qualify authorization, even if fresh completion is
+observed. Unknown/permission/structural failures remain errors. Each osascript
+receives the remaining budget; late observations/completion cannot pass.
+Independent review is clear. The 9 added regressions fail against the old helper
+(8 failures/5 errors including subtests); 43 scoped offline harness tests and
+8 documentation checks pass after repair. The unchanged Rust-compilation fixture
+and full suite are reused from PR422, not rerun locally. This establishes the
+new error-handling contract, not the historical AX stage/code. Evidence:
+`output/readiness-preflight-20261026/native-auth-observation/verification.json`.
+Next: normal PR and fresh native CI; no unchanged workflow rerun.
+Product/PF, build/sign/attestation, browser, notification and audit passed, but
+the failed overall CI candidate remains ineligible. Only one of three combined
+account-backed attempts was consumed today; no second dispatch occurred.
+
+PR419's routing repair and PR422's actual native PF proof are merged. Native
+account-backed outage/recovery and a fresh root/app update pair still remain.
+The October 24 Codex403 Ray remains unattributed; a Geph server address is not
+measured HTTP egress. The detailed verified baselines follow.
+
+### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
 
 The installed-source geo handler allowed system-route fallback during owned
 Geph cooldown/circuit/drain/unready states, explicitly covered by the old test.
@@ -162,8 +192,38 @@ Only test harnesses and docs change. Independent reviews found no blocker;
 Two new regressions fail against the old helper (missing control receipt and
 acceptance of a wrong default source); both pass after repair. This does not
 prove the exact historical tag/UID failure cause.
-Actual native preflight remains required in PR CI before another protected run;
-unit mocks do not prove this Darwin topology. No local PF/build/runtime action.
+PR422 merged normally at 09:44 UTC as
+`e1ae2c6e6f7cb639e260467bd743f0b9025c0cc0`. Tested head
+`d6b67b81ed69ef89aac127dd28ab92d84b8bf1b4` passed CI40299464400 and
+audit40299464376, including all packaged native lifecycle/browser gates.
+Merged tree `409f1509c71ab5eb7207992b7a14cbd21d65c409` equals the tested tree.
+Receipt: `output/readiness-preflight-20261026/pr422/merged-422.json`.
+Its actual no-account Darwin PF preflight passed in CI40299464400: unbound root
+direct and forwarded controls both reached the sentinel from the owned alias;
+the console client was captured from `::1`, production NATLOOK recovered the
+exact alias/18443 destination, and exactly two sentinel connections arrived.
+Anchor snapshots were unchanged; the private isolation anchor was removed,
+lo0 alias/skip restored and global PF unchanged. IPv4/IPv6 baseline probes also
+passed. Receipt: `output/readiness-preflight-20261026/pr422/native-pf-proof.json`.
+New exact-main CI40301843338 failed at the packaged native Stop-and-Quit/
+admin-cancellation/partial-stop/reopen step; audit40301843379 passed. Product/PF,
+build/signing/candidate assembly/attestation, browser and update notification
+passed, but the overall failed run cannot qualify the candidate. Exact native
+case/report is under investigation; no unchanged rerun or protected dispatch.
+No local PF/build/runtime action. Account-backed outage/recovery is not yet
+qualified. After full main CI success, authenticate the new small manifest,
+recheck the complete daily attempt budget, then dispatch one combined readiness
+and the native-root exact-pair gate in parallel. Packaged follows successful
+root; publication waits for all gates. Do not reuse the older archive as NEW.
+Publisher review confirmed that build-app.yml itself only consumes CI/audit/
+combined-readiness pins, not root/packaged receipts. The operator must verify
+both fresh root cases and both packaged cases with the same exact OLD/NEW pair
+and clean teardown before dispatch. This existing release condition is not
+satisfied by the old 94e488 root receipt. The private corrected .30 pair does
+not prove the public .30 discovery/tray/admin/rollback path; release notes keep
+manual DMG installation and the absence of Apple notarization explicit.
+After normal merge, require the new exact-main CI candidate; preserve successful
+94e488 native-root evidence as a functional baseline, not proof of a new archive.
 Native-root40295788607 attempt1 passed both cases with exact pair pins and clean
 teardown: committed NEW with progressing same-PID heartbeat, and forced-worker
 crash restoring exact OLD; late commit preserves aborted. Packaged follow-up is

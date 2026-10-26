@@ -24,6 +24,15 @@ source selection, direct delivery, console capture/NATLOOK and root forwarding
 before another protected run. The disabled-Geph positive control remains
 mandatory. Production PF rules and user network settings are unchanged.
 
+PR422 merged as `e1ae2c6e6f7cb639e260467bd743f0b9025c0cc0`, tree-equal to its
+fully green PR. Actual native PF preflight passed in both PR CI40299464400 and
+main CI40301843338: unbound root direct/forward controls used the owned alias,
+console capture from `::1` produced the exact original destination through
+production NATLOOK, and both sentinel deliveries and cleanup were observed.
+Main CI later failed an unrelated native authorization observation. Therefore
+the topology is qualified, but no second protected Geph run has occurred.
+Receipts: `output/readiness-preflight-20261026/{pr422,main422}/native-pf-proof.json`.
+
 Evidence: `output/readiness-preflight-20261026/run-40295745334-readiness.log`.
 The independent native-root update run40295788607 passed commit and forced
 crash/rollback with exact pair identities and clean teardown; it does not
