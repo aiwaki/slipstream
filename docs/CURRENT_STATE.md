@@ -2,12 +2,12 @@
 
 ## Verified Checkpoint
 
-### Owned Geph route continuity, 2026-10-25 (source work in progress)
+### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
 
 Isolated checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-route-continuity`, original base main `8979935f6` (PR416),
-now integrated with main `2210366fa` (PR415). No live
+branch `codex/geph-installed-outage-regression`, based on merged PR419
+`ef39ad169873c17e3c345e227a9078d34ca64efd`. No workstation
 service, account, browser, build or install action was performed; the user's
 external Geph remains untouched. The reported October 24 Codex403 is still
 unattributed: the exact ARN Ray was not found, and a logged Geph server address
@@ -46,11 +46,56 @@ source edits remain. Both README updates are published through PR417/418.
 The requested third-party adaptive module is deferred in ROADMAP until the
 cross-platform application is ready; no SDK or licensing work starts now.
 
-Next: push this reviewed branch, complete required CI and merge through normal
-branch protection. Do not install or switch the user's external Geph as part
-of this source step. Native/browser and account-backed behavior are not
-qualified by these fixtures; no claim of a universal 403 fix or device-wide
-VPN kill switch.
+PR419 merged through normal branch protection on October 25 at 17:35 UTC.
+Exact head `35bcda44cdc5b82a34fabc8abc3937f93ed61c47` passed CI40215981048
+and audit40215981047; merged tree `28b3659f90fb02787cbf5a2ea73bb8d9c3176d20`
+equals the tested tree. Main audit40217202497 passed. Main CI40217202470 failed
+at the native `root_lock_failure` authorization stage, before the expected
+privileged lock failure. SecurityAgent remained open; the harness recorded
+197 button submissions as confirmations. The root service remained active and
+Geph was disabled in this scenario. The same Git tree passed all seven native
+cases in PR CI, but PR and main packages are not byte-identical artifacts.
+The underlying reason for unaccepted authorization is not established. Repair
+the harness's submission/acceptance distinction and repeated-submit loop before
+another run; do not weaken the deadline or infer a routing regression.
+Receipts: `output/geph-route-continuity-20261025/merged-419.json` and
+`output/geph-route-continuity-20261025/main-ci-failure/result.json`.
+
+Coverage audit found that the real owned-Geph lifecycle kills and restores its
+client only after the installed-daemon browser phase; it sends no new geo
+request during that outage. The current branch adds a scenario
+to the existing account-backed installed-daemon phase: successful owned
+payload, backend outage, repeated requests with a separately observed system
+destination, then owned recovery. A disabled-preference positive control must
+prove that the system-destination observation works. Use the real staged Geph
+client and a local original-destination sentinel. A synthetic Geph replacement
+would fail production TLS canaries and distort recovery, so it is not used.
+No production hook or daemon trust change is part of this test.
+
+The branch also replaces repeated SecurityAgent submissions with one submission
+and read-only observation. A dismissed prompt is insufficient: each case still
+requires its fresh operation-specific completion within the original deadline.
+The auth failure's original cause remains unknown; the harness now distinguishes
+submission, rejection, disappearance and completion without exposing dialog text.
+
+Scoped verification: the changed route/coordinator/semantic/auth harnesses plus
+documentation passed **164 tests and 24 subtests**. Final deadline review then
+added a remaining-budget subprocess bound and rejects payloads arriving after
+the 90-second recovery deadline; its focused rerun passed **21 tests and 3
+subtests**. Changed Python files compile, actionlint and diff whitespace pass.
+Independent review covered ownership/cleanup and macOS PF ordering. Actual PF
+controls and account-backed recovery remain unexecuted and required in CI.
+No production code is changed by this harness branch. Reuse PR419's green
+production regressions; do not rerun the local full suite or native build.
+
+After the scoped harness checks and required CI pass, run one combined `release-readiness.yml`
+on an authenticated successful exact-main CI candidate. The standalone owned
+Geph workflow is diagnostic only and should not consume a duplicate account
+attempt. As of October 25 UTC the shared budget was 0/3 with no active runs;
+the workflow guard must recheck at dispatch. Do not install or switch the user's
+external Geph during this source/CI step. Native/browser and account-backed
+behavior are not qualified by handler fixtures; the exact reported HTTP403
+remains unattributed.
 
 ### Network and updater observer follow-up, 2026-10-25
 
@@ -1027,11 +1072,12 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Finish the merged PR416 r3 producer39996042090, then push and qualify the
-  integrated PR415 (`codex/network-updater-followup`) consumer. Supplemental DNS and pre-ACK
-  observer races are causally reproduced and repaired locally. Reuse recorded
-  focused checks; current-head CI and matching candidate/install proof remain
-  before treating these source changes as delivered.
+- PR416 r3 producer39996042090 and consumers PR415/419 are merged and passed
+  their required CI. Submit the reviewed installed-daemon outage/retry and
+  authorization-harness branch above through normal PR checks, then qualify one authenticated exact-main candidate through the combined
+  release-readiness workflow. Reuse the recorded producer, focused tests and
+  unchanged Quit evidence. The user's working external Geph stays untouched;
+  source/CI completion is not workstation delivery or proof of the exact403.
 
 - PR409/410 source repairs, PR412 full Stop-and-Quit and PR413 trust-dependency
   repairs are merged. The privately installed preview31 is authenticated source
