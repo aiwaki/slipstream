@@ -3,8 +3,9 @@
 
 The smoke test is intended for a disposable macOS runner. It never installs or
 starts Slipstream, never targets TCP/443, and refuses to run while Slipstream
-state already exists. All rule writes are restricted to two owned anchors. If
-PF initially skips lo0, the smoke uses Slipstream's durable lease + private
+state already exists. The main runner restricts rule writes to its two owned
+anchors; sentinel isolation has a separate guard for one exact temporary anchor.
+If PF initially skips lo0, the smoke uses Slipstream's durable lease + private
 ioctl path and requires the exact original flag state after cleanup.
 IPv6 translation is exercised through one owned RFC3849 /128 alias on lo0;
 the alias, derived host route, and complete pre-test lo0 IPv6 set must roll back.
@@ -35,6 +36,7 @@ IFCONFIG = Path("/sbin/ifconfig")
 ROUTE = Path("/sbin/route")
 SLIPSTREAM_ANCHOR = "com.apple/slipstream"
 SENTINEL_ANCHOR = "com.apple/slipstream-smoke-sentinel"
+ROUTE_FIXTURE_ANCHOR = "com.apple/000-slipstream-geph-route-smoke"
 OWNED_ANCHORS = frozenset({SLIPSTREAM_ANCHOR, SENTINEL_ANCHOR})
 PRODUCTION_TOKEN_PATH = Path("/var/run/slipstream-pf.token")
 SMOKE_TOKEN_PATH = Path("/var/run/slipstream-pf-smoke.token")
@@ -245,7 +247,7 @@ class IPv6LoopbackAliasFixture:
 
 
 def validate_pfctl_args(args: Sequence[str]) -> None:
-    """Reject every PF mutation outside the two smoke-owned anchors."""
+    """Guard this runner's two anchors; SentinelPfIsolation has its own guard."""
     args = tuple(str(value) for value in args)
     if not args:
         raise SmokeError("empty pfctl command")
@@ -415,6 +417,93 @@ def _assert_same_snapshot(before: PfSnapshot, after: PfSnapshot) -> None:
         raise SmokeError("PF snapshot changed after cleanup: " + ", ".join(changed))
 
 
+class SentinelPfIsolation:
+    """Separate fixture sources without changing production capture rules.
+
+    Unbound root dials must select the owned destination alias as their source;
+    captured console clients bind ::1. Native controls prove both assumptions.
+    The exact source/destination exclusion is only a test topology, not a
+    production policy or a claim that PF UID/tag matching caused the old failure.
+    """
+    def __init__(self, target_port: int = 443):
+        if isinstance(target_port, bool) or not isinstance(target_port, int) or not (target_port == 443 or 1024 <= target_port <= 65535):
+            raise SmokeError("invalid sentinel isolation port")
+        self.target_port = target_port
+        self.runner = PfctlRunner()
+        self.before = None
+        self.production = None
+        self.attempted = False
+
+    @staticmethod
+    def _run(*args: str):
+        if args not in {
+            ("-sn",), ("-sr",), ("-F", "rules"), ("-F", "nat"),
+        } and not (len(args) == 2 and args[0] == "-f" and args[1]):
+            raise SmokeError("unscoped fixture PF command")
+        result = subprocess.run(
+            (str(PFCTL), "-a", ROUTE_FIXTURE_ANCHOR, *args),
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode:
+            raise SmokeError("scoped fixture PF operation failed")
+        return result.stdout.strip()
+
+    def snapshot(self):
+        return self._run("-sn"), self._run("-sr")
+
+    @staticmethod
+    def production_snapshot():
+        outputs = []
+        for action in ("-sn", "-sr"):
+            result = subprocess.run(
+                (str(PFCTL), "-a", "com.apple/slipstream", action),
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode:
+                raise SmokeError("cannot inspect production PF anchor")
+            outputs.append(result.stdout.strip())
+        return tuple(outputs)
+
+    def install(self, address: str, directory: Path):
+        if address != IPV6_LOOPBACK_TEST_DESTINATION:
+            raise SmokeError("unexpected fixture destination")
+        if any(self.snapshot()):
+            raise SmokeError("fixture PF anchor is already occupied")
+        self.before = _pf_snapshot(self.runner)
+        self.production = self.production_snapshot()
+        if not self.before.enabled or not all(self.production):
+            raise SmokeError("installed production PF must already be active")
+        if 'rdr-anchor "com.apple/*"' not in self.before.nat_rules or 'anchor "com.apple/*"' not in self.before.filter_rules:
+            raise SmokeError("expected existing wildcard PF anchors are absent")
+        rules = directory / "sentinel.pf.conf"
+        rules.write_text(
+            f"no rdr on lo0 inet6 proto tcp from {address}/128 to {address}/128 port {self.target_port}\n"
+        )
+        self.attempted = True
+        self._run("-f", str(rules))
+        if not self.snapshot()[0]:
+            raise SmokeError("fixture PF isolation rules were not installed")
+        if self.production_snapshot() != self.production:
+            raise SmokeError("production PF changed while adding fixture isolation")
+
+    def close(self):
+        if not self.attempted:
+            return
+        errors = []
+        for kind in ("rules", "nat"):
+            try:
+                self._run("-F", kind)
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+        if any(self.snapshot()):
+            errors.append("fixture rules survived cleanup")
+        if self.production_snapshot() != self.production:
+            errors.append("production PF changed")
+        _assert_same_snapshot(self.before, _pf_snapshot(self.runner))
+        if errors:
+            raise SmokeError("; ".join(errors))
+
+
 def _original_user() -> tuple[int, int]:
     try:
         uid = int(os.environ["SUDO_UID"])
@@ -426,7 +515,7 @@ def _original_user() -> tuple[int, int]:
     return uid, gid
 
 
-def _open_listener(proxy_port: int, family: int = socket.AF_INET) -> socket.socket:
+def _open_listener(proxy_port: int, family: int = socket.AF_INET, *, host: str | None = None) -> socket.socket:
     if family not in {socket.AF_INET, socket.AF_INET6}:
         raise SmokeError(f"unsupported listener family: {family}")
     listener = socket.socket(family, socket.SOCK_STREAM)
@@ -434,7 +523,8 @@ def _open_listener(proxy_port: int, family: int = socket.AF_INET) -> socket.sock
     if family == socket.AF_INET6:
         listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
     listener.settimeout(5)
-    host = "127.0.0.1" if family == socket.AF_INET else "::1"
+    if host is None:
+        host = "127.0.0.1" if family == socket.AF_INET else "::1"
     listener.bind((host, proxy_port))
     listener.listen(1)
     return listener
@@ -448,6 +538,7 @@ def _run_unprivileged_test_client(
     gid: int,
     destination: str,
     inherited_descriptors: Sequence[int],
+    source_address: str | None = None,
 ) -> int:
     try:
         listener.close()
@@ -456,7 +547,10 @@ def _run_unprivileged_test_client(
         os.setgroups([])
         os.setgid(gid)
         os.setuid(uid)
-        with socket.create_connection((destination, target_port), timeout=4) as client:
+        options = {"source_address": (source_address, 0)} if source_address is not None else {}
+        with socket.create_connection((destination, target_port), timeout=4, **options) as client:
+            if source_address is not None and client.getsockname()[0] != source_address:
+                return 4
             received = client.recv(len(MARKER))
         return 0 if received == MARKER else 2
     except BaseException:
@@ -474,6 +568,8 @@ def _probe_redirect(
     inherited_descriptors: Sequence[int] = (),
     original_destination_lookup=None,
     expected_original_destination: tuple[str, int] | None = None,
+    source_address: str | None = None,
+    forward_payload=None,
 ) -> None:
 
     pid = os.fork()
@@ -485,6 +581,7 @@ def _probe_redirect(
             gid=gid,
             destination=destination,
             inherited_descriptors=inherited_descriptors,
+            source_address=source_address,
         ))
 
     child_status: int | None = None
@@ -498,7 +595,7 @@ def _probe_redirect(
                         "DIOCNATLOOK returned the wrong original destination: "
                         f"actual={original!r}, expected={expected_original_destination!r}"
                     )
-            connection.sendall(MARKER)
+            connection.sendall(MARKER if forward_payload is None else forward_payload())
     except (OSError, TimeoutError) as exc:
         raise SmokeError(
             f"{probe} redirect did not reach the local listener"
@@ -510,6 +607,99 @@ def _probe_redirect(
         raise SmokeError(
             f"{probe} unprivileged client did not traverse the PF redirect"
         )
+
+
+def _probe_route_fixture(*, target_port: int, proxy_port: int, uid: int,
+                         gid: int, destination: str, natlook_descriptor: int,
+                         original_destination_lookup) -> dict:
+    """No-account native proof of the installed-route sentinel topology.
+
+    Uses raw listeners before any SSL/server threads exist. Each forked console
+    client drops all inherited root PF/sentinel descriptors before setuid. The
+    root controls deliberately use the OS default source, as daemon fallback does.
+    """
+    isolation = SentinelPfIsolation(target_port)
+    receipt = {"result": "pending", "root_controls": [], "captured": {},
+               "sentinel_connections": 0}
+    sentinel = capture = None
+    failure = None
+    cleanup_error = None
+    with tempfile.TemporaryDirectory(prefix="slipstream-pf-route-") as directory:
+        try:
+            isolation.install(destination, Path(directory))
+            fixture_before = isolation.snapshot()
+            sentinel = _open_listener(target_port, socket.AF_INET6, host=destination)
+            capture = _open_listener(proxy_port, socket.AF_INET6)
+
+            def root_payload(phase):
+                control = {"phase": phase, "route": "pending"}
+                receipt["root_controls"].append(control)
+                # Intentionally no source_address: qualify actual OS selection.
+                with socket.create_connection((destination, target_port), timeout=4) as client:
+                    control["source"] = client.getsockname()[0]
+                    if control["source"] != destination:
+                        raise SmokeError("unbound root control selected an unexpected source")
+                    connection, peer = sentinel.accept()
+                    with connection:
+                        receipt["sentinel_connections"] += 1
+                        if peer[0] != destination:
+                            raise SmokeError("sentinel accepted an unexpected source")
+                        connection.sendall(MARKER)
+                    with client.makefile("rb") as stream:
+                        payload = stream.read(len(MARKER))
+                    if payload != MARKER:
+                        raise SmokeError("root control did not read the sentinel marker")
+                control["route"] = "sentinel"
+                return payload
+
+            root_payload("direct")
+
+            def captured_lookup(connection):
+                source = connection.getpeername()[0]
+                original = original_destination_lookup(connection)
+                receipt["captured"] = {"source": source, "original": original}
+                if source != "::1":
+                    raise SmokeError("captured console source differs from ::1")
+                return original
+
+            _probe_redirect(
+                probe="source_separated_sentinel", listener=capture,
+                target_port=target_port, uid=uid, gid=gid,
+                destination=destination, source_address="::1",
+                inherited_descriptors=(natlook_descriptor, sentinel.fileno()),
+                original_destination_lookup=captured_lookup,
+                expected_original_destination=(destination, target_port),
+                forward_payload=lambda: root_payload("forwarded"),
+            )
+            capture = None  # _probe_redirect always closes it in the parent
+            if receipt["sentinel_connections"] != 2:
+                raise SmokeError("sentinel did not observe both root controls")
+            if isolation.snapshot() != fixture_before or isolation.production_snapshot() != isolation.production:
+                raise SmokeError("routing rules changed during sentinel controls")
+            _assert_same_snapshot(isolation.before, _pf_snapshot(isolation.runner))
+            receipt["anchors"] = "unchanged during controls"
+            receipt["result"] = "pass"
+        except BaseException as exc:
+            failure = exc
+            receipt["result"] = "fail"
+            # These probes carry only the fixture marker, never account data.
+            receipt["failure"] = {"type": type(exc).__name__}
+            if isinstance(exc, SmokeError):
+                receipt["failure"]["reason"] = str(exc)[:180]
+        finally:
+            for listener in (capture, sentinel):
+                if listener is not None:
+                    listener.close()
+            try:
+                isolation.close()
+            except Exception as exc:
+                cleanup_error = exc
+                receipt["cleanup_error"] = type(exc).__name__
+                receipt["result"] = "fail"
+    if failure is not None or cleanup_error is not None:
+        raise SmokeError("sentinel topology preflight: " + json.dumps(receipt, sort_keys=True)) from (failure or cleanup_error)
+    receipt["cleanup"] = "owned isolation anchor removed; production/global PF unchanged"
+    return receipt
 
 
 def _import_tproxy():
@@ -610,6 +800,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     listener_v4: socket.socket | None = None
     listener_v6: socket.socket | None = None
     natlook_descriptor: int | None = None
+    route_fixture: dict | None = None
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
@@ -708,6 +899,11 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             ),
         )
         listener_v6 = None
+        route_fixture = _probe_route_fixture(
+            target_port=target_port, proxy_port=proxy_port, uid=uid, gid=gid,
+            destination=ipv6_test_destination, natlook_descriptor=natlook_descriptor,
+            original_destination_lookup=tproxy.orig_dst,
+        )
         if not tproxy.suspend_geo_exit_backend("pf smoke runtime failure"):
             raise SmokeError("runtime failure did not cool down Geph")
         if _anchor_snapshot(runner, SLIPSTREAM_ANCHOR) != (nat, filters):
@@ -769,6 +965,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         "ipv6_runtime_proof": "lo0_rdr_and_natlook",
         "ipv6_non_lo0_route_to": "loaded_rule_static_only",
         "natlook_families": ["inet", "inet6"],
+        "installed_route_fixture": route_fixture,
         "loopback_skip": "restored",
         "target_port": target_port,
         "proxy_port": proxy_port,
@@ -783,11 +980,13 @@ def dry_run(*, target_port: int, proxy_port: int) -> dict:
         "platform": "macOS disposable runner",
         "production_anchor": SLIPSTREAM_ANCHOR,
         "sentinel_anchor": SENTINEL_ANCHOR,
+        "route_fixture_anchor": ROUTE_FIXTURE_ANCHOR,
         "target_port": target_port,
         "proxy_port": proxy_port,
         "intercepts_tcp_443": False,
         "ipv6_fixture": f"temporary lo0 {IPV6_LOOPBACK_TEST_DESTINATION}/128",
         "ipv6_runtime_proof": "lo0 rdr and NATLOOK only",
+        "installed_route_fixture": "unbound root sentinel; ::1 console capture and NATLOOK; unbound root forward",
         "ipv6_non_lo0_route_to": "loaded-rule static verification only",
         "loopback_skip": "temporarily cleared only when present, then restored",
         "forbidden_operations": [

@@ -6,8 +6,8 @@
 
 Isolated checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/terminal-refresh-test-isolation`, based on merged PR420
-`27262b3b8c4c2874cfea815e982691aab5f667f0`. No workstation
+branch `codex/geph-route-fixture-preflight`, based on merged PR421
+`94e48878598c2a2382cee7a368a6b69c62130d49`. No workstation
 service, account, browser, build or install action was performed; the user's
 external Geph remains untouched. The reported October 24 Codex403 is still
 unattributed: the exact ARN Ray was not found, and a logged Geph server address
@@ -106,6 +106,15 @@ parent close the lock stayed busy until child exit. This proves the reachable
 skip, not the historical result's exact value. The current branch isolates only
 the generation/budget test under one verified lock and preserves separate
 nonblocking concurrency coverage. No product behavior or deadline change.
+PR421 merged normally on October 26 at 08:37 UTC as
+`94e48878598c2a2382cee7a368a6b69c62130d49`. Tested head
+`a8be84a7943c0859f1f6948f92ccd0ead59961bd` passed CI40291991178 and
+audit40291991175, including the repaired test, all 243 Rust tray tests and the
+native lifecycle. Tested and merged tree are identical:
+`1655b867fb2fc831ab93eda26d68cc32107042fa`. Main CI40293622775 and
+audit40293622651 passed on that exact source; current main was rechecked equal.
+Both authenticated manifest/provenance and all required checks passed.
+Receipt: `output/geph-route-continuity-20261025/pr-readiness/merged-421.json`.
 Receipt: `output/geph-route-continuity-20261025/pr-readiness/fork-flock-reproduction.json`.
 The test-only repair is independently reviewed: a held lock now isolates the
 seven generation/budget steps. An additional public-wrapper call at the expired
@@ -114,18 +123,53 @@ the lock is busy; the locked path must then return the specific `exhausted`
 error. Setup skips unrelated real-time refresh. The separate concurrency test
 is untouched. Everything outside this one Rust test is byte-identical to main;
 rustfmt parsed the file and diff whitespace passed. No local Cargo/Tauri build
-was run; the changed Rust test must execute in PR CI.
+was run; the changed Rust test passed in PR CI.
 
 Main CI40289194469 is terminal failure solely from that unit test (242 passed,
 1 failed in the tray target). Native lifecycle, browser qualification, signed
 candidate assembly and update notification passed. Do not use the failed run's
 otherwise-built candidate. No account-backed dispatch yet.
 
-After the exact-main CI completes successfully, run one combined `release-readiness.yml`
-on an authenticated successful exact-main CI candidate. The standalone owned
-Geph workflow is diagnostic only and should not consume a duplicate account
-attempt. As of October 26 at 07:47 UTC the shared budget was 0/3 with no active runs;
-the workflow guard must recheck at dispatch. Do not install or switch the user's
+The exact successful main candidate is source
+`94e48878598c2a2382cee7a368a6b69c62130d49`, CI40293622775 attempt1,
+artifact12637133533, manifest SHA256
+`17b649e6adbb046d35132ea978bce97221b2eb6237e88459e75b389abbe0635e`.
+Exact ci.yml/source/ref/run/attempt attestation passed; only 1499 archive bytes
+were transferred to obtain the small manifest, not the full application.
+At 08:55 UTC daily account budget was 0/3 with no active runs. One combined
+`release-readiness.yml` was dispatched as **40295745334**; this is the first
+account-backed attempt today. Do not duplicate or rerun it. Native root update
+qualification **40295788607** runs independently on the same exact candidate
+and authenticated private OLD5385b89add415c531276ba43f5c06c50293ffb17/run39465376685.
+Both commit and crash-before-commit must pass with clean teardown, then dispatch
+packaged app qualification with the same eight pins and successful root run.
+Root does not depend on the readiness receipt, so these run in parallel;
+publication waits for all required gates.
+Readiness40295745334 failed at the fixture's first root-to-local-origin positive
+control: zero sentinel TCP connections and requests; the failure receipt omitted
+whether the returned route was owned or closed. No actual backend-outage probe
+ran. Fixture/coordinator cleanup passed; soak was skipped. Do not rerun unchanged.
+One of three account-backed attempts is consumed today. The current branch
+replaces unqualified UID/tag isolation with an exact source/destination/port
+exception shared by protected and no-account fixtures. Console clients bind
+`::1`; unbound root controls must observe the owned alias as the kernel-selected
+source. Root route/source/counts are preserved before assertions. The existing
+CI PF smoke now requires direct sentinel delivery, console capture with exact
+production NATLOOK, and root forwarding through a second sentinel connection,
+with unchanged rules and exact cleanup. Its IPv4/IPv6 baseline is unchanged.
+Only test harnesses and docs change. Independent reviews found no blocker;
+47 route/PF-harness tests and 8 documentation checks passed.
+Two new regressions fail against the old helper (missing control receipt and
+acceptance of a wrong default source); both pass after repair. This does not
+prove the exact historical tag/UID failure cause.
+Actual native preflight remains required in PR CI before another protected run;
+unit mocks do not prove this Darwin topology. No local PF/build/runtime action.
+Native-root40295788607 attempt1 passed both cases with exact pair pins and clean
+teardown: committed NEW with progressing same-PID heartbeat, and forced-worker
+crash restoring exact OLD; late commit preserves aborted. Packaged follow-up is
+held until fixture repair/candidate choice settles, to avoid obsolete work.
+Receipts/input maps: `output/readiness-preflight-20261026/`.
+The standalone owned Geph workflow remains diagnostic only; no duplicate run. Do not install or switch the user's
 external Geph during this source/CI step. Native/browser and account-backed
 behavior are not qualified by handler fixtures; the exact reported HTTP403
 remains unattributed.

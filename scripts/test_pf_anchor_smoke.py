@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
@@ -52,6 +54,133 @@ class PfAnchorSmokeTests(unittest.TestCase):
             [("close", 71), ("groups", []), ("gid", 20), ("uid", 501)],
         )
         listener.close.assert_called_once_with()
+
+    def test_sentinel_isolation_is_exact_source_and_destination_on_both_ports(self):
+        for port in (443, 18443):
+            isolation = pf_anchor_smoke.SentinelPfIsolation(port)
+            before = SimpleNamespace(enabled=True, nat_rules='rdr-anchor "com.apple/*" all', filter_rules='anchor "com.apple/*" all')
+            commands = []
+            def run(*args):
+                commands.append(args)
+                if args[0] == "-f":
+                    address = pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION
+                    self.assertEqual(Path(args[1]).read_text(), f"no rdr on lo0 inet6 proto tcp from {address}/128 to {address}/128 port {port}\n")
+                return ""
+            with self.subTest(port=port), tempfile.TemporaryDirectory() as directory, mock.patch.object(isolation, "snapshot", side_effect=(("", ""), ("no rdr", ""), ("", ""))), mock.patch.object(isolation, "production_snapshot", return_value=("production-nat", "production-filter")), mock.patch.object(pf_anchor_smoke, "_pf_snapshot", return_value=before), mock.patch.object(pf_anchor_smoke, "_assert_same_snapshot"), mock.patch.object(isolation, "_run", side_effect=run):
+                isolation.install(pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION, Path(directory))
+                isolation.close()
+            self.assertEqual([x[0] for x in commands], ["-f", "-F", "-F"])
+        with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "unscoped"):
+            isolation._run("-F", "all")
+
+    def test_sentinel_isolation_refuses_collision_destination_and_invalid_port(self):
+        isolation = pf_anchor_smoke.SentinelPfIsolation()
+        with mock.patch.object(isolation, "snapshot", return_value=("foreign", "")):
+            with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "occupied"):
+                isolation.install(pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION, Path("/unused"))
+        self.assertFalse(isolation.attempted)
+        with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "destination"):
+            isolation.install("::1", Path("/unused"))
+        for port in (0, 80, -1, 65536, True, "443"):
+            with self.subTest(port=port), self.assertRaises(pf_anchor_smoke.SmokeError):
+                pf_anchor_smoke.SentinelPfIsolation(port)
+
+    def test_console_source_bind_is_forwarded_after_dropping_privileges(self):
+        client = mock.MagicMock()
+        client.__enter__.return_value.recv.return_value = pf_anchor_smoke.MARKER
+        client.__enter__.return_value.getsockname.return_value = ("::1", 12000, 0, 0)
+        with mock.patch.object(pf_anchor_smoke.os, "close"), mock.patch.object(pf_anchor_smoke.os, "setgroups"), mock.patch.object(pf_anchor_smoke.os, "setgid"), mock.patch.object(pf_anchor_smoke.os, "setuid"), mock.patch.object(pf_anchor_smoke.socket, "create_connection", return_value=client) as connect:
+            result = pf_anchor_smoke._run_unprivileged_test_client(listener=mock.Mock(), target_port=18443, uid=501, gid=20, destination=pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION, inherited_descriptors=(71, 72), source_address="::1")
+        self.assertEqual(result, 0)
+        connect.assert_called_once_with((pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION, 18443), timeout=4, source_address=("::1", 0))
+
+    def test_redirect_checks_natlook_before_forwarding_and_waits_for_child(self):
+        for valid in (True, False):
+            listener = mock.Mock()
+            connection = mock.MagicMock()
+            listener.accept.return_value = (connection, ("::1", 12000, 0, 0))
+            address = pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION
+            original = (address, 18443 if valid else 18444)
+            forward = mock.Mock(return_value=pf_anchor_smoke.MARKER)
+            with self.subTest(valid=valid), mock.patch.object(pf_anchor_smoke.os, "fork", return_value=42), mock.patch.object(pf_anchor_smoke.os, "waitpid", return_value=(42, 0)) as wait:
+                kwargs = dict(probe="fixture", listener=listener, target_port=18443, uid=501, gid=20, destination=address, source_address="::1", original_destination_lookup=lambda _: original, expected_original_destination=(address, 18443), forward_payload=forward)
+                if valid:
+                    pf_anchor_smoke._probe_redirect(**kwargs)
+                    forward.assert_called_once()
+                    connection.sendall.assert_called_once_with(pf_anchor_smoke.MARKER)
+                else:
+                    with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "wrong original destination"):
+                        pf_anchor_smoke._probe_redirect(**kwargs)
+                    forward.assert_not_called()
+                listener.close.assert_called_once()
+                wait.assert_called_once_with(42, 0)
+
+    def _route_fixture_mocks(self, wrong_source=False, wrong_natlook=False, cleanup_fails=False):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        address = pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION
+        isolation = mock.Mock(before="global", production=("production", "filter"))
+        isolation.snapshot.return_value = ("no rdr", "")
+        isolation.production_snapshot.return_value = isolation.production
+        if cleanup_fails:
+            isolation.close.side_effect = pf_anchor_smoke.SmokeError("cleanup")
+        sentinel = mock.Mock()
+        sentinel.fileno.return_value = 72
+        sentinel.accept.return_value = (mock.MagicMock(), (address, 12000, 0, 0))
+        capture = mock.Mock()
+        client = mock.MagicMock()
+        client.__enter__.return_value.getsockname.return_value = ("::1" if wrong_source else address, 12000, 0, 0)
+        client.__enter__.return_value.makefile.return_value.__enter__.return_value.read.return_value = pf_anchor_smoke.MARKER
+        lookup = mock.Mock(return_value=(address, 18444 if wrong_natlook else 18443))
+        def redirect(**kwargs):
+            self.assertEqual(kwargs["source_address"], "::1")
+            self.assertEqual(kwargs["inherited_descriptors"], (71, 72))
+            connection = mock.Mock()
+            connection.getpeername.return_value = ("::1", 13000, 0, 0)
+            original = kwargs["original_destination_lookup"](connection)
+            if original != kwargs["expected_original_destination"]:
+                raise pf_anchor_smoke.SmokeError("wrong original")
+            self.assertEqual(kwargs["forward_payload"](), pf_anchor_smoke.MARKER)
+            capture.close()
+        stack.enter_context(mock.patch.object(pf_anchor_smoke, "SentinelPfIsolation", return_value=isolation))
+        stack.enter_context(mock.patch.object(pf_anchor_smoke, "_open_listener", side_effect=(sentinel, capture)))
+        connect = stack.enter_context(mock.patch.object(pf_anchor_smoke.socket, "create_connection", return_value=client))
+        stack.enter_context(mock.patch.object(pf_anchor_smoke, "_pf_snapshot", return_value="global"))
+        stack.enter_context(mock.patch.object(pf_anchor_smoke, "_probe_redirect", side_effect=redirect))
+        args = dict(target_port=18443, proxy_port=19443, uid=501, gid=20, destination=address, natlook_descriptor=71, original_destination_lookup=lookup)
+        return args, isolation, sentinel, capture, connect
+
+    def test_native_fixture_requires_root_direct_capture_natlook_and_root_forward(self):
+        args, isolation, sentinel, capture, connect = self._route_fixture_mocks()
+        result = pf_anchor_smoke._probe_route_fixture(**args)
+        self.assertEqual(result["result"], "pass")
+        self.assertEqual(result["sentinel_connections"], 2)
+        self.assertEqual([c["phase"] for c in result["root_controls"]], ["direct", "forwarded"])
+        self.assertEqual(result["captured"]["source"], "::1")
+        self.assertEqual(connect.call_count, 2)
+        for call in connect.call_args_list:
+            self.assertNotIn("source_address", call.kwargs)
+        sentinel.close.assert_called_once()
+        capture.close.assert_called_once()
+        isolation.close.assert_called_once()
+
+    def test_native_fixture_reports_source_natlook_and_cleanup_failures(self):
+        for field in ("wrong_source", "wrong_natlook", "cleanup_fails"):
+            with self.subTest(field=field):
+                args, isolation, sentinel, capture, _ = self._route_fixture_mocks(**{field: True})
+                with self.assertRaises(pf_anchor_smoke.SmokeError) as caught:
+                    pf_anchor_smoke._probe_route_fixture(**args)
+                result = json.loads(str(caught.exception).split(": ", 1)[1])
+                self.assertEqual(result["result"], "fail")
+                if field == "wrong_source":
+                    self.assertEqual(result["root_controls"][0]["source"], "::1")
+                    self.assertEqual(result["sentinel_connections"], 0)
+                if field == "wrong_natlook":
+                    self.assertEqual(result["captured"]["original"][1], 18444)
+                    self.assertEqual(result["sentinel_connections"], 1)
+                isolation.close.assert_called_once()
+                sentinel.close.assert_called_once()
 
     def test_ipv6_loopback_fixture_installs_and_restores_exact_alias(self) -> None:
         state = {"installed": False}

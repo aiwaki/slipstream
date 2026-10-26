@@ -80,10 +80,13 @@ new requests must close without reaching that origin. Restoring the backend
 must restore the owned payload with the enabled preference unchanged. Only
 then does a disabled-preference control prove the system path is observable.
 
-The local destination needs a disposable, exact-address root-only PF isolation
-rule so the daemon's own connection can reach it without recapture. Production
-PF rules stay unchanged; the unprivileged request still traverses their
-NATLOOK path. The fixture trusts its certificate only in its client context,
+The local destination uses a disposable PF exception limited to one source,
+destination and port. Console probes bind `::1`; root control and daemon fallback
+must use the fixture alias as their source so they reach the local origin
+without recapture. The existing no-account PF smoke first verifies this source
+selection, direct delivery, console capture/NATLOOK and root forwarding on high
+ports. Production PF rules stay unchanged; this exception is test isolation,
+not an application routing rule. The fixture trusts its certificate only in its client context,
 restores the exact private settings and verified owned backend, and removes
 its own rules and alias on success or failure. This checks installed routing
 during an outage; it is not a localhost-policy test or a reproduction of a

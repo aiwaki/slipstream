@@ -30,8 +30,6 @@ import pf_anchor_smoke as pf
 
 HOST = "store.steampowered.com"
 REQUEST_PATH = "/"
-FIXTURE_ANCHOR = "com.apple/000-slipstream-geph-route-smoke"
-FIXTURE_TAG = "SLIPSTREAM_GEPH_ROUTE_CONTROL"
 SYSTEM_BODY = b"slipstream-installed-geph-system-route-control\n"
 MAX_BODY = 2 * 1024 * 1024
 
@@ -148,96 +146,10 @@ class OwnedBackend:
         geph._assert_owned_geph(self.paths, self.uid, self.state)
 
 
-class SentinelPfIsolation:
-    """Exclude only root control dials from lo0 re-interception in disposable CI.
-
-    Production PF excludes root only on the physical-interface route-to rule.
-    Our destination lives on lo0, so its root-origin packets need a fixture-only
-    tag before inbound rdr. Unprivileged clients receive no tag and still use
-    the untouched production rdr/NATLOOK path. This is not localhost policy
-    qualification; both positive controls must actually reach the sentinel.
-    """
-    def __init__(self):
-        self.runner = pf.PfctlRunner()
-        self.before = None
-        self.production = None
-        self.attempted = False
-
-    @staticmethod
-    def _run(*args: str):
-        if args not in {
-            ("-sn",), ("-sr",), ("-F", "rules"), ("-F", "nat"),
-        } and not (len(args) == 2 and args[0] == "-f" and args[1]):
-            raise RouteQualificationError("unscoped fixture PF command")
-        result = subprocess.run(
-            (str(pf.PFCTL), "-a", FIXTURE_ANCHOR, *args),
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode:
-            raise RouteQualificationError("scoped fixture PF operation failed")
-        return result.stdout.strip()
-
-    def snapshot(self):
-        return self._run("-sn"), self._run("-sr")
-
-    @staticmethod
-    def production_snapshot():
-        outputs = []
-        for action in ("-sn", "-sr"):
-            result = subprocess.run(
-                (str(pf.PFCTL), "-a", "com.apple/slipstream", action),
-                capture_output=True, text=True, timeout=15,
-            )
-            if result.returncode:
-                raise RouteQualificationError("cannot inspect production PF anchor")
-            outputs.append(result.stdout.strip())
-        return tuple(outputs)
-
-    def install(self, address: str, directory: Path):
-        if address != pf.IPV6_LOOPBACK_TEST_DESTINATION:
-            raise RouteQualificationError("unexpected fixture destination")
-        if any(self.snapshot()):
-            raise RouteQualificationError("fixture PF anchor is already occupied")
-        self.before = pf._pf_snapshot(self.runner)
-        self.production = self.production_snapshot()
-        if not self.before.enabled or not all(self.production):
-            raise RouteQualificationError("installed production PF must already be active")
-        if 'rdr-anchor "com.apple/*"' not in self.before.nat_rules or 'anchor "com.apple/*"' not in self.before.filter_rules:
-            raise RouteQualificationError("expected existing wildcard PF anchors are absent")
-        rules = directory / "sentinel.pf.conf"
-        rules.write_text(
-            f"no rdr on lo0 inet6 proto tcp from any to {address}/128 port 443 tagged {FIXTURE_TAG}\n"
-            f"pass out quick on lo0 inet6 proto tcp from any to {address}/128 port 443 user root tag {FIXTURE_TAG} no state\n"
-        )
-        self.attempted = True
-        self._run("-f", str(rules))
-        if not all(self.snapshot()):
-            raise RouteQualificationError("fixture PF isolation rules were not installed")
-        if self.production_snapshot() != self.production:
-            raise RouteQualificationError("production PF changed while adding fixture isolation")
-
-    def close(self):
-        if not self.attempted:
-            return
-        errors = []
-        for kind in ("rules", "nat"):
-            try:
-                self._run("-F", kind)
-            except Exception as exc:
-                errors.append(type(exc).__name__)
-        if any(self.snapshot()):
-            errors.append("fixture rules survived cleanup")
-        if self.production_snapshot() != self.production:
-            errors.append("production PF changed")
-        pf._assert_same_snapshot(self.before, pf._pf_snapshot(self.runner))
-        if errors:
-            raise RouteQualificationError("; ".join(errors))
-
-
 class SystemOrigin:
     def __init__(self):
         self.alias = pf.IPv6LoopbackAliasFixture()
-        self.isolation = SentinelPfIsolation()
+        self.isolation = pf.SentinelPfIsolation()
         self.directory = Path(tempfile.mkdtemp(prefix="slipstream-geph-route-"))
         # The unprivileged client reads only the public certificate; the key is 0600.
         self.directory.chmod(0o711)
@@ -327,13 +239,16 @@ class SystemOrigin:
                     self.directory.rmdir()
 
 
-def client_probe(destination: str, certificate: Path) -> dict:
+def client_probe(destination: str, certificate: Path, *, source_address: str | None = None) -> dict:
     """Fresh verified HTTPS, full bounded body, no redirect/auth replay."""
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=certificate)
     context.set_alpn_protocols(["http/1.1"])
+    source = None
+    connect_options = {"source_address": (source_address, 0)} if source_address is not None else {}
     try:
-        with socket.create_connection((destination, 443), timeout=15) as raw:
+        with socket.create_connection((destination, 443), timeout=15, **connect_options) as raw:
+            source = raw.getsockname()[0]
             with context.wrap_socket(raw, server_hostname=HOST) as tls:
                 tls.sendall((f"GET {REQUEST_PATH} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: Slipstream-route-qualification/1\r\nConnection: close\r\n\r\n").encode())
                 response = http.client.HTTPResponse(tls)
@@ -345,9 +260,9 @@ def client_probe(destination: str, certificate: Path) -> dict:
                     raise RouteQualificationError("response incomplete or too large")
                 if response.status != 200 or len(body) < 32:
                     raise RouteQualificationError("public canary did not return a complete successful body")
-                return {"route": "system" if body == SYSTEM_BODY else "owned", "bytes": len(body), "status": response.status}
+                return {"route": "system" if body == SYSTEM_BODY else "owned", "bytes": len(body), "status": response.status, "source": source}
     except (ssl.SSLEOFError, ConnectionResetError, BrokenPipeError) as exc:
-        return {"route": "closed", "error": type(exc).__name__}
+        return {"route": "closed", "error": type(exc).__name__, "source": source}
 
 
 def _probe(origin: SystemOrigin, uid: int, gid: int, *, timeout: float = 25) -> dict:
@@ -361,6 +276,8 @@ def _probe(origin: SystemOrigin, uid: int, gid: int, *, timeout: float = 25) -> 
     value = json.loads(result.stdout)
     if not isinstance(value, dict) or value.get("route") not in {"owned", "system", "closed"}:
         raise RouteQualificationError("fresh client returned an invalid receipt")
+    if value.get("source") != "::1":
+        raise RouteQualificationError("captured client did not use its distinct fixture source")
     return value
 
 
@@ -452,6 +369,9 @@ def run_qualification(uid: int, gid: int, home: Path, read_status: Callable) -> 
         # Scoped fixture isolation lets root reach lo0: prove the alternate path is live.
         control = client_probe(origin.alias.address, origin.certificate)
         baseline = origin.counts()
+        receipt["root_control"] = {**control, "system_counts": baseline}
+        if control.get("source") != origin.alias.address:
+            raise RouteQualificationError("unbound root control selected an unexpected source")
         if control.get("route") != "system" or baseline != {"connections": 1, "requests": 1}:
             raise RouteQualificationError("original destination positive control failed")
         receipt["stage"] = "initial-owned"
@@ -524,7 +444,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 4 or sys.argv[1] != "--client":
         raise SystemExit("private fixture client only")
     try:
-        print(json.dumps(client_probe(sys.argv[2], Path(sys.argv[3]))))
+        print(json.dumps(client_probe(sys.argv[2], Path(sys.argv[3]), source_address="::1")))
     except Exception as exc:
         # Public receipt contains only the class, never response bodies or credentials.
         print(json.dumps({"error": type(exc).__name__}))
