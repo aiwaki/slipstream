@@ -6,8 +6,8 @@
 
 Isolated checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-installed-outage-regression`, based on merged PR419
-`ef39ad169873c17e3c345e227a9078d34ca64efd`. No workstation
+branch `codex/terminal-refresh-test-isolation`, based on merged PR420
+`27262b3b8c4c2874cfea815e982691aab5f667f0`. No workstation
 service, account, browser, build or install action was performed; the user's
 external Geph remains untouched. The reported October 24 Codex403 is still
 unattributed: the exact ARN Ray was not found, and a logged Geph server address
@@ -88,10 +88,43 @@ controls and account-backed recovery remain unexecuted and required in CI.
 No production code is changed by this harness branch. Reuse PR419's green
 production regressions; do not rerun the local full suite or native build.
 
-After the scoped harness checks and required CI pass, run one combined `release-readiness.yml`
+PR420 merged normally on October 26 at 07:59 UTC as
+`27262b3b8c4c2874cfea815e982691aab5f667f0`. Head
+`001a485f10f78df0de7c93c6d818a76cd1321dba` passed CI40287460303 and
+audit40287460319; merged tree `e226dfe9ddcb4f0d3bd59e193f189ad7c0784faf`
+equals the tested tree. All required checks and independent review passed.
+The new single-submit authorization scenario and full native lifecycle passed.
+Main audit40289194471 passed. Main CI40289194469 failed its Rust tray unit
+step: `terminal_refresh_resets_only_for_a_verified_process_birth` expected an
+error at virtual time 1730, but the nonblocking wrapper returned `Ok(_)`.
+The captured log does not distinguish `Ok(false)` (busy lock) from `Ok(true)`.
+Product source is unchanged in PR420. The wrapper explicitly skips a busy flock
+before checking the episode deadline; the neighbouring virtual-clock test
+already holds one lock to avoid fork inheritance from parallel tests. A bounded
+real Darwin probe reproduced a CLOEXEC descriptor inherited before exec: after
+parent close the lock stayed busy until child exit. This proves the reachable
+skip, not the historical result's exact value. The current branch isolates only
+the generation/budget test under one verified lock and preserves separate
+nonblocking concurrency coverage. No product behavior or deadline change.
+Receipt: `output/geph-route-continuity-20261025/pr-readiness/fork-flock-reproduction.json`.
+The test-only repair is independently reviewed: a held lock now isolates the
+seven generation/budget steps. An additional public-wrapper call at the expired
+virtual time explicitly proves `Ok(false)` with unchanged marker bytes while
+the lock is busy; the locked path must then return the specific `exhausted`
+error. Setup skips unrelated real-time refresh. The separate concurrency test
+is untouched. Everything outside this one Rust test is byte-identical to main;
+rustfmt parsed the file and diff whitespace passed. No local Cargo/Tauri build
+was run; the changed Rust test must execute in PR CI.
+
+Main CI40289194469 is terminal failure solely from that unit test (242 passed,
+1 failed in the tray target). Native lifecycle, browser qualification, signed
+candidate assembly and update notification passed. Do not use the failed run's
+otherwise-built candidate. No account-backed dispatch yet.
+
+After the exact-main CI completes successfully, run one combined `release-readiness.yml`
 on an authenticated successful exact-main CI candidate. The standalone owned
 Geph workflow is diagnostic only and should not consume a duplicate account
-attempt. As of October 25 UTC the shared budget was 0/3 with no active runs;
+attempt. As of October 26 at 07:47 UTC the shared budget was 0/3 with no active runs;
 the workflow guard must recheck at dispatch. Do not install or switch the user's
 external Geph during this source/CI step. Native/browser and account-backed
 behavior are not qualified by handler fixtures; the exact reported HTTP403
@@ -1073,8 +1106,9 @@ installation ran. The unchanged release checks are not repeated.
 ## Next Verified Action
 
 - PR416 r3 producer39996042090 and consumers PR415/419 are merged and passed
-  their required CI. Submit the reviewed installed-daemon outage/retry and
-  authorization-harness branch above through normal PR checks, then qualify one authenticated exact-main candidate through the combined
+  their required CI. PR420 is also merged with green PR checks. Repair the
+  virtual-clock test isolation exposed in main CI40289194469, merge through
+  normal checks, then qualify one authenticated exact-main candidate through the combined
   release-readiness workflow. Reuse the recorded producer, focused tests and
   unchanged Quit evidence. The user's working external Geph stays untouched;
   source/CI completion is not workstation delivery or proof of the exact403.
