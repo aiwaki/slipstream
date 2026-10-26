@@ -1,5 +1,34 @@
 # Routing Research Notes
 
+### Installed-route sentinel isolation failed before the outage, 2026-10-26
+
+Protected run40295745334 used the authenticated main94e488785 candidate. Its
+first root HTTPS control to the fixture's IPv6 alias returned without any
+sentinel TCP accept or HTTP request. The generic failure omitted whether the
+client returned `owned` or `closed`; it cannot establish which route completed.
+Timeout, certificate verification and connection refusal would have raised a
+different error, so there is no evidence that the sentinel's TLS certificate
+caused this failure. The backend-outage probes never ran. Both fixture and
+coordinator cleanup passed; the soak did not run.
+
+The fixture relied on root socket-owner matching on outbound lo0, a packet tag,
+and a tagged inbound `no rdr` rule. Static PF/XNU review had supported syntax
+and ordering, but no real macOS positive control had qualified that topology.
+The failed control exposes that missing test boundary. The evidence does not
+show that loopback strips tags or identify an error in production routing.
+
+The repair isolates the test by source address at one owned destination/port:
+console probes bind `::1`; an exact alias-to-alias exception permits the root
+control and daemon fallback. A real no-account PF preflight must verify kernel
+source selection, direct delivery, console capture/NATLOOK and root forwarding
+before another protected run. The disabled-Geph positive control remains
+mandatory. Production PF rules and user network settings are unchanged.
+
+Evidence: `output/readiness-preflight-20261026/run-40295745334-readiness.log`.
+The independent native-root update run40295788607 passed commit and forced
+crash/rollback with exact pair identities and clean teardown; it does not
+qualify the failed route scenario or public auto-update.
+
 ### Owned Geph selection changed during health outages, 2026-10-25
 
 The installed `1f3ddcfb6` and the inspected PR415 `658b3018f` share the relevant

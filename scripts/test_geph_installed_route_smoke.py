@@ -15,7 +15,7 @@ import geph_installed_route_smoke as smoke
 class _Origin:
     def __init__(self):
         self.value = {"connections": 0, "requests": 0}
-        self.alias = SimpleNamespace(address="::1")
+        self.alias = SimpleNamespace(address=smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION)
         self.certificate = Path("/fixture/certificate.pem")
         self.closed = False
 
@@ -24,7 +24,7 @@ class _Origin:
 
     def visit(self):
         self.value = {k: v + 1 for k, v in self.value.items()}
-        return {"route": "system", "bytes": len(smoke.SYSTEM_BODY), "status": 200}
+        return {"route": "system", "bytes": len(smoke.SYSTEM_BODY), "status": 200, "source": self.alias.address}
 
     def start(self):
         pass
@@ -94,6 +94,53 @@ class InstalledGephRouteSmokeTests(unittest.TestCase):
         self.assertEqual(result["system_counts"], {"connections": 2, "requests": 2})
         self.assertEqual(result["restored_probe"]["route"], "owned")
         self.assertTrue(fixture.origin.closed)
+
+    def test_failed_root_control_keeps_route_source_and_counts(self):
+        fixture = self._run_fixture()
+        control = {"route": "closed", "error": "SSLEOFError", "source": fixture.origin.alias.address}
+        with mock.patch.object(smoke, "client_probe", return_value=control):
+            with self.assertRaises(smoke.RouteQualificationError) as caught:
+                smoke.run_qualification(os.getuid(), os.getgid(), fixture.home, lambda: {})
+        receipt = json.loads(str(caught.exception))
+        self.assertEqual(receipt["stage"], "local-origin")
+        self.assertEqual(receipt["root_control"], {**control, "system_counts": {"connections": 0, "requests": 0}})
+        fixture.backend.stop.assert_not_called()
+        self.assertTrue(fixture.origin.closed)
+
+    def test_root_control_rejects_wrong_default_source_even_with_payload(self):
+        fixture = self._run_fixture()
+        def wrong_source(*_args):
+            return {**fixture.origin.visit(), "source": "::1"}
+        with mock.patch.object(smoke, "client_probe", side_effect=wrong_source):
+            with self.assertRaises(smoke.RouteQualificationError) as caught:
+                smoke.run_qualification(os.getuid(), os.getgid(), fixture.home, lambda: {})
+        receipt = json.loads(str(caught.exception))
+        self.assertIn("unexpected source", receipt["failure"]["reason"])
+        self.assertEqual(receipt["root_control"]["system_counts"]["connections"], 1)
+        fixture.backend.stop.assert_not_called()
+
+    def test_client_bind_is_explicit_only_for_captured_requests(self):
+        context = mock.Mock()
+        context.wrap_socket.side_effect = smoke.ssl.SSLEOFError
+        raw = mock.MagicMock()
+        raw.__enter__.return_value.getsockname.return_value = ("::1", 12345, 0, 0)
+        with mock.patch.object(smoke.ssl, "create_default_context", return_value=context), mock.patch.object(smoke.socket, "create_connection", return_value=raw) as connect:
+            self.assertEqual(smoke.client_probe("fixture", Path("cert"), source_address="::1")["source"], "::1")
+            connect.assert_called_once_with(("fixture", 443), timeout=15, source_address=("::1", 0))
+            connect.reset_mock()
+            smoke.client_probe("fixture", Path("cert"))
+            connect.assert_called_once_with(("fixture", 443), timeout=15)
+
+    def test_captured_receipt_requires_the_distinct_client_source(self):
+        origin = _Origin()
+        for source in (None, origin.alias.address):
+            completed = SimpleNamespace(returncode=0, stdout=json.dumps({"route": "owned", "source": source}))
+            with self.subTest(source=source), mock.patch.object(smoke.subprocess, "run", return_value=completed):
+                with self.assertRaisesRegex(smoke.RouteQualificationError, "distinct fixture source"):
+                    smoke._probe(origin, 501, 20)
+        completed.stdout = json.dumps({"route": "closed", "source": "::1"})
+        with mock.patch.object(smoke.subprocess, "run", return_value=completed):
+            self.assertEqual(smoke._probe(origin, 501, 20)["route"], "closed")
 
     def test_failure_after_bootout_restores_settings_backend_and_origin(self):
         fixture = self._run_fixture(fail_probe=2)
@@ -180,32 +227,6 @@ class InstalledGephRouteSmokeTests(unittest.TestCase):
             smoke._wait_backend(lambda: {}, 5, False, updated_after=100)
         self.assertEqual(read.call_count, 2)
         sleep.assert_called_once_with(0.5)
-
-    def test_pf_isolation_is_only_exact_ipv6_root_tag_and_never_loads_production(self):
-        isolation = smoke.SentinelPfIsolation()
-        before = SimpleNamespace(enabled=True, nat_rules='rdr-anchor "com.apple/*" all', filter_rules='anchor "com.apple/*" all')
-        commands = []
-        def run(*args):
-            commands.append(args)
-            if args[0] == "-f":
-                rules = Path(args[1]).read_text()
-                self.assertIn(f"to {smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION}/128 port 443 tagged {smoke.FIXTURE_TAG}", rules)
-                self.assertIn(f"user root tag {smoke.FIXTURE_TAG} no state", rules)
-                self.assertNotIn("route-to", rules)
-            return ""
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(isolation, "snapshot", side_effect=(("", ""), ("no rdr", "pass tagged"), ("", ""))), mock.patch.object(isolation, "production_snapshot", return_value=("production-nat", "production-filter")), mock.patch.object(smoke.pf, "_pf_snapshot", return_value=before), mock.patch.object(smoke.pf, "_assert_same_snapshot"), mock.patch.object(isolation, "_run", side_effect=run):
-            isolation.install(smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION, Path(directory))
-            isolation.close()
-        self.assertEqual([x[0] for x in commands], ["-f", "-F", "-F"])
-        with self.assertRaisesRegex(smoke.RouteQualificationError, "unscoped"):
-            isolation._run("-F", "all")
-
-    def test_pf_isolation_does_not_claim_existing_rules(self):
-        isolation = smoke.SentinelPfIsolation()
-        with mock.patch.object(isolation, "snapshot", return_value=("foreign", "")):
-            with self.assertRaisesRegex(smoke.RouteQualificationError, "occupied"):
-                isolation.install(smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION, Path("/unused"))
-        self.assertFalse(isolation.attempted)
 
     def test_recovery_waits_for_captured_payload_through_natural_cooldown(self):
         origin = _Origin()
@@ -297,6 +318,8 @@ class InstalledGephRouteSmokeTests(unittest.TestCase):
                 return self
             def __exit__(self, *_):
                 pass
+            def getsockname(self):
+                return ("::1", 12345, 0, 0)
             def sendall(self, _):
                 pass
             def makefile(self, *_):
