@@ -86,32 +86,91 @@ def wait(predicate, message, timeout=60):
     raise QualificationError(message)
 
 
+AUTH_STAGES = frozenset({"lookup", "window_shape", "focus", "inventory", "inventory_shape",
+                         "element_read", "prompt_match", "form_shape", "write_username",
+                         "write_password", "confirm", "cancel"})
+AUTH_RETRY_STAGES = frozenset({"lookup", "focus", "inventory", "element_read",
+                               "write_username", "write_password"})
+# Missing AX object / AX cannot complete: eligibility for a bounded fresh read,
+# not evidence of the historical failure's cause. Permission errors fail closed.
+AUTH_RETRY_CODES = frozenset({-1728, -25204})
+
+
 def authorize_until(done, observe_auth, *, result, prompt=STOP_PROMPT, timeout=90, require_submission=False):
-    """Submit once; a clicked button is not accepted authorization or completion."""
+    """Retry only known pre-click AX failures; never replay an uncertain click."""
     deadline = time.monotonic() + timeout
-    attempt = {"state": "waiting", "submitted": False, "prompt_disappeared": False,
-               "operation_completed": False}
+    attempt = {"state": "waiting", "submitted": False, "submission_attempted": False,
+               "submission_uncertain": False, "prompt_disappeared": False,
+               "operation_completed": False, "transient_errors": 0}
     result.setdefault("authorization_attempts", []).append(attempt)
+
+    def failure(message):
+        detail = attempt.get("submission_error", attempt.get("last_error"))
+        if detail:
+            message += f'; stage={detail["stage"]} code={detail["code"]}'
+        if attempt["submission_uncertain"]:
+            message += "; submission outcome uncertain"
+        return QualificationError(message)
+
     while time.monotonic() < deadline:
-        response = observe_auth(prompt, submit=not attempt["submitted"])
-        if response not in {"absent", "submitted", "pending", "rejected"}:
+        submit = not attempt["submission_attempted"]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            response = observe_auth(prompt, submit=submit,
+                                    timeout=min(15, remaining))
+        except QualificationError:
+            # Compile/transport/timeout or malformed output has no certified
+            # stage. A click may already have happened; never retry this action.
+            attempt["state"] = "unobserved"
+            attempt["last_error"] = {"stage": "script", "code": None}
+            if submit:
+                attempt["submission_attempted"] = attempt["submission_uncertain"] = True
+            raise failure("native authorization observation unavailable") from None
+        if isinstance(response, dict):
+            if (set(response) != {"state", "stage", "code"} or response["state"] != "ax_error"
+                    or response["stage"] not in AUTH_STAGES or type(response["code"]) is not int
+                    or not -(2**31) <= response["code"] < 2**31):
+                raise QualificationError("unexpected native authorization observation")
+            attempt["state"] = "ax_error"
+            detail = {"stage": response["stage"], "code": response["code"]}
+            attempt["last_error"] = detail
+            if response["stage"] == "confirm" and submit:
+                attempt["submission_attempted"] = attempt["submission_uncertain"] = True
+                attempt["submission_error"] = detail
+            elif (response["stage"] in AUTH_RETRY_STAGES and response["code"] in AUTH_RETRY_CODES):
+                attempt["transient_errors"] += 1
+            else:
+                raise failure("native authorization action failed")
+        elif isinstance(response, str) and response in {"absent", "submitted", "pending", "rejected"}:
+            attempt["state"] = response
+        else:
             raise QualificationError("unexpected native authorization observation")
-        attempt["state"] = response
         if response == "submitted":
+            if not submit:
+                raise QualificationError("read-only authorization observer reported submission")
+            attempt["submission_attempted"] = True
             attempt["submitted"] = True
-        elif response == "rejected":
+        if time.monotonic() >= deadline:
+            raise failure("native authorization observation arrived after its deadline")
+        if response == "rejected":
             # Do not retry credentials or infer why SecurityAgent rejected them.
-            raise QualificationError("native authorization was rejected; no resubmission attempted")
+            raise failure("native authorization was rejected; no resubmission attempted")
         elif response == "absent":
-            if attempt["submitted"]:
+            if attempt["submission_attempted"]:
                 attempt["prompt_disappeared"] = True
             # Dismissal alone may also mean cancellation. Only the caller's
             # fresh operation-specific state can prove successful completion.
-            if (attempt["submitted"] or not require_submission) and done():
+            if (attempt["submission_attempted"] or not require_submission) and done():
+                if time.monotonic() >= deadline:
+                    raise failure("native authorization completion arrived after its deadline")
                 attempt["operation_completed"] = True
+                if attempt["submission_uncertain"]:
+                    raise failure("operation completed without confirmed native submission")
                 return attempt["submitted"]
-        time.sleep(.2)
-    raise QualificationError("authorized native operation did not reach its expected state")
+        time.sleep(min(.2, max(0, deadline - time.monotonic())))
+    raise failure("authorized native operation did not reach its expected state")
 
 
 def apple_string(value):
@@ -187,36 +246,47 @@ AUTH_PROMPT_COLLECTION = '''
 '''
 
 
-def auth_action(prompt, *, cancel=False, username="", password="", submit=True):
+def auth_action(prompt, *, cancel=False, username="", password="", submit=True, timeout=15):
     # A native Cancel is proven only after finding this operation's prompt.
     # After submission this is a read-only observer: no focus change or field
     # writes. Read static text only, never credentials or secure field values.
     action = '''
-        if (count of cancelButtons) is not 1 then error "authorization Cancel unavailable"
+        set authStage to "form_shape"
+        if (count of cancelButtons) is not 1 then error number -2700
+        set authStage to "cancel"
         click item 1 of cancelButtons
         return "cancelled"
     ''' if cancel else ('''return "pending"''' if not submit else f'''
+        set authStage to "form_shape"
         if (count of userFields) is not 1 or (count of secretFields) is not 1 then
-          return "unexpected authorization form: user fields=" & (count of userFields) & ", secure fields=" & (count of secretFields) & ", cancel buttons=" & (count of cancelButtons) & ", confirmation buttons=" & (count of confirmButtons)
+          error number -2700
         end if
+        if (count of confirmButtons) is not 1 then error number -2700
+        set authStage to "write_username"
         set value of item 1 of userFields to {apple_string(username)}
+        set authStage to "write_password"
         set value of item 1 of secretFields to {apple_string(password)}
-        if (count of confirmButtons) is not 1 then error "authorization confirmation unavailable"
+        set authStage to "confirm"
         click item 1 of confirmButtons
         return "submitted"
     ''')
     script = f'''
+    set authStage to "lookup"
+    try
     tell application "System Events"
       if not (exists application process "SecurityAgent") then return "absent"
       set agent to application process "SecurityAgent"
       set windowCount to count of windows of agent
       if windowCount is 0 then return "absent"
-      if windowCount is not 1 then error "authorization window is ambiguous"
+      set authStage to "window_shape"
+      if windowCount is not 1 then error number -2700
+      set authStage to "focus"
       {"set frontmost of agent to true" if cancel or submit else ""}
+      set authStage to "inventory"
       set w to window 1 of agent
           {AUTH_WINDOW_ELEMENTS}
-          if (count of elements) > 256 then error "authorization element inventory is too large"
-          set readErrors to 0
+          set authStage to "inventory_shape"
+          if (count of elements) > 256 then error number -2700
           set valueText to ""
           set nameText to ""
           set descriptionText to ""
@@ -224,28 +294,27 @@ def auth_action(prompt, *, cancel=False, username="", password="", submit=True):
           set secretFields to {{}}
           set cancelButtons to {{}}
           set confirmButtons to {{}}
+          set authStage to "element_read"
           repeat with elementIndex from 1 to elementLimit
             set e to item elementIndex of elements
-            try
-              set r to role of e
-              {AUTH_PROMPT_COLLECTION}
-              if r is "AXTextField" or r is "AXComboBox" then
-                if subrole of e is "AXSecureTextField" then
-                  set end of secretFields to e
-                else
-                  set end of userFields to e
-                end if
+            -- Stop at the failing operation: retain its numeric error, do not
+            -- combine multiple AX failures into an unclassified count.
+            set r to role of e
+            {AUTH_PROMPT_COLLECTION}
+            if r is "AXTextField" or r is "AXComboBox" then
+              if subrole of e is "AXSecureTextField" then
+                set end of secretFields to e
+              else
+                set end of userFields to e
               end if
-              if r is "AXButton" then
-                set buttonName to name of e
-                if buttonName is "Cancel" or buttonName is "Отмена" then set end of cancelButtons to e
-                if buttonName is "OK" or buttonName is "Allow" or buttonName is "ОК" then set end of confirmButtons to e
-              end if
-            on error
-              set readErrors to readErrors + 1
-            end try
+            end if
+            if r is "AXButton" then
+              set buttonName to name of e
+              if buttonName is "Cancel" or buttonName is "Отмена" then set end of cancelButtons to e
+              if buttonName is "OK" or buttonName is "Allow" or buttonName is "ОК" then set end of confirmButtons to e
+            end if
           end repeat
-          if readErrors is not 0 then error "authorization elements unavailable"
+          set authStage to "prompt_match"
           if (valueText contains {apple_string(prompt)}) or (nameText contains {apple_string(prompt)}) then
             -- Return only a classification, never the dialog's accessible text.
             if {str(not cancel).lower()} then
@@ -256,12 +325,21 @@ def auth_action(prompt, *, cancel=False, username="", password="", submit=True):
           end if
     end tell
     return "absent"
+    on error number errorCode
+      return "ax_error|" & authStage & "|" & errorCode
+    end try
     '''
-    response = applescript(script, sensitive=True)
-    if response.startswith("unexpected authorization form:"):
-        # Counts only: preserve useful AX diagnostics without reading field values.
-        raise QualificationError(response)
-    return response
+    response = applescript(script, sensitive=True, timeout=timeout)
+    if response in {"absent", "cancelled", "submitted", "pending", "rejected"}:
+        return response
+    match = re.fullmatch(r"ax_error\|([a-z_]+)\|(-?[0-9]{1,10})", response)
+    if match and match[1] in AUTH_STAGES and -(2**31) <= int(match[2]) < 2**31:
+        stage, code = match[1], int(match[2])
+        if cancel:
+            raise QualificationError(f"native Cancel action failed; stage={stage} code={code}")
+        return {"state": "ax_error", "stage": stage, "code": code}
+    # Unknown output may contain accessible text; never include it in evidence.
+    raise QualificationError("unexpected native authorization observation")
 
 
 AUTH_PROCESS_NAMES = ("SecurityAgent", "SecurityAgentHelper-arm64", "SecurityAgentHelper-x86_64")
@@ -807,7 +885,7 @@ def run_qualification(bundle, report):
         result["last_menu_item_enabled"] = True
     def observe_auth(prompt, **kwargs):
         response = auth_action(prompt, **kwargs)
-        category = response if response in {"absent", "cancelled", "submitted", "pending", "rejected"} else "unrecognized"
+        category = "ax_error" if isinstance(response, dict) else response
         counts = result.setdefault("authorization_results", {})
         counts[category] = counts.get(category, 0) + 1
         return response
@@ -852,10 +930,10 @@ def run_qualification(bundle, report):
             sentinel.check()
             cases.append({"case": "native_cancel", "result": "pass", "root_continued": True, "ui_error_visible": True})
 
-            def operation_auth(prompt, *, submit=True):
+            def operation_auth(prompt, *, submit=True, timeout=15):
                 if submit:
-                    return observe_auth(prompt, username=username, password=password)
-                return observe_auth(prompt, submit=False)
+                    return observe_auth(prompt, username=username, password=password, timeout=timeout)
+                return observe_auth(prompt, submit=False, timeout=timeout)
 
             with installer_lock():
                 result["phase"] = "root_lock_failure"

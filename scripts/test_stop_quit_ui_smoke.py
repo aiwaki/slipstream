@@ -305,7 +305,7 @@ fn disable(app: &App, enable_h: &Check) { DISABLE }
             self.assertNotIn("repeat with elementRef in entire contents", script)
         click = action.index("click item 1 of cancelButtons")
         for guard in ('if windowCount is not 1', 'if (count of cancelButtons) is not 1',
-                      'if readErrors is not 0', f'valueText contains "{smoke.STOP_PROMPT}"',
+                      'set authStage to "element_read"', f'valueText contains "{smoke.STOP_PROMPT}"',
                       f'nameText contains "{smoke.STOP_PROMPT}"'):
             self.assertLess(action.index(guard), click)
 
@@ -467,7 +467,7 @@ class AuthorizationProgressTests(unittest.TestCase):
         reads = []
         states = iter(observations)
         last = ["pending"]
-        def observe(prompt, *, submit=True):
+        def observe(prompt, *, submit=True, timeout=15):
             if submit:
                 submits.append(now[0])
                 return "submitted"
@@ -560,6 +560,147 @@ class AuthorizationProgressTests(unittest.TestCase):
                     else:
                         self.assertFalse(smoke.authorize_until(lambda: True,
                             lambda *a, **k: "absent", result={}))
+
+
+class AuthorizationObservationTests(unittest.TestCase):
+    def drive(self, observations, *, done=None, require_submission=False, timeout=90):
+        now, calls, result = [0.0], [], {}
+        states = iter(observations)
+        done = done if done is not None else mock.Mock(return_value=True)
+
+        def apple(script, **kwargs):
+            calls.append((script, kwargs))
+            response = next(states, "pending")
+            if isinstance(response, tuple):
+                response, elapsed = response
+                now[0] += elapsed
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        def sleep(seconds):
+            now[0] += seconds
+
+        with mock.patch.object(smoke, "applescript", side_effect=apple), \
+             mock.patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+             mock.patch.object(smoke.time, "sleep", side_effect=sleep):
+            try:
+                value = smoke.authorize_until(done, smoke.auth_action, result=result,
+                    require_submission=require_submission, timeout=timeout)
+                error = None
+            except smoke.QualificationError as caught:
+                value, error = None, caught
+        return value, error, calls, result, done, now[0]
+
+    def test_transient_preclick_error_recovers_without_losing_stage_or_code(self):
+        value, error, calls, result, _, _ = self.drive([
+            "ax_error|inventory|-1728", "ax_error|write_username|-25204",
+            "submitted", "pending", "absent"], require_submission=True)
+        self.assertIsNone(error)
+        self.assertTrue(value)
+        attempt = result["authorization_attempts"][-1]
+        self.assertEqual(attempt["transient_errors"], 2)
+        self.assertEqual(attempt["last_error"], {"stage": "write_username", "code": -25204})
+        self.assertTrue(attempt["submission_attempted"])
+        self.assertFalse(attempt["submission_uncertain"])
+        self.assertTrue(all("click item 1 of confirmButtons" not in call[0] for call in calls[3:]))
+
+    def test_click_error_is_uncertain_and_never_resubmitted_or_qualified(self):
+        for required in (False, True):
+            with self.subTest(require_submission=required):
+                value, error, calls, result, done, _ = self.drive([
+                    "ax_error|confirm|-25204", "pending", "absent"], require_submission=required)
+                self.assertIsNone(value)
+                self.assertRegex(str(error), r"stage=confirm code=-25204")
+                attempt = result["authorization_attempts"][-1]
+                self.assertFalse(attempt["submitted"])
+                self.assertTrue(attempt["submission_attempted"])
+                self.assertTrue(attempt["submission_uncertain"])
+                self.assertTrue(attempt["operation_completed"])
+                self.assertTrue(attempt["prompt_disappeared"])
+                self.assertEqual(done.call_count, 1)
+                self.assertEqual(len(calls), 3)
+                for script, _ in calls[1:]:
+                    self.assertNotIn("click ", script)
+                    self.assertNotIn("set value of", script)
+                    self.assertNotIn("set frontmost", script)
+
+    def test_confirmed_submission_stays_readonly_after_transient_observer_error(self):
+        value, error, calls, result, _, _ = self.drive([
+            "submitted", "ax_error|element_read|-1728", "absent"])
+        self.assertIsNone(error)
+        self.assertTrue(value)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(result["authorization_attempts"][-1]["submitted"])
+        self.assertTrue(all("click " not in call[0] for call in calls[1:]))
+
+    def test_permission_unknown_and_structural_errors_fail_closed(self):
+        for observation in ("ax_error|inventory|-10005", "ax_error|inventory|-1743",
+                            "ax_error|inventory|-2700", "ax_error|inventory|-1712",
+                            "ax_error|form_shape|-1728", "ax_error|window_shape|-25204"):
+            with self.subTest(observation=observation):
+                _, error, calls, result, done, elapsed = self.drive([observation])
+                self.assertIsInstance(error, smoke.QualificationError)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(elapsed, 0)
+                self.assertFalse(result["authorization_attempts"][-1]["submitted"])
+                done.assert_not_called()
+
+    def test_unknown_script_outcome_never_retries_or_exposes_private_text(self):
+        private = "private-authentication-detail"
+        for observation in (private, "ax_error|" + private + "|-1728",
+                            "ax_error|inventory|" + private,
+                            "ax_error|confirm|-25204|" + private,
+                            smoke.QualificationError("osascript failed (1): " + private)):
+            with self.subTest(kind=type(observation).__name__):
+                _, error, calls, result, done, _ = self.drive([observation])
+                self.assertIsInstance(error, smoke.QualificationError)
+                self.assertNotIn(private, str(error))
+                self.assertNotIn(private, json.dumps(result))
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(result["authorization_attempts"][-1]["last_error"],
+                                 {"stage": "script", "code": None})
+                done.assert_not_called()
+
+    def test_remaining_budget_limits_subprocess_and_rejects_late_submission(self):
+        observations = [("ax_error|inventory|-1728", 14.9)] * 5
+        observations += [("ax_error|inventory|-1728", 14.2), ("submitted", .2)]
+        _, error, calls, result, done, elapsed = self.drive(observations)
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertEqual(len(calls), 7)
+        self.assertLess(calls[-1][1]["timeout"], .11)
+        self.assertGreater(calls[-1][1]["timeout"], 0)
+        self.assertTrue(all(call[1]["timeout"] <= 15 for call in calls))
+        self.assertLess(elapsed, 90.11)
+        self.assertTrue(result["authorization_attempts"][-1]["submitted"])
+        self.assertFalse(result["authorization_attempts"][-1]["operation_completed"])
+        done.assert_not_called()
+
+    def test_late_absence_cannot_accept_cached_authorization(self):
+        _, error, _, result, done, _ = self.drive([("absent", .3)], timeout=.25)
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertFalse(result["authorization_attempts"][-1]["operation_completed"])
+        done.assert_not_called()
+
+    def test_transient_errors_do_not_extend_deadline(self):
+        _, error, calls, result, done, elapsed = self.drive(
+            ["ax_error|inventory|-1728"] * 10, timeout=.25)
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertEqual(len(calls), 2)
+        self.assertAlmostEqual(elapsed, .25)
+        self.assertFalse(result["authorization_attempts"][-1]["submission_attempted"])
+        done.assert_not_called()
+
+    def test_action_marks_stage_before_click_and_checks_form_before_writes(self):
+        with mock.patch.object(smoke, "applescript", return_value="submitted") as apple:
+            smoke.auth_action(smoke.STOP_PROMPT, username="fixture", password="secret", timeout=.5)
+        script = apple.call_args.args[0]
+        self.assertEqual(apple.call_args.kwargs["timeout"], .5)
+        self.assertLess(script.index('set authStage to "confirm"'), script.index("click item 1 of confirmButtons"))
+        self.assertLess(script.index("if (count of confirmButtons) is not 1"), script.index("set value of item 1 of userFields"))
+        self.assertIn("on error number errorCode", script)
+        self.assertIn('return "ax_error|" & authStage & "|" & errorCode', script)
+        self.assertNotIn("set readErrors to readErrors + 1", script)
 
 
 if __name__ == "__main__":
