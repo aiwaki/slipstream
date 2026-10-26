@@ -193,6 +193,7 @@ jobs:
             spike/test_xbox_dns.py \
             scripts/pf_anchor_smoke.py \
             scripts/pf_installed_lifecycle_smoke.py \
+            scripts/geph_installed_route_smoke.py \
             scripts/composed_pending_navigation_smoke.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
@@ -209,6 +210,7 @@ jobs:
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
             scripts/test_pf_installed_lifecycle_smoke.py \
+            scripts/test_geph_installed_route_smoke.py \
             scripts/test_packaged_transport_mechanics_smoke.py \
             scripts/test_stop_quit_ui_smoke.py \
             scripts/test_release_transport_matrix.py \

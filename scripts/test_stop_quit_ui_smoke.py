@@ -256,16 +256,38 @@ fn disable(app: &App, enable_h: &Check) { DISABLE }
                 smoke.run(["sysadminctl", secret], sensitive=True)
             self.assertNotIn(secret, str(error.exception))
 
-    def test_native_cancel_and_confirmation_are_distinct_results(self):
+    def test_native_cancel_and_submission_are_distinct_results(self):
         with mock.patch.object(smoke, "applescript", return_value="cancelled") as apple:
             self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT, cancel=True), "cancelled")
             script = apple.call_args.args[0]
             self.assertIn(smoke.STOP_PROMPT, script)
             self.assertIn('click item 1 of cancelButtons', script)
             self.assertNotIn('set value of item 1 of secretFields', script)
-        with mock.patch.object(smoke, "applescript", return_value="confirmed") as apple:
-            self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT, username="fixture", password="secret"), "confirmed")
+        with mock.patch.object(smoke, "applescript", return_value="submitted") as apple:
+            self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT, username="fixture", password="secret"), "submitted")
             self.assertTrue(apple.call_args.kwargs["sensitive"])
+            self.assertIn('return "submitted"', apple.call_args.args[0])
+            self.assertNotIn('return "confirmed"', apple.call_args.args[0])
+
+    def test_pending_authorization_observer_never_focuses_writes_or_clicks(self):
+        with mock.patch.object(smoke, "applescript", return_value="pending") as apple:
+            self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT, submit=False,
+                username="private-fixture-user", password="private-fixture-secret"), "pending")
+        script = apple.call_args.args[0]
+        for forbidden in ("set frontmost", "set value of", "click ",
+                          "private-fixture-user", "private-fixture-secret"):
+            self.assertNotIn(forbidden, script)
+        self.assertIn('return "pending"', script)
+        self.assertTrue(apple.call_args.kwargs["sensitive"])
+
+    def test_explicit_rejection_is_classified_before_submission_without_text_output(self):
+        with mock.patch.object(smoke, "applescript", return_value="rejected") as apple:
+            self.assertEqual(smoke.auth_action(smoke.STOP_PROMPT,
+                username="private-user", password="private-secret"), "rejected")
+        script = apple.call_args.args[0]
+        self.assertLess(script.index('then return "rejected"'), script.index('set value of item 1 of userFields'))
+        self.assertNotIn("return rejectionText", script)
+        self.assertNotIn("return valueText", script)
 
     def test_auth_action_uses_the_observed_snapshot_traversal_before_unique_prompt_action(self):
         # CI observed the exact prompt in one window while the old direct-repeat
@@ -434,6 +456,110 @@ fn disable(app: &App, enable_h: &Check) { DISABLE }
             with self.assertRaisesRegex(smoke.QualificationError, "unowned"):
                 tray.close()
             kill.assert_not_called()
+
+
+class AuthorizationProgressTests(unittest.TestCase):
+    def exercise(self, observations, done=None, *, require_submission=False):
+        # A deterministic native-dialog adapter: only submit=True writes fields
+        # and presses OK. Read-only observations never touch fixture credentials.
+        now = [0.0]
+        submits = []
+        reads = []
+        states = iter(observations)
+        last = ["pending"]
+        def observe(prompt, *, submit=True):
+            if submit:
+                submits.append(now[0])
+                return "submitted"
+            reads.append(now[0])
+            last[0] = next(states, last[0])
+            return last[0]
+        def sleep(seconds):
+            now[0] += seconds
+        result = {}
+        with mock.patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+             mock.patch.object(smoke.time, "sleep", side_effect=sleep):
+            try:
+                value = smoke.authorize_until(done or (lambda: False), observe,
+                    result=result, require_submission=require_submission)
+                error = None
+            except smoke.QualificationError as caught:
+                value, error = None, caught
+        return value, error, submits, reads, now[0], result
+
+    def test_pending_prompt_submits_once_until_original_deadline(self):
+        _, error, submits, reads, elapsed, result = self.exercise(["pending"])
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertEqual(len(submits), 1, "pending authorization must not rewrite credentials or press OK again")
+        self.assertGreater(len(reads), 1)
+        self.assertGreaterEqual(elapsed, 90)
+        self.assertLess(elapsed, 90.21)
+        self.assertEqual(result["authorization_attempts"][-1]["state"], "pending")
+        self.assertNotIn("confirmed", json.dumps(result))
+
+    def test_rejected_prompt_fails_without_resubmission(self):
+        _, error, submits, reads, elapsed, result = self.exercise(["pending", "rejected"])
+        self.assertRegex(str(error), "authorization was rejected")
+        self.assertEqual(len(submits), 1)
+        self.assertLess(elapsed, 90)
+        self.assertEqual(result["authorization_attempts"][-1]["state"], "rejected")
+
+    def test_disappearance_requires_operation_completion(self):
+        _, error, submits, _, elapsed, result = self.exercise(["absent"])
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertEqual(len(submits), 1)
+        self.assertGreaterEqual(elapsed, 90)
+        attempt = result["authorization_attempts"][-1]
+        self.assertTrue(attempt["prompt_disappeared"])
+        self.assertFalse(attempt["operation_completed"])
+
+    def test_pending_prompt_does_not_accept_stale_done(self):
+        done = mock.Mock(return_value=True)
+        _, error, submits, _, _, _ = self.exercise(["pending"], done, require_submission=True)
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertEqual(len(submits), 1)
+        done.assert_not_called()
+
+    def test_disappeared_prompt_and_completed_operation_pass(self):
+        done = mock.Mock(side_effect=[False, True])
+        value, error, submits, reads, _, result = self.exercise(["pending", "absent"], done, require_submission=True)
+        self.assertIsNone(error)
+        self.assertTrue(value)
+        self.assertEqual(len(submits), 1)
+        self.assertEqual(done.call_count, 2)
+        self.assertGreaterEqual(len(reads), 3)
+        self.assertTrue(result["authorization_attempts"][-1]["operation_completed"])
+
+    def test_reappearing_prompt_is_not_resubmitted(self):
+        _, error, submits, _, _, result = self.exercise(["absent", "pending"])
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertEqual(len(submits), 1)
+        self.assertTrue(result["authorization_attempts"][-1]["prompt_disappeared"])
+        self.assertEqual(result["authorization_attempts"][-1]["state"], "pending")
+
+    def test_unknown_observation_does_not_leak_text_or_qualify(self):
+        private = "private-authentication-detail"
+        result = {}
+        with self.assertRaisesRegex(smoke.QualificationError, "unexpected native authorization observation") as caught:
+            smoke.authorize_until(lambda: True, lambda *a, **k: private, result=result)
+        self.assertNotIn(private, str(caught.exception))
+        self.assertNotIn(private, json.dumps(result))
+
+    def test_no_prompt_allows_cached_authorization_only_when_not_required(self):
+        for required in (False, True):
+            with self.subTest(required=required):
+                now = [0.0]
+                def sleep(seconds):
+                    now[0] += seconds
+                with mock.patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                     mock.patch.object(smoke.time, "sleep", side_effect=sleep):
+                    if required:
+                        with self.assertRaises(smoke.QualificationError):
+                            smoke.authorize_until(lambda: True, lambda *a, **k: "absent",
+                                result={}, require_submission=True)
+                    else:
+                        self.assertFalse(smoke.authorize_until(lambda: True,
+                            lambda *a, **k: "absent", result={}))
 
 
 if __name__ == "__main__":

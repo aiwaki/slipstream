@@ -42,6 +42,7 @@ from pathlib import Path
 
 import composed_pending_navigation_smoke as composed
 import geph_owned_lifecycle_smoke as geph_smoke
+import geph_installed_route_smoke as geph_route
 import pf_anchor_smoke as pf
 import pf_installed_lifecycle_smoke as lifecycle
 
@@ -2855,8 +2856,14 @@ def run_qualification(
                 ),
             }
             fixture.close()
+        # The same staged owned Geph and installed daemon remain active here.
+        # Restore both before uninstall and the coordinator's release phase.
+        route_continuity = geph_route.run_qualification(
+            uid, gid, home, lifecycle._read_status,
+        )
         result = {
             "result": "pass",
+            "installed_owned_route_continuity": route_continuity,
             "restricted_to": "protected disposable GitHub Actions macOS runner",
             "browser": "Chrome for Testing with a fresh owner-only profile",
             "chrome_sandbox": "enabled",

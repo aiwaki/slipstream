@@ -941,6 +941,15 @@ def run_qualification(
         abort_reason = lambda: _owned_geph_abort_reason(paths, redaction_secret)
         initial_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
+        # Coordinated installed-daemon scenarios intentionally boot out and
+        # bootstrap the backend. Stop this exact tray first so its own lifecycle
+        # reconciliation cannot compete with the fixture. Native messaging still
+        # launches the packaged executable independently from its manifest.
+        if coordination is not None:
+            tray.crash()
+            _assert_owned_geph(paths, uid, initial)
+            trayless_payload = _wait_for_payload(abort_reason=abort_reason)
+            sentinel.check()
         active = _publish_ready_and_wait(
             coordination,
             paths,
@@ -949,10 +958,11 @@ def run_qualification(
             abort_reason=abort_reason,
         )
 
-        tray.crash()
-        _assert_owned_geph(paths, uid, active)
-        trayless_payload = _wait_for_payload(abort_reason=abort_reason)
-        sentinel.check()
+        if coordination is None:
+            tray.crash()
+            _assert_owned_geph(paths, uid, active)
+            trayless_payload = _wait_for_payload(abort_reason=abort_reason)
+            sentinel.check()
 
         _kill_owned_geph(paths, uid, active)
         recovered = _wait_for_owned_geph(paths, uid, previous_pid=active.pid)

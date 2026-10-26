@@ -68,6 +68,28 @@ it does not prove a remote provider is currently available or that a particular
 browser version has no independent issue. PF ownership, installer lifecycle,
 and live endpoint health remain separate CI and release gates.
 
+### Installed owned-route continuity
+
+The account-backed packaged semantic gate also runs
+`scripts/geph_installed_route_smoke.py` while the real root daemon and owned
+Geph are active. An unprivileged HTTPS client sends a reviewed geo SNI to a
+fixture-owned IPv6 destination. Successful responses must arrive through Geph;
+a separate local HTTPS origin counts any system-route connection, including
+connections that fail before HTTP. After an exact owned backend stop, repeated
+new requests must close without reaching that origin. Restoring the backend
+must restore the owned payload with the enabled preference unchanged. Only
+then does a disabled-preference control prove the system path is observable.
+
+The local destination needs a disposable, exact-address root-only PF isolation
+rule so the daemon's own connection can reach it without recapture. Production
+PF rules stay unchanged; the unprivileged request still traverses their
+NATLOOK path. The fixture trusts its certificate only in its client context,
+restores the exact private settings and verified owned backend, and removes
+its own rules and alias on success or failure. This checks installed routing
+during an outage; it is not a localhost-policy test or a reproduction of a
+particular remote HTTP403. A passing offline harness test is not a passing
+account-backed run; current execution evidence belongs in CURRENT_STATE.
+
 ## Resolver And Connector Contract
 
 `contracts/connection-race-v1.json` covers the layer below route selection and

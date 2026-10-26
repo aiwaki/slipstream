@@ -86,6 +86,34 @@ def wait(predicate, message, timeout=60):
     raise QualificationError(message)
 
 
+def authorize_until(done, observe_auth, *, result, prompt=STOP_PROMPT, timeout=90, require_submission=False):
+    """Submit once; a clicked button is not accepted authorization or completion."""
+    deadline = time.monotonic() + timeout
+    attempt = {"state": "waiting", "submitted": False, "prompt_disappeared": False,
+               "operation_completed": False}
+    result.setdefault("authorization_attempts", []).append(attempt)
+    while time.monotonic() < deadline:
+        response = observe_auth(prompt, submit=not attempt["submitted"])
+        if response not in {"absent", "submitted", "pending", "rejected"}:
+            raise QualificationError("unexpected native authorization observation")
+        attempt["state"] = response
+        if response == "submitted":
+            attempt["submitted"] = True
+        elif response == "rejected":
+            # Do not retry credentials or infer why SecurityAgent rejected them.
+            raise QualificationError("native authorization was rejected; no resubmission attempted")
+        elif response == "absent":
+            if attempt["submitted"]:
+                attempt["prompt_disappeared"] = True
+            # Dismissal alone may also mean cancellation. Only the caller's
+            # fresh operation-specific state can prove successful completion.
+            if (attempt["submitted"] or not require_submission) and done():
+                attempt["operation_completed"] = True
+                return attempt["submitted"]
+        time.sleep(.2)
+    raise QualificationError("authorized native operation did not reach its expected state")
+
+
 def apple_string(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -159,14 +187,15 @@ AUTH_PROMPT_COLLECTION = '''
 '''
 
 
-def auth_action(prompt, *, cancel=False, username="", password=""):
+def auth_action(prompt, *, cancel=False, username="", password="", submit=True):
     # A native Cancel is proven only after finding this operation's prompt.
-    # Read static text only, never credentials or secure field values.
+    # After submission this is a read-only observer: no focus change or field
+    # writes. Read static text only, never credentials or secure field values.
     action = '''
         if (count of cancelButtons) is not 1 then error "authorization Cancel unavailable"
         click item 1 of cancelButtons
         return "cancelled"
-    ''' if cancel else f'''
+    ''' if cancel else ('''return "pending"''' if not submit else f'''
         if (count of userFields) is not 1 or (count of secretFields) is not 1 then
           return "unexpected authorization form: user fields=" & (count of userFields) & ", secure fields=" & (count of secretFields) & ", cancel buttons=" & (count of cancelButtons) & ", confirmation buttons=" & (count of confirmButtons)
         end if
@@ -174,8 +203,8 @@ def auth_action(prompt, *, cancel=False, username="", password=""):
         set value of item 1 of secretFields to {apple_string(password)}
         if (count of confirmButtons) is not 1 then error "authorization confirmation unavailable"
         click item 1 of confirmButtons
-        return "confirmed"
-    '''
+        return "submitted"
+    ''')
     script = f'''
     tell application "System Events"
       if not (exists application process "SecurityAgent") then return "absent"
@@ -183,7 +212,7 @@ def auth_action(prompt, *, cancel=False, username="", password=""):
       set windowCount to count of windows of agent
       if windowCount is 0 then return "absent"
       if windowCount is not 1 then error "authorization window is ambiguous"
-      set frontmost of agent to true
+      {"set frontmost of agent to true" if cancel or submit else ""}
       set w to window 1 of agent
           {AUTH_WINDOW_ELEMENTS}
           if (count of elements) > 256 then error "authorization element inventory is too large"
@@ -218,6 +247,11 @@ def auth_action(prompt, *, cancel=False, username="", password=""):
           end repeat
           if readErrors is not 0 then error "authorization elements unavailable"
           if (valueText contains {apple_string(prompt)}) or (nameText contains {apple_string(prompt)}) then
+            -- Return only a classification, never the dialog's accessible text.
+            if {str(not cancel).lower()} then
+              set rejectionText to valueText & " " & nameText & " " & descriptionText
+              if (rejectionText contains "password is incorrect") or (rejectionText contains "password you entered is incorrect") or (rejectionText contains "incorrect password") or (rejectionText contains "user name or password is incorrect") or (rejectionText contains "неверный пароль") or (rejectionText contains "неправильный пароль") or (rejectionText contains "пароль введён неверно") then return "rejected"
+            end if
             {action}
           end if
     end tell
@@ -773,7 +807,7 @@ def run_qualification(bundle, report):
         result["last_menu_item_enabled"] = True
     def observe_auth(prompt, **kwargs):
         response = auth_action(prompt, **kwargs)
-        category = response if response in {"absent", "cancelled", "confirmed"} else "unrecognized"
+        category = response if response in {"absent", "cancelled", "submitted", "pending", "rejected"} else "unrecognized"
         counts = result.setdefault("authorization_results", {})
         counts[category] = counts.get(category, 0) + 1
         return response
@@ -818,39 +852,33 @@ def run_qualification(bundle, report):
             sentinel.check()
             cases.append({"case": "native_cancel", "result": "pass", "root_continued": True, "ui_error_visible": True})
 
-            def authorize_until(done, prompt=STOP_PROMPT, timeout=90, require_confirmation=False):
-                deadline = time.monotonic() + timeout
-                confirmed = False
-                while time.monotonic() < deadline:
-                    response = observe_auth(prompt, username=username, password=password)
-                    confirmed |= response == "confirmed"
-                    if (confirmed or not require_confirmation) and done():
-                        return confirmed
-                    time.sleep(.2)
-                raise QualificationError("authorized native operation did not reach its expected state")
+            def operation_auth(prompt, *, submit=True):
+                if submit:
+                    return observe_auth(prompt, username=username, password=password)
+                return observe_auth(prompt, submit=False)
 
             with installer_lock():
                 result["phase"] = "root_lock_failure"
                 before = wait_progress()
                 checkpoint = tray.checkpoint()
                 click_stop(pid)
-                confirmed = authorize_until(lambda: tray.error_since(checkpoint, "administrator action failed") and "administrator action failed" in menu_action(pid), require_confirmation=True)
-                # The old error may still be rendered for one status tick. Require
-                # the fresh authorization result and a settling poll before proof.
-                if not confirmed:
-                    raise QualificationError("root failure did not exercise native confirmation")
+                submitted = authorize_until(lambda: tray.error_since(checkpoint, "administrator action failed") and "administrator action failed" in menu_action(pid), observe_auth=operation_auth, result=result, require_submission=True)
+                # The old error may still be rendered for one status tick. The
+                # waiter requires prompt dismissal and the fresh operation error.
+                if not submitted:
+                    raise QualificationError("root failure did not exercise native submission")
                 time.sleep(2.5)
                 if not tray.alive() or intent.read_bytes() != b"v1 stopping\n":
                     raise QualificationError("root failure lost UI or pending intent")
                 continued_root(before)
-            cases.append({"case": "root_lock_failure", "result": "pass", "native_confirmation": True})
+            cases.append({"case": "root_lock_failure", "result": "pass", "native_submission": True, "operation_completed": True})
 
             ownership.write_bytes(b"unreadable cleanup fixture\n")
             ownership.chmod(0)
             result["phase"] = "partial_geph_cleanup_failure"
             checkpoint = tray.checkpoint()
             click_stop(pid)
-            authorize_until(lambda: root_stopped() and tray.error_since(checkpoint, "Geph stop unconfirmed") and "Geph stop unconfirmed" in menu_action(pid))
+            authorize_until(lambda: root_stopped() and tray.error_since(checkpoint, "Geph stop unconfirmed") and "Geph stop unconfirmed" in menu_action(pid), observe_auth=operation_auth, result=result)
             if not tray.alive() or intent.read_bytes() != b"v1 stopping\n":
                 raise QualificationError("partial stop exited or claimed completion")
             preserved(settings, preferences, retained)
@@ -865,7 +893,7 @@ def run_qualification(bundle, report):
             if not owned_fixture.identity():
                 raise QualificationError("owned pre-listener process disappeared before actual Quit")
             click_stop(pid)
-            authorize_until(lambda: tray.process.poll() is not None)
+            authorize_until(lambda: tray.process.poll() is not None, observe_auth=operation_auth, result=result)
             if tray.process.returncode != 0 or not root_stopped() or intent.read_bytes() != b"v1 stopped\n":
                 raise QualificationError("successful menu Quit was not fully confirmed")
             owned_fixture.assert_stopped()
@@ -895,7 +923,7 @@ def run_qualification(bundle, report):
                 if tray.error_since(checkpoint, "Slipstream service lifecycle: Resume:"):
                     raise QualificationError("ordinary reopen was rejected by production readiness; see diagnostics")
                 return not intent.exists()
-            authorize_until(resumed, prompt=START_PROMPT, timeout=150)
+            authorize_until(resumed, observe_auth=operation_auth, result=result, prompt=START_PROMPT, timeout=150)
             resumed = wait_progress()
             if not tray.alive() or resumed[0] == initial[0]:
                 raise QualificationError("ordinary reopen did not establish a new owned daemon")

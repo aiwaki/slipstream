@@ -709,13 +709,14 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         )
 
     def test_qualification_continues_from_the_coordinated_owned_replacement(
-        self,
+        self, coordinated_mode=False,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = (Path(tmp) / "runner").resolve()
             app_bundle = Path(tmp) / "Slipstream.app"
             app_bundle.mkdir()
             paths = smoke.geph_paths(home)
+            coordination = smoke.CoordinationPaths(Path(tmp) / "ready", Path(tmp) / "release") if coordinated_mode else None
             initial = smoke.OwnedGephState(
                 pid=4242,
                 uid=501,
@@ -786,7 +787,7 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
                         side_effect=(initial, recovered),
                     )
                 )
-                stack.enter_context(
+                payload_probe = stack.enter_context(
                     mock.patch.object(
                         smoke,
                         "_wait_for_payload",
@@ -830,17 +831,22 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
                         Path(tmp) / "daemon.plist",
                     )
                 )
-                result = smoke.run_qualification(app_bundle)
+                def publish_ready(*_args, **_kwargs):
+                    self.assertEqual(tray.crash.called, coordinated_mode)
+                    self.assertEqual(payload_probe.call_count, 2 if coordinated_mode else 1)
+                    return coordinated
+                publish.side_effect = publish_ready
+                result = smoke.run_qualification(app_bundle, coordination)
 
             self.assertEqual(result["result"], "pass")
             publish.assert_called_once_with(
-                None,
+                coordination,
                 paths,
                 501,
                 initial,
                 abort_reason=mock.ANY,
             )
-            validate.assert_called_once_with(paths, 501, coordinated)
+            validate.assert_called_once_with(paths, 501, initial if coordinated_mode else coordinated)
             kill_owned.assert_called_once_with(paths, 501, coordinated)
             self.assertEqual(
                 wait_for_owned.call_args_list,
@@ -849,6 +855,9 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
                     mock.call(paths, 501, previous_pid=coordinated.pid),
                 ],
             )
+
+    def test_coordinated_tray_crash_and_payload_precede_ready(self):
+        self.test_qualification_continues_from_the_coordinated_owned_replacement(True)
 
     def test_cleanup_continues_after_keychain_delete_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
