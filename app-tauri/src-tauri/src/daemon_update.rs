@@ -1108,44 +1108,78 @@ mod tests {
             let client = Client::system();
             let mailbox = create_mailbox(&client, &binding);
             write_status(&root, &binding, &wire(&binding, "aborted"));
-            let mut status = client.status(&binding).unwrap();
+            let mut status = client
+                .status_with_runtime_check(&binding, |_| true)
+                .unwrap();
             status.runtime_fresh = false;
+            // Keep generation/budget assertions independent of unrelated test
+            // forks retaining an inherited flock between virtual clock ticks.
+            let lock = super::super::try_transaction_lock(&mailbox)
+                .unwrap()
+                .unwrap();
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, None, 1000)
+                .request_terminal_refresh_locked(&lock, &binding, &status, None, 1000)
                 .unwrap());
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, None, 1330)
+                .request_terminal_refresh_locked(&lock, &binding, &status, None, 1330)
                 .unwrap_err()
                 .contains("exhausted"));
             // First verified generation after None permits a new bounded attempt.
             let observed = generation(44, 0);
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, Some(observed.clone()), 1400)
+                .request_terminal_refresh_locked(
+                    &lock,
+                    &binding,
+                    &status,
+                    Some(observed.clone()),
+                    1400,
+                )
                 .unwrap());
             assert_eq!(read_episode(&mailbox).started_unix, 1400);
             assert!(!client
-                .request_terminal_refresh_at(&binding, &status, None, 1401)
+                .request_terminal_refresh_locked(&lock, &binding, &status, None, 1401)
                 .unwrap());
             assert_eq!(
                 read_episode(&mailbox).observed_generation,
                 Some(observed.clone())
             );
+            // A busy public request skips before checking the persisted budget;
+            // Ok(false) must not be mistaken for a successful budget reset.
+            let before_busy = fs::read(mailbox.join("refresh.json")).unwrap();
+            assert!(!client
+                .request_terminal_refresh_at(&binding, &status, Some(observed.clone()), 1730)
+                .unwrap());
+            assert_eq!(fs::read(mailbox.join("refresh.json")).unwrap(), before_busy);
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, Some(observed), 1730)
-                .is_err());
+                .request_terminal_refresh_locked(&lock, &binding, &status, Some(observed), 1730)
+                .unwrap_err()
+                .contains("exhausted"));
             // PID reuse with a different verified process start is a genuine restart.
             let restarted = generation(44, 1);
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, Some(restarted.clone()), 1800)
+                .request_terminal_refresh_locked(
+                    &lock,
+                    &binding,
+                    &status,
+                    Some(restarted.clone()),
+                    1800,
+                )
                 .unwrap());
             let episode = read_episode(&mailbox);
             assert_eq!(episode.started_unix, 1800);
             assert_eq!(episode.attempts, 1);
             assert_eq!(episode.observed_generation, Some(restarted));
             assert!(client
-                .request_terminal_refresh_at(&binding, &status, Some(generation(45, 2)), 2200)
+                .request_terminal_refresh_locked(
+                    &lock,
+                    &binding,
+                    &status,
+                    Some(generation(45, 2)),
+                    2200,
+                )
                 .unwrap());
             assert_eq!(read_episode(&mailbox).attempts, 1);
+            release_fixture_lock(lock);
         });
     }
 
