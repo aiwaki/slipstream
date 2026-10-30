@@ -98,11 +98,10 @@ when they fail.
 Slipstream uses Tauri and a Python background service. Routing decisions run
 locally; only traffic assigned to foreign routes passes through Geph.
 
-An unknown website may also receive a temporary Geph route for its exact
-hostname. This requires independent failures of the direct connection, built-in
-DNS, and multiple local bypass methods, followed by a successful payload check
-through the bundled Geph client. This exception never applies to YouTube or
-Discord.
+An unknown website may receive a temporary Geph route for its exact hostname
+only after independent checks confirm a problem on the local route and a
+successful response through the bundled Geph client. The checks depend on the
+type of failure. This exception never applies to YouTube or Discord.
 
 Diagnostic exports redact URLs, cookies, account secrets, and page content.
 
@@ -114,9 +113,9 @@ We plan to support **Windows and Android**; **iOS and Linux** are under
 consideration. No dates have been announced. See the [roadmap](docs/ROADMAP.md)
 for details.
 
-We are testing fixes for incomplete page loads and connection recovery in
-separate PRs, along with an update to the Telegram proxy. These changes are not
-yet in the downloadable build. [Work in progress and release blockers](docs/ROADMAP.md#development-status).
+See the [roadmap](docs/ROADMAP.md#development-status) for work in progress and
+release blockers. The [release notes](https://github.com/aiwaki/slipstream/releases)
+describe what is included in each downloadable build.
 
 [Build from source](DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) ·

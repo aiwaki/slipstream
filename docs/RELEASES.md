@@ -227,6 +227,15 @@ SHA256. [Materialization](../scripts/materialize_pair.py) verifies those pins,
 GitHub attestation and all manifest files before extracting either app. The
 [driver](../scripts/native_root_update.py) checks the pair again before the first
 install. Different versions, tray executables and daemon bytes are mandatory.
+
+After attestation and exact successful main CI identity, each candidate's audit is
+verified with the policy fetched from that same source commit. The driver holds the
+policy in a separate temporary directory, never inside the candidate artifact set;
+concurrent OLD/NEW verification does not share mutable policy state. Missing, malformed
+or mismatched policy refuses materialization. This historical verification does not
+renew admission: the current-publication check rejects a historical policy override
+and still requires the current policy and date.
+
 The first PR393/PR394 pair failed before installation because the bundled Geph
 executable had mode `0700`. Keep that evidence; do not repair signed archives in
 place. Build a fresh bridge with corrected packaging and a normal version-bumped
@@ -456,6 +465,14 @@ full Geph graph and policy so newly published advisories and expired exceptions
 still block a later app release.
 `tg-ws-proxy` remains covered by its separate vendored-source review rather
 than a Rust dependency graph.
+
+When `build-geph` finds an existing vendor release, its resolve step also verifies
+the stored audit with the policy fetched from that release's exact tag commit,
+after the source, lock, tag and SPDX checks. Missing, malformed or mismatched policy
+stops verification; it never falls back to the current policy. This authenticates
+the historical result. New vendor builds, the current full Geph audit and current
+publication admission continue to use current policy. A policy-only change does
+not require replacing an immutable vendor binary or rewriting its old report.
 
 An exception never changes an immutable Geph release in place. If a fix is
 lock-compatible, the reviewed lock digest and `release_revision` are bumped and

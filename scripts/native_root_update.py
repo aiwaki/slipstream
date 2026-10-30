@@ -18,6 +18,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 
@@ -255,11 +256,22 @@ class Native:
         require(metadata.get("head_sha") == source["commit"] and metadata.get("head_branch") == "main"
                 and metadata.get("event") == "push" and metadata.get("conclusion") == "success"
                 and metadata.get("path") == ".github/workflows/ci.yml", "candidate build was not successful exact main CI")
-        self.candidate.validate_manifest(candidate_dir=directory, repository=self.args.repository,
-            version=manifest["version"], source_commit=source["commit"], source_tree=source["tree"],
-            source_archive_sha256=source["archive_sha256"], source_date_epoch=source["source_date_epoch"],
-            target="aarch64-apple-darwin", expected_workflow_run_id=pinned["run_id"],
-            expected_workflow_run_attempt=pinned["run_attempt"], app_tree=app)
+        # OLD and NEW may have different audit policies. Authenticate the
+        # historical report against its attested source, never mutable HEAD.
+        # Keep policy bytes outside the exact candidate artifact set and local
+        # to this invocation, including concurrent OLD/NEW verification.
+        with tempfile.TemporaryDirectory(prefix="slipstream-candidate-policy-") as temporary:
+            policy = Path(temporary) / "dependency-audit-policy.json"
+            policy.write_bytes(self.run([self.args.gh, "api", "-H",
+                "Accept: application/vnd.github.raw+json",
+                f"repos/{self.args.repository}/contents/security/dependency-audit-policy.json?ref={source['commit']}"],
+                github=True).stdout)
+            self.candidate.validate_manifest(candidate_dir=directory, repository=self.args.repository,
+                version=manifest["version"], source_commit=source["commit"], source_tree=source["tree"],
+                source_archive_sha256=source["archive_sha256"], source_date_epoch=source["source_date_epoch"],
+                target="aarch64-apple-darwin", expected_workflow_run_id=pinned["run_id"],
+                expected_workflow_run_attempt=pinned["run_attempt"], app_tree=app,
+                historical_audit_policy=policy)
         return manifest
 
     def artifact(self, side, pinned, app, directory):

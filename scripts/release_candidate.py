@@ -248,7 +248,10 @@ def _validate_candidate_metadata(
     source_date_epoch: int,
     target: str,
     admission_on: date | None = None,
+    historical_audit_policy: Path | None = None,
 ) -> dict:
+    if historical_audit_policy is not None and admission_on is not None:
+        raise ValueError("historical audit policy cannot authorize current publication")
     tag = _candidate_tag(source_commit)
     sbom = _read_object(candidate_dir / SBOM_NAME, "candidate SBOM")
     sbom_summary = make_release_sbom.validate_spdx_document(
@@ -262,7 +265,8 @@ def _validate_candidate_metadata(
     )
     audit_summary = dependency_audit.validate_audit_report_file(
         report_path=candidate_dir / AUDIT_NAME,
-        policy_path=dependency_audit.DEFAULT_POLICY,
+        policy_path=(dependency_audit.DEFAULT_POLICY if historical_audit_policy is None
+                     else historical_audit_policy),
         sbom_path=candidate_dir / SBOM_NAME,
         source_commit=source_commit,
         target=target,
@@ -346,6 +350,7 @@ def validate_manifest(
     expected_workflow_run_attempt: int | None = None,
     app_tree: Path | None = None,
     admission_on: date | None = None,
+    historical_audit_policy: Path | None = None,
 ) -> dict:
     manifest = _read_object(candidate_dir / MANIFEST_NAME, "candidate manifest")
     if manifest.get("schema_version") != SCHEMA_VERSION:
@@ -400,6 +405,7 @@ def validate_manifest(
         source_date_epoch=source_date_epoch,
         target=target,
         admission_on=admission_on,
+        historical_audit_policy=historical_audit_policy,
     )
     if manifest.get("metadata") != metadata:
         raise ValueError("candidate dependency metadata summary does not match")

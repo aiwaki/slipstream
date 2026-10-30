@@ -173,10 +173,20 @@ jobs:
               --source-commit "$vendor_commit" \
               --target macos-universal \
               --sbom /tmp/geph-existing/geph5-client.spdx.json
+            historical_policy="$(mktemp \
+              "$RUNNER_TEMP/geph-existing-audit-policy.XXXXXX")"
+            gh api \
+              -H "Accept: application/vnd.github.raw+json" \
+              "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
+              > "$historical_policy"
+            test -f "$historical_policy"
+            test ! -L "$historical_policy"
+            test -s "$historical_policy"
+            python3 -m json.tool "$historical_policy" >/dev/null
             python3 scripts/dependency_audit.py verify \
               --report /tmp/geph-existing/geph5-client-dependency-audit.json \
               --sbom /tmp/geph-existing/geph5-client.spdx.json \
-              --policy security/geph-dependency-audit-policy.json \
+              --policy "$historical_policy" \
               --source-commit "$vendor_commit" \
               --target macos-universal \
               --vendored-transitive-dependencies full

@@ -2,46 +2,73 @@
 
 ## Verified Checkpoint
 
-### Active: PR426 preview.32 candidate, 2026-10-30
+### Active: combined preview.32 candidate, 2026-10-30
 
-Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`;
-branch `codex/post-preview31-recovery`, base main `a37cb6c5`. PR426 is still open.
-The last fully green pre-review-fix source is `7b4f885dbb29d9fed1eeffd1507c82da87f95e9b`:
-CI41053750282 (including packaged browser/lifecycle) and audit41053750222 passed.
-The additional ownership fixes below require fresh final-head checks before merge.
-Preview .32 is not published. Preserve private output and the working external Geph;
-no workstation services, settings, account, browser, native build or installation changes.
+Checkout: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`;
+branch `codex/geph-historical-audit-verification`, based on merged PR426 main
+`41b946ed72465c38aee74b9d0aeb3becdda85599` (C). Main CI41060078487 and
+full dependency audit41060078480 passed. Preview .32 publication is held:
+native-root41063272330 failed both cases before installation because materializing
+OLD .31 compared its historical app audit with the current policy. Protected readiness
+41063658872 was cancelled: slot 1 is spent, soak is incomplete and no final attestations
+exist. Cancellation left a launchd plist; bounded harness analysis is separate from
+this patch and does not implicate ordinary Quit. No retry of C's inputs is authorized
+by this checkpoint. Primary receipts: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/`
+(`qualification.json`, `merge-verification.json`, exact audit/native/readiness records).
+PR428 combines reviewed historical-policy commit `17736400cd4add0808c3daf0dbe533f11629e2b2`
+with DNS PR427 commit `09589c94dd0bd49c924410ff0a9fee7ad23cdf21` by a normal merge.
+Only this checkpoint required conflict resolution. The replacement needs fresh gates.
 
-| Area | Current evidence and limit |
-|---|---|
-| Connection ownership | Initial cancellation repair plus five newly reproduced review cases: close already-done and late socket results before unrelated cleanup; retain shielded close ownership through COMMAND_CANCEL and both harvest paths. Five causal failures, 16 adapter + 6 caller tests green, independent review clear. No new cleanup deadline; winner handoff remains protected. |
-| HTTP completion | Valid hex chunk prefix ending in CR is incomplete after EOF/timeout. Eleven parser tests pass; malformed controls now reject both complete/incomplete classifications. Earlier 30 bootstrap tests remain reusable. |
-| Chromium | Version156.0.8078.80 pinned to reviewed archive/executable. Isolated review41048890989/1 and small artifact12973786970 prove identity, sandbox DOM and cleanup. Review through November13 is integrity-only: OSV has no supported generic mapping, no CVE clearance claim. |
-| Publication admission | Current UTC admission for app and full exact-run/attempt Geph evidence before every publication PATCH. 74 tests/65 subcases +16 workflow checks; historical verification retained. RSA allowances unchanged and expire October30 UTC inclusive. |
-| Version and historical fixtures | Publisher32 and public31→32 qualification tied to VERSION; 130 tests/5 subcases and review passed. Historical r2→r3 policy frozen to reviewed digest; 34 tests passed, production transition validator unchanged. |
-| Dependency policy | App block-buffer0.10.4 and Geph0.9.0/0.10.4 exact advisory dispositions backed by verified separate-cursor sources, expire November6. Fresh audit at2867cb06d verified app361 scans/accepted1 and full Geph423/accepted4; later final-head audits also green. No RSA expiry extension. |
+Producer41060078598 independently failed for the same kind of policy mismatch while
+revalidating existing `geph-vendor-0.4.3-r3`. SOURCE/lock/SPDX checks passed. The report
+policy hash matches its immutable vendor tag policy. This follow-up now fetches that
+policy; the app consumer already did so. One causal shell regression failed before
+repair, then five new tests and eleven existing workflow tests (three subcases) passed.
+Independent review accepted this producer change. Evidence:
+`output/continuation-20261030/geph-historical-policy/`.
 
-Evidence: `output/continuation-20261030/connection-race-review/`,
-`pr426-review/`, `release-audit-admission/`, `chromium-review41048890989/`,
-`candidate32-2867cb06d/` and `candidate32-949323955/`.
-The generic Popen audit was reviewed: two fixed list-argv callers, shell disabled,
-validated private executable path and fixed synthetic HTML; no concrete injection
-path or suppression. Parser coverage and the two ownership threads are addressed
-by this commit; resolve them only after the source is pushed.
+The native driver now fetches each candidate's app-audit policy at its attested source
+commit, only after attestation and successful exact-main CI verification. Per-call
+private temporary files stay outside candidate artifacts and are cleaned on success
+or failure. An explicit historical-policy argument replaces the live-policy assumption;
+current-publication admission rejects that override and remains mandatory. The causal
+native regression reproduced the same input-hash failure; seven new authentication,
+policy, integrity and concurrency tests plus 61 existing driver/materialization tests
+pass. Evidence: `output/continuation-20261030/native-historical-policy/` and
+`output/continuation-20261030/historical-candidate-policy/` for the verifier API.
+Missing, empty, malformed or mismatched historical policy fails closed in both paths.
 
-Next: final PR checks and normal merge, then exact main candidate/audit. Freeze main
-at that source while readiness and native-root run in parallel, followed by packaged
-qualification and publisher. Exact inputs are in
-`output/continuation-20261030/candidate32-2867cb06d/next-actions.md`.
-Use public .31 bits as OLD (artifact12670738202, available through November9); do not
-reuse the earlier private .30 pair as public update proof. This requires one protected
-account-backed readiness run; none has been dispatched in this continuation.
-The harness still does not qualify actual public-feed/tray/admin auto-update.
+Eight documentation tests plus project-state, YAML and whitespace checks passed.
+Historical-verification independent review passed, including real public OLD .31
+metadata with its source policy. Next: combined PR428 review/CI, then fresh exact-main
+CI/audit and candidate inputs. Run native-root first; only after it passes run
+readiness and packaged qualification in parallel, then consider publication. No
+native rerun, binary, account, workstation, release-asset or installation changes
+were made by this follow-up.
 
-Remaining independent work: bundled xbox-dns.ru removal and broader recovery (PR376),
-RSA-only vendor/source-tooling work (PR384), Telegram1.11.2/H2 (PR386). All thirteen
-Geph session/SQLite edits from PR384 already shipped via PR388; do not redo them.
-Historical user reconnects/403 and sustained workstation media remain unqualified.
+The reviewed DNS change is now included in the replacement .32 candidate because
+the historical-verification repair already invalidated the first candidate's release
+gates. PR427 passed CI41062262485 and audit41062262441 on09589c94. It replaces the
+bundled Xbox fallback with fixed-IP Cloudflare/Google binary DoH and verified TLS;
+retires provider-based Smart DNS authority and old automatic-Geph authorizations;
+preserves external settings, local strategy learning and None/empty DNS semantics.
+Six causal failures, 257 focused tests, overlapping 87 adapter/packaging tests plus
+17 subcases passed; independent review passed. Live provider reachability is not
+claimed. DNS receipts remain in the readme-humanizer checkout under
+`output/continuation-20261030/app-dns-retirement/`.
+
+Before merge require combined source/review checks and exact PR CI/audit. Then use
+a fresh main candidate, native-root FIRST, and only after that gate passes run
+readiness and packaged qualification in parallel. Current RSA allowances expire
+October30 UTC inclusive; never extend them or carry admission across that boundary.
+Only one protected slot has been spent today. Keep the working external Geph and
+workstation unchanged. No cancellation-harness, RSA or Telegram changes are included.
+
+Remaining independent work: broader recovery (PR376), RSA-only vendor/source-tooling
+(PR384), Telegram1.11.2/H2 (PR386), and the recorded CI cancellation cleanup gap.
+All thirteen Geph session/SQLite edits from PR384 shipped via PR388; do not redo them.
+Historical user reconnects/403, public auto-update and sustained workstation media
+remain unqualified. The DNS follow-up does not claim to solve every website failure.
 
 ### Published .31 — retained historical evidence
 

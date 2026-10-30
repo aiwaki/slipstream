@@ -915,7 +915,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         asyncio.run(scenario())
     finally:
         tproxy._local_payload_idle_failures.pop("unknown.example", None)
-        tproxy._xbox_dns_candidates.pop("unknown.example", None)
+        tproxy._app_dns_candidates.pop("unknown.example", None)
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.clear()
