@@ -8,12 +8,20 @@ passed, but publication accepted an October 26 application audit after its used
 Chromium integrity-only admission expired on October 29. The public release notes
 now disclose this gap; the immutable assets remain unchanged. Current dependency
 admission is not established for that release. Runtime refresh and publication-time
-expiry checks are in progress in PR426. See [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
+expiry checks are merged; a replacement preview still requires fresh qualification.
+See [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
 
 New publication must validate the current UTC validity of used, time-bounded
 application and vendored dependency admissions separately from historical report
 verification. Preserve the original scan date and exact source/policy hashes;
 rechecking expiry does not imply a fresh scan of advisory data.
+
+Hosted macOS build, qualification and publication jobs use the explicit
+`macos-15` ARM64 runner label. GitHub's [macOS 14 retirement announcement](https://github.com/actions/runner-images/issues/13518)
+includes scheduled job failures before the November 2, 2026 removal; such a
+cancelled run does not qualify a candidate. The application minimum remains
+configured as macOS 13.0. A successful hosted macOS 15 run establishes the tested
+path on that image, not runtime compatibility with every earlier supported OS.
 
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|
@@ -580,10 +588,23 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   updater key. A separate no-checkout, no-repository-code signer job first
   verifies the frozen archive and pinned Tauri CLI tarball digests, then exposes
   the production key only to the signing command. A no-secret assembly job
-  binds both GitHub service-artifact digests and reruns the offline updater
+  binds the exact upload IDs, names, source/run identities and GitHub
+  service-artifact digests, then reruns the offline updater
   verifier before candidate assembly. OIDC and attestation permissions live in
-  another no-checkout, no-shell-command job that downloads the sealed
-  candidate; build, signer, and assembly jobs do not inherit them.
+  another no-checkout job that validates the candidate artifact ID with a fixed
+  inline format check before downloading the sealed candidate. It executes no
+  repository or candidate code; build, signer, and assembly jobs do not inherit
+  its permissions.
+- If a confirmed infrastructure failure requires another main-CI attempt after
+  artifacts were created, rerun `packaged-app-build` and its dependent jobs.
+  This regenerates the signing input, signature proof and candidate manifest for
+  the new attempt while preserving independent successful checks. Rerunning only
+  assembly or the final qualification jobs would mix attempt identities and is
+  rejected. Internal downloads use IDs from producer outputs; earlier artifacts
+  remain available. Refresh the candidate artifact ID, producer attempt and
+  manifest SHA before native, readiness or packaged-update qualification. This
+  procedure applies to common CI; protected `release-readiness` reruns remain
+  prohibited by the account-backed dispatch budget below.
 - One protected release-readiness run downloads that exact artifact, verifies
   its source commit, Git tree, source-archive digest, CI run ID and file hashes,
   then holds one account-backed owned-Geph lifecycle across the deterministic
@@ -607,10 +628,10 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.31`, with
-  `VERSION` and `preview_sequence=31` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.32`, with
+  `VERSION` and `preview_sequence=32` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.31`; the new preview requires its own
+  `.23` source and is rejected for `.32`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact

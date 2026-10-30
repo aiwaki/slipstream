@@ -779,6 +779,97 @@ def test_system_command_runner_is_bounded_and_strips_malloc_debug_env(monkeypatc
     assert not any(name.startswith("Malloc") for name in observed["env"])
 
 
+@pytest.fixture
+def source_install_commands(monkeypatch, tmp_path):
+    source = tmp_path / "source" / "tproxy.py"
+    source.parent.mkdir()
+    source.write_text("# isolated source-install fixture\n")
+    install = tmp_path / "installed"
+    plist = tmp_path / "daemon.plist"
+    state = {"now": 100.0, "prepare_seconds": 0, "durations": {},
+             "calls": [], "cleanup": [], "attestations": [], "plist": plist}
+    monkeypatch.setattr(tproxy, "__file__", str(source))
+    monkeypatch.setattr(tproxy.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "_script_runtime_payload", lambda _: [(str(source), "tproxy.py")])
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "_harden_installed_identity", lambda *_: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda _: True)
+    monkeypatch.setattr(tproxy, "_write_install_attestation", lambda *a: state["attestations"].append(a))
+    monkeypatch.setattr(tproxy, "_INSTALL_OPERATION_LOCK_FD", 91)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: state["now"])
+
+    def cleanup(_port, *, remove_runtime):
+        state["cleanup"].append(remove_runtime)
+        if not remove_runtime:
+            state["now"] += state["prepare_seconds"]
+        return True
+
+    def run(args, **kwargs):
+        kind = args[2] if args[1:2] == ["-m"] else "control"
+        state["calls"].append((kind, args, kwargs))
+        duration = state["durations"].get(kind, 0)
+        if duration > kwargs["timeout"]:
+            state["now"] += kwargs["timeout"]
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        state["now"] += duration
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(tproxy, "_disable_and_cleanup_install", cleanup)
+    monkeypatch.setattr(tproxy.subprocess, "run", run)
+    return state
+
+
+@pytest.mark.parametrize("slow_step", ("venv", "pip"))
+def test_source_install_allows_bootstrap_longer_than_system_command_timeout(source_install_commands, slow_step):
+    state = source_install_commands
+    state["durations"][slow_step] = 6
+    assert tproxy.do_install(1080)
+    assert len(state["attestations"]) == 1
+    assert state["cleanup"] == [False]
+    for kind, args, kwargs in state["calls"]:
+        assert kwargs["pass_fds"] == (91,)
+        assert not any(name.startswith("Malloc") for name in kwargs["env"])
+        assert kwargs["timeout"] > 5 if kind in {"venv", "pip"} else kwargs["timeout"] == 5
+        if kind == "pip":
+            assert "--only-binary=:all:" in args and "--require-hashes" in args
+
+
+def test_source_install_bootstrap_shares_budget_with_preparation(source_install_commands):
+    state = source_install_commands
+    state["prepare_seconds"] = 23
+    state["durations"].update(venv=15, pip=20)
+    assert tproxy.do_install(1080)
+    bootstrap = [(kind, kwargs["timeout"]) for kind, _, kwargs in state["calls"] if kind != "control"]
+    assert bootstrap == [("venv", 67), ("pip", 52)]
+
+
+@pytest.mark.parametrize("exhausted_at", ("preparation", "venv"))
+def test_source_install_does_not_spawn_after_shared_budget_expires(source_install_commands, exhausted_at):
+    state = source_install_commands
+    if exhausted_at == "preparation":
+        state["prepare_seconds"] = 90
+    else:
+        state["durations"]["venv"] = 90
+    assert not tproxy.do_install(1080)
+    assert [kind for kind, _, _ in state["calls"]] == ([] if exhausted_at == "preparation" else ["venv"])
+    assert state["cleanup"] == [False, True]
+    assert not state["attestations"] and not state["plist"].exists()
+
+
+@pytest.mark.parametrize("timed_out_step", ("venv", "pip"))
+def test_source_install_bootstrap_timeout_rolls_back_before_launchd(source_install_commands, timed_out_step, capsys):
+    state = source_install_commands
+    state["durations"][timed_out_step] = 1000
+    assert not tproxy.do_install(1080)
+    assert state["cleanup"] == [False, True]
+    assert not state["attestations"] and not state["plist"].exists()
+    assert all(kind != "control" and kwargs["pass_fds"] == (91,) for kind, _, kwargs in state["calls"])
+    assert "timed out after 90s" in capsys.readouterr().err
+
+
 def test_copy_file_resilient_skips_identical_and_replaces_changed_file(tmp_path):
     src = tmp_path / "src"
     dst = tmp_path / "dst"

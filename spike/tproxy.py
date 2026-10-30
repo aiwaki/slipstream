@@ -9110,17 +9110,21 @@ for _debug_env_name in tuple(_RUN_ENV):
         _RUN_ENV.pop(_debug_env_name, None)
 
 RUN_COMMAND_TIMEOUT_SECONDS = 5
+# Source-only venv/pip share this budget with installation preparation. Keep
+# headroom under the lifecycle runner's 180s command allowance for readiness
+# (30s), attestation and the existing bounded control/rollback commands.
+SOURCE_INSTALL_BOOTSTRAP_TIMEOUT_SECONDS = 90
 _INSTALL_OPERATION_LOCK_FD = None
 
 
-def _run(*args):
+def _run(*args, timeout=RUN_COMMAND_TIMEOUT_SECONDS):
     try:
         return subprocess.run(
             list(args),
             capture_output=True,
             text=True,
             env=_RUN_ENV,
-            timeout=RUN_COMMAND_TIMEOUT_SECONDS,
+            timeout=timeout,
             pass_fds=(
                 (_INSTALL_OPERATION_LOCK_FD,)
                 if _INSTALL_OPERATION_LOCK_FD is not None else ()
@@ -9131,7 +9135,7 @@ def _run(*args):
     except subprocess.TimeoutExpired as error:
         stdout = error.stdout if isinstance(error.stdout, str) else ""
         stderr = error.stderr if isinstance(error.stderr, str) else ""
-        detail = f"timed out after {RUN_COMMAND_TIMEOUT_SECONDS}s"
+        detail = f"timed out after {timeout:g}s"
         return subprocess.CompletedProcess(
             args,
             124,
@@ -16100,8 +16104,14 @@ def _command_failure(action, result):
     raise RuntimeError(f"{action}: {detail[:400]}")
 
 
-def _require_command(action, *args):
-    result = _run(*args)
+def _require_command(action, *args, deadline=None):
+    if deadline is None:
+        result = _run(*args)
+    else:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"{action}: source bootstrap budget exhausted")
+        result = _run(*args, timeout=remaining)
     if result.returncode != 0:
         _command_failure(action, result)
     return result
@@ -18018,6 +18028,9 @@ def do_install(port, *, frozen_source=None, browser_worker_override=None,
     #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
     #  - script (dev): copy local runtime modules + build a venv with dependencies
     frozen = frozen_source is not None or getattr(sys, "frozen", False)
+    source_bootstrap_deadline = (
+        None if frozen else time.monotonic() + SOURCE_INSTALL_BOOTSTRAP_TIMEOUT_SECONDS
+    )
     try:
         if not frozen:
             # Validate before stopping a working installed daemon.
@@ -18077,7 +18090,8 @@ def do_install(port, *, frozen_source=None, browser_worker_override=None,
             if not os.path.exists(py):
                 base = getattr(sys, "_base_executable", None) or sys.executable
                 print(">> building self-contained venv (needs network, ~20s)...")
-                _require_command("venv create failed", base, "-m", "venv", venv)
+                _require_command("venv create failed", base, "-m", "venv", venv,
+                                 deadline=source_bootstrap_deadline)
             # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
             # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
             # libcrypto in an unsafe way") -> the daemon crash-loops. certifi gives
@@ -18091,6 +18105,7 @@ def do_install(port, *, frozen_source=None, browser_worker_override=None,
                 "--only-binary=:all:",
                 "--require-hashes",
                 "-r", os.path.join(_here, "requirements-runtime.txt"),
+                deadline=source_bootstrap_deadline,
             )
             prog_args = [py, script, "--port", str(port)]
             uninstall_hint = f"sudo {py} {script} --uninstall"

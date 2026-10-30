@@ -2,77 +2,159 @@
 
 ## Verified Checkpoint
 
-### Active: preview.32 qualification-observer repairs, 2026-10-30
+### Active: release CI, source bootstrap and browser observation, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
-branch `codex/semantic-cache-qualification`, based on merged PR428 main
-`46ad4de4b71a0bcd60855126c9b6613b02774846` (C2). Tracked source was clean before
-creating this branch; the DNS branch and private output remain preserved.
-Preview .32 is not published or installed. Keep the working external Geph and
-workstation unchanged. No account-backed retry is authorized by this checkpoint.
+branch `codex/ci-artifact-attempt-identity`, based on main
+`0860167bcb44a196fc18a2c98ccb0f67d98a95cf` (C3). PR429 merged normally;
+C3 has the same tree `de281f7b388708157b1f07fafc3927289b370335` as reviewed/tested
+PR head67f4c8e3. Preview .32 is not published or installed. Keep the working external
+Geph and workstation unchanged. No native/protected retry is authorized by this
+checkpoint.
 
-C2 passed main CI41074846948/1, current full audit41074846640/1 and native-root
-41077842851/1. Its candidate manifest is
-`97634fa4c835275465a3f3f7bdea8f43aae3e9e43bcb8f04336b96b870634363`.
-Protected readiness41079675772/1 failed after candidate verification and all three
-PF/QUIC scenarios passed. The semantic observer read `last.get(host)`, but the
-product had correctly saved `{"__v__":2,"routes":{"example.org":<future expiry>}}`.
-Its local test fixture also retained the old bare host map. This cache consumer
-was missed by the bundled-DNS migration; the failure does not show a failed route
-learn. The browser matrix did not start (`live-sites.exit=125` placeholder), and
-no completed outage/recovery proof, 1800-second soak or final five attestations
-were produced. Both account-gate and final system-absence checks passed; the latter
-followed a skipped soak and is cleanup evidence only.
+PR430 head `e26b98470d78e7c0ab3e75b46c9a11e4b715368a` supplied new causal
+evidence in CI41110796459/1. The source-only cold install timed out its hash-locked
+pip command after five seconds: it inherited the short system-command deadline.
+The outer lifecycle runner allowed 180 seconds. Frozen packaged installation
+does not invoke this pip path. Source venv/pip now share one 90-second monotonic
+budget starting at installation preparation; each command gets only its remainder.
+An exhausted budget prevents another bootstrap command and follows existing
+failure cleanup before launchd publication. Ordinary control commands keep five
+seconds, including lock-FD inheritance and environment filtering. Two causal RED
+cases and 13 focused checks passed; independent review passed without rerunning
+them. Evidence: `output/continuation-20261030/source-bootstrap-timeout/`.
 
-Packaged update qualification41079675441/1 passed pre-ACK rollback/cleanup but
-found a second observer defect in the commit case: the installer wrote a real ACK
-and reached committed/quiescent sequence2, but `final_app()` repeated an immediate
-watchdog-finished probe and the second snapshot showed a busy shared lock. That
-refusal withheld normal commit-case cleanup; the lock holder/duration were not
-proven by this snapshot. The repair reuses the existing bounded waiter and unchanged
-`self.deadline - 90` bound, then rechecks all app/path/process predicates. A real
-file-lock causal test reproduced the original refusal; 188 focused observer/commit
-tests passed, including five new transient/permanent-busy, deadline and safety cases.
-Evidence: `output/continuation-20261030/packaged-terminal-lock/`. The primary
-`replacement/packaged/` directory retains the failed run's logs and artifacts.
-Native-root41077842851/1 remains a verified pass only for retired C2; it does not
-qualify the forthcoming corrected source.
+The retained browser record also shows Finder changing to UserNotificationCenter
+at 1060–1087 ms, before worker invocation at 35585 ms. This run's focus change
+therefore preceded the worker by about 34.5 seconds. Its 30-second LaunchServices
+listener had already expired before invocation, so zero recorded events do not
+prove worker invisibility. Fixture and broker preparation now finish before the
+fresh baseline and recorder start. The unchanged 25-second worker/observation/
+cleanup limit fits inside the unchanged 30-second recorder lifetime. Early recorder
+exit, including status zero, is rejected before launch and after the final snapshot.
+Setup, sampling and fixture-close failures still clean up owned resources. Eight
+causal RED cases, 72 observer tests and one directly affected build-contract test
+passed; independent review confirmed unchanged visibility acceptance conditions.
+See `output/continuation-20261030/browser-observer-setup-order/`.
+The earlier run without retained evidence remains unattributed. CI evidence is in
+`ci-artifact-attempt-identity/pr430/diagnostic-head/` below.
+Audit41110796855/1 passed actual current-UTC admission at18:57:32Z. Chromium
+review41110797091/1 ran 15 helper tests and sandboxed version/DOM checks on macOS15
+ARM64, with owned processes/files cleaned up. This runtime/integrity evidence is
+not vulnerability clearance; Chromium OSV coverage remains unsupported.
+CI41110796459/1 is terminal FAILED on the two causes above. Its seven native
+Stop-and-Quit cases and packaged lifecycle checks passed with clean owned teardown
+and preserved external sentinel/global PF. Lifecycle Chrome used its real binary
+in headless mode; Safari used a real SafariDriver session. This is not ordinary
+GUI Chrome qualification or real account-backed Geph qualification. Terminal
+evidence is `diagnostic-head/terminal-verification.json` (SHA256
+`3d3fd368c5cc1a1f33cc422f999a0d606eac047e26b11b78dfc6a30d1a0db7c7`).
+Next: commit these two reviewed fixes and require fresh exact-source CI before
+normal merge. No main candidate or protected qualification has been dispatched.
+
+PR430's first head `6660be1e8ee323f3a4100892be77f10ae6a0fc48` reached a separate
+infrastructure blocker: CI41101705353/1 was cancelled on October 30 at 18:03:41Z.
+Product, Chromium-contract and app-build jobs were cancelled without a runner;
+their annotations identify the scheduled macOS 14 image brownout. Downstream app
+qualifications did not run. Evidence: `ci-artifact-attempt-identity/pr430/` under
+the output directory below. Audit41101704933 reports passed current-date admission,
+but cannot turn the cancelled CI into a release gate.
+
+This PR also moves all 13 retired runner labels in six active workflows to
+`macos-15`, matching the two existing native-update workflows. GitHub documents
+both old and new standard labels as ARM64; its [retirement announcement](https://github.com/actions/runner-images/issues/13518)
+confirms today's 14:00–00:00 UTC brownout and November 2 removal. Application
+targets/configured minimum and historical r3 inputs remain unchanged. The new
+hosted runs must establish compatibility with this runner image; no existing
+macOS 13 runtime qualification is implied.
+
+After migration, PR430 head `6b898fbc557b55b4bc175771e8240dac12740bd9` ran on
+macOS 15.8.2 ARM64. CI41105773284/1 passed build/product/Windows/Chromium checks
+and all seven native Stop-and-Quit cases, with no cleanup errors. Lifecycle probes
+using Chrome/Safari survived tray crash/restart; the external connection and global
+PF state were preserved. Both app consumers downloaded the exact producer ID and
+verified its digest. Audit41105773270/1 passed current-date admission. The separate
+Chromium review41105773355/1 could not acquire a hosted ARM64 runner and produced
+no runtime evidence; existing admission remains separate.
+
+That CI still failed on browser visibility: before/after frontmost application
+ASNs differed. The original guard discarded its in-memory snapshots/events on
+failure, so the responsible process and timing could not be established. The
+diagnostic correction retains a bounded, sanitized stderr record: frontmost
+ASN/PID/bundle identity, observation and worker-invocation times, first differences
+before/after/overlapping invocation, and owned LaunchServices event summaries.
+Raw listings, paths, arguments, URLs and window titles are excluded. The same
+visibility refusal and cleanup remain in force. Two causal failures and 58 focused
+tests verify retained evidence and its bounds; see
+`output/continuation-20261030/browser-visibility-diagnostic/`.
+The next observation established the preparation-stage timing above. The
+diagnostic repair alone does not close the visibility gate.
+
+Main CI41090901062/1 failed because three macOS arm64 qualification jobs could not
+acquire hosted runners. All three were cancelled without a runner or executed step;
+GitHub explicitly reported capacity constraints. Build, signing, assembly and
+attestation passed. Candidate artifact12994861913 has manifest
+`860621073afe7c0bd73515da2bf14e702bec3fb43f16a79f649f837a91ac61df`, but its recorded
+producer attempt1 did not pass the complete main gate. Do not dispatch native gates
+with this candidate or treat a successful partial attempt2 as proof for attempt1.
+Primary evidence is under
+`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/observer-corrected/`:
+`candidate/verification.json`, `candidate/retry-analysis/` and `queue-diagnosis/`.
+No retry of this main run has been dispatched.
+
+The retry investigation found name-only artifact selectors in CI signing/assembly
+and two consumers. GitHub retains same-name artifacts across attempts; selecting
+merely the newest or deleting old evidence is not acceptable. The CI repair passes
+trusted upload IDs through job outputs, checks exact ID/name/digest/unexpired
+source/run identity, and downloads those IDs in all ten internal consumers. Six
+pre-download guards reject absent or malformed IDs because an empty action input
+would download all artifacts. Existing signing-input/proof attempt checks remain;
+a valid rebuild must start at the build/signing-input producer, not assembly alone.
+The exact pinned download action extracts one selected ID directly into the stated
+path and supports fail-closed digest verification.
+
+Both real embedded Python verifiers first failed a two-attempt fixture. The repaired
+verifiers and source-extracted shell guards passed 15 focused tests, including five
+existing workflow checks. Three old text assertions were updated for exact-ID
+selection and the attestation job's sole permitted data-format guard; downloaded
+or repository code still cannot execute in that privileged job. Evidence:
+`output/continuation-20261030/ci-artifact-attempt-identity/`.
+The consumer fixes select one artifact inside the authenticated successful producer
+job window, preserving source/run/attempt, malformed identity and ambiguity checks.
+Their separate causal evidence is in
+`output/continuation-20261030/artifact-attempt-consumers/`.
+The consumer checks passed 179 tests and 54 subtests, including valid expired
+records from prior attempts and rejection of expired current records. Both
+independent source reviews passed; the combined review is in
+`output/continuation-20261030/ci-artifact-attempt-identity-review/`.
+Eight documentation tests and the project-state continuity check also passed.
+Next: exact-head PR CI with retained visibility evidence, normal merge only after
+required checks pass, then fresh main qualification. Product
+routing, DNS, Geph, authorization and release policy are unchanged by these repairs.
+
+Retained prior evidence: C2 main46ad4de4 passed CI41074846948/1,
+current audit41074846640/1 and native-root41077842851/1. Readiness41079675772/1 failed
+on the observer's stale cache shape before the browser matrix/soak; packaged
+41079675441/1 passed pre-ACK rollback/cleanup but its committed case refused a busy
+lock snapshot after real ACK and withheld cleanup. PR429 repaired both observers;
+those failed C2 runs remain failed and its native pass does not qualify new source.
+PR429 CI41084918267 attempt1's authorization failure remains unexplained. Its one
+approved targeted retry passed all required checks and all seven Stop-Quit cases,
+using the same immutable app artifact; this does not explain the first failure.
 
 Two of today's three protected dispatch slots are spent: cancelled41063658872/1
-on the first source C (`41b946ed...`), and failed41079675772/1 on C2. One slot remains.
-The first source's OLD .31 historical-policy defect was repaired by merged PR428;
-its interrupted-soak cleanup observation remains a separate deferred harness issue,
-not evidence against ordinary Quit. Do not rerun either old candidate.
+on C41b946ed and failed41079675772/1 on C2. One remains. After normal review/PR/merge,
+obtain a fresh exact-source main candidate and current audit, then run native-root
+first. Only after native PASS may readiness and packaged gates run in parallel.
+Do not reuse retired-source gates, bypass exact attempts or extend RSA allowances
+(expiry October30 UTC inclusive). The earlier interrupted-soak cleanup observation
+remains a separate deferred harness issue, not evidence against ordinary Quit.
 
-The semantic patch changes only the qualification observer and its tests: require
-the current exact-integer version2 envelope and an object `routes`, then retain the
-root-private file read, numeric future-expiry check and bounded wait. An AST-only
-check ties the observer version to the product writer without importing runtime
-code. The actual CI envelope first failed the old observer; four focused tests now
-pass, including 18 malformed/legacy/expiry controls and two delayed-state subcases.
-Neither observer patch changes product routing, authorization, DNS, lifecycle or
-publication policy.
-Independent cache-consumer review found 83 references in 12 files and no further
-stale schema reader. Existing unprotected CI runs both affected test files before
-protected qualification. Final independent code/test review passed; no blocking findings. New semantic
-patch evidence is in this checkout's
-`output/continuation-20261030/semantic-cache-qualification/`.
-
-Primary exact-C2 failure receipt:
-`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/replacement/readiness/verification.json`.
-C2 CI/audit and focused green tests remain reusable evidence for unchanged behavior;
-the correction still requires normal PR review/CI, merge, and a new exact-source
-candidate/audit before release gates. Native-root must pass before the remaining
-protected readiness invocation. No dispatch, native build, local browser/probe,
-service/settings change or installation was performed for this repair. Current RSA
-allowances expire October30 UTC inclusive; never extend them to finish a release.
-
-C2 includes the reviewed bundled Xbox-DNS retirement and historical-policy repairs.
-Local strategy learning, user-managed DNS and protected Discord/YouTube routing
-remain unchanged. No live public-provider qualification is claimed. Broader recovery
-(PR376), RSA source/tooling (PR384), Telegram1.11.2/H2 (PR386), and cancellation cleanup
-remain separate. Historical workstation403/reconnects, public auto-update and
-sustained workstation media remain unqualified.
+Bundled Xbox-DNS retirement and historical-policy repairs are already merged.
+User-managed DNS, local learning and protected Discord/YouTube routing remain
+unchanged; no new live provider qualification is claimed. Broader PR376 recovery,
+PR384 RSA/tooling and PR386 Telegram/H2 work remain separate. Historical workstation
+403/reconnects, public auto-update and sustained workstation media remain unqualified.
 
 ### Published .31 — retained historical evidence
 
