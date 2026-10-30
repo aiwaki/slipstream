@@ -339,12 +339,16 @@ def test_every_proper_chunked_prefix_is_incomplete_after_eof_or_timeout():
         )
 
         for malformed in (b"\r", b"5\r\r", b"5\n", b"5\rX", b";ext\r"):
+            response = _response(b"Transfer-Encoding: chunked", malformed)
+            assert not http_response_complete(
+                response, stream_closed=stream_closed, truncated=False,
+            ), repr(malformed)
             assert not http_response_incomplete(
-                _response(b"Transfer-Encoding: chunked", malformed),
+                response,
                 stream_closed=stream_closed,
                 idle_timed_out=idle_timed_out,
                 truncated=False,
-            )
+            ), repr(malformed)
 
 
 def test_unsuccessful_malformed_or_locally_truncated_response_stays_unknown():

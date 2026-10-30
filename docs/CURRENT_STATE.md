@@ -2,63 +2,52 @@
 
 ## Verified Checkpoint
 
-### Active: PR426 preview.32 candidate qualification, 2026-10-30
+### Active: PR426 preview.32 candidate, 2026-10-30
 
-Active checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/post-preview31-recovery`, based on documentation main `a37cb6c5`. Published source is
-`3eb32bd3029d6acd88b380a8c767c19c7abc76a4` (PR424), tree
-`37981d7723c73d74b99ab86faf00f494c8c0c030`. Documentation follow-up PR425 merged normally as
-`a37cb6c5e3ccce805af46b7b1c4b72d7be6a041c`; its tree equals tested head
-`e2afc02630cc0cf56257c34fe8381e1b27de5e71`. PR CI41044074098/audit41044074284
-and main CI41044257786/audit41044257543 passed. That follow-up changed only three
-documentation files. The new transport changes below are not in the published binary.
-The previous tested documentation branch is retained; preserve private output.
-Preserve the user's working external Geph. No workstation service/account/browser/build/install action in this continuation.
+Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`;
+branch `codex/post-preview31-recovery`, base main `a37cb6c5`. PR426 is still open.
+The last fully green pre-review-fix source is `7b4f885dbb29d9fed1eeffd1507c82da87f95e9b`:
+CI41053750282 (including packaged browser/lifecycle) and audit41053750222 passed.
+The additional ownership fixes below require fresh final-head checks before merge.
+Preview .32 is not published. Preserve private output and the working external Geph;
+no workstation services, settings, account, browser, native build or installation changes.
 
-**Initial blocker:** exact-head audit41046195000 failed: the app's Chromium155
-integrity-only admission expired October 29; Geph newly reports block-buffer0.9/0.10
-under GHSA-qwgh-2vcv-g2f7. Independent exact-source review finds the documented
-inline-cursor mechanism absent in those two versions; scoped policy dispositions
-are prepared, with no RSA renewal. Browser156.0.8078.80 passed official archive
-identity, sandbox DOM and cleanup in evidence-only review41048890989/1 at
-head7930fb61e; exact pins and a new artifact review through November 13 are prepared.
-OSV still cannot map the generic browser to a supported ecosystem, so no CVE clearance
-is claimed. Small artifact12973786970 and its run/merge-tree binding are verified.
-36 runtime/audit/SBOM tests and 38 subcases passed. Its companion
-product/audit runs41048891135/41048890862 were cancelled because this intermediate
-head deliberately retains old Chromium155; final production CI remains mandatory.
+| Area | Current evidence and limit |
+|---|---|
+| Connection ownership | Initial cancellation repair plus five newly reproduced review cases: close already-done and late socket results before unrelated cleanup; retain shielded close ownership through COMMAND_CANCEL and both harvest paths. Five causal failures, 16 adapter + 6 caller tests green, independent review clear. No new cleanup deadline; winner handoff remains protected. |
+| HTTP completion | Valid hex chunk prefix ending in CR is incomplete after EOF/timeout. Eleven parser tests pass; malformed controls now reject both complete/incomplete classifications. Earlier 30 bootstrap tests remain reusable. |
+| Chromium | Version156.0.8078.80 pinned to reviewed archive/executable. Isolated review41048890989/1 and small artifact12973786970 prove identity, sandbox DOM and cleanup. Review through November13 is integrity-only: OSV has no supported generic mapping, no CVE clearance claim. |
+| Publication admission | Current UTC admission for app and full exact-run/attempt Geph evidence before every publication PATCH. 74 tests/65 subcases +16 workflow checks; historical verification retained. RSA allowances unchanged and expire October30 UTC inclusive. |
+| Version and historical fixtures | Publisher32 and public31→32 qualification tied to VERSION; 130 tests/5 subcases and review passed. Historical r2→r3 policy frozen to reviewed digest; 34 tests passed, production transition validator unchanged. |
+| Dependency policy | App block-buffer0.10.4 and Geph0.9.0/0.10.4 exact advisory dispositions backed by verified separate-cursor sources, expire November6. Fresh audit at2867cb06d verified app361 scans/accepted1 and full Geph423/accepted4; later final-head audits also green. No RSA expiry extension. |
 
-Version metadata is synchronized to `.32` for the upcoming candidate; no `.32`
-binary has been built or published yet. The .31 publisher and manual preflight
-missed Chromium's expiry. Its public notes
-have been corrected; all 12 assets/tag remain unchanged. Publication-time admission is now implemented for the application and selected
-exact-run/attempt full Geph audit before every draft-publication PATCH. Historical
-verification remains separate. Independent final review passed; 74 tests/65
-subcases and 16 workflow checks passed, including causal refusal of expired vendor
-evidence and UTC rollover. Receipt: `output/continuation-20261030/release-audit-admission/`.
-Fresh audit41050387042 passed at candidate2867cb06d (PR merge tree verified equal):
-app361 scanned / accepted1 / blocked0, plus exact Chromium integrity review;
-Geph423 / full coverage / accepted4 / blocked0. Two RSA allowances still expire
-October 30 UTC; none were extended. Small artifacts and policy/source proofs are
-in `output/continuation-20261030/candidate32-2867cb06d/`.
+Evidence: `output/continuation-20261030/connection-race-review/`,
+`pr426-review/`, `release-audit-admission/`, `chromium-review41048890989/`,
+`candidate32-2867cb06d/` and `candidate32-949323955/`.
+The generic Popen audit was reviewed: two fixed list-argv callers, shell disabled,
+validated private executable path and fixed synthetic HTML; no concrete injection
+path or suppression. Parser coverage and the two ownership threads are addressed
+by this commit; resolve them only after the source is pushed.
 
-The dispatch preflight then caught stale executable publisher/qualification pins:
-preview31 and .30 -> .31. The source now targets preview32 and public .31 -> .32;
-focused coherence checks tie both gates to VERSION. Causal red/green and 130 focused
-tests passed; observer fingerprints are synchronized. The superseded CI41050387083
-was cancelled rather than finishing a non-publishable candidate. The complete final
-head needs fresh CI/audit before merge. No protected qualification was dispatched.
+Next: final PR checks and normal merge, then exact main candidate/audit. Freeze main
+at that source while readiness and native-root run in parallel, followed by packaged
+qualification and publisher. Exact inputs are in
+`output/continuation-20261030/candidate32-2867cb06d/next-actions.md`.
+Use public .31 bits as OLD (artifact12670738202, available through November9); do not
+reuse the earlier private .30 pair as public update proof. This requires one protected
+account-backed readiness run; none has been dispatched in this continuation.
+The harness still does not qualify actual public-feed/tray/admin auto-update.
 
-CI41051589184 at949323955 completed the packaged app and browser contract successfully;
-audit41051589138 also passed. Its 750 metadata tests exposed an old r2→r3 test
-fixture that read the live policy (2 failures/3 errors), and diff validation found
-one extra workflow EOF newline. The fixture is now frozen to the reviewed r3
-canonical digest; 34 focused tests pass and independent review confirms the
-production transition validator is unchanged. The workflow change removes only
-that newline. Receipts: `output/continuation-20261030/candidate32-949323955/`.
-Fresh final-head checks remain required; the failed run is not a green gate.
-Do not describe .31's historical audit as current policy acceptance. Details and
-causal evidence: `output/continuation-20261030/` and ROUTING_RESEARCH.md.
+Remaining independent work: bundled xbox-dns.ru removal and broader recovery (PR376),
+RSA-only vendor/source-tooling work (PR384), Telegram1.11.2/H2 (PR386). All thirteen
+Geph session/SQLite edits from PR384 already shipped via PR388; do not redo them.
+Historical user reconnects/403 and sustained workstation media remain unqualified.
+
+### Published .31 — retained historical evidence
+
+The .31 publisher/manual preflight missed Chromium155 admission expiring October29.
+Public release notes were corrected; all twelve assets/tag remain unchanged. Historical
+identity/gate evidence below does not retroactively establish current-policy admission.
 
 [Preview .31](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
 was published October 30 at 10:47 UTC by
@@ -111,9 +100,9 @@ winner only after cleanup, and classifies a valid hex-plus-CR prefix as incomple
 Malformed input stays unknown; no routing policy or cleanup deadline changes.
 Focused results: 17 adapter/probe tests (including real loopback TCP), 11 parser
 tests and 30 bootstrap classifier tests passed. Independent review found no blocker.
-PR426 is open at `a1b1cf32df7c958a0323c18f69171585b52a092b`; GitHub checks
-initial full CI41046195098 passed (including packaged browser/lifecycle), but
-the dependency audit is blocked as recorded above. Eight documentation checks
+Initial PR426 source `a1b1cf32df7c958a0323c18f69171585b52a092b` passed
+CI41046195098 (including packaged browser/lifecycle); its dependency audit failed.
+This initial evidence is superseded by the current checkpoint above. Eight documentation checks
 also passed (66 focused checks total).
 No new installed or live-site claim is made. Wait for exact-head checks before merge.
 

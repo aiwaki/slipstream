@@ -1852,3 +1852,22 @@ Unsafe candidates:
 - Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
 - Importing upstream strategy scripts without a pinned, verified, and reviewed
   policy bundle.
+
+### 2026-10-30 — follow-up connection ownership review
+
+PR426 review identified two additional cancellation windows: completed dialer
+results were held behind unrelated pending cleanup, and COMMAND_CANCEL removed
+its stream before its cancellable wait_closed finished. The same second pattern
+existed in cancelled/duplicate outcomes during harvesting. Five deterministic
+old-code failures now pass: shutdown harvests and closes each result promptly,
+and one shielded close helper retains ownership through cancellation. The winner
+transfer and no-second-cancel guard remain intact, with no new deadline. Sixteen
+adapter and six caller tests passed; independent review recorded the exact hashes
+in `output/continuation-20261030/connection-race-review/`.
+
+The parser's malformed-chunk controls now assert both not-complete and
+not-incomplete for EOF/timeout; all eleven focused tests pass, without another
+production parser change. The runtime-review Popen audit has no concrete command
+injection path in its two current callers: fixed argv lists with shell disabled,
+a validated private executable path, fixed flags and synthetic HTML. No scanner
+suppression was added. Full boundary review: `output/continuation-20261030/pr426-review/`.

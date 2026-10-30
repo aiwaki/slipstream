@@ -147,7 +147,7 @@ async def _wait_closed_quietly(connection):
 
 async def _close_quietly(connection):
     _close_writer_quietly(connection)
-    await _wait_closed_quietly(connection)
+    await _await_owned_cleanup(_wait_closed_quietly(connection))
 
 
 async def _await_owned_cleanup(cleanup):
@@ -290,9 +290,13 @@ class _RaceSession:
         task = self._candidate_tasks.get(candidate_id)
         if task is not None and not task.done():
             task.cancel()
-        connection = self._connections.pop(candidate_id, None)
+        connection = self._connections.get(candidate_id)
         if connection is not None:
-            await _close_quietly(connection)
+            try:
+                await _close_quietly(connection)
+            finally:
+                if self._connections.get(candidate_id) is connection:
+                    self._connections.pop(candidate_id)
 
     async def apply_commands(self, commands, state):
         for command in commands:
@@ -387,9 +391,21 @@ class _RaceSession:
         for connection in connections:
             _close_writer_quietly(connection)
         self._connections.clear()
-        if tasks:
-            outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-            for outcome in outcomes:
+        remaining = set(tasks)
+        while remaining:
+            # Harvest ready streams before waiting for unrelated dialers, then
+            # close each late result as it arrives, even if another task stalls.
+            done = {task for task in remaining if task.done()}
+            if not done:
+                done, _ = await asyncio.wait(
+                    remaining, return_when=asyncio.FIRST_COMPLETED,
+                )
+            remaining.difference_update(done)
+            for task in done:
+                try:
+                    outcome = task.result()
+                except (asyncio.CancelledError, Exception):
+                    continue
                 if isinstance(outcome, _TaskOutcome) and outcome.connection is not None:
                     _close_writer_quietly(outcome.connection)
                     connections.append(outcome.connection)
@@ -465,6 +481,6 @@ async def open_connection_race(
             # The winner is only transferred by the return below. Cancellation
             # during loser cleanup still leaves this frame responsible for it.
             if connection is not None:
-                await _await_owned_cleanup(_close_quietly(connection))
+                await _close_quietly(connection)
             raise
     return ConnectionRaceIoResult(transition, connection)

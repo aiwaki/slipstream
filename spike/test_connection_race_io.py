@@ -532,3 +532,155 @@ def test_addrinfo_conversion_preserves_order_scope_and_deduplicates():
         "system_resolver",
         "system_resolver",
     ]
+
+
+class _ControlledWriter:
+    def __init__(self, *, hold_close=False):
+        self.hold_close = hold_close
+        self.closed = asyncio.Event()
+        self.waiting = asyncio.Event()
+        self.release = asyncio.Event()
+        self.finished = asyncio.Event()
+        self.interrupted = False
+
+    def close(self):
+        self.closed.set()
+
+    async def wait_closed(self):
+        self.waiting.set()
+        try:
+            if self.hold_close:
+                await self.release.wait()
+        except asyncio.CancelledError:
+            self.interrupted = True
+            raise
+        self.finished.set()
+
+
+@pytest.mark.parametrize("completed_before_shutdown", [True, False])
+def test_shutdown_closes_unharvested_results_before_unrelated_dialer_cleanup(
+    completed_before_shutdown,
+):
+    async def scenario():
+        socket_started = asyncio.Event()
+        release_socket = asyncio.Event()
+        blocked_started = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        release_cleanup = asyncio.Event()
+        writer = _ControlledWriter()
+
+        async def connector(candidate, _port):
+            if candidate.id == "socket":
+                socket_started.set()
+                try:
+                    await release_socket.wait()
+                except asyncio.CancelledError:
+                    # A dialer can produce a stream while handling cancellation.
+                    await release_socket.wait()
+                return asyncio.StreamReader(), writer
+            blocked_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cleanup_started.set()
+                await release_cleanup.wait()
+
+        session = connection_race_io._RaceSession(
+            "cleanup.test", 443, None, connector, connection_race_io.monotonic_ms,
+        )
+        socket_task = session._track(
+            session._run_connector(_candidate("socket")), connection_race.COMMAND_START,
+            candidate_id="socket",
+        )
+        session._track(
+            session._run_connector(_candidate("blocked")), connection_race.COMMAND_START,
+            candidate_id="blocked",
+        )
+        await socket_started.wait()
+        await blocked_started.wait()
+        if completed_before_shutdown:
+            release_socket.set()
+            await socket_task  # Leave the completed result unharvested by the session.
+        shutdown = asyncio.create_task(session.shutdown())
+        await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+        release_socket.set()
+        closed_before_cleanup_finished = False
+        try:
+            await asyncio.wait_for(writer.closed.wait(), timeout=1)
+            closed_before_cleanup_finished = True
+        except TimeoutError:
+            pass
+        finally:
+            release_cleanup.set()
+            await asyncio.wait_for(shutdown, timeout=1)
+        assert closed_before_cleanup_finished, "socket close waited for unrelated dialer cleanup"
+        assert writer.finished.is_set()
+        assert not session._pending
+        assert not [pending for pending in asyncio.all_tasks()
+                    if pending is not asyncio.current_task() and not pending.done()]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("close_path", ["command_cancel", "cancelled_outcome", "duplicate_outcome"])
+def test_cancellation_during_owned_close_waits_for_completion(close_path):
+    async def scenario():
+        writer = _ControlledWriter(hold_close=True)
+        stream = connection_race_io.OwnedStream("victim", asyncio.StreamReader(), writer)
+        session = connection_race_io._RaceSession(
+            "cleanup.test", 443, None, None, connection_race_io.monotonic_ms,
+        )
+        if close_path == "command_cancel":
+            session._connections["victim"] = stream
+        else:
+            if close_path == "cancelled_outcome":
+                session._cancelled_candidates.add("victim")
+            else:
+                original = _ControlledWriter()
+                session._connections["victim"] = connection_race_io.OwnedStream(
+                    "victim", asyncio.StreamReader(), original,
+                )
+
+            async def completed():
+                return connection_race_io._TaskOutcome(
+                    connection_race.ConnectionRaceEvent(
+                        connection_race.EVENT_ATTEMPT_SUCCEEDED, 1, candidate_id="victim",
+                    ), stream,
+                )
+
+            await session._track(completed(), connection_race.COMMAND_START, candidate_id="victim")
+
+        async def execute_then_shutdown():
+            try:
+                if close_path == "command_cancel":
+                    await session.apply_commands((connection_race.ConnectionRaceCommand(
+                        connection_race.COMMAND_CANCEL, candidate_id="victim",
+                    ),), None)
+                else:
+                    await session._harvest_done()
+            finally:
+                await session.shutdown()
+
+        task = asyncio.create_task(execute_then_shutdown())
+        await asyncio.wait_for(writer.waiting.wait(), timeout=1)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        retained_until_closed = (
+            close_path != "command_cancel" or session._connections.get("victim") is stream
+        )
+        writer.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert writer.finished.is_set(), "caller cancellation orphaned wait_closed"
+        assert not writer.interrupted
+        assert retained_until_closed, "COMMAND_CANCEL released ownership before wait_closed finished"
+        if close_path == "duplicate_outcome":
+            assert original.finished.is_set()
+        assert not session._connections
+        assert not session._pending
+        assert not [pending for pending in asyncio.all_tasks()
+                    if pending is not asyncio.current_task() and not pending.done()]
+
+    asyncio.run(scenario())
