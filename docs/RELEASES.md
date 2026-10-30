@@ -3,6 +3,18 @@
 Slipstream publishes three distinct kinds of GitHub release. Their tags and
 purpose must remain visually and mechanically separate.
 
+**October 30 correction:** preview .31's artifact identity and functional gates
+passed, but publication accepted an October 26 application audit after its used
+Chromium integrity-only admission expired on October 29. The public release notes
+now disclose this gap; the immutable assets remain unchanged. Current dependency
+admission is not established for that release. Runtime refresh and publication-time
+expiry checks are in progress in PR426. See [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
+
+New publication must validate the current UTC validity of used, time-bounded
+application and vendored dependency admissions separately from historical report
+verification. Preserve the original scan date and exact source/policy hashes;
+rechecking expiry does not imply a fresh scan of advisory data.
+
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|
 | Stable app | `vX.Y.Z` | Release and latest | Signed updater feed and first installation |

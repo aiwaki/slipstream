@@ -28,12 +28,12 @@ class ChromiumHeadlessShellMaterializationTests(unittest.TestCase):
     def test_repository_source_contract_is_exact_and_canonical(self) -> None:
         source = materialize.load_source()
 
-        self.assertEqual(source["version"], "155.0.8059.79")
+        self.assertEqual(source["version"], "156.0.8078.80")
         self.assertEqual(source["platform"], "mac-arm64")
-        self.assertEqual(source["archive"]["length"], 102_390_341)
+        self.assertEqual(source["archive"]["length"], 103_982_159)
         self.assertEqual(
             source["archive"]["sha256"],
-            "5f51504ead3d41815111cd73e79c4979df3a4e6aedc7cf6fe2b042ae037363b5",
+            "ea615baa2e9caf0d02d1898a6562b5f8fa9c35239707dae0f592178df5b986ac",
         )
 
     def test_macos_download_context_uses_system_ca_without_disabling_tls(self) -> None:

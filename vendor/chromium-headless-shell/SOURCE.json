@@ -1,11 +1,11 @@
 {
   "archive": {
-    "length": 102390341,
-    "sha256": "5f51504ead3d41815111cd73e79c4979df3a4e6aedc7cf6fe2b042ae037363b5",
-    "url": "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.79/mac-arm64/chrome-headless-shell-mac-arm64.zip"
+    "length": 103982159,
+    "sha256": "ea615baa2e9caf0d02d1898a6562b5f8fa9c35239707dae0f592178df5b986ac",
+    "url": "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.80/mac-arm64/chrome-headless-shell-mac-arm64.zip"
   },
   "component": "Chrome for Testing chrome-headless-shell",
   "license_path": "LICENSE.headless_shell",
   "platform": "mac-arm64",
-  "version": "155.0.8059.79"
+  "version": "156.0.8078.80"
 }

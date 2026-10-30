@@ -110,6 +110,28 @@
       "package": "sqlx",
       "reason": "The affected Postgres protocol path is not used; geph5-client persists state through SQLite. The advisory does not identify SQLite as exploitable. Remove when upstream updates SQLx and disables unused backend defaults.",
       "version": "0.7.4"
+    },
+    {
+      "advisories": [
+        "GHSA-qwgh-2vcv-g2f7"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-11-06",
+      "id": "geph-block-buffer-0.9.0-separate-cursor",
+      "package": "block-buffer",
+      "reason": "Reviewed 2026-10-30 against the exact crates.io archive SHA-256 4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4, matching current Geph Cargo.lock. This version stores the cursor in a separate private pos: usize field, not inside block storage passed to compression callbacks, and contains no ReadBuffer. The advisory and upstream fix concern inline cursor bytes overwritten before a caught callback panic; that mechanism is absent from this exact source. Independent static review supports not-affected for this advisory only, not a general safety claim. Keep the scanner finding visible and re-review by 2026-11-06; see docs/ROUTING_RESEARCH.md, block-buffer applicability 2026-10-30.",
+      "version": "0.9.0"
+    },
+    {
+      "advisories": [
+        "GHSA-qwgh-2vcv-g2f7"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-11-06",
+      "id": "geph-block-buffer-0.10.4-separate-cursor",
+      "package": "block-buffer",
+      "reason": "Reviewed 2026-10-30 against the exact crates.io archive SHA-256 3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71, matching current Geph Cargo.lock. This version stores the cursor in a separate private pos: u8 field, not inside block storage passed to compression callbacks, and contains no ReadBuffer. The advisory and upstream fix concern inline cursor bytes overwritten before a caught callback panic; that mechanism is absent from this exact source. Independent static review supports not-affected for this advisory only, not a general safety claim. Keep the scanner finding visible and re-review by 2026-11-06; see docs/ROUTING_RESEARCH.md, block-buffer applicability 2026-10-30.",
+      "version": "0.10.4"
     }
   ],
   "rules": {

@@ -398,6 +398,7 @@ jobs:
           READINESS_INPUT: ${{ github.event.inputs.readiness_run_id }}
           RELEASE_SOURCE_INPUT: ${{ github.event.inputs.release_source_commit }}
           SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
+          RESUME_RELEASE_ID: ${{ steps.ver.outputs.resume_release_id }}
         run: |
           set -euo pipefail
           candidate_run="$CANDIDATE_INPUT"
@@ -529,6 +530,21 @@ jobs:
                       f"dependency audit job {name!r} did not complete successfully"
                   )
           ' "$dependency_audit_attempt" <<< "$dependency_audit_jobs"
+          if [ -z "$RESUME_RELEASE_ID" ]; then
+            geph_artifacts="$(gh api \
+              "repos/${{ github.repository }}/actions/runs/$dependency_audit_run/artifacts?per_page=100")"
+            geph_artifact_id="$(PYTHONPATH=scripts python3 -c '
+          import json, sys
+          from release_candidate import select_geph_audit_artifact
+          print(select_geph_audit_artifact(
+              json.load(sys.stdin), json.loads(sys.argv[5]),
+              source_commit=sys.argv[1], run_id=int(sys.argv[2]),
+              run_attempt=int(sys.argv[3]), repository_id=int(sys.argv[4]),
+          ))
+          ' "$SOURCE_COMMIT" "$dependency_audit_run" "$dependency_audit_attempt" \
+              "${{ github.repository_id }}" "$dependency_audit_jobs" <<< "$geph_artifacts")"
+            echo "geph_audit_artifact_id=$geph_artifact_id" >> "$GITHUB_OUTPUT"
+          fi
           python3 -c '
           import json
           import sys
@@ -584,6 +600,17 @@ jobs:
           run-id: ${{ steps.runs.outputs.release_candidate_run_id }}
           github-token: ${{ github.token }}
 
+      - name: Download the exact full Geph dependency audit
+        if: steps.ver.outputs.resume_release_id == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.runs.outputs.geph_audit_artifact_id }}
+          path: dist-geph-audit
+          merge-multiple: true
+          digest-mismatch: error
+          run-id: ${{ steps.runs.outputs.dependency_audit_run_id }}
+          github-token: ${{ github.token }}
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: Slipstream-release-ready-${{ steps.ver.outputs.source_commit }}
@@ -602,13 +629,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
+          RESUME_RELEASE_ID: ${{ steps.ver.outputs.resume_release_id }}
         run: |
           set -euo pipefail
           source_tree="$(git rev-parse "$SOURCE_COMMIT^{tree}")"
           source_archive_sha256="$(git archive --format=tar "$SOURCE_COMMIT" | shasum -a 256 | awk '{print $1}')"
           mkdir -p "$RUNNER_TEMP/candidate-app"
           ditto -x -k dist-candidate/Slipstream-macos-arm64.zip "$RUNNER_TEMP/candidate-app"
+          publication_args=()
+          [ -n "$RESUME_RELEASE_ID" ] || publication_args+=(--for-publication)
           python3 scripts/release_candidate.py verify \
+            "${publication_args[@]}" \
             --candidate-dir dist-candidate \
             --repository "${{ github.repository }}" \
             --version "${{ steps.ver.outputs.version }}" \
@@ -672,15 +703,34 @@ jobs:
               --deny-self-hosted-runners >/dev/null
           done
 
+      - name: Verify current application and full Geph dependency admission
+        if: steps.ver.outputs.resume_release_id == ''
+        env:
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          python3 scripts/dependency_audit.py admit-release \
+            --report dist-candidate/dependency-audit.json \
+            --sbom dist-candidate/Slipstream.spdx.json \
+            --policy security/dependency-audit-policy.json \
+            --geph-report dist-geph-audit/geph5-client-dependency-audit.json \
+            --geph-sbom dist-geph-audit/geph5-client.spdx.json \
+            --geph-policy security/geph-dependency-audit-policy.json \
+            --source-commit "$SOURCE_COMMIT" \
+            --target "$SLIPSTREAM_TAURI_TARGET"
+
       - name: Create tag-specific release metadata without rebuilding
         env:
           SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
+          RESUME_RELEASE_ID: ${{ steps.ver.outputs.resume_release_id }}
         run: |
           set -euo pipefail
           cp -R dist-candidate dist-release
           cp dist-qualified/release-qualification.json dist-release/
           cp dist-readiness/release-readiness.json dist-release/
           cp dist-readiness/transport-mechanics.json dist-release/
+          publication_args=()
+          [ -n "$RESUME_RELEASE_ID" ] || publication_args+=(--for-publication)
           python3 scripts/make_appcast.py \
             --version "${{ steps.ver.outputs.version }}" \
             --tag "${{ steps.ver.outputs.tag }}" \
@@ -688,6 +738,7 @@ jobs:
             --signature-file dist-release/Slipstream.app.tar.gz.sig \
             --output dist-release/latest.json
           python3 scripts/make_release_manifest.py \
+            "${publication_args[@]}" \
             --release-dir dist-release \
             --repository "${{ github.repository }}" \
             --version "${{ steps.ver.outputs.version }}" \
@@ -867,10 +918,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ steps.release.outputs.id }}
+          SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
           published=false
           for attempt in 1 2 3 4; do
+            python3 scripts/dependency_audit.py admit-release \
+              --report dist-release/dependency-audit.json \
+              --sbom dist-release/Slipstream.spdx.json \
+              --policy security/dependency-audit-policy.json \
+              --geph-report dist-geph-audit/geph5-client-dependency-audit.json \
+              --geph-sbom dist-geph-audit/geph5-client.spdx.json \
+              --geph-policy security/geph-dependency-audit-policy.json \
+              --source-commit "$SOURCE_COMMIT" \
+              --target "$SLIPSTREAM_TAURI_TARGET"
             if gh api --method PATCH \
               "repos/${{ github.repository }}/releases/$RELEASE_ID" \
               -F draft=false \

@@ -2,7 +2,7 @@
 
 ## Verified Checkpoint
 
-### Active: post-preview .31 transport repairs, 2026-10-30
+### Active: PR426 transport fixes and dependency-admission blockers, 2026-10-30
 
 Active checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
 branch `codex/post-preview31-recovery`, based on documentation main `a37cb6c5`. Published source is
@@ -14,6 +14,31 @@ and main CI41044257786/audit41044257543 passed. That follow-up changed only thre
 documentation files. The new transport changes below are not in the published binary.
 The previous tested documentation branch is retained; preserve private output.
 Preserve the user's working external Geph. No workstation service/account/browser/build/install action in this continuation.
+
+**Initial blocker:** exact-head audit41046195000 failed: the app's Chromium155
+integrity-only admission expired October 29; Geph newly reports block-buffer0.9/0.10
+under GHSA-qwgh-2vcv-g2f7. Independent exact-source review finds the documented
+inline-cursor mechanism absent in those two versions; scoped policy dispositions
+are prepared, with no RSA renewal. Browser156.0.8078.80 passed official archive
+identity, sandbox DOM and cleanup in evidence-only review41048890989/1 at
+head7930fb61e; exact pins and a new artifact review through November 13 are prepared.
+OSV still cannot map the generic browser to a supported ecosystem, so no CVE clearance
+is claimed. Small artifact12973786970 and its run/merge-tree binding are verified.
+36 runtime/audit/SBOM tests and 38 subcases passed. Its companion
+product/audit runs41048891135/41048890862 were cancelled because this intermediate
+head deliberately retains old Chromium155; final production CI remains mandatory.
+
+Version metadata is synchronized to `.32` for the upcoming candidate; no `.32`
+binary has been built or published yet. The .31 publisher and manual preflight
+missed Chromium's expiry. Its public notes
+have been corrected; all 12 assets/tag remain unchanged. Publication-time admission is now implemented for the application and selected
+exact-run/attempt full Geph audit before every draft-publication PATCH. Historical
+verification remains separate. Independent final review passed; 74 tests/65
+subcases and 16 workflow checks passed, including causal refusal of expired vendor
+evidence and UTC rollover. Receipt: `output/continuation-20261030/release-audit-admission/`.
+The complete .32 candidate needs fresh exact-head CI/audit before merge.
+Do not describe .31's historical audit as current policy acceptance. Details and
+causal evidence: `output/continuation-20261030/` and ROUTING_RESEARCH.md.
 
 [Preview .31](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
 was published October 30 at 10:47 UTC by
@@ -66,7 +91,11 @@ winner only after cleanup, and classifies a valid hex-plus-CR prefix as incomple
 Malformed input stays unknown; no routing policy or cleanup deadline changes.
 Focused results: 17 adapter/probe tests (including real loopback TCP), 11 parser
 tests and 30 bootstrap classifier tests passed. Independent review found no blocker.
-PR/CI/merge are the next gate; there is no new installed or live-site claim.
+PR426 is open at `a1b1cf32df7c958a0323c18f69171585b52a092b`; GitHub checks
+initial full CI41046195098 passed (including packaged browser/lifecycle), but
+the dependency audit is blocked as recorded above. Eight documentation checks
+also passed (66 focused checks total).
+No new installed or live-site claim is made. Wait for exact-head checks before merge.
 
 PR reconciliation is complete: all three old heads conflict with main, but all
 13 Geph session/SQLite edits from PR384 already shipped via PR388. Its remaining
@@ -1253,6 +1282,10 @@ installation ran. The unchanged release checks are not repeated.
 - Complete PR/CI/merge for the selected cancellation and chunked-prefix fixes on
   `codex/post-preview31-recovery`. Preserve the remaining PR376 scope; a source
   merge will not update the already published `.31` binary.
+- First resolve current dependency admission: obtain the isolated Chromium review
+  receipt, update exact runtime pins/review, verify scoped block-buffer disposition
+  in fresh audit, and finish publication-time app/vendor expiry enforcement. Never
+  renew a date without the required fresh evidence or overwrite published assets.
 - Preview `.31` is published and remotely verified; documentation PR425 is merged
   with green PR/main checks. The exact candidate/readiness/native/packaged gates above
   are complete and reusable; do not rerun or redispatch them after resuming.

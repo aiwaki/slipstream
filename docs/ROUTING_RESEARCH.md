@@ -1,5 +1,62 @@
 # Routing Research Notes
 
+### Chromium runtime review 2026-10-30
+
+The official [Stable release](https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_02107719452.html)
+and Chrome for Testing catalogs select 156.0.8078.80, revision 1706539. Evidence-only
+CI41048890989/1 fetched the exact official mac-arm64 object (generation1793229146450866),
+checked its 103982159-byte length and metadata consistency, then computed archive
+SHA-256 `ea615baa2e9caf0d02d1898a6562b5f8fa9c35239707dae0f592178df5b986ac`.
+The safely extracted arm64 executable hashes to
+`febae66e849b516d551a7fd0434af84f7c7e688e93e43dbc1fb951bdc87ec869`.
+License/ABOUT identity, exact version output, sandbox-enabled local JavaScript DOM
+execution, owned-process cleanup and removal of the temporary archive/profile passed.
+
+Fresh checksum-verified OSV Scanner 2.3.8 preserves the exact proposed generic package
+but provides an empty ecosystem, so its mapping remains unsupported. No findings
+were reported; this is explicitly **not vulnerability clearance**. The new exact
+artifact review is bounded through November 13, retaining separate integrity-only
+coverage and rejection of any scanner finding or identity mismatch. Package/source
+pins and the browser-helper identity contract are synchronized; .31 assets are not
+changed. Packaged observer/semantic/invisibility and final release gates remain.
+
+Only the 9156-byte evidence artifact12973786970 was downloaded to the workstation.
+Its run/head/merge-tree binding and scanner input/output hashes were independently
+checked against head7930fb61e. Receipts: `output/continuation-20261030/chromium-review41048890989/`.
+No browser, scanner or archive was installed or executed locally. Scoped source
+checks passed: 36 runtime/audit/SBOM tests and 38 subcases; the subsequent exact
+application block-buffer disposition also passed 22 audit tests/28 subcases.
+
+### block-buffer applicability and publication admission, 2026-10-30
+
+Fresh audit41046195000 reported GHSA-qwgh-2vcv-g2f7 for Geph's block-buffer
+0.9.0 and 0.10.4. The [primary advisory](https://github.com/advisories/GHSA-qwgh-2vcv-g2f7)
+describes a caught callback panic leaving a cursor embedded in block bytes corrupt;
+the [upstream fix](https://github.com/RustCrypto/utils/pull/1487) guards that inline state.
+The two exact older archives instead store a separate private `pos: usize` (0.9.0)
+or `pos: u8` (0.10.4); neither contains `ReadBuffer`. Bytes passed to callbacks do
+not include the cursor, and a callback panic preserves its earlier valid value.
+The checked archive hashes match the Geph lock; the application lock also uses
+the identical 0.10.4 archive:
+
+- 0.9.0: `4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4`.
+- 0.10.4: `3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71`.
+
+Independent static review supports not-affected for this documented mechanism,
+not general immunity to defects. Two Geph records and one application record retain
+visible exact package/version/advisory findings and require re-review by November 6. Other identities,
+advisories and expiry still block. The RSA exceptions are unchanged. Evidence and
+source snapshots: `output/continuation-20261030/pr426-audit41046195000/`.
+
+The same audit exposed a separate publication defect. Preview .31 was published
+October 30 with an October 26 report whose Chromium integrity-only entry expired
+October 29. Its signed artifact identity and functional tests remain established;
+current policy admission was not. The verifier checked expiry at the historical
+report date, and the manual preflight checked RSA expiry but missed this entry.
+New publication must separately enforce current UTC admission without rewriting
+the original scan date or pretending to rescan new advisory data. The old runtime
+review is not extended; a current official Chromium candidate is being qualified.
+
 ### Cancellation ownership and split chunk-size prefixes, 2026-10-30
 
 Two independent defects from PR376 remained in main `a37cb6c5` after preview .31.

@@ -15,7 +15,7 @@ import sys
 import tempfile
 import urllib.request
 from urllib.parse import unquote
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 
@@ -739,7 +739,13 @@ def validate_audit_report(
     source_commit: str,
     target: str,
     vendored_transitive_dependencies: str = "top-level-only",
+    admission_on: date | None = None,
 ) -> dict:
+    """Verify historical evidence, optionally rechecking its current admission.
+
+    Admission checks only the exact policy allowances used by this report. It
+    never changes the scan date or represents a fresh advisory-database scan.
+    """
     if not isinstance(report, dict):
         raise ValueError("dependency audit report must be a JSON object")
     if vendored_transitive_dependencies not in VENDORED_TRANSITIVE_COVERAGE:
@@ -769,6 +775,11 @@ def validate_audit_report(
         evaluated_on = date.fromisoformat(evaluated_value)
     except (TypeError, ValueError) as exc:
         raise ValueError("dependency audit evaluation date is invalid") from exc
+    if admission_on is not None:
+        if type(admission_on) is not date:
+            raise ValueError("dependency audit admission date is invalid")
+        if admission_on < evaluated_on:
+            raise ValueError("dependency audit admission date precedes evaluation")
     scanner = report.get("scanner")
     if not isinstance(scanner, dict):
         raise ValueError("dependency audit scanner metadata is missing")
@@ -854,6 +865,12 @@ def validate_audit_report(
                 raise ValueError(
                     "dependency audit integrity-only evidence does not match SBOM"
                 )
+            if admission_on is not None and admission_on > date.fromisoformat(
+                policy_package["expires"]
+            ):
+                raise ValueError(
+                    "dependency audit integrity-only policy is expired at admission"
+                )
     elif "integrity_only" in report or "packages_integrity_only" in summary:
         raise ValueError(
             "dependency audit report has integrity-only data without policy"
@@ -923,6 +940,10 @@ def validate_audit_report(
             )
         if evaluated_on > date.fromisoformat(exception["expires"]):
             raise ValueError("dependency audit report uses an expired exception")
+        if admission_on is not None and admission_on > date.fromisoformat(
+            exception["expires"]
+        ):
+            raise ValueError("dependency audit exception is expired at admission")
     return {
         "advisories": len(findings),
         "accepted_exceptions": counts["accepted_exception"],
@@ -941,6 +962,7 @@ def validate_audit_report_file(
     source_commit: str,
     target: str,
     vendored_transitive_dependencies: str = "top-level-only",
+    admission_on: date | None = None,
 ) -> dict:
     report = _read_json_object(report_path, "dependency audit report")
     return validate_audit_report(
@@ -950,7 +972,31 @@ def validate_audit_report_file(
         source_commit=source_commit,
         target=target,
         vendored_transitive_dependencies=vendored_transitive_dependencies,
+        admission_on=admission_on,
     )
+
+
+def validate_release_admission(
+    *, report_path: Path, sbom_path: Path, policy_path: Path,
+    geph_report_path: Path, geph_sbom_path: Path, geph_policy_path: Path,
+    source_commit: str, target: str,
+) -> dict:
+    """Admit both unchanged audit reports on one current UTC publication day."""
+    admission_on = datetime.now(UTC).date()
+    application = validate_audit_report_file(
+        report_path=report_path, sbom_path=sbom_path, policy_path=policy_path,
+        source_commit=source_commit, target=target, admission_on=admission_on,
+    )
+    geph = validate_audit_report_file(
+        report_path=geph_report_path, sbom_path=geph_sbom_path,
+        policy_path=geph_policy_path, source_commit=source_commit,
+        target="macos-universal", vendored_transitive_dependencies="full",
+        admission_on=admission_on,
+    )
+    if datetime.now(UTC).date() != admission_on:
+        raise ValueError("UTC date changed during release dependency admission")
+    return {"admission_checked_on": admission_on.isoformat(),
+            "application": application, "geph": geph}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -988,6 +1034,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=VENDORED_TRANSITIVE_COVERAGE,
         default="top-level-only",
     )
+    admit = subparsers.add_parser("admit-release")
+    admit.add_argument("--report", required=True, type=Path)
+    admit.add_argument("--sbom", required=True, type=Path)
+    admit.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    admit.add_argument("--geph-report", required=True, type=Path)
+    admit.add_argument("--geph-sbom", required=True, type=Path)
+    admit.add_argument("--geph-policy", required=True, type=Path)
+    admit.add_argument("--source-commit", required=True)
+    admit.add_argument("--target", required=True)
     return parser.parse_args(argv)
 
 
@@ -1023,6 +1078,13 @@ def main(argv: list[str] | None = None) -> int:
         if report["status"] != "pass":
             print(json.dumps(result, sort_keys=True))
             return 1
+    elif args.command == "admit-release":
+        result = validate_release_admission(
+            report_path=args.report, sbom_path=args.sbom, policy_path=args.policy,
+            geph_report_path=args.geph_report, geph_sbom_path=args.geph_sbom,
+            geph_policy_path=args.geph_policy, source_commit=args.source_commit,
+            target=args.target,
+        )
     else:
         result = validate_audit_report_file(
             report_path=args.report,
