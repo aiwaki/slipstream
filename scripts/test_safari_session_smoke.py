@@ -26,6 +26,7 @@ class SafariSessionSmokeTests(unittest.TestCase):
         absent = stack.enter_context(mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"))
         pid = stack.enter_context(mock.patch.object(smoke.lifecycle, "_wait_for_safari_process", return_value=1234))
         stop = stack.enter_context(mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"))
+        stack.enter_context(mock.patch.object(smoke.lifecycle, "_safari_pid_candidates", return_value=()))
         request = stack.enter_context(mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=[
             {"value": {"sessionId": "PRIVATE-SESSION"}}, {"value": None},
             {"value": "about:blank"}, {"value": None},
@@ -41,14 +42,18 @@ class SafariSessionSmokeTests(unittest.TestCase):
                 self.assertTrue(result["blank_verified"])
                 self.assertTrue(result["cleanup_verified"])
                 self.assertEqual(absent.call_count, 2)
-                stop.assert_called_once_with(1234, 501, "session-smoke")
-                calls = request.call_args_list
-                self.assertEqual(calls[0].args[1:3], ("POST", "/session"))
-                self.assertEqual(calls[0].args[3]["capabilities"]["alwaysMatch"],
-                                 {"browserName": "safari", "pageLoadStrategy": strategy})
-                self.assertEqual(calls[1].args[3], {"url": "about:blank"})
-                self.assertEqual(calls[2].args[1], "GET")
-                self.assertEqual(calls[3].args[1], "DELETE")
+                stop.assert_not_called()
+                self.assertEqual(request.call_args_list, [
+                    mock.call("http://127.0.0.1:12345", "POST", "/session", {
+                        "capabilities": {"alwaysMatch": {
+                            "browserName": "safari", "pageLoadStrategy": strategy,
+                        }},
+                    }),
+                    mock.call("http://127.0.0.1:12345", "POST",
+                              "/session/PRIVATE-SESSION/url", {"url": "about:blank"}),
+                    mock.call("http://127.0.0.1:12345", "GET", "/session/PRIVATE-SESSION/url"),
+                    mock.call("http://127.0.0.1:12345", "DELETE", "/session/PRIVATE-SESSION"),
+                ])
                 self.assertNotIn("PRIVATE-SESSION", json.dumps(result))
                 self.assertNotIn("127.0.0.1", json.dumps(result))
 
@@ -100,13 +105,14 @@ class SafariSessionSmokeTests(unittest.TestCase):
                 self.assertNotIn("PRIVATE", json.dumps(result))
 
     def test_cleanup_error_and_wrong_document_cannot_pass(self):
-        for case in ("delete", "stop", "absence", "document"):
+        for case in ("delete", "inspection", "absence", "document"):
             with self.subTest(case=case), ExitStack() as stack:
                 absent, pid, stop, request = self.probe_mocks(stack)
                 if case == "delete":
                     request.side_effect = [{"sessionId": "id"}, {}, {"value": "about:blank"}, TimeoutError("private")]
-                elif case == "stop":
-                    stop.side_effect = smoke.lifecycle.LifecycleError("identity changed")
+                elif case == "inspection":
+                    stack.enter_context(mock.patch.object(smoke.lifecycle, "_safari_pid_candidates",
+                        side_effect=smoke.lifecycle.LifecycleError("inspection failed")))
                 elif case == "absence":
                     absent.side_effect = [None, smoke.lifecycle.LifecycleError("leftover")]
                 else:
@@ -114,7 +120,8 @@ class SafariSessionSmokeTests(unittest.TestCase):
                 result = smoke.session_probe("none", "http://127.0.0.1:12345", 501)
                 self.assertEqual(result["status"], "failed")
                 self.assertNotIn("private", json.dumps(result))
-                self.assertEqual(absent.call_count, 2)
+                self.assertEqual(absent.call_count, 1 if case == "inspection" else 2)
+                stop.assert_not_called()
 
     def test_client_report_rejects_contradictory_success_and_private_nested_data(self):
         changes = [
@@ -136,9 +143,77 @@ class SafariSessionSmokeTests(unittest.TestCase):
         result = subprocess.CompletedProcess([], 0, json.dumps(self.clean_report()).encode(), b"PRIVATE")
         with mock.patch.object(smoke.subprocess, "run", return_value=result) as run:
             self.assertEqual(smoke._run_client("none", "http://127.0.0.1:12345", 501), self.clean_report())
-        self.assertEqual(run.call_count, 1)
-        self.assertEqual(run.call_args.kwargs["timeout"], smoke.CLIENT_TIMEOUT)
-        self.assertEqual(run.call_args.args[0][:3], ["/usr/bin/sudo", "-n", "-E"])
+        run.assert_called_once_with([
+            "/usr/bin/sudo", "-n", "-E", smoke.sys.executable,
+            str(Path(smoke.__file__).resolve()), "--client", "--strategy", "none",
+            "--safaridriver-url", "http://127.0.0.1:12345", "--uid", "501",
+        ], capture_output=True, timeout=smoke.CLIENT_TIMEOUT, check=False)
+
+    def test_foreign_same_user_pid_observation_never_authorizes_cleanup_signal(self):
+        stop_impl = smoke.lifecycle._stop_owned_safari_process
+        with ExitStack() as stack:
+            absent, pid, stop, request = self.probe_mocks(stack)
+            # Another same-user Safari can appear after the empty baseline and
+            # satisfy the shared UID/executable predicate. That is not ownership.
+            absent.side_effect = [None, smoke.lifecycle.LifecycleError("remaining Safari")]
+            stack.enter_context(mock.patch.object(smoke.lifecycle, "_safari_pid_candidates",
+                                                  return_value=(1234,)))
+            stack.enter_context(mock.patch.object(smoke.lifecycle, "_safari_pid_is_owned", return_value=True))
+            stack.enter_context(mock.patch.object(smoke.time, "monotonic", side_effect=range(0, 100)))
+            stack.enter_context(mock.patch.object(smoke.time, "sleep"))
+            kill = stack.enter_context(mock.patch.object(smoke.os, "kill"))
+            stop.side_effect = stop_impl
+            result = smoke.session_probe("none", "http://127.0.0.1:12345", 501)
+            self.assertTrue(result["pid_observed"])
+            self.assertEqual(result["status"], "failed")
+            self.assertFalse(result["cleanup_verified"])
+            kill.assert_not_called()
+            stop.assert_not_called()
+            self.assertEqual(request.call_args_list[-1], mock.call(
+                "http://127.0.0.1:12345", "DELETE", "/session/PRIVATE-SESSION"))
+
+    def test_absence_wait_accepts_natural_exit_without_signalling(self):
+        now = [0.0]
+        with mock.patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+             mock.patch.object(smoke.time, "sleep", side_effect=lambda delay: now.__setitem__(0, now[0] + delay)), \
+             mock.patch.object(smoke.lifecycle, "_safari_pid_candidates", side_effect=[(1234,), ()]) as candidates, \
+             mock.patch.object(smoke.lifecycle, "_assert_no_safari_process") as absent, \
+             mock.patch.object(smoke.os, "kill") as kill:
+            smoke._wait_for_safari_absence(501)
+        self.assertEqual(candidates.call_count, 2)
+        absent.assert_called_once_with(501, "session-smoke-after")
+        kill.assert_not_called()
+
+    def test_absence_wait_refuses_inspection_error_residue_and_late_proof(self):
+        for case in ("inspection", "residue", "late-empty", "strict-absence"):
+            with self.subTest(case=case), ExitStack() as stack:
+                now = [0.0]
+                stack.enter_context(mock.patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]))
+                sleep = stack.enter_context(mock.patch.object(smoke.time, "sleep",
+                    side_effect=lambda delay: now.__setitem__(0, now[0] + delay)))
+                candidates = stack.enter_context(mock.patch.object(smoke.lifecycle, "_safari_pid_candidates",
+                                                                  return_value=()))
+                absent = stack.enter_context(mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"))
+                kill = stack.enter_context(mock.patch.object(smoke.os, "kill"))
+                if case == "inspection":
+                    candidates.side_effect = smoke.lifecycle.LifecycleError("inspection failed")
+                elif case == "residue":
+                    candidates.return_value = (1234,)
+                elif case == "late-empty":
+                    def late_empty():
+                        now[0] = smoke.lifecycle.SAFARI_PROCESS_STOP_TIMEOUT + 1
+                        return ()
+                    candidates.side_effect = late_empty
+                else:
+                    absent.side_effect = smoke.lifecycle.LifecycleError("identity unknown")
+                with self.assertRaises(smoke.lifecycle.LifecycleError):
+                    smoke._wait_for_safari_absence(501)
+                kill.assert_not_called()
+                if case != "residue":
+                    sleep.assert_not_called()
+                    candidates.assert_called_once_with()
+                if case != "strict-absence":
+                    absent.assert_not_called()
 
     def test_no_native_action_after_disposable_guard_refusal(self):
         with mock.patch.object(smoke, "_runtime_identity", return_value={}), \
@@ -152,7 +227,7 @@ class SafariSessionSmokeTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_coordinator_retains_refused_session_and_stops_only_its_driver(self):
-        for case in ("success", "session-failure", "client-timeout", "enable", "driver-start", "driver-stop"):
+        for case in ("success", "session-failure", "session-cleanup", "client-timeout", "enable", "driver-start", "driver-stop"):
             with self.subTest(case=case), ExitStack() as stack:
                 stack.enter_context(mock.patch.object(smoke, "_runtime_identity", return_value={}))
                 stack.enter_context(mock.patch.object(smoke, "_require_ci"))
@@ -167,6 +242,10 @@ class SafariSessionSmokeTests(unittest.TestCase):
                 client = stack.enter_context(mock.patch.object(smoke, "_run_client", return_value=self.clean_report()))
                 if case == "session-failure":
                     client.return_value = self.clean_report() | {"status": "failed", "stage": "session_create"}
+                elif case == "session-cleanup":
+                    client.return_value = self.clean_report() | {"status": "failed", "cleanup_verified": False,
+                        "cleanup_errors": [smoke.lifecycle.webdriver_failure_details(
+                            smoke.lifecycle.LifecycleError("residue"))]}
                 elif case == "client-timeout":
                     client.side_effect = subprocess.TimeoutExpired(["PRIVATE"], smoke.CLIENT_TIMEOUT, output=b"SECRET")
                 elif case == "enable":

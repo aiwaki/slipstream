@@ -4,6 +4,25 @@
 
 ### Active: isolate Safari startup failure, 2026-10-30
 
+PR432 quoted head `179fb5339c285c010403c415c7f85cea5d70f31d` passed complete
+CI41140189410/1, audit41140189428/1 and Safari comparison41140189505/1.
+Actual packaged lifecycle covered Chrome4/4 and Safari4/4, native Stop/Quit7/7,
+clean uninstall, external sentinel preservation and unchanged global PF.
+Pre-merge review then identified a valid race in the new diagnostic harness:
+a same-user Safari PID observed after startup is not proof of session ownership.
+A pre-session empty PID snapshot does not resolve that race. The narrow correction
+removes Safari PID signalling from the standalone probe, retains exact-session
+DELETE and bounded absence observation, and refuses unproved cleanup. Existing
+shared/live lifecycle helpers still use their pre-existing UID/executable ownership
+assumption; that separate limitation is not fixed or qualified by this change.
+Two mocked contracts also now assert complete WebDriver paths and root-client argv.
+The old-source regression reproduced two mocked foreign-PID signals; all 17
+focused tests pass after the fix, and four invocation mutations are now rejected.
+Writer receipt `output/continuation-20261030/safari-session-mock-contracts/verification.json`
+SHA `e1136912257d5e69e26ea3a7996982a140eec43cd832f52e5f936825311994e8`.
+Eight documentation checks and project-state continuity pass. Require independent
+delta review and fresh exact-head CI before merge.
+
 PR432 first head `c34b62e15b17e47ba031da7084ee8c68bf40c7df` ran the
 unprotected Safari comparison 41139057736/1: both modes created sessions,
 navigated `about:blank` and proved cleanup on separate runners. The original

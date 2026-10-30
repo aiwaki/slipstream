@@ -39,8 +39,24 @@ def _require_ci(*, client: bool) -> None:
         raise lifecycle.LifecycleError("requires disposable macOS CI and expected user")
 
 
+def _wait_for_safari_absence(uid: int) -> None:
+    """Observe natural exit without treating a same-user PID as ours to signal."""
+    deadline = time.monotonic() + lifecycle.SAFARI_PROCESS_STOP_TIMEOUT
+    while time.monotonic() < deadline:
+        pids = lifecycle._safari_pid_candidates()
+        if time.monotonic() >= deadline:
+            break
+        if not pids:
+            lifecycle._assert_no_safari_process(uid, "session-smoke-after")
+            if time.monotonic() < deadline:
+                return
+            break
+        time.sleep(0.1)
+    raise lifecycle.LifecycleError("Safari absence was not verified before the cleanup deadline")
+
+
 def session_probe(strategy: str, driver_url: str, uid: int) -> dict:
-    """Use the live gate's transport/ownership checks, without a live-site URL."""
+    """Use the live gate's transport/process observations, without a live-site URL."""
     if strategy not in STRATEGIES or type(uid) is not int or uid <= 0:
         raise ValueError("invalid fixed session inputs")
     driver_url = lifecycle._validated_safaridriver_url(driver_url)
@@ -71,6 +87,8 @@ def session_probe(strategy: str, driver_url: str, uid: int) -> dict:
             session_id = None
             raise lifecycle.LifecycleError("missing session identity")
         stage = "process_start"
+        # UID/executable match is useful observation, not proof that this
+        # WebDriver session owns the observed process. Never signal that PID.
         safari_pid = lifecycle._wait_for_safari_process(uid, "session-smoke")
         encoded = urllib.parse.quote(session_id, safe="")
         stage = "navigate_blank"
@@ -91,15 +109,10 @@ def session_probe(strategy: str, driver_url: str, uid: int) -> dict:
                     f"/session/{urllib.parse.quote(session_id, safe='')}")
             except Exception as exc:
                 cleanup_errors.append(lifecycle.webdriver_failure_details(exc))
-        if safari_pid is not None:
-            try:
-                lifecycle._stop_owned_safari_process(safari_pid, uid, "session-smoke")
-            except Exception as exc:
-                cleanup_errors.append(lifecycle.webdriver_failure_details(exc))
         # A failed creation can still have started Safari. Never adopt/kill an
         # unknown PID, and never infer absence from a missing session/PID.
         try:
-            lifecycle._assert_no_safari_process(uid, "session-smoke-after")
+            _wait_for_safari_absence(uid)
             cleanup_verified = not cleanup_errors
         except Exception as exc:
             cleanup_errors.append(lifecycle.webdriver_failure_details(exc))
