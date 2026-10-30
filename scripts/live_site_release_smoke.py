@@ -730,7 +730,10 @@ def _is_safari_observation_timeout(error: lifecycle.LifecycleError) -> bool:
     return isinstance(error.__cause__, TimeoutError)
 
 
-def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
+def _run_safari(
+    host: str, driver_url: str, uid: int, *,
+    startup_diagnostics: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     session_id = None
     safari_pid = None
     outcome = "terminal_error"
@@ -740,11 +743,13 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     observation_started: float | None = None
     finished = attempt_started
     failure: BaseException | None = None
+    creation_attempted = False
     try:
         _wait_for_safaridriver_ready(driver_url)
         failure_reason = "browser_process_conflict"
         lifecycle._assert_no_safari_process(uid, host)
         failure_reason = "session_create_failed"
+        creation_attempted = True
         created = lifecycle._webdriver_request(
             driver_url,
             "POST",
@@ -873,6 +878,28 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
                 lifecycle._stop_owned_safari_process(safari_pid, uid, host)
             except BaseException as exc:
                 cleanup.append(exc)
+        cleanup_verified = False
+        if creation_attempted:
+            try:
+                lifecycle._assert_no_safari_process(uid, host)
+                cleanup_verified = not cleanup
+            except BaseException as exc:
+                cleanup.append(exc)
+        if startup_diagnostics is not None and len(startup_diagnostics) < len(SITES):
+            startup_diagnostics.append({
+                "stage": failure_reason if failure is not None else "complete",
+                "error": lifecycle.webdriver_failure_details(failure),
+                "setup_ms": max(0, min(300_000, round(
+                    ((observation_started if observation_started is not None else finished)
+                     - attempt_started) * 1000
+                ))),
+                "session_id_observed": isinstance(session_id, str) and bool(session_id),
+                "pid_observed": safari_pid is not None,
+                "cleanup_verified": cleanup_verified,
+                "cleanup_error": lifecycle.webdriver_failure_details(
+                    cleanup[0] if cleanup else None
+                ),
+            })
         if cleanup:
             raise LiveSiteError("Safari cleanup failed") from (failure or cleanup[0])
     # Session teardown is verified but excluded from the navigation deadline.
@@ -941,7 +968,10 @@ def _control_route(host: str, route: str) -> str:
     return "origin_error"
 
 
-def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int]:
+def run_gate(
+    app_bundle: Path, chrome: Path, driver_url: str, *,
+    startup_diagnostics: list[dict[str, object]] | None = None,
+) -> tuple[dict, int]:
     failure_stage = "require_protected_ci"
     try:
         _require_protected_ci()
@@ -971,7 +1001,12 @@ def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int
         lifecycle._assert_anchor_active(runner)
         for host in SITES:
             failure_stage = f"safari:{host}"
-            safari = _run_safari(host, driver_url, uid)
+            if startup_diagnostics is None:
+                safari = _run_safari(host, driver_url, uid)
+            else:
+                safari = _run_safari(
+                    host, driver_url, uid, startup_diagnostics=startup_diagnostics
+                )
             failure_stage = f"chrome:{host}"
             chrome_result = _run_chrome(host, chrome, uid, gid)
             browsers = (safari, chrome_result)
@@ -1044,10 +1079,24 @@ def main() -> int:
     parser.add_argument("--chrome-executable", type=Path, required=True)
     parser.add_argument("--safaridriver-url", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--safari-startup-report", type=Path)
     args = parser.parse_args()
-    report, exit_status = run_gate(
-        args.app_bundle, args.chrome_executable, args.safaridriver_url
-    )
+    startup_diagnostics: list[dict[str, object]] = []
+    try:
+        kwargs = (
+            {"startup_diagnostics": startup_diagnostics}
+            if args.safari_startup_report is not None else {}
+        )
+        report, exit_status = run_gate(
+            args.app_bundle, args.chrome_executable, args.safaridriver_url, **kwargs
+        )
+    finally:
+        if args.safari_startup_report is not None:
+            args.safari_startup_report.write_text(json.dumps({
+                "schema_version": 1,
+                "harness": "safari_startup_observation",
+                "attempts": startup_diagnostics,
+            }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     args.output.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

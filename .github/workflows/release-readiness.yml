@@ -251,6 +251,8 @@ jobs:
           release="$RUNNER_TEMP/readiness-geph.release"
           geph_log="$RUNNER_TEMP/readiness-geph.log"
           driver_log="$RUNNER_TEMP/readiness-safaridriver.log"
+          safari_startup_report="$RUNNER_TEMP/live-site-safari-startup.json"
+          sudo /bin/rm -f "$safari_startup_report"
           rm -f "$ready" "$release" "$geph_log" "$driver_log"
           python3 scripts/geph_owned_lifecycle_smoke.py \
             --app-bundle "$RUNNER_TEMP/candidate-app/Slipstream.app" \
@@ -269,7 +271,11 @@ jobs:
               wait "$geph_pid" 2>/dev/null || true
             fi
             cat "$geph_log" || true
-            test "$status" -eq 0 || cat "$driver_log" || true
+            if [ -f "$safari_startup_report" ]; then
+              sudo /usr/bin/install -m 600 -o "$(id -u)" "$safari_startup_report" \
+                dist-readiness/live-site-safari-startup.json
+              sudo /bin/rm -f "$safari_startup_report"
+            fi
             rm -f "$ready" "$release" "$geph_log" "$driver_log"
             exit "$status"
           }
@@ -323,9 +329,15 @@ jobs:
             --app-bundle "$RUNNER_TEMP/candidate-app/Slipstream.app" \
             --chrome-executable "${{ steps.chrome.outputs.chrome-path }}" \
             --safaridriver-url "$driver_url" \
+            --safari-startup-report "$safari_startup_report" \
             --output "$RUNNER_TEMP/live-sites.json"
           live_status=$?
           set -e
+          if [ -f "$safari_startup_report" ]; then
+            sudo /usr/bin/install -m 600 -o "$(id -u)" "$safari_startup_report" \
+              dist-readiness/live-site-safari-startup.json
+            sudo /bin/rm -f "$safari_startup_report"
+          fi
           /usr/bin/install -m 600 "$RUNNER_TEMP/live-sites.json" \
             dist-readiness/live-sites.json
           sudo /bin/rm -f "$RUNNER_TEMP/live-sites.json"
@@ -347,6 +359,7 @@ jobs:
           path: |
             dist-readiness/live-sites.json
             dist-readiness/live-sites.exit
+            dist-readiness/live-site-safari-startup.json
           if-no-files-found: error
           retention-days: 7
 

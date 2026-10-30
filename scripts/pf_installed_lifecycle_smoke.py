@@ -126,6 +126,55 @@ class LifecycleError(RuntimeError):
     """A lifecycle safety condition or assertion failed."""
 
 
+WEBDRIVER_ERROR_CODES = frozenset({
+    "detached shadow root", "element click intercepted", "element not interactable",
+    "insecure certificate", "invalid argument", "invalid cookie domain",
+    "invalid element state", "invalid selector", "invalid session id",
+    "javascript error", "move target out of bounds", "no such alert",
+    "no such cookie", "no such element", "no such frame", "no such shadow root",
+    "no such window", "script timeout", "session not created",
+    "stale element reference", "timeout", "unable to capture screen",
+    "unable to set cookie", "unexpected alert open", "unknown command",
+    "unknown error", "unknown method", "unsupported operation",
+})
+WEBDRIVER_EXCEPTION_CLASSES = frozenset({
+    "LifecycleError", "WebDriverRequestError", "LiveSiteError", "TimeoutError",
+    "ConnectionError", "ConnectionRefusedError", "ConnectionResetError",
+    "BrokenPipeError", "OSError", "HTTPException", "RemoteDisconnected",
+    "BadStatusLine", "IncompleteRead", "JSONDecodeError", "UnicodeDecodeError",
+})
+
+
+class WebDriverRequestError(LifecycleError):
+    """Request failure with separate, bounded public diagnostic metadata."""
+
+    def __init__(self, message: str, *, http_status: object = None,
+                 webdriver_error: object = None) -> None:
+        super().__init__(message)
+        self.http_status = (
+            http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        )
+        self.webdriver_error = (
+            webdriver_error if isinstance(webdriver_error, str)
+            and webdriver_error in WEBDRIVER_ERROR_CODES else None
+        )
+
+
+def webdriver_failure_details(error: BaseException | None) -> dict[str, object]:
+    """Never serialize exception text, response bodies, URLs or identifiers."""
+    if error is None:
+        return {"exception_class": None, "http_status": None, "webdriver_error": None}
+    cause = error.__cause__ if isinstance(error, WebDriverRequestError) else None
+    name = type(cause if cause is not None else error).__name__
+    http_status = getattr(error, "http_status", None) if isinstance(error, WebDriverRequestError) else None
+    code = getattr(error, "webdriver_error", None) if isinstance(error, WebDriverRequestError) else None
+    return {
+        "exception_class": name if name in WEBDRIVER_EXCEPTION_CLASSES else "Exception",
+        "http_status": http_status if type(http_status) is int and 100 <= http_status <= 599 else None,
+        "webdriver_error": code if isinstance(code, str) and code in WEBDRIVER_ERROR_CODES else None,
+    }
+
+
 @dataclass(frozen=True)
 class ChromeProcessGroupMember:
     pid: int
@@ -1329,32 +1378,45 @@ def _webdriver_request(
         response = connection.getresponse()
         body = response.read(WEBDRIVER_RESPONSE_LIMIT + 1)
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
-        raise LifecycleError(
+        raise WebDriverRequestError(
             f"SafariDriver {method} {path} failed: {exc}"
         ) from exc
     finally:
         connection.close()
     if len(body) > WEBDRIVER_RESPONSE_LIMIT:
-        raise LifecycleError(f"SafariDriver {method} {path} response is too large")
+        raise WebDriverRequestError(
+            f"SafariDriver {method} {path} response is too large", http_status=response.status
+        )
     if response.status >= 400:
         detail = body[:4000].decode("utf-8", errors="replace")
-        raise LifecycleError(
-            f"SafariDriver {method} {path} returned HTTP {response.status}: {detail}"
+        try:
+            parsed_error = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            parsed_error = None
+        value = parsed_error.get("value") if isinstance(parsed_error, dict) else None
+        code = value.get("error") if isinstance(value, dict) else None
+        raise WebDriverRequestError(
+            f"SafariDriver {method} {path} returned HTTP {response.status}: {detail}",
+            http_status=response.status, webdriver_error=code,
         )
     try:
         result = json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         detail = body[:1000].decode("utf-8", errors="replace")
-        raise LifecycleError(
-            f"SafariDriver {method} {path} returned invalid JSON: {detail}"
+        raise WebDriverRequestError(
+            f"SafariDriver {method} {path} returned invalid JSON: {detail}",
+            http_status=response.status,
         ) from exc
     if not isinstance(result, dict):
-        raise LifecycleError(f"SafariDriver {method} {path} returned a non-object")
+        raise WebDriverRequestError(
+            f"SafariDriver {method} {path} returned a non-object", http_status=response.status
+        )
     value = result.get("value")
     if isinstance(value, dict) and value.get("error"):
-        raise LifecycleError(
+        raise WebDriverRequestError(
             f"SafariDriver {method} {path} failed: "
-            f"{value.get('error')}: {value.get('message', '')}"
+            f"{value.get('error')}: {value.get('message', '')}",
+            http_status=response.status, webdriver_error=value.get("error"),
         )
     return result
 
@@ -1459,11 +1521,19 @@ def _owned_safari_pids(uid: int) -> tuple[int, ...]:
 
 
 def _assert_no_safari_process(uid: int, label: str) -> None:
-    pids = _owned_safari_pids(uid)
-    if pids:
-        raise LifecycleError(
-            f"Safari probe {label} requires a fresh process; already running: {pids}"
-        )
+    if not SAFARI_EXECUTABLE.is_file() or not os.access(SAFARI_EXECUTABLE, os.X_OK):
+        raise LifecycleError(f"Safari executable is unavailable: {SAFARI_EXECUTABLE}")
+    # Absence is not established when pgrep observed a candidate but ps could
+    # not identify it. Do not infer ownership or signal such a process.
+    for pid in _safari_pid_candidates():
+        identity = _safari_process_identity_for_pid(pid)
+        if identity is not None and _safari_identity_is_terminal(identity, uid):
+            continue
+        if identity is None and not _safari_pid_candidates():
+            # The process can exit between pgrep and ps. A successful fresh
+            # empty snapshot proves absence; an unreadable/nonempty one does not.
+            return
+        raise LifecycleError(f"Safari probe {label} process absence is not verified")
 
 
 def _wait_for_safari_process(uid: int, label: str) -> int:

@@ -1275,6 +1275,152 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(sleep.call_count, 2)
 
+    def test_failed_safari_creation_refuses_unverified_partial_process_cleanup(self) -> None:
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process", side_effect=[
+                None, smoke.lifecycle.LifecycleError("private leftover process")
+            ]) as absent,
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=
+                smoke.lifecycle.LifecycleError("private POST /session failure")),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process") as stop,
+        ):
+            with self.assertRaisesRegex(smoke.LiveSiteError, "Safari cleanup failed"):
+                smoke._run_safari("app.aikido.dev", "http://127.0.0.1:12345", 501)
+        self.assertEqual(absent.call_count, 2)
+        stop.assert_not_called()
+
+    def test_safari_startup_sidecar_records_setup_not_navigation_and_no_private_data(self) -> None:
+        error = smoke.lifecycle.WebDriverRequestError("private-token https://secret/", http_status=500, webdriver_error="session not created")
+        diagnostics = []
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=error),
+            mock.patch.object(smoke.time, "monotonic", side_effect=[10.0, 12.5]),
+        ):
+            result = smoke._run_safari("app.aikido.dev", "http://127.0.0.1:12345", 501, startup_diagnostics=diagnostics)
+        self.assertEqual(result["elapsed_ms"], 0)
+        self.assertEqual(set(result), {"browser", "deadline_ms", "elapsed_ms", "outcome", "reason", "route"})
+        self.assertEqual(diagnostics, [{
+            "stage": "session_create_failed",
+            "error": {"exception_class": "WebDriverRequestError", "http_status": 500, "webdriver_error": "session not created"},
+            "setup_ms": 2500, "session_id_observed": False, "pid_observed": False,
+            "cleanup_verified": True,
+            "cleanup_error": {"exception_class": None, "http_status": None, "webdriver_error": None},
+        }])
+        self.assertNotIn("private-token", smoke.json.dumps(diagnostics))
+        self.assertNotIn("https://", smoke.json.dumps(diagnostics))
+
+    def test_safari_missing_session_id_cannot_claim_leftover_cleanup(self) -> None:
+        for identity_error in ("private leftover process", "private foreign identity", "private unavailable identity"):
+            with self.subTest(identity_error=identity_error):
+                diagnostics = []
+                with (
+                    mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+                    mock.patch.object(smoke.lifecycle, "_assert_no_safari_process", side_effect=[None, smoke.lifecycle.LifecycleError(identity_error)]),
+                    mock.patch.object(smoke.lifecycle, "_webdriver_request", return_value={"value": {"private": "token"}}) as request,
+                    mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process") as stop,
+                ):
+                    with self.assertRaisesRegex(smoke.LiveSiteError, "Safari cleanup failed"):
+                        smoke._run_safari("app.aikido.dev", "http://127.0.0.1:12345", 501, startup_diagnostics=diagnostics)
+                request.assert_called_once()
+                stop.assert_not_called()
+                self.assertFalse(diagnostics[0]["cleanup_verified"])
+                self.assertFalse(diagnostics[0]["session_id_observed"])
+                self.assertFalse(diagnostics[0]["pid_observed"])
+                self.assertEqual(diagnostics[0]["stage"], "session_create_failed")
+                self.assertNotIn("private", smoke.json.dumps(diagnostics))
+
+    def test_safari_preexisting_conflict_is_not_owned_or_cleaned(self) -> None:
+        diagnostics = []
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process", side_effect=smoke.lifecycle.LifecycleError("private foreign process")),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request") as request,
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process") as stop,
+        ):
+            result = smoke._run_safari("app.aikido.dev", "http://127.0.0.1:12345", 501, startup_diagnostics=diagnostics)
+        self.assertEqual(result["reason"], "browser_process_conflict")
+        self.assertFalse(diagnostics[0]["cleanup_verified"])
+        request.assert_not_called()
+        stop.assert_not_called()
+
+    def test_safari_sidecar_is_written_when_live_gate_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report = smoke.Path(temporary) / "live-sites.json"
+            sidecar = smoke.Path(temporary) / "live-site-safari-startup.json"
+            def fail_gate(*args, startup_diagnostics):
+                self.assertEqual(startup_diagnostics, [])
+                raise smoke.LiveSiteError("controlled failure")
+            with (
+                mock.patch.object(smoke.sys, "argv", ["smoke", "--app-bundle", "/app", "--chrome-executable", "/chrome", "--safaridriver-url", "http://127.0.0.1:12345", "--output", str(report), "--safari-startup-report", str(sidecar)]),
+                mock.patch.object(smoke, "run_gate", side_effect=fail_gate),
+            ):
+                with self.assertRaisesRegex(smoke.LiveSiteError, "controlled failure"):
+                    smoke.main()
+            self.assertEqual(smoke.json.loads(sidecar.read_text()), {"schema_version": 1, "harness": "safari_startup_observation", "attempts": []})
+            self.assertFalse(report.exists())
+
+    def test_safari_sidecar_bounds_attempts_and_duration(self) -> None:
+        diagnostics = []
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=smoke.lifecycle.LifecycleError("private")),
+            mock.patch.object(smoke.time, "monotonic", side_effect=[0, 999999999] * 5),
+        ):
+            for _ in range(5):
+                smoke._run_safari("app.aikido.dev", "http://127.0.0.1:12345", 501, startup_diagnostics=diagnostics)
+        self.assertEqual(len(diagnostics), 4)
+        self.assertTrue(all(item["setup_ms"] == 300000 for item in diagnostics))
+        self.assertLess(len(smoke.json.dumps(diagnostics)), 4096)
+
+    def test_safari_sidecar_keeps_release_schema_two_exact(self) -> None:
+        report = {
+            "schema_version": 2, "harness": "safari_chrome_live_sites",
+            "harness_exit_status": 0, "result": "passed", "sites": [{
+                "host": host, "result": "usable",
+                "controls": {"direct": "not_needed", "owned_geph": "not_needed"},
+                "browsers": [{"browser": browser, "deadline_ms": values["deadline_ms"],
+                              "elapsed_ms": 100, "outcome": "usable", "reason": "",
+                              "route": "slipstream_selected"} for browser in ("safari", "chrome")],
+            } for host, values in smoke.SITES.items()],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            output = smoke.Path(temporary) / "live-sites.json"
+            sidecar = smoke.Path(temporary) / "startup.json"
+            with (
+                mock.patch.object(smoke.sys, "argv", ["smoke", "--app-bundle", "/app", "--chrome-executable", "/chrome", "--safaridriver-url", "http://127.0.0.1:12345", "--output", str(output), "--safari-startup-report", str(sidecar)]),
+                mock.patch.object(smoke, "run_gate", return_value=(report, 0)),
+            ):
+                self.assertEqual(smoke.main(), 0)
+            actual = smoke.json.loads(output.read_text())
+            self.assertEqual(actual, report)
+            self.assertEqual(readiness.validate_live_report(actual, 0), "passed")
+            self.assertEqual(smoke.json.loads(sidecar.read_text())["schema_version"], 1)
+
+    def test_safari_known_session_and_pid_cleanup_retains_only_booleans(self) -> None:
+        diagnostics = []
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=[
+                {"value": {"sessionId": "private-session-token"}},
+                smoke.lifecycle.WebDriverRequestError("private configuration", http_status=500, webdriver_error="unknown error"), {},
+            ]),
+            mock.patch.object(smoke.lifecycle, "_wait_for_safari_process", return_value=4321),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process") as stop,
+        ):
+            result = smoke._run_safari("app.aikido.dev", "http://127.0.0.1:12345", 501, startup_diagnostics=diagnostics)
+        stop.assert_called_once_with(4321, 501, "app.aikido.dev")
+        self.assertEqual(result["reason"], "session_configuration_failed")
+        self.assertTrue(diagnostics[0]["session_id_observed"])
+        self.assertTrue(diagnostics[0]["pid_observed"])
+        self.assertTrue(diagnostics[0]["cleanup_verified"])
+        self.assertNotIn("private", smoke.json.dumps(diagnostics))
+        self.assertNotIn("4321", smoke.json.dumps(diagnostics))
+
     def test_safari_setup_failures_keep_exact_bounded_stages(self) -> None:
         with (
             mock.patch.object(
@@ -2757,7 +2903,10 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         target = SimpleNamespace(install_command=("install",))
         system = mock.Mock()
 
-        def safari(host: str, _driver_url: str, _uid: int) -> dict[str, object]:
+        observed_diagnostics = []
+
+        def safari(host: str, _driver_url: str, _uid: int, *, startup_diagnostics=None) -> dict[str, object]:
+            observed_diagnostics.append(startup_diagnostics)
             return {
                 **browser_result,
                 "deadline_ms": smoke.SITES[host]["deadline_ms"],
@@ -2795,7 +2944,16 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 mock.Mock(), mock.Mock(), "http://127.0.0.1:1"
             )
 
+            diagnostics = []
+            with_sidecar, sidecar_status = smoke.run_gate(
+                mock.Mock(), mock.Mock(), "http://127.0.0.1:1",
+                startup_diagnostics=diagnostics,
+            )
+
         self.assertEqual(readiness.validate_live_report(report, status), "passed")
+        self.assertEqual((with_sidecar, sidecar_status), (report, status))
+        self.assertEqual(observed_diagnostics[:4], [None] * 4)
+        self.assertTrue(all(item is diagnostics for item in observed_diagnostics[4:]))
 
     def test_browser_terminal_result_still_returns_the_full_matrix(self) -> None:
         browser_result = {

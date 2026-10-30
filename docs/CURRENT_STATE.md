@@ -2,7 +2,64 @@
 
 ## Verified Checkpoint
 
-### Active: candidate producer readiness, 2026-10-30
+### Active: preserve Safari failure evidence, 2026-10-30
+
+PR432: https://github.com/aiwaki/slipstream/pull/432. Secondary checkout
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/safari-startup-observation`, based on C5
+`2984beb5a102930d6cede825d9ae393d680513b5`.
+The final scope is seven files: four shared helper/test files, readiness workflow
+sidecar retention and two documentation files. The standalone Safari experiment
+is archived privately and removed from the PR; no experimental workflow ships.
+
+R41134436278/1 failed before its long soak: Chrome4/4 opened, but Safari's first
+session creation failed and three further attempts failed its process-absence
+check. Navigation elapsed_ms=0 does not establish startup duration. The initial
+exception was suppressed and driver log deleted, so its underlying cause remains
+unknown. Owned-Geph baseline/outage/recovery, tray crash, KeepAlive and external
+sentinel checks passed; partial Safari startup cleanup was not proved. The
+1800-second soak and final attestations were not run. Release .32 is NOT_ADMITTED.
+
+The retained fix preserves bounded, allowlisted startup/cleanup observations in
+an optional sidecar, without changing strict live-sites schema2. Failed creation
+without a recorded session ID/PID still verifies Safari absence. An inspection
+failure cannot stand for successful cleanup. The default pageLoadStrategy=none,
+30-second command timeout, release gates and protected budget are unchanged.
+Two causal regressions failed on C5; 48 focused mocked checks passed. Receipt
+`output/continuation-20261030/safari-startup-observation/verification.json`, SHA
+`598226566c5c56e6d3558938b56b224ba2929a75540fd206688deadb2419227c`.
+
+Disposable experiments created sessions and navigated about:blank with both
+normal and none. They did not reproduce the original startup failure. Review
+identified a separate race in the experimental harness: matching UID/executable
+does not prove that a Safari PID belongs to its session. After removing Safari
+signalling, run41143761559/1 refused cleanup for both modes, including the final
+absence check after its own driver exited. Safe evidence does not distinguish
+process residue from inspection failure. Do not call this a routing failure or
+restore guessed-PID signalling to make it pass. The experiment is retained under
+`output/continuation-20261030/safari-session-experiment-archive/`, archive receipt
+SHA `c38aa87fb0c2d9fc03c28c0adeed070d952ecf27e3a9cc85f5e3cd97627930d2`.
+The existing shared/live lifecycle helpers' UID/executable ownership assumption
+remains a separate known limitation; this patch does not resolve it.
+
+Reusable ordinary-CI baseline: PR head179fb533 passed CI41140189410/1 and
+audit41140189428/1, with native Stop/Quit7/7, Chrome4/4 and Safari4/4, composed
+CSS/JS/image navigation, clean uninstall, external sentinel and global PF
+preservation. CI receipt SHA
+`e0936f0ca4f54fccf15190d0051eaef5fc8af7ead93b3a551c4453c6a94bef1b`.
+C5 main CI41128371044/1 and audit41128370866/1 also passed; its native
+G41131209759/2 and packaged P41134440722/1 passed. These historical proofs do not
+admit a new exact-source release or prove the public feed/tray/admin-dialog path.
+
+Next: independent review of the narrowed seven-file scope and fresh exact-head
+required CI, then normal merge. Do not repeat unchanged local suites. Protected
+budget is 3/3 for October30 UTC: no additional account-backed dispatch or rerun.
+Two RSA allowances expire October31 00:00 UTC; never extend or carry them forward.
+No .32 publication or workstation installation. Preserve the working external
+Geph and all apps/services/PF/DNS/proxy/PAC/VPN/accounts; no local native/browser/
+build/live activity. Small mocked/static checks and disposable CI only.
+
+### Previous: candidate producer readiness, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/producer-readiness-job-proof`, based on main C4

@@ -1454,6 +1454,111 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         )
         connection.close.assert_called_once()
 
+    def test_webdriver_startup_failure_retains_allowlisted_http_metadata(self) -> None:
+        response = mock.Mock(status=500)
+        response.read.return_value = json.dumps({"value": {
+            "error": "session not created", "message": "private-token https://secret/"
+        }}).encode()
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        with mock.patch.object(lifecycle.http.client, "HTTPConnection", return_value=connection):
+            with self.assertRaises(lifecycle.LifecycleError) as caught:
+                lifecycle._webdriver_request("http://127.0.0.1:19445", "POST", "/session", {})
+        self.assertEqual(getattr(caught.exception, "http_status", None), 500)
+        self.assertEqual(getattr(caught.exception, "webdriver_error", None), "session not created")
+        connection.close.assert_called_once()
+
+    def test_webdriver_failure_metadata_excludes_response_content(self) -> None:
+        cases = (
+            (500, b'{"value":{"error":"session not created","message":"private-token https://secret/"}}', "session not created", "WebDriverRequestError"),
+            (500, b'{"value":{"error":"private-token","message":"secret"}}', None, "WebDriverRequestError"),
+            (500, b'{"value":{"error":["private-token"]}}', None, "WebDriverRequestError"),
+            (503, b'private-token https://secret/', None, "WebDriverRequestError"),
+            (200, b'private-token https://secret/', None, "JSONDecodeError"),
+            (200, b'["private-token"]', None, "WebDriverRequestError"),
+            (200, b'{"value":{"error":"invalid argument","message":"private-token"}}', "invalid argument", "WebDriverRequestError"),
+        )
+        for status, body, code, exception_class in cases:
+            with self.subTest(status=status, code=code, exception_class=exception_class):
+                response = mock.Mock(status=status)
+                response.read.return_value = body
+                connection = mock.Mock()
+                connection.getresponse.return_value = response
+                with mock.patch.object(lifecycle.http.client, "HTTPConnection", return_value=connection):
+                    with self.assertRaises(lifecycle.LifecycleError) as caught:
+                        lifecycle._webdriver_request("http://127.0.0.1:19445", "POST", "/session", {})
+                details = lifecycle.webdriver_failure_details(caught.exception)
+                self.assertEqual(details, {"exception_class": exception_class, "http_status": status, "webdriver_error": code})
+                self.assertNotIn("private-token", json.dumps(details))
+                connection.close.assert_called_once()
+
+    def test_webdriver_timeout_metadata_preserves_default_deadline(self) -> None:
+        connection = mock.Mock()
+        connection.getresponse.side_effect = TimeoutError("private-token")
+        with mock.patch.object(lifecycle.http.client, "HTTPConnection", return_value=connection) as factory:
+            with self.assertRaises(lifecycle.LifecycleError) as caught:
+                lifecycle._webdriver_request("http://127.0.0.1:19445", "POST", "/session", {})
+        factory.assert_called_once_with("127.0.0.1", 19445, timeout=30)
+        self.assertEqual(lifecycle.webdriver_failure_details(caught.exception), {
+            "exception_class": "TimeoutError", "http_status": None, "webdriver_error": None,
+        })
+        connection.close.assert_called_once()
+
+    def test_webdriver_metadata_revalidates_mutated_or_unknown_values(self) -> None:
+        error = lifecycle.WebDriverRequestError("private-token", http_status=500, webdriver_error="unknown error")
+        error.http_status = True
+        error.webdriver_error = "private-token"
+        self.assertEqual(lifecycle.webdriver_failure_details(error), {
+            "exception_class": "WebDriverRequestError", "http_status": None, "webdriver_error": None,
+        })
+        private_class = type("private_token", (RuntimeError,), {})
+        self.assertEqual(lifecycle.webdriver_failure_details(private_class("secret"))["exception_class"], "Exception")
+
+    def test_safari_absence_requires_known_terminal_identity_or_no_candidate(self) -> None:
+        for identity in (None, (502, "S", "/foreign/Safari"), (501, "S", str(lifecycle.SAFARI_EXECUTABLE))):
+            with (
+                self.subTest(identity=identity),
+                mock.patch.object(lifecycle.Path, "is_file", return_value=True),
+                mock.patch.object(lifecycle.os, "access", return_value=True),
+                mock.patch.object(lifecycle, "_safari_pid_candidates", return_value=(321,)),
+                mock.patch.object(lifecycle, "_safari_process_identity_for_pid", return_value=identity),
+                mock.patch.object(lifecycle.os, "kill") as kill,
+            ):
+                with self.assertRaisesRegex(lifecycle.LifecycleError, "absence is not verified"):
+                    lifecycle._assert_no_safari_process(501, "case")
+                kill.assert_not_called()
+
+    def test_safari_absence_accepts_empty_or_known_terminal_snapshot(self) -> None:
+        for pids, identity in (((), None), ((321,), (501, "Z", str(lifecycle.SAFARI_EXECUTABLE)))):
+            with (
+                self.subTest(pids=pids),
+                mock.patch.object(lifecycle.Path, "is_file", return_value=True),
+                mock.patch.object(lifecycle.os, "access", return_value=True),
+                mock.patch.object(lifecycle, "_safari_pid_candidates", return_value=pids),
+                mock.patch.object(lifecycle, "_safari_process_identity_for_pid", return_value=identity),
+                mock.patch.object(lifecycle.os, "kill") as kill,
+            ):
+                lifecycle._assert_no_safari_process(501, "case")
+                kill.assert_not_called()
+
+    def test_safari_absence_allows_exit_race_only_with_fresh_empty_snapshot(self) -> None:
+        for fresh in ((), (654,), lifecycle.LifecycleError("private inspection failure")):
+            with (
+                self.subTest(fresh=fresh),
+                mock.patch.object(lifecycle.Path, "is_file", return_value=True),
+                mock.patch.object(lifecycle.os, "access", return_value=True),
+                mock.patch.object(lifecycle, "_safari_pid_candidates", side_effect=[(321,), fresh]) as inspect,
+                mock.patch.object(lifecycle, "_safari_process_identity_for_pid", return_value=None),
+                mock.patch.object(lifecycle.os, "kill") as kill,
+            ):
+                if fresh == ():
+                    lifecycle._assert_no_safari_process(501, "case")
+                else:
+                    with self.assertRaises(lifecycle.LifecycleError):
+                        lifecycle._assert_no_safari_process(501, "case")
+                self.assertEqual(inspect.call_count, 2)
+                kill.assert_not_called()
+
     def test_safari_probe_uses_and_deletes_an_isolated_session(self) -> None:
         calls = []
 
