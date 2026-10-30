@@ -618,12 +618,15 @@ class Observer(Native):
         self.retain_completion_diagnostic()
         raise Refused("packaged transaction deadline exhausted; observation incomplete")
 
-    def final_app(self):
+    def final_app(self, *, clock=time.monotonic, sleep=time.sleep):
+        # A terminal observation does not keep the shared lock available for a
+        # later check. Keep the existing qualification budget and recheck app
+        # identity/cleanup only after terminal observation.
+        self.wait_watchdog_finished(self.deadline - 90, clock=clock, sleep=sleep)
         expected = self.expected["new"]
         require(self.tproxy._daemon_update_tree(self.target, readable=True) == expected["bundle_tree_sha256"], "final app tree mismatch")
         for path in (self.journal_path, self.ack_path, self.stage, Path(self.last_journal["backup"]), self.agent):
             require(not os.path.lexists(path), "app transaction cleanup incomplete: " + str(path))
-        require(self.watchdog_finished(), "app watchdog is not terminal")
         result = self.run(["/usr/bin/pgrep", "-x", "slipstream"], check=False)
         self.retain_final_tray_query("new", result)
         values = result.stdout.decode().split()
