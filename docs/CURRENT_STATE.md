@@ -2,46 +2,59 @@
 
 ## Verified Checkpoint
 
-### Active: native Quit process-census repair, 2026-10-26
+### Active: preview .31 published and verified, 2026-10-30
 
-Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/root-stop-census-observation`, HEAD `4ddfaf624e4f1ae1d439761bfd2933fa9e1a61d7`.
-Preserve the user's external Geph. No workstation service/account/browser/build/install action.
+Active checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
+branch `codex/post-census-release-qualification`. Published source is
+`3eb32bd3029d6acd88b380a8c767c19c7abc76a4` (PR424), tree
+`37981d7723c73d74b99ab86faf00f494c8c0c030`. Documentation follow-up is separate.
+Preserve the user's working external Geph. No workstation service/account/browser/build/install action in this continuation.
 
-PR423 merged normally at 11:58:46 UTC. Exact head `73781df7d8ba5ae04e7afc591a234693b3f54c25`
-passed CI40314113059 and audit40314113053; all three required checks and independent review
-were clear. All seven native Stop/Quit cases passed; four confirmed submissions completed,
-with no uncertain outcome or transient retries. Merged tree equals tested tree
-`1d33f00f31b9339bec338815b58f8705531a8899`. Receipts:
-`output/readiness-preflight-20261026/native-auth-observation/pr423/`.
+[Preview .31](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
+was published October 30 at 10:47 UTC by
+[publisher41042305259](https://github.com/aiwaki/slipstream/actions/runs/41042305259),
+attempt 1, release ID428916042. Independent verification passed all 24 conditions:
+exact tag/source, signed manifest, all 12 asset sizes/digests, unchanged candidate,
+previous `.30` archived by title only, and unchanged stable/latest identity/assets.
+Actual release notes were updated and read back: manual DMG installation; public
+preview auto-update and public upgrade/rollback explicitly remain unverified.
+No new build, protected retry, or workstation installation was needed.
 
-Main audit40319062698 passed. Main CI40319062696 failed `menu_stop_and_quit`
-after three native cases and confirmed authorization passed. Product stop returned
-`root process census is unknown after bootout`; tray retained stopping. Exact census
-reason was not recorded, and prior partial stop had already proven root absence.
-Independent Apple-source review found a real parser defect: legal initial `?` state
-is rejected by both process parsers, even in an unrelated row. Argument lookup can
-also fall back to an ambiguous basename during a process-snapshot race. Scoped repair
-is ready: accept legal state while retaining UID/command identity; retain safe
-reason codes; permit only one fresh full census for ambiguous root basename.
-No unknown result may authorize a signal or successful absence. See the October 26
-Quit entry in ROUTING_RESEARCH.md. The old-code regression gives 26 failures / 3 passes;
-the repaired root-stop selection gives 98 passes and the directly affected cleanup/identity
-selection gives 12 passes. Python compilation and independent read-only review are clear.
-Evidence: `output/readiness-preflight-20261026/root-stop-census/verification.json`.
-Next: a fresh PR/native CI; no unchanged rerun or qualification. No local native build,
-service operation, account switch or full test suite was performed for this repair.
-Only one of three account-backed attempts was consumed today at the last complete inventory;
-no subsequent protected dispatch occurred. Recheck the budget before any future dispatch.
+Exact-candidate evidence (all attempt 1; revalidated October 30):
 
-PR423 changed only the native auth harness and docs: fixed stage/numeric-code observations,
-bounded known pre-click retry, no resubmission after possible click, no late/uncertain success.
-43 scoped offline harness tests and 8 docs checks passed; 9 added cases fail against old code.
-The historical AX stage/code was unknown, so the prior green PR was not proof of its cause.
-PR419 routing continuity and PR422 real PF controls remain merged; protected outage/recovery
-and a fresh root/app update pair still remain. October 24 Codex403 Ray is unattributed.
-Next qualification plan has placeholders only and explicitly rejects stale/failed candidates:
-`output/readiness-preflight-20261026/native-auth-observation/next-qualification-plan.json`.
+| Gate | Result |
+|---|---|
+| CI40366566525 / audit40366566435 | Both passed on published source. Seven native Stop/Quit cases passed, four confirmed authorizations, no uncertain submissions or cleanup errors. |
+| Readiness40370438338 | All five report attestations verified against the exact workflow/run/source. Four sites usable in Chrome/Safari; 1800-second background soak, stable daemon, advancing heartbeat and clean teardown. |
+| Installed owned-Geph outage | Three requests closed without reaching the alternate system-route sentinel; owned HTTP 200 recovered. Disabled positive control reached the sentinel; settings restored and unrelated listener preserved. |
+| Native-root40370445166 | Commit and crash-before-commit passed. OLD daemon restored after crash; late commit refused; terminal worker quiescent. |
+| Packaged40372943574 | Real successor ACK commits. Pre-ACK stop/kill restores OLD app and daemon; watchdog exits and transaction paths are absent. All ten input pins and root prerequisite hashes match. |
+
+Candidate artifact12670738202 remains available until November 9; manifest SHA-256
+`9fcf9be84f199eed9dd178fa82333ae0bbc4cd2a4660df36052ef9513163a874`.
+The OLD origin is the corrected **private** `.30`, source5385b89, run39465376685;
+it is not the immutable public `.30`. These checks do not qualify public discovery,
+ordinary tray/admin activation, sustained video/calls, or this new build on the user's Mac.
+The historical Codex403 Ray remains unattributed.
+
+Receipts: `output/readiness-preflight-20261026/post-pr424-main40366566525/`,
+including each gate's `verification.json` and publisher notes/remote metadata.
+Only small reports/manifests were downloaded locally. All full candidate authentication,
+real network mechanics, and native update cases ran on disposable CI Macs.
+The two used RSA exceptions were valid through October 30 UTC inclusive; future
+release/audit work must revalidate policy rather than carry this preflight across expiry.
+
+PR424 merged normally with tested/merged tree equality after PR/main CI. Its repair
+accepts Darwin's legal initial `?` state without weakening ownership checks and retries
+one fresh full census only for an otherwise validated ambiguous root basename. Unknown
+still cannot authorize a signal or successful absence. Scoped checks: 98 root-stop,
+12 affected cleanup/identity, 8 docs. Earlier main423 failed and is ineligible; its
+exact historical census reason remains unknown. Details: ROUTING_RESEARCH.md and
+`output/readiness-preflight-20261026/root-stop-census/verification.json`.
+
+This documentation follow-up records publication without changing the released code.
+Next: continue the separate public-update/workstation gates and open candidate work
+described below; do not repeat these unchanged green gates or mutate the working connection.
 
 ### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
 
@@ -1205,42 +1218,35 @@ installation ran. The unchanged release checks are not repeated.
 |---|---|
 | M0 - Safe Base | Candidate cleanup passed; public update/rollback unqualified. |
 | M1 - Autonomous Routing V1 | Hosted browser/soak passed; no new workstation qualification. |
-| M2 - Contracts And Code | Recorded .29/.30 root/app pair passed; attended public attempt exposed startup timer defect. |
-| M3 - Release-Grade macOS | Preview .30 public; private .31 installed and full Quit/reopen qualified. Stable and public updater gates open. |
+| M2 - Contracts And Code | Corrected private .30 -> published .31 root/app pair passed commit and pre-ACK rollback; ordinary public transition remains open. |
+| M3 - Release-Grade macOS | Preview .31 public and remotely verified; exact candidate passed hosted native/readiness gates. New workstation, stable and public updater gates remain open. |
 | M4 - Cross-Platform Core | No new platform qualification in this change. |
 
 ## Next Verified Action
 
-- PR416 r3 producer39996042090 and consumers PR415/419 are merged and passed
-  their required CI. PR420 is also merged with green PR checks. Repair the
-  virtual-clock test isolation exposed in main CI40289194469, merge through
-  normal checks, then qualify one authenticated exact-main candidate through the combined
-  release-readiness workflow. Reuse the recorded producer, focused tests and
-  unchanged Quit evidence. The user's working external Geph stays untouched;
-  source/CI completion is not workstation delivery or proof of the exact403.
-
-- PR409/410 source repairs, PR412 full Stop-and-Quit and PR413 trust-dependency
-  repairs are merged. The privately installed preview31 is authenticated source
-  `1f3ddcfb6ed912a22fb4d0d1502e3879aee9ee36`; it contains these repairs. Reuse
-  its green CI/audit, seven native lifecycle cases and the completed workstation
-  start/full-Quit/reopen receipts above. Do not reinstall or repeat these gates
-  without a relevant code change or new failure.
-- The next release gate is the still-unqualified ordinary public update and
-  forced rollback. The observer follow-up above retains the missing false diagnostic and
-  handles the reproduced transient lock; qualify current source before
-  another native attempt; a successful manual install or Quit
-  does not prove the updater. See [RELEASES.md](RELEASES.md). Keep public preview30
-  immutable and preserve all private candidates, state and backups.
-- Historical Safari DNS and Codex403 incidents remain open. Their diagnosis
-  needs current routing/error evidence; the lifecycle fix alone is insufficient.
-  Preserve the separately running Geph and external network configuration.
+- Preview `.31` is published and remotely verified. Verify the documentation-only
+  follow-up PR state once on resume. The exact candidate/readiness/native/packaged gates
+  above are complete and reusable; do not rerun or redispatch them after resuming.
+- Public preview `.30` is immutable and lacks origin-side updater repairs. The
+  qualified private `.30 -> .31` pair cannot prove a public transition. Plan the
+  next ordinary tray/admin and fully public update/rollback checks from compatible
+  released origins; keep that gate open until observed. See [RELEASES.md](RELEASES.md).
+- Historical Safari DNS and Codex403 incidents still need current user-visible
+  routing/error evidence. The published lifecycle and route-continuity checks do
+  not establish the cause of those earlier responses. Preserve external Geph and
+  network settings; no workstation transaction in this continuation.
+- PR376/384/386 candidate work remains separate from this release. Reconcile each
+  live PR and source before selecting its next gate. Existing RSA policy exceptions
+  expire after October 30 UTC; do not extend or reuse them implicitly.
 
 ## External Gates
 
-- Normal full Quit and ordinary reopen are qualified locally on preview31 with
-  owned Geph disabled, preserving the external Geph processes. Native CI also
+- Normal full Quit and ordinary reopen were qualified locally on the earlier private
+  preview31 source1f3ddcf, with owned Geph disabled, preserving external Geph. This
+  is not installed evidence for the newly published source3eb32bd. Native CI also
   qualifies owned inert listener/pre-listener cleanup. Account-backed owned
-  Geph operation/shutdown is not established by that local cycle.
+  Geph operation/shutdown is not established by that local cycle; the separate
+  current hosted account-backed lifecycle and outage gate passed as recorded above.
 - Ordinary public update/forced rollback remains unqualified. The earlier
   public attempt stopped on the short startup timer; source repairs and the
   later manual installation are separate evidence. Hosted updater authorization

@@ -52,8 +52,9 @@ identity check is incomplete: source now requires bundled-daemon attestation and
 the same PID across fresh advancing heartbeat observations. A pending successor
 with a mismatched daemon refuses startup without spawning a privileged installer;
 the watchdog restores the previous application. Coordinated replacement of both
-daemon and app is implemented in source; native and public qualification remain
-open.
+daemon and app is implemented in source. The private-pair native commit and
+pre-ACK rollback checks below have passed; ordinary public upgrade/rollback
+qualification remains open.
 In updated clients, a restored rollback app also waits for the watchdog's lock,
 terminal cleanup and exact old-app receipt before resuming daemon installation.
 It emits no successor ACK. Existing published clients retain their old behavior.
@@ -83,10 +84,26 @@ need a manual DMG or separately qualified bridge transition.
 The next delivery uses the signed exact-main candidate at `5385b89add415c531276ba43f5c06c50293ffb17`
 as a private fixed `.30` origin, with PR409's extraction repair and PR410's
 original startup lease. Public `.30` remains unchanged and lacks those fixes.
-Qualify that exact origin with the normally built `.31` successor before
-publication, then check the ordinary tray/admin transition locally. Report
+That exact origin and the normally built `.31` successor passed the checks below
+before publication. The ordinary tray/admin transition still needs a local check. Report
 private-bridge success separately from a future fully public release-pair
 update and forced rollback.
+
+The qualified `.31` source is `3eb32bd3029d6acd88b380a8c767c19c7abc76a4`,
+built once by [CI40366566525](https://github.com/aiwaki/slipstream/actions/runs/40366566525).
+The following attempt-1 results completed on October 26 and were independently
+verified on October 30. All use that same candidate and preserve the fixed private
+`.30` origin where a pair is required.
+
+| Check | Observed result |
+|---|---|
+| [Native root40370445166](https://github.com/aiwaki/slipstream/actions/runs/40370445166) | Commit selects the new daemon. Crash before commit restores the old daemon and rejects a late commit; terminal workers are quiescent. |
+| [Packaged40372943574](https://github.com/aiwaki/slipstream/actions/runs/40372943574) | Real successor ACK commits the update. Killing the successor before ACK restores both the old app and daemon; the watchdog exits and temporary transaction paths are removed. |
+| [Readiness40370438338](https://github.com/aiwaki/slipstream/actions/runs/40370438338) | Four sites work in Safari and Chrome. Three requests during an owned-Geph outage close without an alternate route, followed by owned payload recovery. The 30-minute background soak has stable daemon identity, advancing heartbeat and clean teardown. |
+
+These are installed-path checks on disposable CI Macs. They do not establish the
+cause of the historical Codex HTTP 403, sustained video/call behavior, or successful
+public discovery, tray activation and administrator authorization on a user's Mac.
 
 The protocol orders effects as follows. The root worker's durable decision
 controls recovery; a missing reply is not evidence that an operation stopped.

@@ -4,41 +4,48 @@ Roadmap is informational and not a release promise. Each milestone lands as a
 small PR with tests and matching documentation.
 
 <a id="development-status"></a>
-## Статус разработки / Development status — 2026-10-13
+## Статус разработки / Development status — 2026-10-30
 
 ### Русский
 
-Работа продолжается в публичных PR. Последние исправления пока не вошли
-в скачиваемое приложение: успешные тесты исходников сами по себе не подтверждают,
-что установка, обновление и обычные браузерные сеансы работают правильно.
+[Slipstream 0.1.9-preview.31 опубликован](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
+для ручной установки из DMG. В выпуск вошли исправления остановки служб при выходе,
+сохранение выбранного маршрута при сбое встроенного Geph, ограничение ожидания
+дополнительных DNS-запросов и исправления распаковки и координации обновления
+приложения с фоновой службой.
 
-| Направление | Что уже сделано в кандидатах | Что осталось до выпуска |
-|---|---|---|
-| Загрузка страниц и восстановление соединений ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Добавлены исправления неполных ответов и гонок при восстановлении и завершении работы; автоматические проверки кода проходят. | Проверить собранное приложение, обновление с опубликованной версии и работу в обычных Chrome/Safari. |
-| DNS и Telegram ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Удалён встроенный провайдер xbox-dns.ru; обновлён Telegram-прокси с сохранением локальных исправлений. Локальные тесты покрывают TLS, параллельные запросы, обрыв ответа и отмену. | Выпустить эти изменения в составе проверенной сборки; живой сеанс Telegram остаётся отдельной проверкой. |
-| Встроенный Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Подготовлено обновление клиента с исправлениями общей сессии и зависания читателей кеша после отмены запроса; соответствующие регрессии проверены. | Завершить проверку зависимостей и подготовить пригодный для публикации пакет. |
+На отдельных Mac в CI проверены выход, отказ и восстановление Geph, четыре сайта
+в Safari и Chrome и 30 минут работы в фоне без появления окон. Обновление и
+аварийный откат прошли на подготовленной паре сборок. Это не проверка обновления
+между опубликованными выпусками: публичное автообновление и его откат ещё не
+подтверждены. Длительные звонки, видео, сон/пробуждение и проверка текущего выпуска
+на пользовательском Mac остаются отдельными задачами.
 
-Главные препятствия сейчас — незавершённая проверка зависимостей и последующая
-проверка упакованного приложения. Прежние временные исключения аудита истекли;
-новый установщик пока не готов к публикации. Наличие внутреннего релиза Geph
-не означает, что вышла новая версия Slipstream. Даты следующего выпуска пока нет.
+| Продолжающаяся работа | Что ещё не вошло в выпуск полностью |
+|---|---|
+| Восстановление соединений ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Более широкий набор исправлений неполных ответов и гонок остаётся в открытом PR. Выпуск отдельных исправлений не означает завершения этой ветки. |
+| Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | Обновление транспорта остаётся в открытом PR; живой сеанс Telegram также требует проверки. |
+| Встроенный Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Дополнительные изменения кеша и зависимостей остаются в открытом PR и требуют собственной проверки и выпуска. |
 
 ### English
 
-Work continues in public PRs. The latest fixes are not yet in the downloadable
-app: passing source tests alone does not establish that installation, updates,
-and ordinary browser sessions work correctly.
+[Slipstream 0.1.9-preview.31 is published](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
+for manual DMG installation. It includes fixes for stopping owned services on
+Quit, preserving the selected route during bundled Geph outages, bounding
+supplemental DNS waits, and unpacking and coordinating app/daemon updates.
 
-| Area | Completed in candidates | Remaining before release |
-|---|---|---|
-| Page loading and connection recovery ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Fixes for incomplete responses and recovery/shutdown races; automated product checks pass. | Qualify the packaged app, upgrading from the published version, and ordinary Chrome/Safari sessions. |
-| DNS and Telegram ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Removed the bundled xbox-dns.ru provider and updated the Telegram proxy while preserving local fixes. Local tests cover TLS, concurrent requests, truncated responses, and cancellation. | Ship the changes in a qualified app; a live Telegram session remains a separate check. |
-| Bundled Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Prepared a client update preserving shared-session fixes and preventing cache readers from hanging after request cancellation; targeted regressions are tested. | Complete dependency review and prepare a publishable vendor package. |
+Disposable Macs in CI covered Quit, Geph outage and recovery, four sites in
+Safari and Chrome, and 30 minutes of background operation without visible
+windows. Update and crash rollback passed on a prepared pair of builds. This
+does not qualify updates between published releases: public auto-update and
+its rollback remain unverified. Sustained calls, video, sleep/wake, and testing
+this release on the user's Mac remain separate tasks.
 
-The immediate blockers are incomplete dependency review and subsequent packaged
-app qualification. Previous temporary audit exceptions have expired; a new
-installer is not ready to publish. An internal Geph release is not a new
-Slipstream app release. No date for the next app release is announced.
+| Ongoing work | Scope not yet fully shipped |
+|---|---|
+| Connection recovery ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | The broader incomplete-response and race repairs remain in an open PR. Shipping individual fixes does not complete that branch. |
+| Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | The transport update remains in an open PR; a live Telegram session also needs validation. |
+| Bundled Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Additional cache and dependency changes remain in an open PR and need their own qualification and release. |
 
 For exact commits, checks, and remaining gates, see [CURRENT_STATE.md](CURRENT_STATE.md).
 The milestone descriptions below are the longer-term plan, not a claim that the
