@@ -2,7 +2,7 @@
 
 ## Verified Checkpoint
 
-### Active: PR426 transport fixes and dependency-admission blockers, 2026-10-30
+### Active: PR426 preview.32 candidate qualification, 2026-10-30
 
 Active checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
 branch `codex/post-preview31-recovery`, based on documentation main `a37cb6c5`. Published source is
@@ -36,7 +36,18 @@ exact-run/attempt full Geph audit before every draft-publication PATCH. Historic
 verification remains separate. Independent final review passed; 74 tests/65
 subcases and 16 workflow checks passed, including causal refusal of expired vendor
 evidence and UTC rollover. Receipt: `output/continuation-20261030/release-audit-admission/`.
-The complete .32 candidate needs fresh exact-head CI/audit before merge.
+Fresh audit41050387042 passed at candidate2867cb06d (PR merge tree verified equal):
+app361 scanned / accepted1 / blocked0, plus exact Chromium integrity review;
+Geph423 / full coverage / accepted4 / blocked0. Two RSA allowances still expire
+October 30 UTC; none were extended. Small artifacts and policy/source proofs are
+in `output/continuation-20261030/candidate32-2867cb06d/`.
+
+The dispatch preflight then caught stale executable publisher/qualification pins:
+preview31 and .30 -> .31. The source now targets preview32 and public .31 -> .32;
+focused coherence checks tie both gates to VERSION. Causal red/green and 130 focused
+tests passed; observer fingerprints are synchronized. The superseded CI41050387083
+was cancelled rather than finishing a non-publishable candidate. The complete final
+head needs fresh CI/audit before merge. No protected qualification was dispatched.
 Do not describe .31's historical audit as current policy acceptance. Details and
 causal evidence: `output/continuation-20261030/` and ROUTING_RESEARCH.md.
 

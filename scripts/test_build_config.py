@@ -990,6 +990,27 @@ class BuildConfigTests(unittest.TestCase):
             ["build-geph.yml", "ci.yml"],
         )
 
+    def test_current_preview_guard_accepts32_and_rejects_stale_or_mismatched_inputs(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        start = '            preview_sequence="${{ github.event.inputs.preview_sequence }}"\n'
+        block = workflow[workflow.index(start):].split('            tag="v${v}"', 1)[0]
+        command = 'v="$PACKAGE_VERSION"\n' + textwrap.dedent(block).replace(
+            '${{ github.event.inputs.preview_sequence }}', '$PREVIEW_INPUT'
+        )
+        for sequence, version, accepted in (
+            ("32", "0.1.9-preview.32", True),
+            ("31", "0.1.9-preview.31", False),
+            ("33", "0.1.9-preview.33", False),
+            ("32", "0.1.9-preview.31", False),
+            ("32x", "0.1.9-preview.32x", False),
+        ):
+            with self.subTest(sequence=sequence, version=version):
+                result = subprocess.run(
+                    ["/bin/bash", "-c", command], capture_output=True, text=True, timeout=5,
+                    env={"PATH": "/usr/bin:/bin", "PREVIEW_INPUT": sequence, "PACKAGE_VERSION": version},
+                )
+                self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
+
     def test_release_workflow_keeps_manual_previews_off_the_stable_feed(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
             encoding="utf-8"
@@ -997,8 +1018,11 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn('tag="v${v}"', workflow)
         self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
-        self.assertIn('[ "$preview_sequence" = 31 ]', workflow)
-        self.assertIn('default: "31"', workflow)
+        self.assertIn('[ "$preview_sequence" = 32 ]', workflow)
+        self.assertIn('default: "32"', workflow)
+        sequence = (ROOT / "VERSION").read_text(encoding="utf-8").strip().rsplit(".", 1)[1]
+        self.assertIn(f'[ "$preview_sequence" = {sequence} ]', workflow)
+        self.assertIn(f'default: "{sequence}"', workflow)
         self.assertIn("release or Git tag already exists", workflow)
         self.assertIn("git/matching-refs/tags/$tag", workflow)
         self.assertIn("releases?per_page=100", workflow)

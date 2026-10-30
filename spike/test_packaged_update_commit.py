@@ -14,7 +14,7 @@ import qualify_packaged_update_commit as gate
 from native_root_update import Refused
 
 
-def fixture(tmp_path, *, old_version=30, new_version=31):
+def fixture(tmp_path, *, old_version=31, new_version=32):
     def pin(char, run):
         return {"source_commit": char * 40, "candidate_manifest_sha256": char * 64, "run_id": run, "run_attempt": 1}
     pair = {"schema_version": 1, "old": pin("b", 102), "new": pin("c", 103)}
@@ -51,6 +51,19 @@ def test_requires_both_successful_root_cases_bound_to_same_complete_app_pair(tmp
     assert proof["run_attempt"] == 2
 
 
+def test_current_public31_to_preview32_root_pair_is_accepted(tmp_path):
+    metadata, pair, expected = fixture(tmp_path, old_version=31, new_version=32)
+    assert expected["new"]["version"] == (ROOT / "VERSION").read_text().strip()
+    proof = gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+    assert proof["pair"] == pair
+
+
+def test_historical30_to31_cannot_authorize_current_pair(tmp_path):
+    metadata, pair, expected = fixture(tmp_path, old_version=30, new_version=31)
+    with pytest.raises(Refused, match=r"\.31 -> \.32"):
+        gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
+
+
 @pytest.mark.parametrize("field,value", [("head_sha", "a" * 40), ("head_sha", "b" * 40),
     ("id", 201), ("run_attempt", 1), ("head_branch", "feature"), ("status", "in_progress"),
     ("path", ".github/workflows/ci.yml"), ("conclusion", "failure"), ("event", "pull_request")])
@@ -78,10 +91,10 @@ def test_each_root_receipt_must_match_and_finish_cleanup(tmp_path, name, field, 
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
 
 
-@pytest.mark.parametrize("old_version,new_version", [(26, 27), (27, 28), (28, 29), (28, 30), (29, 30), (29, 31), (30, 32)])
+@pytest.mark.parametrize("old_version,new_version", [(26, 27), (27, 28), (28, 29), (28, 30), (29, 30), (29, 31), (30, 32), (31, 33), (32, 31)])
 def test_root_pass_cannot_qualify_unfixed_or_unreviewed_pair(tmp_path, old_version, new_version):
     metadata, pair, expected = fixture(tmp_path, old_version=old_version, new_version=new_version)
-    with pytest.raises(Refused, match=r"\.30 -> \.31"):
+    with pytest.raises(Refused, match=r"\.31 -> \.32"):
         gate.prerequisite(metadata, tmp_path, pair, expected, 200, 2)
 
 
@@ -301,7 +314,7 @@ def test_workflow_uses_exact_pair_builder_and_observer_without_repair_hooks():
         assert script in source
     assert "ref: ${{ inputs.old_source_sha }}" in source
     assert "native-root-update-*-${{ inputs.root_gate_run_id }}-${{ inputs.root_gate_attempt }}" in source
-    assert "Successful exact NEW main root-gate run ID for the same .30 to .31 pair" in source
+    assert "Successful exact NEW main root-gate run ID for the same .31 to .32 pair" in source
     assert "kickstart" not in source and "--update-prepare" not in source
     assert "if: always()" in source and "prepare-result.json" in source
 
