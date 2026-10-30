@@ -579,6 +579,13 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   frontmost-app, process, or registration residue. Permission denial verifies
   fallback behavior but cannot authorize a release that claims notifications
   work. Private notification databases remain secondary diagnostics only.
+  Before native launch, producer readiness requires the exact successful
+  assembly job and artifact, including source, attempt, timing and digest
+  bindings. An unfinished aggregate run (`queued` or `in_progress`, without a
+  conclusion) does not override complete producer evidence. Missing or unfinished
+  producer evidence remains pending within the existing 120-second refresh
+  budget; invalid or failed evidence is rejected. Publication still requires the
+  entire CI run to succeed.
 - The candidate tree digest includes every directory, symlink, regular file,
   mode, relative path, and file payload. Legitimate zero-length marker files
   inside the packaged application are represented in that digest; top-level

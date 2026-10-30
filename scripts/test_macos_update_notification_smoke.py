@@ -1193,9 +1193,8 @@ def test_report_contract_never_claims_visible_delivery_or_contains_content() -> 
 
 def _pending_producer(payloads, stage):
     _, run, jobs, artifacts = payloads
-    if stage == "run_pending":
-        run.update(status="queued", conclusion=None)
-    elif stage == "job_pending":
+    run.update(status="queued", conclusion=None)
+    if stage == "job_pending":
         jobs["jobs"][0].update(status="in_progress", conclusion=None, completed_at=None)
     elif stage == "job_missing":
         jobs.update(total_count=0, jobs=[])
@@ -1237,6 +1236,38 @@ def _collector_fixture(tmp_path, snapshots):
     return kwargs, calls, fetch, _ProducerClock()
 
 
+def _stale_queued_run_with_completed_producer():
+    payloads = _producer_payloads(qualification_attempt=1)
+    # CI41118944722/1 retained this timing/status shape after assembly succeeded.
+    # Identities remain the existing isolated fixture's exact source/run pins.
+    payloads[1].update(status="queued", conclusion=None, updated_at="2026-10-30T20:01:10Z")
+    payloads[2]["jobs"][0].update(
+        started_at="2026-10-30T20:11:35Z", completed_at="2026-10-30T20:16:43Z")
+    payloads[3]["artifacts"][0]["created_at"] = "2026-10-30T20:16:38Z"
+    return payloads
+
+
+def test_stale_queued_run_accepts_completed_exact_producer(tmp_path):
+    kwargs = _write_producer_evidence(tmp_path, _stale_queued_run_with_completed_producer())
+    evidence = smoke.validate_candidate_producer_evidence(**kwargs)
+    assert evidence == smoke.CandidateProducerEvidence(
+        run_id=77, run_attempt=1, assemble_job_id=101, artifact_id=201,
+        artifact_digest=f"sha256:{'6' * 64}")
+
+
+def test_stale_queued_run_collector_is_ready_without_polling_or_native_call(tmp_path):
+    kwargs, calls, fetch, clock = _collector_fixture(
+        tmp_path, [_stale_queued_run_with_completed_producer()])
+    kwargs["qualification_run_attempt"] = 1
+    with mock.patch.object(smoke.subprocess, "run", side_effect=AssertionError("no real API or native call")):
+        report = smoke.collect_candidate_producer_evidence(
+            output=tmp_path / "report.json", fetch=fetch,
+            clock=clock.clock, sleep=clock.sleep, **kwargs)
+    assert report == {"schema_version": 1, "outcome": "ready", "producer_stage": "ready",
+                      "poll_count": 1, "duration_seconds": 0.0, "candidate_run_attempt": 1}
+    assert len(calls) == 3 and clock.value == 0
+
+
 @pytest.mark.parametrize("stage", sorted(smoke.PRODUCER_PENDING_STAGES))
 def test_pending_api_snapshot_is_never_authenticated(stage, tmp_path):
     kwargs = _write_producer_evidence(tmp_path, _pending_producer(_producer_payloads(), stage))
@@ -1260,13 +1291,18 @@ def test_producer_refresh_waits_only_for_new_strict_evidence(stage, tmp_path):
     assert smoke.validate_candidate_producer_evidence(**kwargs).artifact_id == 201
 
 
-@pytest.mark.parametrize("hard", ["run_sha", "run_attempt", "job_sha", "job_attempt", "job_failed",
+@pytest.mark.parametrize("hard", ["run_sha", "run_attempt", "run_failed", "run_conclusion", "run_status",
+                                  "job_sha", "job_attempt", "job_failed",
                                   "artifact_digest", "artifact_duplicate", "artifact_expired", "artifact_repository"])
-def test_pending_run_never_masks_hard_provenance_error(hard, tmp_path):
-    snapshot = _pending_producer(_producer_payloads(), "run_pending")
+def test_queued_run_never_masks_hard_provenance_error(hard, tmp_path):
+    snapshot = _producer_payloads()
     _, run, jobs, artifacts = snapshot
+    run.update(status="queued", conclusion=None)
     if hard == "run_sha": run["head_sha"] = "9" * 40
     elif hard == "run_attempt": run["run_attempt"] = 999
+    elif hard == "run_failed": run.update(status="completed", conclusion="failure")
+    elif hard == "run_conclusion": run["conclusion"] = "success"
+    elif hard == "run_status": run["status"] = []
     elif hard == "job_sha": jobs["jobs"][0]["head_sha"] = "9" * 40
     elif hard == "job_attempt": jobs["jobs"][0]["run_attempt"] = 999
     elif hard == "job_failed": jobs["jobs"][0]["conclusion"] = "failure"
@@ -1291,7 +1327,7 @@ def test_refresh_cannot_rebind_an_observed_producer_identity(field, tmp_path):
     elif field == "artifact_id": changed[3]["artifacts"][0]["id"] += 1
     else: changed[3]["artifacts"][0]["digest"] = "sha256:" + "7" * 64
     kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [
-        _pending_producer(_producer_payloads(), "run_pending"), changed])
+        _pending_producer(_producer_payloads(), "job_pending"), changed])
     with pytest.raises(smoke.NotificationQualificationError) as raised:
         smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
             clock=clock.clock, sleep=clock.sleep, **kwargs)
@@ -1301,7 +1337,7 @@ def test_refresh_cannot_rebind_an_observed_producer_identity(field, tmp_path):
 
 def test_unchanged_pending_stops_at_fixed_deadline_and_retains_last_triplet(tmp_path):
     kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [
-        _pending_producer(_producer_payloads(), "run_pending")])
+        _pending_producer(_producer_payloads(), "job_pending")])
     with pytest.raises(smoke.NotificationQualificationError) as raised:
         smoke.collect_candidate_producer_evidence(output=tmp_path / "report.json", fetch=fetch,
             clock=clock.clock, sleep=clock.sleep, **kwargs)
@@ -1311,6 +1347,8 @@ def test_unchanged_pending_stops_at_fixed_deadline_and_retains_last_triplet(tmp_
     assert report["poll_count"] == smoke.PRODUCER_MAX_POLLS
     assert len(calls) == 36
     assert json.loads(kwargs["run_metadata_path"].read_text())["status"] == "queued"
+    assert json.loads(kwargs["jobs_path"].read_text())["jobs"][0]["status"] == "in_progress"
+    assert report["last_pending_stage"] == "job_pending"
 
 
 def test_ready_snapshot_does_not_poll_or_touch_native_hook(tmp_path):
@@ -1448,7 +1486,7 @@ def test_collector_cli_sanitizes_unexpected_output_failure(tmp_path, capsys):
 
 @pytest.mark.parametrize("failed_endpoint", (2, 3))
 def test_partial_refresh_preserves_last_complete_triplet(failed_endpoint, tmp_path):
-    previous = _pending_producer(_producer_payloads(), "run_pending")
+    previous = _pending_producer(_producer_payloads(), "job_pending")
     fresh = _producer_payloads()
     for payload in previous[1:]: payload["snapshot"] = "previous"
     for payload in fresh[1:]: payload["snapshot"] = "new"
@@ -1471,7 +1509,7 @@ def test_partial_refresh_preserves_last_complete_triplet(failed_endpoint, tmp_pa
 
 
 def test_last_fetch_after_deadline_preserves_complete_triplet(tmp_path):
-    previous = _pending_producer(_producer_payloads(), "run_pending")
+    previous = _pending_producer(_producer_payloads(), "job_pending")
     kwargs, calls, fetch, clock = _collector_fixture(tmp_path, [previous, _producer_payloads()])
 
     def late_last(endpoint, timeout):

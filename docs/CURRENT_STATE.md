@@ -2,7 +2,53 @@
 
 ## Verified Checkpoint
 
-### Active: release CI, source bootstrap and browser observation, 2026-10-30
+### Active: candidate producer readiness, 2026-10-30
+
+Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
+branch `codex/producer-readiness-job-proof`, based on main C4
+`b5ce4942719055a3dc5c87268dc6bdd367b3ae3a`, tree
+`9e0b4caed4d2e9e9d89a4bb10be615ed9130a35d`. PR430 merged normally after its exact-head
+CI41116262592/1, audit and actual Chromium runtime review passed. Preview .32 is
+not published or installed; preserve the working external Geph and workstation.
+
+Main CI41118944722/1 exposed a readiness-observer refusal before notification UI.
+After 12 polls/120.021 seconds, `last_pending_stage=run_pending`: aggregate run
+metadata still said queued/null (updated20:01:10Z), while the same saved API triplet
+contained a successful assembler completed20:16:43Z and the exact candidate
+artifact created20:16:38Z within its verified producer window. Notification was
+already in progress. Its workflow depends on successful assembly; there is no
+dependency cycle or wait for the entire CI. The aggregate state alone added a
+pending condition after the producer evidence had passed. The underlying cause
+of GitHub's inconsistent metadata is not established.
+
+The narrow correction treats queued/null as an unfinished aggregate, like the
+already permitted in_progress/null state. Readiness still requires the unique
+successful assembler and exact artifact, with all repository/source/attempt/
+timing/digest checks. Incomplete producer proof stays pending; malformed or failed
+proof stays invalid. The 120-second refresh budget and final complete-CI release
+requirement remain unchanged. Two causal regressions failed on C4; all 158
+notification-module tests passed after the fix. Independent review passed without
+repeating the tests; collector and native-hook functions are AST-unchanged.
+Local evidence: `output/continuation-20261030/notification-producer-job-readiness/`;
+`verification.json` SHA256
+`4e07533ed5233ae617a851e60b6fefcb7051e4189c163257a739d47e2cf5e934`,
+`independent-review.json` SHA256
+`a304d488b2ef73ac6e869158d6392b961e3d1b63199845b6c4be66021482341c`.
+
+Evidence is in the primary qualification checkout's
+`output/continuation-20261030/preview32-main/ci-corrected/`, including the saved
+notification API/report files and `notification-producer-independent/verification.json`
+(SHA256 `6f654c8da392911499b01477b96109a2fd3fd1c380655abb79c69edf1ef49542`).
+Candidate13008956785 / manifest
+`d45f22621f672921ae889d898faa9682883f54e1ee83bb3ee007d901f338a7f1` is retained,
+not admitted. CI completed with failure at 20:25:18Z; signing, assembly, attestation,
+source cold install and browser evidence passed. Native/lifecycle steps succeeded,
+but their report bodies were not fully verified (native download returned HTTP 503).
+Native/protected qualification has not been dispatched. Next: publish this reviewed
+correction through a PR, then use fresh successful main
+evidence. Protected budget remains 2/3 today UTC; RSA allowances expire at its end.
+
+### Previous: PR430 release CI and observation repairs
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/ci-artifact-attempt-identity`, based on main
@@ -49,8 +95,8 @@ in headless mode; Safari used a real SafariDriver session. This is not ordinary
 GUI Chrome qualification or real account-backed Geph qualification. Terminal
 evidence is `diagnostic-head/terminal-verification.json` (SHA256
 `3d3fd368c5cc1a1f33cc422f999a0d606eac047e26b11b78dfc6a30d1a0db7c7`).
-Next: commit these two reviewed fixes and require fresh exact-source CI before
-normal merge. No main candidate or protected qualification has been dispatched.
+Those two fixes subsequently passed exact-head CI41116262592/1 and were merged
+normally in PR430; the current main observation above is the next unresolved gate.
 
 PR430's first head `6660be1e8ee323f3a4100892be77f10ae6a0fc48` reached a separate
 infrastructure blocker: CI41101705353/1 was cancelled on October 30 at 18:03:41Z.
