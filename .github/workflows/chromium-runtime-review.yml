@@ -1,0 +1,34 @@
+name: chromium-runtime-review
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/chromium-runtime-review.yml
+      - scripts/review_chromium_runtime.py
+      - scripts/test_review_chromium_runtime.py
+
+permissions:
+  contents: read
+
+jobs:
+  review-pinned-upstream:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Test the bounded evidence helper
+        run: python3 -m unittest discover -s scripts -p test_review_chromium_runtime.py
+      - name: Review exact upstream Chromium and OSV mapping on the disposable runner
+        run: |
+          python3 scripts/review_chromium_runtime.py \
+            --output "$RUNNER_TEMP/chromium-runtime-review"
+      - name: Retain only small review evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chromium-runtime-review-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/chromium-runtime-review/*.json
+          if-no-files-found: error
+          retention-days: 14

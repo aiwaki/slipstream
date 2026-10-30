@@ -312,6 +312,45 @@ def test_partial_chunked_body_is_proven_only_after_the_stream_stops():
     )
 
 
+def test_every_proper_chunked_prefix_is_incomplete_after_eof_or_timeout():
+    body = b"5\r\nhello\r\nA\r\n0123456789\r\n0\r\n\r\n"
+    for stream_closed, idle_timed_out in ((True, False), (False, True)):
+        for length in range(len(body)):
+            partial = _response(b"Transfer-Encoding: chunked", body[:length])
+            assert http_response_incomplete(
+                partial,
+                stream_closed=stream_closed,
+                idle_timed_out=idle_timed_out,
+                truncated=False,
+            ), repr(body[:length])
+            assert not http_response_complete(
+                partial, stream_closed=stream_closed, truncated=False,
+            )
+
+        complete = _response(b"Transfer-Encoding: chunked", body)
+        assert http_response_complete(
+            complete, stream_closed=stream_closed, truncated=False,
+        )
+        assert not http_response_incomplete(
+            complete,
+            stream_closed=stream_closed,
+            idle_timed_out=idle_timed_out,
+            truncated=False,
+        )
+
+        for malformed in (b"\r", b"5\r\r", b"5\n", b"5\rX", b";ext\r"):
+            response = _response(b"Transfer-Encoding: chunked", malformed)
+            assert not http_response_complete(
+                response, stream_closed=stream_closed, truncated=False,
+            ), repr(malformed)
+            assert not http_response_incomplete(
+                response,
+                stream_closed=stream_closed,
+                idle_timed_out=idle_timed_out,
+                truncated=False,
+            ), repr(malformed)
+
+
 def test_unsuccessful_malformed_or_locally_truncated_response_stays_unknown():
     denied = b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 5\r\n\r\nno"
     conflicting = _response(

@@ -306,6 +306,52 @@ def reviewed_revision2_policy():
     return policy
 
 
+def reviewed_revision3_policy():
+    # Freeze the reviewed ctutils r2 -> r3 policy. New runtime dispositions
+    # must not silently become part of that immutable historical transition.
+    policy = reviewed_revision2_policy()
+    reasons = {
+        'geph-rsa-0.8.2-marvin-public-key-only': (
+            'Rebound 2026-10-23 to Geph 0.4.3-r3 SOURCE '
+            'de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286 and '
+            'Cargo.lock '
+            'c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0. '
+            'Relative to reviewed r2, only ctutils 0.4.3 -> 0.4.4 changed; the '
+            'verified crate, 13 source edits and complete RSA reverse-dependency '
+            'closure are unchanged. The prior 2026-10-23 client review remains '
+            'applicable; its expiry is not extended. The client uses public-key '
+            'parsing, blind/finalize/verify only. No client config, RPC or cache DTO '
+            'constructs or imports RsaPrivateKey, and no client call enters the '
+            'private signing/decryption required by Marvin. This bounded reachability'
+            ' exception does not establish constant-time blinding arithmetic, removal'
+            ' of private APIs or installed-artifact safety. Re-review on source, '
+            'dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA '
+            'client review 2026-10-23.'
+        ),
+        'geph-rsa-0.8.2-prime-validation-public-key-only': (
+            'Rebound 2026-10-23 to Geph 0.4.3-r3 SOURCE '
+            'de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286 and '
+            'Cargo.lock '
+            'c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0. '
+            'Relative to reviewed r2, only ctutils 0.4.3 -> 0.4.4 changed; the '
+            'verified crate, 13 source edits and complete RSA reverse-dependency '
+            'closure are unchanged. The prior 2026-10-23 client review remains '
+            'applicable; its expiry is not extended. Untrusted broker/config key '
+            'bytes enter RsaPublicKey modulus/exponent decoders; no client, RPC or '
+            'cache DTO enters RsaPrivateKey::from_components/precompute. This '
+            'exception covers only the malformed-private-prime advisory in this exact'
+            ' client graph, regardless of broker trust, and makes no broader '
+            'cryptographic safety claim. Re-review on source, dependency or '
+            'client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review '
+            '2026-10-23.'
+        ),
+    }
+    for exception in policy['exceptions']:
+        if exception['id'] in reasons:
+            exception['reason'] = reasons[exception['id']]
+    return policy
+
+
 class ReviewedRsaPolicyTransitionTests(unittest.TestCase):
     expected_policy_transition = "renewed-reviewed-rsa-public-key-exceptions"
 
@@ -561,10 +607,8 @@ class ReviewedCtutilsPolicyTransitionTests(ReviewedRsaPolicyTransitionTests):
     expected_policy_transition = "rebound-reviewed-rsa-public-key-exceptions"
 
     def setUp(self):
-        root = Path(__file__).parents[1]
         self.previous = reviewed_revision2_policy()
-        self.current = json.loads(
-            (root / 'security/geph-dependency-audit-policy.json').read_text())
+        self.current = reviewed_revision3_policy()
         self.binding = (
             '387ddab282548377b2e35d0d2c6fdb5c81a23436de87fc631b6bbb41323f1a1e',
             '440c8b8156443144f6528ebc4be3613338ba84d3856f623f3aa4ce04512feffe',
@@ -583,6 +627,18 @@ class ReviewedCtutilsPolicyTransitionTests(ReviewedRsaPolicyTransitionTests):
             '467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7')
         self.assert_policy_digest(self.current,
             'e3edd0ab492b298b6e30a32e0f6cb4a20422f613e3a06880cb06d85f157506b0')
+
+    def test_live_shared_allowances_preserve_reviewed_bindings(self):
+        root = Path(__file__).parents[1]
+        live = json.loads((root / 'security/geph-dependency-audit-policy.json').read_text())
+        live_rows = {entry['id']: entry for entry in live['exceptions']}
+        self.assertEqual(len(live_rows), len(live['exceptions']))
+        # Removal of an allowance is legitimate; current audit coverage decides
+        # whether the new graph still needs it. Scanner metadata may also evolve.
+        for reviewed in self.current['exceptions']:
+            if reviewed['id'] in live_rows:
+                with self.subTest(identifier=reviewed['id']):
+                    self.assertEqual(live_rows[reviewed['id']], reviewed)
 
     def test_only_two_reasons_change_without_extending_any_expiry(self):
         previous = {e['id']: e for e in self.previous['exceptions']}

@@ -1,5 +1,90 @@
 # Routing Research Notes
 
+### Chromium runtime review 2026-10-30
+
+The official [Stable release](https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_02107719452.html)
+and Chrome for Testing catalogs select 156.0.8078.80, revision 1706539. Evidence-only
+CI41048890989/1 fetched the exact official mac-arm64 object (generation1793229146450866),
+checked its 103982159-byte length and metadata consistency, then computed archive
+SHA-256 `ea615baa2e9caf0d02d1898a6562b5f8fa9c35239707dae0f592178df5b986ac`.
+The safely extracted arm64 executable hashes to
+`febae66e849b516d551a7fd0434af84f7c7e688e93e43dbc1fb951bdc87ec869`.
+License/ABOUT identity, exact version output, sandbox-enabled local JavaScript DOM
+execution, owned-process cleanup and removal of the temporary archive/profile passed.
+
+Fresh checksum-verified OSV Scanner 2.3.8 preserves the exact proposed generic package
+but provides an empty ecosystem, so its mapping remains unsupported. No findings
+were reported; this is explicitly **not vulnerability clearance**. The new exact
+artifact review is bounded through November 13, retaining separate integrity-only
+coverage and rejection of any scanner finding or identity mismatch. Package/source
+pins and the browser-helper identity contract are synchronized; .31 assets are not
+changed. Packaged observer/semantic/invisibility and final release gates remain.
+
+Only the 9156-byte evidence artifact12973786970 was downloaded to the workstation.
+Its run/head/merge-tree binding and scanner input/output hashes were independently
+checked against head7930fb61e. Receipts: `output/continuation-20261030/chromium-review41048890989/`.
+No browser, scanner or archive was installed or executed locally. Scoped source
+checks passed: 36 runtime/audit/SBOM tests and 38 subcases; the subsequent exact
+application block-buffer disposition also passed 22 audit tests/28 subcases.
+
+### block-buffer applicability and publication admission, 2026-10-30
+
+Fresh audit41046195000 reported GHSA-qwgh-2vcv-g2f7 for Geph's block-buffer
+0.9.0 and 0.10.4. The [primary advisory](https://github.com/advisories/GHSA-qwgh-2vcv-g2f7)
+describes a caught callback panic leaving a cursor embedded in block bytes corrupt;
+the [upstream fix](https://github.com/RustCrypto/utils/pull/1487) guards that inline state.
+The two exact older archives instead store a separate private `pos: usize` (0.9.0)
+or `pos: u8` (0.10.4); neither contains `ReadBuffer`. Bytes passed to callbacks do
+not include the cursor, and a callback panic preserves its earlier valid value.
+The checked archive hashes match the Geph lock; the application lock also uses
+the identical 0.10.4 archive:
+
+- 0.9.0: `4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4`.
+- 0.10.4: `3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71`.
+
+Independent static review supports not-affected for this documented mechanism,
+not general immunity to defects. Two Geph records and one application record retain
+visible exact package/version/advisory findings and require re-review by November 6. Other identities,
+advisories and expiry still block. The RSA exceptions are unchanged. Evidence and
+source snapshots: `output/continuation-20261030/pr426-audit41046195000/`.
+
+The same audit exposed a separate publication defect. Preview .31 was published
+October 30 with an October 26 report whose Chromium integrity-only entry expired
+October 29. Its signed artifact identity and functional tests remain established;
+current policy admission was not. The verifier checked expiry at the historical
+report date, and the manual preflight checked RSA expiry but missed this entry.
+New publication must separately enforce current UTC admission without rewriting
+the original scan date or pretending to rescan new advisory data. The old runtime
+review is not extended; a current official Chromium candidate is being qualified.
+
+### Cancellation ownership and split chunk-size prefixes, 2026-10-30
+
+Two independent defects from PR376 remained in main `a37cb6c5` after preview .31.
+In `connection_race_io.py`, a selected stream was removed from the session before
+awaiting loser cleanup. Caller cancellation during that wait prevented delivery
+without closing the selected stream. Cancellation while awaiting one writer's close
+could also skip remaining writers. Two event-controlled regressions fail against
+the old source. One shielded cleanup task now owns shutdown, closes every known
+writer before async waits and avoids re-cancelling a dialer already in cleanup.
+The selected stream transfers to the caller only after shutdown succeeds; otherwise
+it is closed. No new cleanup deadline or routing policy is introduced.
+
+In `http_response_completion.py`, an EOF/timeout after chunk-size bytes `5\r`
+was treated as malformed, although the LF can legally arrive in a later read.
+The repair recognizes only a nonempty hexadecimal prefix with one trailing CR
+as incomplete. It never calls that response complete; malformed sizes, unsupported
+framing and locally truncated evidence retain their existing unknown classification.
+A regression checks every proper prefix of a multi-chunk body under EOF and timeout,
+plus complete and malformed controls. The bootstrap range classifier also covers
+split size lines and malformed input.
+
+Causal old-source failures: two cancellation cases and one chunk-prefix case.
+Focused green: 17 adapter/probe, 11 parser and 30 bootstrap tests. The adapter suite
+includes actual loopback TCP ownership/cleanup checks. Independent review found no
+blocker. Evidence: `output/continuation-20261030/connection-race/`, `chunked-prefix/`
+and `transport-review.md`. These are source-level proofs; they do not establish the
+cause of historical Codex reconnects, memory growth, or any particular website failure.
+
 ### Native Quit reached an unclassified process census, 2026-10-26
 
 Main CI40319062696 (source `4ddfaf624e4f1ae1d439761bfd2933fa9e1a61d7`)
@@ -1767,3 +1852,22 @@ Unsafe candidates:
 - Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
 - Importing upstream strategy scripts without a pinned, verified, and reviewed
   policy bundle.
+
+### 2026-10-30 — follow-up connection ownership review
+
+PR426 review identified two additional cancellation windows: completed dialer
+results were held behind unrelated pending cleanup, and COMMAND_CANCEL removed
+its stream before its cancellable wait_closed finished. The same second pattern
+existed in cancelled/duplicate outcomes during harvesting. Five deterministic
+old-code failures now pass: shutdown harvests and closes each result promptly,
+and one shielded close helper retains ownership through cancellation. The winner
+transfer and no-second-cancel guard remain intact, with no new deadline. Sixteen
+adapter and six caller tests passed; independent review recorded the exact hashes
+in `output/continuation-20261030/connection-race-review/`.
+
+The parser's malformed-chunk controls now assert both not-complete and
+not-incomplete for EOF/timeout; all eleven focused tests pass, without another
+production parser change. The runtime-review Popen audit has no concrete command
+injection path in its two current callers: fixed argv lists with shell disabled,
+a validated private executable path, fixed flags and synthetic HTML. No scanner
+suppression was added. Full boundary review: `output/continuation-20261030/pr426-review/`.

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import stat
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import dependency_audit
@@ -43,6 +44,68 @@ REQUIRED_FILES = {
     SBOM_NAME,
     AUDIT_NAME,
 }
+
+
+def select_geph_audit_artifact(
+    artifacts: object, jobs: object, *, source_commit: str,
+    run_id: int, run_attempt: int, repository_id: int,
+) -> int:
+    """Bind the small full-audit artifact to the verified run's exact attempt."""
+    if any(type(value) is not int or value <= 0
+           for value in (run_id, run_attempt, repository_id)):
+        raise ValueError("Geph audit run identity is invalid")
+
+    def complete_list(payload, key):
+        if not isinstance(payload, dict) or not isinstance(payload.get(key), list):
+            raise ValueError("Geph audit metadata list is invalid")
+        values = payload[key]
+        if type(payload.get("total_count")) is not int or payload["total_count"] != len(values):
+            raise ValueError("Geph audit metadata list is incomplete")
+        if not all(isinstance(item, dict) for item in values):
+            raise ValueError("Geph audit metadata entry is invalid")
+        return values
+
+    def timestamp(value):
+        try:
+            if not isinstance(value, str):
+                raise ValueError
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
+                raise ValueError
+            return parsed
+        except ValueError as exc:
+            raise ValueError("Geph audit timestamp is missing or not UTC") from exc
+
+    matches = [job for job in complete_list(jobs, "jobs")
+               if job.get("name") == "geph-vendor-audit"]
+    if len(matches) != 1:
+        raise ValueError("Geph audit job is missing or duplicated")
+    job = matches[0]
+    if (type(job.get("run_attempt")) is not int or job["run_attempt"] != run_attempt
+            or job.get("status") != "completed" or job.get("conclusion") != "success"):
+        raise ValueError("Geph audit job did not pass in the selected attempt")
+    started, completed = timestamp(job.get("started_at")), timestamp(job.get("completed_at"))
+    matches = [item for item in complete_list(artifacts, "artifacts")
+               if item.get("name") == f"geph-vendor-dependency-audit-{source_commit}"]
+    if len(matches) != 1:
+        raise ValueError("Geph audit artifact is missing or duplicated")
+    artifact = matches[0]
+    if (type(artifact.get("id")) is not int or artifact["id"] <= 0
+            or artifact.get("expired") is not False):
+        raise ValueError("Geph audit artifact is unavailable")
+    workflow = artifact.get("workflow_run")
+    expected = {"id": run_id, "repository_id": repository_id,
+                "head_repository_id": repository_id, "head_sha": source_commit,
+                "head_branch": "main"}
+    if (not isinstance(workflow, dict)
+            or any(type(workflow.get(k)) is not int for k in ("id", "repository_id", "head_repository_id"))
+            or any(workflow.get(k) != v for k, v in expected.items())):
+        raise ValueError("Geph audit artifact belongs to another source or run")
+    created = timestamp(artifact.get("created_at"))
+    updated = timestamp(artifact.get("updated_at"))
+    if not started <= created <= updated <= completed:
+        raise ValueError("Geph audit artifact is not from the selected job attempt")
+    return artifact["id"]
 
 
 def _read_object(path: Path, label: str) -> dict:
@@ -184,6 +247,7 @@ def _validate_candidate_metadata(
     source_commit: str,
     source_date_epoch: int,
     target: str,
+    admission_on: date | None = None,
 ) -> dict:
     tag = _candidate_tag(source_commit)
     sbom = _read_object(candidate_dir / SBOM_NAME, "candidate SBOM")
@@ -202,6 +266,7 @@ def _validate_candidate_metadata(
         sbom_path=candidate_dir / SBOM_NAME,
         source_commit=source_commit,
         target=target,
+        admission_on=admission_on,
     )
     return {
         "sbom_packages": sbom_summary["package_count"],
@@ -280,6 +345,7 @@ def validate_manifest(
     expected_workflow_run_id: int | None = None,
     expected_workflow_run_attempt: int | None = None,
     app_tree: Path | None = None,
+    admission_on: date | None = None,
 ) -> dict:
     manifest = _read_object(candidate_dir / MANIFEST_NAME, "candidate manifest")
     if manifest.get("schema_version") != SCHEMA_VERSION:
@@ -333,6 +399,7 @@ def validate_manifest(
         source_commit=source_commit,
         source_date_epoch=source_date_epoch,
         target=target,
+        admission_on=admission_on,
     )
     if manifest.get("metadata") != metadata:
         raise ValueError("candidate dependency metadata summary does not match")
@@ -495,6 +562,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verify.add_argument("--expected-workflow-run-id", type=int)
     verify.add_argument("--expected-workflow-run-attempt", type=int)
     verify.add_argument("--app-tree", type=Path)
+    verify.add_argument(
+        "--for-publication", action="store_true",
+        help="recheck used policy allowances on the current UTC date",
+    )
     proof = subparsers.add_parser("create-proof")
     proof.add_argument("--candidate-dir", required=True, type=Path)
     proof.add_argument("--output", required=True, type=Path)
@@ -562,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_workflow_run_id=args.expected_workflow_run_id,
             expected_workflow_run_attempt=args.expected_workflow_run_attempt,
             app_tree=args.app_tree,
+            admission_on=datetime.now(UTC).date() if args.for_publication else None,
         )
     elif args.command == "create-proof":
         proof = build_qualification_proof(

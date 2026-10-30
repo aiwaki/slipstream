@@ -2,13 +2,52 @@
 
 ## Verified Checkpoint
 
-### Active: preview .31 published and verified, 2026-10-30
+### Active: PR426 preview.32 candidate, 2026-10-30
 
-Active checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/post-census-release-qualification`. Published source is
-`3eb32bd3029d6acd88b380a8c767c19c7abc76a4` (PR424), tree
-`37981d7723c73d74b99ab86faf00f494c8c0c030`. Documentation follow-up is separate.
-Preserve the user's working external Geph. No workstation service/account/browser/build/install action in this continuation.
+Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`;
+branch `codex/post-preview31-recovery`, base main `a37cb6c5`. PR426 is still open.
+The last fully green pre-review-fix source is `7b4f885dbb29d9fed1eeffd1507c82da87f95e9b`:
+CI41053750282 (including packaged browser/lifecycle) and audit41053750222 passed.
+The additional ownership fixes below require fresh final-head checks before merge.
+Preview .32 is not published. Preserve private output and the working external Geph;
+no workstation services, settings, account, browser, native build or installation changes.
+
+| Area | Current evidence and limit |
+|---|---|
+| Connection ownership | Initial cancellation repair plus five newly reproduced review cases: close already-done and late socket results before unrelated cleanup; retain shielded close ownership through COMMAND_CANCEL and both harvest paths. Five causal failures, 16 adapter + 6 caller tests green, independent review clear. No new cleanup deadline; winner handoff remains protected. |
+| HTTP completion | Valid hex chunk prefix ending in CR is incomplete after EOF/timeout. Eleven parser tests pass; malformed controls now reject both complete/incomplete classifications. Earlier 30 bootstrap tests remain reusable. |
+| Chromium | Version156.0.8078.80 pinned to reviewed archive/executable. Isolated review41048890989/1 and small artifact12973786970 prove identity, sandbox DOM and cleanup. Review through November13 is integrity-only: OSV has no supported generic mapping, no CVE clearance claim. |
+| Publication admission | Current UTC admission for app and full exact-run/attempt Geph evidence before every publication PATCH. 74 tests/65 subcases +16 workflow checks; historical verification retained. RSA allowances unchanged and expire October30 UTC inclusive. |
+| Version and historical fixtures | Publisher32 and public31→32 qualification tied to VERSION; 130 tests/5 subcases and review passed. Historical r2→r3 policy frozen to reviewed digest; 34 tests passed, production transition validator unchanged. |
+| Dependency policy | App block-buffer0.10.4 and Geph0.9.0/0.10.4 exact advisory dispositions backed by verified separate-cursor sources, expire November6. Fresh audit at2867cb06d verified app361 scans/accepted1 and full Geph423/accepted4; later final-head audits also green. No RSA expiry extension. |
+
+Evidence: `output/continuation-20261030/connection-race-review/`,
+`pr426-review/`, `release-audit-admission/`, `chromium-review41048890989/`,
+`candidate32-2867cb06d/` and `candidate32-949323955/`.
+The generic Popen audit was reviewed: two fixed list-argv callers, shell disabled,
+validated private executable path and fixed synthetic HTML; no concrete injection
+path or suppression. Parser coverage and the two ownership threads are addressed
+by this commit; resolve them only after the source is pushed.
+
+Next: final PR checks and normal merge, then exact main candidate/audit. Freeze main
+at that source while readiness and native-root run in parallel, followed by packaged
+qualification and publisher. Exact inputs are in
+`output/continuation-20261030/candidate32-2867cb06d/next-actions.md`.
+Use public .31 bits as OLD (artifact12670738202, available through November9); do not
+reuse the earlier private .30 pair as public update proof. This requires one protected
+account-backed readiness run; none has been dispatched in this continuation.
+The harness still does not qualify actual public-feed/tray/admin auto-update.
+
+Remaining independent work: bundled xbox-dns.ru removal and broader recovery (PR376),
+RSA-only vendor/source-tooling work (PR384), Telegram1.11.2/H2 (PR386). All thirteen
+Geph session/SQLite edits from PR384 already shipped via PR388; do not redo them.
+Historical user reconnects/403 and sustained workstation media remain unqualified.
+
+### Published .31 — retained historical evidence
+
+The .31 publisher/manual preflight missed Chromium155 admission expiring October29.
+Public release notes were corrected; all twelve assets/tag remain unchanged. Historical
+identity/gate evidence below does not retroactively establish current-policy admission.
 
 [Preview .31](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
 was published October 30 at 10:47 UTC by
@@ -52,9 +91,34 @@ still cannot authorize a signal or successful absence. Scoped checks: 98 root-st
 exact historical census reason remains unknown. Details: ROUTING_RESEARCH.md and
 `output/readiness-preflight-20261026/root-stop-census/verification.json`.
 
-This documentation follow-up records publication without changing the released code.
-Next: continue the separate public-update/workstation gates and open candidate work
-described below; do not repeat these unchanged green gates or mutate the working connection.
+The continuation selected two unmerged PR376 repairs against current main:
+the connection-race adapter could orphan its winner or skip later owned writers
+when cancelled during cleanup; the HTTP completion parser treated a valid chunk-size
+prefix ending in CR as unknown after EOF/timeout. Both now have causal failing tests
+against the old source. The fix retains one shielded cleanup owner, transfers the
+winner only after cleanup, and classifies a valid hex-plus-CR prefix as incomplete.
+Malformed input stays unknown; no routing policy or cleanup deadline changes.
+Focused results: 17 adapter/probe tests (including real loopback TCP), 11 parser
+tests and 30 bootstrap classifier tests passed. Independent review found no blocker.
+Initial PR426 source `a1b1cf32df7c958a0323c18f69171585b52a092b` passed
+CI41046195098 (including packaged browser/lifecycle); its dependency audit failed.
+This initial evidence is superseded by the current checkpoint above. Eight documentation checks
+also passed (66 focused checks total).
+No new installed or live-site claim is made. Wait for exact-head checks before merge.
+
+PR reconciliation is complete: all three old heads conflict with main, but all
+13 Geph session/SQLite edits from PR384 already shipped via PR388. Its remaining
+scope is source/build/audit tooling, with a separate RSA-only candidate requiring
+fresh review and qualification; native SQLite research is not its prerequisite.
+Telegram 1.11.2/H2 remains unmerged in PR386. PR376 also still contains pending
+removal of the bundled xbox-dns.ru provider and broader response-recovery changes.
+Do not reimport any old branch wholesale. Reports and red/green logs are retained in
+`output/continuation-20261030/`; see ROUTING_RESEARCH.md for the two concrete repairs.
+No graph tool is available, so discovery uses bounded direct diffs and source reads.
+
+Next: finish the selected transport PR, then continue the reconciled candidate work
+and separate public-update/workstation gates. Do not repeat unchanged release gates
+or mutate the working connection.
 
 ### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
 
@@ -1224,9 +1288,16 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Preview `.31` is published and remotely verified. Verify the documentation-only
-  follow-up PR state once on resume. The exact candidate/readiness/native/packaged gates
-  above are complete and reusable; do not rerun or redispatch them after resuming.
+- Complete PR/CI/merge for the selected cancellation and chunked-prefix fixes on
+  `codex/post-preview31-recovery`. Preserve the remaining PR376 scope; a source
+  merge will not update the already published `.31` binary.
+- First resolve current dependency admission: obtain the isolated Chromium review
+  receipt, update exact runtime pins/review, verify scoped block-buffer disposition
+  in fresh audit, and finish publication-time app/vendor expiry enforcement. Never
+  renew a date without the required fresh evidence or overwrite published assets.
+- Preview `.31` is published and remotely verified; documentation PR425 is merged
+  with green PR/main checks. The exact candidate/readiness/native/packaged gates above
+  are complete and reusable; do not rerun or redispatch them after resuming.
 - Public preview `.30` is immutable and lacks origin-side updater repairs. The
   qualified private `.30 -> .31` pair cannot prove a public transition. Plan the
   next ordinary tray/admin and fully public update/rollback checks from compatible
@@ -1235,8 +1306,8 @@ installation ran. The unchanged release checks are not repeated.
   routing/error evidence. The published lifecycle and route-continuity checks do
   not establish the cause of those earlier responses. Preserve external Geph and
   network settings; no workstation transaction in this continuation.
-- PR376/384/386 candidate work remains separate from this release. Reconcile each
-  live PR and source before selecting its next gate. Existing RSA policy exceptions
+- PR376/384/386 remaining scope was reconciled October 30 (reports above). Verify
+  new changes before the next action instead of repeating that inventory. RSA policy exceptions
   expire after October 30 UTC; do not extend or reuse them implicitly.
 
 ## External Gates

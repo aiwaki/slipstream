@@ -81,8 +81,10 @@ def _chunked_body_state(body):
                 return "incomplete"
             if b";" in pending:
                 return "invalid"
-            if all(
-                byte in b"0123456789abcdefABCDEF" for byte in pending
+            # A read may end between the CR and LF of the chunk-size line.
+            size_prefix = pending[:-1] if pending.endswith(b"\r") else pending
+            if size_prefix and all(
+                byte in b"0123456789abcdefABCDEF" for byte in size_prefix
             ):
                 return "incomplete"
             return "invalid"

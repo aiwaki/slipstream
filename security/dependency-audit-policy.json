@@ -1,13 +1,25 @@
 {
-  "exceptions": [],
+  "exceptions": [
+    {
+      "advisories": [
+        "GHSA-qwgh-2vcv-g2f7"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-11-06",
+      "id": "app-block-buffer-0.10.4-separate-cursor",
+      "package": "block-buffer",
+      "reason": "Reviewed 2026-10-30 against the exact crates.io archive SHA-256 3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71, matching current application Cargo.lock. This version stores the cursor in a separate private pos: u8 field, not inside block storage passed to compression callbacks, and contains no ReadBuffer. The advisory and upstream fix concern inline cursor bytes overwritten before a caught callback panic; that mechanism is absent from this exact source. Independent static review supports not-affected for this advisory only, not a general safety claim. Keep the scanner finding visible and re-review by 2026-11-06; see docs/ROUTING_RESEARCH.md, block-buffer applicability 2026-10-30.",
+      "version": "0.10.4"
+    }
+  ],
   "integrity_only": [
     {
-      "expires": "2026-10-29",
+      "expires": "2026-11-13",
       "name": "chromium-headless-shell",
-      "purl": "pkg:generic/chromium-headless-shell@155.0.8059.79",
-      "reason": "Reviewed 2026-10-15: exact mac-arm64 headless-shell from the official Chrome for Testing Stable 155.0.8059.79 catalog, archive SHA-256 verified. A fresh run of pinned OSV Scanner 2.3.8 preserves this generic name/version with an empty ecosystem and explicitly filters it as unscannable. This time-bounded record accepts only artifact identity, not vulnerability coverage or absence of Chromium vulnerabilities. Reports must retain the separate integrity-only count; any scanner-reported vulnerability or identity mismatch still rejects. Re-review the current Stable artifact and scanner mapping by 2026-10-29; see docs/ROUTING_RESEARCH.md, Chromium runtime review 2026-10-15.",
-      "sha256": "5f51504ead3d41815111cd73e79c4979df3a4e6aedc7cf6fe2b042ae037363b5",
-      "version": "155.0.8059.79"
+      "purl": "pkg:generic/chromium-headless-shell@156.0.8078.80",
+      "reason": "Reviewed 2026-10-30: exact official Chrome for Testing Stable 156.0.8078.80 mac-arm64 artifact, revision 1706539. Disposable CI41048890989/1 verified catalog/object identity, full archive SHA-256, extracted arm64 executable, license/ABOUT, sandbox-enabled local DOM execution and owned-process/profile cleanup. Fresh checksum-verified OSV Scanner 2.3.8 retained the exact generic package with empty ecosystem, no reported findings and explicitly unsupported mapping; this accepts artifact identity only, not vulnerability coverage or absence of Chromium vulnerabilities. Reports retain the separate integrity-only count, and any scanner finding or identity mismatch rejects. Review current Stable and mapping again by 2026-11-13; see docs/ROUTING_RESEARCH.md, Chromium runtime review 2026-10-30.",
+      "sha256": "ea615baa2e9caf0d02d1898a6562b5f8fa9c35239707dae0f592178df5b986ac",
+      "version": "156.0.8078.80"
     }
   ],
   "rules": {

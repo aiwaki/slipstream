@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import stat
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import dependency_audit
@@ -195,6 +196,7 @@ def validate_artifact_manifest(
     channel: str,
     source_commit: str,
     target: str,
+    admission_on: date | None = None,
 ) -> dict:
     if channel not in {"stable", "preview"}:
         raise ValueError(f"invalid release channel: {channel!r}")
@@ -266,6 +268,7 @@ def validate_artifact_manifest(
         sbom_path=sbom_path,
         source_commit=source_commit,
         target=target,
+        admission_on=admission_on,
     )
     manifest_sha256, manifest_size = hash_regular_file(path)
     return {
@@ -290,6 +293,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-date-epoch", required=True, type=int)
     parser.add_argument("--target", choices=tuple(TARGETS), required=True)
     parser.add_argument(
+        "--for-publication", action="store_true",
+        help="recheck used policy allowances on the current UTC date",
+    )
+    parser.add_argument(
         "--output", type=Path, default=None, help=f"default: RELEASE_DIR/{MANIFEST_NAME}"
     )
     return parser.parse_args(argv)
@@ -297,6 +304,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Historical finalization may recreate metadata without publishing again.
+    admission_on = datetime.now(UTC).date() if args.for_publication else None
     output = args.output or args.release_dir / MANIFEST_NAME
     expected_output = (args.release_dir / MANIFEST_NAME).resolve()
     if output.resolve() != expected_output:
@@ -320,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         channel=args.channel,
         source_commit=args.source_commit,
         target=args.target,
+        admission_on=admission_on,
     )
     print(
         json.dumps(
@@ -327,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
                 "output": str(output),
                 "artifact_count": validation["artifact_count"],
                 "target": args.target,
+                "admission_checked_on": admission_on.isoformat() if admission_on else None,
             },
             sort_keys=True,
         )

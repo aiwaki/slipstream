@@ -356,6 +356,9 @@ def test_chunked_range_delivery_is_framing_aware():
 
     assert _classify(complete) is RangeProbeOutcome.COMPLETE
     assert _classify(incomplete) is RangeProbeOutcome.INCOMPLETE
+    assert _classify(headers + b"5\r") is RangeProbeOutcome.INCOMPLETE
+    assert _classify(headers + b"5\r\nhello\r\n0\r") is RangeProbeOutcome.INCOMPLETE
+    assert _classify(headers + b"5\rX") is RangeProbeOutcome.UNKNOWN
 
 
 @pytest.mark.parametrize(
