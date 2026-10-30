@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
     steps:

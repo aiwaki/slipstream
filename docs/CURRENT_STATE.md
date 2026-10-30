@@ -2,7 +2,7 @@
 
 ## Verified Checkpoint
 
-### Active: exact artifact identity across CI attempts, 2026-10-30
+### Active: artifact identity and supported CI runners, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/ci-artifact-attempt-identity`, based on main
@@ -11,6 +11,22 @@ C3 has the same tree `de281f7b388708157b1f07fafc3927289b370335` as reviewed/test
 PR head67f4c8e3. Preview .32 is not published or installed. Keep the working external
 Geph and workstation unchanged. No native/protected retry is authorized by this
 checkpoint.
+
+PR430's first head `6660be1e8ee323f3a4100892be77f10ae6a0fc48` reached a separate
+infrastructure blocker: CI41101705353/1 was cancelled on October 30 at 18:03:41Z.
+Product, Chromium-contract and app-build jobs were cancelled without a runner;
+their annotations identify the scheduled macOS 14 image brownout. Downstream app
+qualifications did not run. Evidence: `ci-artifact-attempt-identity/pr430/` under
+the output directory below. Audit41101704933 reports passed current-date admission,
+but cannot turn the cancelled CI into a release gate.
+
+This PR also moves all 13 retired runner labels in six active workflows to
+`macos-15`, matching the two existing native-update workflows. GitHub documents
+both old and new standard labels as ARM64; its [retirement announcement](https://github.com/actions/runner-images/issues/13518)
+confirms today's 14:00–00:00 UTC brownout and November 2 removal. Application
+targets/configured minimum and historical r3 inputs remain unchanged. The new
+hosted runs must establish compatibility with this runner image; no existing
+macOS 13 runtime qualification is implied.
 
 Main CI41090901062/1 failed because three macOS arm64 qualification jobs could not
 acquire hosted runners. All three were cancelled without a runner or executed step;
@@ -50,7 +66,7 @@ records from prior attempts and rejection of expired current records. Both
 independent source reviews passed; the combined review is in
 `output/continuation-20261030/ci-artifact-attempt-identity-review/`.
 Eight documentation tests and the project-state continuity check also passed.
-Next: exact-head PR CI, normal merge, then fresh main qualification. Product
+Next: exact-head PR CI after the runner migration, normal merge, then fresh main qualification. Product
 routing, DNS, Geph, authorization and release policy are unchanged by these repairs.
 
 Retained prior evidence: C2 main46ad4de4 passed CI41074846948/1,

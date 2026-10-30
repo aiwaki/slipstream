@@ -8,12 +8,20 @@ passed, but publication accepted an October 26 application audit after its used
 Chromium integrity-only admission expired on October 29. The public release notes
 now disclose this gap; the immutable assets remain unchanged. Current dependency
 admission is not established for that release. Runtime refresh and publication-time
-expiry checks are in progress in PR426. See [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
+expiry checks are merged; a replacement preview still requires fresh qualification.
+See [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
 
 New publication must validate the current UTC validity of used, time-bounded
 application and vendored dependency admissions separately from historical report
 verification. Preserve the original scan date and exact source/policy hashes;
 rechecking expiry does not imply a fresh scan of advisory data.
+
+Hosted macOS build, qualification and publication jobs use the explicit
+`macos-15` ARM64 runner label. GitHub's [macOS 14 retirement announcement](https://github.com/actions/runner-images/issues/13518)
+includes scheduled job failures before the November 2, 2026 removal; such a
+cancelled run does not qualify a candidate. The application minimum remains
+configured as macOS 13.0. A successful hosted macOS 15 run establishes the tested
+path on that image, not runtime compatibility with every earlier supported OS.
 
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|

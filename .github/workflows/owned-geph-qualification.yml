@@ -69,7 +69,7 @@ jobs:
       inputs.diagnostic_only == true &&
       needs.account-backed-run-budget.result == 'success'
     needs: account-backed-run-budget
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 35
     environment: geph-qualification
     env:

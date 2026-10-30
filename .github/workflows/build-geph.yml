@@ -268,7 +268,7 @@ jobs:
   build:
     needs: resolve
     if: needs.resolve.outputs.should_build == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       GEPH_TARGETS: aarch64-apple-darwin,x86_64-apple-darwin
     steps:

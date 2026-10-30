@@ -67,7 +67,7 @@ jobs:
       github.run_attempt == '1' &&
       needs.account-backed-run-budget.result == 'success'
     needs: account-backed-run-budget
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 75
     environment: geph-qualification
     env:
