@@ -94,8 +94,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     pending_navigation_probe_claimed_guards = OrderedDict(
         tproxy._pending_navigation_probe_claimed_guards
     )
-    xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
-    xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
+    app_dns_candidates = dict(tproxy._app_dns_candidates)
+    app_dns_attempts = dict(tproxy._app_dns_attempts)
     clean_eof_stalls = {
         host: deque(values) for host, values in tproxy._clean_eof_stalls.items()
     }
@@ -271,8 +271,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.clear()
         tproxy._pending_navigation_probe_claimed_guards.clear()
-        tproxy._xbox_dns_candidates.clear()
-        tproxy._xbox_dns_attempts.clear()
+        tproxy._app_dns_candidates.clear()
+        tproxy._app_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
         tproxy._server_first_closes.clear()
         tproxy._server_first_repeat_stages.clear()
@@ -401,10 +401,10 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._pending_navigation_probe_claimed_guards.update(
             pending_navigation_probe_claimed_guards
         )
-        tproxy._xbox_dns_candidates.clear()
-        tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
-        tproxy._xbox_dns_attempts.clear()
-        tproxy._xbox_dns_attempts.update(xbox_dns_attempts)
+        tproxy._app_dns_candidates.clear()
+        tproxy._app_dns_candidates.update(app_dns_candidates)
+        tproxy._app_dns_attempts.clear()
+        tproxy._app_dns_attempts.update(app_dns_attempts)
         tproxy._clean_eof_stalls.clear()
         tproxy._clean_eof_stalls.update(clean_eof_stalls)
         tproxy._server_first_closes.clear()
@@ -857,7 +857,7 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "routing_recovery.py": "VALUE = 16\n",
     "semantic_route_signal.py": "VALUE = 17\n",
     "semantic_route_signal_runtime.py": "VALUE = 18\n",
-    "xbox_dns.py": "VALUE = 19\n",
+    "app_dns.py": "VALUE = 19\n",
 }
 
 
@@ -2189,8 +2189,8 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "managed_by_slipstream": False,
     }
     assert status["environment"]["dns"] == {
-        "state": "xbox_dns",
-        "providers": "xbox_dns",
+        "state": "configured",
+        "providers": "",
         "managed_by_slipstream": False,
         "resolution_state": "unknown",
     }
@@ -7118,7 +7118,7 @@ def test_runtime_rearm_helper_keeps_wake_and_network_side_effects_scoped(monkeyp
     ]
 
 
-def test_system_dns_status_detects_xbox_dns_without_mutating():
+def test_system_dns_status_keeps_retired_provider_as_generic_configuration():
     raw = """
 DNS configuration
 
@@ -7132,8 +7132,8 @@ resolver #1
 """
 
     assert tproxy.system_dns_status_from_scutil(raw) == {
-        "state": "xbox_dns",
-        "providers": "xbox_dns",
+        "state": "configured",
+        "providers": "",
         "servers": ["111.88.96.50", "111.88.96.51"],
         "managed_by_slipstream": False,
     }
@@ -7199,9 +7199,9 @@ def test_current_system_dns_status_is_cached(monkeypatch):
         first = tproxy.current_system_dns_status(now=100.0)
         second = tproxy.current_system_dns_status(now=110.0)
 
-        assert first["state"] == "xbox_dns"
+        assert first["state"] == "configured"
         assert first["resolution_checks"]["state"] == "ok"
-        assert second["state"] == "xbox_dns"
+        assert second["state"] == "configured"
         assert calls == [("scutil", "--dns")]
     finally:
         tproxy._system_dns_cache.clear()
@@ -7242,20 +7242,20 @@ def test_current_system_dns_status_reports_unknown_until_background_refresh(
         tproxy._system_dns_cache.update(original)
 
 
-def test_smart_dns_route_gate_requires_geo_exit_and_fresh_canary(monkeypatch):
+def test_retired_provider_cannot_enable_smart_dns_with_fresh_canary(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "current_system_dns_status",
         lambda now=None: {
-            "state": "xbox_dns",
-            "providers": "xbox_dns",
+            "state": "configured",
+            "providers": "",
             "servers": ["111.88.96.50"],
             "managed_by_slipstream": False,
         },
     )
     tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] = 200.0
 
-    assert tproxy.smart_dns_route_enabled("chatgpt.com", now=100.0)
+    assert not tproxy.smart_dns_route_enabled("chatgpt.com", now=100.0)
     assert not tproxy.smart_dns_route_enabled("chatgpt.com", now=201.0)
     assert not tproxy.smart_dns_route_enabled("gateway.discord.gg", now=100.0)
     assert not tproxy.smart_dns_route_enabled("rr2---sn-ntq7yner.googlevideo.com", now=100.0)
@@ -7964,12 +7964,14 @@ def test_geo_exit_canary_uses_smart_dns_before_geph(monkeypatch):
             tproxy,
             "current_system_dns_status",
             lambda now=None: {
-                "state": "xbox_dns",
-                "providers": "xbox_dns",
+                "state": "app_dns",
+                "providers": "app_dns",
                 "servers": ["111.88.96.50"],
                 "managed_by_slipstream": False,
             },
         )
+        # Explicit fixture authority; configured DNS alone cannot enable this backend.
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
         monkeypatch.setattr(tproxy, "system_resolve_async", system_ips)
         monkeypatch.setattr(tproxy, "dial_and_probe", smart_probe)
         monkeypatch.setattr(tproxy, "dial_via_geph", geph_should_not_run)
@@ -8125,12 +8127,14 @@ def test_geo_exit_canary_falls_back_to_geph_when_smart_dns_fails(monkeypatch):
             tproxy,
             "current_system_dns_status",
             lambda now=None: {
-                "state": "xbox_dns",
-                "providers": "xbox_dns",
+                "state": "app_dns",
+                "providers": "app_dns",
                 "servers": ["111.88.96.50"],
                 "managed_by_slipstream": False,
             },
         )
+        # Explicit fixture authority; configured DNS alone cannot enable this backend.
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
         monkeypatch.setattr(tproxy, "system_resolve_async", system_ips)
         monkeypatch.setattr(tproxy, "dial_and_probe", smart_probe)
         monkeypatch.setattr(tproxy, "dial_via_geph", geph_connect)
@@ -10674,7 +10678,7 @@ def test_noise_producer_serializes_before_semantic_route_commit(
         assert before_commit.wait(timeout=2)
         stages = (
             tproxy.AUTO_GEPH_STAGE_SYSTEM,
-            tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+            tproxy.AUTO_GEPH_STAGE_APP_DNS,
             f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
             f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
         )
@@ -12678,7 +12682,7 @@ def test_network_noise_discards_preexisting_learning_authorizations(
     tproxy._local_zero_payload_failures.clear()
     for offset, stage in enumerate((
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     )):
@@ -14524,7 +14528,7 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
         now_unix_ms=1_043_000,
         token_factory=lambda: "b" * 32,
     )
-    activity.pending_navigation_stage = tproxy.AUTO_GEPH_STAGE_XBOX_DNS
+    activity.pending_navigation_stage = tproxy.AUTO_GEPH_STAGE_APP_DNS
     assert not tproxy._submit_pending_navigation_probe_result(
         _pending_navigation_probe_result(rebound_job),
         now=141.001,
@@ -15250,7 +15254,7 @@ def test_pending_navigation_signal_advances_only_the_exact_unknown_stage():
         now=100.0,
     )
     assert system_activity.downstream_idle_retry
-    assert tproxy._xbox_dns_candidate_active("unknown.example", now=100.0)
+    assert tproxy._app_dns_candidate_active("unknown.example", now=100.0)
     tproxy._unregister_pending_navigation_relay(system_activity)
 
     xbox_activity = _eligible_pending_navigation_activity()
@@ -15259,7 +15263,7 @@ def test_pending_navigation_signal_advances_only_the_exact_unknown_stage():
         "unknown.example",
         "8.8.8.8",
         tproxy.ROUTE_UNKNOWN,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         scheduler=lambda *args, **kwargs: False,
     )
     assert tproxy._request_pending_navigation_retry(
@@ -15268,7 +15272,7 @@ def test_pending_navigation_signal_advances_only_the_exact_unknown_stage():
         now=100.0,
     )
     assert xbox_activity.downstream_idle_retry
-    assert tproxy._xbox_dns_attempted_recently("unknown.example", now=100.0)
+    assert tproxy._app_dns_attempted_recently("unknown.example", now=100.0)
 
 
 def test_completed_independent_navigation_retries_only_the_stuck_exact_relay():
@@ -15303,7 +15307,7 @@ def test_completed_independent_navigation_retries_only_the_stuck_exact_relay():
         now=101.0,
     )
     assert activity.downstream_idle_retry
-    assert not tproxy._xbox_dns_candidate_active("unknown.example", now=101.0)
+    assert not tproxy._app_dns_candidate_active("unknown.example", now=101.0)
     assert tproxy._pending_navigation_probe_worker_completed(
         _PROBE_LAUNCH_ONE,
         now=101.001,
@@ -15363,7 +15367,7 @@ def test_failed_independent_navigation_advances_the_bound_stuck_relay():
         now=101.0,
     )
     assert activity.downstream_idle_retry
-    assert tproxy._xbox_dns_candidate_active("unknown.example", now=101.0)
+    assert tproxy._app_dns_candidate_active("unknown.example", now=101.0)
 
 
 def test_pending_navigation_strategy_moves_behind_untried_strategies():
@@ -15393,7 +15397,7 @@ def test_pending_navigation_retries_only_after_confirmation_succeeds():
     host = "unknown.example"
     for stage, ip in (
         (tproxy.AUTO_GEPH_STAGE_SYSTEM, "1.1.1.1"),
-        (tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "8.8.8.8"),
+        (tproxy.AUTO_GEPH_STAGE_APP_DNS, "8.8.8.8"),
         (f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64", "9.9.9.9"),
     ):
         tproxy._record_transport_incomplete_idle_evidence(
@@ -15435,7 +15439,7 @@ def test_final_pending_navigation_relay_stays_open_when_confirmation_refuses():
     host = "unknown.example"
     stages = (
         (tproxy.AUTO_GEPH_STAGE_SYSTEM, "1.1.1.1"),
-        (tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "8.8.8.8"),
+        (tproxy.AUTO_GEPH_STAGE_APP_DNS, "8.8.8.8"),
         (f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64", "9.9.9.9"),
     )
     for stage, ip in stages:
@@ -15902,7 +15906,7 @@ def test_repeated_short_server_first_closes_advance_exact_unknown_host():
         duration=0.2,
         now=100.2,
     )
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._app_dns_candidate_active(host, now=100.2)
     assert tproxy.note_server_first_route_close(
         host,
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
@@ -15910,7 +15914,7 @@ def test_repeated_short_server_first_closes_advance_exact_unknown_host():
         duration=0.2,
         now=100.3,
     )
-    assert tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert tproxy._app_dns_candidate_active(host, now=100.3)
     assert (
         tproxy.AUTO_GEPH_STAGE_SYSTEM
         in tproxy._transport_incomplete_server_first_evidence[host]
@@ -15930,7 +15934,7 @@ def test_repeated_short_server_first_closes_advance_exact_unknown_host():
             duration=0.2,
             now=100.4,
         )
-        assert not tproxy._xbox_dns_candidate_active(protected, now=100.4)
+        assert not tproxy._app_dns_candidate_active(protected, now=100.4)
 
 
 def test_repeated_plain_server_close_schedules_exact_transport_confirmation(
@@ -15969,7 +15973,7 @@ def test_repeated_plain_server_close_schedules_exact_transport_confirmation(
     )
     assert host not in tproxy._transport_incomplete_confirming
     assert tproxy._transport_incomplete_last_probe[host] == 100.3
-    assert tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert tproxy._app_dns_candidate_active(host, now=100.3)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -15998,7 +16002,7 @@ def test_single_system_short_close_does_not_request_content_probe(
 
     assert confirmations == []
     assert host not in tproxy._transport_incomplete_last_probe
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._app_dns_candidate_active(host, now=100.2)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -16033,7 +16037,7 @@ def test_repeated_system_short_close_respects_network_wide_failure_guard(
 
     assert confirmations == []
     assert host not in tproxy._transport_incomplete_last_probe
-    assert tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert tproxy._app_dns_candidate_active(host, now=100.3)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -16065,7 +16069,7 @@ def test_repeated_large_system_close_uses_content_probe_without_advancing_ladder
         )
 
     assert confirmations == [(host, "1.1.1.1")]
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
     assert host not in tproxy._transport_incomplete_server_first_evidence
     assert tproxy._transport_incomplete_last_probe[host] == 100.3
     assert not tproxy.is_geo_exit_route(host)
@@ -16106,7 +16110,7 @@ def test_repeated_large_complete_response_does_not_request_geph(monkeypatch):
 
     assert local_probes == [("1.1.1.1", host)]
     assert geph_requests == []
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -16133,7 +16137,7 @@ def test_repeated_large_close_requires_exact_public_system_ip(monkeypatch):
 
     assert confirmations == []
     assert host not in tproxy._transport_incomplete_last_probe
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -16168,7 +16172,7 @@ def test_repeated_client_first_abort_schedules_only_content_probe():
     )
 
     assert scheduled == [(host, "1.0.0.1", "plain", 100.3)]
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -16218,7 +16222,7 @@ def test_client_first_abort_excludes_non_system_and_protected_routes():
     scheduled = []
 
     for host, stage in (
-        ("partial-local.example", tproxy.AUTO_GEPH_STAGE_XBOX_DNS),
+        ("partial-local.example", tproxy.AUTO_GEPH_STAGE_APP_DNS),
         ("updates.discord.com", tproxy.AUTO_GEPH_STAGE_SYSTEM),
         ("rr2---sn-test.googlevideo.com", tproxy.AUTO_GEPH_STAGE_SYSTEM),
         ("www.google.com", tproxy.AUTO_GEPH_STAGE_SYSTEM),
@@ -16318,7 +16322,7 @@ def test_repeated_large_close_excludes_protected_routes(monkeypatch):
                     confirmations.append((candidate, ip)) or True
                 ),
             )
-        assert not tproxy._xbox_dns_candidate_active(protected, now=100.3)
+        assert not tproxy._app_dns_candidate_active(protected, now=100.3)
 
     assert confirmations == []
 
@@ -16352,7 +16356,7 @@ def test_server_first_close_classes_do_not_complete_each_other(monkeypatch):
         )
 
     assert confirmations == []
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.4)
+    assert not tproxy._app_dns_candidate_active(host, now=100.4)
     assert host not in tproxy._transport_incomplete_server_first_evidence
     assert not tproxy.is_geo_exit_route(host)
 
@@ -16381,7 +16385,7 @@ def test_short_repeat_claim_cannot_authorize_large_content_probe(monkeypatch):
     )
 
     assert confirmations == []
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._app_dns_candidate_active(host, now=100.2)
     assert host not in tproxy._transport_incomplete_last_probe
     assert not tproxy.is_geo_exit_route(host)
 
@@ -16397,7 +16401,7 @@ def test_repeated_large_non_system_close_never_schedules_content_probe(monkeypat
     for now in (100.2, 100.3):
         assert not tproxy.note_server_first_route_close(
             host,
-            tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+            tproxy.AUTO_GEPH_STAGE_APP_DNS,
             activity,
             duration=12.0,
             now=now,
@@ -16424,7 +16428,7 @@ def test_server_first_evidence_does_not_mix_with_partial_record_stalls(
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
     for stage in (
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     ):
@@ -16449,7 +16453,7 @@ def test_server_first_evidence_does_not_mix_with_partial_record_stalls(
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
     }
     assert set(tproxy._local_partial_stalls[host]) == {
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     }
@@ -16620,7 +16624,7 @@ def test_payload_idle_evidence_participates_in_network_wide_failure_guard():
     guarded_host = "idle-0.example"
     for stage, expected in (
         (
-            tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+            tproxy.AUTO_GEPH_STAGE_APP_DNS,
             tproxy.TRANSPORT_IDLE_EVIDENCE_ADVANCE,
         ),
         (
@@ -16673,11 +16677,11 @@ def test_server_reset_advances_unknown_host_without_waiting_for_repeat():
         duration=0.2,
         now=100.2,
     )
-    assert tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert tproxy._app_dns_candidate_active(host, now=100.2)
     assert host not in tproxy._transport_incomplete_server_first_evidence
     assert (
         tproxy.unknown_recovery_stage(host, now=100.3)
-        == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+        == tproxy.UNKNOWN_RECOVERY_APP_DNS
     )
     repeat_stage = tproxy._claim_server_first_repeat_stage(host, now=100.3)
     assert repeat_stage == (tproxy.AUTO_GEPH_STAGE_SYSTEM, None)
@@ -16744,7 +16748,7 @@ def test_server_first_repeat_stage_expires_inside_the_evidence_window():
 
     assert tproxy.note_server_first_route_close(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         activity,
         duration=0.2,
         now=100.0,
@@ -16761,11 +16765,11 @@ def test_server_first_repeat_stage_expires_inside_the_evidence_window():
 def test_server_first_repeat_restores_xbox_and_exact_strategy_once():
     activity = _short_server_first_activity(read_failed=True)
     xbox_host = "repeat-xbox.example"
-    tproxy._mark_xbox_dns_candidate(xbox_host, now=100.0)
+    tproxy._mark_app_dns_candidate(xbox_host, now=100.0)
 
     assert tproxy.note_server_first_route_close(
         xbox_host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         activity,
         duration=0.2,
         now=100.1,
@@ -16775,18 +16779,18 @@ def test_server_first_repeat_restores_xbox_and_exact_strategy_once():
         == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
     )
     xbox_repeat = tproxy._claim_server_first_repeat_stage(xbox_host, now=100.2)
-    assert xbox_repeat == (tproxy.AUTO_GEPH_STAGE_XBOX_DNS, None)
+    assert xbox_repeat == (tproxy.AUTO_GEPH_STAGE_APP_DNS, None)
     assert (
         tproxy._unknown_recovery_stage_for_attempt(
             xbox_host,
             xbox_repeat[0],
             now=100.2,
         )
-        == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+        == tproxy.UNKNOWN_RECOVERY_APP_DNS
     )
 
     strategy_host = "repeat-strategy.example"
-    tproxy._mark_xbox_dns_exhausted(strategy_host, now=100.0)
+    tproxy._mark_app_dns_exhausted(strategy_host, now=100.0)
     repeat_name = "plain"
     repeat_stage = f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}{repeat_name}"
     assert tproxy.note_server_first_route_close(
@@ -16878,7 +16882,7 @@ def test_downstream_write_failure_is_not_server_close_evidence():
         duration=0.2,
         now=100.2,
     )
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._app_dns_candidate_active(host, now=100.2)
     assert not tproxy._server_first_closes
 
 
@@ -16896,7 +16900,7 @@ def test_late_server_reset_does_not_advance_unknown_host():
         duration=0.2,
         now=100.2,
     )
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._app_dns_candidate_active(host, now=100.2)
     assert tproxy._server_first_closes
 
 
@@ -16923,7 +16927,7 @@ def test_large_completed_server_close_clears_provisional_evidence():
         now=100.3,
     )
     assert not tproxy._server_first_closes
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
 
 
 def test_slow_large_server_close_clears_provisional_evidence():
@@ -16951,24 +16955,24 @@ def test_slow_large_server_close_clears_provisional_evidence():
     )
     assert not tproxy._server_first_closes
     assert host not in tproxy._transport_incomplete_last_probe
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
 
 
 def test_repeated_xbox_server_closes_advance_to_local_ladder():
     host = "xbox-transfer.example"
     activity = _short_server_first_activity()
-    tproxy._mark_xbox_dns_candidate(host, now=100.0)
+    tproxy._mark_app_dns_candidate(host, now=100.0)
 
     assert not tproxy.note_server_first_route_close(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         activity,
         duration=0.2,
         now=100.2,
     )
     assert tproxy.note_server_first_route_close(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         activity,
         duration=0.2,
         now=100.3,
@@ -16978,28 +16982,28 @@ def test_repeated_xbox_server_closes_advance_to_local_ladder():
         == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
     )
     assert (
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS
+        tproxy.AUTO_GEPH_STAGE_APP_DNS
         in tproxy._transport_incomplete_server_first_evidence[host]
     )
     assert host not in tproxy._local_partial_stalls
     assert not tproxy.is_geo_exit_route(host)
 
 
-def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
+def test_partial_stream_stall_marks_exact_app_dns_candidate():
     host = "crystalidea.example"
     tproxy._strat_cache[host] = "split64+fake"
 
     try:
         assert tproxy.note_local_stream_stall(host, "split64+fake")
         assert host not in tproxy._strat_cache
-        assert tproxy._xbox_dns_candidate_active(host)
+        assert tproxy._app_dns_candidate_active(host)
         assert not tproxy.is_geo_exit_route(host)
         assert [strategy["name"] for strategy in tproxy.strategy_order(host)][0] == "split16+fake"
 
         tproxy._strat_cache["updates.discord.com"] = "split64+fake"
         assert not tproxy.note_local_stream_stall("updates.discord.com", "split64+fake")
         assert tproxy._strat_cache["updates.discord.com"] == "split64+fake"
-        assert not tproxy._xbox_dns_candidate_active("updates.discord.com")
+        assert not tproxy._app_dns_candidate_active("updates.discord.com")
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
@@ -17012,19 +17016,19 @@ def test_unknown_recovery_stage_progresses_without_foreign_exit():
         tproxy.unknown_recovery_stage(host, now=100.0)
         == tproxy.UNKNOWN_RECOVERY_SYSTEM
     )
-    assert tproxy._mark_xbox_dns_candidate(host, now=100.0)
+    assert tproxy._mark_app_dns_candidate(host, now=100.0)
     assert (
         tproxy.unknown_recovery_stage(host, now=100.1)
-        == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+        == tproxy.UNKNOWN_RECOVERY_APP_DNS
     )
-    assert tproxy._mark_xbox_dns_exhausted(host, now=100.2)
+    assert tproxy._mark_app_dns_exhausted(host, now=100.2)
     assert (
         tproxy.unknown_recovery_stage(host, now=100.3)
         == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
     )
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy._app_dns_candidate_active(host, now=100.3)
     assert tproxy.note_local_stream_stall(host, "split64+fake", now=100.4)
-    assert not tproxy._xbox_dns_candidate_active(host, now=100.4)
+    assert not tproxy._app_dns_candidate_active(host, now=100.4)
     assert (
         tproxy.unknown_recovery_stage(host, now=100.4)
         == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
@@ -17044,13 +17048,13 @@ def test_unknown_recovery_stage_progresses_without_foreign_exit():
     assert (
         tproxy.unknown_recovery_stage(
             host,
-            now=100.2 + tproxy.XBOX_DNS_ATTEMPT_TTL + 0.1,
+            now=100.2 + tproxy.APP_DNS_ATTEMPT_TTL + 0.1,
         )
         == tproxy.UNKNOWN_RECOVERY_SYSTEM
     )
 
 
-def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
+def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_app_dns():
     host = "crystalidea.example"
     activity = tproxy._RelayActivity(
         last_downstream_at=100.0,
@@ -17068,7 +17072,7 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
             activity,
             now=130.1,
         )
-        assert not tproxy._xbox_dns_candidate_active(host, now=130.1)
+        assert not tproxy._app_dns_candidate_active(host, now=130.1)
         assert tproxy.note_clean_eof_stream_stall(
             host,
             "split64+fake",
@@ -17077,7 +17081,7 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
         )
         assert host not in tproxy._strat_cache
         assert not tproxy._clean_eof_stalls
-        assert tproxy._xbox_dns_candidate_active(host, now=130.2)
+        assert tproxy._app_dns_candidate_active(host, now=130.2)
         assert not tproxy.is_geo_exit_route(host)
 
         for protected in (
@@ -17090,13 +17094,13 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
                 activity,
                 now=130.3,
             )
-            assert not tproxy._xbox_dns_candidate_active(protected, now=130.3)
+            assert not tproxy._app_dns_candidate_active(protected, now=130.3)
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
 
 
-def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
+def test_clean_eof_stall_requires_repeat_before_clearing_app_dns_retry():
     host = "crystalidea.example"
     activity = tproxy._RelayActivity(
         last_downstream_at=100.0,
@@ -17107,24 +17111,24 @@ def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
     )
 
     try:
-        tproxy._mark_xbox_dns_candidate(host, now=130.0)
+        tproxy._mark_app_dns_candidate(host, now=130.0)
         assert not tproxy.note_clean_eof_stream_stall(
             host,
             "plain",
             activity,
-            via_xbox_dns=True,
+            via_app_dns=True,
             now=130.1,
         )
-        assert tproxy._xbox_dns_candidate_active(host, now=130.1)
+        assert tproxy._app_dns_candidate_active(host, now=130.1)
         assert tproxy.note_clean_eof_stream_stall(
             host,
             "plain",
             activity,
-            via_xbox_dns=True,
+            via_app_dns=True,
             now=130.2,
         )
-        assert not tproxy._xbox_dns_candidate_active(host, now=130.2)
-        assert tproxy._xbox_dns_attempted_recently(host, now=130.2)
+        assert not tproxy._app_dns_candidate_active(host, now=130.2)
+        assert tproxy._app_dns_attempted_recently(host, now=130.2)
         assert (
             tproxy.unknown_recovery_stage(host, now=130.2)
             == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
@@ -17135,7 +17139,7 @@ def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
         tproxy._strat_scores.clear()
 
 
-def test_xbox_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
+def test_app_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
     calls = []
 
     async def resolve(host):
@@ -17146,11 +17150,11 @@ def test_xbox_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
         calls.append((ip, port, host, strategy["name"], strategy["fake"]))
         return ("reader", "writer", b"server-first")
 
-    monkeypatch.setattr(tproxy, "xbox_dns_resolve_async", resolve)
+    monkeypatch.setattr(tproxy, "app_dns_resolve_async", resolve)
     monkeypatch.setattr(tproxy, "dial_strategy", dial)
 
     result = asyncio.run(
-        tproxy._try_xbox_dns_local_connect(
+        tproxy._try_app_dns_local_connect(
             "payments.example.com",
             443,
             b"head",
@@ -17160,30 +17164,30 @@ def test_xbox_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
 
     assert result == ("203.0.113.42", ("reader", "writer", b"server-first"))
     assert calls == [("203.0.113.42", 443, "payments.example.com", "plain", False)]
-    assert not tproxy._xbox_dns_attempted_recently("payments.example.com")
+    assert not tproxy._app_dns_attempted_recently("payments.example.com")
 
 
-def test_xbox_dns_fallback_excludes_discord_and_youtube(monkeypatch):
+def test_app_dns_fallback_excludes_discord_and_youtube(monkeypatch):
     calls = []
 
     async def resolve(host):
         calls.append(host)
         return ["203.0.113.42"]
 
-    monkeypatch.setattr(tproxy, "xbox_dns_resolve_async", resolve)
+    monkeypatch.setattr(tproxy, "app_dns_resolve_async", resolve)
 
     assert asyncio.run(
-        tproxy._try_xbox_dns_local_connect("updates.discord.com", 443, b"head", b"body")
+        tproxy._try_app_dns_local_connect("updates.discord.com", 443, b"head", b"body")
     ) is None
     assert asyncio.run(
-        tproxy._try_xbox_dns_local_connect(
+        tproxy._try_app_dns_local_connect(
             "rr2---sn-ntq7yner.googlevideo.com", 443, b"head", b"body"
         )
     ) is None
     assert calls == []
 
 
-def test_unknown_stalls_use_xbox_dns_without_foreign_exit():
+def test_unknown_stalls_use_app_dns_without_foreign_exit():
     host = "payments.example.com"
     confirmations = []
 
@@ -17197,9 +17201,9 @@ def test_unknown_stalls_use_xbox_dns_without_foreign_exit():
         )
 
     assert confirmations == []
-    assert tproxy._xbox_dns_candidate_active(host, now=103.0)
+    assert tproxy._app_dns_candidate_active(host, now=103.0)
 
-    tproxy._xbox_dns_attempts[host] = 1_000.0
+    tproxy._app_dns_attempts[host] = 1_000.0
     tproxy.note_local_result(
         host,
         down_bytes=100,
@@ -17212,7 +17216,7 @@ def test_unknown_stalls_use_xbox_dns_without_foreign_exit():
     assert not tproxy.is_geo_exit_route(host)
 
 
-def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
+def test_low_content_stall_schedules_app_dns_without_geph(monkeypatch):
     host = "payments.example.com"
 
     monkeypatch.setattr(tproxy, "_geph_up", False)
@@ -17224,7 +17228,7 @@ def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
             now=100.0 + index,
         )
 
-    assert tproxy._xbox_dns_candidate_active(host, now=103.0)
+    assert tproxy._app_dns_candidate_active(host, now=103.0)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -17243,7 +17247,7 @@ def test_distinct_local_partial_stalls_schedule_owned_geph_confirmation(monkeypa
     )
     assert not tproxy.note_partial_tls_stall(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         now=101.0,
         confirmation_runner=confirmations.append,
     )
@@ -17290,7 +17294,7 @@ def test_exact_system_partial_tls_stall_waits_for_full_local_ladder(
     assert tproxy._transport_incomplete_plain_candidates[host][0] == "1.1.1.1"
     assert not tproxy.note_partial_tls_stall(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         now=101.0,
         transport_confirmation_runner=(
             lambda candidate, ip: confirmations.append((candidate, ip))
@@ -17328,7 +17332,7 @@ def test_partial_tls_content_confirmation_excludes_non_system_routes(
 
     for host, stage, strategy in (
         ("updates.discord.com", tproxy.AUTO_GEPH_STAGE_SYSTEM, "plain"),
-        ("partial-body.example.com", tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "plain"),
+        ("partial-body.example.com", tproxy.AUTO_GEPH_STAGE_APP_DNS, "plain"),
         ("partial-body.example.com", tproxy.AUTO_GEPH_STAGE_SYSTEM, "split16+fake"),
     ):
         assert not tproxy.note_partial_tls_stall(
@@ -17384,7 +17388,7 @@ def test_zero_payload_route_exhaustion_requires_all_local_stages(monkeypatch):
     )
     assert not tproxy.note_zero_payload_route_failure(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         now=101.0,
     )
     assert not tproxy.note_zero_payload_route_failure(
@@ -17407,7 +17411,7 @@ def test_network_wide_zero_payload_failures_do_not_authorize_geph(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     stages = (
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     )
@@ -17434,7 +17438,7 @@ def test_one_shot_unknown_rescue_excludes_protected_local_hosts(monkeypatch):
     now = 100.0
     stages = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
     }
@@ -17464,7 +17468,7 @@ def test_network_noise_blocks_background_geph_confirmation(monkeypatch):
     tproxy._auto_geph_candidates[host] = now + 60.0
     stages = (
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     )
@@ -17495,7 +17499,7 @@ def test_one_shot_unknown_rescue_requires_a_full_fresh_proof_after_claim(
     host = "fresh-proof-after-claim.example"
     stages = (
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     )
@@ -17696,9 +17700,12 @@ def test_auto_geph_confirmation_replaces_owned_exit_when_second_probe_is_limited
 def test_load_auto_geph_keeps_only_fresh_unknown_exact_hosts(tmp_path, monkeypatch):
     path = tmp_path / "autogeph.json"
     path.write_text(json.dumps({
-        "payments.example.com": tproxy.time.time() + 3600,
-        "www.google.com": tproxy.time.time() + 3600,
-        "expired.example.com": tproxy.time.time() - 1,
+        "__v__": tproxy.AUTO_GEPH_STATE_VERSION,
+        "routes": {
+            "payments.example.com": tproxy.time.time() + 3600,
+            "www.google.com": tproxy.time.time() + 3600,
+            "expired.example.com": tproxy.time.time() - 1,
+        },
     }))
     monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(path))
     monkeypatch.setattr(tproxy, "_geph_up", True)
@@ -17708,7 +17715,9 @@ def test_load_auto_geph_keeps_only_fresh_unknown_exact_hosts(tmp_path, monkeypat
     tproxy.load_auto_geph()
 
     assert set(tproxy._auto_geph) == {"payments.example.com"}
-    assert set(json.loads(path.read_text())) == {"payments.example.com"}
+    saved = json.loads(path.read_text())
+    assert saved["__v__"] == tproxy.AUTO_GEPH_STATE_VERSION
+    assert set(saved["routes"]) == {"payments.example.com"}
     assert path.stat().st_mode & 0o777 == 0o600
     assert not tproxy.is_geo_exit_route("payments.example.com")
     assert (
@@ -17749,7 +17758,7 @@ def test_network_wide_partial_stalls_do_not_schedule_foreign_exit(monkeypatch):
         host = f"noisy-{idx}.example.com"
         tproxy._local_partial_stalls[host] = {
             tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
-            tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+            tproxy.AUTO_GEPH_STAGE_APP_DNS: now,
             f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
             f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
         }
@@ -17761,7 +17770,7 @@ def test_network_wide_partial_stalls_do_not_schedule_foreign_exit(monkeypatch):
     )
     tproxy.note_partial_tls_stall(
         host,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        tproxy.AUTO_GEPH_STAGE_APP_DNS,
         now=now,
     )
     tproxy.note_local_ladder_partial_stall(

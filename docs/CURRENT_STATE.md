@@ -2,6 +2,39 @@
 
 ## Verified Checkpoint
 
+### Submitted follow-up: app-owned DNS provider retirement, 2026-10-30
+
+This patch belongs only to
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/app-owned-dns-fallback`, based on main
+`41b946ed72465c38aee74b9d0aeb3becdda85599` (the same tree as reviewed `2c9a6b1cc`).
+It is submitted independently for the release after .32, with no VERSION change.
+It is not merged, published or installed. The .32 qualification source stays frozen;
+do not change that release source or the active workstation from this patch.
+
+Bundled `xbox_dns.py` is replaced by `app_dns.py`, using fixed Cloudflare/Google
+IPs and verified provider TLS names with the existing transport. Calls, proof
+stage names, script payload and packaging references are migrated. Retired
+provider DNS addresses remain read-only generic configuration; stale canaries
+cannot restore that provider's Smart DNS authority. Automatic Geph cache version2
+retires legacy authorization without resetting learned local strategies; current
+semantic/framing admission and the staged exact-host ladder stay distinct.
+System lookup `None` versus `[]`, protected-local policy and no-replay are unchanged.
+
+Evidence: six causal retirement failures before the change; 257 focused routing,
+provider, persistence and payload tests passed. A final overlapping adapter/
+retirement/packaging slice passed87 tests and17 subcases, including the added
+cache bound/expiry test. Official endpoint/API assessment is source-based;
+no live resolver, native build, account, service or workstation test was run.
+Receipts and the passed independent review are in
+`output/continuation-20261030/app-dns-retirement/`. Review verified all 17 changed
+file hashes and the five nonmechanical runtime definitions. Only this checkpoint
+changed for submission; source/tests retain the reviewed hashes. Exact PR CI
+remains required. Keep this work separate until .32 qualification/publication
+finishes; mocked checks do not establish live provider or workstation behavior.
+
+The release checkpoint below is the inherited snapshot from the branch base.
+
 ### Active: PR426 preview.32 candidate, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`;

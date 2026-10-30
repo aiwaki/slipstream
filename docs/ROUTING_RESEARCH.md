@@ -1,5 +1,33 @@
 # Routing Research Notes
 
+
+## 2026-10-30: independent app-owned DoH after Xbox provider retirement
+
+The replacement adapter retains DNS wireformat POST `/dns-query` with
+`Accept`/`Content-Type: application/dns-message`. It connects to a fixed provider
+IP while checking the provider's DNS hostname certificate and sending that name
+as SNI/HTTP Host. Cloudflare's official [resolver addresses](https://developers.cloudflare.com/1.1.1.1/ip-addresses/)
+and [wireformat endpoint](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-wireformat/)
+support `1.1.1.1` with `cloudflare-dns.com`. Google's [fixed-IP migration guidance](https://developers.google.com/speed/public-dns/docs/doh/migration)
+and [secure-transport guidance](https://developers.google.com/speed/public-dns/docs/secure-transports#tls_13_and_sni_for_ip_address_urls)
+support `8.8.8.8` with `dns.google`; its [DoH API](https://developers.google.com/speed/public-dns/docs/doh)
+uses `/dns-query`, while `/resolve` is a different JSON interface.
+
+This is a configuration conclusion from official sources, not a new network
+probe. [RFC 8484 section 5.2](https://www.rfc-editor.org/rfc/rfc8484#section-5.2)
+permits earlier HTTP versions while recommending HTTP/2; this slice retains the
+existing HTTP/1.1 adapter. Its existing cache lifetimes and per-operation socket
+timeouts are unchanged. A strict whole-lookup deadline, full DNS parser/cache
+hardening and later live endpoint qualification are separate claims.
+
+These endpoints provide local address candidates only. Retirement also removes
+provider recognition from system-DNS status and advances the automatic-Geph
+cache to a version 2 authority envelope; merely replacing IP constants would leave
+stale routes usable. The old `xbox_dns` proof stage cannot satisfy `app_dns`.
+System DNS remains read-only, unobserved lookups remain neutral, and local
+strategy winners and protected-local routing are preserved. The decision and
+scope are in DECISIONS.md.
+
 ### Chromium runtime review 2026-10-30
 
 The official [Stable release](https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_02107719452.html)
