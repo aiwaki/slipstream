@@ -2,94 +2,62 @@
 
 ## Verified Checkpoint
 
-### Active: isolate Safari startup failure, 2026-10-30
+### Active: preserve Safari failure evidence, 2026-10-30
 
-PR432 quoted head `179fb5339c285c010403c415c7f85cea5d70f31d` passed complete
-CI41140189410/1, audit41140189428/1 and Safari comparison41140189505/1.
-Actual packaged lifecycle covered Chrome4/4 and Safari4/4, native Stop/Quit7/7,
-clean uninstall, external sentinel preservation and unchanged global PF.
-Pre-merge review then identified a valid race in the new diagnostic harness:
-a same-user Safari PID observed after startup is not proof of session ownership.
-A pre-session empty PID snapshot does not resolve that race. The narrow correction
-removes Safari PID signalling from the standalone probe, retains exact-session
-DELETE and bounded absence observation, and refuses unproved cleanup. Existing
-shared/live lifecycle helpers still use their pre-existing UID/executable ownership
-assumption; that separate limitation is not fixed or qualified by this change.
-Two mocked contracts also now assert complete WebDriver paths and root-client argv.
-The old-source regression reproduced two mocked foreign-PID signals; all 17
-focused tests pass after the fix, and four invocation mutations are now rejected.
-Writer receipt `output/continuation-20261030/safari-session-mock-contracts/verification.json`
-SHA `e1136912257d5e69e26ea3a7996982a140eec43cd832f52e5f936825311994e8`.
-Eight documentation checks and project-state continuity pass. Require independent
-delta review and fresh exact-head CI before merge.
+PR432: https://github.com/aiwaki/slipstream/pull/432. Secondary checkout
+`/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`,
+branch `codex/safari-startup-observation`, based on C5
+`2984beb5a102930d6cede825d9ae393d680513b5`.
+The final scope is seven files: four shared helper/test files, readiness workflow
+sidecar retention and two documentation files. The standalone Safari experiment
+is archived privately and removed from the PR; no experimental workflow ships.
 
-PR432 first head `c34b62e15b17e47ba031da7084ee8c68bf40c7df` ran the
-unprotected Safari comparison 41139057736/1: both modes created sessions,
-navigated `about:blank` and proved cleanup on separate runners. The original
-failure was not reproduced. Dependency audit41139057596/1 passed. Ordinary
-CI41139057517/1 found one metadata-contract failure: the new workflow's correct
-Python version used single quotes, while the repository contract counts double
-quotes. The YAML and its assertion are now aligned; both affected tests pass.
-Require new exact-head CI; cancellation of the obsolete run was requested.
+R41134436278/1 failed before its long soak: Chrome4/4 opened, but Safari's first
+session creation failed and three further attempts failed its process-absence
+check. Navigation elapsed_ms=0 does not establish startup duration. The initial
+exception was suppressed and driver log deleted, so its underlying cause remains
+unknown. Owned-Geph baseline/outage/recovery, tray crash, KeepAlive and external
+sentinel checks passed; partial Safari startup cleanup was not proved. The
+1800-second soak and final attestations were not run. Release .32 is NOT_ADMITTED.
 
-Secondary checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
-branch `codex/safari-startup-observation`, based on current main C5
-`2984beb5a102930d6cede825d9ae393d680513b5` / tree
-`8eda700bea752957304913eac2e4c1aacfe8ea04`. Preserve the working external Geph
-and workstation; no local native/browser/build/install activity.
+The retained fix preserves bounded, allowlisted startup/cleanup observations in
+an optional sidecar, without changing strict live-sites schema2. Failed creation
+without a recorded session ID/PID still verifies Safari absence. An inspection
+failure cannot stand for successful cleanup. The default pageLoadStrategy=none,
+30-second command timeout, release gates and protected budget are unchanged.
+Two causal regressions failed on C5; 48 focused mocked checks passed. Receipt
+`output/continuation-20261030/safari-startup-observation/verification.json`, SHA
+`598226566c5c56e6d3558938b56b224ba2929a75540fd206688deadb2419227c`.
 
-C5 passed complete CI41128371044/1 and audit41128370866/1. Candidate13012386843
-has manifest `582739455aec2151d5b394f7a523fea0fd7b3587fff013b3a5955556eef9af22`.
-Native G41131209759/2 passed 26 checks; attempt1 had a confirmed hosted-runner
-capacity cancellation before one mode executed. Packaged P41134440722/1 passed
-13 checks, including real successor ACK and pre-ACK rollback, with clean teardown.
-Public feed/tray/admin-dialog qualification is still not claimed.
+Disposable experiments created sessions and navigated about:blank with both
+normal and none. They did not reproduce the original startup failure. Review
+identified a separate race in the experimental harness: matching UID/executable
+does not prove that a Safari PID belongs to its session. After removing Safari
+signalling, run41143761559/1 refused cleanup for both modes, including the final
+absence check after its own driver exited. Safe evidence does not distinguish
+process residue from inspection failure. Do not call this a routing failure or
+restore guessed-PID signalling to make it pass. The experiment is retained under
+`output/continuation-20261030/safari-session-experiment-archive/`, archive receipt
+SHA `c38aa87fb0c2d9fc03c28c0adeed070d952ecf27e3a9cc85f5e3cd97627930d2`.
+The existing shared/live lifecycle helpers' UID/executable ownership assumption
+remains a separate known limitation; this patch does not resolve it.
 
-Readiness R41134436278/1 failed at 22:00:29 UTC before its long soak. Chrome
-opened all four sites; Safari failed creating its first session, then three further
-attempts failed the Safari process-absence check. `elapsed_ms=0` means
-navigation did not begin; setup may have waited 30 seconds. The exception was
-suppressed and the driver log deleted, so the initial protocol, timeout or
-permission cause cannot be recovered. Do not label this a routing/site failure.
-Owned-Geph baseline, three closed-outage requests, recovery, tray crash,
-KeepAlive and external-sentinel checks passed. Product-owned cleanup steps passed;
-partial Safari startup cleanup was not proved. The 1800-second soak and five
-final attestations were not run. Release .32 remains NOT_ADMITTED/unpublished.
+Reusable ordinary-CI baseline: PR head179fb533 passed CI41140189410/1 and
+audit41140189428/1, with native Stop/Quit7/7, Chrome4/4 and Safari4/4, composed
+CSS/JS/image navigation, clean uninstall, external sentinel and global PF
+preservation. CI receipt SHA
+`e0936f0ca4f54fccf15190d0051eaef5fc8af7ead93b3a551c4453c6a94bef1b`.
+C5 main CI41128371044/1 and audit41128370866/1 also passed; its native
+G41131209759/2 and packaged P41134440722/1 passed. These historical proofs do not
+admit a new exact-source release or prove the public feed/tray/admin-dialog path.
 
-The protected budget is exhausted (3/3 for October 30 UTC): no rerun or additional
-account-backed dispatch. RSA allowances expire at October 31 00:00 UTC and must
-not be extended or carried forward. Publisher inputs are retained but not admitted.
-
-The source review proves lost startup diagnostics and a missing Safari-absence
-assertion when the session ID/PID was never recorded. The passing lifecycle path
-performs that assertion. `pageLoadStrategy=none` versus the working fixture's
-`normal` is an A/B variable, not an established cause. Next: retain bounded
-structured startup/cleanup diagnostics in a separate sidecar without changing
-live-sites schema2, then run an unprotected disposable Safari-only normal/none
-comparison. No Geph/account/app install or remote sites are needed for this test.
-Never kill an unknown or foreign Safari process or weaken a release gate.
-
-Implementation ownership: verify_readiness owns lifecycle/live-site Python helpers
-and focused mocked regressions; verify_packaged owns the Safari-only harness,
-workflow and safe sidecar retention; release_preflight independently reviews.
-Root owns docs/commit/PR. Evidence: secondary
-`output/continuation-20261030/safari-startup-observation/`. No claimed fix for the
-underlying Safari startup cause until the isolated run supplies actual evidence.
-The shared helpers have two causal RED regressions and 48 focused mocked GREEN
-checks; receipt SHA `598226566c5c56e6d3558938b56b224ba2929a75540fd206688deadb2419227c`.
-The standalone harness has two causal driver-liveness RED cases and 14 mocked
-checks plus one existing workflow contract check passing;
-`output/continuation-20261030/safari-session-smoke/verification.json`
-SHA `9324c79b339a18c06a8eadc0f86c5f9d83a3250c69401cfe35dc78414d525fa2`.
-Independent combined review found no blockers. Eight documentation checks,
-project-state continuity and diff checks passed. No local Safari or native process ran.
-
-Retained primary evidence under `output/continuation-20261030/preview32-main/producer-ready/`:
-- Main verification SHA `b87c0e87f65388571d7a58ac58568d34ed9c15c62188fd9c4921ccad6ed1bf81`.
-- Native attempt2 SHA `4372a76f69b6ea8d71c6e9cad1c8db303286950607301a794f5a7f1e390a81c1`.
-- Packaged verification SHA `d4d28a6123c2efe17ad2750e7d1aee011fcf837df93b16a5c2483c4e3a44f70c`.
-- Failed readiness SHA `23562ae2a14569640efc09efa9bdadc80cac6c14f8f1cd7450a8d1ae9502efd6`.
-- Safari source review SHA `cec16a698fdfdd821121db9b924b06127d63a41e5268169c71eccca1f1416d29`.
+Next: independent review of the narrowed seven-file scope and fresh exact-head
+required CI, then normal merge. Do not repeat unchanged local suites. Protected
+budget is 3/3 for October30 UTC: no additional account-backed dispatch or rerun.
+Two RSA allowances expire October31 00:00 UTC; never extend or carry them forward.
+No .32 publication or workstation installation. Preserve the working external
+Geph and all apps/services/PF/DNS/proxy/PAC/VPN/accounts; no local native/browser/
+build/live activity. Small mocked/static checks and disposable CI only.
 
 ### Previous: candidate producer readiness, 2026-10-30
 

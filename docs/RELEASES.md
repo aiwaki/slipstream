@@ -622,16 +622,13 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   the workflow does not rebuild the app.
 - Safari startup diagnostics are retained separately from the strict schema2
   live-site report. They record bounded stages, setup duration, allowlisted
-  transport/protocol error classifications and ownership/cleanup observations;
-  raw messages, response bodies, page content, URLs and driver logs are not
-  published. A failed session creation does not prove that Safari exited. The separate
-  `safari-session-smoke` workflow compares `normal` and `none` page-load strategies
-  on fresh disposable macOS runners using only `about:blank`. It has no Geph,
-  account, app-install or external-site dependency. It deletes its exact WebDriver
-  session and stops its own driver, but never signals a Safari PID inferred from
-  user/executable matching. Remaining or uninspectable Safari processes fail the
-  cleanup check. This diagnostic workflow cannot qualify a release or replace
-  the protected live-site matrix.
+  transport/protocol error classifications and cleanup observations; raw messages,
+  response bodies, page content, URLs and driver logs are not published. Failed
+  session creation without a recorded session ID/PID still requires an explicit
+  Safari-absence check. Missing identity or failed inspection does not prove
+  cleanup. This observation change preserves the existing lifecycle helpers'
+  UID/executable ownership model; it does not establish session ownership for
+  every observed Safari PID.
 - A Linux preflight with only the read-scoped ephemeral GitHub token and no
   protected account/broker secret limits `release-readiness` and the standalone
   diagnostic-only owned-Geph workflow to three fresh `main` dispatches combined
