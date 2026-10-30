@@ -25,7 +25,7 @@ small PR with tests and matching documentation.
 |---|---|
 | Восстановление соединений ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Более широкий набор исправлений неполных ответов и гонок остаётся в открытом PR. Выпуск отдельных исправлений не означает завершения этой ветки. |
 | Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | Обновление транспорта остаётся в открытом PR; живой сеанс Telegram также требует проверки. |
-| Встроенный Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Дополнительные изменения кеша и зависимостей остаются в открытом PR и требуют собственной проверки и выпуска. |
+| Сборка Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Исправления сессий и SQLite-кеша уже вошли через PR #388. Остаются дополнительные проверки исходников и состава сборки; замена RSA требует отдельной проверки и выпуска. |
 
 ### English
 
@@ -45,7 +45,7 @@ this release on the user's Mac remain separate tasks.
 |---|---|
 | Connection recovery ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | The broader incomplete-response and race repairs remain in an open PR. Shipping individual fixes does not complete that branch. |
 | Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | The transport update remains in an open PR; a live Telegram session also needs validation. |
-| Bundled Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Additional cache and dependency changes remain in an open PR and need their own qualification and release. |
+| Geph build ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Session and SQLite-cache fixes already shipped through PR #388. Additional source and build-inventory checks remain; the RSA replacement needs separate qualification and publication. |
 
 For exact commits, checks, and remaining gates, see [CURRENT_STATE.md](CURRENT_STATE.md).
 The milestone descriptions below are the longer-term plan, not a claim that the

@@ -2,12 +2,17 @@
 
 ## Verified Checkpoint
 
-### Active: preview .31 published and verified, 2026-10-30
+### Active: post-preview .31 transport repairs, 2026-10-30
 
 Active checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/post-census-release-qualification`. Published source is
+branch `codex/post-preview31-recovery`, based on documentation main `a37cb6c5`. Published source is
 `3eb32bd3029d6acd88b380a8c767c19c7abc76a4` (PR424), tree
-`37981d7723c73d74b99ab86faf00f494c8c0c030`. Documentation follow-up is separate.
+`37981d7723c73d74b99ab86faf00f494c8c0c030`. Documentation follow-up PR425 merged normally as
+`a37cb6c5e3ccce805af46b7b1c4b72d7be6a041c`; its tree equals tested head
+`e2afc02630cc0cf56257c34fe8381e1b27de5e71`. PR CI41044074098/audit41044074284
+and main CI41044257786/audit41044257543 passed. That follow-up changed only three
+documentation files. The new transport changes below are not in the published binary.
+The previous tested documentation branch is retained; preserve private output.
 Preserve the user's working external Geph. No workstation service/account/browser/build/install action in this continuation.
 
 [Preview .31](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
@@ -52,9 +57,30 @@ still cannot authorize a signal or successful absence. Scoped checks: 98 root-st
 exact historical census reason remains unknown. Details: ROUTING_RESEARCH.md and
 `output/readiness-preflight-20261026/root-stop-census/verification.json`.
 
-This documentation follow-up records publication without changing the released code.
-Next: continue the separate public-update/workstation gates and open candidate work
-described below; do not repeat these unchanged green gates or mutate the working connection.
+The continuation selected two unmerged PR376 repairs against current main:
+the connection-race adapter could orphan its winner or skip later owned writers
+when cancelled during cleanup; the HTTP completion parser treated a valid chunk-size
+prefix ending in CR as unknown after EOF/timeout. Both now have causal failing tests
+against the old source. The fix retains one shielded cleanup owner, transfers the
+winner only after cleanup, and classifies a valid hex-plus-CR prefix as incomplete.
+Malformed input stays unknown; no routing policy or cleanup deadline changes.
+Focused results: 17 adapter/probe tests (including real loopback TCP), 11 parser
+tests and 30 bootstrap classifier tests passed. Independent review found no blocker.
+PR/CI/merge are the next gate; there is no new installed or live-site claim.
+
+PR reconciliation is complete: all three old heads conflict with main, but all
+13 Geph session/SQLite edits from PR384 already shipped via PR388. Its remaining
+scope is source/build/audit tooling, with a separate RSA-only candidate requiring
+fresh review and qualification; native SQLite research is not its prerequisite.
+Telegram 1.11.2/H2 remains unmerged in PR386. PR376 also still contains pending
+removal of the bundled xbox-dns.ru provider and broader response-recovery changes.
+Do not reimport any old branch wholesale. Reports and red/green logs are retained in
+`output/continuation-20261030/`; see ROUTING_RESEARCH.md for the two concrete repairs.
+No graph tool is available, so discovery uses bounded direct diffs and source reads.
+
+Next: finish the selected transport PR, then continue the reconciled candidate work
+and separate public-update/workstation gates. Do not repeat unchanged release gates
+or mutate the working connection.
 
 ### Owned Geph route continuity, 2026-10-25 (merged; installed-path regression next)
 
@@ -1224,9 +1250,12 @@ installation ran. The unchanged release checks are not repeated.
 
 ## Next Verified Action
 
-- Preview `.31` is published and remotely verified. Verify the documentation-only
-  follow-up PR state once on resume. The exact candidate/readiness/native/packaged gates
-  above are complete and reusable; do not rerun or redispatch them after resuming.
+- Complete PR/CI/merge for the selected cancellation and chunked-prefix fixes on
+  `codex/post-preview31-recovery`. Preserve the remaining PR376 scope; a source
+  merge will not update the already published `.31` binary.
+- Preview `.31` is published and remotely verified; documentation PR425 is merged
+  with green PR/main checks. The exact candidate/readiness/native/packaged gates above
+  are complete and reusable; do not rerun or redispatch them after resuming.
 - Public preview `.30` is immutable and lacks origin-side updater repairs. The
   qualified private `.30 -> .31` pair cannot prove a public transition. Plan the
   next ordinary tray/admin and fully public update/rollback checks from compatible
@@ -1235,8 +1264,8 @@ installation ran. The unchanged release checks are not repeated.
   routing/error evidence. The published lifecycle and route-continuity checks do
   not establish the cause of those earlier responses. Preserve external Geph and
   network settings; no workstation transaction in this continuation.
-- PR376/384/386 candidate work remains separate from this release. Reconcile each
-  live PR and source before selecting its next gate. Existing RSA policy exceptions
+- PR376/384/386 remaining scope was reconciled October 30 (reports above). Verify
+  new changes before the next action instead of repeating that inventory. RSA policy exceptions
   expire after October 30 UTC; do not extend or reuse them implicitly.
 
 ## External Gates

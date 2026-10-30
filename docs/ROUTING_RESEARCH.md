@@ -1,5 +1,33 @@
 # Routing Research Notes
 
+### Cancellation ownership and split chunk-size prefixes, 2026-10-30
+
+Two independent defects from PR376 remained in main `a37cb6c5` after preview .31.
+In `connection_race_io.py`, a selected stream was removed from the session before
+awaiting loser cleanup. Caller cancellation during that wait prevented delivery
+without closing the selected stream. Cancellation while awaiting one writer's close
+could also skip remaining writers. Two event-controlled regressions fail against
+the old source. One shielded cleanup task now owns shutdown, closes every known
+writer before async waits and avoids re-cancelling a dialer already in cleanup.
+The selected stream transfers to the caller only after shutdown succeeds; otherwise
+it is closed. No new cleanup deadline or routing policy is introduced.
+
+In `http_response_completion.py`, an EOF/timeout after chunk-size bytes `5\r`
+was treated as malformed, although the LF can legally arrive in a later read.
+The repair recognizes only a nonempty hexadecimal prefix with one trailing CR
+as incomplete. It never calls that response complete; malformed sizes, unsupported
+framing and locally truncated evidence retain their existing unknown classification.
+A regression checks every proper prefix of a multi-chunk body under EOF and timeout,
+plus complete and malformed controls. The bootstrap range classifier also covers
+split size lines and malformed input.
+
+Causal old-source failures: two cancellation cases and one chunk-prefix case.
+Focused green: 17 adapter/probe, 11 parser and 30 bootstrap tests. The adapter suite
+includes actual loopback TCP ownership/cleanup checks. Independent review found no
+blocker. Evidence: `output/continuation-20261030/connection-race/`, `chunked-prefix/`
+and `transport-review.md`. These are source-level proofs; they do not establish the
+cause of historical Codex reconnects, memory growth, or any particular website failure.
+
 ### Native Quit reached an unclassified process census, 2026-10-26
 
 Main CI40319062696 (source `4ddfaf624e4f1ae1d439761bfd2933fa9e1a61d7`)
