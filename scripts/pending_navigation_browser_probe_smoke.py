@@ -615,7 +615,7 @@ class VisibilityMonitor:
     def emit_failure(self, after: VisibilitySnapshot | None) -> None:
         """Best-effort, bounded metadata only; never replace the original refusal."""
         try:
-            origin = self.phase_times["baseline_started"]
+            origin = self.phase_times.get("setup_started", self.phase_times["baseline_started"])
             invocation = self.phase_times.get("worker_invocation")
 
             def milliseconds(value):
@@ -685,7 +685,7 @@ class VisibilityMonitor:
                         events.append(item)
                     if len(visible_events) < 4 and any(marker.lower() in line.lower() for marker in FORBIDDEN_LAUNCH_SERVICES_EVENTS):
                         visible_events.append(item)
-            phases = ("baseline_started", "baseline_ready", "monitor_started", "monitor_ready", "fixture_ready",
+            phases = ("setup_started", "fixture_ready", "broker_ready", "baseline_started", "baseline_ready", "monitor_started", "monitor_ready",
                       "worker_invocation", "worker_returned", "cleanup_started", "cleanup_complete")
             record = {"kind": "slipstream_browser_visibility_failure", "schema_version": 1,
                       "before": snapshot(self.before), "after": snapshot(after),
@@ -736,6 +736,10 @@ class VisibilityMonitor:
                 self.listener.terminate()
                 self.listener.communicate(timeout=5.0)
             raise QualificationError("visibility sampler failed") from self.failure
+        if self.listener.poll() is not None:
+            raise QualificationError(
+                "LaunchServices listener exited before browser launch"
+            )
 
     def _sample(self) -> None:
         try:
@@ -751,22 +755,44 @@ class VisibilityMonitor:
 
     def close(self) -> VisibilitySnapshot:
         self.stop.set()
-        if self.thread is not None:
-            self.thread.join(timeout=5.0)
-            if self.thread.is_alive():
-                raise QualificationError("visibility sampler survived cleanup")
-        if self.listener is not None:
-            self.listener.terminate()
-            try:
-                output, _ = self.listener.communicate(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self.listener.kill()
-                output, _ = self.listener.communicate(timeout=5.0)
-            self.events = output.splitlines()
-        after = _visibility_snapshot()
-        self.samples.append(after)
-        if self.failure is not None:
-            raise QualificationError("visibility sampler failed") from self.failure
+        failure = None
+        after = None
+        try:
+            if self.thread is not None:
+                self.thread.join(timeout=5.0)
+                if self.thread.is_alive():
+                    raise QualificationError("visibility sampler survived cleanup")
+            # Keep the event recorder alive through the final observation,
+            # after fixture, broker and worker cleanup have completed.
+            after = _visibility_snapshot()
+            self.samples.append(after)
+            if self.failure is not None:
+                raise QualificationError("visibility sampler failed") from self.failure
+        except BaseException as error:
+            failure = error
+        finally:
+            if self.listener is not None:
+                try:
+                    exited_early = self.listener.poll() is not None
+                    if not exited_early:
+                        self.listener.terminate()
+                    try:
+                        output, _ = self.listener.communicate(timeout=5.0)
+                    except subprocess.TimeoutExpired:
+                        self.listener.kill()
+                        output, _ = self.listener.communicate(timeout=5.0)
+                    self.events = output.splitlines()
+                    if exited_early:
+                        raise QualificationError(
+                            "LaunchServices listener exited before observation completed"
+                        )
+                except BaseException as error:
+                    if failure is None:
+                        failure = error
+        if failure is not None:
+            raise failure
+        if after is None:
+            raise QualificationError("visibility monitor produced no final snapshot")
         return after
 
     def assert_invisible(self, after: VisibilitySnapshot) -> int:
@@ -1110,7 +1136,6 @@ def main() -> int:
         raise QualificationError("qualification is not the active console user")
 
     before_profiles = _profile_residue()
-    visibility = VisibilityMonitor(chrome_identity.path)
     with tempfile.TemporaryDirectory(
         prefix="slipstream-browser-probe-smoke-",
         dir="/tmp",
@@ -1118,19 +1143,18 @@ def main() -> int:
         directory = Path(raw_directory)
         fixture = HangingHttpsFixture(directory)
         broker = None
+        visibility = None
         failure = None
         after_visibility = None
-        started_at = time.monotonic()
+        setup_phases = {"setup_started": time.monotonic()}
         try:
-            visibility.mark_phase("monitor_started")
-            visibility.start()
-            visibility.mark_phase("monitor_ready")
             fixture.start()
-            visibility.mark_phase("fixture_ready")
+            setup_phases["fixture_ready"] = time.monotonic()
             now_ms = int(time.time() * 1000)
             socket_path = directory / "probe.sock"
             broker = OwnerOnlyProbeBroker(socket_path, _job(now_ms))
             broker.start()
+            setup_phases["broker_ready"] = time.monotonic()
             environment = {
                 "CI": "true",
                 "GITHUB_ACTIONS": "true",
@@ -1150,6 +1174,17 @@ def main() -> int:
             worker_environment[
                 probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV
             ] = launch_id
+            # Fixture preparation has its own bounds and may invoke macOS UI.
+            # Observe only after it is ready, so it neither changes the worker's
+            # baseline nor consumes the recorder's existing 30-second lifetime.
+            # The unchanged 25-second end-to-end gate includes observation and
+            # cleanup, keeping every accepted run inside that recorder lifetime.
+            started_at = time.monotonic()
+            visibility = VisibilityMonitor(chrome_identity.path)
+            visibility.phase_times.update(setup_phases)
+            visibility.mark_phase("monitor_started")
+            visibility.start()
+            visibility.mark_phase("monitor_ready")
             visibility.mark_phase("worker_invocation")
             worker = subprocess.run(
                 (
@@ -1173,22 +1208,29 @@ def main() -> int:
         except BaseException as error:
             failure = error
         finally:
-            visibility.mark_phase("cleanup_started")
-            fixture.close()
+            if visibility is not None:
+                visibility.mark_phase("cleanup_started")
+            try:
+                fixture.close()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
             if broker is not None:
                 try:
                     broker.close()
                 except BaseException as error:
                     if failure is None:
                         failure = error
-            try:
-                after_visibility = visibility.close()
-                visibility.mark_phase("cleanup_complete")
-            except BaseException as error:
-                if failure is None:
-                    failure = error
+            if visibility is not None:
+                try:
+                    after_visibility = visibility.close()
+                    visibility.mark_phase("cleanup_complete")
+                except BaseException as error:
+                    if failure is None:
+                        failure = error
         if failure is not None:
-            visibility.emit_failure(after_visibility)
+            if visibility is not None:
+                visibility.emit_failure(after_visibility)
             raise failure
         if after_visibility is None:
             raise QualificationError("visibility monitor produced no final snapshot")

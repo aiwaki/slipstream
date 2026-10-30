@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -680,18 +681,23 @@ def test_visibility_diagnostic_failure_does_not_replace_original_refusal(capsys)
 @pytest.mark.parametrize("returncode", (0, 17))
 def test_main_failure_keeps_cleanup_and_records_launch_phases(packaged_browser_bundle, capsys, returncode):
     app = packaged_browser_bundle
-    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
-        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    monitor_type = smoke.VisibilityMonitor
     changed = _snapshot(front="ASN:0x0-0x2002:")
+
+    def monitor_factory(path):
+        with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+            monitor = monitor_type(path)
+        monitor.start = mock.Mock()
+        monitor.close = mock.Mock(return_value=changed)
+        return monitor
+
     fixture, broker = mock.Mock(), mock.Mock()
     fixture.port = 12345
     with (
         mock.patch.object(smoke, "_require_disposable_ci"),
         mock.patch.object(smoke, "_parse_args", return_value=argparse.Namespace(app_bundle=app)),
         mock.patch.object(smoke.probe_runtime, "_active_console_user", return_value=mock.Mock(uid=os.getuid())),
-        mock.patch.object(smoke, "VisibilityMonitor", return_value=monitor),
-        mock.patch.object(monitor, "start"),
-        mock.patch.object(monitor, "close", return_value=changed),
+        mock.patch.object(smoke, "VisibilityMonitor", side_effect=monitor_factory),
         mock.patch.object(smoke, "HangingHttpsFixture", return_value=fixture),
         mock.patch.object(smoke, "OwnerOnlyProbeBroker", return_value=broker),
         mock.patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], returncode, "", "private worker output")),
@@ -702,7 +708,7 @@ def test_main_failure_keeps_cleanup_and_records_launch_phases(packaged_browser_b
     broker.close.assert_called_once()
     evidence = json.loads(capsys.readouterr().err)
     phases = evidence["phases_ms"]
-    expected = ["baseline_started", "baseline_ready", "monitor_started", "monitor_ready", "fixture_ready",
+    expected = ["setup_started", "fixture_ready", "broker_ready", "baseline_started", "baseline_ready", "monitor_started", "monitor_ready",
                 "worker_invocation", "worker_returned", "cleanup_started", "cleanup_complete"]
     assert all(name in phases for name in expected)
     assert [phases[name] for name in expected] == sorted(phases[name] for name in expected)
@@ -716,3 +722,224 @@ def test_packaged_smoke_launches_only_the_non_gui_auxiliary_helper() -> None:
         "Contents/MacOS/slipstream-browser-probe"
     )
     assert '"Contents" / "MacOS" / "slipstream"' not in source
+
+
+@pytest.fixture
+def observer_main_case(monkeypatch, packaged_browser_bundle):
+    """Exercise main/monitor ownership with a clock, never native UI or children."""
+    case = SimpleNamespace(clock=100.0, front="ASN:0x0-0x1001:", events=[], monitors=[],
+                           setup_seconds=35.0, worker_seconds=8.0, listener_started=None)
+    fixture, broker = mock.Mock(), mock.Mock()
+    fixture.port, fixture.requests = 12345, 1
+    fixture.started.is_set.return_value = True
+    broker.runtime.state_size.return_value = 0
+    broker.submitted, broker.launch_ids = [{"outcome": "navigation_timeout"}], []
+    case.fixture, case.broker = fixture, broker
+
+    def monotonic():
+        case.clock += 0.001
+        return case.clock
+
+    def setup():
+        case.events.append("fixture.start")
+        case.clock += case.setup_seconds
+        case.front = "ASN:0x0-0x22022:"
+
+    fixture.start.side_effect = setup
+    fixture.close.side_effect = lambda: case.events.append("fixture.close")
+    broker.start.side_effect = lambda: case.events.append("broker.start")
+    broker.close.side_effect = lambda: case.events.append("broker.close")
+    listener = mock.Mock()
+    case.listener = listener
+    listener.poll.side_effect = lambda: 0 if case.clock - case.listener_started >= 30 else None
+    listener.communicate.return_value = ("", None)
+    listener.terminate.side_effect = lambda: case.events.append("listener.close")
+
+    def popen(*args, **kwargs):
+        case.events.append("listener.start")
+        case.listener_started = case.clock
+        case.listener_arguments = args[0]
+        return listener
+
+    def thread(*, target, daemon):
+        result = mock.Mock()
+        monitor = target.__self__
+        result.start.side_effect = lambda: monitor.ready.set()
+        result.is_alive.return_value = False
+        return result
+
+    real_monitor = smoke.VisibilityMonitor
+
+    def monitor_factory(path):
+        case.events.append("baseline")
+        monitor = real_monitor(path)
+        case.monitors.append(monitor)
+        return monitor
+
+    def worker(*args, **kwargs):
+        case.events.append("worker")
+        monitor = case.monitors[-1]
+        monitor.samples.append(_snapshot(front=case.front, headless={731}, roots={731}))
+        case.clock += case.worker_seconds
+        broker.launch_ids.append(kwargs["env"][smoke.probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV])
+        listener.communicate.return_value = ("\n".join(
+            _launch_event(name).replace(str(EXPECTED_SHELL), str(monitor.expected_shell))
+            for name in ("kLSNotifyApplicationCreation", "kLSNotifyApplicationDeath")
+        ), None)
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(smoke, "_require_disposable_ci", lambda: None)
+    monkeypatch.setattr(smoke, "_parse_args", lambda: argparse.Namespace(app_bundle=packaged_browser_bundle))
+    monkeypatch.setattr(smoke.probe_runtime, "_active_console_user", lambda: mock.Mock(uid=os.getuid()))
+    monkeypatch.setattr(smoke, "_profile_residue", lambda: set())
+    monkeypatch.setattr(smoke, "_visibility_snapshot", lambda: _snapshot(front=case.front))
+    monkeypatch.setattr(smoke, "VisibilityMonitor", monitor_factory)
+    monkeypatch.setattr(smoke, "HangingHttpsFixture", lambda directory: fixture)
+    monkeypatch.setattr(smoke, "OwnerOnlyProbeBroker", lambda *args: broker)
+    monkeypatch.setattr(smoke.time, "monotonic", monotonic)
+    monkeypatch.setattr(smoke.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(smoke.threading, "Thread", thread)
+    monkeypatch.setattr(smoke.subprocess, "Popen", popen)
+    monkeypatch.setattr(smoke.subprocess, "run", worker)
+    return case
+
+
+def test_observer_starts_after_slow_fixture_and_broker_setup(observer_main_case, capsys):
+    case = observer_main_case
+    assert smoke.main() == 0
+    assert case.events == ["fixture.start", "broker.start", "baseline", "listener.start",
+                           "worker", "fixture.close", "broker.close", "listener.close"]
+    assert case.monitors[0].before.frontmost_asn == "ASN:0x0-0x22022:"
+    report = json.loads(capsys.readouterr().out)
+    assert 8_000 <= report["end_to_end_ms"] < 9_000
+    assert report["launch_services_hidden_events"] == 2
+    assert case.listener_arguments[-2:] == ("-duration", "30")
+    assert smoke.MAX_END_TO_END_MS == 25_000
+    assert case.clock - case.listener_started < 30
+
+
+def test_fixture_setup_failure_cleans_up_without_starting_observer(observer_main_case):
+    case = observer_main_case
+    case.fixture.start.side_effect = smoke.QualificationError("fixture setup failed")
+    with pytest.raises(smoke.QualificationError, match="fixture setup failed"):
+        smoke.main()
+    case.fixture.close.assert_called_once()
+    case.broker.start.assert_not_called()
+    assert not case.monitors
+    assert case.listener_started is None
+
+
+def test_baseline_failure_still_cleans_prepared_fixture_and_broker(observer_main_case, monkeypatch):
+    case = observer_main_case
+    monkeypatch.setattr(smoke, "_visibility_snapshot", lambda: _snapshot(windows={17}))
+    with pytest.raises(smoke.QualificationError, match="clean GUI baseline"):
+        smoke.main()
+    case.fixture.close.assert_called_once()
+    case.broker.close.assert_called_once()
+    assert case.listener_started is None
+
+
+def test_fixture_cleanup_failure_does_not_skip_broker_or_recorder(observer_main_case):
+    case = observer_main_case
+    case.fixture.close.side_effect = smoke.QualificationError("fixture cleanup failed")
+    with pytest.raises(smoke.QualificationError, match="fixture cleanup failed"):
+        smoke.main()
+    case.broker.close.assert_called_once()
+    case.listener.terminate.assert_called_once()
+    case.listener.communicate.assert_called_once()
+
+
+@pytest.mark.parametrize("returncode", (0, 9))
+def test_recorder_premature_exit_is_refused_even_with_complete_events(returncode):
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+        monitor.listener = mock.Mock()
+        monitor.listener.poll.return_value = returncode
+        monitor.listener.communicate.return_value = ("\n".join(
+            _launch_event(name) for name in ("kLSNotifyApplicationCreation", "kLSNotifyApplicationDeath")
+        ), None)
+        with pytest.raises(smoke.QualificationError, match="listener exited"):
+            monitor.close()
+    monitor.listener.communicate.assert_called_once()
+    assert len(monitor.events) == 2
+
+
+def test_recorder_remains_live_through_final_snapshot():
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    monitor.listener = mock.Mock()
+    monitor.listener.poll.return_value = None
+    monitor.listener.communicate.return_value = ("", None)
+
+    def snapshot():
+        monitor.listener.terminate.assert_not_called()
+        return _snapshot()
+
+    with mock.patch.object(smoke, "_visibility_snapshot", side_effect=snapshot):
+        assert monitor.close() == _snapshot()
+    monitor.listener.terminate.assert_called_once()
+
+
+@pytest.mark.parametrize("failed_part", ("snapshot", "sampler"))
+def test_recorder_is_reaped_when_final_observation_fails(failed_part):
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    monitor.listener = mock.Mock()
+    monitor.listener.poll.return_value = None
+    monitor.listener.communicate.return_value = ("", None)
+    monitor.thread = mock.Mock()
+    monitor.thread.is_alive.return_value = failed_part == "sampler"
+    effect = smoke.QualificationError("final snapshot failed") if failed_part == "snapshot" else None
+    with mock.patch.object(smoke, "_visibility_snapshot", side_effect=effect, return_value=_snapshot()):
+        with pytest.raises(smoke.QualificationError, match="snapshot failed|sampler survived cleanup"):
+            monitor.close()
+    monitor.listener.terminate.assert_called_once()
+    monitor.listener.communicate.assert_called_once()
+
+
+@pytest.mark.parametrize(("seconds", "refusal"), ((26, "end-to-end budget"), (31, "listener exited")))
+def test_slow_worker_is_still_refused_by_original_budgets(observer_main_case, seconds, refusal):
+    case = observer_main_case
+    case.worker_seconds = seconds
+    with pytest.raises(smoke.QualificationError, match=refusal):
+        smoke.main()
+    case.fixture.close.assert_called_once()
+    case.broker.close.assert_called_once()
+    case.listener.communicate.assert_called_once()
+
+
+def test_real_worker_focus_change_is_still_refused(observer_main_case, monkeypatch):
+    case = observer_main_case
+    run = smoke.subprocess.run
+
+    def steal_focus(*args, **kwargs):
+        result = run(*args, **kwargs)
+        case.front = "ASN:0x0-0x33033:"
+        return result
+
+    monkeypatch.setattr(smoke.subprocess, "run", steal_focus)
+    with pytest.raises(smoke.QualificationError, match="changed the frontmost application"):
+        smoke.main()
+    case.listener.terminate.assert_called_once()
+
+
+def test_recorder_exit_during_sampler_readiness_prevents_worker(observer_main_case):
+    case = observer_main_case
+    case.listener.poll.side_effect = lambda: None if case.listener.poll.call_count == 1 else 0
+    with pytest.raises(smoke.QualificationError, match="listener exited before browser launch"):
+        smoke.main()
+    assert "worker" not in case.events
+    case.fixture.close.assert_called_once()
+    case.broker.close.assert_called_once()
+    case.listener.communicate.assert_called_once()
+
+
+def test_original_worker_failure_survives_cleanup_failure(observer_main_case, monkeypatch):
+    case = observer_main_case
+    case.fixture.close.side_effect = smoke.QualificationError("fixture cleanup failed")
+    monkeypatch.setattr(smoke.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess([], 17, "", ""))
+    with pytest.raises(smoke.QualificationError, match="direct packaged browser worker failed"):
+        smoke.main()
+    case.broker.close.assert_called_once()
+    case.listener.terminate.assert_called_once()
+    case.listener.communicate.assert_called_once()

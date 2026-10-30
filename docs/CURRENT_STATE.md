@@ -2,7 +2,7 @@
 
 ## Verified Checkpoint
 
-### Active: release CI correction and browser failure evidence, 2026-10-30
+### Active: release CI, source bootstrap and browser observation, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/ci-artifact-attempt-identity`, based on main
@@ -11,6 +11,46 @@ C3 has the same tree `de281f7b388708157b1f07fafc3927289b370335` as reviewed/test
 PR head67f4c8e3. Preview .32 is not published or installed. Keep the working external
 Geph and workstation unchanged. No native/protected retry is authorized by this
 checkpoint.
+
+PR430 head `e26b98470d78e7c0ab3e75b46c9a11e4b715368a` supplied new causal
+evidence in CI41110796459/1. The source-only cold install timed out its hash-locked
+pip command after five seconds: it inherited the short system-command deadline.
+The outer lifecycle runner allowed 180 seconds. Frozen packaged installation
+does not invoke this pip path. Source venv/pip now share one 90-second monotonic
+budget starting at installation preparation; each command gets only its remainder.
+An exhausted budget prevents another bootstrap command and follows existing
+failure cleanup before launchd publication. Ordinary control commands keep five
+seconds, including lock-FD inheritance and environment filtering. Two causal RED
+cases and 13 focused checks passed; independent review passed without rerunning
+them. Evidence: `output/continuation-20261030/source-bootstrap-timeout/`.
+
+The retained browser record also shows Finder changing to UserNotificationCenter
+at 1060–1087 ms, before worker invocation at 35585 ms. This run's focus change
+therefore preceded the worker by about 34.5 seconds. Its 30-second LaunchServices
+listener had already expired before invocation, so zero recorded events do not
+prove worker invisibility. Fixture and broker preparation now finish before the
+fresh baseline and recorder start. The unchanged 25-second worker/observation/
+cleanup limit fits inside the unchanged 30-second recorder lifetime. Early recorder
+exit, including status zero, is rejected before launch and after the final snapshot.
+Setup, sampling and fixture-close failures still clean up owned resources. Eight
+causal RED cases, 72 observer tests and one directly affected build-contract test
+passed; independent review confirmed unchanged visibility acceptance conditions.
+See `output/continuation-20261030/browser-observer-setup-order/`.
+The earlier run without retained evidence remains unattributed. CI evidence is in
+`ci-artifact-attempt-identity/pr430/diagnostic-head/` below.
+Audit41110796855/1 passed actual current-UTC admission at18:57:32Z. Chromium
+review41110797091/1 ran 15 helper tests and sandboxed version/DOM checks on macOS15
+ARM64, with owned processes/files cleaned up. This runtime/integrity evidence is
+not vulnerability clearance; Chromium OSV coverage remains unsupported.
+CI41110796459/1 is terminal FAILED on the two causes above. Its seven native
+Stop-and-Quit cases and packaged lifecycle checks passed with clean owned teardown
+and preserved external sentinel/global PF. Lifecycle Chrome used its real binary
+in headless mode; Safari used a real SafariDriver session. This is not ordinary
+GUI Chrome qualification or real account-backed Geph qualification. Terminal
+evidence is `diagnostic-head/terminal-verification.json` (SHA256
+`3d3fd368c5cc1a1f33cc422f999a0d606eac047e26b11b78dfc6a30d1a0db7c7`).
+Next: commit these two reviewed fixes and require fresh exact-source CI before
+normal merge. No main candidate or protected qualification has been dispatched.
 
 PR430's first head `6660be1e8ee323f3a4100892be77f10ae6a0fc48` reached a separate
 infrastructure blocker: CI41101705353/1 was cancelled on October 30 at 18:03:41Z.
@@ -47,8 +87,8 @@ Raw listings, paths, arguments, URLs and window titles are excluded. The same
 visibility refusal and cleanup remain in force. Two causal failures and 58 focused
 tests verify retained evidence and its bounds; see
 `output/continuation-20261030/browser-visibility-diagnostic/`.
-The actual focus-change cause still requires a fresh exact-source CI observation;
-this evidence repair does not close that gate.
+The next observation established the preparation-stage timing above. The
+diagnostic repair alone does not close the visibility gate.
 
 Main CI41090901062/1 failed because three macOS arm64 qualification jobs could not
 acquire hosted runners. All three were cancelled without a runner or executed step;
