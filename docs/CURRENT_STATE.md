@@ -2,7 +2,7 @@
 
 ## Verified Checkpoint
 
-### Active: artifact identity and supported CI runners, 2026-10-30
+### Active: release CI correction and browser failure evidence, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/ci-artifact-attempt-identity`, based on main
@@ -27,6 +27,28 @@ confirms today's 14:00–00:00 UTC brownout and November 2 removal. Application
 targets/configured minimum and historical r3 inputs remain unchanged. The new
 hosted runs must establish compatibility with this runner image; no existing
 macOS 13 runtime qualification is implied.
+
+After migration, PR430 head `6b898fbc557b55b4bc175771e8240dac12740bd9` ran on
+macOS 15.8.2 ARM64. CI41105773284/1 passed build/product/Windows/Chromium checks
+and all seven native Stop-and-Quit cases, with no cleanup errors. Lifecycle probes
+using Chrome/Safari survived tray crash/restart; the external connection and global
+PF state were preserved. Both app consumers downloaded the exact producer ID and
+verified its digest. Audit41105773270/1 passed current-date admission. The separate
+Chromium review41105773355/1 could not acquire a hosted ARM64 runner and produced
+no runtime evidence; existing admission remains separate.
+
+That CI still failed on browser visibility: before/after frontmost application
+ASNs differed. The original guard discarded its in-memory snapshots/events on
+failure, so the responsible process and timing could not be established. The
+diagnostic correction retains a bounded, sanitized stderr record: frontmost
+ASN/PID/bundle identity, observation and worker-invocation times, first differences
+before/after/overlapping invocation, and owned LaunchServices event summaries.
+Raw listings, paths, arguments, URLs and window titles are excluded. The same
+visibility refusal and cleanup remain in force. Two causal failures and 58 focused
+tests verify retained evidence and its bounds; see
+`output/continuation-20261030/browser-visibility-diagnostic/`.
+The actual focus-change cause still requires a fresh exact-source CI observation;
+this evidence repair does not close that gate.
 
 Main CI41090901062/1 failed because three macOS arm64 qualification jobs could not
 acquire hosted runners. All three were cancelled without a runner or executed step;
@@ -66,7 +88,8 @@ records from prior attempts and rejection of expired current records. Both
 independent source reviews passed; the combined review is in
 `output/continuation-20261030/ci-artifact-attempt-identity-review/`.
 Eight documentation tests and the project-state continuity check also passed.
-Next: exact-head PR CI after the runner migration, normal merge, then fresh main qualification. Product
+Next: exact-head PR CI with retained visibility evidence, normal merge only after
+required checks pass, then fresh main qualification. Product
 routing, DNS, Geph, authorization and release policy are unchanged by these repairs.
 
 Retained prior evidence: C2 main46ad4de4 passed CI41074846948/1,

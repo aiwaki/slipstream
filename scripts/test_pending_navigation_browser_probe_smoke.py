@@ -1,8 +1,10 @@
 import argparse
 import hashlib
+import json
 import os
 import stat
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 import subprocess
 from unittest import mock
@@ -583,6 +585,128 @@ def test_packaged_smoke_does_not_claim_visibility_by_constant() -> None:
     assert "CGWindowListCopyWindowInfo" in source
     assert 'LSAPPINFO, "listen", "+all"' in source
     assert "PendingNavigationBrowserWorkerLauncher" not in source
+
+
+@pytest.mark.parametrize("temporary", (False, True))
+def test_focus_failure_retains_diagnostic_and_original_refusal(capsys, temporary):
+    before = _snapshot()
+    changed = _snapshot(front="ASN:0x0-0x2002:")
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=before):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    monitor.samples.append(changed)
+    after = before if temporary else changed
+    with pytest.raises(smoke.QualificationError, match="frontmost"):
+        monitor.assert_invisible(after)
+    lines = capsys.readouterr().err.splitlines()
+    assert lines, "focus refusal discarded its in-memory diagnostic evidence"
+    assert len(lines) == 1
+    evidence = json.loads(lines[0])
+    assert evidence["kind"] == "slipstream_browser_visibility_failure"
+    assert evidence["before"]["asn"] == before.frontmost_asn
+    assert evidence["after"]["asn"] == after.frontmost_asn
+    assert evidence["first_differences"]["unknown"]["asn"] == changed.frontmost_asn
+
+
+def test_visibility_failure_distinguishes_setup_worker_and_overlapping_observation(capsys):
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    monitor.phase_times = {"baseline_started": 100.0, "worker_invocation": 110.0}
+    for start, end, asn in ((105, 106, 2), (109, 111, 3), (112, 113, 4)):
+        monitor.samples.append(replace(_snapshot(front=f"ASN:0x0-0x{asn}:"),
+                                       frontmost_read_started=start, frontmost_read_finished=end))
+    with pytest.raises(smoke.QualificationError, match="frontmost"):
+        monitor.assert_invisible(monitor.samples[-1])
+    evidence = json.loads(capsys.readouterr().err)
+    for phase, asn in (("before_worker", 2), ("overlap", 3), ("after_worker", 4)):
+        assert evidence["first_differences"][phase]["asn"] == f"ASN:0x0-0x{asn}:"
+    assert evidence["phases_ms"]["worker_invocation"] == 10_000
+
+
+def test_frontmost_identity_uses_existing_listing_and_does_not_expose_names():
+    listing = '''1) "private window title" ASN:0x0-0x1001:
+    bundleID="com.apple.finder" pid = 321 type="Foreground"
+2) "other title" ASN:0x0-0x2002:
+    bundleID="com.apple.Terminal" pid = 654 type="Foreground"
+'''
+    assert smoke._frontmost_identity(listing, "ASN:0x0-0x1001:") == (321, "com.apple.finder")
+    assert smoke._frontmost_identity(listing, "ASN:0x0-0x2002:") == (654, "com.apple.Terminal")
+    assert smoke._frontmost_identity(listing, "ASN:0x0-0x3003:") == (None, None)
+
+
+def test_visibility_failure_metadata_is_bounded_and_redacts_raw_fields(capsys):
+    secret = "https://private.invalid/path?token=NEVER_PRINT_THIS_TOKEN"
+    before = replace(_snapshot(front="ASN:0x0-0x1001: " + secret), frontmost_bundle_id=secret)
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=before):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    changed = replace(_snapshot(front="ASN:0x0-0x2002:", roots={731},
+                                headless=range(731, 831), windows=range(50)),
+                      frontmost_pid=321, frontmost_bundle_id="com.apple.finder")
+    monitor.samples = [changed] * 100
+    monitor.events = [_launch_event("kLSNotifyApplicationCreation") + secret] * 100
+    monitor.events.extend([
+        'Notification: kLSNotifyBecameFrontmost "LSASN"=ASN:0x0-0x731731: ' + secret,
+        'Notification: kLSNotifyBecameFrontmost pid=999 "LSASN"=ASN:0x0-0x999: ' + secret,
+    ])
+    with pytest.raises(smoke.QualificationError, match="frontmost"):
+        monitor.assert_invisible(changed)
+    encoded = capsys.readouterr().err
+    assert len(encoded.encode()) <= 16_384
+    assert secret not in encoded and "NEVER_PRINT_THIS_TOKEN" not in encoded
+    assert str(EXPECTED_SHELL) not in encoded
+    evidence = json.loads(encoded)
+    assert evidence["before"]["bundle_id"] is None
+    assert evidence["after"]["pid"] == 321
+    assert evidence["after"]["bundle_id"] == "com.apple.finder"
+    assert len(evidence["after"]["headless_pids"]) == 8
+    assert evidence["sample_count"] == 100
+    assert evidence["ls_event_count"] == 102
+    assert evidence["attributable_event_count"] == 101
+    assert len(evidence["attributable_events"]) == 8
+    assert evidence["visible_attributable_events"] == [{
+        "index": 100, "event": "kLSNotifyBecameFrontmost", "root_pid": None,
+        "asns": ["ASN:0x0-0x731731:"],
+    }]
+
+
+def test_visibility_diagnostic_failure_does_not_replace_original_refusal(capsys):
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    with mock.patch.object(smoke.json, "dumps", side_effect=RuntimeError("private diagnostic error")):
+        with pytest.raises(smoke.QualificationError, match="changed the frontmost"):
+            monitor.assert_invisible(_snapshot(front="ASN:0x0-0x2002:"))
+    assert json.loads(capsys.readouterr().err)["diagnostic_unavailable"] is True
+
+
+@pytest.mark.parametrize("returncode", (0, 17))
+def test_main_failure_keeps_cleanup_and_records_launch_phases(packaged_browser_bundle, capsys, returncode):
+    app = packaged_browser_bundle
+    with mock.patch.object(smoke, "_visibility_snapshot", return_value=_snapshot()):
+        monitor = smoke.VisibilityMonitor(EXPECTED_SHELL)
+    changed = _snapshot(front="ASN:0x0-0x2002:")
+    fixture, broker = mock.Mock(), mock.Mock()
+    fixture.port = 12345
+    with (
+        mock.patch.object(smoke, "_require_disposable_ci"),
+        mock.patch.object(smoke, "_parse_args", return_value=argparse.Namespace(app_bundle=app)),
+        mock.patch.object(smoke.probe_runtime, "_active_console_user", return_value=mock.Mock(uid=os.getuid())),
+        mock.patch.object(smoke, "VisibilityMonitor", return_value=monitor),
+        mock.patch.object(monitor, "start"),
+        mock.patch.object(monitor, "close", return_value=changed),
+        mock.patch.object(smoke, "HangingHttpsFixture", return_value=fixture),
+        mock.patch.object(smoke, "OwnerOnlyProbeBroker", return_value=broker),
+        mock.patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], returncode, "", "private worker output")),
+    ):
+        with pytest.raises(smoke.QualificationError, match="frontmost|direct packaged browser worker failed"):
+            smoke.main()
+    fixture.close.assert_called_once()
+    broker.close.assert_called_once()
+    evidence = json.loads(capsys.readouterr().err)
+    phases = evidence["phases_ms"]
+    expected = ["baseline_started", "baseline_ready", "monitor_started", "monitor_ready", "fixture_ready",
+                "worker_invocation", "worker_returned", "cleanup_started", "cleanup_complete"]
+    assert all(name in phases for name in expected)
+    assert [phases[name] for name in expected] == sorted(phases[name] for name in expected)
+    assert "private worker output" not in json.dumps(evidence)
 
 
 def test_packaged_smoke_launches_only_the_non_gui_auxiliary_helper() -> None:

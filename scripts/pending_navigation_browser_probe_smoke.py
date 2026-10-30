@@ -9,6 +9,7 @@ import ctypes.util
 import hashlib
 import http.server
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -160,6 +161,10 @@ class VisibilitySnapshot:
     headless_shell_pids: frozenset[int]
     headless_shell_root_pids: frozenset[int]
     launch_services_entries: tuple["LaunchServicesEntry", ...]
+    frontmost_pid: int | None = None
+    frontmost_bundle_id: str | None = None
+    frontmost_read_started: float | None = None
+    frontmost_read_finished: float | None = None
 
 
 @dataclass(frozen=True)
@@ -408,8 +413,12 @@ def _visibility_snapshot() -> VisibilitySnapshot:
     gui_chrome, headless_shell, headless_roots = _browser_process_snapshot(
         process_listing
     )
+    read_started = time.monotonic()
+    frontmost = _frontmost_asn()
+    read_finished = time.monotonic()
+    front_pid, front_bundle = _frontmost_identity(listing, frontmost)
     return VisibilitySnapshot(
-        frontmost_asn=_frontmost_asn(),
+        frontmost_asn=frontmost,
         slipstream_window_ids=_slipstream_window_ids(),
         slipstream_launch_services=bool(entries),
         slipstream_dock_visible=any(entry.dock_visible for entry in entries),
@@ -417,7 +426,29 @@ def _visibility_snapshot() -> VisibilitySnapshot:
         headless_shell_pids=headless_shell,
         headless_shell_root_pids=headless_roots,
         launch_services_entries=entries,
+        frontmost_pid=front_pid,
+        frontmost_bundle_id=front_bundle,
+        frontmost_read_started=read_started,
+        frontmost_read_finished=read_finished,
     )
+
+
+def _diagnostic_asn(value: str) -> str | None:
+    match = re.match(r"ASN:0x[0-9a-f]{1,16}-0x[0-9a-f]{1,16}:", value, re.I)
+    return match.group(0) if match else None
+
+
+def _frontmost_identity(listing: str, frontmost: str) -> tuple[int | None, str | None]:
+    # Reuse the existing listing; never launch another app or collect its title.
+    wanted = _diagnostic_asn(frontmost)
+    for block in re.split(r"(?m)(?=^\s*\d+\) )", listing):
+        header = block.splitlines()[0] if block else ""
+        if wanted is None or LAUNCH_SERVICES_ASN_RE.findall(header) != [wanted]:
+            continue
+        pid = LAUNCH_SERVICES_PID_RE.search(block)
+        bundle = re.search(r'\bbundleID="([A-Za-z0-9._-]{1,128})"', block)
+        return (int(pid.group(1)) if pid else None, bundle.group(1) if bundle else None)
+    return None, None
 
 
 def _assert_hidden_launch_services_events(
@@ -557,7 +588,9 @@ def _assert_hidden_launch_services_events(
 class VisibilityMonitor:
     def __init__(self, expected_shell: Path) -> None:
         self.expected_shell = expected_shell.resolve(strict=False)
+        self.phase_times = {"baseline_started": time.monotonic()}
         self.before = _visibility_snapshot()
+        self.mark_phase("baseline_ready")
         if (
             self.before.slipstream_window_ids
             or self.before.slipstream_launch_services
@@ -575,6 +608,101 @@ class VisibilityMonitor:
         self.ready = threading.Event()
         self.thread: threading.Thread | None = None
         self.listener: subprocess.Popen[str] | None = None
+
+    def mark_phase(self, name: str) -> None:
+        self.phase_times[name] = time.monotonic()
+
+    def emit_failure(self, after: VisibilitySnapshot | None) -> None:
+        """Best-effort, bounded metadata only; never replace the original refusal."""
+        try:
+            origin = self.phase_times["baseline_started"]
+            invocation = self.phase_times.get("worker_invocation")
+
+            def milliseconds(value):
+                if type(value) not in (int, float) or not math.isfinite(value):
+                    return None
+                return max(0, min(300_000, round((value - origin) * 1000)))
+
+            def pids(values):
+                return sorted(p for p in values if type(p) is int and 0 < p < 2**31)[:8]
+
+            def snapshot(value):
+                if value is None:
+                    return None
+                bundle = value.frontmost_bundle_id
+                return {
+                    "asn": _diagnostic_asn(value.frontmost_asn),
+                    "front_text_sha256": hashlib.sha256(value.frontmost_asn.encode()).hexdigest(),
+                    "pid": next(iter(pids([value.frontmost_pid])), None),
+                    "bundle_id": bundle if isinstance(bundle, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", bundle) else None,
+                    "read_ms": [milliseconds(value.frontmost_read_started), milliseconds(value.frontmost_read_finished)],
+                    "window_count": len(value.slipstream_window_ids),
+                    "dock_visible": bool(value.slipstream_dock_visible),
+                    "gui_chrome_pids": pids(value.gui_chrome_pids),
+                    "headless_pids": pids(value.headless_shell_pids),
+                    "root_pids": pids(value.headless_shell_root_pids),
+                }
+
+            differences = dict.fromkeys(("before_worker", "after_worker", "overlap", "unknown"))
+            for sample in self.samples:
+                if sample.frontmost_asn == self.before.frontmost_asn:
+                    continue
+                start, end = sample.frontmost_read_started, sample.frontmost_read_finished
+                phase = "unknown"
+                if start is not None and end is not None and invocation is not None:
+                    phase = "before_worker" if end < invocation else ("after_worker" if start >= invocation else "overlap")
+                if differences[phase] is None:
+                    differences[phase] = snapshot(sample)
+            roots = {pid for sample in self.samples for pid in sample.headless_shell_root_pids}
+            anchored_asns = set()
+            for line in self.events:
+                path = re.search(r'CFBundleExecutablePath"="([^"]+)"', line)
+                pid = LAUNCH_SERVICES_PID_RE.search(line)
+                if path and path.group(1) == str(self.expected_shell) and pid and int(pid.group(1)) in roots:
+                    asn = LAUNCH_SERVICES_LSASN_RE.search(line)
+                    tokens = LAUNCH_SERVICES_ASN_RE.findall(line)
+                    if asn:
+                        anchored_asns.add(asn.group("quoted") or asn.group("plain"))
+                    elif len(tokens) == 1:
+                        anchored_asns.add(tokens[0])
+            events, visible_events = [], []
+            known = ALLOWED_HIDDEN_LAUNCH_SERVICES_EVENTS.union(FORBIDDEN_LAUNCH_SERVICES_EVENTS)
+            attributable = 0
+            for index, line in enumerate(self.events):
+                pid = LAUNCH_SERVICES_PID_RE.search(line)
+                pid = int(pid.group(1)) if pid else None
+                owned_asns = anchored_asns.intersection(LAUNCH_SERVICES_ASN_RE.findall(line))
+                if pid not in roots and not owned_asns:
+                    continue
+                attributable += 1
+                if len(events) < 8 or len(visible_events) < 4:
+                    event = LAUNCH_SERVICES_EVENT_RE.match(line)
+                    name = event.group(1) if event else None
+                    item = {"index": index, "event": name if name in known else "other",
+                            "root_pid": pid if pid in roots else None,
+                            "asns": sorted(filter(None, (_diagnostic_asn(a) for a in owned_asns)))[:4]}
+                    if len(events) < 8:
+                        events.append(item)
+                    if len(visible_events) < 4 and any(marker.lower() in line.lower() for marker in FORBIDDEN_LAUNCH_SERVICES_EVENTS):
+                        visible_events.append(item)
+            phases = ("baseline_started", "baseline_ready", "monitor_started", "monitor_ready", "fixture_ready",
+                      "worker_invocation", "worker_returned", "cleanup_started", "cleanup_complete")
+            record = {"kind": "slipstream_browser_visibility_failure", "schema_version": 1,
+                      "before": snapshot(self.before), "after": snapshot(after),
+                      "sample_count": len(self.samples), "first_differences": differences,
+                      "phases_ms": {p: milliseconds(self.phase_times[p]) for p in phases if p in self.phase_times},
+                      "ls_event_count": len(self.events), "attributable_event_count": attributable,
+                      "attributable_events": events, "visible_attributable_events": visible_events}
+            encoded = json.dumps(record, sort_keys=True)
+            if len(encoded) > 16_384:
+                raise ValueError("diagnostic exceeds bound")
+            print(encoded, file=sys.stderr, flush=True)
+        except Exception:
+            # Even stderr may be unavailable; the qualification must still fail.
+            try:
+                print('{"kind":"slipstream_browser_visibility_failure","diagnostic_unavailable":true}', file=sys.stderr, flush=True)
+            except Exception:
+                pass
 
     def start(self) -> None:
         self.listener = subprocess.Popen(
@@ -642,6 +770,13 @@ class VisibilityMonitor:
         return after
 
     def assert_invisible(self, after: VisibilitySnapshot) -> int:
+        try:
+            return self._assert_invisible(after)
+        except QualificationError:
+            self.emit_failure(after)
+            raise
+
+    def _assert_invisible(self, after: VisibilitySnapshot) -> int:
         if after.frontmost_asn != self.before.frontmost_asn:
             raise QualificationError("browser worker changed the frontmost application")
         if any(
@@ -987,8 +1122,11 @@ def main() -> int:
         after_visibility = None
         started_at = time.monotonic()
         try:
+            visibility.mark_phase("monitor_started")
             visibility.start()
+            visibility.mark_phase("monitor_ready")
             fixture.start()
+            visibility.mark_phase("fixture_ready")
             now_ms = int(time.time() * 1000)
             socket_path = directory / "probe.sock"
             broker = OwnerOnlyProbeBroker(socket_path, _job(now_ms))
@@ -1012,6 +1150,7 @@ def main() -> int:
             worker_environment[
                 probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV
             ] = launch_id
+            visibility.mark_phase("worker_invocation")
             worker = subprocess.run(
                 (
                     str(executable),
@@ -1023,6 +1162,7 @@ def main() -> int:
                 timeout=MAX_END_TO_END_MS / 1000,
                 check=False,
             )
+            visibility.mark_phase("worker_returned")
             if worker.returncode != 0:
                 raise QualificationError(
                     "direct packaged browser worker failed: "
@@ -1033,6 +1173,7 @@ def main() -> int:
         except BaseException as error:
             failure = error
         finally:
+            visibility.mark_phase("cleanup_started")
             fixture.close()
             if broker is not None:
                 try:
@@ -1042,10 +1183,12 @@ def main() -> int:
                         failure = error
             try:
                 after_visibility = visibility.close()
+                visibility.mark_phase("cleanup_complete")
             except BaseException as error:
                 if failure is None:
                     failure = error
         if failure is not None:
+            visibility.emit_failure(after_visibility)
             raise failure
         if after_visibility is None:
             raise QualificationError("visibility monitor produced no final snapshot")
