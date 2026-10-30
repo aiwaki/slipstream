@@ -249,7 +249,7 @@ class SafariSessionSmokeTests(unittest.TestCase):
         self.assertIn("runs-on: macos-15", workflow)
         self.assertIn("fail-fast: false", workflow)
         self.assertIn("workflow_dispatch:", workflow)
-        self.assertIn("python-version: '3.13.14'", workflow)
+        self.assertIn('python-version: "3.13.14"', workflow)
         self.assertIn("if: always()", workflow)
         self.assertIn("safari-session/report.json", workflow)
         for forbidden in ("secrets.", "environment:", "geph", "pfctl", "app-bundle", ".log", "retry"):

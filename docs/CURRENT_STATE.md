@@ -4,6 +4,15 @@
 
 ### Active: isolate Safari startup failure, 2026-10-30
 
+PR432 first head `c34b62e15b17e47ba031da7084ee8c68bf40c7df` ran the
+unprotected Safari comparison 41139057736/1: both modes created sessions,
+navigated `about:blank` and proved cleanup on separate runners. The original
+failure was not reproduced. Dependency audit41139057596/1 passed. Ordinary
+CI41139057517/1 found one metadata-contract failure: the new workflow's correct
+Python version used single quotes, while the repository contract counts double
+quotes. The YAML and its assertion are now aligned; both affected tests pass.
+Require new exact-head CI; cancellation of the obsolete run was requested.
+
 Secondary checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/safari-startup-observation`, based on current main C5
 `2984beb5a102930d6cede825d9ae393d680513b5` / tree

@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.13.14'
+          python-version: "3.13.14"
       - name: Check isolated session evidence contracts
         run: python3 -m unittest discover -s scripts -p test_safari_session_smoke.py
       - name: Create one session, navigate about:blank and clean up
