@@ -2,7 +2,68 @@
 
 ## Verified Checkpoint
 
-### Active: candidate producer readiness, 2026-10-30
+### Active: isolate Safari startup failure, 2026-10-30
+
+Secondary checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
+branch `codex/safari-startup-observation`, based on current main C5
+`2984beb5a102930d6cede825d9ae393d680513b5` / tree
+`8eda700bea752957304913eac2e4c1aacfe8ea04`. Preserve the working external Geph
+and workstation; no local native/browser/build/install activity.
+
+C5 passed complete CI41128371044/1 and audit41128370866/1. Candidate13012386843
+has manifest `582739455aec2151d5b394f7a523fea0fd7b3587fff013b3a5955556eef9af22`.
+Native G41131209759/2 passed 26 checks; attempt1 had a confirmed hosted-runner
+capacity cancellation before one mode executed. Packaged P41134440722/1 passed
+13 checks, including real successor ACK and pre-ACK rollback, with clean teardown.
+Public feed/tray/admin-dialog qualification is still not claimed.
+
+Readiness R41134436278/1 failed at 22:00:29 UTC before its long soak. Chrome
+opened all four sites; Safari failed creating its first session, then three further
+attempts failed the Safari process-absence check. `elapsed_ms=0` means
+navigation did not begin; setup may have waited 30 seconds. The exception was
+suppressed and the driver log deleted, so the initial protocol, timeout or
+permission cause cannot be recovered. Do not label this a routing/site failure.
+Owned-Geph baseline, three closed-outage requests, recovery, tray crash,
+KeepAlive and external-sentinel checks passed. Product-owned cleanup steps passed;
+partial Safari startup cleanup was not proved. The 1800-second soak and five
+final attestations were not run. Release .32 remains NOT_ADMITTED/unpublished.
+
+The protected budget is exhausted (3/3 for October 30 UTC): no rerun or additional
+account-backed dispatch. RSA allowances expire at October 31 00:00 UTC and must
+not be extended or carried forward. Publisher inputs are retained but not admitted.
+
+The source review proves lost startup diagnostics and a missing Safari-absence
+assertion when the session ID/PID was never recorded. The passing lifecycle path
+performs that assertion. `pageLoadStrategy=none` versus the working fixture's
+`normal` is an A/B variable, not an established cause. Next: retain bounded
+structured startup/cleanup diagnostics in a separate sidecar without changing
+live-sites schema2, then run an unprotected disposable Safari-only normal/none
+comparison. No Geph/account/app install or remote sites are needed for this test.
+Never kill an unknown or foreign Safari process or weaken a release gate.
+
+Implementation ownership: verify_readiness owns lifecycle/live-site Python helpers
+and focused mocked regressions; verify_packaged owns the Safari-only harness,
+workflow and safe sidecar retention; release_preflight independently reviews.
+Root owns docs/commit/PR. Evidence: secondary
+`output/continuation-20261030/safari-startup-observation/`. No claimed fix for the
+underlying Safari startup cause until the isolated run supplies actual evidence.
+The shared helpers have two causal RED regressions and 48 focused mocked GREEN
+checks; receipt SHA `598226566c5c56e6d3558938b56b224ba2929a75540fd206688deadb2419227c`.
+The standalone harness has two causal driver-liveness RED cases and 14 mocked
+checks plus one existing workflow contract check passing;
+`output/continuation-20261030/safari-session-smoke/verification.json`
+SHA `9324c79b339a18c06a8eadc0f86c5f9d83a3250c69401cfe35dc78414d525fa2`.
+Independent combined review found no blockers. Eight documentation checks,
+project-state continuity and diff checks passed. No local Safari or native process ran.
+
+Retained primary evidence under `output/continuation-20261030/preview32-main/producer-ready/`:
+- Main verification SHA `b87c0e87f65388571d7a58ac58568d34ed9c15c62188fd9c4921ccad6ed1bf81`.
+- Native attempt2 SHA `4372a76f69b6ea8d71c6e9cad1c8db303286950607301a794f5a7f1e390a81c1`.
+- Packaged verification SHA `d4d28a6123c2efe17ad2750e7d1aee011fcf837df93b16a5c2483c4e3a44f70c`.
+- Failed readiness SHA `23562ae2a14569640efc09efa9bdadc80cac6c14f8f1cd7450a8d1ae9502efd6`.
+- Safari source review SHA `cec16a698fdfdd821121db9b924b06127d63a41e5268169c71eccca1f1416d29`.
+
+### Previous: candidate producer readiness, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
 branch `codex/producer-readiness-job-proof`, based on main C4

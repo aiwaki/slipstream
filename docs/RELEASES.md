@@ -620,6 +620,16 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   measured invisibility soak. Separate qualification and readiness proofs bind
   both result sets to the same candidate manifest and protected run attempt;
   the workflow does not rebuild the app.
+- Safari startup diagnostics are retained separately from the strict schema2
+  live-site report. They record bounded stages, setup duration, allowlisted
+  transport/protocol error classifications and ownership/cleanup observations;
+  raw messages, response bodies, page content, URLs and driver logs are not
+  published. A failed session creation does not prove that Safari exited, and
+  an unknown process is never terminated to make the check pass. The separate
+  `safari-session-smoke` workflow compares `normal` and `none` page-load strategies
+  on fresh disposable macOS runners using only `about:blank`. It has no Geph,
+  account, app-install or external-site dependency and cannot qualify a release
+  or replace the protected live-site matrix.
 - A Linux preflight with only the read-scoped ephemeral GitHub token and no
   protected account/broker secret limits `release-readiness` and the standalone
   diagnostic-only owned-Geph workflow to three fresh `main` dispatches combined
