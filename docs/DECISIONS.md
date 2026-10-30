@@ -1,5 +1,40 @@
 # Decisions
 
+### 2026-10-30: retire bundled Xbox DNS and its cached routing authority
+
+At the user's request, Slipstream no longer bundles or contacts `xbox-dns.ru`.
+The exact-host fallback is now `app_dns`: binary RFC 8484 POST requests to
+Cloudflare (`1.1.1.1`, verified TLS/SNI `cloudflare-dns.com`) and then Google
+(`8.8.8.8`, verified TLS/SNI `dns.google`). These fixed addresses bootstrap the
+resolver connection; they are not country or site allowlists. The adapter keeps
+its bounded response/cache, two-endpoint fallback and per-provider socket timeout.
+This migration adds neither a new whole-lookup deadline nor a transport layer.
+
+The existing system → app-owned DNS → distinct local-strategy evidence sequence
+is unchanged. Public DNS supplies addresses for local attempts, not a geo exit.
+The retired provider's system addresses remain visible as read-only generic
+configuration and cannot enable Smart DNS, even with stale canary timestamps.
+Existing external DNS/proxy/PAC/VPN settings and the original system-selected
+connection address remain untouched. An unobserved system lookup (`None`) still
+has no failure authority; a completed empty result (`[]`) remains distinct.
+
+Persisted automatic Geph authorizations now require the exact version 2 envelope
+`{"__v__": 2, "routes": {...}}`. Bare legacy routes and other versions no longer
+restore cached authority; routes must pass the current exact-host authorization
+rules again. In staged zero/partial-payload recovery, `app_dns` is mandatory and
+an old `xbox_dns` observation cannot satisfy it. Existing independent semantic
+and response-framing admission paths are unchanged; they do not acquire an extra
+DNS-stage requirement. Only the old authorization cache is invalidated; learned
+local strategy winners are preserved. Protected Discord/YouTube/googlevideo,
+static/direct policy, owned-Geph verification, network-wide noise guards and
+first-payload/no-replay rules remain unchanged.
+
+This supersedes the provider-specific Xbox DNS parts of earlier recovery/Smart
+DNS decisions, not their local-first or ownership invariants. Endpoint identity
+and API choices are documented in ROUTING_RESEARCH.md; mocked contract tests do
+not claim live resolver reachability or workstation qualification.
+
+
 ### 2026-10-25: preserve an opted-in owned Geph route during an outage
 
 For a captured TLS connection classified as geo exit, a saved enabled preference

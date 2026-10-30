@@ -61,9 +61,10 @@
   plus a verified owned-Geph payload; this is never a broad local-failure rule.
 - Do not globally block QUIC or UDP/443.
 - Do not mutate external DNS, proxy, PAC, VPN, or user-managed DNS such as
-  `xbox-dns.ru`. Its app-owned direct DoH fallback is allowed only for one
-  exact unknown host after a local failure; it never changes resolver settings
-  or sends Discord/YouTube through Geph.
+  `xbox-dns.ru`. The bundled Xbox DNS provider is retired. App-owned verified
+  Cloudflare/Google DoH is allowed only for one exact unknown host after a local
+  failure; these bootstrap endpoints are not site allowlists or Smart DNS
+  geo-exit authority. Discord/YouTube remain on local bypass.
 
 ## Knowledge Capture
 

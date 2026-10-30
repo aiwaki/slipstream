@@ -1,7 +1,7 @@
-"""Bounded, direct RFC 8484 lookup for Slipstream's local Xbox DNS fallback.
+"""Bounded, direct RFC 8484 lookup for Slipstream's app-owned DNS fallback.
 
 This module never changes macOS DNS configuration. It connects to the resolver's
-published IP addresses with verified TLS for ``xbox-dns.ru`` and is called only
+published IP addresses with verified TLS for each provider's hostname and is called only
 for an exact host after the ordinary local route has shown a real failure.
 """
 from collections import OrderedDict
@@ -15,16 +15,16 @@ import threading
 import time
 
 
-XBOX_DOH_ENDPOINTS = (
-    ("111.88.96.50", "xbox-dns.ru"),
-    ("111.88.96.51", "xbox-dns.ru"),
+APP_DOH_ENDPOINTS = (
+    ("1.1.1.1", "cloudflare-dns.com"),
+    ("8.8.8.8", "dns.google"),
 )
-XBOX_DOH_PATH = "/dns-query"
-XBOX_DOH_TIMEOUT = 3.0
-XBOX_DOH_TTL = 300.0
-XBOX_DOH_NEGATIVE_TTL = 30.0
-XBOX_DOH_CACHE_MAX = 512
-XBOX_DOH_MAX_RESPONSE = 64 * 1024
+APP_DOH_PATH = "/dns-query"
+APP_DOH_TIMEOUT = 3.0
+APP_DOH_TTL = 300.0
+APP_DOH_NEGATIVE_TTL = 30.0
+APP_DOH_CACHE_MAX = 512
+APP_DOH_MAX_RESPONSE = 64 * 1024
 SYSTEM_CA_BUNDLE = "/etc/ssl/cert.pem"
 
 _cache = OrderedDict()
@@ -139,7 +139,7 @@ def _query_endpoint(connect_ip, server_name, host, timeout):
     try:
         connection.request(
             "POST",
-            XBOX_DOH_PATH,
+            APP_DOH_PATH,
             body=query,
             headers={
                 "Accept": "application/dns-message",
@@ -152,8 +152,8 @@ def _query_endpoint(connect_ip, server_name, host, timeout):
         content_type = (response.getheader("content-type") or "").lower()
         if "application/dns-message" not in content_type:
             return []
-        packet = response.read(XBOX_DOH_MAX_RESPONSE + 1)
-        if len(packet) > XBOX_DOH_MAX_RESPONSE:
+        packet = response.read(APP_DOH_MAX_RESPONSE + 1)
+        if len(packet) > APP_DOH_MAX_RESPONSE:
             return []
         return parse_a_response(packet, query_id)
     except (OSError, ValueError, http.client.HTTPException, ssl.SSLError):
@@ -162,8 +162,8 @@ def _query_endpoint(connect_ip, server_name, host, timeout):
         connection.close()
 
 
-def resolve(host, timeout=XBOX_DOH_TIMEOUT):
-    """Resolve an exact hostname through Xbox DNS without touching system DNS."""
+def resolve(host, timeout=APP_DOH_TIMEOUT):
+    """Resolve an exact hostname through app-owned DNS without touching system DNS."""
     host = _normalize_host(host)
     if not host:
         return []
@@ -175,15 +175,15 @@ def resolve(host, timeout=XBOX_DOH_TIMEOUT):
             return list(cached[0])
 
     ips = []
-    for connect_ip, server_name in XBOX_DOH_ENDPOINTS:
+    for connect_ip, server_name in APP_DOH_ENDPOINTS:
         ips = _query_endpoint(connect_ip, server_name, host, timeout)
         if ips:
             break
 
     with _cache_lock:
-        ttl = XBOX_DOH_TTL if ips else XBOX_DOH_NEGATIVE_TTL
+        ttl = APP_DOH_TTL if ips else APP_DOH_NEGATIVE_TTL
         _cache[host] = (tuple(ips), now + ttl)
         _cache.move_to_end(host)
-        while len(_cache) > XBOX_DOH_CACHE_MAX:
+        while len(_cache) > APP_DOH_CACHE_MAX:
             _cache.popitem(last=False)
     return ips

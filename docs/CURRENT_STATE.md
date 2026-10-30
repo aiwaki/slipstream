@@ -2,7 +2,7 @@
 
 ## Verified Checkpoint
 
-### Active follow-up: historical candidate and Geph audits, 2026-10-30
+### Active: combined preview.32 candidate, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`;
 branch `codex/geph-historical-audit-verification`, based on merged PR426 main
@@ -15,7 +15,9 @@ exist. Cancellation left a launchd plist; bounded harness analysis is separate f
 this patch and does not implicate ordinary Quit. No retry of C's inputs is authorized
 by this checkpoint. Primary receipts: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/`
 (`qualification.json`, `merge-verification.json`, exact audit/native/readiness records).
-The combined repair needs a new source commit and matching gates.
+PR428 combines reviewed historical-policy commit `17736400cd4add0808c3daf0dbe533f11629e2b2`
+with DNS PR427 commit `09589c94dd0bd49c924410ff0a9fee7ad23cdf21` by a normal merge.
+Only this checkpoint required conflict resolution. The replacement needs fresh gates.
 
 Producer41060078598 independently failed for the same kind of policy mismatch while
 revalidating existing `geph-vendor-0.4.3-r3`. SOURCE/lock/SPDX checks passed. The report
@@ -37,16 +39,36 @@ pass. Evidence: `output/continuation-20261030/native-historical-policy/` and
 Missing, empty, malformed or mismatched historical policy fails closed in both paths.
 
 Eight documentation tests plus project-state, YAML and whitespace checks passed.
-Combined independent review passed, including real published OLD .31 metadata with
-its source policy. Next: normal PR, then fresh exact-main CI/audit and candidate inputs. Run native-root first; only after it passes run
+Historical-verification independent review passed, including real public OLD .31
+metadata with its source policy. Next: combined PR428 review/CI, then fresh exact-main
+CI/audit and candidate inputs. Run native-root first; only after it passes run
 readiness and packaged qualification in parallel, then consider publication. No
 native rerun, binary, account, workstation, release-asset or installation changes
 were made by this follow-up.
 
-Remaining independent work: bundled xbox-dns.ru removal (PR427 green, held), broader recovery (PR376),
-RSA-only vendor/source-tooling work (PR384), Telegram1.11.2/H2 (PR386). All thirteen
-Geph session/SQLite edits from PR384 already shipped via PR388; do not redo them.
-Historical user reconnects/403 and sustained workstation media remain unqualified.
+The reviewed DNS change is now included in the replacement .32 candidate because
+the historical-verification repair already invalidated the first candidate's release
+gates. PR427 passed CI41062262485 and audit41062262441 on09589c94. It replaces the
+bundled Xbox fallback with fixed-IP Cloudflare/Google binary DoH and verified TLS;
+retires provider-based Smart DNS authority and old automatic-Geph authorizations;
+preserves external settings, local strategy learning and None/empty DNS semantics.
+Six causal failures, 257 focused tests, overlapping 87 adapter/packaging tests plus
+17 subcases passed; independent review passed. Live provider reachability is not
+claimed. DNS receipts remain in the readme-humanizer checkout under
+`output/continuation-20261030/app-dns-retirement/`.
+
+Before merge require combined source/review checks and exact PR CI/audit. Then use
+a fresh main candidate, native-root FIRST, and only after that gate passes run
+readiness and packaged qualification in parallel. Current RSA allowances expire
+October30 UTC inclusive; never extend them or carry admission across that boundary.
+Only one protected slot has been spent today. Keep the working external Geph and
+workstation unchanged. No cancellation-harness, RSA or Telegram changes are included.
+
+Remaining independent work: broader recovery (PR376), RSA-only vendor/source-tooling
+(PR384), Telegram1.11.2/H2 (PR386), and the recorded CI cancellation cleanup gap.
+All thirteen Geph session/SQLite edits from PR384 shipped via PR388; do not redo them.
+Historical user reconnects/403, public auto-update and sustained workstation media
+remain unqualified. The DNS follow-up does not claim to solve every website failure.
 
 ### Published .31 — retained historical evidence
 
