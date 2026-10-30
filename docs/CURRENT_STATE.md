@@ -48,6 +48,15 @@ focused coherence checks tie both gates to VERSION. Causal red/green and 130 foc
 tests passed; observer fingerprints are synchronized. The superseded CI41050387083
 was cancelled rather than finishing a non-publishable candidate. The complete final
 head needs fresh CI/audit before merge. No protected qualification was dispatched.
+
+CI41051589184 at949323955 completed the packaged app and browser contract successfully;
+audit41051589138 also passed. Its 750 metadata tests exposed an old r2→r3 test
+fixture that read the live policy (2 failures/3 errors), and diff validation found
+one extra workflow EOF newline. The fixture is now frozen to the reviewed r3
+canonical digest; 34 focused tests pass and independent review confirms the
+production transition validator is unchanged. The workflow change removes only
+that newline. Receipts: `output/continuation-20261030/candidate32-949323955/`.
+Fresh final-head checks remain required; the failed run is not a green gate.
 Do not describe .31's historical audit as current policy acceptance. Details and
 causal evidence: `output/continuation-20261030/` and ROUTING_RESEARCH.md.
 
