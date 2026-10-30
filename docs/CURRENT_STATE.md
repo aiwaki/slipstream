@@ -45,7 +45,12 @@ The consumer fixes select one artifact inside the authenticated successful produ
 job window, preserving source/run/attempt, malformed identity and ambiguity checks.
 Their separate causal evidence is in
 `output/continuation-20261030/artifact-attempt-consumers/`.
-Final consumer checks and combined independent review remain pending. Product
+The consumer checks passed 179 tests and 54 subtests, including valid expired
+records from prior attempts and rejection of expired current records. Both
+independent source reviews passed; the combined review is in
+`output/continuation-20261030/ci-artifact-attempt-identity-review/`.
+Eight documentation tests and the project-state continuity check also passed.
+Next: exact-head PR CI, normal merge, then fresh main qualification. Product
 routing, DNS, Geph, authorization and release policy are unchanged by these repairs.
 
 Retained prior evidence: C2 main46ad4de4 passed CI41074846948/1,
