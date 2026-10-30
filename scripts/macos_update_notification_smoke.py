@@ -54,7 +54,7 @@ PRODUCER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024
 PRODUCER_POLL_SECONDS = 10.0
 PRODUCER_WAIT_SECONDS = 120.0
 PRODUCER_MAX_POLLS = 13
-PRODUCER_PENDING_STAGES = frozenset({"run_pending", "job_pending", "job_missing", "artifact_missing"})
+PRODUCER_PENDING_STAGES = frozenset({"job_pending", "job_missing", "artifact_missing"})
 PRODUCER_STAGES = PRODUCER_PENDING_STAGES | frozenset({
     "selector_invalid", "attempt_invalid", "run_invalid", "jobs_invalid",
     "job_invalid", "job_timing_invalid", "artifacts_invalid", "artifact_invalid",
@@ -442,10 +442,10 @@ def validate_candidate_producer_evidence(
         or head_repository["id"] != repository_value["id"]
     ):
         raise _producer_invalid("workflow run evidence is invalid", stage="run_invalid")
-    if run.get("status") == "queued" and run.get("conclusion") is None:
-        pending.append("run_pending")
-    elif not (
-        (run.get("status") == "in_progress" and run.get("conclusion") is None)
+    # The aggregate can lag behind completed jobs. Readiness still requires the
+    # exact successful assembler and its matching artifact below, not full CI.
+    if not (
+        (run.get("status") in ("queued", "in_progress") and run.get("conclusion") is None)
         or (run.get("status") == "completed" and run.get("conclusion") == "success")
     ):
         raise _producer_invalid("workflow run evidence is invalid", stage="run_invalid")
@@ -564,7 +564,7 @@ def validate_candidate_producer_evidence(
         digest = artifact["digest"]
         observed.update(artifact_id=artifact["id"], artifact_digest=digest)
     # All available identity/digest fields were checked, even when another
-    # endpoint was incomplete. A queued run cannot mask a hard provenance error.
+    # endpoint was incomplete. An unfinished producer cannot mask bad provenance.
     if pending:
         raise ProducerEvidencePending(pending[0], observed)
     return CandidateProducerEvidence(
