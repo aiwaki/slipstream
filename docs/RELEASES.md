@@ -580,10 +580,23 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   updater key. A separate no-checkout, no-repository-code signer job first
   verifies the frozen archive and pinned Tauri CLI tarball digests, then exposes
   the production key only to the signing command. A no-secret assembly job
-  binds both GitHub service-artifact digests and reruns the offline updater
+  binds the exact upload IDs, names, source/run identities and GitHub
+  service-artifact digests, then reruns the offline updater
   verifier before candidate assembly. OIDC and attestation permissions live in
-  another no-checkout, no-shell-command job that downloads the sealed
-  candidate; build, signer, and assembly jobs do not inherit them.
+  another no-checkout job that validates the candidate artifact ID with a fixed
+  inline format check before downloading the sealed candidate. It executes no
+  repository or candidate code; build, signer, and assembly jobs do not inherit
+  its permissions.
+- If a confirmed infrastructure failure requires another main-CI attempt after
+  artifacts were created, rerun `packaged-app-build` and its dependent jobs.
+  This regenerates the signing input, signature proof and candidate manifest for
+  the new attempt while preserving independent successful checks. Rerunning only
+  assembly or the final qualification jobs would mix attempt identities and is
+  rejected. Internal downloads use IDs from producer outputs; earlier artifacts
+  remain available. Refresh the candidate artifact ID, producer attempt and
+  manifest SHA before native, readiness or packaged-update qualification. This
+  procedure applies to common CI; protected `release-readiness` reruns remain
+  prohibited by the account-backed dispatch budget below.
 - One protected release-readiness run downloads that exact artifact, verifies
   its source commit, Git tree, source-archive digest, CI run ID and file hashes,
   then holds one account-backed owned-Geph lifecycle across the deterministic
@@ -607,10 +620,10 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.31`, with
-  `VERSION` and `preview_sequence=31` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.32`, with
+  `VERSION` and `preview_sequence=32` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.31`; the new preview requires its own
+  `.23` source and is rejected for `.32`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact

@@ -414,6 +414,65 @@ class GephAuditArtifactSelectionTests(unittest.TestCase):
         )
         self.assertEqual(self.select(), 99)
 
+    def test_retained_previous_attempt_does_not_hide_current_artifact(self):
+        previous = copy.deepcopy(self.artifacts["artifacts"][0])
+        previous.update(id=98, created_at="2026-10-30T09:04:00Z",
+                        updated_at="2026-10-30T09:04:01Z")
+        current = self.artifacts["artifacts"][0]
+        for values in ([previous, current], [current, previous]):
+            with self.subTest(order=[item["id"] for item in values]):
+                self.artifacts.update(total_count=2, artifacts=values)
+                self.assertEqual(self.select(), 99)
+
+    def test_retained_artifacts_do_not_hide_invalid_or_ambiguous_evidence(self):
+        current = copy.deepcopy(self.artifacts["artifacts"][0])
+        previous = dict(copy.deepcopy(current), id=98,
+                        created_at="2026-10-30T09:04:00Z", updated_at="2026-10-30T09:04:01Z")
+        variants = [
+            ("missing_expiry", {}), ("nonboolean_expiry", {"expired": "false"}),
+            ("expired_current", {"expired": True, "created_at": current["created_at"],
+                                 "updated_at": current["updated_at"]}), ("duplicate_id", {"id": 99}),
+            ("boolean_id", {"id": True}), ("missing_timestamp", {"created_at": None}),
+            ("reversed_timestamps", {"updated_at": "2026-10-30T09:03:59Z"}),
+            ("overlaps_job", {"updated_at": "2026-10-30T10:04:01Z"}),
+            ("future", {"created_at": "2026-10-30T10:06:00Z", "updated_at": "2026-10-30T10:06:01Z"}),
+            ("second_current", {"created_at": current["created_at"], "updated_at": current["updated_at"]}),
+        ]
+        for field, value in (("id", 43), ("repository_id", 13), ("head_repository_id", 13),
+                             ("head_sha", "b" * 40), ("head_branch", "other")):
+            variants.append((field, {"workflow_run": dict(previous["workflow_run"], **{field: value})}))
+        for label, change in variants:
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                candidate = dict(previous, **change)
+                if label == "missing_expiry":
+                    candidate.pop("expired")
+                self.artifacts.update(total_count=2, artifacts=[candidate, current])
+                self.select()
+
+    def test_expired_prior_attempt_does_not_block_current_artifact(self):
+        current = self.artifacts["artifacts"][0]
+        previous = dict(copy.deepcopy(current), id=98, expired=True,
+                        created_at="2026-10-30T09:04:00Z", updated_at="2026-10-30T09:04:01Z")
+        self.artifacts.update(total_count=2, artifacts=[previous, current])
+        self.assertEqual(self.select(), 99)
+
+    def test_retained_artifact_alone_is_not_current_attempt_evidence(self):
+        self.artifacts["artifacts"][0].update(created_at="2026-10-30T09:04:00Z",
+                                              updated_at="2026-10-30T09:04:01Z")
+        with self.assertRaisesRegex(ValueError, "selected job attempt"):
+            self.select()
+
+    def test_first_attempt_cannot_ignore_prior_artifacts(self):
+        previous = dict(copy.deepcopy(self.artifacts["artifacts"][0]), id=98,
+                        created_at="2026-10-30T09:04:00Z", updated_at="2026-10-30T09:04:01Z")
+        self.artifacts["artifacts"].append(previous)
+        self.artifacts["total_count"] = 2
+        self.jobs["jobs"][0]["run_attempt"] = 1
+        with self.assertRaises(ValueError):
+            release_candidate.select_geph_audit_artifact(
+                self.artifacts, self.jobs, source_commit=SOURCE, run_id=42,
+                run_attempt=1, repository_id=12)
+
     def test_same_run_previous_attempt_and_missing_or_non_utc_timestamps_fail(self):
         artifact = self.artifacts["artifacts"][0]
         for field in ("created_at", "updated_at"):

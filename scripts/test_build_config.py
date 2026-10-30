@@ -272,7 +272,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("needs: [changes, assemble-release-candidate]", job)
         self.assertIn("github.event_name == 'push'", job)
         self.assertIn("github.ref == 'refs/heads/main'", job)
-        self.assertIn("release-candidate-${{ github.sha }}", job)
+        self.assertIn("artifact-ids: ${{ needs.assemble-release-candidate.outputs.candidate-artifact-id }}", job)
         self.assertIn("scripts/macos_update_notification_smoke.py", job)
         self.assertIn('--repository "${{ github.repository }}"', job)
         self.assertIn('--source-commit "$GITHUB_SHA"', job)
@@ -425,9 +425,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('test -f "$bundle/macos/Slipstream.app.tar.gz"', ci)
         self.assertIn("needs: [changes, packaged-app-build]", ci)
         self.assertIn("Assemble immutable main release candidate", ci)
-        self.assertGreaterEqual(
-            ci.count("name: release-candidate-${{ github.sha }}"), 3
-        )
+        self.assertEqual(ci.count("name: release-candidate-${{ github.sha }}"), 1)
+        self.assertEqual(ci.count("artifact-ids: ${{ needs.assemble-release-candidate.outputs.candidate-artifact-id }}"), 4)
 
         self.assertIn("release-candidate-${{ github.sha }}", qualification)
         self.assertIn("scripts/release_candidate.py verify", qualification)
@@ -760,7 +759,20 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(attestation.count("actions/attest@"), 2)
         self.assertNotIn("actions/checkout@", attestation)
         self.assertNotIn("${{ secrets.", attestation)
-        self.assertNotIn("\n        run:", attestation)
+        # Only this data-format guard may run with attestation privileges;
+        # downloaded/repository code must still never execute in this job.
+        id_guard = '''        run: |
+          set -euo pipefail
+          artifact_ids=("$CANDIDATE_ARTIFACT_ID")
+          for artifact_id in "${artifact_ids[@]}"; do
+            if ! [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]; then
+              echo "missing or malformed trusted artifact ID" >&2
+              exit 1
+            fi
+          done
+'''
+        self.assertEqual(attestation.count(id_guard), 1)
+        self.assertNotIn("\n        run:", attestation.replace(id_guard, "", 1))
         self.assertIn("- attest-release-candidate", workflow)
         self.assertIn("- sign-updater-archive", workflow)
         self.assertIn("- assemble-release-candidate", workflow)

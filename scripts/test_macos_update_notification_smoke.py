@@ -667,6 +667,70 @@ def test_candidate_validation_rejects_a_different_repository() -> None:
                 )
 
 
+@pytest.mark.parametrize("previous_first", (True, False))
+def test_retained_previous_candidate_does_not_hide_current_producer(tmp_path, previous_first):
+    payloads = _producer_payloads(producer_attempt=2, qualification_attempt=2)
+    artifacts = payloads[3]
+    current = artifacts["artifacts"][0]
+    previous = dict(current, id=200, created_at="2026-08-19T00:04:00Z")
+    artifacts.update(total_count=2, artifacts=[previous, current] if previous_first else [current, previous])
+    kwargs = _write_producer_evidence(tmp_path, payloads)
+    evidence = smoke.validate_candidate_producer_evidence(**kwargs)
+    assert evidence.artifact_id == 201 and evidence.run_attempt == 2
+
+
+def test_expired_prior_candidate_does_not_block_current_producer(tmp_path):
+    payloads = _producer_payloads(producer_attempt=2, qualification_attempt=2)
+    current = payloads[3]["artifacts"][0]
+    previous = dict(current, id=200, expired=True, created_at="2026-08-19T00:04:00Z")
+    payloads[3].update(total_count=2, artifacts=[previous, current])
+    evidence = smoke.validate_candidate_producer_evidence(**_write_producer_evidence(tmp_path, payloads))
+    assert evidence.artifact_id == 201 and evidence.run_attempt == 2
+
+
+@pytest.mark.parametrize("case", (
+    "missing_expiry", "nonboolean_expiry", "current_expired", "duplicate_id", "boolean_id", "malformed_timestamp", "malformed_digest",
+    "foreign_run", "foreign_repo", "foreign_head_repo", "foreign_source", "foreign_branch",
+    "future", "second_current", "stale_only", "first_attempt", "pending_job",
+))
+def test_retained_candidates_cannot_hide_invalid_or_ambiguous_evidence(tmp_path, case):
+    payloads = _producer_payloads(producer_attempt=1 if case == "first_attempt" else 2,
+                                 qualification_attempt=2)
+    current = payloads[3]["artifacts"][0]
+    previous = dict(current, id=200, created_at="2026-08-19T00:04:00Z",
+                    workflow_run=dict(current["workflow_run"]))
+    changes = {
+        "nonboolean_expiry": ("expired", "false"), "duplicate_id": ("id", 201),
+        "boolean_id": ("id", True), "malformed_timestamp": ("created_at", None),
+        "malformed_digest": ("digest", "bad"), "future": ("created_at", "2026-08-20T00:06:00Z"),
+        "second_current": ("created_at", current["created_at"]),
+    }
+    foreign = {
+        "foreign_run": ("id", 78), "foreign_repo": ("repository_id", 92),
+        "foreign_head_repo": ("head_repository_id", 92), "foreign_source": ("head_sha", "2" * 40),
+        "foreign_branch": ("head_branch", "other"),
+    }
+    if case in changes:
+        key, value = changes[case]
+        previous[key] = value
+    if case in foreign:
+        key, value = foreign[case]
+        previous["workflow_run"][key] = value
+    if case == "missing_expiry":
+        previous.pop("expired")
+    if case == "current_expired":
+        current["expired"] = True
+    if case == "pending_job":
+        payloads[2]["jobs"][0].update(status="in_progress", conclusion=None, completed_at=None)
+    records = [previous] if case == "stale_only" else [previous, current]
+    payloads[3].update(total_count=len(records), artifacts=records)
+    kwargs = _write_producer_evidence(tmp_path, payloads)
+    with pytest.raises(smoke.NotificationQualificationError) as caught:
+        smoke.validate_candidate_producer_evidence(**kwargs)
+    assert caught.value.failure_code == "candidate_producer_invalid"
+    assert not isinstance(caught.value, smoke.ProducerEvidencePending)
+
+
 @pytest.mark.parametrize("qualification_attempt", (1, 2))
 def test_qualification_accepts_only_authenticated_candidate_attempt(
     qualification_attempt,

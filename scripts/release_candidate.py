@@ -87,25 +87,36 @@ def select_geph_audit_artifact(
     started, completed = timestamp(job.get("started_at")), timestamp(job.get("completed_at"))
     matches = [item for item in complete_list(artifacts, "artifacts")
                if item.get("name") == f"geph-vendor-dependency-audit-{source_commit}"]
-    if len(matches) != 1:
-        raise ValueError("Geph audit artifact is missing or duplicated")
-    artifact = matches[0]
-    if (type(artifact.get("id")) is not int or artifact["id"] <= 0
-            or artifact.get("expired") is not False):
-        raise ValueError("Geph audit artifact is unavailable")
-    workflow = artifact.get("workflow_run")
     expected = {"id": run_id, "repository_id": repository_id,
                 "head_repository_id": repository_id, "head_sha": source_commit,
                 "head_branch": "main"}
-    if (not isinstance(workflow, dict)
-            or any(type(workflow.get(k)) is not int for k in ("id", "repository_id", "head_repository_id"))
-            or any(workflow.get(k) != v for k, v in expected.items())):
-        raise ValueError("Geph audit artifact belongs to another source or run")
-    created = timestamp(artifact.get("created_at"))
-    updated = timestamp(artifact.get("updated_at"))
-    if not started <= created <= updated <= completed:
-        raise ValueError("Geph audit artifact is not from the selected job attempt")
-    return artifact["id"]
+    selected, seen = [], set()
+    for artifact in matches:
+        if (type(artifact.get("id")) is not int or artifact["id"] <= 0
+                or artifact["id"] in seen or type(artifact.get("expired")) is not bool):
+            raise ValueError("Geph audit artifact is unavailable or duplicated")
+        seen.add(artifact["id"])
+        workflow = artifact.get("workflow_run")
+        if (not isinstance(workflow, dict)
+                or any(type(workflow.get(k)) is not int for k in ("id", "repository_id", "head_repository_id"))
+                or any(workflow.get(k) != v for k, v in expected.items())):
+            raise ValueError("Geph audit artifact belongs to another source or run")
+        created = timestamp(artifact.get("created_at"))
+        updated = timestamp(artifact.get("updated_at"))
+        if created > updated:
+            raise ValueError("Geph audit artifact is not from the selected job attempt")
+        # A rerun retains valid artifacts from earlier attempts. Validate their
+        # identities before excluding them; never choose merely the newest ID.
+        if run_attempt > 1 and updated < started:
+            continue
+        if artifact["expired"]:
+            raise ValueError("Geph audit artifact is unavailable")
+        if not started <= created <= updated <= completed:
+            raise ValueError("Geph audit artifact is not from the selected job attempt")
+        selected.append(artifact["id"])
+    if len(selected) != 1:
+        raise ValueError("Geph audit artifact is missing or duplicated in the selected job attempt")
+    return selected[0]
 
 
 def _read_object(path: Path, label: str) -> dict:

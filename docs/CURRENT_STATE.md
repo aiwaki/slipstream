@@ -2,77 +2,75 @@
 
 ## Verified Checkpoint
 
-### Active: preview.32 qualification-observer repairs, 2026-10-30
+### Active: exact artifact identity across CI attempts, 2026-10-30
 
 Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
-branch `codex/semantic-cache-qualification`, based on merged PR428 main
-`46ad4de4b71a0bcd60855126c9b6613b02774846` (C2). Tracked source was clean before
-creating this branch; the DNS branch and private output remain preserved.
-Preview .32 is not published or installed. Keep the working external Geph and
-workstation unchanged. No account-backed retry is authorized by this checkpoint.
+branch `codex/ci-artifact-attempt-identity`, based on main
+`0860167bcb44a196fc18a2c98ccb0f67d98a95cf` (C3). PR429 merged normally;
+C3 has the same tree `de281f7b388708157b1f07fafc3927289b370335` as reviewed/tested
+PR head67f4c8e3. Preview .32 is not published or installed. Keep the working external
+Geph and workstation unchanged. No native/protected retry is authorized by this
+checkpoint.
 
-C2 passed main CI41074846948/1, current full audit41074846640/1 and native-root
-41077842851/1. Its candidate manifest is
-`97634fa4c835275465a3f3f7bdea8f43aae3e9e43bcb8f04336b96b870634363`.
-Protected readiness41079675772/1 failed after candidate verification and all three
-PF/QUIC scenarios passed. The semantic observer read `last.get(host)`, but the
-product had correctly saved `{"__v__":2,"routes":{"example.org":<future expiry>}}`.
-Its local test fixture also retained the old bare host map. This cache consumer
-was missed by the bundled-DNS migration; the failure does not show a failed route
-learn. The browser matrix did not start (`live-sites.exit=125` placeholder), and
-no completed outage/recovery proof, 1800-second soak or final five attestations
-were produced. Both account-gate and final system-absence checks passed; the latter
-followed a skipped soak and is cleanup evidence only.
+Main CI41090901062/1 failed because three macOS arm64 qualification jobs could not
+acquire hosted runners. All three were cancelled without a runner or executed step;
+GitHub explicitly reported capacity constraints. Build, signing, assembly and
+attestation passed. Candidate artifact12994861913 has manifest
+`860621073afe7c0bd73515da2bf14e702bec3fb43f16a79f649f837a91ac61df`, but its recorded
+producer attempt1 did not pass the complete main gate. Do not dispatch native gates
+with this candidate or treat a successful partial attempt2 as proof for attempt1.
+Primary evidence is under
+`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/observer-corrected/`:
+`candidate/verification.json`, `candidate/retry-analysis/` and `queue-diagnosis/`.
+No retry of this main run has been dispatched.
 
-Packaged update qualification41079675441/1 passed pre-ACK rollback/cleanup but
-found a second observer defect in the commit case: the installer wrote a real ACK
-and reached committed/quiescent sequence2, but `final_app()` repeated an immediate
-watchdog-finished probe and the second snapshot showed a busy shared lock. That
-refusal withheld normal commit-case cleanup; the lock holder/duration were not
-proven by this snapshot. The repair reuses the existing bounded waiter and unchanged
-`self.deadline - 90` bound, then rechecks all app/path/process predicates. A real
-file-lock causal test reproduced the original refusal; 188 focused observer/commit
-tests passed, including five new transient/permanent-busy, deadline and safety cases.
-Evidence: `output/continuation-20261030/packaged-terminal-lock/`. The primary
-`replacement/packaged/` directory retains the failed run's logs and artifacts.
-Native-root41077842851/1 remains a verified pass only for retired C2; it does not
-qualify the forthcoming corrected source.
+The retry investigation found name-only artifact selectors in CI signing/assembly
+and two consumers. GitHub retains same-name artifacts across attempts; selecting
+merely the newest or deleting old evidence is not acceptable. The CI repair passes
+trusted upload IDs through job outputs, checks exact ID/name/digest/unexpired
+source/run identity, and downloads those IDs in all ten internal consumers. Six
+pre-download guards reject absent or malformed IDs because an empty action input
+would download all artifacts. Existing signing-input/proof attempt checks remain;
+a valid rebuild must start at the build/signing-input producer, not assembly alone.
+The exact pinned download action extracts one selected ID directly into the stated
+path and supports fail-closed digest verification.
+
+Both real embedded Python verifiers first failed a two-attempt fixture. The repaired
+verifiers and source-extracted shell guards passed 15 focused tests, including five
+existing workflow checks. Three old text assertions were updated for exact-ID
+selection and the attestation job's sole permitted data-format guard; downloaded
+or repository code still cannot execute in that privileged job. Evidence:
+`output/continuation-20261030/ci-artifact-attempt-identity/`.
+The consumer fixes select one artifact inside the authenticated successful producer
+job window, preserving source/run/attempt, malformed identity and ambiguity checks.
+Their separate causal evidence is in
+`output/continuation-20261030/artifact-attempt-consumers/`.
+Final consumer checks and combined independent review remain pending. Product
+routing, DNS, Geph, authorization and release policy are unchanged by these repairs.
+
+Retained prior evidence: C2 main46ad4de4 passed CI41074846948/1,
+current audit41074846640/1 and native-root41077842851/1. Readiness41079675772/1 failed
+on the observer's stale cache shape before the browser matrix/soak; packaged
+41079675441/1 passed pre-ACK rollback/cleanup but its committed case refused a busy
+lock snapshot after real ACK and withheld cleanup. PR429 repaired both observers;
+those failed C2 runs remain failed and its native pass does not qualify new source.
+PR429 CI41084918267 attempt1's authorization failure remains unexplained. Its one
+approved targeted retry passed all required checks and all seven Stop-Quit cases,
+using the same immutable app artifact; this does not explain the first failure.
 
 Two of today's three protected dispatch slots are spent: cancelled41063658872/1
-on the first source C (`41b946ed...`), and failed41079675772/1 on C2. One slot remains.
-The first source's OLD .31 historical-policy defect was repaired by merged PR428;
-its interrupted-soak cleanup observation remains a separate deferred harness issue,
-not evidence against ordinary Quit. Do not rerun either old candidate.
+on C41b946ed and failed41079675772/1 on C2. One remains. After normal review/PR/merge,
+obtain a fresh exact-source main candidate and current audit, then run native-root
+first. Only after native PASS may readiness and packaged gates run in parallel.
+Do not reuse retired-source gates, bypass exact attempts or extend RSA allowances
+(expiry October30 UTC inclusive). The earlier interrupted-soak cleanup observation
+remains a separate deferred harness issue, not evidence against ordinary Quit.
 
-The semantic patch changes only the qualification observer and its tests: require
-the current exact-integer version2 envelope and an object `routes`, then retain the
-root-private file read, numeric future-expiry check and bounded wait. An AST-only
-check ties the observer version to the product writer without importing runtime
-code. The actual CI envelope first failed the old observer; four focused tests now
-pass, including 18 malformed/legacy/expiry controls and two delayed-state subcases.
-Neither observer patch changes product routing, authorization, DNS, lifecycle or
-publication policy.
-Independent cache-consumer review found 83 references in 12 files and no further
-stale schema reader. Existing unprotected CI runs both affected test files before
-protected qualification. Final independent code/test review passed; no blocking findings. New semantic
-patch evidence is in this checkout's
-`output/continuation-20261030/semantic-cache-qualification/`.
-
-Primary exact-C2 failure receipt:
-`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/replacement/readiness/verification.json`.
-C2 CI/audit and focused green tests remain reusable evidence for unchanged behavior;
-the correction still requires normal PR review/CI, merge, and a new exact-source
-candidate/audit before release gates. Native-root must pass before the remaining
-protected readiness invocation. No dispatch, native build, local browser/probe,
-service/settings change or installation was performed for this repair. Current RSA
-allowances expire October30 UTC inclusive; never extend them to finish a release.
-
-C2 includes the reviewed bundled Xbox-DNS retirement and historical-policy repairs.
-Local strategy learning, user-managed DNS and protected Discord/YouTube routing
-remain unchanged. No live public-provider qualification is claimed. Broader recovery
-(PR376), RSA source/tooling (PR384), Telegram1.11.2/H2 (PR386), and cancellation cleanup
-remain separate. Historical workstation403/reconnects, public auto-update and
-sustained workstation media remain unqualified.
+Bundled Xbox-DNS retirement and historical-policy repairs are already merged.
+User-managed DNS, local learning and protected Discord/YouTube routing remain
+unchanged; no new live provider qualification is claimed. Broader PR376 recovery,
+PR384 RSA/tooling and PR386 Telegram/H2 work remain separate. Historical workstation
+403/reconnects, public auto-update and sustained workstation media remain unqualified.
 
 ### Published .31 — retained historical evidence
 

@@ -509,25 +509,22 @@ def validate_candidate_producer_evidence(
     ):
         raise _producer_invalid("workflow artifacts evidence is incomplete", stage="artifacts_invalid")
     artifact_name = f"release-candidate-{source_commit}"
-    candidates = [
+    matching = [
         artifact
         for artifact in artifacts
         if isinstance(artifact, dict) and artifact.get("name") == artifact_name
     ]
-    if len(candidates) > 1:
-        raise _producer_invalid("candidate artifact is not unique", stage="artifacts_invalid")
-    if not candidates:
-        pending.append("artifact_missing")
-    else:
-        artifact = candidates[0]
+    candidates, seen = [], set()
+    for artifact in matching:
         workflow_run = artifact.get("workflow_run")
         digest = artifact.get("digest")
         if (
             type(artifact.get("id")) is not int
             or artifact["id"] <= 0
+            or artifact["id"] in seen
             or type(artifact.get("size_in_bytes")) is not int
             or artifact["size_in_bytes"] <= 0
-            or artifact.get("expired") is not False
+            or type(artifact.get("expired")) is not bool
             or not isinstance(digest, str)
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
             or not isinstance(workflow_run, dict)
@@ -541,12 +538,30 @@ def validate_candidate_producer_evidence(
             or workflow_run["head_repository_id"] != head_repository["id"]
         ):
             raise _producer_invalid("candidate artifact evidence is invalid", stage="artifact_invalid")
+        seen.add(artifact["id"])
         artifact_created = _github_timestamp(
             artifact.get("created_at"), label="candidate artifact creation"
         )
+        # Exclude a valid retained attempt only after a successful producer's
+        # complete window is known. Pending evidence cannot hide bad timing.
+        if (producer_attempt > 1 and job_started is not None and job_completed is not None
+                and artifact_created < job_started):
+            continue
+        if artifact["expired"]:
+            raise _producer_invalid("candidate artifact evidence is invalid", stage="artifact_invalid")
         if ((job_started is not None and artifact_created < job_started)
                 or (job_completed is not None and artifact_created > job_completed)):
             raise _producer_invalid("candidate artifact escaped its producer job", stage="artifact_timing_invalid")
+        candidates.append(artifact)
+    if len(candidates) > 1:
+        raise _producer_invalid("candidate artifact is not unique", stage="artifacts_invalid")
+    if not candidates:
+        if matching:
+            raise _producer_invalid("candidate artifact escaped its producer job", stage="artifact_timing_invalid")
+        pending.append("artifact_missing")
+    else:
+        artifact = candidates[0]
+        digest = artifact["digest"]
         observed.update(artifact_id=artifact["id"], artifact_digest=digest)
     # All available identity/digest fields were checked, even when another
     # endpoint was incomplete. A queued run cannot mask a hard provenance error.
