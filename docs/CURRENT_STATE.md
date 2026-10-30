@@ -2,73 +2,77 @@
 
 ## Verified Checkpoint
 
-### Active: combined preview.32 candidate, 2026-10-30
+### Active: preview.32 qualification-observer repairs, 2026-10-30
 
-Checkout: `/Users/aiwaki/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905`;
-branch `codex/geph-historical-audit-verification`, based on merged PR426 main
-`41b946ed72465c38aee74b9d0aeb3becdda85599` (C). Main CI41060078487 and
-full dependency audit41060078480 passed. Preview .32 publication is held:
-native-root41063272330 failed both cases before installation because materializing
-OLD .31 compared its historical app audit with the current policy. Protected readiness
-41063658872 was cancelled: slot 1 is spent, soak is incomplete and no final attestations
-exist. Cancellation left a launchd plist; bounded harness analysis is separate from
-this patch and does not implicate ordinary Quit. No retry of C's inputs is authorized
-by this checkpoint. Primary receipts: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/`
-(`qualification.json`, `merge-verification.json`, exact audit/native/readiness records).
-PR428 combines reviewed historical-policy commit `17736400cd4add0808c3daf0dbe533f11629e2b2`
-with DNS PR427 commit `09589c94dd0bd49c924410ff0a9fee7ad23cdf21` by a normal merge.
-Only this checkpoint required conflict resolution. The replacement needs fresh gates.
+Checkout: `/Users/aiwaki/.codex/worktrees/readme-humanizer/slipstream-codebase-audit-20260905`;
+branch `codex/semantic-cache-qualification`, based on merged PR428 main
+`46ad4de4b71a0bcd60855126c9b6613b02774846` (C2). Tracked source was clean before
+creating this branch; the DNS branch and private output remain preserved.
+Preview .32 is not published or installed. Keep the working external Geph and
+workstation unchanged. No account-backed retry is authorized by this checkpoint.
 
-Producer41060078598 independently failed for the same kind of policy mismatch while
-revalidating existing `geph-vendor-0.4.3-r3`. SOURCE/lock/SPDX checks passed. The report
-policy hash matches its immutable vendor tag policy. This follow-up now fetches that
-policy; the app consumer already did so. One causal shell regression failed before
-repair, then five new tests and eleven existing workflow tests (three subcases) passed.
-Independent review accepted this producer change. Evidence:
-`output/continuation-20261030/geph-historical-policy/`.
+C2 passed main CI41074846948/1, current full audit41074846640/1 and native-root
+41077842851/1. Its candidate manifest is
+`97634fa4c835275465a3f3f7bdea8f43aae3e9e43bcb8f04336b96b870634363`.
+Protected readiness41079675772/1 failed after candidate verification and all three
+PF/QUIC scenarios passed. The semantic observer read `last.get(host)`, but the
+product had correctly saved `{"__v__":2,"routes":{"example.org":<future expiry>}}`.
+Its local test fixture also retained the old bare host map. This cache consumer
+was missed by the bundled-DNS migration; the failure does not show a failed route
+learn. The browser matrix did not start (`live-sites.exit=125` placeholder), and
+no completed outage/recovery proof, 1800-second soak or final five attestations
+were produced. Both account-gate and final system-absence checks passed; the latter
+followed a skipped soak and is cleanup evidence only.
 
-The native driver now fetches each candidate's app-audit policy at its attested source
-commit, only after attestation and successful exact-main CI verification. Per-call
-private temporary files stay outside candidate artifacts and are cleaned on success
-or failure. An explicit historical-policy argument replaces the live-policy assumption;
-current-publication admission rejects that override and remains mandatory. The causal
-native regression reproduced the same input-hash failure; seven new authentication,
-policy, integrity and concurrency tests plus 61 existing driver/materialization tests
-pass. Evidence: `output/continuation-20261030/native-historical-policy/` and
-`output/continuation-20261030/historical-candidate-policy/` for the verifier API.
-Missing, empty, malformed or mismatched historical policy fails closed in both paths.
+Packaged update qualification41079675441/1 passed pre-ACK rollback/cleanup but
+found a second observer defect in the commit case: the installer wrote a real ACK
+and reached committed/quiescent sequence2, but `final_app()` repeated an immediate
+watchdog-finished probe and the second snapshot showed a busy shared lock. That
+refusal withheld normal commit-case cleanup; the lock holder/duration were not
+proven by this snapshot. The repair reuses the existing bounded waiter and unchanged
+`self.deadline - 90` bound, then rechecks all app/path/process predicates. A real
+file-lock causal test reproduced the original refusal; 188 focused observer/commit
+tests passed, including five new transient/permanent-busy, deadline and safety cases.
+Evidence: `output/continuation-20261030/packaged-terminal-lock/`. The primary
+`replacement/packaged/` directory retains the failed run's logs and artifacts.
+Native-root41077842851/1 remains a verified pass only for retired C2; it does not
+qualify the forthcoming corrected source.
 
-Eight documentation tests plus project-state, YAML and whitespace checks passed.
-Historical-verification independent review passed, including real public OLD .31
-metadata with its source policy. Next: combined PR428 review/CI, then fresh exact-main
-CI/audit and candidate inputs. Run native-root first; only after it passes run
-readiness and packaged qualification in parallel, then consider publication. No
-native rerun, binary, account, workstation, release-asset or installation changes
-were made by this follow-up.
+Two of today's three protected dispatch slots are spent: cancelled41063658872/1
+on the first source C (`41b946ed...`), and failed41079675772/1 on C2. One slot remains.
+The first source's OLD .31 historical-policy defect was repaired by merged PR428;
+its interrupted-soak cleanup observation remains a separate deferred harness issue,
+not evidence against ordinary Quit. Do not rerun either old candidate.
 
-The reviewed DNS change is now included in the replacement .32 candidate because
-the historical-verification repair already invalidated the first candidate's release
-gates. PR427 passed CI41062262485 and audit41062262441 on09589c94. It replaces the
-bundled Xbox fallback with fixed-IP Cloudflare/Google binary DoH and verified TLS;
-retires provider-based Smart DNS authority and old automatic-Geph authorizations;
-preserves external settings, local strategy learning and None/empty DNS semantics.
-Six causal failures, 257 focused tests, overlapping 87 adapter/packaging tests plus
-17 subcases passed; independent review passed. Live provider reachability is not
-claimed. DNS receipts remain in the readme-humanizer checkout under
-`output/continuation-20261030/app-dns-retirement/`.
+The semantic patch changes only the qualification observer and its tests: require
+the current exact-integer version2 envelope and an object `routes`, then retain the
+root-private file read, numeric future-expiry check and bounded wait. An AST-only
+check ties the observer version to the product writer without importing runtime
+code. The actual CI envelope first failed the old observer; four focused tests now
+pass, including 18 malformed/legacy/expiry controls and two delayed-state subcases.
+Neither observer patch changes product routing, authorization, DNS, lifecycle or
+publication policy.
+Independent cache-consumer review found 83 references in 12 files and no further
+stale schema reader. Existing unprotected CI runs both affected test files before
+protected qualification. Final independent code/test review passed; no blocking findings. New semantic
+patch evidence is in this checkout's
+`output/continuation-20261030/semantic-cache-qualification/`.
 
-Before merge require combined source/review checks and exact PR CI/audit. Then use
-a fresh main candidate, native-root FIRST, and only after that gate passes run
-readiness and packaged qualification in parallel. Current RSA allowances expire
-October30 UTC inclusive; never extend them or carry admission across that boundary.
-Only one protected slot has been spent today. Keep the working external Geph and
-workstation unchanged. No cancellation-harness, RSA or Telegram changes are included.
+Primary exact-C2 failure receipt:
+`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905/output/continuation-20261030/preview32-main/replacement/readiness/verification.json`.
+C2 CI/audit and focused green tests remain reusable evidence for unchanged behavior;
+the correction still requires normal PR review/CI, merge, and a new exact-source
+candidate/audit before release gates. Native-root must pass before the remaining
+protected readiness invocation. No dispatch, native build, local browser/probe,
+service/settings change or installation was performed for this repair. Current RSA
+allowances expire October30 UTC inclusive; never extend them to finish a release.
 
-Remaining independent work: broader recovery (PR376), RSA-only vendor/source-tooling
-(PR384), Telegram1.11.2/H2 (PR386), and the recorded CI cancellation cleanup gap.
-All thirteen Geph session/SQLite edits from PR384 shipped via PR388; do not redo them.
-Historical user reconnects/403, public auto-update and sustained workstation media
-remain unqualified. The DNS follow-up does not claim to solve every website failure.
+C2 includes the reviewed bundled Xbox-DNS retirement and historical-policy repairs.
+Local strategy learning, user-managed DNS and protected Discord/YouTube routing
+remain unchanged. No live public-provider qualification is claimed. Broader recovery
+(PR376), RSA source/tooling (PR384), Telegram1.11.2/H2 (PR386), and cancellation cleanup
+remain separate. Historical workstation403/reconnects, public auto-update and
+sustained workstation media remain unqualified.
 
 ### Published .31 — retained historical evidence
 

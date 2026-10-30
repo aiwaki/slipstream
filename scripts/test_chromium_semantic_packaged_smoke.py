@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import http.client
 import io
 import json
@@ -2494,18 +2495,99 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def test_learned_route_state_requires_root_private_future_expiry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "auto-geph.json"
-            learned = {smoke.FIXTURE_HOST: smoke.time.time() + 60}
+            # Exact envelope observed in failed readiness41079675772.
+            learned = {
+                "__v__": 2,
+                "routes": {"example.org": 1793377351.083062},
+            }
             with mock.patch.object(smoke, "AUTO_GEPH_STATE", state), mock.patch.object(
                 smoke,
                 "_read_private_json",
                 return_value=learned,
-            ) as read:
+            ) as read, mock.patch.object(smoke.time, "time", return_value=1793373751.0):
                 expiry = smoke._wait_for_learned_host(
                     smoke.FIXTURE_HOST,
                     timeout=0.1,
                 )
-            self.assertGreater(expiry, smoke.time.time())
+            self.assertEqual(expiry, learned["routes"]["example.org"])
             read.assert_called_once_with(state, 0)
+
+    def test_learned_route_cache_version_matches_product_writer(self) -> None:
+        # Read the producer declaration without importing its runtime or services.
+        tree = ast.parse((ROOT / "spike" / "tproxy.py").read_text(encoding="utf-8"))
+        versions = [
+            node.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "AUTO_GEPH_STATE_VERSION"
+                for target in node.targets
+            )
+        ]
+        self.assertEqual(len(versions), 1)
+        self.assertIsInstance(versions[0], ast.Constant)
+        self.assertIs(type(versions[0].value), int)
+        self.assertEqual(versions[0].value, smoke.AUTO_GEPH_STATE_VERSION)
+
+    def test_learned_route_rejects_retired_or_malformed_state_with_bounded_wait(self) -> None:
+        host = smoke.FIXTURE_HOST
+        routes = {host: 1000}
+        cases = {
+            "bare legacy map": routes,
+            "non-object root": [routes],
+            "missing version": {"routes": routes},
+            "retired version": {"__v__": 1, "routes": routes},
+            "unknown version": {"__v__": 3, "routes": routes},
+            "float version": {"__v__": 2.0, "routes": routes},
+            "string version": {"__v__": "2", "routes": routes},
+            "boolean version": {"__v__": True, "routes": routes},
+            "missing routes with top-level host": {"__v__": 2, host: 1000},
+            "non-object routes": {"__v__": 2, "routes": [routes]},
+            "null routes": {"__v__": 2, "routes": None},
+            "missing host": {"__v__": 2, "routes": {"different.example": 1000}},
+        }
+        for label, expiry in (
+            ("string expiry", "1000"),
+            ("boolean expiry", True),
+            ("null expiry", None),
+            ("non-numeric expiry", {}),
+            ("expiry equals now", 0),
+            ("expired route", -1),
+        ):
+            cases[label] = {"__v__": 2, "routes": {host: expiry}}
+        for label, state in cases.items():
+            with self.subTest(label=label), mock.patch.object(
+                smoke, "_read_private_json", return_value=state
+            ) as read, mock.patch.object(
+                smoke.time, "monotonic", side_effect=[0.0, 0.0, 1.0]
+            ), mock.patch.object(
+                smoke.time, "time", return_value=0.0
+            ), mock.patch.object(smoke.time, "sleep") as sleep:
+                with self.assertRaisesRegex(
+                    smoke.QualificationError, "semantic route was not learned"
+                ):
+                    smoke._wait_for_learned_host(host, timeout=0.1)
+                read.assert_called_once_with(smoke.AUTO_GEPH_STATE, 0)
+                sleep.assert_called_once_with(0.25)
+
+    def test_learned_route_waits_for_current_state_to_appear(self) -> None:
+        host = smoke.FIXTURE_HOST
+        current = {"__v__": 2, "routes": {host: 1000}}
+        for initial in (FileNotFoundError(), {host: 1000}):
+            with self.subTest(initial=type(initial).__name__), mock.patch.object(
+                smoke, "_read_private_json", side_effect=[initial, current]
+            ) as read, mock.patch.object(
+                smoke.time, "monotonic", side_effect=[0.0, 0.0, 0.25]
+            ), mock.patch.object(
+                smoke.time, "time", return_value=0.0
+            ), mock.patch.object(smoke.time, "sleep") as sleep:
+                self.assertEqual(smoke._wait_for_learned_host(host, timeout=1.0), 1000.0)
+                self.assertEqual(read.call_args_list, [
+                    mock.call(smoke.AUTO_GEPH_STATE, 0),
+                    mock.call(smoke.AUTO_GEPH_STATE, 0),
+                ])
+                sleep.assert_called_once_with(0.25)
 
     def test_automatic_navigation_runtime_restarts_with_exact_environment(
         self,

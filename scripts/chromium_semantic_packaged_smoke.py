@@ -66,6 +66,7 @@ NATIVE_MESSAGE_TAP_RUNTIME_RELATIVE_PATH = Path(
 )
 SEMANTIC_SOCKET = Path("/var/run/slipstream-semantic.sock")
 AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
+AUTO_GEPH_STATE_VERSION = 2
 FIXTURE_HOST = "example.org"
 INCOMPLETE_FIXTURE_HOST = "example.net"
 PENDING_NAVIGATION_FIXTURE_HOST = "example.edu"
@@ -2145,7 +2146,14 @@ def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
     while time.monotonic() < deadline:
         try:
             last = _read_private_json(AUTO_GEPH_STATE, 0)
-            expiry = last.get(host) if isinstance(last, dict) else None
+            routes = None
+            if (
+                isinstance(last, dict)
+                and type(last.get("__v__")) is int
+                and last.get("__v__") == AUTO_GEPH_STATE_VERSION
+            ):
+                routes = last.get("routes")
+            expiry = routes.get(host) if isinstance(routes, dict) else None
             if isinstance(expiry, (int, float)) and not isinstance(expiry, bool):
                 if float(expiry) > time.time():
                     return float(expiry)

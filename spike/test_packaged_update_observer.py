@@ -344,6 +344,87 @@ def test_commit_accepts_exact_successfully_exited_loaded_watchdog(journal):
     assert backend.events[-1]["value"]["lock"] == "available"
 
 
+def final_watchdog_fixture(journal):
+    backend, clock = terminal_watchdog_fixture(journal), Clock()
+    backend.target = Path(journal["target"])
+    backend.tproxy = SimpleNamespace(_daemon_update_tree=lambda *_a, **_k: EXPECTED["new"]["bundle_tree_sha256"])
+    backend.process_snapshot = lambda pid: process_for(journal) if pid == journal["successor_pid"] else None
+    def query(argv, **_kwargs):
+        if argv[0] == "/bin/launchctl":
+            return SimpleNamespace(returncode=0, stdout=backend.job_text, stderr=b"")
+        if argv[0] == "/usr/bin/pgrep":
+            return SimpleNamespace(returncode=0, stdout=b"222\n")
+        assert argv[0] == "/bin/ps"
+        return SimpleNamespace(returncode=0, stdout=f"222 333 {UID} S {START}\n".encode())
+    backend.run = query
+    # Use the real bounded wait with a deterministic clock. The old final_app
+    # bypasses this helper and fails on its single busy-lock observation.
+    def wait(deadline, **_kwargs):
+        assert deadline == backend.deadline - 90
+        return observer.Observer.wait_watchdog_finished(backend, deadline, clock=clock, sleep=clock.sleep)
+    backend.wait_watchdog_finished = wait
+    return backend, clock
+
+
+def test_final_app_rechecks_transient_lock_after_observed_completion(journal):
+    backend, clock = final_watchdog_fixture(journal)
+    assert backend.watchdog_finished() is True
+    with backend.journal_path.with_suffix(".lock").open("rb") as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        def release(seconds):
+            clock.now += seconds
+            observer.fcntl.flock(held, observer.fcntl.LOCK_UN)
+        clock.sleep = release
+        backend.final_app()
+    assert clock.now == 0.02 and backend.deadline == 91
+    assert any(e["kind"] == "completion_diagnostic" and e["value"]["lock"] == "busy" for e in backend.events)
+    assert backend.tray == process_for(journal)
+    assert backend.events[-1]["kind"] == "final_app"
+
+
+def test_final_app_permanent_lock_contention_exhausts_existing_budget(journal):
+    backend, clock = final_watchdog_fixture(journal)
+    with backend.journal_path.with_suffix(".lock").open("rb") as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        with pytest.raises(observer.Refused, match="terminal watchdog deadline exhausted"):
+            backend.final_app()
+    assert clock.now == 1 and backend.deadline == 91
+    assert backend.events[-1]["value"]["lock"] == "busy"
+    assert not any(e["kind"] == "final_app" for e in backend.events)
+
+
+def test_final_app_expired_budget_cannot_accept_even_terminal_watchdog(journal):
+    backend, clock = final_watchdog_fixture(journal)
+    clock.now = backend.deadline - 90
+    with pytest.raises(observer.Refused, match="terminal watchdog deadline exhausted"):
+        backend.final_app()
+    assert clock.now == 1 and not backend.events
+
+
+def test_final_app_unsafe_terminal_lock_is_not_retried(journal):
+    backend, clock = final_watchdog_fixture(journal)
+    backend.journal_path.with_suffix(".lock").chmod(0o644)
+    with pytest.raises(observer.Refused, match="unsafe terminal transaction lock"):
+        backend.final_app()
+    assert clock.now == 0
+    assert not any(e["kind"] == "final_app" for e in backend.events)
+
+
+def test_final_app_rechecks_bundle_after_waiting_for_lock(journal):
+    backend, clock = final_watchdog_fixture(journal)
+    with backend.journal_path.with_suffix(".lock").open("rb") as held:
+        observer.fcntl.flock(held, observer.fcntl.LOCK_EX | observer.fcntl.LOCK_NB)
+        def change_bundle(seconds):
+            clock.now += seconds
+            backend.tproxy._daemon_update_tree = lambda *_a, **_k: "0" * 64
+            observer.fcntl.flock(held, observer.fcntl.LOCK_UN)
+        clock.sleep = change_bundle
+        with pytest.raises(observer.Refused, match="final app tree mismatch"):
+            backend.final_app()
+    assert clock.now == 0.02
+    assert not any(e["kind"] == "final_app" for e in backend.events)
+
+
 def test_preack_rollback_accepts_same_terminal_watchdog_contract(journal):
     from packaged_update_preack import PreAckObserver
     backend, clock = terminal_watchdog_fixture(journal), Clock()
@@ -653,7 +734,7 @@ def test_observes_real_fixture_journal_ack_receipt_then_cleanup_without_mutation
     backend.watchdog_finished = lambda: True
     clock = Clock()
     assert backend.wait_transaction(clock=clock, sleep=clock.sleep)["decision"] == "commit"
-    backend.final_app()
+    backend.final_app(clock=clock, sleep=clock.sleep)
     assert backend.tray == process_for(journal)
     assert [entry["value"]["phase"] for entry in backend.events if entry["kind"] == "root_status"] == ["prepared", "ready", "committed"]
     assert len([entry for entry in backend.events if entry["kind"] == "successor_ack"]) == 1
@@ -683,8 +764,9 @@ def test_final_tray_refusal_retains_query_without_relaxing_acceptance(journal, t
             return SimpleNamespace(returncode=returncode, stdout=stdout)
         raise observer.Refused("inert optional diagnostic failure")
     backend.run = query
+    clock = Clock()
     with pytest.raises(observer.Refused, match="one final tray must be alive"):
-        backend.final_app()
+        backend.final_app(clock=clock, sleep=clock.sleep)
     assert backend.last_event["final_tray_query"]["returncode"] == returncode
     assert backend.last_event["final_tray_query"]["outcome"] == outcome
     assert sum(argv[0] == "/usr/bin/pgrep" for argv in queries) == 1
