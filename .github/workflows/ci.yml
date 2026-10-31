@@ -241,6 +241,9 @@ jobs:
       - name: Core traffic contracts
         run: python3 -m pytest -q spike/test_traffic_contracts.py
 
+      - name: Public updater UI observer contracts (no native actions)
+        run: python3 -m pytest -q scripts/test_public_update_observer.py scripts/test_public_update_visibility.py
+
       - name: Daemon unit tests
         run: python3 -m pytest -q spike
 
