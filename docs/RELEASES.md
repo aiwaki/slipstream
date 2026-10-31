@@ -40,6 +40,35 @@ These results do not establish the cause of earlier Safari startup failures or
 Codex HTTP 403 responses, or guarantee every site, call, or future network condition.
 The broader recovery and Telegram branches remain separate work.
 
+### Ordinary public update qualification
+
+The dispatch-only `public-update-qualification.yml` exercises the unchanged,
+published `.31` and `.32` applications on a disposable hosted Mac. It downloads
+both public asset sets, verifies their pinned release identities, signatures and
+source-bound candidate manifests, and keeps the observer revision separate from
+the released product sources. Historical verification of `.31` does not renew
+its expired release-policy allowances. The app performs its own unauthenticated
+public discovery and download; the driver supplies no feed or prepared update.
+
+| Case | Required observation |
+|---|---|
+| Cancel | One real native Cancel; the same OLD tray and daemon remain healthy; the full OLD app is unchanged; local preparation and root operation are absent. |
+| Retry and install | Ordinary menu actions and one confirmed administrator submission; normal OLD exit, exact NEW bundle and daemon, real successor ACK, commit and clean teardown. |
+| Pre-ACK rollback | Run only after independently verified public commit evidence for this pair. Kill only the identified successor before ACK; require production abort, restored OLD app and daemon, and clean teardown. |
+
+An ambiguous menu click or authorization response must not be replayed. The
+authorization UI observation has its own deadline; it does not shorten or extend
+the production root preparation lease. Existing G/P evidence is reused for the
+unchanged backend, not relabeled as proof of ordinary menu interaction.
+
+Adding this driver is not a passing native result. Each case remains unqualified
+until its exact hosted run and terminal evidence are verified. Ordinary
+notification delivery also remains separate: the saved notification preference
+proves submission, and provisional macOS notifications may appear only in
+Notification Center. The C9 qualification-hook delivery proof is not evidence
+that a particular ordinary update banner was visible. This workflow does not
+install anything on the user's Mac or exercise media, calls or sleep/wake.
+
 ## RSA-only dependency release, 2026-10-31
 
 The published Geph 0.4.3-r4 dependency replaces the old RSA dependency with three

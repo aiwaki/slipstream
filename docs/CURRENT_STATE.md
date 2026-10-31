@@ -11,7 +11,8 @@ Previous .31 retains all12assets (only its title became archival); stable1.4
 retains all5assets. No workstation installation or settings changes performed.
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-docs branch `codex/preview32-published-status`, based on frozen release C9.
+active branch `codex/public-preview-update-ui`, based on documentation main
+`f674a76bb717e6624de0574ce616561a180735fd` after frozen release C9.
 Current source, PR/CI and this branch must be reconciled before further work;
 release source is immutable and is not a claim about a later documentation HEAD.
 Private output and original checkout/user edits remain preserved.
@@ -41,7 +42,47 @@ remain intact,37tests+32subchecks and independent review passed. C8 failed CI
 was not rerun again. Source/lock and policies stayed fixed through C9 qualification.
 Review expires2026-11-07; no exception extension. Oct31 account-backed usage1/3.
 
-NEXT: finish the documentation-only publication-status PR. Public discovery,
+Documentation PR436 merged normally; required CI41169741967/1 and
+audit41169741965/1 PASS on the exact equivalent tree (8 docs tests; product
+checks correctly skipped). New main f674a76bb717e6624de0574ce616561a180735fd
+changes only the three docs; frozen release C9 and all assets stay unchanged.
+This release-delivery phase is complete. Prior goal turn made concrete progress:
+C9 app published and docs PR436 merged. Next safe work is the remaining public
+updater UI gate on disposable CI only. Current real stop_quit_ui_smoke helpers
+already drive native menu/SecurityAgent with single-submit authorization and a
+temporary CI admin. Earlier public driver343119b can supply a bounded base;
+ordinary published31→32 discovery/download/menu/auth must not be replaced by
+the G/P direct transaction trigger. Preserve historical policy authentication
+for OLD31; no current-publication allowance is extended. Code graph tools are
+unavailable in this session; bounded exact-path/rg/git-object reads are used.
+Two read-only reviews completed and bound both published payloads; receipts:
+output/continuation-20261031/public-updater/read-only-ui-analysis.json SHA
+ a5ef4b620d33fb26fb2afc6753cc18e3556ebf51eab690fbf8961623fc7b171d,
+read-only-release-analysis.json SHA
+ 70923cc0d23ce1b1f9be8114c620b8160c5044ee69c822ccba22f7ca92ced661.
+Bounded implementation now restores the historical public UI driver and reuses
+current Stop/Quit single-submit SecurityAgent helpers. Scope: real Cancel with
+unchanged OLD runtime and clean preparation, then ordinary public commit;
+separate pre-ACK rollback only after verified commit evidence. Both OLD31 and
+NEW32 must come from exact published assets, with source-bound historical policy
+and signature checks. Shared native G/P, product binaries and production leases
+remain unchanged. No speculative notification-store interpretation: ordinary
+notification UI delivery stays unqualified; C9 native-hook delivery is separate.
+Main f674 push CI41169877080/1 and audit41169877011/1 are green.
+Implementation is now complete in the branch: six restored/adapted public UI
+modules, three focused test modules, dispatch-only workflow, and explicit common
+CI collection of the two script tests. No product or shared G/P code changed.
+Final focused suite: 130 PASS in 1.60s; documentation 8 PASS; continuity contract,
+actionlint and diff whitespace checks PASS. Independent UI review found the AX
+Check command's incorrect success exit code; a causal RED and the correction
+are retained. Final UI review has no open findings. Evidence is under
+output/continuation-20261031/public-updater/, including root-focused-verification.json,
+independent-ui-review.json and pair-workflow/verification.json. Final pair/workflow
+review is separate; ordinary native results are still pending. Next: normal PR
+and required CI, then a disposable public commit+Cancel run, independently
+verify its result before dispatching the pre-ACK rollback case.
+No new workflow dispatch, account-backed run, native build or workstation
+mutation has occurred in this phase. Remaining qualification: public discovery,
 ordinary tray/admin updater flow and installed .32 on the user's Mac remain
 unqualified; do not report these as covered by the G/P CI driver. Sustained media,
 Discord calls and sleep/wake are also separate. Historical Safari/HTTP403 root
