@@ -317,6 +317,7 @@ def test_unknown_postclick_cannot_use_preclick_cleanup():
 
 
 def published_pair(tmp_path, monkeypatch):
+    import make_release_manifest
     specs = copy.deepcopy(driver.PUBLIC_RELEASES)
     public_root = tmp_path / "public"
     candidates = {}
@@ -334,14 +335,30 @@ def published_pair(tmp_path, monkeypatch):
         (assets / "latest.json").write_text(json.dumps({"version": spec["version"], "platforms": {
             "darwin-aarch64": {"url": f"https://github.com/aiwaki/slipstream/releases/download/v{spec['version']}/Slipstream.app.tar.gz",
                                 "signature": (assets / "Slipstream.app.tar.gz.sig").read_text()}}}))
+        release_manifest = {
+            "schema_version": make_release_manifest.MANIFEST_SCHEMA_VERSION,
+            "generator": make_release_manifest.MANIFEST_GENERATOR,
+            "product": "Slipstream", "repository": "aiwaki/slipstream",
+            "version": spec["version"], "tag": "v" + spec["version"], "channel": "preview",
+            "source": {"commit": driver.PAIR[side]["source_commit"]},
+            "build": {"target": "aarch64-apple-darwin"},
+            "artifacts": [{"name": name, "sha256": driver.digest(assets / name),
+                           "size": (assets / name).stat().st_size}
+                          for name in spec["assets"] if name != "artifact-manifest.json"],
+        }
+        (assets / "artifact-manifest.json").write_text(json.dumps(release_manifest))
         rows = []
         for name, (asset_id, _size, _sha) in spec["assets"].items():
             payload = (assets / name).read_bytes()
             spec["assets"][name] = [asset_id, len(payload), hashlib.sha256(payload).hexdigest()]
             rows.append({"name": name, "id": asset_id, "size": len(payload), "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
                          "state": "uploaded", "browser_download_url": f"https://github.com/aiwaki/slipstream/releases/download/v{spec['version']}/{name}"})
-        (folder / "release.json").write_text(json.dumps({"assets": rows}))
-        (folder / "tag.json").write_text("{}")
+        (folder / "release.json").write_text(json.dumps({"assets": rows, "id": spec["release_id"],
+            "tag_name": "v" + spec["version"], "target_commitish": driver.PAIR[side]["source_commit"],
+            "name": spec["release_name"], "draft": False, "prerelease": True,
+            "published_at": "2026-10-30T10:47:09Z", "body": "Public fixture notes"}))
+        (folder / "tag.json").write_text(json.dumps({"ref": "refs/tags/v" + spec["version"],
+            "object": {"type": "commit", "sha": driver.PAIR[side]["source_commit"]}}))
         (folder / "tauri.conf.json").write_text(json.dumps({"version": spec["version"]}))
         spec["tauri_config_sha256"] = driver.digest(folder / "tauri.conf.json")
         for name in ["release-candidate-manifest.json", *names]:
@@ -350,9 +367,9 @@ def published_pair(tmp_path, monkeypatch):
     commands = []
     def run(command, **_kwargs):
         commands.append([str(x) for x in command])
-        return SimpleNamespace(stdout=b'{"verified":true}')
+        return SimpleNamespace(returncode=0, stdout=b'{"verified":true}', stderr=b'')
     return SimpleNamespace(args=SimpleNamespace(repo=tmp_path, repository="aiwaki/slipstream",
-        public_root=public_root, old_candidate_dir=candidates["old"], new_candidate_dir=candidates["new"]), run=run), commands
+        public_root=public_root, old_candidate_dir=candidates["old"], new_candidate_dir=candidates["new"]), run=run, env={"PATH": "/usr/bin:/bin"}), commands
 
 
 def test_both_public_releases_use_frozen_inventory_and_source_specific_signature_config(tmp_path, monkeypatch):
@@ -667,13 +684,32 @@ def test_public_preparation_downloads_both_tags_and_keeps_candidate_subsets_only
             assert kwargs["github"] is True
             assert kwargs["env"]["PATH"].startswith("/opt/runner-tools:")
             shutil.copytree(original.args.public_root / side / "assets", Path(command[command.index("--output") + 1]))
-        return SimpleNamespace(stdout=b'{"verified":true}')
+        if command[1].endswith("verify_published_release.py"):
+            import verify_published_release
+            def value(flag): return command[command.index(flag) + 1]
+            try:
+                proof = verify_published_release.verify_published_release(
+                    release_metadata_path=Path(value("--release-metadata")), tag_ref_path=Path(value("--tag-ref")),
+                    release_dir=Path(value("--release-dir")), repository=value("--repository"),
+                    version=value("--version"), tag=value("--tag"), channel=value("--channel"),
+                    release_name=value("--release-name"), source_commit=value("--source-commit"),
+                    target=value("--target"), release_id=int(value("--release-id")), state=value("--state"))
+            except ValueError as error:
+                if kwargs.get("check", True):
+                    raise Refused("real canonical verifier refused: " + str(error)) from error
+                return SimpleNamespace(returncode=1, stdout=b"", stderr=("ValueError: " + str(error)).encode())
+            return SimpleNamespace(returncode=0, stdout=json.dumps(proof).encode(), stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=b'{"verified":true}', stderr=b"")
     backend = SimpleNamespace(args=args, run=run, env={"PATH": "/usr/bin:/bin"})
     driver.prepare_public(backend, pair)
     for side in ("old", "new"):
         candidate = pair / (side + "-candidate")
         assert {p.name for p in candidate.iterdir()} == set(driver.candidate_names(candidate))
         assert len(list(candidate.iterdir())) == 7
+        notes = destination / side / "assets" / "release-notes.md"
+        assert notes.read_text() == "Public fixture notes\n"
+        assert len(list(notes.parent.iterdir())) == 13
+        assert len(json.loads((destination / side / "release.json").read_text())["assets"]) == 12
         assert all(driver.digest(p) == driver.digest(destination / side / "assets" / p.name) for p in candidate.iterdir())
     assert len([c for c in commands if c[1].endswith("download_github_release_assets.py")]) == 2
     assert all("actions/artifacts" not in " ".join(c) and "verify_release_artifacts.py" not in " ".join(c) for c in commands)
@@ -767,3 +803,36 @@ def test_auth_helper_dependencies_are_bound_to_the_qualified_product_source():
     assert {"stop_quit_ui_smoke.py", "geph_owned_lifecycle_smoke.py"} <= set(driver.REUSED)
     source = Path(driver.__file__).read_text()
     assert source.index('result.update(drive(backend), status="passed")') < source.index('result["public_release_final"] = refresh_public_metadata(backend)')
+
+
+@pytest.mark.parametrize("kind", ["publication", "updater-signature"])
+def test_fixed_public_validator_failure_retains_bounded_stderr_without_tokens_or_argv(tmp_path, monkeypatch, kind):
+    backend, _ = published_pair(tmp_path, monkeypatch)
+    backend.env["GH_TOKEN"] = "private-env-token"
+    backend.env["GITHUB_TOKEN"] = "another-private-token"
+    calls = []
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        failed = str(command[1]).endswith("verify_published_release.py") if kind == "publication" else str(command[1]).endswith("verify_updater_artifacts.py")
+        return SimpleNamespace(returncode=1 if failed else 0, stdout=b"private-stdout" if failed else b"{}",
+                               stderr=b"Traceback:\n" + b"x" * 10000 + b"\nValueError: fixed public validation failed\n")
+    backend.run = run
+    with pytest.raises(Refused, match="bounded diagnostic retained"):
+        driver.verify_public_side(backend, "old")
+    record = json.loads((backend.args.public_root / "old" / (kind + "-failure.json")).read_text())
+    assert record["returncode"] == 1 and record["validator"] == kind
+    assert record["stderr"]["truncated"] is True
+    assert record["stderr"]["text"].startswith("Traceback:")
+    assert "ValueError: fixed public validation failed" in record["stderr"]["text"]
+    assert len(record["stderr"]["text"]) < 4200 and record["stdout_omitted"] is True
+    assert all(call[1]["check"] is False and "GH_TOKEN" not in call[1]["env"] and "GITHUB_TOKEN" not in call[1]["env"] for call in calls)
+    assert all(secret not in json.dumps(record) for secret in ("private-env-token", "another-private-token", "private-stdout"))
+    assert "argv" not in record and "env" not in record
+
+
+def test_validator_diagnostics_cannot_be_enabled_for_an_unrelated_command(tmp_path, monkeypatch):
+    backend, _ = published_pair(tmp_path, monkeypatch)
+    backend.run = lambda *_a, **_k: pytest.fail("an unrelated command must never execute")
+    with pytest.raises(Refused, match="fixed public validator"):
+        driver.run_public_validator(backend, [sys.executable, tmp_path / "private.py"],
+                                    public=tmp_path, kind="publication")
