@@ -108,6 +108,43 @@ class GephSourceOwnedWorkflowTests(unittest.TestCase):
 class WorkflowCliBindingTests(unittest.TestCase):
     """Run the checked-in shell arguments through real CLI parsers, without tools."""
 
+    def test_producer_publishes_physical_root_before_sbom_consumes_it(self):
+        import json
+        import os
+        import subprocess
+        import sys
+        import textwrap
+        import test_geph_source_owned_sbom as sbom_fixture
+
+        fixture = sbom_fixture.SourceOwnedGephSbomTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        alias = fixture.fixture.root / 'source parent alias'
+        alias.symlink_to(fixture.root.parent, target_is_directory=True)
+        lexical_root = alias / fixture.root.name
+        # The validator must continue rejecting a lexical path through a symlink.
+        with self.assertRaisesRegex(ValueError, 'physical and without symlinks'):
+            fixture.collect(source_root=lexical_root)
+
+        body = step(workflow('build-geph.yml'), 'Materialize the reviewed Geph source')
+        body = textwrap.dedent(body.split('        run: |\n', 1)[1])
+        shell = body[body.index('source_root='):]
+        output = fixture.fixture.root / 'github output'
+        result = subprocess.run(['/bin/bash', '-c', 'set -euo pipefail\n' + shell],
+            env={**os.environ, 'source_json': json.dumps({'root': str(lexical_root)}),
+                 'GITHUB_OUTPUT': str(output),
+                 'PATH': str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH']},
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = output.read_text().splitlines()
+        self.assertEqual(len(lines), 1)
+        key, value = lines[0].split('=', 1)
+        self.assertEqual(key, 'root')
+        published_root = Path(value)
+        components = fixture.collect(source_root=published_root)
+        self.assertEqual(published_root, fixture.root)
+        self.assertEqual({item.name for item in components}, {'direct-registry', 'local-transitive'})
+
     def run_parser(self, name, step_name, script, command, *, prefix=False):
         import json
         import os

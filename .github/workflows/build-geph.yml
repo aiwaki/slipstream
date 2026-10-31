@@ -328,7 +328,7 @@ jobs:
             --cargo-lock vendor/geph/Cargo.lock \
             --crate /tmp/geph5-client.crate \
             --output /tmp/geph-source)"
-          source_root="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root"])' <<< "$source_json")"
+          source_root="$(python3 -c 'import json,sys; from pathlib import Path; print(Path(json.load(sys.stdin)["root"]).resolve(strict=True))' <<< "$source_json")"
           echo "root=$source_root" >> "$GITHUB_OUTPUT"
 
       - name: Build the exact locked universal binary
