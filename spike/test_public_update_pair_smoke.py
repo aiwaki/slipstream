@@ -501,6 +501,95 @@ def test_background_discovery_is_readonly_until_interaction_before_menu_press(jo
     assert value.events[-1]["kind"] == "public_discovery"
 
 
+def cancel_rediscovery_fixture(journal, tmp_path, observed_state):
+    value = public_backend(journal, tmp_path)
+    value.uid = os.getuid()
+    value.initiator = original(value.target)
+    value.original_process = SimpleNamespace(poll=lambda: None)
+    value.process_snapshot = lambda _pid: value.initiator
+    value.deadline, value.env = 720, {}
+    value.visibility = SimpleNamespace(set_phase=lambda _phase: None)
+    private(value.state / "app-update-state-v1.json", {"version": 1, "channel": "preview",
+        "highest_seen_version": menu.VERSION, "last_notified_version": menu.VERSION})
+    clock, actions = Clock(), []
+    def run(command, **_kwargs):
+        kind = "check" if "--press-check" in command else "open" if "--open-menu" in command else "inspect"
+        assert "--press-update" not in command, "discovery must never install"
+        title, enabled = observed_state(clock, actions, kind)
+        if kind == "open":
+            assert enabled and title in {f"Install Slipstream {menu.VERSION}…", "Check for Updates…"}, \
+                "must observe ready menu before opening after Cancel"
+        actions.append(kind)
+        report = ax_report(value.initiator, value.target / "Contents/MacOS/slipstream")
+        report["identity"]["executable_sha256"] = value.expected["old"]["app_executable_sha256"]
+        report["update_items"] = [{"title": title, "enabled": enabled}]
+        if kind in {"open", "check"}:
+            report["status"] = "menu_opened" if kind == "open" else "check_pressed"
+            report["actions"] = [{"kind": "open_menu" if kind == "open" else "press_check",
+                                  "attempted": True, "ax_error": 0, "title": "" if kind == "open" else title}]
+        private(Path(command[command.index("--output") + 1]), report)
+        return SimpleNamespace(returncode=0)
+    value.run = run
+    ui = menu.PublicMenu(value)
+    ui.retry_discovery = True  # Only reset_after_cancel enables this production state.
+    return value, ui, clock, actions
+
+
+def test_cancel_rediscovery_accepts_automatic_offer_without_manual_check(journal, tmp_path):
+    value, ui, clock, actions = cancel_rediscovery_fixture(journal, tmp_path,
+        lambda *_a: (f"Install Slipstream {menu.VERSION}…", True))
+    ui.discover(clock=clock, sleep=clock.sleep)
+    assert actions == ["inspect", "open"]
+    assert ui.retry_discovery is False
+    assert value.events[-1]["value"]["method"] == "unmodified_normal_app_automatic_rediscovery_after_cancel"
+
+
+def test_cancel_rediscovery_only_observes_disabled_install_and_busy_until_ready(journal, tmp_path):
+    def state(clock, _actions, _kind):
+        if clock.now < 3:
+            return f"Install Slipstream {menu.VERSION}…", False
+        if clock.now < 6:
+            return "Updating…", False
+        return f"Install Slipstream {menu.VERSION}…", True
+    value, ui, clock, actions = cancel_rediscovery_fixture(journal, tmp_path, state)
+    ui.discover(clock=clock, sleep=clock.sleep)
+    assert actions == ["inspect", "inspect", "inspect", "open"]
+    assert clock.now == 6 and value.events[-1]["kind"] == "public_discovery"
+
+
+def test_cancel_rediscovery_manual_check_once_then_readonly_offer_wait(journal, tmp_path):
+    def state(clock, actions, _kind):
+        if "check" not in actions:
+            return "Check for Updates…", True
+        if clock.now < 6:
+            return "Updating…", False
+        return f"Install Slipstream {menu.VERSION}…", True
+    value, ui, clock, actions = cancel_rediscovery_fixture(journal, tmp_path, state)
+    ui.discover(clock=clock, sleep=clock.sleep)
+    assert actions == ["inspect", "open", "check", "inspect", "inspect", "open"]
+    assert actions.count("check") == 1
+    assert value.events[-1]["value"]["method"] == "unmodified_normal_app_manual_rediscovery_after_cancel"
+
+
+def test_cancel_rediscovery_disabled_menu_expires_without_open_or_check(journal, tmp_path):
+    value, ui, clock, actions = cancel_rediscovery_fixture(journal, tmp_path,
+        lambda *_a: (f"Install Slipstream {menu.VERSION}…", False))
+    value.deadline = 429  # Keep the existing deadline-minus-420 reserve.
+    with pytest.raises(Refused, match="discovery bound"):
+        ui.discover(clock=clock, sleep=clock.sleep)
+    assert actions == ["inspect"] * 3 and clock.now == 9
+
+
+def test_cancel_rediscovery_refuses_late_readiness_before_any_action(journal, tmp_path):
+    def late(clock, _actions, _kind):
+        clock.sleep(121)
+        return f"Install Slipstream {menu.VERSION}…", True
+    _value, ui, clock, actions = cancel_rediscovery_fixture(journal, tmp_path, late)
+    with pytest.raises(Refused, match="discovery bound"):
+        ui.discover(clock=clock, sleep=clock.sleep)
+    assert actions == ["inspect"]
+
+
 @pytest.mark.parametrize("reused", [False, True])
 def test_zombie_exit_between_poll_and_ps_reaps_then_rechecks_identity(journal, tmp_path, reused):
     value = exited_fixture(journal, tmp_path)
