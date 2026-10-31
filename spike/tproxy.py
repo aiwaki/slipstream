@@ -15108,7 +15108,8 @@ async def _handle_impl(reader, writer):
         if geph_attempt_failed:
             log_geph_route_failure(host, geph_failure)
             geph_failure_logged = True
-        if geph_expected and not geph_cooling:
+        # Admission denial is not evidence that the shared backend failed.
+        if geph_attempt_failed and geph_expected and not geph_cooling:
             suspend_geo_exit_backend(geph_suspend)
         if replay_safe_owned_failure or owned_route_required:
             # Health/circuit/drain failures do not revoke a saved owned route.
