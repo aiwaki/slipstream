@@ -18,7 +18,7 @@ import shutil
 import sys
 
 from build_packaged_update_trigger import pins
-from native_root_update import Native, Refused, digest, document, guard, modules, require
+from native_root_update import Native, Refused, bounded_output, digest, document, guard, modules, require
 from packaged_update_observer import exact_equal, same_process
 from public_update_menu_smoke import PublicMenu, VERSION
 from public_update_observer import PublicObserver, PublicPreAckObserver
@@ -173,6 +173,27 @@ def validate_public_inventory(metadata, side, directory):
                 and digest(path) == sha, "public asset bytes changed: " + name)
 
 
+def run_public_validator(backend, command, *, public, kind, final=False, timeout=90):
+    """Retain bounded diagnostics only for the two fixed public-file validators."""
+    scripts = {"publication": "verify_published_release.py", "updater-signature": "verify_updater_artifacts.py"}
+    require(kind in scripts and len(command) >= 2 and command[0] == sys.executable
+            and Path(command[1]) == backend.args.repo / "scripts" / scripts[kind],
+            "diagnostics require a fixed public validator")
+    environment = {key: value for key, value in backend.env.items()
+                   if key in {"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "PATH"}}
+    response = backend.run(command, timeout=timeout, check=False, env=environment)
+    if response.returncode != 0:
+        report = {"schema_version": 1, "validator": kind, "phase": "final" if final else "initial",
+                  "returncode": response.returncode, "stderr": bounded_output(response.stderr, limit=4096),
+                  "stdout_omitted": True}
+        path = public / (kind + (".final" if final else "") + "-failure.json")
+        with path.open("x") as stream:
+            json.dump(report, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        raise Refused(kind + " validator failed; bounded diagnostic retained")
+    return json.loads(response.stdout)
+
+
 def verify_public_side(backend, side, *, final=False):
     args, spec = backend.args, PUBLIC_RELEASES[side]
     require(args.repository == "aiwaki/slipstream", "fixed public repository required")
@@ -187,11 +208,12 @@ def verify_public_side(backend, side, *, final=False):
         "--channel", "preview", "--release-name", spec["release_name"],
         "--source-commit", PAIR[side]["source_commit"], "--target", "aarch64-apple-darwin",
         "--release-id", str(spec["release_id"]), "--state", "published"]
-    verified = json.loads(backend.run(command, timeout=90).stdout)
+    verified = run_public_validator(backend, command, public=public, kind="publication", final=final)
     config = public / "tauri.conf.json"
     require(digest(config) == spec["tauri_config_sha256"], "source-bound updater config changed")
-    signature = json.loads(backend.run([sys.executable, args.repo / "scripts/verify_updater_artifacts.py",
-        "--release-dir", assets, "--version", spec["version"], "--tauri-config", config], timeout=120).stdout)
+    signature = run_public_validator(backend, [sys.executable, args.repo / "scripts/verify_updater_artifacts.py",
+        "--release-dir", assets, "--version", spec["version"], "--tauri-config", config],
+        public=public, kind="updater-signature", final=final, timeout=120)
     appcast = document(assets / "latest.json")
     platform = appcast.get("platforms", {}).get("darwin-aarch64", {})
     base = f"https://github.com/{args.repository}/releases/download/v{spec['version']}/"
@@ -268,6 +290,12 @@ def prepare_public(backend, pair_root):
             "--repo", args.repository, "--tag", "v" + spec["version"], "--output", public / "assets",
             "--pattern", "*"], timeout=240, github=True,
             env={**backend.env, "PATH": str(Path(args.gh).parent) + os.pathsep + backend.env["PATH"]})
+        # The canonical publication verifier requires the local notes projection
+        # alongside the 12 public assets. It is not another downloadable asset.
+        body = document(public / "release.json").get("body")
+        require(isinstance(body, str), "published release notes body is unavailable")
+        with (public / "assets" / "release-notes.md").open("x", encoding="utf-8") as stream:
+            stream.write(body + "\n")
         proof = verify_public_side(backend, side)
         with (public / "verification.json").open("x") as stream:
             json.dump(proof, stream, indent=2, sort_keys=True)

@@ -11,8 +11,8 @@ Previous .31 retains all12assets (only its title became archival); stable1.4
 retains all5assets. No workstation installation or settings changes performed.
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-active branch `codex/public-preview-update-ui`, based on documentation main
-`f674a76bb717e6624de0574ce616561a180735fd` after frozen release C9.
+active branch `codex/public-preview-notes-fix`, based on the merged public UI
+driver `8d90185e6e1250f6c1e7705252634f23d4f7c9e4` after frozen release C9.
 Current source, PR/CI and this branch must be reconciled before further work;
 release source is immutable and is not a claim about a later documentation HEAD.
 Private output and original checkout/user edits remain preserved.
@@ -81,8 +81,30 @@ independent-ui-review.json and pair-workflow/verification.json. Final pair/workf
 review is separate; ordinary native results are still pending. Next: normal PR
 and required CI, then a disposable public commit+Cancel run, independently
 verify its result before dispatching the pre-ACK rollback case.
-No new workflow dispatch, account-backed run, native build or workstation
-mutation has occurred in this phase. Remaining qualification: public discovery,
+PR437 merged at 8d90185e6e1250f6c1e7705252634f23d4f7c9e4; its exact tree matches
+PR head761958d82f31f8555edf22bfa5893cbe87a6466e. PR CI41171870135/1 and
+audit41171870160/1 passed, including all three required contexts (checks,
+packaged-app-lifecycle, Required dependency audit). Both source reviews passed.
+Evidence is under public-updater/pr437/; existing output/user edits preserved.
+Public commit dispatch41173004768/1 at exact8d90185e6 failed before materialization
+or installation. Its initial readonly UI capability check passed. The canonical
+public release verifier rejected OLD31's local file inventory: release-notes.md
+is mandatory locally but is not one of the twelve downloadable assets. The old
+historical workflow projected it from release.body; that step was missed in the
+adapter. No app update or native authorization was attempted. Retained evidence:
+public-updater/commit-41173004768/, artifact13032211213 (51390bytes), digest
+88a103c0e32de2baaa1ea49726d09f92c54d61c1f806fae3efdad67fff2a8d53.
+Active branch is now codex/public-preview-notes-fix at merged8d90185e6. A minimal
+adapter fix is complete: materialize the public release body as local notes;
+retain bounded failure details for these fixed canonical validators; add a real
+canonical-verifier regression. The actual canonical verifier reproduces the
+missing-file rejection on a tiny fixture and passes with the notes projection.
+Changed pair suite:80 PASS in1.76s; unchanged UI/visibility53 reuse the PR437
+baseline. Receipt public-updater/notes-fix/verification.json records exact files. Do not change public assets or shared verifier
+policy. No blind rerun, rollback dispatch or account-backed dispatch occurred.
+After focused review/tests and normal PR checks, run commit+Cancel again; only a
+verified commit permits the separate rollback case. Workstation remains untouched.
+Remaining qualification: public discovery,
 ordinary tray/admin updater flow and installed .32 on the user's Mac remain
 unqualified; do not report these as covered by the G/P CI driver. Sustained media,
 Discord calls and sleep/wake are also separate. Historical Safari/HTTP403 root
