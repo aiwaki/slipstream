@@ -1,61 +1,56 @@
 # Current Project State
 
-## Current continuation — 2026-10-31 UTC, producer path repair
+## Current continuation — 2026-10-31 UTC, consumer physical-path repair
 
-Primary: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-producer-physical-root`, base/main C7
-`0087e4d2c44af9b2a2b25db7c3890a7b50421eac` (PR433 merged, required checks PASS).
+Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
+branch `codex/geph-release-physical-root`, base/main C8
+`2db13e5430f90588a2a50d26b490a561d9f15231`, tree
+`864cc80174ce1ba2604e51e7c2938089a7b512c4`. Preserve checkpoint/private output.
+PR434 merged normally; its exact head69fa required CI/audit passed.
 
-C7 producer41157354397/1: all30 native synthetic cases and both universal binary
-architectures PASS; production source remained unchanged. Failure came AFTER
-build, in SBOM generation: workflow passed `/tmp/geph-source/geph5-client-0.4.3`
-while macOS physical path is `/private/tmp/...`. The strict SBOM symlink guard
-correctly refused that spelling. No r4 release or attestations were published.
-Synthetic receipt: output/continuation-20261031/rsa-release-remediation/main-c7/
-synthetic-verification.json SHAaf9ec8da5b79df2a363aca3cc69adf87a72b822af151d0b8ca1a5cb36dd12bcc.
+C8 r4 producer41160514353/1 PASS: fresh30/30 native cases, universal build,
+full audit, exact9 published assets and all9 signed provenance subjects bound C8.
+Receipt main-c8/verification.json SHAd67ab7223060e67be326918bf16114904ae8b16b19f8e766d40367b3b34bc8bc.
+BinarySHA2f2b340d82da11585c147d4fb83393c38cc218c2f9f0edf228483961f685dae2.
+Main audit41160514343/1 PASS_CURRENT_ADMISSION (app361,Geph408+3owned,
+blocking0/exceptions0), receipt main-c8/audit/verification.json SHA
+433f7ade11d6c60f6a5a897627e95a1ce143db9f49035b3f63ae5b290ed6f06b.
 
-Main audit41157354338/1 PASS current-UTC admission; app361, Geph408registry+3owned,
-blocking0/exceptions0. Receipt main-c7/audit/verification.json SHA
-7f19b30f29542f33afca87006ec0ab6ef7a5fa3108b21b296c3a73fe81c2d73d.
-Ordinary mainCI41157354345/1 finished: product checks PASS; package/lifecycle fail
-only because first lookup raced the absent r4 release (HTTP404). Do NOT rerun C7.
+C8 ordinaryCI41160514283 attempt2 terminal FAILED. The approved full rerun followed
+verified r4 publication; this was NOT another missing-release failure. All9assets
+were downloaded, but verify_release_assets passed `/tmp/geph/...review.tar` into
+the strict physical archive reader, which rejected macOS `/tmp` alias. Product,
+Chromium,Windows/checks PASS; candidate/downstreampackaged gates never ran.
+No candidate/manifest exists. Receipt main-c8/ci-attempt2/verification.json SHA
+535080020bed482814d0e4e707d4b8c5be548445b03803967fff141766676446. No further rerun.
 
-Implemented one-line strict physical-root normalization at the producer output.
-Actual shell-to-SBOM regression: old alias RED, fixed workflow GREEN; ten tests
-and six subchecks passed. Exact four-file-bound PR-only bootstrap has six new
-negative/positive tests; all28 classifier tests passed. The old121-file RSA
-catalog and SBOM validator remain unchanged. Evidence: source-root-physical-fix/
-receipt.json SHAe2fc9e2ca3723d0897d27fb2ee565ad03fddb88d11e7a95c7c196fbd690b9a94;
-../geph-physical-root-ci/verification.json SHA3af1f8bc5a6520c2b3a3fb416f86c9b290019007d08f2911d2bf7b05ecbb03ea.
+Implemented parent-only normalization after the existing release-directory guard:
+keep the final root leaf for strict no-follow handling. Initial full-root resolve
+was rejected during independent review because its root-swap control failed. The
+corrected implementation preserves that refusal and closes the macOS ancestor
+alias failure. Real9asset alias and root-swap regressions have causal RED evidence;
+37 tests plus32subchecks PASS after correction. All strict readers/transport,
+output-root rules, hashes, provenance, source/lock and policies stay unchanged.
+Corrected receipt consumer-physical-root-fix/corrected-receipt.json SHA
+ff9d8d71abf6476a64b6fa7e500f3d16baef7397e4e7f372ea506c4688740e76.
+NEXT: finish independent delta review, normal PR/required full CI (r4 exists;
+NO bootstrap or policy exception needed), normal merge and fresh main candidate.
 
-PR434 https://github.com/aiwaki/slipstream/pull/434 first head27c692c24503 failed
-CI41159015975/1 before tests: the bootstrap caller demanded a revision transition
-even though r4 SOURCE/VERSION/lock/policy were unchanged. Audit41159016032/1 PASS.
-The strict revision-reuse rejection was correct; the caller is now corrected.
+Finite caller sweep18rows found only this currentmacOSalias; existingr4 reuse is
+Ubuntu, othermacOSproducer/publisher paths are physicalcheckout/RUNNER_TEMP.
+Evidence under output/continuation-20261031/rsa-release-remediation/main-c8/
+consumer-physical-root-fix/ (caller-audit/callers.md and verification.json SHA
+9e89beeae0e91b730d9233f0fa6c319119180d97630844a19e2b073b9534fd9e;
+independent-review-draft.json SHA21e0be24dfb3fb2aa8ccfc522955defa31075ba4c47c0b33b173ed002dc89aa7).
+Initial36tests+32subchecks green are historical PRE-review, not approval of the race.
 
-The CI callsite compares all four exported snapshots: byte-identical inputs use
-normal source validation; any difference keeps the original strict transition
-checker with every prior argument/policy guard. Actual-shell/CLI old RED ->
-14 tests plus10 subchecks GREEN. Exact bootstrap now binds three changed files
-(producer workflow, CI caller, regression) plus unchanged SOURCE/lock; all28
-classifier tests PASS. Original121 RSA catalog and core validators unchanged.
-Two existing build contracts and actionlint structural check also PASS.
-Evidence bootstrap-contract-fix/receipt.json SHAc0306e894a8e09cbaf02ccf8e669191e4374d1005052435f96f6b0f514150f38;
-../geph-physical-root-ci/transition-callsite/verification.json SHA
-7d9b61ab0d442cb9d5e91aa6d365087af90ac275440fcd7c35d9184fabd02b81.
-NEXT: final independent caller/downstream review, committed-ref replay, and
-required CI on the corrected PR434 head, then normal merge.
-No generic skip, no main bootstrap, no source/policy/catalog/RSA expiry changes.
-Review/merge, then exact new producer30cases/9assets and ordinary mainCI/audit.
-After producer success, at most one full ordinary same-SHA CI rerun if its first
-lookup again failed only for early absence. Native G first, refreshed UTC quota,
-R/P and final current-UTC publisher remain required. No protected dispatch yet.
-
-No .32 published/installed. Preserve external Geph and workstation: no local
-native build/scanner/app/browser/install/account/network-setting changes.
-Source69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7 and
+After corrected maincandidate/audit: native G FIRST -> freshUTCquota -> R/P ->
+current-UTC five-input publisher. No Oct31protected dispatch yet;0/3 earlierquota
+is snapshot only. r4 published, .32app NOT published/installed. SOURCE69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7;
 lock560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb unchanged.
-Reviewed source-owned admission expires2026-11-07. No exception extensions.
+Review expires2026-11-07; noexceptionextensions. Preserve externalGeph/workstation:
+no localnative/scanner/app/browser/install/settings changes. SQLite/Telegram/SDK/
+platform expansion outside this release task.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 

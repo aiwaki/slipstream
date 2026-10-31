@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -72,6 +73,97 @@ class SourceOwnedReleaseConsumerTests(unittest.TestCase):
         provenance.write_text(json.dumps(value))
         return dict(release_dir=self.release, provenance_json=provenance,
                     spdx_json=spdx, source=self.refs["source"])
+
+    def aliased_release(self):
+        alias = self.root / "download parent with spaces"
+        alias.symlink_to(self.root, target_is_directory=True)
+        return alias / self.release.name
+
+    def test_source_owned_release_accepts_physical_directory_beneath_parent_alias(self):
+        release = self.aliased_release()
+        result = self.verify(release_dir=release)
+        self.assertEqual(result["asset_count"], 9)
+        proof = result["source_owned_evidence"]
+        self.assertEqual(proof["bundle_sha256"], sha(self.archive.read_bytes()))
+        self.assertEqual(proof["root"], str(self.output))
+        self.assertEqual(self.case.validate(evidence_root=self.output)["status"], "pass")
+        attest = self.attestations() | {"release_dir": release}
+        self.assertEqual(verifier.verify_attestation_results(**attest)["provenance_subject_count"], 9)
+
+    def test_parent_alias_does_not_allow_symlink_release_root(self):
+        release = self.aliased_release()
+        linked = self.root / "linked release"
+        linked.symlink_to(self.release, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "release directory is missing or unsafe"):
+            self.verify(release_dir=release.parent / linked.name)
+        self.assertFalse(self.output.exists())
+
+    def test_release_root_replaced_after_initial_check_is_not_resolved_away(self):
+        release = self.aliased_release()
+        relocated = self.root / "relocated release"
+        original = Path.is_symlink
+        swapped = []
+
+        def swap_after_check(path):
+            was_symlink = original(path)
+            if path == release and not swapped:
+                self.assertFalse(was_symlink)
+                self.release.rename(relocated)
+                self.release.symlink_to(relocated, target_is_directory=True)
+                swapped.append(True)
+            return was_symlink
+
+        with mock.patch.object(Path, "is_symlink", new=swap_after_check):
+            with self.assertRaises(OSError):
+                self.verify(release_dir=release)
+        self.assertEqual(swapped, [True])
+        self.assertFalse(self.output.exists())
+
+    def test_parent_alias_does_not_allow_symlink_assets(self):
+        release = self.aliased_release()
+        for name in (bundle.BUNDLE_NAME, "geph5-client.SOURCE.json"):
+            with self.subTest(name=name):
+                asset = self.release / name
+                saved = self.root / (name + ".original")
+                asset.rename(saved)
+                asset.symlink_to(saved)
+                try:
+                    with self.assertRaisesRegex(ValueError, "cannot open.*safely"):
+                        self.verify(release_dir=release)
+                    self.assertFalse(self.output.exists())
+                finally:
+                    asset.unlink()
+                    saved.rename(asset)
+
+    def test_parent_alias_preserves_archive_integrity_checks(self):
+        release = self.aliased_release()
+        self.archive.write_bytes(b"tampered source-owned bundle")
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            self.verify(release_dir=release)
+        self.refresh_inventory()
+        with self.assertRaisesRegex(ValueError, "invalid source review bundle"):
+            self.verify(release_dir=release)
+        member = tarfile.TarInfo("review.json")
+        member.type, member.linkname = tarfile.SYMTYPE, "../outside"
+        self.archive.write_bytes(member.tobuf(tarfile.USTAR_FORMAT) + bundle.ZERO_BLOCK * 2)
+        self.refresh_inventory()
+        with self.assertRaisesRegex(ValueError, "canonical regular USTAR files"):
+            self.verify(release_dir=release)
+        self.assertFalse(self.output.exists())
+
+    def test_parent_alias_does_not_normalize_or_overwrite_evidence_output(self):
+        release = self.aliased_release()
+        protected = self.root / "protected output"
+        protected.mkdir()
+        sentinel = protected / "keep"
+        sentinel.write_bytes(b"existing evidence")
+        self.output.symlink_to(protected, target_is_directory=True)
+        for output in (self.output, protected, release.parent / "new output"):
+            with self.subTest(output=str(output)), self.assertRaises((OSError, ValueError)):
+                self.verify(release_dir=release, source_owned_output_root=output)
+        self.assertEqual(sentinel.read_bytes(), b"existing evidence")
+        self.assertEqual(list(protected.iterdir()), [sentinel])
+        self.assertFalse((self.root / "new output").exists())
 
     def test_source_owned_exact_assets_metadata_and_attestations(self):
         result = self.verify()
