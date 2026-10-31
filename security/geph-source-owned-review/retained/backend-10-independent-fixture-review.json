@@ -1,0 +1,39 @@
+{
+  "verdict": "PASS with bounded evidence limits; no new functional blocker found",
+  "review_mode": "Independent static review plus hash-checked retained terminal evidence; no build/test rerun, no network/accounts",
+  "confirmed": [
+    "Mock success payloads are T, not serialized Result<T,E>; WrongLevel JrpcError -1/data matches pinned nanorpc derive/runtime contract.",
+    "Auth bad epoch/root/key/signature/oversize errors assert expected chain and exactly one user/subkey/sign RPC before empty cache; old envelope-failure negatives excluded.",
+    "Good auth writes current and next epoch SQLite tuples, both verified independently by legacy Mizaru oracle; good bandwidth uses real geph5_rt spawned futures, writes five, consumes five, legacy-verifies each, leaves zero.",
+    "WrongLevel fixture uses invalid Plus root and valid Free root, requires four signing calls and distinct first-epoch blinds, and observes Free cached level.",
+    "Auth timeout enters actual signing RPC and uses unchanged real 30-second call-site timeout, external40-second bound, elapsed>=29s, held RPC drained and no cache.",
+    "Cancellation awaits a held RPC before abort; geph5_rt Task drops abort underlying JoinHandles; pre-signing-cancel cases cannot have submitted token writes.",
+    "SQLite fixture holds sole pool connection before polling/cancelling write, then independently proves a completed commit remains after task cancellation.",
+    "All current final evidence artifact hashes match; exact11 passed32.37s,36 unrelatedtests filtered."
+  ],
+  "evidence_limits": [
+    "WrongLevel case checks first-epoch cached Free and blinding inequality; it does not independently verify both Free cache tuples using legacy oracle.",
+    "No-root happy case asserts completion only; its wrong-key negative is stage-bound and empty-cache checked, while both-cache persistence is proved by configured-root happy case.",
+    "Bandwidth WrongKey global count>=6 proves at least one retry across five workers, not that all five workers separately retried; document that narrower claim.",
+    "Mock active counter tracks RPC futures, not every task waiting on auth mutex/backoff; full task cancellation relies additionally on inspected geph5_rt cancel-on-drop semantics.",
+    "SQLite queued/submitted-but-not-yet-completed cancellation remains untested and must not be described as rollback.",
+    "Native pending cleanup/zeroization comes from prior primitive tests and ownership review, not the mock active counter.",
+    "No real HTTP/JSON framing limits, real broker/account traffic, installed Geph, packaged recovery, x86execution or workstation E2E qualified here."
+  ],
+  "input_sha256": {
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/rsa_composition_tests.rs": "8699e7a637445534a309f346c589dca3944681dc89326cab79347cc079731faf",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/auth.rs": "3126244142c9901ee9111bb1e09c9d7f1ecec9183032b3c1ed7cc253784dcf50",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/bw_token.rs": "450293327f8d405aa84d166580784f1e3d2b5312bb079f095c219f248276009a",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/database.rs": "ecc8ccd9bc0ad940b8f7431b8c6212a676735438e328dec97eb71d82150a5f33",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker.rs": "44aabfedeac3260804481ff0c996b3112ff6a88b4a167dd0a4013a4472b027de",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/lib.rs": "4b995a4c5ef4079df3ff350fed1627cb2022e2bae6be2d6770e2489ef50f7e43",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/mizaru-client-only/src/lib.rs": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/nanorpc-0.1.13/src/lib.rs": "327578e0205b14ac6a5730c230a1a3cc8476fc46a129a29f52d7cb0e8fb337b0",
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/nanorpc-derive-0.1.6/src/lib.rs": "49edd6f331eaaa0582afe9dd15921db289d7c73be72085f82880d0cc8d2d89d1",
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/geph5-rt-0.3.8/src/lib.rs": "8dd7e7f93a8c0a21b2b2050b14af9a836384f747f2d06601a80ffb466f7995d3",
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/geph5-rt-0.3.8/src/timeout.rs": "7fc634502620a115e535ce5151b3235d6378a14ce9d5d4bb2c64a499c03342ed",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/legacy-oracle/src/bin/sign_adapter.rs": "081806af047d3032b34728c0dae6e0ecc100a48610945778acda4de2557285ed",
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/legacy-target/debug/sign_adapter": "c3ce6182ecc7c8129ab4c1a1c79fc0f254d00e5175c8df3e2d86cde349c96ed4"
+  },
+  "production_edits": false
+}

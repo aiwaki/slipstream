@@ -220,7 +220,7 @@ class ReleaseAuditAdmissionTests(unittest.TestCase):
 
     def geph_fixture(self):
         policy = dependency_audit.load_policy(
-            Path(__file__).resolve().parents[1] / "security/geph-dependency-audit-policy.json"
+            Path(__file__).parent / "fixtures/geph-registry-policy-r3.json"
         )
         used = [x for x in policy["exceptions"] if x["package"] == "rsa" and x["version"] == "0.8.2"]
         for item in used:
@@ -262,6 +262,8 @@ class ReleaseAuditAdmissionTests(unittest.TestCase):
         days = [utc_day] if isinstance(utc_day, str) else list(utc_day)
         (bin_dir / "python3").write_text(
             f"#!{interpreter}\nimport sys\nsys.path.insert(0, {str(scripts)!r})\n"
+            "import os\n"
+            f"if sys.argv[1] == '-c': os.execv({str(interpreter)!r}, [str({str(interpreter)!r}), *sys.argv[1:]])\n"
             "import dependency_audit\nfrom datetime import datetime, UTC\nfrom pathlib import Path\n"
             f"days = {days!r}\nlog = Path('admissions.log')\n"
             "old = log.read_text().splitlines() if log.exists() else []\n"
@@ -283,6 +285,9 @@ class ReleaseAuditAdmissionTests(unittest.TestCase):
         security.mkdir(exist_ok=True)
         shutil.copyfile(self.policy_path, security / "dependency-audit-policy.json")
         shutil.copyfile(self.geph_policy, security / "geph-dependency-audit-policy.json")
+        vendor = self.root / "vendor/geph"
+        vendor.mkdir(parents=True, exist_ok=True)
+        (vendor / "SOURCE.json").write_text("{}")
         geph_dir = self.root / "dist-geph-audit"
         geph_dir.mkdir(exist_ok=True)
         for path in (self.geph_report, self.geph_sbom):

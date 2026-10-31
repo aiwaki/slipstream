@@ -1,0 +1,1634 @@
+{
+  "candidate_source_sha256": "a94d4c1d0263963f1ad8461f8f9705c64acc524e4b31588353821a18bef7d0e9",
+  "embedded_descriptors_and_all_20_files_unchanged": true,
+  "limitations": [
+    "This is only the three embedded package source-review boundary. No full candidate security/release approval.",
+    "The SOURCE remains output-only; source_commit names the audit checkout, not a Git-tracked version of this candidate.",
+    "Actual OSV ancestor results are retained from 2026-10-13, not refreshed on the preparation date.",
+    "Registry dependencies still need a full candidate scan; native SQLite has no descriptor in this SOURCE and is not qualified.",
+    "Root PROTOCOL-01 has actual old RED2/new PASS3 evidence under harness lock94db8764, not full candidate lock9fd68248.",
+    "Inherited whole RPC body/JSON allocation remains unbounded; bandwidth cancellation notification/recovery is not established.",
+    "Side-channel, sanitizer/fuzz, architecture ABI, custom allocator, stack/register/caller-copy erasure and packaged entropy-abort recovery remain unqualified."
+  ],
+  "metadata_relocations": [
+    {
+      "local_manifest_count": 4,
+      "only_change": "exact physical source-root string replacement; graph and feature selection retained",
+      "original_root": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3",
+      "original_sha256": "fed1d1095ec04716d520d93a79e359008f640d03b36838ec39c2c19547a40330",
+      "relocated_root": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-actual-candidate-20261015/materialized/geph5-client-0.4.3",
+      "relocated_sha256": "2cb21a4fd9d15e91630f12cadac149c37d462389ae3af9d4cf9a544a027a9ea1",
+      "target": "aarch64-apple-darwin"
+    },
+    {
+      "local_manifest_count": 4,
+      "only_change": "exact physical source-root string replacement; graph and feature selection retained",
+      "original_root": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3",
+      "original_sha256": "a3597c391715c8bd8df48eb1f8028bfd4683f658c7372551d13f6481e3192b9c",
+      "relocated_root": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-actual-candidate-20261015/materialized/geph5-client-0.4.3",
+      "relocated_sha256": "3e737526e8f3eee89b640a97b7d8240d6b6bccdaa7f35641be2216f3b766e6b1",
+      "target": "x86_64-apple-darwin"
+    }
+  ],
+  "old_source_sha256": "3c2cf6d98b19edf77d20f7105f20ddc509e9e1422dc137720acf7f103de51a6e",
+  "package_review_basis": "actual retained bounded source review with complete package file inventory",
+  "root_callsite_review_is_separate": true,
+  "verified_input_bindings": {
+    "retained-home/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0.crate": {
+      "sha256": "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27",
+      "size": 9725710
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/Cargo.toml": {
+      "sha256": "836bac6390070d88f3c804f4212e16ca6e142f6c111795094d925470d07d6866",
+      "size": 3360
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/bn.c": {
+      "sha256": "d1dcac7dbabd174fc6413a4b20de7169a4d8908ac67a2d745d71bcfd8c5dfae8",
+      "size": 9325
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/bytes.c": {
+      "sha256": "dc96b981cd49f7cbfd7af490c00442b7416956b2a60db1e7458f2ab698595e32",
+      "size": 7965
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/ctx.c": {
+      "sha256": "108768c96480fd3b8ad85d08e8975f9dd6ba1f3d91756f9e717f82fd28487f46",
+      "size": 4655
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/exponentiation.c": {
+      "sha256": "a858ca843eeabed2102e8686cc55aaffb6854176eb39f5322cd8d0278434a86e",
+      "size": 36217
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/gcd.c": {
+      "sha256": "7ebb35b113d29f804567efef43204725224c8d806b59fdab679eb1c9cb00691e",
+      "size": 7365
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/montgomery.c": {
+      "sha256": "073cba671b1c22ebf57dea832835a4b9e179a153326de60d8a2a0ab05753a1fc",
+      "size": 16600
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/rsa/padding.c": {
+      "sha256": "a2e241acc3cb29c7f0ebf5b988e07e71999955187ab0cfe5cc602a025e28a399",
+      "size": 9886
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/mem.c": {
+      "sha256": "88651b6d0b7e135980f97408815e2d357b2c39eabb563e241e795792d60fc3a1",
+      "size": 15430
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/rsa_extra/rsa_asn1.c": {
+      "sha256": "2c14056d37e79145ff2354f71b8f151221dc17210409ede1e00a1174fb0c5693",
+      "size": 7336
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/include/openssl/bn.h": {
+      "sha256": "9c3b508aef0d12f5db09995106dc00b667c8194836e0db60bc752799ab0cf851",
+      "size": 46677
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/include/openssl/rand.h": {
+      "sha256": "968775664d7e574b96a3c473e39a38f2173e9a8db1ee3decab165f236e85efc2",
+      "size": 4778
+    },
+    "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/include/openssl/rsa.h": {
+      "sha256": "d9140449f1e55ad244974b07a980d2df4eb19cc1312a73b1c7a2234d836cd889",
+      "size": 45653
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/rsa-isc-local-notices-20261013/inputs/Cargo.lock": {
+      "sha256": "9fd682481aa33a57ee2ad7254fdb482e595c598010b505e647872df4c51454c9",
+      "size": 123956
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/rsa-isc-local-notices-20261013/inputs/SOURCE.json": {
+      "sha256": "3c2cf6d98b19edf77d20f7105f20ddc509e9e1422dc137720acf7f103de51a6e",
+      "size": 152644
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/rsa-isc-local-notices-20261013/inputs/VERSION": {
+      "sha256": "520a19075780a38b440395e2c70e20d7cddd96b8c2e2c2403b265cbb74a1b333",
+      "size": 6
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/rsa-isc-local-notices-20261013/inputs/geph5-client-0.4.3.crate": {
+      "sha256": "c05ac72fe57922095e4d60254d0b872c7780ed425121efc28485e2805adbae32",
+      "size": 587780
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/README.md": {
+      "sha256": "0a082b2f987b9487eeb564010e24a2976997b74fae1e33f903deab594c4aabbd",
+      "size": 3578
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/SOURCE.json": {
+      "sha256": "a94d4c1d0263963f1ad8461f8f9705c64acc524e4b31588353821a18bef7d0e9",
+      "size": 152605
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/after/src/auth.rs": {
+      "sha256": "3265feb5847bef9c3dacdde4b0b0b27edfa5c751d15583b160a3d3f86595bbb5",
+      "size": 7786
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/auth-expiry.patch": {
+      "sha256": "b82539bd86d1eea584a8a51e288130ed2507c792bc96f6a0b85131907076682e",
+      "size": 471
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/before/src/auth.rs": {
+      "sha256": "6b56eb3cb0f652c4274c498e830b0c73a5592e54805a547cbfee563f7bf8d3d0",
+      "size": 7837
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/check_counterexample.py": {
+      "sha256": "5d47ed5e8c18f218a34c5015adeec7f7752f36c8675797b1728a5ee744616fc6",
+      "size": 6370
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/counterexample-results.json": {
+      "sha256": "c53769c9e3977a41e81215887a44bec1a82b46ec259687adc274609ebd97a025",
+      "size": 11845
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/fixture-after/auth.rs": {
+      "sha256": "4dc9650fb57558132c404e8dd184f97a99cd81cb9f24312cc5eec63246eb3f51",
+      "size": 7941
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/fixture-after/rsa_composition_tests.rs": {
+      "sha256": "18f3d6f3f1208270e00c5acbdcb4b72995dfd6a76ac186340f4e4ff88d941c36",
+      "size": 20138
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/fixture-before/rsa_composition_tests.rs": {
+      "sha256": "8699e7a637445534a309f346c589dca3944681dc89326cab79347cc079731faf",
+      "size": 15883
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/materialized/Cargo.toml": {
+      "sha256": "2b52b2ff59bea2033504b1f94c5d05fbea35e4c875598c18e2e29e30d07212f4",
+      "size": 6217
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/materialized/src/auth.rs": {
+      "sha256": "3265feb5847bef9c3dacdde4b0b0b27edfa5c751d15583b160a3d3f86595bbb5",
+      "size": 7786
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/materialized/src/bw_token.rs": {
+      "sha256": "b7e74e8fefa04fb98e689c737d1152417b7eed9a8b957e862d2a3ba6c8fa8af9",
+      "size": 5909
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/materialized/src/database.rs": {
+      "sha256": "5b6be4d78c2a9e18f9292e61198600f776d51252d3daf7835d06e732583f1961",
+      "size": 21009
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/materialized/src/session.rs": {
+      "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822",
+      "size": 33495
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/prepare.py": {
+      "sha256": "545fe83aac6883e86f133588820ed29b012784f1b08dd915e1aee59ef1749b85",
+      "size": 6059
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/receipt.json": {
+      "sha256": "fb922596be368ca924392ec72b70cc5cad4fd81e8b19cedaabcc17819bca680d",
+      "size": 3158
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/regression-fixture.patch": {
+      "sha256": "0bd1414e53fc7932e109b61be629971d2f9f106bd4a1f48d74399c3043e0a86b",
+      "size": 7645
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/regression-tests.rs": {
+      "sha256": "17b3d16a12cca40b3ed990e55f6df5ec4df6a85ff34995d63cb6d56e690f0256",
+      "size": 3885
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/rust-syntax-check.json": {
+      "sha256": "5ffed837b2607f170a5dd9c3c27eb95879a4c4da2901a1dbf8841a854235df91",
+      "size": 629
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-candidate/source-contract.delta.json": {
+      "sha256": "f171f48138ffc6bb9d3a2d70cbdda96a9cf9652a1f7c325d5d478c57fd34e0cf",
+      "size": 771
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/README.md": {
+      "sha256": "3bab265c6712d1f0f409a17bfd1307782822b773d8ba8985298f48c9373043ab",
+      "size": 4984
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/active.json": {
+      "sha256": "b7844e446f9e749c5a08c077e92b33dcd65a0a04ad7481888275d24f92aeb2b2",
+      "size": 85
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/clone-isolation.json": {
+      "sha256": "f130f12ad26642b2ac3fc1d40ebb6698b5a9252781fec22e9c1576dedef69970",
+      "size": 267
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/evidence-bindings.json": {
+      "sha256": "0e5d2ec8bf05beb9b9328333d23266f8ba163db2cdc03a50420b1b151754d959",
+      "size": 4496
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/execution-receipt.json": {
+      "sha256": "31d893cebfebcf0d9d4879b3a5d462e51ce45290a211a04b30cc7f6377706b0f",
+      "size": 4699
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/fixture-tree-bindings.json": {
+      "sha256": "f4fdc19c254acef78b2f322cb6ef92fc02d7a8ca1a28e89c1ae96f867d2a0169",
+      "size": 17761
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case1-command.json": {
+      "sha256": "763eb0ea57f78743b01bd9926d35f608b4e4dd2fa56f33d49e50a9714d22bb34",
+      "size": 2031
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case1-result.json": {
+      "sha256": "6a4f4a498e41694c345c9f516f8bf7f2486a7a81b36dcb5a91d0c247782c8e8e",
+      "size": 370
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case1.log": {
+      "sha256": "9ddd546809367969cfe8446172995ab3b0a561fb46fa26236f89102092b73301",
+      "size": 225
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case2-command.json": {
+      "sha256": "7500504a61634ec868a23efdd25b616d32445a438bcd167ebd091df7d548bb7d",
+      "size": 2022
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case2-result.json": {
+      "sha256": "e3ed8ee168449d968bd01beef65669a4d2bfc08c278b9ef19da79eb4cc84ec67",
+      "size": 369
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case2.log": {
+      "sha256": "7079a43ad13c13c14724833c7c05d28ffc94eb25ef93bbea046430f6c6512452",
+      "size": 216
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case3-command.json": {
+      "sha256": "96418e30d9ae6eb7ecd1cc2ff58224ecf2e7d442b6cd987701ea5073dfd75b34",
+      "size": 2023
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case3-result.json": {
+      "sha256": "b38108f4025b1524d9e21ba8026519a6aef1ce7c395b3502f6976c9edd6d27f4",
+      "size": 369
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-case3.log": {
+      "sha256": "8de7a8e6f3487f31d03002556a10221adc3325e787da0162c9de0abd9f7036e8",
+      "size": 217
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-compile-artifacts.json": {
+      "sha256": "5afee9ebc4a2fd410b2f0b08e0d024731d43ec77ac26d1d300ba65573a6ff73d",
+      "size": 2237
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-compile-command.json": {
+      "sha256": "74c1dc0758ed606f4748cd3f4579ec4893fbf0a4d9df7b5be86f5415cb3f4c5a",
+      "size": 2253
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-compile-result.json": {
+      "sha256": "985ce2b3043414fecccadd10e2e8113db4edc9b37e664333b95967a026525e0f",
+      "size": 374
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-compile.log": {
+      "sha256": "ac2c644156a5fe228f26f531b85dae6c1d222ca022cc56d0b4b501be6f3be5b4",
+      "size": 459217
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-geph5-client_src_auth.rs.patch": {
+      "sha256": "c753a56604743017a7c2daf1f7a9bc825937c5ae5e8f84d02ceda7640a5fbcd1",
+      "size": 506
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-geph5-client_src_rsa_composition_tests.rs.patch": {
+      "sha256": "19020191a7d215d4af6e1cf2c08eaf1dbbefc6d3ad99646dfa14430997d6fab8",
+      "size": 7680
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new-overlays.json": {
+      "sha256": "2b3c9ec3b305609204bb3fa391e2bdc57822232105e5adc62f20e2f00c792bd4",
+      "size": 968
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/Cargo.lock": {
+      "sha256": "a327082bd8850e2a98c6125ebc64fff2354de16077936e48d9bd0ddc76c89a56",
+      "size": 9410
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/Cargo.toml": {
+      "sha256": "f8f263ff26dfeeb9ae7d3bfb39b43b7bfe978338046ef5fd365e3c25eca98522",
+      "size": 326
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/README.md": {
+      "sha256": "4518db092041a164c0fcfd28ff83328105b720b58d7d95bf78b3b507b8e2492a",
+      "size": 5083
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/generated-public-test-private-key-2048.der": {
+      "sha256": "db99b25b32329332e86407c5d67f9ae521db161245e18841d624b689cb3db98a",
+      "size": 1190
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/generated-public-test-public-key-2048.der": {
+      "sha256": "8958d46fe9ef7179f9b4f11097ae4fe3732147838730dce26c7e13c792ed48c1",
+      "size": 270
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/invalid-domain-public-keys.json": {
+      "sha256": "af04bbc327c0dc39d85bd2d4c57f629dfd1293565d810ffcb4d93e23bb4eeddb",
+      "size": 3520
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/rfc9474-public-test-private-key.der": {
+      "sha256": "aa5ca17bcd4f09fd306d14549c33fc9724fd02cb3819cc9d78d6dea787b3949f",
+      "size": 2348
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/src/lib.rs": {
+      "sha256": "1131e9eee36e226e5d45ed9e0990a27a688267215f40e36bce489a865efe47da",
+      "size": 26492
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/src/owned.rs": {
+      "sha256": "70f68d4b3679112aaaf2d8d17747f1ca7376ba39d9fd3692b25b825c72257642",
+      "size": 3307
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/src/tests/async_boundary.rs": {
+      "sha256": "edac173a4c72c5b75bf0d3558e6fd292ffc4d7649af7666acc13f7cf67a3b685",
+      "size": 11786
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/aws-lc-async-prototype/src/tests/compatibility.rs": {
+      "sha256": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+      "size": 20807
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/.cargo_vcs_info.json": {
+      "sha256": "af7120481b3d3342f79c78e9963a44e9149b30124c63b74b69c30ada524e5c84",
+      "size": 144
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/Cargo.lock": {
+      "sha256": "12f08d7677f31a8495b00f74437c06ee2aeebe76fa1610c251ed30dfa6bb684e",
+      "size": 74109
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/Cargo.toml": {
+      "sha256": "3ec7b0e8b952a0fc75987cb6f57622bdb71a8ee4390182b4fed7b76f36d82137",
+      "size": 1939
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/Cargo.toml.orig": {
+      "sha256": "30c580eecf88ed29df018595d8bf871756108aa4e04fb10b49f0a7347cdc33b4",
+      "size": 964
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/bridge.rs": {
+      "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+      "size": 277
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/exit.rs": {
+      "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+      "size": 2891
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/lib.rs": {
+      "sha256": "4b995a4c5ef4079df3ff350fed1627cb2022e2bae6be2d6770e2489ef50f7e43",
+      "size": 10764
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/mac.rs": {
+      "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+      "size": 1039
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/puzzle.rs": {
+      "sha256": "15fb01aa7be9023975631ff0b9eeaf8c6d4dc1a7e86a2bdebf66302ed451f116",
+      "size": 1475
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/route.rs": {
+      "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+      "size": 1007
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-broker-protocol/src/signed.rs": {
+      "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+      "size": 4095
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/.cargo_vcs_info.json": {
+      "sha256": "0ab8415c60df10f0e649f14a55590ce9836e7dc00461ad64d477645f6672604f",
+      "size": 134
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/Cargo.lock": {
+      "sha256": "94db8764d8351ef40e181f489a6cb25a838dcecc089770f5a7cfb6738a977ff6",
+      "size": 124007
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/Cargo.toml": {
+      "sha256": "ec3287f0c7a7f731d18ee9f1dc4f3410cf38a12f58abb8dd1b27783a30cb268c",
+      "size": 6197
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/Cargo.toml.orig": {
+      "sha256": "f96aff68bcba697d3af918ae37da03e99e2a8455101ab033788d5d32a96f1c76",
+      "size": 4370
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/README.md": {
+      "sha256": "76733b1f9247e0cc5a303ed3c3909d3f509f9deb475fc1bbd7fbb46bd781bb4e",
+      "size": 1097
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/build.rs": {
+      "sha256": "536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4",
+      "size": 13
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/geph5_client.h": {
+      "sha256": "9c01d4bdbf32bb6e57efd6e3a0659cf75c601e86cc69ea85be4fd9dbf0d4979a",
+      "size": 1691
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/auth.rs": {
+      "sha256": "4dc9650fb57558132c404e8dd184f97a99cd81cb9f24312cc5eec63246eb3f51",
+      "size": 7941
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/bin/geph5-client.rs": {
+      "sha256": "0633cef8087d93e6908146dad3c9ac945299003540ed5a08da56347e73200f6b",
+      "size": 3272
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/bound_dialer.rs": {
+      "sha256": "179f202676eac7c5aef382249555c45af0eecab8024a0ee23662e3a66ffe1f53",
+      "size": 13382
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker.rs": {
+      "sha256": "44aabfedeac3260804481ff0c996b3112ff6a88b4a167dd0a4013a4472b027de",
+      "size": 8870
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/aws_lambda.rs": {
+      "sha256": "fbe2b8687cda5857cbf0377d181b6db8f4753446feb4acd3f73a85986b63a4ed",
+      "size": 13545
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/bind_forward.rs": {
+      "sha256": "5ca29b6b7e4405542665f8534aec425275f60987f337d5bf080d7a988dfe1e4a",
+      "size": 3624
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/fronted_http.rs": {
+      "sha256": "c216756ebfa276d3278789eaeabea554f1a27ce9cc1ba1265dbda5b06dd892a2",
+      "size": 2539
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/http_client.rs": {
+      "sha256": "08e3bc2faf0b0df6375623f3ce2104adf1bf46d60561569c72d669e5c119d3b8",
+      "size": 8010
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/priority_race.rs": {
+      "sha256": "8afc01c4ce78b8ec5c418b05526c65205299e6c5407c0edf610ebdb4ea73d6dd",
+      "size": 1111
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/race.rs": {
+      "sha256": "915f41042906383fae9ddbd0227f392fde78b75599ed70d6087ad2ba5a05df35",
+      "size": 1844
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/broker/tunneled_http.rs": {
+      "sha256": "eae3dc574bc74cbec928ba7dcbddb5c85114cf5132b80a7cac3ae57082f5101c",
+      "size": 6718
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/bw_accounting.rs": {
+      "sha256": "ce1c236a5e47a931dddc746142a405928bcc722bcea68a8292259fcda4c4e581",
+      "size": 3623
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/bw_token.rs": {
+      "sha256": "450293327f8d405aa84d166580784f1e3d2b5312bb079f095c219f248276009a",
+      "size": 6048
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/china/china-domains.txt": {
+      "sha256": "c2bf00bcc32bf52bd14b1a14ed50f40db8bb0cf4b82aea9c436f2e1c639e834f",
+      "size": 1335881
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/china/china-ips.txt": {
+      "sha256": "1e855b2493221becffe6261c97efce005f2cea65bf506e3c6ca1687d7e7551ad",
+      "size": 117795
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/china/china-sync.sh": {
+      "sha256": "af0b8f101826216f8f72f51a5b3c1441efec8ce1e2b08aa4f37c1d2ff6ba7e7e",
+      "size": 154
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/china/generate-china.sh": {
+      "sha256": "231fc544de4f118b02f7c3af36b265d872130c47443a1a6db91e02989a7f4917",
+      "size": 163
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/china/mod.rs": {
+      "sha256": "74266167074fe83558fd5fa7b5da7b19880ef819399f3d5e666e4d20e40d14a9",
+      "size": 8140
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/client.rs": {
+      "sha256": "7beeb67ef474626d4d4a176dce15e31481af2ccd5e20e3461b4e5ead7fd23fbc",
+      "size": 12171
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/control_prot.rs": {
+      "sha256": "585f4fd3f48dd855d56bb89ff44d6d658ff0f7f0a9b0f8f30758b17303e0e299",
+      "size": 8109
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/database.rs": {
+      "sha256": "ecc8ccd9bc0ad940b8f7431b8c6212a676735438e328dec97eb71d82150a5f33",
+      "size": 6150
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/device_metadata.rs": {
+      "sha256": "45c76d593d7282e5f5343015c14d7a5e1daaef42c9db15517dd01cb450de58f9",
+      "size": 3636
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/dial_logging.rs": {
+      "sha256": "6e67141a1245350593cc65be3f044f09c7c4fb3986ac10c4e4d02303ae38a76c",
+      "size": 6771
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/get_dialer.rs": {
+      "sha256": "a2c078bbd67a3d95a6cafa7a9e5f2bb62c2d6082fdaba3eb127bba29729072e4",
+      "size": 16432
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/http_proxy/address.rs": {
+      "sha256": "d07b541b2fe3ad3e5aa93cd8892d6087ae7da7659038ce8d1ffcfc018c74c926",
+      "size": 4472
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/http_proxy/http_client.rs": {
+      "sha256": "99092cdef6f40b11690c1523882764def0fd9d4aae8e03ac4a92e3f829192e0e",
+      "size": 228
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/http_proxy/mod.rs": {
+      "sha256": "8dcbf400418dc48949e7e0df6af73dfd99f05604057629217793e792a9476c8b",
+      "size": 17376
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/http_proxy/rt_compat.rs": {
+      "sha256": "0cefcb9ca9736ad1398ebcb90f1e30e03c5ac2a2ea0a5fb047cdcbb6cfddcb57",
+      "size": 4446
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/lib.rs": {
+      "sha256": "a023bff31a3ab4235948292fd950584ec19b81505967552db952f1fb56938b16",
+      "size": 8591
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/litecopy.rs": {
+      "sha256": "1b73d1354a8f15a7f18ff50a4964d367cd7d8c47d41d415a8c2bce06bebf0af2",
+      "size": 1111
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/logging.rs": {
+      "sha256": "27e4ac5cce9b32832a0d059db5710d1fb458cbd319d7a2ee4a1766d56d887620",
+      "size": 4657
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/pac.rs": {
+      "sha256": "15b913eeb19ba0e4226d03191e2c9474072a2d31a8b5871fbccc998b57f944cc",
+      "size": 2348
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/port_forward.rs": {
+      "sha256": "6f347774a258f4657b26717420c66c564f57ff900d5a9bcf44441b2ce65342d1",
+      "size": 2338
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/route_cache.rs": {
+      "sha256": "61b99db4118f5524baccd22248a7c22b09c81f4a5540269a0f3d16573c088bb4",
+      "size": 6644
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/rsa_composition_tests.rs": {
+      "sha256": "18f3d6f3f1208270e00c5acbdcb4b72995dfd6a76ac186340f4e4ff88d941c36",
+      "size": 20138
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/session.rs": {
+      "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822",
+      "size": 33495
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/socks5.rs": {
+      "sha256": "68f143ad46b409e94a40001f9952a4be498ec998e1f31df6bacdcf73630dd49c",
+      "size": 11144
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/spoof_dns.rs": {
+      "sha256": "78f21249db399aedf22698929fa7e43d7cfb94d483e790330e447aacbde18c96",
+      "size": 8673
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/stats.rs": {
+      "sha256": "62f0123483f75e7242fe3ce33eb3d1845ae99805a45be061d4c07f63f9ff94fe",
+      "size": 794
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/taskpool.rs": {
+      "sha256": "8a9cc2ba102aa6987b4600ce3199d358d06afc9334dc0172ebddc420157248f1",
+      "size": 515
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/timeout.rs": {
+      "sha256": "03722cf8e07e86518ce90f7fc1cbbb15e1c101aca336ceb376d55536d6497f63",
+      "size": 1240
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/traffcount.rs": {
+      "sha256": "4aa25244a12c3005445048cc58851aa300fe9ac617d4072275f4feb46f0504cc",
+      "size": 3844
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/tunneled_http.rs": {
+      "sha256": "32a40ee30e89b2919b8876988ece8655a0f587e81afa495a47b0e14fdae3e04f",
+      "size": 7428
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/updates.rs": {
+      "sha256": "cd4dd3b4ad1ef09e26e26fb718df050e3e441aca8536c03830b0dc507e4e5825",
+      "size": 2074
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/geph5-client/src/vpn.rs": {
+      "sha256": "82b549d2395183585017cb90906820ab1f309893d63917d894ca94b4f8a6bca1",
+      "size": 10463
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/mizaru-client-only/Cargo.lock": {
+      "sha256": "072b4ab2f585a9ab842ea38fcc6114761118f23bfc44bd9effc41916562ddf05",
+      "size": 12130
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/mizaru-client-only/Cargo.toml": {
+      "sha256": "2427386647789599515ccb9dc638c13abc263c4c4bda4e7bc27503fdf1269eaf",
+      "size": 412
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/mizaru-client-only/src/lib.rs": {
+      "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+      "size": 9180
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/new/mizaru-client-only/tests/contracts.rs": {
+      "sha256": "e39b5f23b0956f26ee99bc71989ca13729a3e9657bf7daaadcd21b3a593153d4",
+      "size": 11707
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/offline.sb": {
+      "sha256": "8832e9298d5b06dea1c3e912b4bb215f65f3e08df82557b8f47038f605123427",
+      "size": 1274
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case1-command.json": {
+      "sha256": "acd88902532e1f336de36a294ff5db1a8a768b27dddbbf1fe46c2ffbe75e9894",
+      "size": 2031
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case1-result.json": {
+      "sha256": "7502786b1df2d2d312a39f94725417b3a4a3180028b8a0b1bee1d6878224d8fa",
+      "size": 372
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case1.log": {
+      "sha256": "087db42f8ef5df1dfdd4fe8d1e79d19bb5299e55d66c813280c3dc489a74dfff",
+      "size": 735
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case2-command.json": {
+      "sha256": "f64111a4fbeeb9850d060be333e0c586232cd1318649ddac372f02c29852ee01",
+      "size": 2022
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case2-result.json": {
+      "sha256": "9791ed7488149c8109d3200bb3456d2e2fd0a372eac0ff9acc7112f9875c61f8",
+      "size": 371
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case2.log": {
+      "sha256": "d9908eb8acedba81842638cd120e929c3925104fd9e41ff61019b2b67b7ad855",
+      "size": 630
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case3-command.json": {
+      "sha256": "caf52ca551400285521a6161adc3f161a4c15529c6a4e3f9311954cb868c43e8",
+      "size": 2023
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case3-result.json": {
+      "sha256": "b754512626babdb329d930dd37d0ebcdecc59c49a0932ffc1aaa20911b689220",
+      "size": 369
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-case3.log": {
+      "sha256": "8de7a8e6f3487f31d03002556a10221adc3325e787da0162c9de0abd9f7036e8",
+      "size": 217
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-compile-artifacts.json": {
+      "sha256": "bae479837ea1c92d9e834869c5b84f37335687b1e8269aa35cd8dcd613a85257",
+      "size": 2237
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-compile-command.json": {
+      "sha256": "61cf1dcd76b79e017556de92e57a6fe84817642b5621304db685f5e90e8ae19f",
+      "size": 2253
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-compile-result.json": {
+      "sha256": "618dd281ba859e0e87b26992beef97d657fa2ad01d71537aeb2600f0d32b784d",
+      "size": 374
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-compile.log": {
+      "sha256": "e73798f0c9969b07d615d6784d3239c289de0a3dfc550a667c30fb735a66d7c8",
+      "size": 459217
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-geph5-client_src_rsa_composition_tests.rs.patch": {
+      "sha256": "c92a0f3758091538c4c6ffc14a637faf27f006e6394401600c0aedfde2f26095",
+      "size": 7680
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old-overlays.json": {
+      "sha256": "0433ef423bb3c18e5bb8dba47723091877480a601b8bb9a36dd839b0625f879a",
+      "size": 747
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/Cargo.lock": {
+      "sha256": "a327082bd8850e2a98c6125ebc64fff2354de16077936e48d9bd0ddc76c89a56",
+      "size": 9410
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/Cargo.toml": {
+      "sha256": "f8f263ff26dfeeb9ae7d3bfb39b43b7bfe978338046ef5fd365e3c25eca98522",
+      "size": 326
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/README.md": {
+      "sha256": "4518db092041a164c0fcfd28ff83328105b720b58d7d95bf78b3b507b8e2492a",
+      "size": 5083
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/generated-public-test-private-key-2048.der": {
+      "sha256": "db99b25b32329332e86407c5d67f9ae521db161245e18841d624b689cb3db98a",
+      "size": 1190
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/generated-public-test-public-key-2048.der": {
+      "sha256": "8958d46fe9ef7179f9b4f11097ae4fe3732147838730dce26c7e13c792ed48c1",
+      "size": 270
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/invalid-domain-public-keys.json": {
+      "sha256": "af04bbc327c0dc39d85bd2d4c57f629dfd1293565d810ffcb4d93e23bb4eeddb",
+      "size": 3520
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/rfc9474-public-test-private-key.der": {
+      "sha256": "aa5ca17bcd4f09fd306d14549c33fc9724fd02cb3819cc9d78d6dea787b3949f",
+      "size": 2348
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/src/lib.rs": {
+      "sha256": "1131e9eee36e226e5d45ed9e0990a27a688267215f40e36bce489a865efe47da",
+      "size": 26492
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/src/owned.rs": {
+      "sha256": "70f68d4b3679112aaaf2d8d17747f1ca7376ba39d9fd3692b25b825c72257642",
+      "size": 3307
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/src/tests/async_boundary.rs": {
+      "sha256": "edac173a4c72c5b75bf0d3558e6fd292ffc4d7649af7666acc13f7cf67a3b685",
+      "size": 11786
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/aws-lc-async-prototype/src/tests/compatibility.rs": {
+      "sha256": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+      "size": 20807
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/.cargo_vcs_info.json": {
+      "sha256": "af7120481b3d3342f79c78e9963a44e9149b30124c63b74b69c30ada524e5c84",
+      "size": 144
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/Cargo.lock": {
+      "sha256": "12f08d7677f31a8495b00f74437c06ee2aeebe76fa1610c251ed30dfa6bb684e",
+      "size": 74109
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/Cargo.toml": {
+      "sha256": "3ec7b0e8b952a0fc75987cb6f57622bdb71a8ee4390182b4fed7b76f36d82137",
+      "size": 1939
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/Cargo.toml.orig": {
+      "sha256": "30c580eecf88ed29df018595d8bf871756108aa4e04fb10b49f0a7347cdc33b4",
+      "size": 964
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/bridge.rs": {
+      "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+      "size": 277
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/exit.rs": {
+      "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+      "size": 2891
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/lib.rs": {
+      "sha256": "4b995a4c5ef4079df3ff350fed1627cb2022e2bae6be2d6770e2489ef50f7e43",
+      "size": 10764
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/mac.rs": {
+      "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+      "size": 1039
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/puzzle.rs": {
+      "sha256": "15fb01aa7be9023975631ff0b9eeaf8c6d4dc1a7e86a2bdebf66302ed451f116",
+      "size": 1475
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/route.rs": {
+      "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+      "size": 1007
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-broker-protocol/src/signed.rs": {
+      "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+      "size": 4095
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/.cargo_vcs_info.json": {
+      "sha256": "0ab8415c60df10f0e649f14a55590ce9836e7dc00461ad64d477645f6672604f",
+      "size": 134
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/Cargo.lock": {
+      "sha256": "94db8764d8351ef40e181f489a6cb25a838dcecc089770f5a7cfb6738a977ff6",
+      "size": 124007
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/Cargo.toml": {
+      "sha256": "ec3287f0c7a7f731d18ee9f1dc4f3410cf38a12f58abb8dd1b27783a30cb268c",
+      "size": 6197
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/Cargo.toml.orig": {
+      "sha256": "f96aff68bcba697d3af918ae37da03e99e2a8455101ab033788d5d32a96f1c76",
+      "size": 4370
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/README.md": {
+      "sha256": "76733b1f9247e0cc5a303ed3c3909d3f509f9deb475fc1bbd7fbb46bd781bb4e",
+      "size": 1097
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/build.rs": {
+      "sha256": "536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4",
+      "size": 13
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/geph5_client.h": {
+      "sha256": "9c01d4bdbf32bb6e57efd6e3a0659cf75c601e86cc69ea85be4fd9dbf0d4979a",
+      "size": 1691
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/auth.rs": {
+      "sha256": "3126244142c9901ee9111bb1e09c9d7f1ecec9183032b3c1ed7cc253784dcf50",
+      "size": 7992
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/bin/geph5-client.rs": {
+      "sha256": "0633cef8087d93e6908146dad3c9ac945299003540ed5a08da56347e73200f6b",
+      "size": 3272
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/bound_dialer.rs": {
+      "sha256": "179f202676eac7c5aef382249555c45af0eecab8024a0ee23662e3a66ffe1f53",
+      "size": 13382
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker.rs": {
+      "sha256": "44aabfedeac3260804481ff0c996b3112ff6a88b4a167dd0a4013a4472b027de",
+      "size": 8870
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/aws_lambda.rs": {
+      "sha256": "fbe2b8687cda5857cbf0377d181b6db8f4753446feb4acd3f73a85986b63a4ed",
+      "size": 13545
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/bind_forward.rs": {
+      "sha256": "5ca29b6b7e4405542665f8534aec425275f60987f337d5bf080d7a988dfe1e4a",
+      "size": 3624
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/fronted_http.rs": {
+      "sha256": "c216756ebfa276d3278789eaeabea554f1a27ce9cc1ba1265dbda5b06dd892a2",
+      "size": 2539
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/http_client.rs": {
+      "sha256": "08e3bc2faf0b0df6375623f3ce2104adf1bf46d60561569c72d669e5c119d3b8",
+      "size": 8010
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/priority_race.rs": {
+      "sha256": "8afc01c4ce78b8ec5c418b05526c65205299e6c5407c0edf610ebdb4ea73d6dd",
+      "size": 1111
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/race.rs": {
+      "sha256": "915f41042906383fae9ddbd0227f392fde78b75599ed70d6087ad2ba5a05df35",
+      "size": 1844
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/broker/tunneled_http.rs": {
+      "sha256": "eae3dc574bc74cbec928ba7dcbddb5c85114cf5132b80a7cac3ae57082f5101c",
+      "size": 6718
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/bw_accounting.rs": {
+      "sha256": "ce1c236a5e47a931dddc746142a405928bcc722bcea68a8292259fcda4c4e581",
+      "size": 3623
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/bw_token.rs": {
+      "sha256": "450293327f8d405aa84d166580784f1e3d2b5312bb079f095c219f248276009a",
+      "size": 6048
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/china/china-domains.txt": {
+      "sha256": "c2bf00bcc32bf52bd14b1a14ed50f40db8bb0cf4b82aea9c436f2e1c639e834f",
+      "size": 1335881
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/china/china-ips.txt": {
+      "sha256": "1e855b2493221becffe6261c97efce005f2cea65bf506e3c6ca1687d7e7551ad",
+      "size": 117795
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/china/china-sync.sh": {
+      "sha256": "af0b8f101826216f8f72f51a5b3c1441efec8ce1e2b08aa4f37c1d2ff6ba7e7e",
+      "size": 154
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/china/generate-china.sh": {
+      "sha256": "231fc544de4f118b02f7c3af36b265d872130c47443a1a6db91e02989a7f4917",
+      "size": 163
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/china/mod.rs": {
+      "sha256": "74266167074fe83558fd5fa7b5da7b19880ef819399f3d5e666e4d20e40d14a9",
+      "size": 8140
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/client.rs": {
+      "sha256": "7beeb67ef474626d4d4a176dce15e31481af2ccd5e20e3461b4e5ead7fd23fbc",
+      "size": 12171
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/control_prot.rs": {
+      "sha256": "585f4fd3f48dd855d56bb89ff44d6d658ff0f7f0a9b0f8f30758b17303e0e299",
+      "size": 8109
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/database.rs": {
+      "sha256": "ecc8ccd9bc0ad940b8f7431b8c6212a676735438e328dec97eb71d82150a5f33",
+      "size": 6150
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/device_metadata.rs": {
+      "sha256": "45c76d593d7282e5f5343015c14d7a5e1daaef42c9db15517dd01cb450de58f9",
+      "size": 3636
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/dial_logging.rs": {
+      "sha256": "6e67141a1245350593cc65be3f044f09c7c4fb3986ac10c4e4d02303ae38a76c",
+      "size": 6771
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/get_dialer.rs": {
+      "sha256": "a2c078bbd67a3d95a6cafa7a9e5f2bb62c2d6082fdaba3eb127bba29729072e4",
+      "size": 16432
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/http_proxy/address.rs": {
+      "sha256": "d07b541b2fe3ad3e5aa93cd8892d6087ae7da7659038ce8d1ffcfc018c74c926",
+      "size": 4472
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/http_proxy/http_client.rs": {
+      "sha256": "99092cdef6f40b11690c1523882764def0fd9d4aae8e03ac4a92e3f829192e0e",
+      "size": 228
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/http_proxy/mod.rs": {
+      "sha256": "8dcbf400418dc48949e7e0df6af73dfd99f05604057629217793e792a9476c8b",
+      "size": 17376
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/http_proxy/rt_compat.rs": {
+      "sha256": "0cefcb9ca9736ad1398ebcb90f1e30e03c5ac2a2ea0a5fb047cdcbb6cfddcb57",
+      "size": 4446
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/lib.rs": {
+      "sha256": "a023bff31a3ab4235948292fd950584ec19b81505967552db952f1fb56938b16",
+      "size": 8591
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/litecopy.rs": {
+      "sha256": "1b73d1354a8f15a7f18ff50a4964d367cd7d8c47d41d415a8c2bce06bebf0af2",
+      "size": 1111
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/logging.rs": {
+      "sha256": "27e4ac5cce9b32832a0d059db5710d1fb458cbd319d7a2ee4a1766d56d887620",
+      "size": 4657
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/pac.rs": {
+      "sha256": "15b913eeb19ba0e4226d03191e2c9474072a2d31a8b5871fbccc998b57f944cc",
+      "size": 2348
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/port_forward.rs": {
+      "sha256": "6f347774a258f4657b26717420c66c564f57ff900d5a9bcf44441b2ce65342d1",
+      "size": 2338
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/route_cache.rs": {
+      "sha256": "61b99db4118f5524baccd22248a7c22b09c81f4a5540269a0f3d16573c088bb4",
+      "size": 6644
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/rsa_composition_tests.rs": {
+      "sha256": "18f3d6f3f1208270e00c5acbdcb4b72995dfd6a76ac186340f4e4ff88d941c36",
+      "size": 20138
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/session.rs": {
+      "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822",
+      "size": 33495
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/socks5.rs": {
+      "sha256": "68f143ad46b409e94a40001f9952a4be498ec998e1f31df6bacdcf73630dd49c",
+      "size": 11144
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/spoof_dns.rs": {
+      "sha256": "78f21249db399aedf22698929fa7e43d7cfb94d483e790330e447aacbde18c96",
+      "size": 8673
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/stats.rs": {
+      "sha256": "62f0123483f75e7242fe3ce33eb3d1845ae99805a45be061d4c07f63f9ff94fe",
+      "size": 794
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/taskpool.rs": {
+      "sha256": "8a9cc2ba102aa6987b4600ce3199d358d06afc9334dc0172ebddc420157248f1",
+      "size": 515
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/timeout.rs": {
+      "sha256": "03722cf8e07e86518ce90f7fc1cbbb15e1c101aca336ceb376d55536d6497f63",
+      "size": 1240
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/traffcount.rs": {
+      "sha256": "4aa25244a12c3005445048cc58851aa300fe9ac617d4072275f4feb46f0504cc",
+      "size": 3844
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/tunneled_http.rs": {
+      "sha256": "32a40ee30e89b2919b8876988ece8655a0f587e81afa495a47b0e14fdae3e04f",
+      "size": 7428
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/updates.rs": {
+      "sha256": "cd4dd3b4ad1ef09e26e26fb718df050e3e441aca8536c03830b0dc507e4e5825",
+      "size": 2074
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/geph5-client/src/vpn.rs": {
+      "sha256": "82b549d2395183585017cb90906820ab1f309893d63917d894ca94b4f8a6bca1",
+      "size": 10463
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/mizaru-client-only/Cargo.lock": {
+      "sha256": "072b4ab2f585a9ab842ea38fcc6114761118f23bfc44bd9effc41916562ddf05",
+      "size": 12130
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/mizaru-client-only/Cargo.toml": {
+      "sha256": "2427386647789599515ccb9dc638c13abc263c4c4bda4e7bc27503fdf1269eaf",
+      "size": 412
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/mizaru-client-only/src/lib.rs": {
+      "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+      "size": 9180
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/old/mizaru-client-only/tests/contracts.rs": {
+      "sha256": "e39b5f23b0956f26ee99bc71989ca13729a3e9657bf7daaadcd21b3a593153d4",
+      "size": 11707
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/preparation.json": {
+      "sha256": "2f26354b626ffc78988a3bf820f46619eaef25f74b3d1cbda4a8701920b93de4",
+      "size": 1073
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/prepare.py": {
+      "sha256": "9d3e17edd223a1cffb225f2c9e246accf54752ea3579248b2315a6e7702533da",
+      "size": 5803
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/retained-input-hashes-before.json": {
+      "sha256": "5df1ad8ee65764f600a8c1dda4907dbb67bf74a136048b1c76f4e5bda1064908",
+      "size": 30425
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/retained-inputs-after.json": {
+      "sha256": "9af82dd357b9c6d3a95ac300f39e2320212a80d63295ec207f9012be2f6d2788",
+      "size": 71
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/run.py": {
+      "sha256": "5d616e6f3b2b8b29d3f1f3dd3d2f635a4d45b96d180a3c2faceb0b9377f662c9",
+      "size": 8399
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/sandbox-probe-command.json": {
+      "sha256": "c157b4359390ddcf4afe125e80675282f6e1c46057fe104064b519f03e9b090a",
+      "size": 2303
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/sandbox-probe-result.json": {
+      "sha256": "06f9bebdc0d38aaadb6d1f4a4e5ab970cc879449d30b05ae5cde5bdbfe3e7a6d",
+      "size": 373
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/auth-expiry-rust-regression-20261015/sandbox-probe.log": {
+      "sha256": "88c1e62f77ebda345971117d90e3936f3a27c876aac8f25b973580b7d7aaa92a",
+      "size": 37
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/backend-bindings.json": {
+      "sha256": "a49a9887b82f3e4dbe4f907845260ee5d4253c8ff42be77f0e41dac1eb16079b",
+      "size": 8612
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-callsites/materialized/Cargo.toml": {
+      "sha256": "2b52b2ff59bea2033504b1f94c5d05fbea35e4c875598c18e2e29e30d07212f4",
+      "size": 6217
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-callsites/materialized/src/auth.rs": {
+      "sha256": "6b56eb3cb0f652c4274c498e830b0c73a5592e54805a547cbfee563f7bf8d3d0",
+      "size": 7837
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-callsites/materialized/src/bw_token.rs": {
+      "sha256": "b7e74e8fefa04fb98e689c737d1152417b7eed9a8b957e862d2a3ba6c8fa8af9",
+      "size": 5909
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-callsites/materialized/src/database.rs": {
+      "sha256": "5b6be4d78c2a9e18f9292e61198600f776d51252d3daf7835d06e732583f1961",
+      "size": 21009
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-callsites/materialized/src/session.rs": {
+      "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822",
+      "size": 33495
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-review.json": {
+      "sha256": "ff3f0897e7a837c7a41248a1b039356450d129829c5d0d20b1edef012c73cf7c",
+      "size": 13169
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-review.md": {
+      "sha256": "97f11694bcce60c1ac176b87857008d0d19a45f81ff9ddb199d29b1b1e4d2e90",
+      "size": 2238
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/provenance.json": {
+      "sha256": "edac7273bd60e8312009d1710d360fc52ebc03f0c8964a21d8f5f91420a14e1f",
+      "size": 11510
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/review.json": {
+      "sha256": "4fc05b1c60137b47d897e93301d9007b91720fea36e5fbaa2839e44a152e0b57",
+      "size": 15584
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/review.md": {
+      "sha256": "7d32c91e9f4664ee626c78ede7d0c875153c0e9dfe84d74bcf82f8c3cc90a68a",
+      "size": 6195
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/aws-lc-backend/Cargo.toml": {
+      "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+      "size": 146
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/aws-lc-backend/LICENSE": {
+      "sha256": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+      "size": 1063
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/aws-lc-backend/src/lib.rs": {
+      "sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+      "size": 14176
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/aws-lc-backend/src/owned.rs": {
+      "sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+      "size": 2288
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/Cargo.toml": {
+      "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+      "size": 1945
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/LICENSE-ISC.txt": {
+      "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+      "size": 740
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/SOURCE-NOTICE.md": {
+      "sha256": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+      "size": 2344
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/provenance/Cargo.toml": {
+      "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+      "size": 1884
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/bridge.rs": {
+      "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+      "size": 277
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/exit.rs": {
+      "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+      "size": 2891
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/lib.rs": {
+      "sha256": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+      "size": 8383
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/mac.rs": {
+      "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+      "size": 1039
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/puzzle.rs": {
+      "sha256": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+      "size": 1172
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/route.rs": {
+      "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+      "size": 1007
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/geph5-broker-protocol/src/signed.rs": {
+      "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+      "size": 4095
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/mizaru-client/Cargo.toml": {
+      "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+      "size": 317
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/mizaru-client/LICENSE-ISC.txt": {
+      "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+      "size": 740
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/mizaru-client/SOURCE-NOTICE.md": {
+      "sha256": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+      "size": 2228
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/mizaru-client/provenance/Cargo.toml": {
+      "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+      "size": 1215
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/mizaru-client/src/lib.rs": {
+      "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+      "size": 9180
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/sqlite-native-integration/native-actual-scan-20261013/evidence/osv.json": {
+      "sha256": "7d3bdafd66c88d34aed97e26eff8f5b7b19456ec9f8b77fc6d0a8cde2ced227f",
+      "size": 90368
+    },
+    "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/sqlite-native-integration/native-actual-scan-20261013/evidence/receipt.json": {
+      "sha256": "dc370ab081e6b9ac17a818dd4322bb5e05f7f4dd6162b7705c0a971865d4485e",
+      "size": 12186
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/async-independent-review-test.log": {
+      "sha256": "beed4b492d6708615887d1fd353b74eb2a2ae6e4fed3a4de7b70eee9dc4f23b9",
+      "size": 987
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/async-prototype-test.log": {
+      "sha256": "349550e802328cf11d4abe19ec55eb1fcfa4fc75a9bc1267bf5599378372b67f",
+      "size": 1175
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/client-adapter-independent-result.json": {
+      "sha256": "4c272ee5d239bb22dd4f777a965ee9397f75e64e3a07f1fa5e56f499824f03ad",
+      "size": 2002
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-prototype-test.log": {
+      "sha256": "ea2ecf8f48eea12450d56dfb874d05af1ab4df7559e3dc6ded2939ff6283b375",
+      "size": 2259
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048-pkcs1.der": {
+      "sha256": "25b5dd4b5f115246802e6c370f5755d90f66bdd9e30941f2f63ae072a23111c4",
+      "size": 268
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048-private.der": {
+      "sha256": "4a72f7488d9dc7370f325625ab82f9de54e788e90f288e8d2f836a5f18346352",
+      "size": 1192
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048-spki.der": {
+      "sha256": "e2dc1029667ab0da6ed3e08e6d07d0daf40b48d4aa81371c5e156859e14bb44e",
+      "size": 292
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048.candidate.sig": {
+      "sha256": "b1f9149bc4960a147c741e390342ee12e7d748afadbea7fed5147474f6d2991b",
+      "size": 256
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048.message.bin": {
+      "sha256": "8fd6a6a78f5857d7ba1cfe9033bffeec86da2ba6a4bd60a6f833209d9d3e390d",
+      "size": 32
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048.openssl.sig": {
+      "sha256": "b1f9149bc4960a147c741e390342ee12e7d748afadbea7fed5147474f6d2991b",
+      "size": 256
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e3-2048.public.pem": {
+      "sha256": "ff54708d75af5e18eaa383da7d58ce30d953bb52598b4ad2c8ccdb27c766ceef",
+      "size": 451
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048-pkcs1.der": {
+      "sha256": "f49e22328fe35e0e91fbadb46f0d5d065f82bf68268cbf9f907e66bd358624af",
+      "size": 270
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048-private.der": {
+      "sha256": "1f73c05d465b65c529d1e85a2f8046cf144b2ed6723ac15c9bbd91178feb1a90",
+      "size": 1193
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048-spki.der": {
+      "sha256": "d64f6afef53a8fbf46b5e554cee27a1912bfed4749926a9bbb7cd10e28ca26d0",
+      "size": 294
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048.candidate.sig": {
+      "sha256": "73fac8a4228bd5cbe28ee7ec6d33bc2b44e275af25a6e3a51cc6f54f3b848dbf",
+      "size": 256
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048.message.bin": {
+      "sha256": "cc1f590ae60f13da8b3c88dc0f626920c320810f4d0829dc6b608227d68256b6",
+      "size": 32
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048.openssl.sig": {
+      "sha256": "73fac8a4228bd5cbe28ee7ec6d33bc2b44e275af25a6e3a51cc6f54f3b848dbf",
+      "size": 256
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2048.public.pem": {
+      "sha256": "32fe73312daec9e6bc1b85b07a5e153e11f5baa5b8321a38d15234fa726f01c4",
+      "size": 451
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049-pkcs1.der": {
+      "sha256": "9edd3b0838dce4bd63d8a6858dbc17b85ed2f4e7862d266aad1027b6c5497f31",
+      "size": 270
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049-private.der": {
+      "sha256": "8b6e0dc54bccc85e2109dcb7b96717c7b8270909fad91de671971497ae105249",
+      "size": 1192
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049-spki.der": {
+      "sha256": "af40dc05fc76fe4e9f17acefb669df6e8de5ab55154a5213adb0ee63efbc0254",
+      "size": 294
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049.candidate.sig": {
+      "sha256": "a3ffe409e48ce0adf2516c78fa8db555112613556d78fb7e8a8b08a04f06e213",
+      "size": 257
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049.message.bin": {
+      "sha256": "8408c6d2a7b286b16d526315e5e8216cf36a7148cdbbd6e064762cd75ec5ae66",
+      "size": 32
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049.openssl.sig": {
+      "sha256": "a3ffe409e48ce0adf2516c78fa8db555112613556d78fb7e8a8b08a04f06e213",
+      "size": 257
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/e65537-2049.public.pem": {
+      "sha256": "b9b2f81f9b80c182280ef18353e5a320b6ec882446b73843464661b1751c1550",
+      "size": 451
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-public-fixtures/old-partial-fixture.der": {
+      "sha256": "3c2bd4b8437111c34e8e240d7fd396e12ce8c0e5df05ef2d0d175f184dfb1f61",
+      "size": 525
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-vectors.json": {
+      "sha256": "c7bb06db21aeafd074a312c724e1f73aa44f1730cb52cf073e98a96e809b487e",
+      "size": 224357
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/Cargo.lock": {
+      "sha256": "a327082bd8850e2a98c6125ebc64fff2354de16077936e48d9bd0ddc76c89a56",
+      "size": 9410
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/Cargo.toml": {
+      "sha256": "f8f263ff26dfeeb9ae7d3bfb39b43b7bfe978338046ef5fd365e3c25eca98522",
+      "size": 326
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/README.md": {
+      "sha256": "4518db092041a164c0fcfd28ff83328105b720b58d7d95bf78b3b507b8e2492a",
+      "size": 5083
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/generated-public-test-private-key-2048.der": {
+      "sha256": "db99b25b32329332e86407c5d67f9ae521db161245e18841d624b689cb3db98a",
+      "size": 1190
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/generated-public-test-public-key-2048.der": {
+      "sha256": "8958d46fe9ef7179f9b4f11097ae4fe3732147838730dce26c7e13c792ed48c1",
+      "size": 270
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/invalid-domain-public-keys.json": {
+      "sha256": "af04bbc327c0dc39d85bd2d4c57f629dfd1293565d810ffcb4d93e23bb4eeddb",
+      "size": 3520
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/rfc9474-public-test-private-key.der": {
+      "sha256": "aa5ca17bcd4f09fd306d14549c33fc9724fd02cb3819cc9d78d6dea787b3949f",
+      "size": 2348
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/lib.rs": {
+      "sha256": "1131e9eee36e226e5d45ed9e0990a27a688267215f40e36bce489a865efe47da",
+      "size": 26492
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/owned.rs": {
+      "sha256": "70f68d4b3679112aaaf2d8d17747f1ca7376ba39d9fd3692b25b825c72257642",
+      "size": 3307
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/tests/async_boundary.rs": {
+      "sha256": "edac173a4c72c5b75bf0d3558e6fd292ffc4d7649af7666acc13f7cf67a3b685",
+      "size": 11786
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/tests/compatibility.rs": {
+      "sha256": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+      "size": 20807
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/final-composition-hashes.json": {
+      "sha256": "2f1b542a92d6226f917535361fe66d8e3b63d15e08128b66f187aef2cb82ae77",
+      "size": 9242
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/final-execution-evidence.json": {
+      "sha256": "1360e35958bcaa75991d5c777183ec20d0221eec29bddb48617aea82f743f3a9",
+      "size": 3332
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/.cargo_vcs_info.json": {
+      "sha256": "af7120481b3d3342f79c78e9963a44e9149b30124c63b74b69c30ada524e5c84",
+      "size": 144
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/Cargo.lock": {
+      "sha256": "12f08d7677f31a8495b00f74437c06ee2aeebe76fa1610c251ed30dfa6bb684e",
+      "size": 74109
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/Cargo.toml": {
+      "sha256": "3ec7b0e8b952a0fc75987cb6f57622bdb71a8ee4390182b4fed7b76f36d82137",
+      "size": 1939
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/Cargo.toml.orig": {
+      "sha256": "30c580eecf88ed29df018595d8bf871756108aa4e04fb10b49f0a7347cdc33b4",
+      "size": 964
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/bridge.rs": {
+      "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+      "size": 277
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/exit.rs": {
+      "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+      "size": 2891
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/lib.rs": {
+      "sha256": "4b995a4c5ef4079df3ff350fed1627cb2022e2bae6be2d6770e2489ef50f7e43",
+      "size": 10764
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/mac.rs": {
+      "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+      "size": 1039
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/puzzle.rs": {
+      "sha256": "15fb01aa7be9023975631ff0b9eeaf8c6d4dc1a7e86a2bdebf66302ed451f116",
+      "size": 1475
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/route.rs": {
+      "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+      "size": 1007
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-broker-protocol/src/signed.rs": {
+      "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+      "size": 4095
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/.cargo_vcs_info.json": {
+      "sha256": "0ab8415c60df10f0e649f14a55590ce9836e7dc00461ad64d477645f6672604f",
+      "size": 134
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/Cargo.lock": {
+      "sha256": "94db8764d8351ef40e181f489a6cb25a838dcecc089770f5a7cfb6738a977ff6",
+      "size": 124007
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/Cargo.toml": {
+      "sha256": "ec3287f0c7a7f731d18ee9f1dc4f3410cf38a12f58abb8dd1b27783a30cb268c",
+      "size": 6197
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/Cargo.toml.orig": {
+      "sha256": "f96aff68bcba697d3af918ae37da03e99e2a8455101ab033788d5d32a96f1c76",
+      "size": 4370
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/README.md": {
+      "sha256": "76733b1f9247e0cc5a303ed3c3909d3f509f9deb475fc1bbd7fbb46bd781bb4e",
+      "size": 1097
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/build.rs": {
+      "sha256": "536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4",
+      "size": 13
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/geph5_client.h": {
+      "sha256": "9c01d4bdbf32bb6e57efd6e3a0659cf75c601e86cc69ea85be4fd9dbf0d4979a",
+      "size": 1691
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/auth.rs": {
+      "sha256": "3126244142c9901ee9111bb1e09c9d7f1ecec9183032b3c1ed7cc253784dcf50",
+      "size": 7992
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/bin/geph5-client.rs": {
+      "sha256": "0633cef8087d93e6908146dad3c9ac945299003540ed5a08da56347e73200f6b",
+      "size": 3272
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/bound_dialer.rs": {
+      "sha256": "179f202676eac7c5aef382249555c45af0eecab8024a0ee23662e3a66ffe1f53",
+      "size": 13382
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker.rs": {
+      "sha256": "44aabfedeac3260804481ff0c996b3112ff6a88b4a167dd0a4013a4472b027de",
+      "size": 8870
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/aws_lambda.rs": {
+      "sha256": "fbe2b8687cda5857cbf0377d181b6db8f4753446feb4acd3f73a85986b63a4ed",
+      "size": 13545
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/bind_forward.rs": {
+      "sha256": "5ca29b6b7e4405542665f8534aec425275f60987f337d5bf080d7a988dfe1e4a",
+      "size": 3624
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/fronted_http.rs": {
+      "sha256": "c216756ebfa276d3278789eaeabea554f1a27ce9cc1ba1265dbda5b06dd892a2",
+      "size": 2539
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/http_client.rs": {
+      "sha256": "08e3bc2faf0b0df6375623f3ce2104adf1bf46d60561569c72d669e5c119d3b8",
+      "size": 8010
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/priority_race.rs": {
+      "sha256": "8afc01c4ce78b8ec5c418b05526c65205299e6c5407c0edf610ebdb4ea73d6dd",
+      "size": 1111
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/race.rs": {
+      "sha256": "915f41042906383fae9ddbd0227f392fde78b75599ed70d6087ad2ba5a05df35",
+      "size": 1844
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/broker/tunneled_http.rs": {
+      "sha256": "eae3dc574bc74cbec928ba7dcbddb5c85114cf5132b80a7cac3ae57082f5101c",
+      "size": 6718
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/bw_accounting.rs": {
+      "sha256": "ce1c236a5e47a931dddc746142a405928bcc722bcea68a8292259fcda4c4e581",
+      "size": 3623
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/bw_token.rs": {
+      "sha256": "450293327f8d405aa84d166580784f1e3d2b5312bb079f095c219f248276009a",
+      "size": 6048
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/china/china-domains.txt": {
+      "sha256": "c2bf00bcc32bf52bd14b1a14ed50f40db8bb0cf4b82aea9c436f2e1c639e834f",
+      "size": 1335881
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/china/china-ips.txt": {
+      "sha256": "1e855b2493221becffe6261c97efce005f2cea65bf506e3c6ca1687d7e7551ad",
+      "size": 117795
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/china/china-sync.sh": {
+      "sha256": "af0b8f101826216f8f72f51a5b3c1441efec8ce1e2b08aa4f37c1d2ff6ba7e7e",
+      "size": 154
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/china/generate-china.sh": {
+      "sha256": "231fc544de4f118b02f7c3af36b265d872130c47443a1a6db91e02989a7f4917",
+      "size": 163
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/china/mod.rs": {
+      "sha256": "74266167074fe83558fd5fa7b5da7b19880ef819399f3d5e666e4d20e40d14a9",
+      "size": 8140
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/client.rs": {
+      "sha256": "7beeb67ef474626d4d4a176dce15e31481af2ccd5e20e3461b4e5ead7fd23fbc",
+      "size": 12171
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/control_prot.rs": {
+      "sha256": "585f4fd3f48dd855d56bb89ff44d6d658ff0f7f0a9b0f8f30758b17303e0e299",
+      "size": 8109
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/database.rs": {
+      "sha256": "ecc8ccd9bc0ad940b8f7431b8c6212a676735438e328dec97eb71d82150a5f33",
+      "size": 6150
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/device_metadata.rs": {
+      "sha256": "45c76d593d7282e5f5343015c14d7a5e1daaef42c9db15517dd01cb450de58f9",
+      "size": 3636
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/dial_logging.rs": {
+      "sha256": "6e67141a1245350593cc65be3f044f09c7c4fb3986ac10c4e4d02303ae38a76c",
+      "size": 6771
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/get_dialer.rs": {
+      "sha256": "a2c078bbd67a3d95a6cafa7a9e5f2bb62c2d6082fdaba3eb127bba29729072e4",
+      "size": 16432
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/http_proxy/address.rs": {
+      "sha256": "d07b541b2fe3ad3e5aa93cd8892d6087ae7da7659038ce8d1ffcfc018c74c926",
+      "size": 4472
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/http_proxy/http_client.rs": {
+      "sha256": "99092cdef6f40b11690c1523882764def0fd9d4aae8e03ac4a92e3f829192e0e",
+      "size": 228
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/http_proxy/mod.rs": {
+      "sha256": "8dcbf400418dc48949e7e0df6af73dfd99f05604057629217793e792a9476c8b",
+      "size": 17376
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/http_proxy/rt_compat.rs": {
+      "sha256": "0cefcb9ca9736ad1398ebcb90f1e30e03c5ac2a2ea0a5fb047cdcbb6cfddcb57",
+      "size": 4446
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/lib.rs": {
+      "sha256": "a023bff31a3ab4235948292fd950584ec19b81505967552db952f1fb56938b16",
+      "size": 8591
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/litecopy.rs": {
+      "sha256": "1b73d1354a8f15a7f18ff50a4964d367cd7d8c47d41d415a8c2bce06bebf0af2",
+      "size": 1111
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/logging.rs": {
+      "sha256": "27e4ac5cce9b32832a0d059db5710d1fb458cbd319d7a2ee4a1766d56d887620",
+      "size": 4657
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/pac.rs": {
+      "sha256": "15b913eeb19ba0e4226d03191e2c9474072a2d31a8b5871fbccc998b57f944cc",
+      "size": 2348
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/port_forward.rs": {
+      "sha256": "6f347774a258f4657b26717420c66c564f57ff900d5a9bcf44441b2ce65342d1",
+      "size": 2338
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/route_cache.rs": {
+      "sha256": "61b99db4118f5524baccd22248a7c22b09c81f4a5540269a0f3d16573c088bb4",
+      "size": 6644
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/rsa_composition_tests.rs": {
+      "sha256": "8699e7a637445534a309f346c589dca3944681dc89326cab79347cc079731faf",
+      "size": 15883
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/session.rs": {
+      "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822",
+      "size": 33495
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/socks5.rs": {
+      "sha256": "68f143ad46b409e94a40001f9952a4be498ec998e1f31df6bacdcf73630dd49c",
+      "size": 11144
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/spoof_dns.rs": {
+      "sha256": "78f21249db399aedf22698929fa7e43d7cfb94d483e790330e447aacbde18c96",
+      "size": 8673
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/stats.rs": {
+      "sha256": "62f0123483f75e7242fe3ce33eb3d1845ae99805a45be061d4c07f63f9ff94fe",
+      "size": 794
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/taskpool.rs": {
+      "sha256": "8a9cc2ba102aa6987b4600ce3199d358d06afc9334dc0172ebddc420157248f1",
+      "size": 515
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/timeout.rs": {
+      "sha256": "03722cf8e07e86518ce90f7fc1cbbb15e1c101aca336ceb376d55536d6497f63",
+      "size": 1240
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/traffcount.rs": {
+      "sha256": "4aa25244a12c3005445048cc58851aa300fe9ac617d4072275f4feb46f0504cc",
+      "size": 3844
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/tunneled_http.rs": {
+      "sha256": "32a40ee30e89b2919b8876988ece8655a0f587e81afa495a47b0e14fdae3e04f",
+      "size": 7428
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/updates.rs": {
+      "sha256": "cd4dd3b4ad1ef09e26e26fb718df050e3e441aca8536c03830b0dc507e4e5825",
+      "size": 2074
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/geph5-client/src/vpn.rs": {
+      "sha256": "82b549d2395183585017cb90906820ab1f309893d63917d894ca94b4f8a6bca1",
+      "size": 10463
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/independent-fixture-review.json": {
+      "sha256": "83b9c26c03780acd4d9873afc03086629abd7d8bc93fe2a73eb023d58e9d0085",
+      "size": 5461
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/mizaru-client-only/Cargo.lock": {
+      "sha256": "072b4ab2f585a9ab842ea38fcc6114761118f23bfc44bd9effc41916562ddf05",
+      "size": 12130
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/mizaru-client-only/Cargo.toml": {
+      "sha256": "2427386647789599515ccb9dc638c13abc263c4c4bda4e7bc27503fdf1269eaf",
+      "size": 412
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/mizaru-client-only/src/lib.rs": {
+      "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+      "size": 9180
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/mizaru-client-only/tests/contracts.rs": {
+      "sha256": "e39b5f23b0956f26ee99bc71989ca13729a3e9657bf7daaadcd21b3a593153d4",
+      "size": 11707
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/public-cargo-offline.sb": {
+      "sha256": "9c69b5aa0a6082b49a788e05730fa02a9d478395cedbfb5635ad320bd44ade07",
+      "size": 1112
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/test-command.json": {
+      "sha256": "8e8ba16c125f52a5c6c218df2093cfed5b536f4e1cb94d30bd82edb1c69db841",
+      "size": 1469
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/test-result.json": {
+      "sha256": "cbc37a21e8d1af8ec3a73cdfa5c0d33c7e7562f02bbd29b40d7375998d478d17",
+      "size": 61
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/independent-compat-review/compatibility-corrected-independent.log": {
+      "sha256": "589544c9880f2a0ca3dac06086c80ed76c5841c894cf4ea07cf8c51efdbfe62b",
+      "size": 1239
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/independent-compat-review/corrected-review-hashes.json": {
+      "sha256": "4d9245456b1b3493b00b8d9c01144783e0792dbb58f487afcc953116d338dd3f",
+      "size": 927
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/isc-notice-provenance/bound-archives/geph5-broker-protocol-0.4.3.crate": {
+      "sha256": "c0f8b70695d21757da473ffba32eeeba85f9f79708b11b54812cb77b9fc4e0d1",
+      "size": 26306
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/isc-notice-provenance/bound-archives/mizaru2-0.2.21.crate": {
+      "sha256": "db4ea54ffedc62011081b18940996e37453bf029553b40964302f7efc5dcaff7",
+      "size": 13140
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/legacy-target/debug/sign_adapter": {
+      "sha256": "c3ce6182ecc7c8129ab4c1a1c79fc0f254d00e5175c8df3e2d86cde349c96ed4",
+      "size": 2982944
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/legacy-vector.json": {
+      "sha256": "071e2d2aa6bc7acf125fd5db8f83caf410ab61eb286b2e010a6de372eba0b9e7",
+      "size": 19467
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3/Cargo.lock": {
+      "sha256": "9fd682481aa33a57ee2ad7254fdb482e595c598010b505e647872df4c51454c9",
+      "size": 123956
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3/Cargo.toml": {
+      "sha256": "2b52b2ff59bea2033504b1f94c5d05fbea35e4c875598c18e2e29e30d07212f4",
+      "size": 6217
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3/slipstream-vendor/aws-lc-backend/Cargo.toml": {
+      "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+      "size": 146
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3/slipstream-vendor/geph5-broker-protocol/Cargo.toml": {
+      "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+      "size": 1945
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/materialized-a/geph5-client-0.4.3/slipstream-vendor/mizaru-client/Cargo.toml": {
+      "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+      "size": 317
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/metadata-qualification/aarch64-apple-darwin.json": {
+      "sha256": "fed1d1095ec04716d520d93a79e359008f640d03b36838ec39c2c19547a40330",
+      "size": 2032836
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/metadata-qualification/final-receipt.json": {
+      "sha256": "5ee5de366e479e7b84318ccea9da689fc2374c73304d307de68258abd89f2b3a",
+      "size": 3238
+    },
+    "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/source-contract-candidate/metadata-qualification/x86_64-apple-darwin.json": {
+      "sha256": "a3597c391715c8bd8df48eb1f8028bfd4683f658c7372551d13f6481e3192b9c",
+      "size": 2035670
+    }
+  }
+}

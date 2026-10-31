@@ -1,0 +1,801 @@
+{
+  "ancestors": [
+    {
+      "archive_evidence": "ancestor-mizaru2",
+      "name": "mizaru2",
+      "version": "0.2.21"
+    },
+    {
+      "archive_evidence": "ancestor-geph5-broker-protocol",
+      "name": "geph5-broker-protocol",
+      "version": "0.4.3"
+    }
+  ],
+  "binding": {
+    "lock_sha256": "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    "packages": [
+      {
+        "descriptor_sha256": "ca128627b932eb5cb5f80e7de0524d70c9068aff31689b94db8b871c63bc3592",
+        "files": {
+          "Cargo.toml": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+          "LICENSE": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+          "src/lib.rs": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+          "src/owned.rs": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a"
+        },
+        "path": "slipstream-vendor/aws-lc-backend"
+      },
+      {
+        "descriptor_sha256": "5c2d8819035ca6f55da1d8cceca30fba28f274457b00c2375a1ef05abf713cde",
+        "files": {
+          "Cargo.toml": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+          "LICENSE-ISC.txt": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "SOURCE-NOTICE.md": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+          "provenance/Cargo.toml": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+          "src/bridge.rs": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+          "src/exit.rs": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+          "src/lib.rs": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+          "src/mac.rs": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+          "src/puzzle.rs": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+          "src/route.rs": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+          "src/signed.rs": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2"
+        },
+        "path": "slipstream-vendor/geph5-broker-protocol"
+      },
+      {
+        "descriptor_sha256": "b51d00b9d21979f21d5ae806f4e06b90bf87b3ce16ee9b5a802cfdb4b1b4b18a",
+        "files": {
+          "Cargo.toml": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+          "LICENSE-ISC.txt": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "SOURCE-NOTICE.md": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+          "provenance/Cargo.toml": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+          "src/lib.rs": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8"
+        },
+        "path": "slipstream-vendor/mizaru-client"
+      }
+    ],
+    "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7"
+  },
+  "evidence": [
+    {
+      "id": "prior-review-0",
+      "kind": "review",
+      "path": "reviews/prior-review.json",
+      "sha256": "f9ae01b9b6cc0ab59a6f768822999d1d192e6540caef0e1b262cfdd0052a3956",
+      "size": 15584
+    },
+    {
+      "id": "prior-review-1",
+      "kind": "review",
+      "path": "reviews/prior-review.md",
+      "sha256": "7d32c91e9f4664ee626c78ede7d0c875153c0e9dfe84d74bcf82f8c3cc90a68a",
+      "size": 6195
+    },
+    {
+      "id": "prior-review-2",
+      "kind": "review",
+      "path": "reviews/prior-provenance.json",
+      "sha256": "d88d153c8c4f1de442b6766804b10b7976960dd54a85f9c5f0bb10099ea61a99",
+      "size": 11510
+    },
+    {
+      "id": "prior-review-3",
+      "kind": "review",
+      "path": "reviews/prior-backend-bindings.json",
+      "sha256": "2559ab78fae1ce2d9613b19fc4fe24e864f16bb467fb585b1a4021ef4200eced",
+      "size": 8612
+    },
+    {
+      "id": "prior-review-4",
+      "kind": "review",
+      "path": "reviews/prior-protocol-review.json",
+      "sha256": "9506a86750a02ee95f7c10da1623ecb2e88b49c3e7d9c2b9bfa296dfb3b0636c",
+      "size": 13169
+    },
+    {
+      "id": "prior-review-5",
+      "kind": "review",
+      "path": "reviews/prior-protocol-review.md",
+      "sha256": "97f11694bcce60c1ac176b87857008d0d19a45f81ff9ddb199d29b1b1e4d2e90",
+      "size": 2238
+    },
+    {
+      "id": "source-mizaru2-slipstream-client-0",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/mizaru-client/Cargo.toml",
+      "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+      "size": 317
+    },
+    {
+      "id": "source-mizaru2-slipstream-client-1",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/mizaru-client/LICENSE-ISC.txt",
+      "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+      "size": 740
+    },
+    {
+      "id": "source-mizaru2-slipstream-client-2",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/mizaru-client/SOURCE-NOTICE.md",
+      "sha256": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+      "size": 2228
+    },
+    {
+      "id": "source-mizaru2-slipstream-client-3",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/mizaru-client/provenance/Cargo.toml",
+      "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+      "size": 1215
+    },
+    {
+      "id": "source-mizaru2-slipstream-client-4",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/mizaru-client/src/lib.rs",
+      "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+      "size": 9180
+    },
+    {
+      "id": "ancestor-mizaru2",
+      "kind": "archive",
+      "path": "archives/mizaru2-0.2.21.crate",
+      "sha256": "db4ea54ffedc62011081b18940996e37453bf029553b40964302f7efc5dcaff7",
+      "size": 13140
+    },
+    {
+      "id": "source-slipstream-rsa-client-0",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/aws-lc-backend/Cargo.toml",
+      "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+      "size": 146
+    },
+    {
+      "id": "source-slipstream-rsa-client-1",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/aws-lc-backend/LICENSE",
+      "sha256": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+      "size": 1063
+    },
+    {
+      "id": "source-slipstream-rsa-client-2",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+      "size": 14176
+    },
+    {
+      "id": "source-slipstream-rsa-client-3",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/aws-lc-backend/src/owned.rs",
+      "sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+      "size": 2288
+    },
+    {
+      "id": "source-geph5-broker-protocol-0",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/Cargo.toml",
+      "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+      "size": 1945
+    },
+    {
+      "id": "source-geph5-broker-protocol-1",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/LICENSE-ISC.txt",
+      "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+      "size": 740
+    },
+    {
+      "id": "source-geph5-broker-protocol-2",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/SOURCE-NOTICE.md",
+      "sha256": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+      "size": 2344
+    },
+    {
+      "id": "source-geph5-broker-protocol-3",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/provenance/Cargo.toml",
+      "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+      "size": 1884
+    },
+    {
+      "id": "source-geph5-broker-protocol-4",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/bridge.rs",
+      "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+      "size": 277
+    },
+    {
+      "id": "source-geph5-broker-protocol-5",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/exit.rs",
+      "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+      "size": 2891
+    },
+    {
+      "id": "source-geph5-broker-protocol-6",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/lib.rs",
+      "sha256": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+      "size": 8383
+    },
+    {
+      "id": "source-geph5-broker-protocol-7",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/mac.rs",
+      "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+      "size": 1039
+    },
+    {
+      "id": "source-geph5-broker-protocol-8",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/puzzle.rs",
+      "sha256": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+      "size": 1172
+    },
+    {
+      "id": "source-geph5-broker-protocol-9",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/route.rs",
+      "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+      "size": 1007
+    },
+    {
+      "id": "source-geph5-broker-protocol-10",
+      "kind": "review",
+      "path": "sources/slipstream-vendor/geph5-broker-protocol/src/signed.rs",
+      "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+      "size": 4095
+    },
+    {
+      "id": "ancestor-geph5-broker-protocol",
+      "kind": "archive",
+      "path": "archives/geph5-broker-protocol-0.4.3.crate",
+      "sha256": "c0f8b70695d21757da473ffba32eeeba85f9f79708b11b54812cb77b9fc4e0d1",
+      "size": 26306
+    },
+    {
+      "id": "aws-lc-archive",
+      "kind": "review",
+      "path": "backend/aws-lc-sys-0.45.0.crate",
+      "sha256": "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27",
+      "size": 9725710
+    },
+    {
+      "id": "backend-api-0",
+      "kind": "review",
+      "path": "backend/Cargo.toml",
+      "sha256": "836bac6390070d88f3c804f4212e16ca6e142f6c111795094d925470d07d6866",
+      "size": 3360
+    },
+    {
+      "id": "backend-api-1",
+      "kind": "review",
+      "path": "backend/aws-lc/include/openssl/bn.h",
+      "sha256": "9c3b508aef0d12f5db09995106dc00b667c8194836e0db60bc752799ab0cf851",
+      "size": 46677
+    },
+    {
+      "id": "backend-api-2",
+      "kind": "review",
+      "path": "backend/aws-lc/include/openssl/rsa.h",
+      "sha256": "d9140449f1e55ad244974b07a980d2df4eb19cc1312a73b1c7a2234d836cd889",
+      "size": 45653
+    },
+    {
+      "id": "backend-api-3",
+      "kind": "review",
+      "path": "backend/aws-lc/include/openssl/rand.h",
+      "sha256": "968775664d7e574b96a3c473e39a38f2173e9a8db1ee3decab165f236e85efc2",
+      "size": 4778
+    },
+    {
+      "id": "backend-api-4",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/bn/ctx.c",
+      "sha256": "108768c96480fd3b8ad85d08e8975f9dd6ba1f3d91756f9e717f82fd28487f46",
+      "size": 4655
+    },
+    {
+      "id": "backend-api-5",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/bn/bn.c",
+      "sha256": "d1dcac7dbabd174fc6413a4b20de7169a4d8908ac67a2d745d71bcfd8c5dfae8",
+      "size": 9325
+    },
+    {
+      "id": "backend-api-6",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/bn/bytes.c",
+      "sha256": "dc96b981cd49f7cbfd7af490c00442b7416956b2a60db1e7458f2ab698595e32",
+      "size": 7965
+    },
+    {
+      "id": "backend-api-7",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/bn/gcd.c",
+      "sha256": "7ebb35b113d29f804567efef43204725224c8d806b59fdab679eb1c9cb00691e",
+      "size": 7365
+    },
+    {
+      "id": "backend-api-8",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/bn/exponentiation.c",
+      "sha256": "a858ca843eeabed2102e8686cc55aaffb6854176eb39f5322cd8d0278434a86e",
+      "size": 36217
+    },
+    {
+      "id": "backend-api-9",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/bn/montgomery.c",
+      "sha256": "073cba671b1c22ebf57dea832835a4b9e179a153326de60d8a2a0ab05753a1fc",
+      "size": 16600
+    },
+    {
+      "id": "backend-api-10",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/rsa_extra/rsa_asn1.c",
+      "sha256": "2c14056d37e79145ff2354f71b8f151221dc17210409ede1e00a1174fb0c5693",
+      "size": 7336
+    },
+    {
+      "id": "backend-api-11",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/fipsmodule/rsa/padding.c",
+      "sha256": "a2e241acc3cb29c7f0ebf5b988e07e71999955187ab0cfe5cc602a025e28a399",
+      "size": 9886
+    },
+    {
+      "id": "backend-api-12",
+      "kind": "review",
+      "path": "backend/aws-lc/crypto/mem.c",
+      "sha256": "88651b6d0b7e135980f97408815e2d357b2c39eabb563e241e795792d60fc3a1",
+      "size": 15430
+    },
+    {
+      "id": "backend-baseline-lib.rs",
+      "kind": "review",
+      "path": "backend/baseline/lib.rs",
+      "sha256": "1131e9eee36e226e5d45ed9e0990a27a688267215f40e36bce489a865efe47da",
+      "size": 26492
+    },
+    {
+      "id": "backend-baseline-owned.rs",
+      "kind": "review",
+      "path": "backend/baseline/owned.rs",
+      "sha256": "70f68d4b3679112aaaf2d8d17747f1ca7376ba39d9fd3692b25b825c72257642",
+      "size": 3307
+    },
+    {
+      "id": "backend-retained-0",
+      "kind": "review",
+      "path": "retained/backend-0-legacy-vector.json",
+      "sha256": "071e2d2aa6bc7acf125fd5db8f83caf410ab61eb286b2e010a6de372eba0b9e7",
+      "size": 19467
+    },
+    {
+      "id": "backend-retained-1",
+      "kind": "review",
+      "path": "retained/backend-1-compat-vectors.json",
+      "sha256": "c7bb06db21aeafd074a312c724e1f73aa44f1730cb52cf073e98a96e809b487e",
+      "size": 224357
+    },
+    {
+      "id": "backend-retained-2",
+      "kind": "review",
+      "path": "retained/backend-2-compat-prototype-test.log",
+      "sha256": "224de6862aaa2ef0acbc024c68e90486fea847113e546e422907b6b7f834308d",
+      "size": 2259
+    },
+    {
+      "id": "backend-retained-3",
+      "kind": "review",
+      "path": "retained/backend-3-async-independent-review-test.log",
+      "sha256": "beed4b492d6708615887d1fd353b74eb2a2ae6e4fed3a4de7b70eee9dc4f23b9",
+      "size": 987
+    },
+    {
+      "id": "backend-retained-4",
+      "kind": "review",
+      "path": "retained/backend-4-async-prototype-test.log",
+      "sha256": "c46d4b400bca5e2e5c470aeaeb009163dc582b9dc893fd94157bb2bd1bb407ce",
+      "size": 1175
+    },
+    {
+      "id": "backend-retained-5",
+      "kind": "review",
+      "path": "retained/backend-5-compatibility-corrected-independent.log",
+      "sha256": "589544c9880f2a0ca3dac06086c80ed76c5841c894cf4ea07cf8c51efdbfe62b",
+      "size": 1239
+    },
+    {
+      "id": "backend-retained-6",
+      "kind": "review",
+      "path": "retained/backend-6-corrected-review-hashes.json",
+      "sha256": "4d9245456b1b3493b00b8d9c01144783e0792dbb58f487afcc953116d338dd3f",
+      "size": 927
+    },
+    {
+      "id": "backend-retained-7",
+      "kind": "review",
+      "path": "retained/backend-7-compatibility.rs",
+      "sha256": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+      "size": 20807
+    },
+    {
+      "id": "backend-retained-8",
+      "kind": "review",
+      "path": "retained/backend-8-async_boundary.rs",
+      "sha256": "edac173a4c72c5b75bf0d3558e6fd292ffc4d7649af7666acc13f7cf67a3b685",
+      "size": 11786
+    },
+    {
+      "id": "backend-retained-9",
+      "kind": "review",
+      "path": "retained/backend-9-final-execution-evidence.json",
+      "sha256": "1360e35958bcaa75991d5c777183ec20d0221eec29bddb48617aea82f743f3a9",
+      "size": 3332
+    },
+    {
+      "id": "backend-retained-10",
+      "kind": "review",
+      "path": "retained/backend-10-independent-fixture-review.json",
+      "sha256": "e3600ce693895353545878b233b9a20ee8e8d171bf4738889adf7dc6600bb8ba",
+      "size": 5461
+    },
+    {
+      "id": "protocol-retained-0",
+      "kind": "review",
+      "path": "retained/protocol-0-client-adapter-independent-result.json",
+      "sha256": "617daf14aea0f4bc1c1378fc90e569e9d95bbd7f07d47aeddbf2f9f7204e5efc",
+      "size": 2002
+    },
+    {
+      "id": "protocol-retained-1",
+      "kind": "review",
+      "path": "retained/protocol-1-final-execution-evidence.json",
+      "sha256": "1360e35958bcaa75991d5c777183ec20d0221eec29bddb48617aea82f743f3a9",
+      "size": 3332
+    },
+    {
+      "id": "protocol-retained-2",
+      "kind": "review",
+      "path": "retained/protocol-2-compat-vectors.json",
+      "sha256": "c7bb06db21aeafd074a312c724e1f73aa44f1730cb52cf073e98a96e809b487e",
+      "size": 224357
+    },
+    {
+      "id": "ancestor-osv",
+      "kind": "osv",
+      "path": "osv/ancestors.json",
+      "sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
+      "size": 495
+    },
+    {
+      "id": "osv-complete",
+      "kind": "review",
+      "path": "osv/osv-complete.json",
+      "sha256": "a51eecea9afd3a26ae703ef4e3f53d44130ff161288b90b6853c3f6fbf2f0c23",
+      "size": 90368
+    },
+    {
+      "id": "osv-receipt",
+      "kind": "review",
+      "path": "osv/receipt.json",
+      "sha256": "dc370ab081e6b9ac17a818dd4322bb5e05f7f4dd6162b7705c0a971865d4485e",
+      "size": 12186
+    },
+    {
+      "id": "osv-projection",
+      "kind": "review",
+      "path": "osv/projection.json",
+      "sha256": "32d244e23927b7316f664b613d20876424d843c579a8ab2713fdef2cb2a1bbcb",
+      "size": 717
+    },
+    {
+      "id": "verified-reuse",
+      "kind": "review",
+      "path": "reviews/verified-reuse.json",
+      "sha256": "201a5114ecbe042b5d6dcb953c977d4a473c9b3b54815b4e5ef7ba0591d805b4",
+      "size": 120232
+    },
+    {
+      "id": "current-osv-mizaru2",
+      "kind": "review",
+      "path": "osv/current-mizaru2.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "current-osv-geph5-broker-protocol",
+      "kind": "review",
+      "path": "osv/current-geph5-broker-protocol.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "current-osv-receipt",
+      "kind": "review",
+      "path": "osv/current-receipt.json",
+      "sha256": "9a0563eb5b126b43d14b55414b899916324c6edf6415a787238fa49124d1aad4",
+      "size": 1020
+    },
+    {
+      "id": "current-source-review-json",
+      "kind": "review",
+      "path": "reviews/source-review-20261031.json",
+      "sha256": "5410e83f7e2cc1a3cc86b13c4d34fe4cc7b348bfac8acfe35d3e61bd3ca8289a",
+      "size": 31702
+    },
+    {
+      "id": "current-source-review-md",
+      "kind": "review",
+      "path": "reviews/source-review-20261031.md",
+      "sha256": "1d287933a0783b2195c7fd69d4a240e16e0d5bea1987c34ba8011011b5082524",
+      "size": 7267
+    },
+    {
+      "id": "portable-evidence",
+      "kind": "review",
+      "path": "reviews/portable-evidence.json",
+      "sha256": "5259f0348825871e5f7aba756d40c0ac432df773c3426625f30a2f5b0277fcfc",
+      "size": 4528
+    }
+  ],
+  "osv_evidence": "ancestor-osv",
+  "packages": [
+    {
+      "inherited_findings": [],
+      "manual_findings": [],
+      "path": "slipstream-vendor/mizaru-client",
+      "source_review": {
+        "disposition": "reviewed",
+        "evidence": [
+          "prior-review-0",
+          "prior-review-1",
+          "prior-review-2",
+          "prior-review-3",
+          "prior-review-4",
+          "prior-review-5",
+          "source-mizaru2-slipstream-client-0",
+          "source-mizaru2-slipstream-client-1",
+          "source-mizaru2-slipstream-client-2",
+          "source-mizaru2-slipstream-client-3",
+          "source-mizaru2-slipstream-client-4",
+          "source-slipstream-rsa-client-0",
+          "source-slipstream-rsa-client-1",
+          "source-slipstream-rsa-client-2",
+          "source-slipstream-rsa-client-3",
+          "source-geph5-broker-protocol-0",
+          "source-geph5-broker-protocol-1",
+          "source-geph5-broker-protocol-2",
+          "source-geph5-broker-protocol-3",
+          "source-geph5-broker-protocol-4",
+          "source-geph5-broker-protocol-5",
+          "source-geph5-broker-protocol-6",
+          "source-geph5-broker-protocol-7",
+          "source-geph5-broker-protocol-8",
+          "source-geph5-broker-protocol-9",
+          "source-geph5-broker-protocol-10",
+          "aws-lc-archive",
+          "backend-api-0",
+          "backend-api-1",
+          "backend-api-2",
+          "backend-api-3",
+          "backend-api-4",
+          "backend-api-5",
+          "backend-api-6",
+          "backend-api-7",
+          "backend-api-8",
+          "backend-api-9",
+          "backend-api-10",
+          "backend-api-11",
+          "backend-api-12",
+          "backend-baseline-lib.rs",
+          "backend-baseline-owned.rs",
+          "backend-retained-0",
+          "backend-retained-1",
+          "backend-retained-2",
+          "backend-retained-3",
+          "backend-retained-4",
+          "backend-retained-5",
+          "backend-retained-6",
+          "backend-retained-7",
+          "backend-retained-8",
+          "backend-retained-9",
+          "backend-retained-10",
+          "protocol-retained-0",
+          "protocol-retained-1",
+          "protocol-retained-2",
+          "osv-complete",
+          "osv-receipt",
+          "osv-projection",
+          "verified-reuse",
+          "current-osv-mizaru2",
+          "current-osv-geph5-broker-protocol",
+          "current-osv-receipt",
+          "current-source-review-json",
+          "current-source-review-md",
+          "portable-evidence"
+        ],
+        "files": [
+          "Cargo.toml",
+          "LICENSE-ISC.txt",
+          "SOURCE-NOTICE.md",
+          "provenance/Cargo.toml",
+          "src/lib.rs"
+        ]
+      }
+    },
+    {
+      "inherited_findings": [],
+      "manual_findings": [],
+      "path": "slipstream-vendor/aws-lc-backend",
+      "source_review": {
+        "disposition": "reviewed",
+        "evidence": [
+          "prior-review-0",
+          "prior-review-1",
+          "prior-review-2",
+          "prior-review-3",
+          "prior-review-4",
+          "prior-review-5",
+          "source-mizaru2-slipstream-client-0",
+          "source-mizaru2-slipstream-client-1",
+          "source-mizaru2-slipstream-client-2",
+          "source-mizaru2-slipstream-client-3",
+          "source-mizaru2-slipstream-client-4",
+          "source-slipstream-rsa-client-0",
+          "source-slipstream-rsa-client-1",
+          "source-slipstream-rsa-client-2",
+          "source-slipstream-rsa-client-3",
+          "source-geph5-broker-protocol-0",
+          "source-geph5-broker-protocol-1",
+          "source-geph5-broker-protocol-2",
+          "source-geph5-broker-protocol-3",
+          "source-geph5-broker-protocol-4",
+          "source-geph5-broker-protocol-5",
+          "source-geph5-broker-protocol-6",
+          "source-geph5-broker-protocol-7",
+          "source-geph5-broker-protocol-8",
+          "source-geph5-broker-protocol-9",
+          "source-geph5-broker-protocol-10",
+          "aws-lc-archive",
+          "backend-api-0",
+          "backend-api-1",
+          "backend-api-2",
+          "backend-api-3",
+          "backend-api-4",
+          "backend-api-5",
+          "backend-api-6",
+          "backend-api-7",
+          "backend-api-8",
+          "backend-api-9",
+          "backend-api-10",
+          "backend-api-11",
+          "backend-api-12",
+          "backend-baseline-lib.rs",
+          "backend-baseline-owned.rs",
+          "backend-retained-0",
+          "backend-retained-1",
+          "backend-retained-2",
+          "backend-retained-3",
+          "backend-retained-4",
+          "backend-retained-5",
+          "backend-retained-6",
+          "backend-retained-7",
+          "backend-retained-8",
+          "backend-retained-9",
+          "backend-retained-10",
+          "protocol-retained-0",
+          "protocol-retained-1",
+          "protocol-retained-2",
+          "osv-complete",
+          "osv-receipt",
+          "osv-projection",
+          "verified-reuse",
+          "current-osv-mizaru2",
+          "current-osv-geph5-broker-protocol",
+          "current-osv-receipt",
+          "current-source-review-json",
+          "current-source-review-md",
+          "portable-evidence"
+        ],
+        "files": [
+          "Cargo.toml",
+          "LICENSE",
+          "src/lib.rs",
+          "src/owned.rs"
+        ]
+      }
+    },
+    {
+      "inherited_findings": [],
+      "manual_findings": [],
+      "path": "slipstream-vendor/geph5-broker-protocol",
+      "source_review": {
+        "disposition": "reviewed",
+        "evidence": [
+          "prior-review-0",
+          "prior-review-1",
+          "prior-review-2",
+          "prior-review-3",
+          "prior-review-4",
+          "prior-review-5",
+          "source-mizaru2-slipstream-client-0",
+          "source-mizaru2-slipstream-client-1",
+          "source-mizaru2-slipstream-client-2",
+          "source-mizaru2-slipstream-client-3",
+          "source-mizaru2-slipstream-client-4",
+          "source-slipstream-rsa-client-0",
+          "source-slipstream-rsa-client-1",
+          "source-slipstream-rsa-client-2",
+          "source-slipstream-rsa-client-3",
+          "source-geph5-broker-protocol-0",
+          "source-geph5-broker-protocol-1",
+          "source-geph5-broker-protocol-2",
+          "source-geph5-broker-protocol-3",
+          "source-geph5-broker-protocol-4",
+          "source-geph5-broker-protocol-5",
+          "source-geph5-broker-protocol-6",
+          "source-geph5-broker-protocol-7",
+          "source-geph5-broker-protocol-8",
+          "source-geph5-broker-protocol-9",
+          "source-geph5-broker-protocol-10",
+          "aws-lc-archive",
+          "backend-api-0",
+          "backend-api-1",
+          "backend-api-2",
+          "backend-api-3",
+          "backend-api-4",
+          "backend-api-5",
+          "backend-api-6",
+          "backend-api-7",
+          "backend-api-8",
+          "backend-api-9",
+          "backend-api-10",
+          "backend-api-11",
+          "backend-api-12",
+          "backend-baseline-lib.rs",
+          "backend-baseline-owned.rs",
+          "backend-retained-0",
+          "backend-retained-1",
+          "backend-retained-2",
+          "backend-retained-3",
+          "backend-retained-4",
+          "backend-retained-5",
+          "backend-retained-6",
+          "backend-retained-7",
+          "backend-retained-8",
+          "backend-retained-9",
+          "backend-retained-10",
+          "protocol-retained-0",
+          "protocol-retained-1",
+          "protocol-retained-2",
+          "osv-complete",
+          "osv-receipt",
+          "osv-projection",
+          "verified-reuse",
+          "current-osv-mizaru2",
+          "current-osv-geph5-broker-protocol",
+          "current-osv-receipt",
+          "current-source-review-json",
+          "current-source-review-md",
+          "portable-evidence"
+        ],
+        "files": [
+          "Cargo.toml",
+          "LICENSE-ISC.txt",
+          "SOURCE-NOTICE.md",
+          "provenance/Cargo.toml",
+          "src/bridge.rs",
+          "src/exit.rs",
+          "src/lib.rs",
+          "src/mac.rs",
+          "src/puzzle.rs",
+          "src/route.rs",
+          "src/signed.rs"
+        ]
+      }
+    }
+  ],
+  "schema_version": 1
+}

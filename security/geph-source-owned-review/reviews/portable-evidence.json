@@ -1,0 +1,67 @@
+{
+  "generated_at_utc": "2026-10-31T00:47:04.977350+00:00",
+  "projections": [
+    {
+      "original_sha256": "4fc05b1c60137b47d897e93301d9007b91720fea36e5fbaa2839e44a152e0b57",
+      "path": "reviews/prior-review.json",
+      "portable_sha256": "f9ae01b9b6cc0ab59a6f768822999d1d192e6540caef0e1b262cfdd0052a3956",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "edac7273bd60e8312009d1710d360fc52ebc03f0c8964a21d8f5f91420a14e1f",
+      "path": "reviews/prior-provenance.json",
+      "portable_sha256": "d88d153c8c4f1de442b6766804b10b7976960dd54a85f9c5f0bb10099ea61a99",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "a49a9887b82f3e4dbe4f907845260ee5d4253c8ff42be77f0e41dac1eb16079b",
+      "path": "reviews/prior-backend-bindings.json",
+      "portable_sha256": "2559ab78fae1ce2d9613b19fc4fe24e864f16bb467fb585b1a4021ef4200eced",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "ff3f0897e7a837c7a41248a1b039356450d129829c5d0d20b1edef012c73cf7c",
+      "path": "reviews/prior-protocol-review.json",
+      "portable_sha256": "9506a86750a02ee95f7c10da1623ecb2e88b49c3e7d9c2b9bfa296dfb3b0636c",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "ea2ecf8f48eea12450d56dfb874d05af1ab4df7559e3dc6ded2939ff6283b375",
+      "path": "retained/backend-2-compat-prototype-test.log",
+      "portable_sha256": "224de6862aaa2ef0acbc024c68e90486fea847113e546e422907b6b7f834308d",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "349550e802328cf11d4abe19ec55eb1fcfa4fc75a9bc1267bf5599378372b67f",
+      "path": "retained/backend-4-async-prototype-test.log",
+      "portable_sha256": "c46d4b400bca5e2e5c470aeaeb009163dc582b9dc893fd94157bb2bd1bb407ce",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "83b9c26c03780acd4d9873afc03086629abd7d8bc93fe2a73eb023d58e9d0085",
+      "path": "retained/backend-10-independent-fixture-review.json",
+      "portable_sha256": "e3600ce693895353545878b233b9a20ee8e8d171bf4738889adf7dc6600bb8ba",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "4c272ee5d239bb22dd4f777a965ee9397f75e64e3a07f1fa5e56f499824f03ad",
+      "path": "retained/protocol-0-client-adapter-independent-result.json",
+      "portable_sha256": "617daf14aea0f4bc1c1378fc90e569e9d95bbd7f07d47aeddbf2f9f7204e5efc",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "7d3bdafd66c88d34aed97e26eff8f5b7b19456ec9f8b77fc6d0a8cde2ced227f",
+      "path": "osv/osv-complete.json",
+      "portable_sha256": "a51eecea9afd3a26ae703ef4e3f53d44130ff161288b90b6853c3f6fbf2f0c23",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    },
+    {
+      "original_sha256": "081669fb3d5355c237ed1ba836ffe50d8c3abc5163f77d4e00e267b77adfec56",
+      "path": "reviews/verified-reuse.json",
+      "portable_sha256": "201a5114ecbe042b5d6dcb953c977d4a473c9b3b54815b4e5ef7ba0591d805b4",
+      "transformation": "Local user-home prefix replaced by retained-home/. Original privately retained; this is a labeled projection, not unchanged raw evidence."
+    }
+  ],
+  "schema_version": 1,
+  "source_review_scope": "Fresh static review of the exact three embedded packages; historical fixture runs remain historical. New combined registry/native audit, metadata, build and account-backed qualification are separate mandatory gates."
+}

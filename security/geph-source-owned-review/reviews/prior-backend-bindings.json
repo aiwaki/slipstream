@@ -1,0 +1,150 @@
+{
+  "aws_lc_archive": {
+    "path": "retained-home/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0.crate",
+    "sha256": "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27",
+    "bytes": 9725710,
+    "matches_candidate_lock": true
+  },
+  "files": [
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/Cargo.toml",
+      "sha256": "836bac6390070d88f3c804f4212e16ca6e142f6c111795094d925470d07d6866",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/include/openssl/bn.h",
+      "sha256": "9c3b508aef0d12f5db09995106dc00b667c8194836e0db60bc752799ab0cf851",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/include/openssl/rsa.h",
+      "sha256": "d9140449f1e55ad244974b07a980d2df4eb19cc1312a73b1c7a2234d836cd889",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/include/openssl/rand.h",
+      "sha256": "968775664d7e574b96a3c473e39a38f2173e9a8db1ee3decab165f236e85efc2",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/ctx.c",
+      "sha256": "108768c96480fd3b8ad85d08e8975f9dd6ba1f3d91756f9e717f82fd28487f46",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/bn.c",
+      "sha256": "d1dcac7dbabd174fc6413a4b20de7169a4d8908ac67a2d745d71bcfd8c5dfae8",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/bytes.c",
+      "sha256": "dc96b981cd49f7cbfd7af490c00442b7416956b2a60db1e7458f2ab698595e32",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/gcd.c",
+      "sha256": "7ebb35b113d29f804567efef43204725224c8d806b59fdab679eb1c9cb00691e",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/exponentiation.c",
+      "sha256": "a858ca843eeabed2102e8686cc55aaffb6854176eb39f5322cd8d0278434a86e",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/bn/montgomery.c",
+      "sha256": "073cba671b1c22ebf57dea832835a4b9e179a153326de60d8a2a0ab05753a1fc",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/rsa_extra/rsa_asn1.c",
+      "sha256": "2c14056d37e79145ff2354f71b8f151221dc17210409ede1e00a1174fb0c5693",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/fipsmodule/rsa/padding.c",
+      "sha256": "a2e241acc3cb29c7f0ebf5b988e07e71999955187ab0cfe5cc602a025e28a399",
+      "matches_locked_archive": true
+    },
+    {
+      "path": "retained-home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-lc-sys-0.45.0/aws-lc/crypto/mem.c",
+      "sha256": "88651b6d0b7e135980f97408815e2d357b2c39eabb563e241e795792d60fc3a1",
+      "matches_locked_archive": true
+    }
+  ],
+  "backend_baseline_comparison": [
+    {
+      "candidate_path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "candidate_sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+      "baseline_path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/lib.rs",
+      "baseline_sha256": "1131e9eee36e226e5d45ed9e0990a27a688267215f40e36bce489a865efe47da",
+      "only_cfg_test_instrumentation_and_tests_removed": true,
+      "diff": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/diffs/slipstream-rsa-client/lib.rs.diff"
+    },
+    {
+      "candidate_path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/source/slipstream-vendor/aws-lc-backend/src/owned.rs",
+      "candidate_sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+      "baseline_path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/owned.rs",
+      "baseline_sha256": "70f68d4b3679112aaaf2d8d17747f1ca7376ba39d9fd3692b25b825c72257642",
+      "only_cfg_test_instrumentation_and_tests_removed": true,
+      "diff": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/diffs/slipstream-rsa-client/owned.rs.diff"
+    }
+  ],
+  "retained_evidence": [
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/legacy-vector.json",
+      "sha256": "071e2d2aa6bc7acf125fd5db8f83caf410ab61eb286b2e010a6de372eba0b9e7",
+      "bytes": 19467
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-vectors.json",
+      "sha256": "c7bb06db21aeafd074a312c724e1f73aa44f1730cb52cf073e98a96e809b487e",
+      "bytes": 224357
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/compat-prototype-test.log",
+      "sha256": "ea2ecf8f48eea12450d56dfb874d05af1ab4df7559e3dc6ded2939ff6283b375",
+      "bytes": 2259
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/async-independent-review-test.log",
+      "sha256": "beed4b492d6708615887d1fd353b74eb2a2ae6e4fed3a4de7b70eee9dc4f23b9",
+      "bytes": 987
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/async-prototype-test.log",
+      "sha256": "349550e802328cf11d4abe19ec55eb1fcfa4fc75a9bc1267bf5599378372b67f",
+      "bytes": 1175
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/independent-compat-review/compatibility-corrected-independent.log",
+      "sha256": "589544c9880f2a0ca3dac06086c80ed76c5841c894cf4ea07cf8c51efdbfe62b",
+      "bytes": 1239
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/independent-compat-review/corrected-review-hashes.json",
+      "sha256": "4d9245456b1b3493b00b8d9c01144783e0792dbb58f487afcc953116d338dd3f",
+      "bytes": 927
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/tests/compatibility.rs",
+      "sha256": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+      "bytes": 20807
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/aws-lc-async-prototype/src/tests/async_boundary.rs",
+      "sha256": "edac173a4c72c5b75bf0d3558e6fd292ffc4d7649af7666acc13f7cf67a3b685",
+      "bytes": 11786
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/final-execution-evidence.json",
+      "sha256": "1360e35958bcaa75991d5c777183ec20d0221eec29bddb48617aea82f743f3a9",
+      "bytes": 3332
+    },
+    {
+      "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/geph-callsite-composition/independent-fixture-review.json",
+      "sha256": "83b9c26c03780acd4d9873afc03086629abd7d8bc93fe2a73eb023d58e9d0085",
+      "bytes": 5461
+    }
+  ]
+}

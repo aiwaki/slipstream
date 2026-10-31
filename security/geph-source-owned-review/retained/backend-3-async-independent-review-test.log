@@ -1,0 +1,13 @@
+
+running 6 tests
+test tests::async_boundary::wrong_level_discards_old_inverse_and_uses_fresh_operation_before_publication ... ok
+test tests::async_boundary::cancelling_suspended_auth_or_bandwidth_cleanses_bytes_and_never_publishes ... ok
+test tests::async_boundary::stale_reply_or_different_key_cannot_finish_a_new_owned_operation ... ok
+test tests::async_boundary::auth_and_bandwidth_futures_are_send_and_migrate_threads_without_native_handles ... ok
+test tests::async_boundary::rpc_and_invalid_response_errors_consume_state_without_publication ... ok
+test tests::async_boundary::owned_state_roundtrips_all_compatibility_keys_and_mixed_der_replies ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.12s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.18s
+     Running unittests src/lib.rs (output/continuation-20261009/rsa-migration/aws-lc-target/debug/deps/slipstream_mizaru_awslc_async_prototype-379419c9af304086)

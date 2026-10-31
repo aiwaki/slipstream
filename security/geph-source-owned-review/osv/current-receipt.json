@@ -1,0 +1,35 @@
+{
+  "checked_at_utc": "2026-10-31T00:42:22.971638+00:00",
+  "projection_sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
+  "records": [
+    {
+      "bytes": 2,
+      "findings": [],
+      "path": "mizaru2.json",
+      "query": {
+        "package": {
+          "ecosystem": "crates.io",
+          "name": "mizaru2"
+        },
+        "version": "0.2.21"
+      },
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "url": "https://api.osv.dev/v1/query"
+    },
+    {
+      "bytes": 2,
+      "findings": [],
+      "path": "geph5-broker-protocol.json",
+      "query": {
+        "package": {
+          "ecosystem": "crates.io",
+          "name": "geph5-broker-protocol"
+        },
+        "version": "0.4.3"
+      },
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "url": "https://api.osv.dev/v1/query"
+    }
+  ],
+  "scope": "Two direct official OSV package queries; not a full registry or native dependency scan."
+}

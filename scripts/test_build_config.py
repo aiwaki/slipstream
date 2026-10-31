@@ -1288,7 +1288,8 @@ class BuildConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             import shutil
-            for relative in ("scripts/geph_vendor_source.py", "vendor/geph/SOURCE.json",
+            for relative in ("scripts/geph_vendor_source.py", "scripts/geph_native_sqlite.py",
+                             "vendor/geph/SOURCE.json",
                              "vendor/geph/VERSION", "vendor/geph/Cargo.lock"):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)

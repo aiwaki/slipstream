@@ -1,0 +1,770 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-31T00:44:37.007519+00:00",
+  "review_kind": "fresh_independent_bounded_source_review",
+  "verdict": "no_new_confirmed_source_defect_in_reviewed_scope; release_not_admitted_by_this_review",
+  "source_binding": {
+    "source_path": "vendor/geph/SOURCE.json",
+    "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    "lock_path": "vendor/geph/Cargo.lock",
+    "lock_sha256": "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    "release_revision": 4,
+    "base_main_source": "9a02e262063f32415c28cb72263204168fdcb5a7"
+  },
+  "retained_candidate_binding": {
+    "collection": "source-owned-actual-candidate-20261015",
+    "source_sha256": "a94d4c1d0263963f1ad8461f8f9705c64acc524e4b31588353821a18bef7d0e9",
+    "lock_sha256": "9fd682481aa33a57ee2ad7254fdb482e595c598010b505e647872df4c51454c9",
+    "delta_keys": [
+      "lock_sha256",
+      "release_revision"
+    ],
+    "embedded_files_verified": 20,
+    "source_edits_unchanged": 16,
+    "materialized_final_root_files_verified": [
+      {
+        "path": "src/session.rs",
+        "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822"
+      },
+      {
+        "path": "Cargo.toml",
+        "sha256": "2b52b2ff59bea2033504b1f94c5d05fbea35e4c875598c18e2e29e30d07212f4"
+      },
+      {
+        "path": "src/database.rs",
+        "sha256": "5b6be4d78c2a9e18f9292e61198600f776d51252d3daf7835d06e732583f1961"
+      },
+      {
+        "path": "src/auth.rs",
+        "sha256": "3265feb5847bef9c3dacdde4b0b0b27edfa5c751d15583b160a3d3f86595bbb5"
+      },
+      {
+        "path": "src/bw_token.rs",
+        "sha256": "b7e74e8fefa04fb98e689c737d1152417b7eed9a8b957e862d2a3ba6c8fa8af9"
+      }
+    ]
+  },
+  "lock_review": {
+    "removed": [
+      {
+        "name": "ctutils",
+        "version": "0.4.3"
+      },
+      {
+        "name": "rustls",
+        "version": "0.23.45"
+      },
+      {
+        "name": "rustls-webpki",
+        "version": "0.103.15"
+      },
+      {
+        "name": "webpki-roots",
+        "version": "1.0.9"
+      }
+    ],
+    "added": [
+      {
+        "name": "ctutils",
+        "version": "0.4.4"
+      },
+      {
+        "name": "rustls",
+        "version": "0.23.46"
+      },
+      {
+        "name": "rustls-webpki",
+        "version": "0.103.16"
+      },
+      {
+        "name": "webpki-roots",
+        "version": "1.0.10"
+      }
+    ],
+    "added_blocks_equal_current_C6": true,
+    "remaining_package_records_unchanged": true,
+    "rsa_and_blind_rsa_signatures_absent": true,
+    "static_metadata_only": true
+  },
+  "packages": [
+    {
+      "name": "mizaru2-slipstream-client",
+      "version": "0.1.0",
+      "path": "slipstream-vendor/mizaru-client",
+      "descriptor_sha256": "b51d00b9d21979f21d5ae806f4e06b90bf87b3ce16ee9b5a802cfdb4b1b4b18a",
+      "files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+          "size_bytes": 317
+        },
+        {
+          "path": "LICENSE-ISC.txt",
+          "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "size_bytes": 740
+        },
+        {
+          "path": "SOURCE-NOTICE.md",
+          "sha256": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+          "size_bytes": 2228
+        },
+        {
+          "path": "provenance/Cargo.toml",
+          "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+          "size_bytes": 1215
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+          "size_bytes": 9180
+        }
+      ],
+      "source_review_disposition": "reviewed_no_new_confirmed_source_defect",
+      "manual_findings": [],
+      "observations": [
+        "Fallible DER/signature/Merkle bounds cover both serde decoding and direct DTO use; fixed element types and Vec/newtype wire representation remain unchanged.",
+        "Unblind validates expected epoch and configured request-selected root over exact response DER before finalization; malformed configured roots are errors, not an implicit None fallback.",
+        "Pending binds the response to the original mathematical n/e key; equivalent PKCS1/SPKI encodings may interoperate without admitting a different issuer.",
+        "ClientToken randomness precedes untrusted subkey retrieval in auth; explicit inherited no-root mode remains available when broker_keys is absent."
+      ],
+      "ancestor_advisory_admission": "not_granted_by_this_review; independent fresh CI audit required"
+    },
+    {
+      "name": "slipstream-rsa-client",
+      "version": "0.1.0",
+      "path": "slipstream-vendor/aws-lc-backend",
+      "descriptor_sha256": "ca128627b932eb5cb5f80e7de0524d70c9068aff31689b94db8b871c63bc3592",
+      "files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+          "size_bytes": 146
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+          "size_bytes": 1063
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+          "size_bytes": 14176
+        },
+        {
+          "path": "src/owned.rs",
+          "sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+          "size_bytes": 2288
+        }
+      ],
+      "source_review_disposition": "reviewed_no_new_confirmed_source_defect",
+      "manual_findings": [],
+      "observations": [
+        "Read Bn/Ctx/Mont/Rsa allocation, ownership, borrowed n/e lifetime, error paths and Drop implementations; no concrete new FFI ownership defect found.",
+        "Rc keeps native PublicKey/Pending non-Send/non-Sync; OwnedPending moves owned byte state across await, has no Clone/Debug/serialization, and consumes state on finalization.",
+        "Native AWS-LC performs arithmetic/hash/PSS. Pinned bn.h explicitly permits secret base for BN_mod_exp_mont; inversion uses BN_mod_inverse_blinded.",
+        "Width/range/DER consumption checks precede cryptographic output; signatures are verified before publication. SecretBytes cleans live buffers; Bn uses BN_clear_free."
+      ],
+      "ancestor_advisory_admission": "not_granted_by_this_review; independent fresh CI audit required"
+    },
+    {
+      "name": "geph5-broker-protocol",
+      "version": "0.4.3",
+      "path": "slipstream-vendor/geph5-broker-protocol",
+      "descriptor_sha256": "5c2d8819035ca6f55da1d8cceca30fba28f274457b00c2375a1ef05abf713cde",
+      "files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+          "size_bytes": 1945
+        },
+        {
+          "path": "LICENSE-ISC.txt",
+          "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "size_bytes": 740
+        },
+        {
+          "path": "SOURCE-NOTICE.md",
+          "sha256": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+          "size_bytes": 2344
+        },
+        {
+          "path": "provenance/Cargo.toml",
+          "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+          "size_bytes": 1884
+        },
+        {
+          "path": "src/bridge.rs",
+          "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+          "size_bytes": 277
+        },
+        {
+          "path": "src/exit.rs",
+          "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+          "size_bytes": 2891
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+          "size_bytes": 8383
+        },
+        {
+          "path": "src/mac.rs",
+          "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+          "size_bytes": 1039
+        },
+        {
+          "path": "src/puzzle.rs",
+          "sha256": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+          "size_bytes": 1172
+        },
+        {
+          "path": "src/route.rs",
+          "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+          "size_bytes": 1007
+        },
+        {
+          "path": "src/signed.rs",
+          "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+          "size_bytes": 4095
+        }
+      ],
+      "source_review_disposition": "reviewed_no_new_confirmed_source_defect",
+      "manual_findings": [],
+      "observations": [
+        "Five runtime Rust files are byte-identical to retained upstream 0.4.3; lib.rs and puzzle.rs are exact runtime prefixes with terminal cfg(test) modules removed.",
+        "RPC method signatures and authentication/token DTO composition remain unchanged; manifest selects the local client-only Mizaru derivative.",
+        "Retained source notice identifies the derivative and upstream ISC declaration. Standard ISC text is not represented as a recovered package-specific copyright notice."
+      ],
+      "ancestor_advisory_admission": "not_granted_by_this_review; independent fresh CI audit required"
+    }
+  ],
+  "production_callsites": [
+    {
+      "path": "src/auth.rs",
+      "lines": [
+        144,
+        187
+      ],
+      "result": "Token generated before untrusted subkey fetch; request-selected Plus/Free root and epoch are checked before unblind and db_write."
+    },
+    {
+      "path": "src/auth.rs",
+      "lines": [
+        119,
+        134
+      ],
+      "result": "Retained causal fix uses is_plus != currently_plus; expired nonzero Plus status preserves valid Free cache and still retires obsolete Plus credentials."
+    },
+    {
+      "path": "src/bw_token.rs",
+      "lines": [
+        30,
+        75
+      ],
+      "result": "Configured bandwidth key parsed fallibly; pending binds original issuer key; INSERT occurs only after verified unblind."
+    },
+    {
+      "path": "src and embedded production Rust",
+      "result": "Scoped source search found no old RustCrypto rsa/blind_rsa imports, RSA private-key parsing, key-generation or private-signing call paths."
+    }
+  ],
+  "retained_evidence": {
+    "collection": "source-owned-actual-candidate-20261015",
+    "portable_paths_are_collection_relative": true,
+    "small_evidence_verified": [
+      {
+        "id": "prior-review-0",
+        "path": "evidence/reviews/prior-review.json",
+        "sha256": "4fc05b1c60137b47d897e93301d9007b91720fea36e5fbaa2839e44a152e0b57",
+        "size_bytes": 15584
+      },
+      {
+        "id": "prior-review-1",
+        "path": "evidence/reviews/prior-review.md",
+        "sha256": "7d32c91e9f4664ee626c78ede7d0c875153c0e9dfe84d74bcf82f8c3cc90a68a",
+        "size_bytes": 6195
+      },
+      {
+        "id": "prior-review-2",
+        "path": "evidence/reviews/prior-provenance.json",
+        "sha256": "edac7273bd60e8312009d1710d360fc52ebc03f0c8964a21d8f5f91420a14e1f",
+        "size_bytes": 11510
+      },
+      {
+        "id": "prior-review-3",
+        "path": "evidence/reviews/prior-backend-bindings.json",
+        "sha256": "a49a9887b82f3e4dbe4f907845260ee5d4253c8ff42be77f0e41dac1eb16079b",
+        "size_bytes": 8612
+      },
+      {
+        "id": "prior-review-4",
+        "path": "evidence/reviews/prior-protocol-review.json",
+        "sha256": "ff3f0897e7a837c7a41248a1b039356450d129829c5d0d20b1edef012c73cf7c",
+        "size_bytes": 13169
+      },
+      {
+        "id": "prior-review-5",
+        "path": "evidence/reviews/prior-protocol-review.md",
+        "sha256": "97f11694bcce60c1ac176b87857008d0d19a45f81ff9ddb199d29b1b1e4d2e90",
+        "size_bytes": 2238
+      },
+      {
+        "id": "source-mizaru2-slipstream-client-0",
+        "path": "evidence/sources/slipstream-vendor/mizaru-client/Cargo.toml",
+        "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+        "size_bytes": 317
+      },
+      {
+        "id": "source-mizaru2-slipstream-client-1",
+        "path": "evidence/sources/slipstream-vendor/mizaru-client/LICENSE-ISC.txt",
+        "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+        "size_bytes": 740
+      },
+      {
+        "id": "source-mizaru2-slipstream-client-2",
+        "path": "evidence/sources/slipstream-vendor/mizaru-client/SOURCE-NOTICE.md",
+        "sha256": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+        "size_bytes": 2228
+      },
+      {
+        "id": "source-mizaru2-slipstream-client-3",
+        "path": "evidence/sources/slipstream-vendor/mizaru-client/provenance/Cargo.toml",
+        "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+        "size_bytes": 1215
+      },
+      {
+        "id": "source-mizaru2-slipstream-client-4",
+        "path": "evidence/sources/slipstream-vendor/mizaru-client/src/lib.rs",
+        "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+        "size_bytes": 9180
+      },
+      {
+        "id": "ancestor-mizaru2",
+        "path": "evidence/archives/mizaru2-0.2.21.crate",
+        "sha256": "db4ea54ffedc62011081b18940996e37453bf029553b40964302f7efc5dcaff7",
+        "size_bytes": 13140
+      },
+      {
+        "id": "source-slipstream-rsa-client-0",
+        "path": "evidence/sources/slipstream-vendor/aws-lc-backend/Cargo.toml",
+        "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+        "size_bytes": 146
+      },
+      {
+        "id": "source-slipstream-rsa-client-1",
+        "path": "evidence/sources/slipstream-vendor/aws-lc-backend/LICENSE",
+        "sha256": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+        "size_bytes": 1063
+      },
+      {
+        "id": "source-slipstream-rsa-client-2",
+        "path": "evidence/sources/slipstream-vendor/aws-lc-backend/src/lib.rs",
+        "sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+        "size_bytes": 14176
+      },
+      {
+        "id": "source-slipstream-rsa-client-3",
+        "path": "evidence/sources/slipstream-vendor/aws-lc-backend/src/owned.rs",
+        "sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+        "size_bytes": 2288
+      },
+      {
+        "id": "source-geph5-broker-protocol-0",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/Cargo.toml",
+        "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+        "size_bytes": 1945
+      },
+      {
+        "id": "source-geph5-broker-protocol-1",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/LICENSE-ISC.txt",
+        "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+        "size_bytes": 740
+      },
+      {
+        "id": "source-geph5-broker-protocol-2",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/SOURCE-NOTICE.md",
+        "sha256": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+        "size_bytes": 2344
+      },
+      {
+        "id": "source-geph5-broker-protocol-3",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/provenance/Cargo.toml",
+        "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+        "size_bytes": 1884
+      },
+      {
+        "id": "source-geph5-broker-protocol-4",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/bridge.rs",
+        "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+        "size_bytes": 277
+      },
+      {
+        "id": "source-geph5-broker-protocol-5",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/exit.rs",
+        "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+        "size_bytes": 2891
+      },
+      {
+        "id": "source-geph5-broker-protocol-6",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/lib.rs",
+        "sha256": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+        "size_bytes": 8383
+      },
+      {
+        "id": "source-geph5-broker-protocol-7",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/mac.rs",
+        "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+        "size_bytes": 1039
+      },
+      {
+        "id": "source-geph5-broker-protocol-8",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/puzzle.rs",
+        "sha256": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+        "size_bytes": 1172
+      },
+      {
+        "id": "source-geph5-broker-protocol-9",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/route.rs",
+        "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+        "size_bytes": 1007
+      },
+      {
+        "id": "source-geph5-broker-protocol-10",
+        "path": "evidence/sources/slipstream-vendor/geph5-broker-protocol/src/signed.rs",
+        "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+        "size_bytes": 4095
+      },
+      {
+        "id": "ancestor-geph5-broker-protocol",
+        "path": "evidence/archives/geph5-broker-protocol-0.4.3.crate",
+        "sha256": "c0f8b70695d21757da473ffba32eeeba85f9f79708b11b54812cb77b9fc4e0d1",
+        "size_bytes": 26306
+      },
+      {
+        "id": "backend-api-0",
+        "path": "evidence/backend/Cargo.toml",
+        "sha256": "836bac6390070d88f3c804f4212e16ca6e142f6c111795094d925470d07d6866",
+        "size_bytes": 3360
+      },
+      {
+        "id": "backend-api-1",
+        "path": "evidence/backend/aws-lc/include/openssl/bn.h",
+        "sha256": "9c3b508aef0d12f5db09995106dc00b667c8194836e0db60bc752799ab0cf851",
+        "size_bytes": 46677
+      },
+      {
+        "id": "backend-api-2",
+        "path": "evidence/backend/aws-lc/include/openssl/rsa.h",
+        "sha256": "d9140449f1e55ad244974b07a980d2df4eb19cc1312a73b1c7a2234d836cd889",
+        "size_bytes": 45653
+      },
+      {
+        "id": "backend-api-3",
+        "path": "evidence/backend/aws-lc/include/openssl/rand.h",
+        "sha256": "968775664d7e574b96a3c473e39a38f2173e9a8db1ee3decab165f236e85efc2",
+        "size_bytes": 4778
+      },
+      {
+        "id": "backend-api-4",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/bn/ctx.c",
+        "sha256": "108768c96480fd3b8ad85d08e8975f9dd6ba1f3d91756f9e717f82fd28487f46",
+        "size_bytes": 4655
+      },
+      {
+        "id": "backend-api-5",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/bn/bn.c",
+        "sha256": "d1dcac7dbabd174fc6413a4b20de7169a4d8908ac67a2d745d71bcfd8c5dfae8",
+        "size_bytes": 9325
+      },
+      {
+        "id": "backend-api-6",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/bn/bytes.c",
+        "sha256": "dc96b981cd49f7cbfd7af490c00442b7416956b2a60db1e7458f2ab698595e32",
+        "size_bytes": 7965
+      },
+      {
+        "id": "backend-api-7",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/bn/gcd.c",
+        "sha256": "7ebb35b113d29f804567efef43204725224c8d806b59fdab679eb1c9cb00691e",
+        "size_bytes": 7365
+      },
+      {
+        "id": "backend-api-8",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/bn/exponentiation.c",
+        "sha256": "a858ca843eeabed2102e8686cc55aaffb6854176eb39f5322cd8d0278434a86e",
+        "size_bytes": 36217
+      },
+      {
+        "id": "backend-api-9",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/bn/montgomery.c",
+        "sha256": "073cba671b1c22ebf57dea832835a4b9e179a153326de60d8a2a0ab05753a1fc",
+        "size_bytes": 16600
+      },
+      {
+        "id": "backend-api-10",
+        "path": "evidence/backend/aws-lc/crypto/rsa_extra/rsa_asn1.c",
+        "sha256": "2c14056d37e79145ff2354f71b8f151221dc17210409ede1e00a1174fb0c5693",
+        "size_bytes": 7336
+      },
+      {
+        "id": "backend-api-11",
+        "path": "evidence/backend/aws-lc/crypto/fipsmodule/rsa/padding.c",
+        "sha256": "a2e241acc3cb29c7f0ebf5b988e07e71999955187ab0cfe5cc602a025e28a399",
+        "size_bytes": 9886
+      },
+      {
+        "id": "backend-api-12",
+        "path": "evidence/backend/aws-lc/crypto/mem.c",
+        "sha256": "88651b6d0b7e135980f97408815e2d357b2c39eabb563e241e795792d60fc3a1",
+        "size_bytes": 15430
+      },
+      {
+        "id": "backend-baseline-lib.rs",
+        "path": "evidence/backend/baseline/lib.rs",
+        "sha256": "1131e9eee36e226e5d45ed9e0990a27a688267215f40e36bce489a865efe47da",
+        "size_bytes": 26492
+      },
+      {
+        "id": "backend-baseline-owned.rs",
+        "path": "evidence/backend/baseline/owned.rs",
+        "sha256": "70f68d4b3679112aaaf2d8d17747f1ca7376ba39d9fd3692b25b825c72257642",
+        "size_bytes": 3307
+      },
+      {
+        "id": "backend-retained-0",
+        "path": "evidence/retained/backend-0-legacy-vector.json",
+        "sha256": "071e2d2aa6bc7acf125fd5db8f83caf410ab61eb286b2e010a6de372eba0b9e7",
+        "size_bytes": 19467
+      },
+      {
+        "id": "backend-retained-1",
+        "path": "evidence/retained/backend-1-compat-vectors.json",
+        "sha256": "c7bb06db21aeafd074a312c724e1f73aa44f1730cb52cf073e98a96e809b487e",
+        "size_bytes": 224357
+      },
+      {
+        "id": "backend-retained-2",
+        "path": "evidence/retained/backend-2-compat-prototype-test.log",
+        "sha256": "ea2ecf8f48eea12450d56dfb874d05af1ab4df7559e3dc6ded2939ff6283b375",
+        "size_bytes": 2259
+      },
+      {
+        "id": "backend-retained-3",
+        "path": "evidence/retained/backend-3-async-independent-review-test.log",
+        "sha256": "beed4b492d6708615887d1fd353b74eb2a2ae6e4fed3a4de7b70eee9dc4f23b9",
+        "size_bytes": 987
+      },
+      {
+        "id": "backend-retained-4",
+        "path": "evidence/retained/backend-4-async-prototype-test.log",
+        "sha256": "349550e802328cf11d4abe19ec55eb1fcfa4fc75a9bc1267bf5599378372b67f",
+        "size_bytes": 1175
+      },
+      {
+        "id": "backend-retained-5",
+        "path": "evidence/retained/backend-5-compatibility-corrected-independent.log",
+        "sha256": "589544c9880f2a0ca3dac06086c80ed76c5841c894cf4ea07cf8c51efdbfe62b",
+        "size_bytes": 1239
+      },
+      {
+        "id": "backend-retained-6",
+        "path": "evidence/retained/backend-6-corrected-review-hashes.json",
+        "sha256": "4d9245456b1b3493b00b8d9c01144783e0792dbb58f487afcc953116d338dd3f",
+        "size_bytes": 927
+      },
+      {
+        "id": "backend-retained-7",
+        "path": "evidence/retained/backend-7-compatibility.rs",
+        "sha256": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+        "size_bytes": 20807
+      },
+      {
+        "id": "backend-retained-8",
+        "path": "evidence/retained/backend-8-async_boundary.rs",
+        "sha256": "edac173a4c72c5b75bf0d3558e6fd292ffc4d7649af7666acc13f7cf67a3b685",
+        "size_bytes": 11786
+      },
+      {
+        "id": "backend-retained-9",
+        "path": "evidence/retained/backend-9-final-execution-evidence.json",
+        "sha256": "1360e35958bcaa75991d5c777183ec20d0221eec29bddb48617aea82f743f3a9",
+        "size_bytes": 3332
+      },
+      {
+        "id": "backend-retained-10",
+        "path": "evidence/retained/backend-10-independent-fixture-review.json",
+        "sha256": "83b9c26c03780acd4d9873afc03086629abd7d8bc93fe2a73eb023d58e9d0085",
+        "size_bytes": 5461
+      },
+      {
+        "id": "protocol-retained-0",
+        "path": "evidence/retained/protocol-0-client-adapter-independent-result.json",
+        "sha256": "4c272ee5d239bb22dd4f777a965ee9397f75e64e3a07f1fa5e56f499824f03ad",
+        "size_bytes": 2002
+      },
+      {
+        "id": "protocol-retained-1",
+        "path": "evidence/retained/protocol-1-final-execution-evidence.json",
+        "sha256": "1360e35958bcaa75991d5c777183ec20d0221eec29bddb48617aea82f743f3a9",
+        "size_bytes": 3332
+      },
+      {
+        "id": "protocol-retained-2",
+        "path": "evidence/retained/protocol-2-compat-vectors.json",
+        "sha256": "c7bb06db21aeafd074a312c724e1f73aa44f1730cb52cf073e98a96e809b487e",
+        "size_bytes": 224357
+      },
+      {
+        "id": "ancestor-osv",
+        "path": "evidence/osv/ancestors.json",
+        "sha256": "3cb707ae144e225828d9d02031e8c27186e4705221ffaed2aa44de34e9b5918e",
+        "size_bytes": 286
+      },
+      {
+        "id": "osv-complete",
+        "path": "evidence/osv/osv-complete.json",
+        "sha256": "7d3bdafd66c88d34aed97e26eff8f5b7b19456ec9f8b77fc6d0a8cde2ced227f",
+        "size_bytes": 90368
+      },
+      {
+        "id": "osv-receipt",
+        "path": "evidence/osv/receipt.json",
+        "sha256": "dc370ab081e6b9ac17a818dd4322bb5e05f7f4dd6162b7705c0a971865d4485e",
+        "size_bytes": 12186
+      },
+      {
+        "id": "osv-projection",
+        "path": "evidence/osv/projection.json",
+        "sha256": "32d244e23927b7316f664b613d20876424d843c579a8ab2713fdef2cb2a1bbcb",
+        "size_bytes": 717
+      },
+      {
+        "id": "verified-reuse",
+        "path": "evidence/reviews/verified-reuse.json",
+        "sha256": "081669fb3d5355c237ed1ba836ffe50d8c3abc5163f77d4e00e267b77adfec56",
+        "size_bytes": 120232
+      }
+    ],
+    "large_evidence_not_rehashed": [
+      {
+        "id": "aws-lc-archive",
+        "path": "evidence/backend/aws-lc-sys-0.45.0.crate",
+        "sha256": "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27",
+        "size_bytes": 9725710
+      }
+    ],
+    "auth_causal": {
+      "prior_red": 2,
+      "patched_green": 3,
+      "logs": [
+        {
+          "path": "root-auth/old-case1.log",
+          "sha256": "087db42f8ef5df1dfdd4fe8d1e79d19bb5299e55d66c813280c3dc489a74dfff",
+          "retained_result": "RED",
+          "test": "auth_expired_nonzero_plus_preserves_exact_free_cache_when_signer_unavailable"
+        },
+        {
+          "path": "root-auth/old-case2.log",
+          "sha256": "d9908eb8acedba81842638cd120e929c3925104fd9e41ff61019b2b67b7ad855",
+          "retained_result": "RED",
+          "test": "auth_expired_nonzero_plus_retires_plus_cache_before_refresh_failure"
+        },
+        {
+          "path": "root-auth/new-case1.log",
+          "sha256": "9ddd546809367969cfe8446172995ab3b0a561fb46fa26236f89102092b73301",
+          "retained_result": "GREEN",
+          "test": "auth_expired_nonzero_plus_preserves_exact_free_cache_when_signer_unavailable"
+        },
+        {
+          "path": "root-auth/new-case2.log",
+          "sha256": "7079a43ad13c13c14724833c7c05d28ffc94eb25ef93bbea046430f6c6512452",
+          "retained_result": "GREEN",
+          "test": "auth_expired_nonzero_plus_retires_plus_cache_before_refresh_failure"
+        },
+        {
+          "path": "root-auth/new-case3.log",
+          "sha256": "8de7a8e6f3487f31d03002556a10221adc3325e787da0162c9de0abd9f7036e8",
+          "retained_result": "GREEN",
+          "test": "auth_new_active_plus_still_retires_free_cache_before_refresh_failure"
+        }
+      ],
+      "runtime_auth_copy_equals_candidate": true,
+      "execution_receipt_sha256": "31d893cebfebcf0d9d4879b3a5d462e51ce45290a211a04b30cc7f6377706b0f",
+      "fixture_lock_sha256": "94db8764d8351ef40e181f489a6cb25a838dcecc089770f5a7cfb6738a977ff6",
+      "execution_this_review": false
+    },
+    "other_historical_counts": {
+      "primitive_compatibility": 18,
+      "corrected_independent_compatibility": 9,
+      "async": 6,
+      "adapter": 6,
+      "synthetic_real_callsite": 11
+    },
+    "historical_count_limit": "Retained reviewed execution only; not new exact combined candidate tests. Invalid earlier wire-envelope fixture run is excluded."
+  },
+  "limitations": [
+    {
+      "id": "CURRENT_AUDIT",
+      "boundary": "No current registry or native dependency security admission. Independent fresh CI audit must assess the combined source, lock, enabled features and native AWS-LC/SQLite inventory; old RSA exceptions must not be extended or used."
+    },
+    {
+      "id": "EXPIRED_POLICY",
+      "boundary": "Retained source-owned policy expired 2026-10-22; retained ancestor OSV data is historical. This fresh manual source review does not renew that policy or establish fresh advisory absence."
+    },
+    {
+      "id": "COMBINED_BUILD",
+      "boundary": "Retained compile/tests used a different aggregate lock and fixture; byte-equivalent source evidence does not prove the new combined build, exact features, target ABI or package. Current rustls/webpki/roots/ctutils blocks are preserved, but AWS-LC is newly introduced relative to C6."
+    },
+    {
+      "id": "CRYPTO_ASSURANCE",
+      "boundary": "No new side-channel, sanitizer, fuzz, custom-allocator or cross-architecture validation was run. Pinned native API contracts and bounded FFI inspection are not blanket cryptographic or memory-safety assurance."
+    },
+    {
+      "id": "ENTROPY_ABORT",
+      "boundary": "Pinned AWS-LC RNG may abort when sufficient entropy is unavailable. Packaged process containment/recovery is unqualified; returned errors are not evidence of recoverable entropy failure."
+    },
+    {
+      "id": "SECRET_COPIES",
+      "boundary": "SecretBytes/BN cleanup covers inspected owned live storage, not every caller-owned token copy, stack/register copy, allocator configuration or complete erasure."
+    },
+    {
+      "id": "BODY_ALLOCATION",
+      "boundary": "Inherited whole RPC body/JSON allocation occurs before bounded Mizaru DTO decoding. No transport body-size or JSON-depth hardening claim is made."
+    },
+    {
+      "id": "BW_CANCELLATION",
+      "boundary": "Retained cancellation checks do not establish rollback or notification recovery for a bandwidth INSERT already submitted before cancellation ahead of BW_TOKEN_SUPPLIED.notify; an actual operational failure was not reproduced."
+    },
+    {
+      "id": "KEY_POLICY",
+      "boundary": "Legacy byte-width acceptance permits 2041..4096-bit modulus widths and exponents 3/65537. This is not a new strict 2048-bit minimum or complete issuer-modulus validation. Known legacy 2049-bit blind-encoding bug is intentionally not reproduced."
+    },
+    {
+      "id": "NO_ROOT_MODE",
+      "boundary": "Absent broker_keys retains explicit inherited unauthenticated-root mode; configured invalid roots fail rather than falling back. The review does not broaden or remove that policy."
+    },
+    {
+      "id": "LIVE_QUALIFICATION",
+      "boundary": "No real account/broker traffic, installed-app interoperability, browser/site matrix, soak or release qualification was performed. Existing release gates remain required."
+    },
+    {
+      "id": "SQLITE_PROVENANCE",
+      "boundary": "Neither retained candidate SOURCE nor C6 SOURCE has a native_sqlite field. Preserve and freshly validate the independent current SQLite native provenance/inventory; do not infer a descriptor from these files."
+    },
+    {
+      "id": "LICENSE_SCOPE",
+      "boundary": "Available upstream attribution/license declarations were retained; this source review does not provide legal clearance or assert an upstream package-specific notice was recovered."
+    }
+  ],
+  "not_performed": [
+    "build",
+    "test execution",
+    "scanner",
+    "network or account probe",
+    "native or browser execution",
+    "workstation changes",
+    "policy or exception change",
+    "release admission"
+  ],
+  "review_output_only": true
+}

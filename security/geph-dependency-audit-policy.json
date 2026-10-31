@@ -28,28 +28,6 @@
         "CVE-2023-49092"
       ],
       "ecosystem": "crates.io",
-      "expires": "2026-10-30",
-      "id": "geph-rsa-0.8.2-marvin-public-key-only",
-      "package": "rsa",
-      "reason": "Rebound 2026-10-23 to Geph 0.4.3-r3 SOURCE de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286 and Cargo.lock c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0. Relative to reviewed r2, only ctutils 0.4.3 -> 0.4.4 changed; the verified crate, 13 source edits and complete RSA reverse-dependency closure are unchanged. The prior 2026-10-23 client review remains applicable; its expiry is not extended. The client uses public-key parsing, blind/finalize/verify only. No client config, RPC or cache DTO constructs or imports RsaPrivateKey, and no client call enters the private signing/decryption required by Marvin. This bounded reachability exception does not establish constant-time blinding arithmetic, removal of private APIs or installed-artifact safety. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-23.",
-      "version": "0.8.2"
-    },
-    {
-      "advisories": [
-        "CVE-2026-21895"
-      ],
-      "ecosystem": "crates.io",
-      "expires": "2026-10-30",
-      "id": "geph-rsa-0.8.2-prime-validation-public-key-only",
-      "package": "rsa",
-      "reason": "Rebound 2026-10-23 to Geph 0.4.3-r3 SOURCE de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286 and Cargo.lock c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0. Relative to reviewed r2, only ctutils 0.4.3 -> 0.4.4 changed; the verified crate, 13 source edits and complete RSA reverse-dependency closure are unchanged. The prior 2026-10-23 client review remains applicable; its expiry is not extended. Untrusted broker/config key bytes enter RsaPublicKey modulus/exponent decoders; no client, RPC or cache DTO enters RsaPrivateKey::from_components/precompute. This exception covers only the malformed-private-prime advisory in this exact client graph, regardless of broker trust, and makes no broader cryptographic safety claim. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-23.",
-      "version": "0.8.2"
-    },
-    {
-      "advisories": [
-        "CVE-2023-49092"
-      ],
-      "ecosystem": "crates.io",
       "expires": "2026-09-30",
       "id": "geph-rsa-0.9.10-unused-sqlx-mysql",
       "package": "rsa",
@@ -152,5 +130,11 @@
     "repository": "google/osv-scanner",
     "version": "2.3.8"
   },
-  "schema_version": 1
+  "schema_version": 1,
+  "source_owned_review": {
+    "expires": "2026-11-07",
+    "review_sha256": "ce1a0e85d537cf499e895f078627ef33f78e5aaa331962adb1c25d8577e18bf4",
+    "schema_version": 1,
+    "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7"
+  }
 }

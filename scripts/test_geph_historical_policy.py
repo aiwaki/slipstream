@@ -29,6 +29,8 @@ class HistoricalGephPolicyTests(unittest.TestCase):
         (self.root / "security").mkdir()
         (self.root / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
         policy = dependency_audit.load_policy(ROOT / "security/geph-dependency-audit-policy.json")
+        # This historical fixture models registry packages, not a source-owned lane.
+        policy.pop("source_owned_review", None)
         policy["exceptions"] = [dict(
             id="fixture-allowance", ecosystem="crates.io", package="fixture", version="1.0.0",
             advisories=["CVE-2026-0001"], reason="Synthetic historical fixture", expires="2026-10-29",
@@ -88,7 +90,7 @@ class HistoricalGephPolicyTests(unittest.TestCase):
             ["/bin/bash", "-c", "set -euo pipefail\n" + body], cwd=self.root,
             env={"PATH": str(self.bin) + os.pathsep + "/usr/bin:/bin",
                  "RUNNER_TEMP": str(self.root), "tag_commit": SOURCE,
-                 "vendor_commit": source, "FETCH_MODE": mode},
+                 "vendor_commit": source, "source_owned": "false", "FETCH_MODE": mode},
             capture_output=True, text=True, timeout=10,
         )
 

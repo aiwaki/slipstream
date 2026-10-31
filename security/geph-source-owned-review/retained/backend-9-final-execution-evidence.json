@@ -1,0 +1,58 @@
+{
+  "recorded_utc": "2026-10-11T14:17:00.131505+00:00",
+  "status": "PASS output-only synthetic composition; production gate remains open",
+  "compile": {
+    "returncode": 0,
+    "elapsed_seconds": 34.62957550000283
+  },
+  "exact_test": {
+    "returncode": 0,
+    "elapsed_seconds": 35.63839358300174
+  },
+  "passed_cases": [
+    "actual_auth_and_bandwidth_futures_are_send",
+    "auth_actual_thirty_second_timeout_drops_pending_before_publication",
+    "auth_cancellation_at_signing_rpc_does_not_submit_cache_write",
+    "auth_current_next_epoch_configured_root_and_exact_legacy_sqlite_roundtrip",
+    "auth_no_root_mode_remains_explicit_but_still_requires_pending_key",
+    "auth_wrong_epoch_root_key_signature_and_oversize_never_publish",
+    "auth_wrong_level_uses_fresh_blind_and_request_selected_free_root",
+    "bandwidth_cancellation_at_auth_and_signing_await_drains_mock_calls",
+    "bandwidth_configured_key_mismatch_retries_without_publication",
+    "bandwidth_real_spawned_futures_publish_and_consume_legacy_cache",
+    "sqlite_cancellation_before_acquire_and_after_commit_are_different"
+  ],
+  "filtered_out": 36,
+  "fixture_sha256": "8699e7a637445534a309f346c589dca3944681dc89326cab79347cc079731faf",
+  "lock_sha256": "94db8764d8351ef40e181f489a6cb25a838dcecc089770f5a7cfb6738a977ff6",
+  "runner_sha256": "a0860903847aa3c903741941f29ea1c0895d605f3a3bf5dcb9066c768eedb7df",
+  "sandbox_sha256": "9c69b5aa0a6082b49a788e05730fa02a9d478395cedbfb5635ad320bd44ade07",
+  "artifact_sha256": {
+    "test.log": "600a29f87bce2ee8a9e04e097cf507774de5b36c1372c7a4deded715e2bbfe1d",
+    "test-result.json": "cbc37a21e8d1af8ec3a73cdfa5c0d33c7e7562f02bbd29b40d7375998d478d17",
+    "test-build.log": "b04caf998661f6045a7f0c2b62beb72e53d4fe932c03ee5ba29f8dd8248c07c0",
+    "test-build-result.json": "eedd58674253f5a4aded911a8a45cab74419864f83d1a9a17e54d4d2305d8204",
+    "test-command.json": "8e8ba16c125f52a5c6c218df2093cfed5b536f4e1cb94d30bd82edb1c69db841",
+    "test-build-command.json": "b70e47a4aeb5845b6ae76e5755aa0f5e87eddcf67d3d88e577cb030fed7f1859",
+    "sandbox-check.json": "3032bff15cfd8a127788147aedaa85b84a4edf672f679b25206ca2350b9c19c8",
+    "final-composition-hashes.json": "2f1b542a92d6226f917535361fe66d8e3b63d15e08128b66f187aef2cb82ae77",
+    "original-inputs-final-unchanged.json": "2b94eecdece7119cacd3097a7978584a177887bcb0d7f3ac2f0c24b0511e600e",
+    "final-lock-baseline-comparison.json": "87c758dc3d62fba9c5fd87596b60ab1bb924d61772ba67e7a2cdd5a58341fdcf",
+    "FINAL_REPORT.md": "8394873ea6114f6835115d5d2fbab7058dc1dffd89e9702e1be26f47ee6f0121",
+    "README.md": "4753af915ef7de973eff4814d1edc1174aec4aa2e038c227ad60a4087fd4a316"
+  },
+  "production_head": "d2856d8a9210cda29b8081c68741876dde326be2",
+  "production_tracked_diff": "",
+  "production_staged_diff": "",
+  "production_status": "?? output/",
+  "invalid_prior_run": "wire-envelope-red-* is invalid fixture evidence; any negative passes there are not counted",
+  "limits": [
+    "synthetic RPC only; no account or real broker traffic",
+    "no packaged recovery/entropy abort claim",
+    "no first HTTP/JSON allocation-bound claim",
+    "cancellation after SQLite submission does not prove rollback",
+    "macOS arm64 execution only",
+    "dependency/advisory/source-materializer review still open"
+  ],
+  "active_composition_processes_after_run": []
+}

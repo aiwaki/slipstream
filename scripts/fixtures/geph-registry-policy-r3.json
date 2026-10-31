@@ -1,0 +1,156 @@
+{
+  "exceptions": [
+    {
+      "advisories": [
+        "GHSA-g59m-gf8j-gjf5"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-aws-sdk-lambda-1.35.0-region-validation",
+      "package": "aws-sdk-lambda",
+      "reason": "geph5-client pins this SDK for its broker transport. The advisory is defense-in-depth region validation; Slipstream supplies no user AWS credentials or region override. Track upstream and remove when Geph permits aws-sdk-lambda 1.104.0 or newer.",
+      "version": "1.35.0"
+    },
+    {
+      "advisories": [
+        "GHSA-q83h-524g-xf6h",
+        "RUSTSEC-2026-0258"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-h2-0.3.27-upstream-hyper-014",
+      "package": "h2",
+      "reason": "The low-severity empty-DATA-frame denial of service is reachable in geph5-client's exact aws-config 1.5.4 / Hyper 0.14 client, but requires a malicious HTTP/2 peer. Slipstream fixes the AWS Lambda function and region, does not accept a user endpoint override, uses WebPKI TLS authentication, applies a 10-second operation timeout, and consumes the response payload. No fixed h2 0.3 release exists; this is accepted residual availability risk until upstream Geph moves the AWS connector off Hyper 0.14 / h2 0.3.",
+      "version": "0.3.27"
+    },
+    {
+      "advisories": [
+        "CVE-2023-49092"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-10-30",
+      "id": "geph-rsa-0.8.2-marvin-public-key-only",
+      "package": "rsa",
+      "reason": "Rebound 2026-10-23 to Geph 0.4.3-r3 SOURCE de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286 and Cargo.lock c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0. Relative to reviewed r2, only ctutils 0.4.3 -> 0.4.4 changed; the verified crate, 13 source edits and complete RSA reverse-dependency closure are unchanged. The prior 2026-10-23 client review remains applicable; its expiry is not extended. The client uses public-key parsing, blind/finalize/verify only. No client config, RPC or cache DTO constructs or imports RsaPrivateKey, and no client call enters the private signing/decryption required by Marvin. This bounded reachability exception does not establish constant-time blinding arithmetic, removal of private APIs or installed-artifact safety. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-23.",
+      "version": "0.8.2"
+    },
+    {
+      "advisories": [
+        "CVE-2026-21895"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-10-30",
+      "id": "geph-rsa-0.8.2-prime-validation-public-key-only",
+      "package": "rsa",
+      "reason": "Rebound 2026-10-23 to Geph 0.4.3-r3 SOURCE de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286 and Cargo.lock c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0. Relative to reviewed r2, only ctutils 0.4.3 -> 0.4.4 changed; the verified crate, 13 source edits and complete RSA reverse-dependency closure are unchanged. The prior 2026-10-23 client review remains applicable; its expiry is not extended. Untrusted broker/config key bytes enter RsaPublicKey modulus/exponent decoders; no client, RPC or cache DTO enters RsaPrivateKey::from_components/precompute. This exception covers only the malformed-private-prime advisory in this exact client graph, regardless of broker trust, and makes no broader cryptographic safety claim. Re-review on source, dependency or client-role changes; see docs/ROUTING_RESEARCH.md, RSA client review 2026-10-23.",
+      "version": "0.8.2"
+    },
+    {
+      "advisories": [
+        "CVE-2023-49092"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rsa-0.9.10-unused-sqlx-mysql",
+      "package": "rsa",
+      "reason": "This package is pulled by sqlx-mysql default features, while geph5-client uses SQLite and does not execute the MySQL authentication path or RSA private-key operations. Remove when upstream disables unused SQLx defaults or updates SQLx.",
+      "version": "0.9.10"
+    },
+    {
+      "advisories": [
+        "GHSA-82j2-j2ch-gfr8"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rustls-webpki-0.101.7-no-crl-input",
+      "package": "rustls-webpki",
+      "reason": "The panic requires a crafted certificate revocation list. Geph configures WebPKI roots and does not load CRLs. Keep this exception short-lived and remove when upstream updates rustls-webpki.",
+      "version": "0.101.7"
+    },
+    {
+      "advisories": [
+        "GHSA-965h-392x-2mh5"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rustls-webpki-0.101.7-name-constraints-0098",
+      "package": "rustls-webpki",
+      "reason": "This is accepted residual TLS risk requiring a CA to issue a certificate that exploits incomplete name-constraint enforcement. It is not declared unreachable; remove as soon as upstream moves to a fixed rustls-webpki.",
+      "version": "0.101.7"
+    },
+    {
+      "advisories": [
+        "GHSA-xgp8-3hg3-c2mh"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rustls-webpki-0.101.7-name-constraints-0099",
+      "package": "rustls-webpki",
+      "reason": "This is accepted residual TLS risk requiring a CA to issue a certificate that exploits incomplete name-constraint enforcement. It is not declared unreachable; remove as soon as upstream moves to a fixed rustls-webpki.",
+      "version": "0.101.7"
+    },
+    {
+      "advisories": [
+        "GHSA-7gcf-g7xr-8hxj"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-serde-with-1.14.0-key-value-map-unused",
+      "package": "serde_with",
+      "reason": "The advisory affects KeyValueMap serialization with empty entries. No KeyValueMap use exists in the reviewed geph5-client, stdcode, or Mizaru client path. Remove when upstream updates serde_with.",
+      "version": "1.14.0"
+    },
+    {
+      "advisories": [
+        "GHSA-xmrp-424f-vfpx"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-sqlx-0.7.4-sqlite-only",
+      "package": "sqlx",
+      "reason": "The affected Postgres protocol path is not used; geph5-client persists state through SQLite. The advisory does not identify SQLite as exploitable. Remove when upstream updates SQLx and disables unused backend defaults.",
+      "version": "0.7.4"
+    },
+    {
+      "advisories": [
+        "GHSA-qwgh-2vcv-g2f7"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-11-06",
+      "id": "geph-block-buffer-0.9.0-separate-cursor",
+      "package": "block-buffer",
+      "reason": "Reviewed 2026-10-30 against the exact crates.io archive SHA-256 4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4, matching current Geph Cargo.lock. This version stores the cursor in a separate private pos: usize field, not inside block storage passed to compression callbacks, and contains no ReadBuffer. The advisory and upstream fix concern inline cursor bytes overwritten before a caught callback panic; that mechanism is absent from this exact source. Independent static review supports not-affected for this advisory only, not a general safety claim. Keep the scanner finding visible and re-review by 2026-11-06; see docs/ROUTING_RESEARCH.md, block-buffer applicability 2026-10-30.",
+      "version": "0.9.0"
+    },
+    {
+      "advisories": [
+        "GHSA-qwgh-2vcv-g2f7"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-11-06",
+      "id": "geph-block-buffer-0.10.4-separate-cursor",
+      "package": "block-buffer",
+      "reason": "Reviewed 2026-10-30 against the exact crates.io archive SHA-256 3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71, matching current Geph Cargo.lock. This version stores the cursor in a separate private pos: u8 field, not inside block storage passed to compression callbacks, and contains no ReadBuffer. The advisory and upstream fix concern inline cursor bytes overwritten before a caught callback panic; that mechanism is absent from this exact source. Independent static review supports not-affected for this advisory only, not a general safety claim. Keep the scanner finding visible and re-review by 2026-11-06; see docs/ROUTING_RESEARCH.md, block-buffer applicability 2026-10-30.",
+      "version": "0.10.4"
+    }
+  ],
+  "rules": {
+    "informational": "record",
+    "unreviewed": "block"
+  },
+  "scanner": {
+    "assets": {
+      "darwin-arm64": {
+        "name": "osv-scanner_darwin_arm64",
+        "sha256": "a8cd6507b06239f463a7642430cfd2d154882f150f6e30cdc0653e28dfc34216"
+      },
+      "linux-amd64": {
+        "name": "osv-scanner_linux_amd64",
+        "sha256": "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
+      }
+    },
+    "repository": "google/osv-scanner",
+    "version": "2.3.8"
+  },
+  "schema_version": 1
+}

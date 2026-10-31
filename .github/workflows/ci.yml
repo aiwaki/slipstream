@@ -585,7 +585,8 @@ jobs:
             > "$release_metadata"
           python3 scripts/verify_geph_release.py verify-metadata \
             --metadata "$release_metadata" \
-            --expected-tag "$tag"
+            --expected-tag "$tag" \
+            --source vendor/geph/SOURCE.json
           tag_ref="$(gh api \
             "repos/${{ github.repository }}/git/ref/tags/$tag")"
           tag_type="$(python3 -c \
@@ -606,6 +607,28 @@ jobs:
           mkdir -p app-tauri/src-tauri/binaries
           rm -f \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          historical_policy="$(mktemp \
+            "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
+            > "$historical_policy"
+          test -f "$historical_policy"
+          test ! -L "$historical_policy"
+          test -s "$historical_policy"
+          python3 -m json.tool "$historical_policy" >/dev/null
+          asset_args=(--license vendor/geph/LICENSE)
+          review_args=(--policy "$historical_policy")
+          review_patterns=(--pattern SHA256SUMS)
+          if python3 -c 'import json,sys; sys.exit("embedded_packages" not in json.load(open("vendor/geph/SOURCE.json")))'; then
+            review_parent="$(mktemp -d "$RUNNER_TEMP/geph-source-review.XXXXXX")"
+            source_review="$review_parent/evidence"
+            review_patterns+=(--pattern geph5-client-source-review-evidence.tar)
+            asset_args+=(--source-owned-policy "$historical_policy"
+              --source-owned-output-root "$source_review")
+            review_args+=(--source vendor/geph/SOURCE.json
+              --source-owned-evidence "$source_review")
+          fi
           python3 scripts/download_github_release_assets.py \
             --repo "${{ github.repository }}" \
             --tag "$tag" \
@@ -617,7 +640,7 @@ jobs:
             --pattern geph5-client.Cargo.lock \
             --pattern geph5-client.spdx.json \
             --pattern geph5-client-dependency-audit.json \
-            --pattern SHA256SUMS
+            "${review_patterns[@]}"
           python3 scripts/verify_geph_release.py verify-assets \
             --release-dir /tmp/geph \
             --metadata "$release_metadata" \
@@ -625,7 +648,7 @@ jobs:
             --source vendor/geph/SOURCE.json \
             --cargo-lock vendor/geph/Cargo.lock \
             --version-file vendor/geph/VERSION \
-            --license vendor/geph/LICENSE
+            "${asset_args[@]}"
           python3 scripts/make_geph_vendor_sbom.py verify \
             --source vendor/geph/SOURCE.json \
             --version-file vendor/geph/VERSION \
@@ -634,20 +657,10 @@ jobs:
             --source-commit "$tag_commit" \
             --target macos-universal \
             --sbom /tmp/geph/geph5-client.spdx.json
-          historical_policy="$(mktemp \
-            "$RUNNER_TEMP/geph-dependency-audit-policy.XXXXXX")"
-          gh api \
-            -H "Accept: application/vnd.github.raw+json" \
-            "repos/${{ github.repository }}/contents/security/geph-dependency-audit-policy.json?ref=$tag_commit" \
-            > "$historical_policy"
-          test -f "$historical_policy"
-          test ! -L "$historical_policy"
-          test -s "$historical_policy"
-          python3 -m json.tool "$historical_policy" >/dev/null
           python3 scripts/dependency_audit.py verify \
             --report /tmp/geph/geph5-client-dependency-audit.json \
             --sbom /tmp/geph/geph5-client.spdx.json \
-            --policy "$historical_policy" \
+            "${review_args[@]}" \
             --source-commit "$tag_commit" \
             --target macos-universal \
             --vendored-transitive-dependencies full
@@ -690,7 +703,8 @@ jobs:
           python3 scripts/verify_geph_release.py verify-attestations \
             --release-dir /tmp/geph \
             --provenance-json "$provenance_json" \
-            --spdx-json "$spdx_attestation_json"
+            --spdx-json "$spdx_attestation_json" \
+            --source vendor/geph/SOURCE.json
           /usr/bin/lipo /tmp/geph/geph5-client \
             -verify_arch arm64 x86_64
           cp /tmp/geph/geph5-client \

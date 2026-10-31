@@ -1,0 +1,24 @@
+{
+  "scope": "Lossless selection of two exact ancestor package records; no scanner or network executed in this preparation.",
+  "raw_sha256": "7d3bdafd66c88d34aed97e26eff8f5b7b19456ec9f8b77fc6d0a8cde2ced227f",
+  "recorded_started_at": "2026-10-13T14:13:49.436677+00:00",
+  "recorded_finished_at": "2026-10-13T14:13:54.852473+00:00",
+  "scanner": {
+    "asset": "osv-scanner_darwin_arm64",
+    "name": "osv-scanner",
+    "platform": "darwin-arm64",
+    "sha256": "a8cd6507b06239f463a7642430cfd2d154882f150f6e30cdc0653e28dfc34216",
+    "version": "2.3.8"
+  },
+  "identities": [
+    [
+      "geph5-broker-protocol",
+      "0.4.3"
+    ],
+    [
+      "mizaru2",
+      "0.2.21"
+    ]
+  ],
+  "selected_package_records": 2
+}

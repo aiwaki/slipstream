@@ -484,13 +484,12 @@ class ReviewedRsaPolicyTransitionTests(unittest.TestCase):
                    'lock_sha256': binding[3]}
         summaries = [dict(version=version,
                           release_tag=f'geph-vendor-{version}-r{revision}',
-                          lock_sha256=lock_hash)
-                     for version, revision, lock_hash in zip(
-                         self.versions, self.revisions, (binding[1], binding[3]))]
-        with mock.patch.object(source, 'load_source_contract',
-                               side_effect=[previous, current]), \
-             mock.patch.object(source, 'hash_file', side_effect=[binding[0], binding[2]]), \
-             mock.patch.object(source, 'verify_source_contract',
+                          lock_sha256=lock_hash, source_sha256=source_hash)
+                     for version, revision, lock_hash, source_hash in zip(
+                         self.versions, self.revisions, (binding[1], binding[3]), (binding[0], binding[2]))]
+        with mock.patch.object(source, '_source_contract_snapshot',
+                               side_effect=[(previous, binding[0]), (current, binding[2])]), \
+             mock.patch.object(source, '_verify_source_contract_files',
                                side_effect=summaries) as contracts, \
              mock.patch.object(source, '_cargo_lock_has_h2_0_4_15',
                                return_value=False) as locks, \
@@ -619,10 +618,10 @@ class ReviewedCtutilsPolicyTransitionTests(ReviewedRsaPolicyTransitionTests):
         self.revisions = (2, 3)
         self.transition = 'revision'
 
-    def test_checked_out_inputs_match_exact_review(self):
-        root = Path(__file__).parents[1]
-        self.assertEqual(source.hash_file(root / 'vendor/geph/SOURCE.json'), self.binding[2])
-        self.assertEqual(source.hash_file(root / 'vendor/geph/Cargo.lock'), self.binding[3])
+    def test_historical_inputs_match_exact_review(self):
+        # r3 is historical; later reviewed source migrations do not rewrite this
+        # fixed transition or require the current checkout to remain on r3.
+        self.assertEqual(source.RSA_CTUTILS_REVIEW_SOURCE_BINDING, self.binding)
         self.assert_policy_digest(self.previous,
             '467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7')
         self.assert_policy_digest(self.current,

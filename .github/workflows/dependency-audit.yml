@@ -163,6 +163,7 @@ jobs:
           done
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
           python3 scripts/make_geph_vendor_sbom.py generate \
+            --source-root "$source_root" \
             --source vendor/geph/SOURCE.json \
             --version-file vendor/geph/VERSION \
             --cargo-lock vendor/geph/Cargo.lock \
@@ -181,23 +182,43 @@ jobs:
             --policy security/geph-dependency-audit-policy.json \
             --platform linux-amd64 \
             --output /tmp/osv-scanner
+          review_args=(--policy security/geph-dependency-audit-policy.json)
+          source_owned=false
+          if python3 -c 'import json,sys; sys.exit("embedded_packages" not in json.load(open("vendor/geph/SOURCE.json")))'; then
+            source_owned=true
+            review_args+=(--source vendor/geph/SOURCE.json
+              --source-owned-evidence security/geph-source-owned-review)
+          fi
           python3 scripts/dependency_audit.py scan \
             --scanner /tmp/osv-scanner \
             --platform linux-amd64 \
             --sbom dist-geph-audit/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
+            "${review_args[@]}" \
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
             --vendored-transitive-dependencies full \
             --evaluation-date "$(date -u +%F)" \
+            --evidence-dir dist-geph-audit/evidence \
             --output dist-geph-audit/geph5-client-dependency-audit.json
+          if [ "$source_owned" = true ]; then
+            review_args=(--policy security/geph-dependency-audit-policy.json
+              --source vendor/geph/SOURCE.json
+              --source-owned-evidence dist-geph-audit/evidence/source-owned)
+          fi
           python3 scripts/dependency_audit.py verify \
             --report dist-geph-audit/geph5-client-dependency-audit.json \
             --sbom dist-geph-audit/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
+            "${review_args[@]}" \
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
             --vendored-transitive-dependencies full
+
+          if [ "$source_owned" = true ]; then
+            python3 scripts/geph_source_owned_bundle.py pack \
+              --policy security/geph-dependency-audit-policy.json \
+              --evidence-root dist-geph-audit/evidence/source-owned \
+              --output dist-geph-audit/geph5-client-source-review-evidence.tar
+          fi
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
