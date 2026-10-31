@@ -108,6 +108,135 @@ class GephSourceOwnedWorkflowTests(unittest.TestCase):
 class WorkflowCliBindingTests(unittest.TestCase):
     """Run the checked-in shell arguments through real CLI parsers, without tools."""
 
+    def run_bootstrap_source_check(self, change=None):
+        import hashlib
+        import json
+        import os
+        import shlex
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+        import test_geph_vendor_source as source_fixture
+
+        fixture = source_fixture.GephVendorSourceTests()
+        with tempfile.TemporaryDirectory(prefix='geph bootstrap cli ') as temporary:
+            root = Path(temporary)
+            lock = fixture._transition_lock(('geph5-client', '0.4.3'))
+            previous = fixture._transition_contract(root / 'previous snapshot',
+                version='0.4.3', revision=4, lock=lock)
+            current = fixture._transition_contract(root / 'vendor/geph',
+                version='0.4.3', revision=4, lock=lock)
+            security = root / 'security'
+            security.mkdir()
+            policy = fixture._transition_policy(security / 'geph-dependency-audit-policy.json',
+                h2_exception=False)
+            (previous / 'dependency-audit-policy.json').write_bytes(policy.read_bytes())
+            if change == 'both-invalid-lock':
+                for directory in (previous, current):
+                    (directory / 'Cargo.lock').write_text('not the contracted lock')
+            elif change == 'SOURCE.json':
+                source = json.loads((current / change).read_text())
+                (current / 'Cargo.lock').write_bytes(lock + b'\n# changed graph snapshot\n')
+                source['lock_sha256'] = hashlib.sha256((current / 'Cargo.lock').read_bytes()).hexdigest()
+                (current / change).write_text(json.dumps(source))
+            elif change in ('VERSION', 'Cargo.lock'):
+                (current / change).write_text('invalid changed bytes')
+            elif change == 'policy-only':
+                policy.write_text(policy.read_text() + '\n')
+            elif change in ('revision', 'revision-policy-change'):
+                source = json.loads((current / 'SOURCE.json').read_text())
+                source['release_revision'] = 5
+                (current / 'SOURCE.json').write_text(json.dumps(source))
+                if change == 'revision-policy-change':
+                    data = json.loads(policy.read_text())
+                    data['rules']['unreviewed'] = 'allow'
+                    policy.write_text(json.dumps(data))
+            (root / 'scripts').symlink_to(ROOT / 'scripts', target_is_directory=True)
+            body = step(workflow('ci.yml'), 'Verify reviewed Geph source transition')
+            body = textwrap.dedent(body.split('        run: |\n', 1)[1])
+            # Exercise the actual callsite after its unchanged immutable Git export.
+            body = body.split('> "$previous/dependency-audit-policy.json"\n', 1)[1]
+            return subprocess.run(['/bin/bash', '-c',
+                'set -euo pipefail\nprevious=' + shlex.quote(str(previous)) + '\n' + body],
+                cwd=root, env={**os.environ,
+                    'PATH': str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH']},
+                capture_output=True, text=True, timeout=5)
+
+    def test_unchanged_bootstrap_contract_is_verified_without_a_revision_transition(self):
+        import json
+        result = self.run_bootstrap_source_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value['release_tag'], 'geph-vendor-0.4.3-r4')
+        self.assertNotIn('transition', value)
+
+    def test_unchanged_bootstrap_still_validates_actual_lock_bytes(self):
+        result = self.run_bootstrap_source_check('both-invalid-lock')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Cargo.lock does not match the source contract', result.stderr)
+
+    def test_any_changed_bootstrap_input_keeps_strict_transition_checks(self):
+        for change, message in (
+            ('SOURCE.json', 'release revision is reused or decreases'),
+            ('VERSION', 'Geph version file is invalid'),
+            ('Cargo.lock', 'Cargo.lock does not match the source contract'),
+            ('policy-only', 'release revision is reused or decreases'),
+        ):
+            with self.subTest(change=change):
+                result = self.run_bootstrap_source_check(change)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+
+    def test_changed_bootstrap_preserves_valid_revision_and_policy_guards(self):
+        import json
+        result = self.run_bootstrap_source_check('revision')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value['transition'], 'revision')
+        self.assertEqual(value['policy_transition'], 'unchanged')
+        self.assertEqual(value['current_release_tag'], 'geph-vendor-0.4.3-r5')
+        result = self.run_bootstrap_source_check('revision-policy-change')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('dependency audit policy additions or changes are forbidden', result.stderr)
+
+    def test_producer_publishes_physical_root_before_sbom_consumes_it(self):
+        import json
+        import os
+        import subprocess
+        import sys
+        import textwrap
+        import test_geph_source_owned_sbom as sbom_fixture
+
+        fixture = sbom_fixture.SourceOwnedGephSbomTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        alias = fixture.fixture.root / 'source parent alias'
+        alias.symlink_to(fixture.root.parent, target_is_directory=True)
+        lexical_root = alias / fixture.root.name
+        # The validator must continue rejecting a lexical path through a symlink.
+        with self.assertRaisesRegex(ValueError, 'physical and without symlinks'):
+            fixture.collect(source_root=lexical_root)
+
+        body = step(workflow('build-geph.yml'), 'Materialize the reviewed Geph source')
+        body = textwrap.dedent(body.split('        run: |\n', 1)[1])
+        shell = body[body.index('source_root='):]
+        output = fixture.fixture.root / 'github output'
+        result = subprocess.run(['/bin/bash', '-c', 'set -euo pipefail\n' + shell],
+            env={**os.environ, 'source_json': json.dumps({'root': str(lexical_root)}),
+                 'GITHUB_OUTPUT': str(output),
+                 'PATH': str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH']},
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = output.read_text().splitlines()
+        self.assertEqual(len(lines), 1)
+        key, value = lines[0].split('=', 1)
+        self.assertEqual(key, 'root')
+        published_root = Path(value)
+        components = fixture.collect(source_root=published_root)
+        self.assertEqual(published_root, fixture.root)
+        self.assertEqual({item.name for item in components}, {'direct-registry', 'local-transitive'})
+
     def run_parser(self, name, step_name, script, command, *, prefix=False):
         import json
         import os

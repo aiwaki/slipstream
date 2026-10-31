@@ -12,6 +12,132 @@ import ci_scope
 
 
 class CiScopeTests(unittest.TestCase):
+    def physical_root_fixture(self):
+        files = {
+            ".github/workflows/build-geph.yml": (b"logical root", b"physical root"),
+            ".github/workflows/ci.yml": (b"transition only", b"verify unchanged contract"),
+            "scripts/test_geph_source_owned_workflows.py": (b"old tests", b"physical regression"),
+            "vendor/geph/SOURCE.json": (b"same source", b"same source"),
+            "vendor/geph/Cargo.lock": (b"same lock", b"same lock"),
+        }
+        bindings = {path: tuple(hashlib.sha256(value).hexdigest() for value in pair)
+                    for path, pair in files.items()}
+        paths = [".github/workflows/build-geph.yml", ".github/workflows/ci.yml",
+                 "scripts/test_geph_source_owned_workflows.py",
+                 "scripts/ci_scope.py", "scripts/test_ci_scope.py", "docs/CURRENT_STATE.md"]
+        return files, bindings, paths
+
+    def test_physical_root_cli_pr_requires_the_exact_committed_repair(self):
+        files, bindings, paths = self.physical_root_fixture()
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(ci_scope, "GEPH_PHYSICAL_ROOT_FILE_BINDINGS", bindings, create=True), \
+             patch.object(ci_scope, "geph_physical_root_delta_from_git", return_value=files, create=True) as read, \
+             patch.object(ci_scope, "delivery_delta_from_git", return_value=None), \
+             patch("sys.stdin", io.StringIO("\n".join(paths))), \
+             patch("sys.stdout", io.StringIO()) as stdout:
+            output = Path(tmp) / "scope"
+            self.assertEqual(ci_scope.main(["--event-name", "pull_request", "--github-output", str(output)]), 0)
+            self.assertIn('"geph_bootstrap":true', stdout.getvalue())
+            self.assertEqual(output.read_text(), "geph_bootstrap=true\nproduct=true\nwindows=true\n")
+            read.assert_called_once_with()
+
+    def test_physical_root_scope_refuses_changed_contracts_and_unrelated_files(self):
+        files, bindings, paths = self.physical_root_fixture()
+        with patch.object(ci_scope, "GEPH_PHYSICAL_ROOT_FILE_BINDINGS", bindings):
+            def allowed(changed=paths, delta=files, event="pull_request"):
+                return ci_scope.classify_paths(changed, event_name=event,
+                    geph_physical_root_delta=delta).geph_bootstrap
+            self.assertTrue(allowed())
+            self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request",
+                geph_physical_root_delta=files), ci_scope.CiScope(True, True, True))
+            self.assertTrue(allowed(list(ci_scope.GEPH_PHYSICAL_ROOT_REQUIRED)))
+            self.assertFalse(allowed(event="push"))
+            self.assertFalse(allowed(delta=None))
+            for missing in (*ci_scope.GEPH_PHYSICAL_ROOT_REQUIRED, "scripts/test_ci_scope.py"):
+                with self.subTest(missing=missing):
+                    self.assertFalse(allowed([p for p in paths if p != missing]))
+            for path, pair in files.items():
+                for index in (0, 1):
+                    changed = list(pair)
+                    changed[index] += b"unreviewed"
+                    with self.subTest(path=path, side=index):
+                        self.assertFalse(allowed(delta={**files, path: tuple(changed)}))
+            for extra in ("vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock", "spike/tproxy.py",
+                          "app-tauri/src-tauri/src/main.rs", ".github/workflows/build-app.yml",
+                          "security/geph-dependency-audit-policy.json", "security/dependency-audit-policy.json",
+                          "README.md", ".gitattributes", "docs/RELEASES.md"):
+                with self.subTest(extra=extra):
+                    self.assertFalse(allowed([*paths, extra]))
+
+    def test_physical_root_delta_refuses_missing_and_malformed_bytes(self):
+        files, bindings, _ = self.physical_root_fixture()
+        with patch.object(ci_scope, "GEPH_PHYSICAL_ROOT_FILE_BINDINGS", {}):
+            self.assertFalse(ci_scope.reviewed_geph_physical_root_delta({}))
+        with patch.object(ci_scope, "GEPH_PHYSICAL_ROOT_FILE_BINDINGS", bindings):
+            for path, pair in files.items():
+                invalid = [None, {}, [], {p: v for p, v in files.items() if p != path},
+                           {**files, "extra": pair}, {**files, path: list(pair)},
+                           {**files, path: (pair[0],)}, {**files, path: (None, pair[1])},
+                           {**files, path: (pair[0], None)}, {**files, path: ("text", pair[1])}]
+                for index, delta in enumerate(invalid):
+                    with self.subTest(path=path, invalid=index):
+                        self.assertFalse(ci_scope.reviewed_geph_physical_root_delta(delta))
+
+    def test_physical_root_git_reader_binds_both_refs_and_fails_closed(self):
+        files, bindings, _ = self.physical_root_fixture()
+        base, head = "1" * 40, "2" * 40
+        def read(command, **kwargs):
+            ref, path = command[2].split(":", 1)
+            self.assertEqual(kwargs, {"stderr": ci_scope.subprocess.DEVNULL, "timeout": 10})
+            return files[path][ref == head]
+        with patch.object(ci_scope, "GEPH_PHYSICAL_ROOT_FILE_BINDINGS", bindings), \
+             patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+             patch.object(ci_scope.subprocess, "check_output", side_effect=read) as fetch:
+            self.assertEqual(ci_scope.geph_physical_root_delta_from_git(), files)
+            self.assertEqual([call.args[0] for call in fetch.call_args_list],
+                [["git", "show", f"{ref}:{path}"] for path in bindings for ref in (base, head)])
+        for key in ("BASE_SHA", "GITHUB_SHA"):
+            for value in ("", "main", head + ":file"):
+                with self.subTest(key=key, value=value), \
+                     patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head, key: value}), \
+                     patch.object(ci_scope.subprocess, "check_output") as fetch:
+                    self.assertIsNone(ci_scope.geph_physical_root_delta_from_git())
+                    fetch.assert_not_called()
+        for error in (OSError(), ci_scope.subprocess.CalledProcessError(1, "git"),
+                      ci_scope.subprocess.TimeoutExpired("git", 10)):
+            with self.subTest(error=type(error).__name__), \
+                 patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+                 patch.object(ci_scope.subprocess, "check_output", side_effect=error):
+                self.assertIsNone(ci_scope.geph_physical_root_delta_from_git())
+
+    def test_physical_root_cli_does_not_read_or_bootstrap_push_or_incomplete_pair(self):
+        _, _, paths = self.physical_root_fixture()
+        for event, changed in (("push", paths), ("pull_request", paths[1:])):
+            with self.subTest(event=event), tempfile.TemporaryDirectory() as tmp, \
+                 patch.object(ci_scope, "geph_physical_root_delta_from_git") as read, \
+                 patch.object(ci_scope, "delivery_delta_from_git", return_value=None), \
+                 patch("sys.stdin", io.StringIO("\n".join(changed))), \
+                 patch("sys.stdout", io.StringIO()) as stdout:
+                self.assertEqual(ci_scope.main(["--event-name", event,
+                    "--github-output", str(Path(tmp) / "scope")]), 0)
+                self.assertIn('"geph_bootstrap":false', stdout.getvalue())
+                read.assert_not_called()
+
+    def test_physical_root_bindings_pin_the_unchanged_r4_source_and_lock(self):
+        expected = {
+            "vendor/geph/SOURCE.json": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+            "vendor/geph/Cargo.lock": "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+        }
+        self.assertEqual(set(ci_scope.GEPH_PHYSICAL_ROOT_FILE_BINDINGS),
+                         ci_scope.GEPH_PHYSICAL_ROOT_REQUIRED | expected.keys())
+        for path, digest in expected.items():
+            self.assertEqual(ci_scope.GEPH_PHYSICAL_ROOT_FILE_BINDINGS[path], (digest, digest))
+        for path in ci_scope.GEPH_PHYSICAL_ROOT_REQUIRED:
+            before, after = ci_scope.GEPH_PHYSICAL_ROOT_FILE_BINDINGS[path]
+            self.assertNotEqual(before, after)
+            self.assertRegex(before, r"^[0-9a-f]{64}$")
+            self.assertRegex(after, r"^[0-9a-f]{64}$")
+
     def rsa_only_fixture(self):
         deltas = {
             "vendor/geph/SOURCE.json": (b"old source", b"embedded source"),

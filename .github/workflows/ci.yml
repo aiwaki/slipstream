@@ -56,15 +56,25 @@ jobs:
           git show "$BASE_SHA:vendor/geph/Cargo.lock" > "$previous/Cargo.lock"
           git show "$BASE_SHA:security/geph-dependency-audit-policy.json" \
             > "$previous/dependency-audit-policy.json"
-          python3 scripts/geph_vendor_source.py verify-transition \
-            --previous-source "$previous/SOURCE.json" \
-            --previous-version-file "$previous/VERSION" \
-            --previous-cargo-lock "$previous/Cargo.lock" \
-            --previous-policy "$previous/dependency-audit-policy.json" \
-            --source vendor/geph/SOURCE.json \
-            --version-file vendor/geph/VERSION \
-            --cargo-lock vendor/geph/Cargo.lock \
-            --policy security/geph-dependency-audit-policy.json
+          if cmp -s "$previous/SOURCE.json" vendor/geph/SOURCE.json \
+            && cmp -s "$previous/VERSION" vendor/geph/VERSION \
+            && cmp -s "$previous/Cargo.lock" vendor/geph/Cargo.lock \
+            && cmp -s "$previous/dependency-audit-policy.json" security/geph-dependency-audit-policy.json; then
+            python3 scripts/geph_vendor_source.py verify \
+              --source vendor/geph/SOURCE.json \
+              --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock
+          else
+            python3 scripts/geph_vendor_source.py verify-transition \
+              --previous-source "$previous/SOURCE.json" \
+              --previous-version-file "$previous/VERSION" \
+              --previous-cargo-lock "$previous/Cargo.lock" \
+              --previous-policy "$previous/dependency-audit-policy.json" \
+              --source vendor/geph/SOURCE.json \
+              --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock \
+              --policy security/geph-dependency-audit-policy.json
+          fi
 
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
         with:

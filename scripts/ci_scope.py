@@ -458,6 +458,66 @@ def rsa_only_delta_from_git() -> dict | None:
     except (OSError, subprocess.SubprocessError):
         return None
 
+# One producer-path repair after the r4 source contract landed. Only these three
+# changed files may bootstrap; the exact same SOURCE/lock must exist at both
+# refs. Main always takes the normal packaged path after the producer succeeds.
+GEPH_PHYSICAL_ROOT_REQUIRED = frozenset({
+    ".github/workflows/build-geph.yml", ".github/workflows/ci.yml",
+    "scripts/test_geph_source_owned_workflows.py",
+})
+GEPH_PHYSICAL_ROOT_ALLOWED = GEPH_PHYSICAL_ROOT_REQUIRED | {
+    "scripts/ci_scope.py", "scripts/test_ci_scope.py", "docs/CURRENT_STATE.md",
+}
+GEPH_PHYSICAL_ROOT_FILE_BINDINGS = {
+    ".github/workflows/build-geph.yml": (
+        "f4fedc115b2148dd3dcb7f50ca33c045ebabd832770d47efba094ac66ab9a5e1",
+        "f7e49e1aac5360fc7764616b5343290819591932ec5aa57aba374cc977ebcfa7",
+    ),
+    ".github/workflows/ci.yml": (
+        "fca3692d0599adeecc9941c85cdb53381e2b64cb0c01489b066902dbe2ab5a33",
+        "6f592bd7ad0dc172fed43ec01d61090c8278806181567b094445cf7c5d79f6a9",
+    ),
+    "scripts/test_geph_source_owned_workflows.py": (
+        "b933f3169e4b3389bcd1fd1ecd0b61d5fe8add62176bca0a2b077b12a12bd234",
+        "b306261984a672e639d472e19bb0dc399c068cc4d4c6d156da426696f3e5a212",
+    ),
+    "vendor/geph/SOURCE.json": (
+        "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+        "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    ),
+    "vendor/geph/Cargo.lock": (
+        "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+        "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    ),
+}
+
+
+def reviewed_geph_physical_root_delta(deltas: dict | None) -> bool:
+    if not GEPH_PHYSICAL_ROOT_FILE_BINDINGS or not isinstance(deltas, dict):
+        return False
+    if deltas.keys() != GEPH_PHYSICAL_ROOT_FILE_BINDINGS.keys():
+        return False
+    for path, expected in GEPH_PHYSICAL_ROOT_FILE_BINDINGS.items():
+        pair = deltas[path]
+        if not isinstance(pair, tuple) or len(pair) != 2 or not all(isinstance(v, bytes) for v in pair):
+            return False
+        if tuple(hashlib.sha256(v).hexdigest() for v in pair) != expected:
+            return False
+    return True
+
+
+def geph_physical_root_delta_from_git() -> dict | None:
+    refs = (os.environ.get("BASE_SHA", ""), os.environ.get("GITHUB_SHA", ""))
+    if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs):
+        return None
+    try:
+        return {path: tuple(subprocess.check_output(
+            ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL, timeout=10)
+            for ref in refs) for path in GEPH_PHYSICAL_ROOT_FILE_BINDINGS}
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 # One coordinated delivery repair. Exact file bytes keep this from becoming a
 # general app/policy exemption. Full packaged checks still run on main, after
 # its producer publishes the reviewed Geph dependency; both audits run on PRs.
@@ -678,7 +738,8 @@ def classify_paths(paths: list[str], *, event_name: str,
                    app_lock_delta: tuple[str, str] | None = None,
                    delivery_delta: dict[str, tuple[bytes, bytes]] | None = None,
                    python_lock_delta: dict[str, tuple[bytes, bytes]] | None = None,
-                   rsa_only_delta: dict | None = None) -> CiScope:
+                   rsa_only_delta: dict | None = None,
+                   geph_physical_root_delta: dict | None = None) -> CiScope:
     if event_name not in {"pull_request", "push"}:
         raise ValueError(f"unsupported CI event: {event_name}")
     changed = {_validate_path(path) for path in paths if path}
@@ -727,8 +788,15 @@ def classify_paths(paths: list[str], *, event_name: str,
         and changed <= RSA_ONLY_FILE_BINDINGS.keys() | RSA_ONLY_SUPPORT_PATHS
         and reviewed_rsa_only_delta(rsa_only_delta)
     )
+    physical_root_bootstrap = (
+        event_name == "pull_request"
+        and GEPH_PHYSICAL_ROOT_REQUIRED <= changed
+        and changed <= GEPH_PHYSICAL_ROOT_ALLOWED
+        and ("scripts/ci_scope.py" not in changed or "scripts/test_ci_scope.py" in changed)
+        and reviewed_geph_physical_root_delta(geph_physical_root_delta)
+    )
     return CiScope(
-        geph_bootstrap=geph_bootstrap or rsa_only_bootstrap,
+        geph_bootstrap=geph_bootstrap or rsa_only_bootstrap or physical_root_bootstrap,
         product=product,
         windows=windows,
     )
@@ -758,9 +826,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.event_name == "pull_request" and set(paths) & PYTHON_LOCK_FILE_BINDINGS.keys() else None)
     rsa_only_delta = (rsa_only_delta_from_git()
         if args.event_name == "pull_request" and RSA_ONLY_REVIEW in paths else None)
+    physical_root_delta = (geph_physical_root_delta_from_git()
+        if args.event_name == "pull_request" and GEPH_PHYSICAL_ROOT_REQUIRED <= set(paths) else None)
     scope = classify_paths(paths, event_name=args.event_name, app_lock_delta=delta,
                            delivery_delta=delivery_delta, python_lock_delta=python_lock_delta,
-                           rsa_only_delta=rsa_only_delta)
+                           rsa_only_delta=rsa_only_delta,
+                           geph_physical_root_delta=physical_root_delta)
     write_github_output(args.github_output, scope)
     print(json.dumps(asdict(scope), sort_keys=True, separators=(",", ":")))
     return 0
