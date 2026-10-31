@@ -249,15 +249,197 @@ def test_retry_uses_one_actual_check_action_and_keeps_install_distinct():
     with pytest.raises(Refused): menu.validate_ax(report, original, exe, "a" * 64, checked=True)
 
 
-def test_check_menu_cli_reports_success_exit(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("flag", "status"), [("--press-check", "check_pressed"), ("--open-menu", "menu_observed_after_timeout")])
+def test_check_menu_cli_reports_success_exit(tmp_path, monkeypatch, flag, status):
     output = tmp_path / "check.json"
     monkeypatch.setattr(sys, "argv", ["public_update_ax.py", "--pid", "111", "--uid", "501",
         "--executable", "/Applications/Slipstream.app/Contents/MacOS/slipstream",
-        "--exe-sha256", "a" * 64, "--output", str(output), "--press-check"])
+        "--exe-sha256", "a" * 64, "--output", str(output), flag])
     monkeypatch.setattr(ax.signal, "signal", lambda *_a: None)
     monkeypatch.setattr(ax.signal, "alarm", lambda *_a: None)
     def observed(args, report):
-        assert args.press_check and not args.press_update
-        report["status"] = "check_pressed"
+        assert args.press_check == (flag == "--press-check") and not args.press_update
+        report["status"] = status
     monkeypatch.setattr(ax, "run", observed)
     assert ax.main() == 0
+
+
+def menu_nodes(enabled=True):
+    tray = {"element": 11, "path": "AXExtrasMenuBar/AXChildren[0]", "role": "AXMenuBarItem", "title": "", "enabled": True}
+    submenu = {"element": 12, "path": tray["path"] + "/AXChildren[0]", "role": "AXMenu", "title": "", "enabled": True}
+    item = {"element": 13, "path": submenu["path"] + "/AXChildren[0]", "role": "AXMenuItem",
+            "title": f"Install Slipstream {menu.VERSION}…", "enabled": enabled}
+    return [tray, submenu, item]
+
+
+def timeout_visibility(nodes):
+    return {"post_read": True, "visible": True, "visibility_method": "visible_children",
+            "tray_path": nodes[0]["path"], "menu_path": nodes[1]["path"], "item_path": nodes[2]["path"],
+            "title": nodes[2]["title"], "expected_version": menu.VERSION}
+
+
+def ax_actor_fixture(monkeypatch, *, error=-25204, kind="open_menu", post=None, visible=True, drift=False):
+    nodes, calls, identities = menu_nodes(), [], []
+    original = {"pid": 111, "uid": 501, "started": "birth", "executable": "/Applications/Slipstream.app/Contents/MacOS/slipstream",
+                "executable_sha256": "a" * 64}
+    class Client:
+        def __init__(self, _pid):
+            self.nodes, self.reads = [], 0
+        def inspect(self):
+            self.reads += 1
+            calls.append("read")
+            self.nodes = copy.deepcopy(menu_nodes(False) if self.reads == 1 and kind == "open_menu" else (post or nodes))
+            return []
+        def press(self, node):
+            calls.append(("press", node["element"]))
+            return error
+        def menu_visibility(self, node, tray):
+            calls.append("visibility")
+            assert self.reads > 1 and node["enabled"] is True and tray["element"] == 11
+            if not visible:
+                raise ax.Blocked("menu is not visibly present")
+            return timeout_visibility(self.nodes)
+        def close(self): calls.append("close")
+    def identity(*_args):
+        identities.append(1)
+        return {**original, "started": "other"} if drift and len(identities) >= 5 else original
+    monkeypatch.setattr(ax, "AX", Client)
+    monkeypatch.setattr(ax, "identity", identity)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    for key, value in {"CI": "true", "GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "SLIPSTREAM_DISPOSABLE_CI": "1"}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(os, "getuid", lambda: 501)
+    real_stat = os.stat
+    monkeypatch.setattr(os, "stat", lambda path, *a, **kw: SimpleNamespace(st_uid=501) if str(path) == "/dev/console" else real_stat(path, *a, **kw))
+    monkeypatch.setattr(Path, "resolve", lambda self, *_a, **_k: self)
+    monkeypatch.setattr(ax.time, "sleep", lambda _seconds: None)
+    args = SimpleNamespace(pid=111, uid=501, executable=Path(original["executable"]), exe_sha256="a" * 64,
+                           open_menu=kind == "open_menu", press_update=kind == "press_update", press_check=kind == "press_check",
+                           expected_version=menu.VERSION)
+    report = {"status": "blocked", "actions": [], "installation_attempted": False}
+    return args, report, calls, original
+
+
+def test_menu_timeout_uses_one_action_then_fresh_visible_postcondition(monkeypatch):
+    args, report, calls, original = ax_actor_fixture(monkeypatch)
+    ax.run(args, report)
+    assert report["status"] == "menu_observed_after_timeout"
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert calls == ["read", ("press", 11), "read", "visibility", "close"]
+    assert report["actions"][0]["ax_error"] == -25204
+    assert report["actions"][0]["postcondition"] == timeout_visibility(menu_nodes())
+    menu.validate_ax(report, {key: original[key] for key in ("pid", "uid", "started")}, args.executable, "a" * 64)
+
+
+@pytest.mark.parametrize("case", ["hidden", "disabled", "duplicate", "wrong_version", "identity", "other_error"])
+def test_menu_timeout_refuses_uncertain_postcondition_without_replay(monkeypatch, case):
+    nodes = menu_nodes(enabled=case != "disabled")
+    if case == "duplicate": nodes.append(copy.deepcopy(nodes[-1]))
+    if case == "wrong_version": nodes[-1]["title"] = "Install Slipstream 0.1.9-preview.99…"
+    args, report, calls, _ = ax_actor_fixture(monkeypatch, post=nodes, visible=case != "hidden",
+        drift=case == "identity", error=-25202 if case == "other_error" else -25204)
+    with pytest.raises(ax.Blocked): ax.run(args, report)
+    assert len([call for call in calls if isinstance(call, tuple)]) == 1
+    assert report["status"] == "blocked"
+
+
+def test_install_timeout_stays_failure_without_postread_or_replay(monkeypatch):
+    args, report, calls, _ = ax_actor_fixture(monkeypatch, kind="press_update")
+    with pytest.raises(ax.Blocked): ax.run(args, report)
+    assert calls == ["read", ("press", 13), "close"]
+    assert report["installation_attempted"] is True
+
+
+def test_check_timeout_stays_failure_without_postread_or_replay(monkeypatch):
+    nodes = menu_nodes()
+    nodes[-1]["title"] = "Check for Updates…"
+    args, report, calls, _ = ax_actor_fixture(monkeypatch, kind="press_check", post=nodes)
+    with pytest.raises(ax.Blocked): ax.run(args, report)
+    assert calls == ["read", ("press", 13), "close"]
+    assert report["installation_attempted"] is False
+
+
+@pytest.mark.parametrize("mutation", ["missing_proof", "pre_read", "hidden", "unknown_method", "wrong_version", "wrong_title",
+    "wrong_parent", "missing_nodes", "ambiguous_nodes", "missing_offer", "duplicate_offer", "disabled", "extra_action", "rewritten_error",
+    "false_status", "identity", "malformed_method", "malformed_title"])
+def test_timeout_report_rejects_incomplete_or_mismatched_proof(monkeypatch, mutation):
+    args, report, _, original = ax_actor_fixture(monkeypatch)
+    ax.run(args, report)
+    action = report["actions"][0]
+    p = action["postcondition"]
+    if mutation == "missing_proof": del action["postcondition"]
+    if mutation == "pre_read": p["post_read"] = False
+    if mutation == "hidden": p["visible"] = False
+    if mutation == "unknown_method": p["visibility_method"] = "enabled_is_enough"
+    if mutation == "malformed_method": p["visibility_method"] = []
+    if mutation == "malformed_title": p["title"] = []
+    if mutation == "wrong_version": p["expected_version"] = "0.1.9-preview.99"
+    if mutation == "wrong_title": p["title"] = "Check for Updates…"
+    if mutation == "wrong_parent": p["tray_path"] = "another tray"
+    if mutation == "missing_nodes": del report["nodes"]
+    if mutation == "ambiguous_nodes": report["nodes"].append(copy.deepcopy(report["nodes"][-1]))
+    if mutation == "missing_offer": report["update_items"] = []
+    if mutation == "duplicate_offer": report["update_items"] *= 2
+    if mutation == "disabled": report["nodes"][-1]["enabled"] = False
+    if mutation == "extra_action": report["actions"] *= 2
+    if mutation == "rewritten_error": action["ax_error"] = 0
+    if mutation == "false_status": report["status"] = "menu_opened"
+    if mutation == "identity": report["identity"] = {**original, "started": "other"}
+    with pytest.raises(Refused):
+        menu.validate_ax(report, {key: original[key] for key in ("pid", "uid", "started")}, args.executable, "a" * 64)
+
+
+def visibility_client(*, error=0, children=(13,), hit=13, frame=(10, 20, 80, 16), parent=12, hit_error=0):
+    client = ax.AX.__new__(ax.AX)
+    client.nodes, client.refs, client.pid = menu_nodes(), [], 111
+    calls = []
+    values = {11: "element", 12: "element", 13: "element", 14: "element", 31: "array", 41: "value", 42: "value"}
+    attributes = {(13, "AXParent"): (0, parent), (12, "AXParent"): (0, 11),
+                  (12, "AXVisibleChildren"): (error, 31 if error == 0 else None),
+                  (13, "AXPosition"): (0, 41), (13, "AXSize"): (0, 42)}
+    def attribute(element, name):
+        calls.append((element, name))
+        return attributes[element, name]
+    def check(element):
+        calls.append(("check", element))
+        if element not in {11, 12, 13}: raise ax.Blocked("foreign PID")
+    def copy_hit(system, x, y, target):
+        calls.append(("hit", system, x, y))
+        ax.C.cast(target, ax.C.POINTER(ax.C.c_void_p))[0] = ax.C.c_void_p(hit)
+        return hit_error
+    def get_value(value, kind, pointer):
+        target = ax.C.cast(pointer, ax.C.POINTER(ax.Point if kind == 1 else ax.Size)).contents
+        if kind == 1: target.x, target.y = frame[:2]
+        else: target.width, target.height = frame[2:]
+        return True
+    client.attribute, client.check = attribute, check
+    client.cf = SimpleNamespace(CFEqual=lambda a, b: a == b, CFGetTypeID=lambda value: values.get(value),
+        CFArrayGetTypeID=lambda: "array", CFArrayGetCount=lambda _value: len(children),
+        CFArrayGetValueAtIndex=lambda _value, index: children[index])
+    client.ax = SimpleNamespace(AXUIElementGetTypeID=lambda: "element", AXValueGetTypeID=lambda: "value",
+        AXValueGetType=lambda value: value - 40, AXValueGetValue=get_value,
+        AXUIElementCreateSystemWide=lambda: 99, AXUIElementSetMessagingTimeout=lambda *_a: 0,
+        AXUIElementCopyElementAtPosition=copy_hit)
+    return client, calls
+
+
+@pytest.mark.parametrize("error", [0, -25205, -25212])
+def test_positive_menu_visibility_uses_owned_parent_or_exact_global_hit(error):
+    client, calls = visibility_client(error=error)
+    result = client.menu_visibility(client.nodes[-1], client.nodes[0])
+    assert result["visible"] and result["post_read"]
+    assert result["visibility_method"] == ("visible_children" if error == 0 else "global_hit_test")
+    hits = [call for call in calls if call[0] == "hit"]
+    assert hits == ([] if error == 0 else [("hit", 99, 50.0, 28.0)])
+    assert result["tray_path"] == client.nodes[0]["path"] and result["item_path"] == client.nodes[-1]["path"]
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"children": ()}, {"children": (13, 13)}, {"children": (14,)}, {"parent": 11}, {"error": -25204},
+    {"error": -25205, "hit": 14}, {"error": -25205, "hit": 12}, {"error": -25205, "hit": None},
+    {"error": -25205, "hit_error": -25204}, {"error": -25205, "frame": (0, 0, 0, 10)},
+    {"error": -25205, "frame": (float("nan"), 0, 10, 10)}, {"error": -25205, "frame": (0, 0, float("inf"), 10)},
+])
+def test_menu_visibility_refuses_hidden_foreign_unknown_or_invalid_geometry(kwargs):
+    client, _ = visibility_client(**kwargs)
+    with pytest.raises(ax.Blocked): client.menu_visibility(client.nodes[-1], client.nodes[0])

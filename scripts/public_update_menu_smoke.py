@@ -81,7 +81,8 @@ def validate_ax(report, original, executable, old_hash, *, pressed=False, checke
                         "executable": str(executable), "executable_sha256": old_hash},
             "AX report did not bind the original tray")
     require(not (pressed and checked), "one menu action required")
-    require(report.get("status") in ({"update_pressed"} if pressed else {"check_pressed"} if checked else {"inspected", "menu_opened"}),
+    require(report.get("status") in ({"update_pressed"} if pressed else {"check_pressed"} if checked else
+                                    {"inspected", "menu_opened", "menu_observed_after_timeout"}),
             "owned menu action failed; no retry")
     actions = report.get("actions")
     require(isinstance(actions, list), "AX action evidence missing")
@@ -95,6 +96,35 @@ def validate_ax(report, original, executable, old_hash, *, pressed=False, checke
                 and actions[0].get("attempted") is True and actions[0].get("ax_error") == 0
                 and actions[0].get("title") in {"Check for Updates…", "Проверить обновления…"}
                 and report.get("installation_attempted") is False, "one normal update check required")
+    elif report.get("status") == "menu_observed_after_timeout":
+        require(report.get("installation_attempted") is False and report.get("owned_menu_present") is True
+                and len(actions) == 1 and actions[0].get("kind") == "open_menu"
+                and actions[0].get("attempted") is True and type(actions[0].get("ax_error")) is int
+                and actions[0]["ax_error"] == -25204, "one uncertain menu-open action required")
+        proof = actions[0].get("postcondition")
+        require(isinstance(proof, dict) and set(proof) == {"post_read", "visible", "visibility_method", "tray_path",
+                "menu_path", "item_path", "title", "expected_version"}
+                and proof.get("post_read") is True and proof.get("visible") is True
+                and isinstance(proof.get("visibility_method"), str) and isinstance(proof.get("title"), str)
+                and proof.get("visibility_method") in {"visible_children", "global_hit_test"}
+                and proof.get("expected_version") == VERSION
+                and proof.get("title") in {f"Install Slipstream {VERSION}…", f"Установить Slipstream {VERSION}…"}
+                and all(isinstance(proof.get(key), str) for key in ("tray_path", "menu_path", "item_path")),
+                "positive fresh menu visibility proof required")
+        require(proof["tray_path"] == actions[0].get("path")
+                and re.fullmatch(re.escape(proof["tray_path"]) + r"/AXChildren\[\d+\]", proof["menu_path"]) is not None
+                and re.fullmatch(re.escape(proof["menu_path"]) + r"/AXChildren\[\d+\]", proof["item_path"]) is not None,
+                "fresh offer must descend from the single opened tray")
+        nodes, items = report.get("nodes"), report.get("update_items")
+        require(isinstance(nodes, list) and isinstance(items, list), "fresh menu observation missing")
+        for key, role in (("tray_path", "AXMenuBarItem"), ("menu_path", "AXMenu"), ("item_path", "AXMenuItem")):
+            found = [node for node in nodes if isinstance(node, dict) and node.get("path") == proof[key]]
+            require(len(found) == 1 and found[0].get("role") == role, "fresh menu ancestry is ambiguous")
+        offered = [item for item in items if isinstance(item, dict) and item.get("title") in
+                   {f"Install Slipstream {VERSION}…", f"Установить Slipstream {VERSION}…"} and item.get("enabled") is True]
+        require(len(offered) == 1 and offered[0].get("path") == proof["item_path"]
+                and offered[0].get("title") == proof["title"] and offered[0] == found[0],
+                "fresh enabled exact-version menu offer missing")
     else:
         require(report.get("installation_attempted") is False
                 and all(action.get("kind") == "open_menu" and action.get("ax_error") == 0 for action in actions),
@@ -189,6 +219,13 @@ class PublicMenu:
         until = min(clock() + 120, backend.deadline - 420)
         first = True
         rediscovery = self.retry_discovery
+        readonly_before_open = rediscovery
+        manual_check = False
+
+        def check_enabled(report):
+            return any(item.get("title") in {"Check for Updates…", "Проверить обновления…"}
+                       and item.get("enabled") is True for item in report.get("update_items", []))
+
         while clock() < until:
             require(backend.original_process.poll() is None
                     and same_process(backend.initiator, backend.process_snapshot(backend.initiator["pid"])),
@@ -203,31 +240,48 @@ class PublicMenu:
                 # Opening the status menu is an explicit interaction. The earlier
                 # read-only interval observes real background discovery/startup.
                 backend.visibility.set_phase("interaction")
+            if first and readonly_before_open:
+                # Native Cancel proves runtime cleanup, not menu readiness. The
+                # app may still be refreshing its offer or awaiting the UI poll.
+                command, output = self.command()
+                backend.run(command, timeout=35, check=False, env=helper_environment(backend))
+                observed = document(output)
+                self.validate(observed)
+                backend.record("public_menu", observed)
+                require(clock() < until, "normal OLD menu readiness exceeded the discovery bound")
+                if not (offer_visible(observed) or self.retry_discovery and check_enabled(observed)):
+                    sleep(3)
+                    continue
             command, output = self.command(open_menu=first)
             first = False
             backend.run(command, timeout=35, check=False, env=helper_environment(backend))
             report = document(output)
             self.validate(report)
             backend.record("public_menu", report)
-            if self.retry_discovery and any(item.get("title") in {"Check for Updates…", "Проверить обновления…"}
-                                           and item.get("enabled") is True for item in report.get("update_items", [])):
+            if rediscovery:
+                require(clock() < until, "normal OLD menu observation exceeded the discovery bound")
+            if self.retry_discovery and not offer_visible(report) and check_enabled(report):
                 command, output = self.command(check=True)
                 backend.run(command, timeout=35, check=False, env=helper_environment(backend))
                 checked = document(output)
                 self.validate(checked, checked=True)
                 backend.record("cancel_retry_discovery", checked)
                 self.retry_discovery = False
+                manual_check = True
                 first = True  # The ordinary Check action closes the menu.
+                readonly_before_open = True
                 sleep(3)
                 continue
-            if not self.retry_discovery and offer_visible(report):
+            if offer_visible(report):
                 saved = private_json(backend.state / "app-update-state-v1.json", backend.uid)
                 require(saved is not None and set(saved) == {"version", "channel", "last_notified_version", "highest_seen_version"}
                         and saved["version"] == 1 and saved["channel"] == "preview"
                         and saved["highest_seen_version"] == VERSION, "normal app did not persist the public offer")
+                self.retry_discovery = False
                 backend.record("public_discovery", {"version": VERSION, "menu_report": output.name,
                     "persisted_state": saved, "notification_delivery_qualified": False,
-                    "method": ("unmodified_normal_app_manual_rediscovery_after_cancel" if rediscovery else
+                    "method": ("unmodified_normal_app_manual_rediscovery_after_cancel" if manual_check else
+                               "unmodified_normal_app_automatic_rediscovery_after_cancel" if rediscovery else
                                "unmodified_normal_app_background_discovery_and_exact_menu_offer")})
                 return
             sleep(3)

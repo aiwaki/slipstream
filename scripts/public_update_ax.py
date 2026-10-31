@@ -6,6 +6,7 @@ import argparse
 import ctypes as C
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,14 @@ import time
 
 class Blocked(RuntimeError):
     pass
+
+
+class Point(C.Structure):
+    _fields_ = [("x", C.c_double), ("y", C.c_double)]
+
+
+class Size(C.Structure):
+    _fields_ = [("width", C.c_double), ("height", C.c_double)]
 
 
 def update_titles(version: str | None) -> set[str]:
@@ -88,6 +97,11 @@ class AX:
             (self.ax, "AXUIElementSetMessagingTimeout", [ptr, C.c_float], C.c_int),
             (self.ax, "AXUIElementCopyAttributeValue", [ptr, ptr, C.POINTER(ptr)], C.c_int),
             (self.ax, "AXUIElementPerformAction", [ptr, ptr], C.c_int),
+            (self.ax, "AXUIElementCreateSystemWide", [], ptr),
+            (self.ax, "AXUIElementCopyElementAtPosition", [ptr, C.c_float, C.c_float, C.POINTER(ptr)], C.c_int),
+            (self.ax, "AXValueGetTypeID", [], C.c_ulong),
+            (self.ax, "AXValueGetType", [ptr], C.c_int),
+            (self.ax, "AXValueGetValue", [ptr, C.c_int, ptr], C.c_ubyte),
         )
         for library, name, arguments, result in signatures:
             function = getattr(library, name)
@@ -191,6 +205,72 @@ class AX:
         finally:
             self.cf.CFRelease(action)
 
+    def menu_visibility(self, item, pressed_tray):
+        """Prove a fresh exact item is visible; never act on a hit-test result."""
+        tray = unique([node for node in self.nodes if node["role"] == "AXMenuBarItem"
+                       and self.cf.CFEqual(node["element"], pressed_tray["element"])], "fresh owned tray")
+        menu = unique([node for node in self.nodes if node["role"] == "AXMenu"
+                       and item["path"].rsplit("/AXChildren[", 1)[0] == node["path"]
+                       and node["path"].rsplit("/AXChildren[", 1)[0] == tray["path"]], "fresh owned submenu")
+        for child, parent in ((item, menu), (menu, tray)):
+            error, value = self.attribute(child["element"], "AXParent")
+            if error != 0 or not value or self.cf.CFGetTypeID(value) != self.ax.AXUIElementGetTypeID():
+                raise Blocked("menu ancestry unavailable")
+            self.check(value)
+            if not self.cf.CFEqual(value, parent["element"]):
+                raise Blocked("menu ancestry changed")
+        error, children = self.attribute(menu["element"], "AXVisibleChildren")
+        if error == 0:
+            if not children or self.cf.CFGetTypeID(children) != self.cf.CFArrayGetTypeID():
+                raise Blocked("visible menu children unavailable")
+            count = self.cf.CFArrayGetCount(children)
+            if not 0 <= count <= 64:
+                raise Blocked("visible menu child count exceeds bound")
+            matches = 0
+            for index in range(count):
+                child = self.cf.CFArrayGetValueAtIndex(children, index)
+                if not child or self.cf.CFGetTypeID(child) != self.ax.AXUIElementGetTypeID():
+                    raise Blocked("invalid visible menu child")
+                self.check(child)
+                matches += bool(self.cf.CFEqual(child, item["element"]))
+            if matches != 1:
+                raise Blocked("exact update item is not uniquely visible")
+            method = "visible_children"
+        elif error in {-25205, -25212}:  # Unsupported/no-value: require independent positive hit-test proof.
+            position, size = Point(), Size()
+            for name, kind, target in (("AXPosition", 1, position), ("AXSize", 2, size)):
+                code, value = self.attribute(item["element"], name)
+                if (code != 0 or not value or self.cf.CFGetTypeID(value) != self.ax.AXValueGetTypeID()
+                        or self.ax.AXValueGetType(value) != kind
+                        or not self.ax.AXValueGetValue(value, kind, C.byref(target))):
+                    raise Blocked("update item frame unavailable")
+            values = (position.x, position.y, size.width, size.height)
+            if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values) or size.width <= 0 or size.height <= 0:
+                raise Blocked("update item frame is not finite and positive")
+            system = self.ax.AXUIElementCreateSystemWide()
+            if not system:
+                raise Blocked("visibility hit-test unavailable")
+            self.refs.append(system)
+            if self.ax.AXUIElementSetMessagingTimeout(system, 0.5) != 0:
+                raise Blocked("visibility hit-test timeout unavailable")
+            self.check(item["element"])
+            hit = C.c_void_p()
+            code = self.ax.AXUIElementCopyElementAtPosition(system, position.x + size.width / 2,
+                                                          position.y + size.height / 2, C.byref(hit))
+            if hit.value:
+                self.refs.append(hit.value)
+            if code != 0 or not hit.value or self.cf.CFGetTypeID(hit.value) != self.ax.AXUIElementGetTypeID():
+                raise Blocked("update item visibility not observed")
+            self.check(hit.value)  # Only PID is read on a foreign hit; never traverse it or act on it.
+            if not self.cf.CFEqual(hit.value, item["element"]):
+                raise Blocked("update item is hidden or obscured")
+            method = "global_hit_test"
+        else:
+            raise Blocked("visible menu inspection failed")
+        self.check(item["element"])
+        return {"post_read": True, "visible": True, "visibility_method": method,
+                "tray_path": tray["path"], "menu_path": menu["path"], "item_path": item["path"], "title": item["title"]}
+
     def close(self):
         for value in reversed(self.refs):
             self.cf.CFRelease(value)
@@ -230,8 +310,10 @@ def run(args, report):
             if kind == "press_update":
                 report["installation_attempted"] = True
             action["ax_error"] = client.press(node)
-            if action["ax_error"] != 0:
+            if action["ax_error"] != 0 and not (kind == "open_menu" and action["ax_error"] == -25204
+                                                and not args.press_update and not getattr(args, "press_check", False)):
                 raise Blocked("AXPress failed; no retry")
+            return action
 
         inspect()
         if not client.nodes:
@@ -243,11 +325,20 @@ def run(args, report):
                 candidates = [node for node in client.nodes if node["role"] == "AXMenuBarItem"
                               and node["path"].startswith("AXMenuBar") and node["path"].count("/AXChildren") == 1
                               and node["title"] in {"", "Slipstream"}]
-            press(unique(candidates, "owned tray item"), "open_menu")
+            tray = unique(candidates, "owned tray item")
+            action = press(tray, "open_menu")
             time.sleep(0.25)
             inspect()
             if not report["owned_menu_present"]:
                 raise Blocked("opened tray does not expose an update menu item")
+            if action["ax_error"] == -25204:
+                if not args.expected_version:
+                    raise Blocked("timeout observation requires an exact update version")
+                titles = {f"Install Slipstream {args.expected_version}…", f"Установить Slipstream {args.expected_version}…"}
+                item = unique([node for node in client.nodes if node["role"] == "AXMenuItem"
+                               and node["title"] in titles and node["enabled"] is True], "fresh enabled exact-version offer")
+                action["postcondition"] = {**client.menu_visibility(item, tray), "expected_version": args.expected_version}
+                recheck()
         if args.press_update:
             exact_titles = {f"Install Slipstream {args.expected_version}…", f"Установить Slipstream {args.expected_version}…"}
             node = unique([node for node in client.nodes if node["role"] == "AXMenuItem" and node["title"] in exact_titles
@@ -260,7 +351,8 @@ def run(args, report):
                            and node["enabled"] is True], "enabled ordinary update check")
             press(node, "press_check")
         report["status"] = ("update_pressed" if args.press_update else "check_pressed"
-                            if getattr(args, "press_check", False) else "menu_opened" if args.open_menu else "inspected")
+                            if getattr(args, "press_check", False) else "menu_observed_after_timeout"
+                            if args.open_menu and action["ax_error"] == -25204 else "menu_opened" if args.open_menu else "inspected")
     finally:
         client.close()
 
@@ -304,7 +396,7 @@ def main() -> int:
         payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
         stream.write(payload)
         print(payload, end="")
-    return 0 if report["status"] in {"inspected", "menu_opened", "update_pressed", "check_pressed"} else 2
+    return 0 if report["status"] in {"inspected", "menu_opened", "menu_observed_after_timeout", "update_pressed", "check_pressed"} else 2
 
 
 if __name__ == "__main__":
