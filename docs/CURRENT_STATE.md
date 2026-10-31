@@ -28,7 +28,23 @@ catalog and SBOM validator remain unchanged. Evidence: source-root-physical-fix/
 receipt.json SHAe2fc9e2ca3723d0897d27fb2ee565ad03fddb88d11e7a95c7c196fbd690b9a94;
 ../geph-physical-root-ci/verification.json SHA3af1f8bc5a6520c2b3a3fb416f86c9b290019007d08f2911d2bf7b05ecbb03ea.
 
-NEXT: finish independent review and real-ref replay, then normal PR/required CI.
+PR434 https://github.com/aiwaki/slipstream/pull/434 first head27c692c24503 failed
+CI41159015975/1 before tests: the bootstrap caller demanded a revision transition
+even though r4 SOURCE/VERSION/lock/policy were unchanged. Audit41159016032/1 PASS.
+The strict revision-reuse rejection was correct; the caller is now corrected.
+
+The CI callsite compares all four exported snapshots: byte-identical inputs use
+normal source validation; any difference keeps the original strict transition
+checker with every prior argument/policy guard. Actual-shell/CLI old RED ->
+14 tests plus10 subchecks GREEN. Exact bootstrap now binds three changed files
+(producer workflow, CI caller, regression) plus unchanged SOURCE/lock; all28
+classifier tests PASS. Original121 RSA catalog and core validators unchanged.
+Two existing build contracts and actionlint structural check also PASS.
+Evidence bootstrap-contract-fix/receipt.json SHAc0306e894a8e09cbaf02ccf8e669191e4374d1005052435f96f6b0f514150f38;
+../geph-physical-root-ci/transition-callsite/verification.json SHA
+7d9b61ab0d442cb9d5e91aa6d365087af90ac275440fcd7c35d9184fabd02b81.
+NEXT: final independent caller/downstream review, committed-ref replay, and
+required CI on the corrected PR434 head, then normal merge.
 No generic skip, no main bootstrap, no source/policy/catalog/RSA expiry changes.
 Review/merge, then exact new producer30cases/9assets and ordinary mainCI/audit.
 After producer success, at most one full ordinary same-SHA CI rerun if its first

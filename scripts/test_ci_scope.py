@@ -15,13 +15,15 @@ class CiScopeTests(unittest.TestCase):
     def physical_root_fixture(self):
         files = {
             ".github/workflows/build-geph.yml": (b"logical root", b"physical root"),
+            ".github/workflows/ci.yml": (b"transition only", b"verify unchanged contract"),
             "scripts/test_geph_source_owned_workflows.py": (b"old tests", b"physical regression"),
             "vendor/geph/SOURCE.json": (b"same source", b"same source"),
             "vendor/geph/Cargo.lock": (b"same lock", b"same lock"),
         }
         bindings = {path: tuple(hashlib.sha256(value).hexdigest() for value in pair)
                     for path, pair in files.items()}
-        paths = [".github/workflows/build-geph.yml", "scripts/test_geph_source_owned_workflows.py",
+        paths = [".github/workflows/build-geph.yml", ".github/workflows/ci.yml",
+                 "scripts/test_geph_source_owned_workflows.py",
                  "scripts/ci_scope.py", "scripts/test_ci_scope.py", "docs/CURRENT_STATE.md"]
         return files, bindings, paths
 
@@ -36,7 +38,7 @@ class CiScopeTests(unittest.TestCase):
             output = Path(tmp) / "scope"
             self.assertEqual(ci_scope.main(["--event-name", "pull_request", "--github-output", str(output)]), 0)
             self.assertIn('"geph_bootstrap":true', stdout.getvalue())
-            self.assertIn("geph_bootstrap=true\n", output.read_text())
+            self.assertEqual(output.read_text(), "geph_bootstrap=true\nproduct=true\nwindows=true\n")
             read.assert_called_once_with()
 
     def test_physical_root_scope_refuses_changed_contracts_and_unrelated_files(self):
@@ -46,6 +48,8 @@ class CiScopeTests(unittest.TestCase):
                 return ci_scope.classify_paths(changed, event_name=event,
                     geph_physical_root_delta=delta).geph_bootstrap
             self.assertTrue(allowed())
+            self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request",
+                geph_physical_root_delta=files), ci_scope.CiScope(True, True, True))
             self.assertTrue(allowed(list(ci_scope.GEPH_PHYSICAL_ROOT_REQUIRED)))
             self.assertFalse(allowed(event="push"))
             self.assertFalse(allowed(delta=None))
@@ -59,7 +63,8 @@ class CiScopeTests(unittest.TestCase):
                     with self.subTest(path=path, side=index):
                         self.assertFalse(allowed(delta={**files, path: tuple(changed)}))
             for extra in ("vendor/geph/SOURCE.json", "vendor/geph/Cargo.lock", "spike/tproxy.py",
-                          ".github/workflows/ci.yml", "security/geph-dependency-audit-policy.json",
+                          "app-tauri/src-tauri/src/main.rs", ".github/workflows/build-app.yml",
+                          "security/geph-dependency-audit-policy.json", "security/dependency-audit-policy.json",
                           "README.md", ".gitattributes", "docs/RELEASES.md"):
                 with self.subTest(extra=extra):
                     self.assertFalse(allowed([*paths, extra]))

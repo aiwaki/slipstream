@@ -458,11 +458,12 @@ def rsa_only_delta_from_git() -> dict | None:
     except (OSError, subprocess.SubprocessError):
         return None
 
-# One producer-path repair after the r4 source contract landed. Only these two
+# One producer-path repair after the r4 source contract landed. Only these three
 # changed files may bootstrap; the exact same SOURCE/lock must exist at both
 # refs. Main always takes the normal packaged path after the producer succeeds.
 GEPH_PHYSICAL_ROOT_REQUIRED = frozenset({
-    ".github/workflows/build-geph.yml", "scripts/test_geph_source_owned_workflows.py",
+    ".github/workflows/build-geph.yml", ".github/workflows/ci.yml",
+    "scripts/test_geph_source_owned_workflows.py",
 })
 GEPH_PHYSICAL_ROOT_ALLOWED = GEPH_PHYSICAL_ROOT_REQUIRED | {
     "scripts/ci_scope.py", "scripts/test_ci_scope.py", "docs/CURRENT_STATE.md",
@@ -472,9 +473,13 @@ GEPH_PHYSICAL_ROOT_FILE_BINDINGS = {
         "f4fedc115b2148dd3dcb7f50ca33c045ebabd832770d47efba094ac66ab9a5e1",
         "f7e49e1aac5360fc7764616b5343290819591932ec5aa57aba374cc977ebcfa7",
     ),
+    ".github/workflows/ci.yml": (
+        "fca3692d0599adeecc9941c85cdb53381e2b64cb0c01489b066902dbe2ab5a33",
+        "6f592bd7ad0dc172fed43ec01d61090c8278806181567b094445cf7c5d79f6a9",
+    ),
     "scripts/test_geph_source_owned_workflows.py": (
         "b933f3169e4b3389bcd1fd1ecd0b61d5fe8add62176bca0a2b077b12a12bd234",
-        "e6ced05362b6d5500fbe92b61c407690f7fdb3b277837294ddf7561588b29351",
+        "b306261984a672e639d472e19bb0dc399c068cc4d4c6d156da426696f3e5a212",
     ),
     "vendor/geph/SOURCE.json": (
         "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
