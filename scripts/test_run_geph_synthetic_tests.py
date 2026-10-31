@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 import signal
 import subprocess
@@ -38,27 +39,51 @@ class SyntheticRunnerTests(unittest.TestCase):
         contract["crate"]["url"] = f"https://static.crates.io/crates/geph5-client/geph5-client-{version}.crate"
         contract["lock_sha256"] = runner.digest(self.source / "Cargo.lock")
         contract["source_edits"] = []
+        contract.pop("embedded_packages", None)
         self.contract.write_text(json.dumps(contract))
 
-    def orchestration(self, version="0.3.9", fault=None):
+    def orchestration(self, version="0.3.9", fault=None, *, rsa=False):
         self.configure(version)
         self.commands = []
+        self.command_timeouts = []
         expected = runner.ALLOWLIST.get(version, ())
+        prepare = runner.geph_rsa_fixture.prepare
+        if rsa:
+            self.configure_rsa()
+            expected += runner.geph_rsa_fixture.RSA_TESTS
+            prepare = lambda source, contract, root: self.original_prepare(
+                source, contract, root, fixtures=self.fixtures)
+            if fault == "prepare-source":
+                (self.source / "src/auth.rs").write_text("unreviewed production content")
 
         def fake_run(command, *, cwd, env, timeout, log, log_limit=1024 * 1024):
             self.commands.append(command)
+            self.command_timeouts.append(timeout)
             if "cargo" == command[0]:
-                self.assertIn("--no-run", command)
                 self.assertIn("--locked", command)
-                self.assertIn("--lib", command)
+                is_test = command[1] == "test"
+                if is_test:
+                    self.assertIn("--no-run", command)
+                    self.assertIn("--lib", command)
+                else:
+                    self.assertEqual(command[1], "build")
+                    self.assertEqual(command[command.index("--bin") + 1], "sign_adapter")
                 if fault == "compile-exit":
                     raise runner.QualificationError("synthetic compile failure")
                 target = Path(command[command.index("--target-dir") + 1])
-                self.executable = target / "geph5_client-fixture"
-                self.executable.write_text("never executed\n")
-                artifact = {"reason": "compiler-artifact", "profile": {"test": True},
-                            "target": {"name": "geph5_client", "src_path": str(self.source / "src/lib.rs")},
-                            "executable": str(self.executable)}
+                target.mkdir(parents=True, exist_ok=True)
+                executable = target / ("geph5_client-fixture" if is_test else "sign_adapter")
+                executable.write_text("never executed\n")
+                manifest_root = Path(command[command.index("--manifest-path") + 1]).parent
+                if is_test:
+                    self.executable = executable
+                    self.built_source = manifest_root
+                artifact = {"reason": "compiler-artifact", "profile": {"test": is_test},
+                            "target": {"name": "geph5_client" if is_test else "sign_adapter",
+                                       "src_path": str(manifest_root / ("src/lib.rs" if is_test else "src/bin/sign_adapter.rs"))},
+                            "executable": str(executable)}
+                if fault == "oracle-identity" and not is_test:
+                    artifact["target"]["src_path"] = str(self.source / "src/lib.rs")
                 if fault == "outside-binary":
                     artifact["executable"] = sys.executable
                 log.write_text(json.dumps(artifact) + "\n")
@@ -77,6 +102,10 @@ class SyntheticRunnerTests(unittest.TestCase):
                     self.assertEqual(command[5:], ["--exact", "--test-threads=1", "--nocapture"])
                     if fault == "case-exit":
                         raise runner.QualificationError("fixture failure")
+                    if fault == "production-mutated":
+                        (self.source / "src/lib.rs").write_text("unexpected production mutation")
+                    if fault == "copied-lock-mutated":
+                        (self.built_source / "Cargo.lock").write_text("unexpected lock mutation")
                     count = 0 if fault == "zero-pass" else 1
                     log.write_text(f"running {count} test\ntest {name} ... ok\n"
                                    f"test result: ok. {count} passed; 0 failed; 0 ignored; "
@@ -87,11 +116,126 @@ class SyntheticRunnerTests(unittest.TestCase):
              mock.patch.object(runner, "SANDBOX", Path(sys.executable)), \
              mock.patch.object(runner, "sandbox_selftest") as probe, \
              mock.patch.object(runner, "run_command", side_effect=fake_run), \
+             mock.patch.object(runner.geph_rsa_fixture, "prepare", side_effect=prepare), \
              mock.patch.dict(os.environ, {"SLIPSTREAM_GEPH_ACCOUNT_SECRET": "must-not-propagate",
                                           "DYLD_INSERT_LIBRARIES": "must-not-propagate"}):
             if fault == "probe":
                 probe.side_effect = runner.QualificationError("denial probe failed")
             return runner.qualify(self.source, self.contract, self.evidence)
+
+    def configure_rsa(self):
+        contract = json.loads(self.contract.read_text())
+        contract["embedded_packages"] = json.loads(
+            (ROOT / "vendor/geph/SOURCE.json").read_text())["embedded_packages"]
+        self.contract.write_text(json.dumps(contract))
+        for name in ("auth", "bw_token"):
+            (self.source / f"src/{name}.rs").write_text("// current production body\n")
+        (self.source / "src/broker.rs").write_text(
+            runner.geph_rsa_fixture.BROKER_ANCHOR + "    existing_production_branch()\n}\n")
+        self.fixtures = self.root / "rsa-fixtures"
+        if self.fixtures.exists():
+            shutil.rmtree(self.fixtures)
+        shutil.copytree(runner.geph_rsa_fixture.FIXTURES, self.fixtures)
+        catalog_path = self.fixtures / "closure.json"
+        catalog = json.loads(catalog_path.read_text())
+        catalog.update(source_sha256=runner.digest(self.contract),
+                       lock_sha256=runner.digest(self.source / "Cargo.lock"),
+                       production_files=runner.geph_rsa_fixture.snapshot(self.source))
+        catalog_path.write_text(json.dumps(catalog))
+        self.original_prepare = runner.geph_rsa_fixture.prepare
+
+    def test_rsa_current_copy_and_separate_oracle_run_exact_thirty_cases(self):
+        result = self.orchestration("0.4.3", rsa=True)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["expected_tests"], list(runner.ALLOWLIST["0.4.3"] + runner.geph_rsa_fixture.RSA_TESTS))
+        self.assertEqual(result["passed_tests"], result["expected_tests"])
+        self.assertTrue(result["rsa_fixture"]["production_unchanged"])
+        builds = [command for command in self.commands if command[0] == "cargo"]
+        self.assertEqual([command[1] for command in builds], ["build", "test"])
+        self.assertIn("legacy-oracle", builds[0][builds[0].index("--manifest-path") + 1])
+        self.assertIn("composition/geph5-client", builds[1][builds[1].index("--manifest-path") + 1])
+        self.assertNotEqual(Path(builds[1][builds[1].index("--manifest-path") + 1]).parent, self.source)
+        self.assertNotIn("composition_refresh", (self.source / "src/auth.rs").read_text())
+        self.assertFalse(self.built_source.exists(), "temporary test tree must be removed")
+
+    def test_rsa_compilers_share_the_existing_deadline(self):
+        with mock.patch.object(runner.time, "monotonic", side_effect=[10, 20, 35]):
+            self.orchestration("0.4.3", rsa=True)
+        self.assertEqual(self.command_timeouts[:2], [1190, 1175])
+        self.assertTrue(all(timeout == 60 for timeout in self.command_timeouts[2:]))
+        self.evidence = self.root / "deadline-exhausted"
+        with mock.patch.object(runner.time, "monotonic", side_effect=[10, 20, 1210]):
+            with self.assertRaisesRegex(runner.QualificationError, "shared compile deadline"):
+                self.orchestration("0.4.3", rsa=True)
+        self.assertEqual(len(self.commands), 1)
+        self.assertEqual(self.commands[0][1], "build")
+        self.assertEqual(json.loads((self.evidence / "summary.json").read_text())["status"], "failed")
+
+    def test_unreviewed_production_bytes_refuse_before_any_compile(self):
+        with self.assertRaisesRegex(ValueError, "materialized production bytes differ"):
+            self.orchestration("0.4.3", fault="prepare-source", rsa=True)
+        self.assertEqual(self.commands, [])
+        self.assertEqual(json.loads((self.evidence / "summary.json").read_text())["status"], "failed")
+
+    def test_rsa_identity_missing_case_or_changed_inputs_never_pass(self):
+        for fault in ("oracle-identity", "missing-case", "zero-pass", "production-mutated", "copied-lock-mutated"):
+            with self.subTest(fault=fault):
+                self.evidence = self.root / ("rsa-" + fault)
+                with self.assertRaises((runner.QualificationError, ValueError)):
+                    self.orchestration("0.4.3", fault=fault, rsa=True)
+                result = json.loads((self.evidence / "summary.json").read_text())
+                self.assertEqual(result["status"], "failed")
+                self.assertFalse(result["rsa_fixture"]["production_unchanged"])
+
+    def test_rsa_copy_changes_only_four_test_hooks_and_module(self):
+        self.configure("0.4.3")
+        self.configure_rsa()
+        original = runner.geph_rsa_fixture.snapshot(self.source)
+        result = self.original_prepare(self.source, self.contract, self.root / "prepared", fixtures=self.fixtures)
+        self.assertEqual(original, runner.geph_rsa_fixture.snapshot(self.source))
+        copy = result["source"]
+        changed = {name for name, digest in original.items() if result["test_files"][name] != digest}
+        self.assertEqual(changed, {"src/lib.rs", "src/auth.rs", "src/bw_token.rs", "src/broker.rs"})
+        self.assertEqual(set(result["test_files"]) - set(original), {"src/rsa_composition_tests.rs"})
+        self.assertEqual((copy / "Cargo.lock").read_bytes(), (self.source / "Cargo.lock").read_bytes())
+        self.assertEqual((copy / "Cargo.toml").read_bytes(), (self.source / "Cargo.toml").read_bytes())
+        for name, suffix in runner.geph_rsa_fixture.APPENDS.items():
+            self.assertEqual((copy / name).read_text(), (self.source / name).read_text() + suffix)
+        self.assertEqual((copy / "src/broker.rs").read_text(), (self.source / "src/broker.rs").read_text().replace(
+            runner.geph_rsa_fixture.BROKER_ANCHOR, runner.geph_rsa_fixture.BROKER_ANCHOR + runner.geph_rsa_fixture.BROKER_HOOK, 1))
+
+    def test_rsa_closure_rejects_stale_source_or_lock_missing_extra_and_symlink(self):
+        for fault in ("contract", "source", "lock", "missing", "extra", "symlink", "fixture-bytes"):
+            with self.subTest(fault=fault):
+                self.configure("0.4.3")
+                self.configure_rsa()
+                if fault == "contract":
+                    self.contract.write_text(self.contract.read_text() + " ")
+                elif fault in {"source", "lock"}:
+                    (self.source / ("src/lib.rs" if fault == "source" else "Cargo.lock")).write_text("altered")
+                elif fault == "extra":
+                    (self.fixtures / "unexpected.rs").write_text("unreviewed")
+                else:
+                    target = self.fixtures / "rsa_composition_tests.rs"
+                    if fault in {"missing", "symlink"}:
+                        target.unlink()
+                    if fault == "symlink":
+                        target.symlink_to(self.source / "src/lib.rs")
+                    if fault == "fixture-bytes":
+                        target.write_text("stale fixture")
+                with self.assertRaises((ValueError, OSError)):
+                    self.original_prepare(self.source, self.contract, self.root / ("rejected-" + fault), fixtures=self.fixtures)
+
+    def test_source_owned_client_requires_real_auth_fixture_cases(self):
+        self.configure("0.4.3")
+        source = json.loads(self.contract.read_text())
+        source["embedded_packages"] = json.loads(
+            (ROOT / "vendor/geph/SOURCE.json").read_text())["embedded_packages"]
+        self.contract.write_text(json.dumps(source))
+        _, names = runner.reviewed_tests(self.source, self.contract)
+        self.assertIn("rsa_composition_tests::auth_wrong_level_uses_fresh_blind_and_request_selected_free_root", names)
+        self.assertIn("rsa_composition_tests::auth_current_next_epoch_configured_root_and_exact_legacy_sqlite_roundtrip", names)
+        self.assertEqual(len(names), 30)
 
     def test_workflow_never_executes_unfiltered_libtest(self):
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()

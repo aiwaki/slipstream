@@ -23,6 +23,15 @@ Source bootstrap remains PR-only, bound to the reviewed file changes; both fresh
 dependency audits and product checks run. Main must build and attest the immutable
 Geph revision and pass all app/package/readiness gates before an app is published.
 
+The producer also executes eleven retained RSA/auth composition fixtures against
+an exact current-source copy, alongside the nineteen existing session/cache tests.
+Only test-only wrappers and the broker mock hook are inserted into that copy.
+The legacy signing oracle has its own frozen test lock and deliberately public
+synthetic keys; it is never linked or shipped and does not restore an RSA allowance
+to the production policy. All runtime fixtures retain the existing network/private
+file sandbox and owned-process cleanup. Native execution must be fresh in CI;
+static preparation and retained logs are not a substitute.
+
 ### 2026-10-30: retire bundled Xbox DNS and its cached routing authority
 
 At the user's request, Slipstream no longer bundles or contacts `xbox-dns.ru`.

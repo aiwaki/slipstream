@@ -2,6 +2,15 @@
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
+Draft PR433: https://github.com/aiwaki/slipstream/pull/433, first head
+`0ceffd6076126c949c0547a363e34d472fcdc4d1`. Real-ref classifier replay passed:
+PR source bootstrap allowed; push bootstrap refused. PR audit41154777207/1 passed; its verified merge SHA is
+`8ca3359a5c4079668e4d697afbfc40b8c97cfe64`. App361 packages, Geph408 registry
++3 source-owned packages: blocking0, accepted exceptions0. The transported
+review archive passes canonical current-date admission; this is not main/binary
+qualification. Evidence: rsa-release-remediation/ci/41154777207-1/.
+No merge or producer/publication dispatch while the new fixture gate is pending.
+
 Main remains `9a02e262063f32415c28cb72263204168fdcb5a7` (PR432 merged;
 ordinary main CI41146511419 passed). Release admission failed after the two RSA
 exceptions expired at 00:00 UTC. Preview .32 is not published or installed;
@@ -38,11 +47,21 @@ SHA256 `909e873433dacd5b44dae5256739d1cf844695f8ef4b823077c385da9c6daee1`.
 Producer/consumer tests:55 passed; all ten workflow CLI callsites were checked.
 Independent integration review passed and confirmed106 exact CI bindings.
 Root found a separate release-coverage gap: the producer executes19 existing
-session/cache fixtures but no new RSA/auth composition fixtures. Retained tests
-will be wired into the existing isolated runner before merge/publication.
+session/cache fixtures but no new RSA/auth composition fixtures. The existing isolated runner now adds11 retained composition cases against an
+exact current-source test copy. The legacy signing oracle has a separate lock
+and synthetic public keys; it is not linked or shipped.16 static/mock tests passed,
+including an old-code failure; source/lock remain unchanged after preparation.
+Independent review passed. Fresh native execution of all30 cases is still required.
+The separate three account-level cache regressions remain reused historical evidence.
 
-NEXT: open the frozen integration as a draft PR for remote dependency audit while
-adding that bounded fixture gate. Refreeze/review its exact catalog before merge.
+CI41154777253 passed product/Chromium/Windows checks, but its final gate refused
+seven existing blank EOF lines in immutable review source/transcripts. Exact-path
+.gitattributes now preserves those bytes; trailing whitespace and ordinary EOF
+checks remain enforced, verified in a disposable Git fixture. No global waiver.
+
+NEXT: commit the fixture gate and121-file exact classifier catalog, rerun remote
+checks for that head, then normal merge and producer build. Source review/audit
+passes do not replace the pending fresh native and protected readiness gates.
 Do not activate native SQLite, SDK/platform or
 Telegram work. No local native build/browser/install/account/network-setting work;
 preserve the working external Geph and workstation. No protected readiness or

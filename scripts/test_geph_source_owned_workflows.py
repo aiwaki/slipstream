@@ -18,6 +18,7 @@ class GephSourceOwnedWorkflowTests(unittest.TestCase):
         text = workflow('build-geph.yml')
         paths = text.split('\njobs:', 1)[0]
         for path in ('scripts/geph_source_owned_*.py', 'scripts/geph_native_sqlite*.py',
+                     'scripts/geph_rsa_fixture.py', 'scripts/fixtures/geph-rsa-auth/**',
                      'security/geph-source-owned-review/**'):
             self.assertIn('      - "' + path + '"\n', paths)
         audit = step(text, 'Build and audit the vendored dependency inventory')

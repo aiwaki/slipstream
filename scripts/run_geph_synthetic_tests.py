@@ -11,6 +11,7 @@ import pwd
 import re
 import resource
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ import time
 import tomllib
 
 from geph_vendor_source import load_source_contract
+import geph_rsa_fixture
 
 SESSION_TESTS = (
     "session::slipstream_isolation_tests::stream_open_errors_preserve_shared_session",
@@ -109,21 +111,28 @@ def reviewed_tests(source: Path, contract_path: Path) -> tuple[str, tuple[str, .
         raise QualificationError("materialized crate identity differs from reviewed contract")
     if digest(source / "Cargo.lock") != contract["lock_sha256"]:
         raise QualificationError("materialized lock differs from reviewed contract")
-    return version, ALLOWLIST[version]
+    tests = ALLOWLIST[version]
+    if "embedded_packages" in contract:
+        if version != "0.4.3" or "native_sqlite" in contract:
+            raise QualificationError("no reviewed RSA fixture for this source-owned client")
+        tests += geph_rsa_fixture.RSA_TESTS
+    return version, tests
 
 
-def compiled_binary(log: Path, source: Path, target: Path) -> Path:
+def compiled_binary(log: Path, source: Path, target: Path, *,
+                    target_name: str = "geph5_client", target_source: str = "src/lib.rs",
+                    is_test: bool = True) -> Path:
     candidates = set()
     for line in log.read_text().splitlines():
         try:
             row = json.loads(line)
         except ValueError:
             continue
-        if row.get("reason") != "compiler-artifact" or not row.get("profile", {}).get("test"):
+        if row.get("reason") != "compiler-artifact" or row.get("profile", {}).get("test") is not is_test:
             continue
         item = row.get("target", {})
-        if item.get("name") != "geph5_client" or Path(item.get("src_path", "")).resolve() != (
-                source / "src/lib.rs").resolve() or not row.get("executable"):
+        if item.get("name") != target_name or Path(item.get("src_path", "")).resolve() != (
+                source / target_source).resolve() or not row.get("executable"):
             continue
         executable = Path(row["executable"]).resolve()
         if not executable.is_relative_to(target.resolve()) or not executable.is_file():
@@ -237,6 +246,7 @@ def qualify(source: Path, contract: Path, evidence: Path, *, compile_timeout: fl
                    contract, source / "Cargo.toml", source / "Cargo.lock",
                    source / "src/lib.rs", source / "src/session.rs", source / "src/database.rs")}}
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    production_snapshot = None
     try:
         with tempfile.TemporaryDirectory(prefix="geph-synthetic-") as temporary:
             root = Path(temporary).resolve()
@@ -254,15 +264,50 @@ def qualify(source: Path, contract: Path, evidence: Path, *, compile_timeout: fl
             (evidence / "probe.sb").write_text(probe_profile.read_text())
             sandbox_selftest([str(SANDBOX), "-f", str(probe_profile)], scratch=scratch,
                              sentinel=sentinel, env=env, evidence=evidence)
+            build_source = source
+            compile_deadline = time.monotonic() + compile_timeout
+            def remaining_compile_time():
+                remaining = compile_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise QualificationError("shared compile deadline exhausted")
+                return remaining
+            if any(name.startswith("rsa_composition_tests::") for name in tests):
+                fixture = geph_rsa_fixture.prepare(source, contract, scratch / "rsa")
+                production_snapshot = fixture["production_files"]
+                build_source = fixture["source"]
+                summary["rsa_fixture"] = {
+                    "catalog_sha256": fixture["catalog_sha256"],
+                    "production_files": production_snapshot,
+                    "test_copy_files": fixture["test_files"],
+                    "fixture_files": fixture["fixture_files"],
+                    "oracle_scope": "separate synthetic executable; never linked or shipped",
+                    "production_unchanged": False,
+                }
+                oracle_log = evidence / "oracle-compile.log"
+                oracle_target = target / "oracle"
+                run_command(["cargo", "build", "--manifest-path", str(fixture["oracle"] / "Cargo.toml"),
+                             "--locked", "--bin", "sign_adapter", "--message-format=json",
+                             "--target-dir", str(oracle_target)], cwd=fixture["oracle"],
+                            env=dict(os.environ), timeout=remaining_compile_time(), log=oracle_log,
+                            log_limit=8 * 1024 * 1024)
+                oracle = compiled_binary(oracle_log, fixture["oracle"], oracle_target,
+                                         target_name="sign_adapter", target_source="src/bin/sign_adapter.rs",
+                                         is_test=False)
+                copied_oracle = fixture["root"] / "legacy-target/debug/sign_adapter"
+                copied_oracle.parent.mkdir(parents=True)
+                shutil.copy2(oracle, copied_oracle)
+                if digest(copied_oracle) != digest(oracle):
+                    raise QualificationError("synthetic oracle changed while copying")
+                summary["rsa_fixture"]["oracle_binary_sha256"] = digest(copied_oracle)
             compile_log = evidence / "compile.log"
             # Build scripts/dependency fetching remain part of the existing build
             # phase. No Geph libtest code executes during this no-run command.
-            run_command(["cargo", "test", "--manifest-path", str(source / "Cargo.toml"),
+            run_command(["cargo", "test", "--manifest-path", str(build_source / "Cargo.toml"),
                          "--locked", "--features", "aws_lambda", "--lib", "--no-run",
                          "--message-format=json", "--target-dir", str(target)],
-                        cwd=source, env=dict(os.environ), timeout=compile_timeout, log=compile_log,
+                        cwd=build_source, env=dict(os.environ), timeout=remaining_compile_time(), log=compile_log,
                         log_limit=8 * 1024 * 1024)
-            executable = compiled_binary(compile_log, source, target)
+            executable = compiled_binary(compile_log, build_source, target)
             summary["binary_sha256"] = digest(executable)
             listing = evidence / "list.log"
             run_command(base + [str(executable), "--list"], cwd=scratch, env=env,
@@ -274,11 +319,27 @@ def qualify(source: Path, contract: Path, evidence: Path, *, compile_timeout: fl
                             cwd=scratch, env=env, timeout=case_timeout, log=log)
                 require_single_pass(log, name)
                 summary["passed_tests"].append(name)
+            if production_snapshot is not None:
+                geph_rsa_fixture.assert_unchanged(build_source, fixture["test_files"])
+                geph_rsa_fixture.assert_unchanged(fixture["oracle"], {
+                    name.removeprefix("legacy-oracle/"): value
+                    for name, value in fixture["fixture_files"].items()
+                    if name.startswith("legacy-oracle/")})
+                geph_rsa_fixture.assert_unchanged(source, production_snapshot)
+                summary["rsa_fixture"]["production_unchanged"] = True
             summary["status"] = "passed"
     except Exception as error:
         summary["error"] = str(error)
         raise
     finally:
+        if production_snapshot is not None:
+            try:
+                geph_rsa_fixture.assert_unchanged(source, production_snapshot)
+            except (OSError, ValueError) as error:
+                summary["status"] = "failed"
+                summary["error"] = str(error)
+                (evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+                raise QualificationError(str(error)) from error
         (evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 

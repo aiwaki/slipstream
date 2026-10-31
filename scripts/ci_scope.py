@@ -51,12 +51,15 @@ GEPH_BOOTSTRAP_REQUIRED = frozenset(
 # An empty or partial mapping cannot authorize bootstrap.
 # None denotes a file proven absent in the base tree, not an empty file.
 RSA_ONLY_FILE_BINDINGS: dict[str, tuple[str | None, str]] = {
+    '.gitattributes': (
+        None,
+        'a49cd52c99ef219da14bbad6a64b192b01265de7504c996596b12eacd5da2c28'),
     '.github/workflows/build-app.yml': (
         'c0ea37e83f5084092527a67c8802d9d35d59696099465d0ac1e919c066e9b017',
         '465acf0a1a9068388e2835a44faed7c0d30d15ceae5c634ff7be08c764685864'),
     '.github/workflows/build-geph.yml': (
         '240b05820b6b9906e3ec9b795948d2da041d5d1ef4c4fb9701ea8dbff1db0cbe',
-        'e4cae20176568fccf4a437edebff655a66e6bcb85b81e9d305f5655aa5cb26d1'),
+        'f4fedc115b2148dd3dcb7f50ca33c045ebabd832770d47efba094ac66ab9a5e1'),
     '.github/workflows/ci.yml': (
         'b94c8a024f87163cb5d06a4962971307775fe3af0a547ce6f169a4ed80f5b06d',
         'fca3692d0599adeecc9941c85cdb53381e2b64cb0c01489b066902dbe2ab5a33'),
@@ -69,6 +72,39 @@ RSA_ONLY_FILE_BINDINGS: dict[str, tuple[str | None, str]] = {
     'scripts/fixtures/geph-registry-policy-r3.json': (
         None,
         'a4c72127b018c665e8207cc01bbbbdb74012765a32127806a1e2f59e9f3c72af'),
+    'scripts/fixtures/geph-rsa-auth/README.md': (
+        None,
+        '9f870d70345c36ed5a610f95727944f7b95e93176372530a3535e22a440ad95e'),
+    'scripts/fixtures/geph-rsa-auth/account_level_fixture.rs': (
+        None,
+        '02d8f35c66f7215f19e35aec9ab922c0ee6ac48ea65da9cb9caf31e0e5574a90'),
+    'scripts/fixtures/geph-rsa-auth/closure.json': (
+        None,
+        '9b19b1d0705236dfb95e85adc29c4117571082d8c85727d5e1c171aa2a167803'),
+    'scripts/fixtures/geph-rsa-auth/compat-public-fixtures/e3-2048-pkcs1.der': (
+        None,
+        '25b5dd4b5f115246802e6c370f5755d90f66bdd9e30941f2f63ae072a23111c4'),
+    'scripts/fixtures/geph-rsa-auth/compat-public-fixtures/e65537-2048-pkcs1.der': (
+        None,
+        'f49e22328fe35e0e91fbadb46f0d5d065f82bf68268cbf9f907e66bd358624af'),
+    'scripts/fixtures/geph-rsa-auth/compat-public-fixtures/e65537-2048-private.der': (
+        None,
+        '1f73c05d465b65c529d1e85a2f8046cf144b2ed6723ac15c9bbd91178feb1a90'),
+    'scripts/fixtures/geph-rsa-auth/compat-public-fixtures/e65537-2048-spki.der': (
+        None,
+        'd64f6afef53a8fbf46b5e554cee27a1912bfed4749926a9bbb7cd10e28ca26d0'),
+    'scripts/fixtures/geph-rsa-auth/legacy-oracle/Cargo.lock': (
+        None,
+        'a982760c7bb2f70a25af3cad6178261d2bfd21a6f394c28a90d89b27bd2ef116'),
+    'scripts/fixtures/geph-rsa-auth/legacy-oracle/Cargo.toml': (
+        None,
+        '020a6138aa70be4c6be019bd34d106750e65f7cda0faa212d50bfdf56c6a2399'),
+    'scripts/fixtures/geph-rsa-auth/legacy-oracle/src/bin/sign_adapter.rs': (
+        None,
+        '081806af047d3032b34728c0dae6e0ecc100a48610945778acda4de2557285ed'),
+    'scripts/fixtures/geph-rsa-auth/rsa_composition_tests.rs': (
+        None,
+        '8699e7a637445534a309f346c589dca3944681dc89326cab79347cc079731faf'),
     'scripts/fixtures/geph-rsa-removal-policy-r4.json': (
         None,
         '30cae8c4bbacfea24294bfaacc6cc8b45145e089511ebdd2c223820992907ae2'),
@@ -87,6 +123,9 @@ RSA_ONLY_FILE_BINDINGS: dict[str, tuple[str | None, str]] = {
     'scripts/geph_native_sqlite_bundle.py': (
         None,
         '6c5e45553b594245d47661b048d901471137d58777afa293962cffc04edc519a'),
+    'scripts/geph_rsa_fixture.py': (
+        None,
+        'a0039ad6a2e222ee7df4321718bd03d51d4635dd0be8ba2296c0836b29cabc58'),
     'scripts/geph_source_owned_advisories.py': (
         None,
         'e1631c585228ac6525f1e151d6bc1e476e4f7ab42fdd6dd99745627f7673423b'),
@@ -102,6 +141,9 @@ RSA_ONLY_FILE_BINDINGS: dict[str, tuple[str | None, str]] = {
     'scripts/make_release_sbom.py': (
         '64e16f3c30f1cd596f48fa546412c29b547d0e05f617d2478d705bc1b2c5bedc',
         '3e532b9a69f0fe1f53df4531a2fd713567528e85ea255625735d97ab7be72664'),
+    'scripts/run_geph_synthetic_tests.py': (
+        '0da06854b9b624ceab13e1ef5e7be26856533e1a3c95c01a894e774f6f39a547',
+        'fffcfc943279b35747cc4ebb20a1d9955ac2980f84352e60e64b5e4c2f30f700'),
     'scripts/test_build_config.py': (
         'ad60740d7ab6af5f693d43c3d8b775388a788efcfc34a989142ab3380acc9be1',
         'cfb589e058c20b379367abb3269f9df6f479d0a68b163f125503c210e2fb640c'),
@@ -134,10 +176,13 @@ RSA_ONLY_FILE_BINDINGS: dict[str, tuple[str | None, str]] = {
         'a0e8798e8c271a7c24010291b8c10d67748fc23c481cf9396964b4062e9597e7'),
     'scripts/test_geph_source_owned_workflows.py': (
         None,
-        'bb8bc220a028236afb1d91d04402d3f7b25a0835b0c133f0f31ca260f610d283'),
+        'b933f3169e4b3389bcd1fd1ecd0b61d5fe8add62176bca0a2b077b12a12bd234'),
     'scripts/test_release_audit_admission.py': (
         '0fcf6b66c9c293c56ff44153daf282ae918d4f0d7e327c652031912087af4ace',
         'd8b1c9b603812564e76f1887ca799439ed7ad62ee7fc4198ee9af13007d760a0'),
+    'scripts/test_run_geph_synthetic_tests.py': (
+        '632d25e003db816676e0b30326f67662d803159e0e7ae2c74a10d9d8fea0419d',
+        '7ef22dfd3be19cb0c2f178140027b5d8fa8b829544e2be1f4b5321dc87a5ce4d'),
     'scripts/test_source_owned_audit_bridge.py': (
         None,
         'c004cf25a2ff8778b9aa8886e83e2ec366832e23dab00363040840155c383924'),
