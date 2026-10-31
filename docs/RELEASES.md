@@ -1,8 +1,48 @@
 # Release Policy
 
-## RSA-only candidate, 2026-10-31
+## Published preview .32 — 2026-10-31
 
-The pending Geph 0.4.3-r4 candidate replaces the old RSA dependency with three
+[Slipstream 0.1.9-preview.32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
+was published from `fd7d43c271e4a46ac2d10fc5ca4a032b92adae73` by
+[publisher 41168865517/1](https://github.com/aiwaki/slipstream/actions/runs/41168865517).
+It is a pre-release for manual DMG installation; the stable release is unchanged.
+
+**RU:** Выпуск включает отдельные исправления отмены параллельных соединений и
+разделённых строк размера HTTP-блока, обновлённый Chromium и Geph 0.4.3-r4 с
+заменой старой RSA-зависимости и правкой Free/Plus-кеша авторизации. В CI четыре сайта открылись
+в Safari и Chrome; проверены отказ и восстановление Geph. Наблюдение в течение
+1800,103 секунды подтвердило отсутствие окон и оставшихся служб, но не проверяло
+длительную передачу видео или звука. Commit и откат пары публичной `.31` и
+кандидата `.32` проверены в CI; обычный путь через меню и запрос администратора
+и установка на пользовательском Mac ещё не подтверждены.
+
+**EN:** This release includes scoped connection-cancellation and split HTTP
+chunk-size repairs, an updated Chromium runtime, and Geph 0.4.3-r4 with the old
+RSA dependency replaced and the Free/Plus auth cache repaired. Four sites worked
+in Safari and Chrome; Geph outage and recovery passed. The 1800.103-second soak
+verified background invisibility and clean teardown, not sustained media traffic.
+Commit and rollback of the public `.31` / candidate `.32` pair passed in CI;
+the ordinary tray/admin path and installation on the user's Mac remain unverified.
+
+The app candidate has manifest
+`3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823`.
+Source and attempt bindings were verified across these gates:
+
+| Gate | Verified evidence |
+|---|---|
+| [CI 41164190639/1](https://github.com/aiwaki/slipstream/actions/runs/41164190639) | Signed candidate, packaged browser/lifecycle checks, notification and Stop/Quit cleanup. |
+| [Audit 41164190626/1](https://github.com/aiwaki/slipstream/actions/runs/41164190626) | App and full Geph/source-owned admission passed on October 31 UTC with no accepted vulnerability exceptions; publisher rechecked current admission. |
+| [Native G 41165429293/1](https://github.com/aiwaki/slipstream/actions/runs/41165429293) | 26 verification checks: durable commit, crash-before-commit restoration, late-commit refusal and cleanup. |
+| [Packaged P 41165942199/1](https://github.com/aiwaki/slipstream/actions/runs/41165942199) | 15 verification checks: real successor ACK commits; killing the successor before ACK restores the old app and daemon, with clean terminal state. |
+| [Readiness R 41165941890/1](https://github.com/aiwaki/slipstream/actions/runs/41165941890) | 31 verification checks: four sites × two browsers, owned-Geph outage/recovery with external sentinel preserved, 3600 background samples and clean teardown; five core reports plus Safari diagnostics have exact-run attestations. |
+
+These results do not establish the cause of earlier Safari startup failures or
+Codex HTTP 403 responses, or guarantee every site, call, or future network condition.
+The broader recovery and Telegram branches remain separate work.
+
+## RSA-only dependency release, 2026-10-31
+
+The published Geph 0.4.3-r4 dependency replaces the old RSA dependency with three
 exact embedded client packages. Its source-owned review is separate from the
 registry/native dependency audit. The two expired rsa 0.8.2 exceptions are removed,
 not extended. The new lock retains the currently repaired TLS and ctutils versions.
@@ -13,9 +53,11 @@ every retained file; prior local-path projections are labeled with original and
 portable hashes. The producer publishes the bounded immutable review archive with
 the Geph assets. Consumers verify that archive against the historical tag policy;
 fresh release admission additionally requires the current SOURCE, policy, exact
-review evidence and current UTC expiry checks. Registry and native AWS-LC coverage,
-both architecture builds, and installed/readiness behavior still require fresh CI.
-The source review alone does not admit preview .32 or qualify its public updater.
+review evidence and current UTC expiry checks. The
+[r4 producer](https://github.com/aiwaki/slipstream/actions/runs/41160514353)
+passed the registry/native dependency audit, both architecture builds and 30
+session/cache/RSA-auth fixture cases. Installed/readiness checks for the app are
+listed above. Source review alone is not binary or public-updater qualification.
 
 Slipstream publishes three distinct kinds of GitHub release. Their tags and
 purpose must remain visually and mechanically separate.
@@ -24,8 +66,8 @@ purpose must remain visually and mechanically separate.
 passed, but publication accepted an October 26 application audit after its used
 Chromium integrity-only admission expired on October 29. The public release notes
 now disclose this gap; the immutable assets remain unchanged. Current dependency
-admission is not established for that release. Runtime refresh and publication-time
-expiry checks are merged; a replacement preview still requires fresh qualification.
+admission is not established for that release. The replacement `.32` completed
+the fresh runtime, qualification and publication-time admission checks above.
 See [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
 
 New publication must validate the current UTC validity of used, time-bounded
@@ -118,8 +160,9 @@ originating app and root daemon; a successor cannot repair an older watchdog
 that was copied before replacement. Existing `.23` and `.24` users therefore
 need a manual DMG or separately qualified bridge transition.
 
-The next delivery uses the signed exact-main candidate at `5385b89add415c531276ba43f5c06c50293ffb17`
-as a private fixed `.30` origin, with PR409's extraction repair and PR410's
+The historical `.31` qualification used the signed exact-main candidate at
+`5385b89add415c531276ba43f5c06c50293ffb17` as a private fixed `.30` origin,
+with PR409's extraction repair and PR410's
 original startup lease. Public `.30` remains unchanged and lacks those fixes.
 That exact origin and the normally built `.31` successor passed the checks below
 before publication. The ordinary tray/admin transition still needs a local check. Report

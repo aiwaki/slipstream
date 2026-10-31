@@ -4,48 +4,53 @@ Roadmap is informational and not a release promise. Each milestone lands as a
 small PR with tests and matching documentation.
 
 <a id="development-status"></a>
-## Статус разработки / Development status — 2026-10-30
+## Статус разработки / Development status — 2026-10-31
 
 ### Русский
 
-[Slipstream 0.1.9-preview.31 опубликован](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
-для ручной установки из DMG. В выпуск вошли исправления остановки служб при выходе,
-сохранение выбранного маршрута при сбое встроенного Geph, ограничение ожидания
-дополнительных DNS-запросов и исправления распаковки и координации обновления
-приложения с фоновой службой.
+[Slipstream 0.1.9-preview.32 опубликован](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
+для ручной установки из DMG. В него вошли исправления очистки отменённых
+параллельных соединений и распознавания разделённой строки размера HTTP-блока,
+обновлённый Chromium и Geph 0.4.3-r4: замена старой RSA-зависимости и исправление
+кеша авторизации Free/Plus. Исключения для уязвимостей старой RSA удалены,
+а не продлены. Это отдельные проверенные изменения, а не все открытые ветки.
 
 На отдельных Mac в CI проверены выход, отказ и восстановление Geph, четыре сайта
-в Safari и Chrome и 30 минут работы в фоне без появления окон. Обновление и
-аварийный откат прошли на подготовленной паре сборок. Это не проверка обновления
-между опубликованными выпусками: публичное автообновление и его откат ещё не
-подтверждены. Длительные звонки, видео, сон/пробуждение и проверка текущего выпуска
-на пользовательском Mac остаются отдельными задачами.
+в Safari и Chrome и 1800,103 секунды работы в фоне без появления окон. Последняя
+проверка относится к работе в фоне, не к длительной передаче видео или звука.
+Пара публичной `.31` и кандидата `.32` прошла commit и аварийный откат в CI.
+Обычный путь через обнаружение обновления, меню и запрос администратора, установка
+на пользовательском Mac, длительные звонки, видео и сон/пробуждение ещё требуют
+отдельной проверки. Источники и границы доказательств — в [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31).
 
 | Продолжающаяся работа | Что ещё не вошло в выпуск полностью |
 |---|---|
 | Восстановление соединений ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Более широкий набор исправлений неполных ответов и гонок остаётся в открытом PR. Выпуск отдельных исправлений не означает завершения этой ветки. |
 | Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | Обновление транспорта остаётся в открытом PR; живой сеанс Telegram также требует проверки. |
-| Сборка Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Исправления сессий и SQLite-кеша уже вошли через PR #388. Остаются дополнительные проверки исходников и состава сборки; замена RSA требует отдельной проверки и выпуска. |
+| Сборка Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | PR остаётся открытым. Исправления сессий и SQLite-кеша вошли ранее через PR #388; замена RSA и правка Free/Plus-кеша выпущены отдельно в `.32`. PR целиком не включён; исследовательская native SQLite не активирована. |
 
 ### English
 
-[Slipstream 0.1.9-preview.31 is published](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.31)
-for manual DMG installation. It includes fixes for stopping owned services on
-Quit, preserving the selected route during bundled Geph outages, bounding
-supplemental DNS waits, and unpacking and coordinating app/daemon updates.
+[Slipstream 0.1.9-preview.32 is published](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
+for manual DMG installation. It includes cleanup fixes for cancelled connection
+races, recognition of split HTTP chunk-size lines, an updated Chromium runtime,
+and Geph 0.4.3-r4 with the old RSA dependency replaced and the Free/Plus auth cache
+repaired. The old RSA vulnerability exceptions were removed, not extended.
+These are individually qualified changes, not every open branch.
 
 Disposable Macs in CI covered Quit, Geph outage and recovery, four sites in
-Safari and Chrome, and 30 minutes of background operation without visible
-windows. Update and crash rollback passed on a prepared pair of builds. This
-does not qualify updates between published releases: public auto-update and
-its rollback remain unverified. Sustained calls, video, sleep/wake, and testing
-this release on the user's Mac remain separate tasks.
+Safari and Chrome, and 1800.103 seconds of background operation without visible
+windows. That last check measures background behavior, not sustained media traffic.
+The public `.31` and candidate `.32` pair passed commit and crash rollback in CI.
+The ordinary discovery, tray-menu and administrator-dialog path, installation
+on the user's Mac, sustained calls, video, and sleep/wake still need separate
+validation. See [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31) for evidence and its limits.
 
 | Ongoing work | Scope not yet fully shipped |
 |---|---|
 | Connection recovery ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | The broader incomplete-response and race repairs remain in an open PR. Shipping individual fixes does not complete that branch. |
 | Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | The transport update remains in an open PR; a live Telegram session also needs validation. |
-| Geph build ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | Session and SQLite-cache fixes already shipped through PR #388. Additional source and build-inventory checks remain; the RSA replacement needs separate qualification and publication. |
+| Geph build ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | The PR remains open. Session and SQLite-cache fixes shipped earlier through PR #388; the RSA replacement and Free/Plus auth-cache repair shipped separately in `.32`. The whole PR is not included; native SQLite research is not activated. |
 
 For exact commits, checks, and remaining gates, see [CURRENT_STATE.md](CURRENT_STATE.md).
 The milestone descriptions below are the longer-term plan, not a claim that the

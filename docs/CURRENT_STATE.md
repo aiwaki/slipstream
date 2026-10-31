@@ -1,56 +1,55 @@
 # Current Project State
 
-## Current continuation — 2026-10-31 UTC, consumer physical-path repair
+## Current continuation — 2026-10-31 UTC, preview .32 published
+
+[Preview .32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
+is published and independently verified: release429722639, 04:33:42Z,
+source C9 `fd7d43c271e4a46ac2d10fc5ca4a032b92adae73`, tree
+`c4580d44874e081a668b8dc62023c8d2760861be`.
+Publisher41168865517/1 PASS; exact12assets and all signed subjects verified.
+Previous .31 retains all12assets (only its title became archival); stable1.4
+retains all5assets. No workstation installation or settings changes performed.
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-release-physical-root`, base/main C8
-`2db13e5430f90588a2a50d26b490a561d9f15231`, tree
-`864cc80174ce1ba2604e51e7c2938089a7b512c4`. Preserve checkpoint/private output.
-PR434 merged normally; its exact head69fa required CI/audit passed.
+docs branch `codex/preview32-published-status`, based on frozen release C9.
+Current source, PR/CI and this branch must be reconciled before further work;
+release source is immutable and is not a claim about a later documentation HEAD.
+Private output and original checkout/user edits remain preserved.
 
-C8 r4 producer41160514353/1 PASS: fresh30/30 native cases, universal build,
-full audit, exact9 published assets and all9 signed provenance subjects bound C8.
-Receipt main-c8/verification.json SHAd67ab7223060e67be326918bf16114904ae8b16b19f8e766d40367b3b34bc8bc.
-BinarySHA2f2b340d82da11585c147d4fb83393c38cc218c2f9f0edf228483961f685dae2.
-Main audit41160514343/1 PASS_CURRENT_ADMISSION (app361,Geph408+3owned,
-blocking0/exceptions0), receipt main-c8/audit/verification.json SHA
-433f7ade11d6c60f6a5a897627e95a1ce143db9f49035b3f63ae5b290ed6f06b.
+Evidence under output/continuation-20261031/rsa-release-remediation/main-c9/:
+- CI41164190639/1 PASS; artifact13029245735, archiveSHA
+  34eb2c68b80242bd299278b1698aaffddb7aa74c15199e60dc91fc31032f1f58;
+  candidate manifest3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823.
+- Audit41164190626/1 and publication-time currentUTCadmission PASS, no accepted
+  vulnerability exceptions; full Geph408registry+3owned, app361+1integrity-only.
+- G41165429293/1 PASS26/26: actual commit and crash-before-commit recovery/cleanup.
+- P41165942199/1 PASS15/15: actual successorACK commit and pre-ACK rollback/cleanup.
+- R41165941890/1 VERIFIED PASS31/31: four sites×Safari/Chrome, real ownedGeph
+  outage/recovery, 1800.103s idle invisibility/process/heartbeat soak,3600samples,
+  counters0/cleanup[]. Fivecore attestations plus Safari sidecar verified.
+  This was not a 30-minute routed-video or voice-load test.
+- Publication receipt publication/publisher/verification.json SHA
+  112489484a6c64da99929b76c4a5793270e551af64a22ecd6014615a40c6cb1f (28/28 PASS).
+  Only396247bytes of small public metadata/signature files downloaded locally.
+- R receipt readiness-r/verification.json SHA
+  9503e83cf7b0bec24b1aaa820ee11ba122dd9be1a1cc5ec6b284aafe54f1186e.
 
-C8 ordinaryCI41160514283 attempt2 terminal FAILED. The approved full rerun followed
-verified r4 publication; this was NOT another missing-release failure. All9assets
-were downloaded, but verify_release_assets passed `/tmp/geph/...review.tar` into
-the strict physical archive reader, which rejected macOS `/tmp` alias. Product,
-Chromium,Windows/checks PASS; candidate/downstreampackaged gates never ran.
-No candidate/manifest exists. Receipt main-c8/ci-attempt2/verification.json SHA
-535080020bed482814d0e4e707d4b8c5be548445b03803967fff141766676446. No further rerun.
+The r4 dependency was already published by C8 producer41160514353/1 with30fresh
+native cases and both architectures; no consumer-triggered rebuild. PR435 fixed
+only the checked release-directory parent normalization: strict root/leaf guards
+remain intact,37tests+32subchecks and independent review passed. C8 failed CI
+was not rerun again. Source/lock and policies stayed fixed through C9 qualification.
+Review expires2026-11-07; no exception extension. Oct31 account-backed usage1/3.
 
-Implemented parent-only normalization after the existing release-directory guard:
-keep the final root leaf for strict no-follow handling. Initial full-root resolve
-was rejected during independent review because its root-swap control failed. The
-corrected implementation preserves that refusal and closes the macOS ancestor
-alias failure. Real9asset alias and root-swap regressions have causal RED evidence;
-37 tests plus32subchecks PASS after correction. All strict readers/transport,
-output-root rules, hashes, provenance, source/lock and policies stay unchanged.
-Corrected receipt consumer-physical-root-fix/corrected-receipt.json SHA
-ff9d8d71abf6476a64b6fa7e500f3d16baef7397e4e7f372ea506c4688740e76.
-NEXT: finish independent delta review, normal PR/required full CI (r4 exists;
-NO bootstrap or policy exception needed), normal merge and fresh main candidate.
-
-Finite caller sweep18rows found only this currentmacOSalias; existingr4 reuse is
-Ubuntu, othermacOSproducer/publisher paths are physicalcheckout/RUNNER_TEMP.
-Evidence under output/continuation-20261031/rsa-release-remediation/main-c8/
-consumer-physical-root-fix/ (caller-audit/callers.md and verification.json SHA
-9e89beeae0e91b730d9233f0fa6c319119180d97630844a19e2b073b9534fd9e;
-independent-review-draft.json SHA21e0be24dfb3fb2aa8ccfc522955defa31075ba4c47c0b33b173ed002dc89aa7).
-Initial36tests+32subchecks green are historical PRE-review, not approval of the race.
-
-After corrected maincandidate/audit: native G FIRST -> freshUTCquota -> R/P ->
-current-UTC five-input publisher. No Oct31protected dispatch yet;0/3 earlierquota
-is snapshot only. r4 published, .32app NOT published/installed. SOURCE69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7;
-lock560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb unchanged.
-Review expires2026-11-07; noexceptionextensions. Preserve externalGeph/workstation:
-no localnative/scanner/app/browser/install/settings changes. SQLite/Telegram/SDK/
-platform expansion outside this release task.
+NEXT: finish the documentation-only publication-status PR. Public discovery,
+ordinary tray/admin updater flow and installed .32 on the user's Mac remain
+unqualified; do not report these as covered by the G/P CI driver. Sustained media,
+Discord calls and sleep/wake are also separate. Historical Safari/HTTP403 root
+causes are not established merely by the successful current live-site matrix.
+Broader PR376, Telegram PR386 and remaining Geph PR384 are still open; .32 does
+not ship those branches wholesale. SDK/platform expansion and nativeSQLite are
+outside this delivery. Preserve the working externalGeph/workstation; no local
+native/scanner/app/browser/install/settings operations in this phase.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
