@@ -11,8 +11,8 @@ all12 public assets/signed subjects independently verified. OLD31 retains its
 No workstation install or network/settings changes in this phase.
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/public-update-menu-state`, based on main
-`23f747eea40e569888d899489ead6cffa4a464e8`. Reconcile actual HEAD/PR/CI before
+branch `codex/public-update-ax-containment`, based on main
+`92289b053f16180946e2321dd2a5612b3798a420`. Reconcile actual HEAD/PR/CI before
 resuming. Private output, original checkout/user edits and all backups retained.
 Original locator first checkpoint block is synced; do not replace its older tail.
 
@@ -73,7 +73,32 @@ Receipt menu-state-fix/verification.json SHA
 24b2894153f4324f0b939ff42956c3fd96b7f96860f09d3a16485950383f4d52;
 independent-review.json SHA
  dce6ede5d826369d90faf988163a7916c4de0c7413a87ed5cea6b7d38d75595d.
-Next: normal PR, all three required checks, merge; no native rerun yet.
+PR439 merged at92289b053f16180946e2321dd2a5612b3798a420, tree equal to
+checked head01513c2b8c135cb3baed79e323168c2a3b104684. All three required
+contexts PASS; CI41176694085/1 and audit41176694232/1 fully SUCCESS.
+Receipt pr439/receipt.json SHA
+1796319e8175d0f769989d53cbc7b246fc02aa706494c178cba0505a10faf4d1.
+Public commit41177729418/1 FAILED before first Install/Cancel. Exact published
+payloads/materialization passed. One initial open_menu returned-25204; fresh
+exact enabled .32 item was found but reciprocal AXParent comparison refused
+with menu ancestry changed. Report cannot identify which reverse edge.
+Artifact13034005344,112565bytes,SHA
+2b5b428559126b8485764e635c3088752192c4939096ea3c1d82a2af9857d6c9;
+independent-verification.json SHA
+612435c7bd8e74fbd62ccc5d1d3915964125b6276feb3e7a80ccf3b268899383.
+No installation/authorization; cleanup_errors[]. Earlier actual Cancel proof
+still stands independently. No product UI failure is established by this refusal.
+Next narrow correction: use two fresh native AXChildren arrays to prove exact
+unique CFEqual tray→menu→item membership, as the actual tree was discovered.
+Do not require undocumented reciprocal Parent equality; retain same-PID/process,
+positive visibility, deadlines and single-action guards. Save per-edge bounded
+diagnostics before any exception. Independent design and final code review PASS;
+two real-method causal RED and89 observer tests PASS, unchanged159 baseline
+reused for other contracts. Receipt ax-containment-fix/verification.json SHA
+f48e3a1bf2ddb1786e7ddc6464e0560d162894ff185be25e41b53b9d1e27ef32;
+independent-review.json SHA
+083bcfc81ff0a731f7cdea565357652179e695a3c4ec485323a6e8cb5a3d743c.
+Next normal PR/required checks; no native or rollback dispatch yet.
 After that: one public commit+Cancel run, independently verify evidence, then and
 only then a separate kill-successor-before-ack run. No additional G/P/R repeats.
 

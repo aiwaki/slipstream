@@ -293,9 +293,10 @@ def ax_actor_fixture(monkeypatch, *, error=-25204, kind="open_menu", post=None, 
         def press(self, node):
             calls.append(("press", node["element"]))
             return error
-        def menu_visibility(self, node, tray):
+        def menu_visibility(self, node, tray, observation):
             calls.append("visibility")
             assert self.reads > 1 and node["enabled"] is True and tray["element"] == 11
+            observation["stage"] = "visibility"
             if not visible:
                 raise ax.Blocked("menu is not visibly present")
             return timeout_visibility(self.nodes)
@@ -389,12 +390,15 @@ def test_timeout_report_rejects_incomplete_or_mismatched_proof(monkeypatch, muta
         menu.validate_ax(report, {key: original[key] for key in ("pid", "uid", "started")}, args.executable, "a" * 64)
 
 
-def visibility_client(*, error=0, children=(13,), hit=13, frame=(10, 20, 80, 16), parent=12, hit_error=0):
+def visibility_client(*, error=0, children=(13,), hit=13, frame=(10, 20, 80, 16), parent=12, hit_error=0,
+                      tray_parent=11, tray_children=(12,), menu_children=(13,), forward_error=0, forward_value=32):
     client = ax.AX.__new__(ax.AX)
     client.nodes, client.refs, client.pid = menu_nodes(), [], 111
     calls = []
-    values = {11: "element", 12: "element", 13: "element", 14: "element", 31: "array", 41: "value", 42: "value"}
-    attributes = {(13, "AXParent"): (0, parent), (12, "AXParent"): (0, 11),
+    values = {11: "element", 12: "element", 13: "element", 14: "element", 31: "array", 32: "array", 33: "array", 41: "value", 42: "value"}
+    arrays = {31: children, 32: tray_children, 33: menu_children}
+    attributes = {(13, "AXParent"): (0, parent), (12, "AXParent"): (0, tray_parent),
+                  (11, "AXChildren"): (forward_error, forward_value), (12, "AXChildren"): (0, 33),
                   (12, "AXVisibleChildren"): (error, 31 if error == 0 else None),
                   (13, "AXPosition"): (0, 41), (13, "AXSize"): (0, 42)}
     def attribute(element, name):
@@ -414,8 +418,8 @@ def visibility_client(*, error=0, children=(13,), hit=13, frame=(10, 20, 80, 16)
         return True
     client.attribute, client.check = attribute, check
     client.cf = SimpleNamespace(CFEqual=lambda a, b: a == b, CFGetTypeID=lambda value: values.get(value),
-        CFArrayGetTypeID=lambda: "array", CFArrayGetCount=lambda _value: len(children),
-        CFArrayGetValueAtIndex=lambda _value, index: children[index])
+        CFArrayGetTypeID=lambda: "array", CFArrayGetCount=lambda value: len(arrays[value]),
+        CFArrayGetValueAtIndex=lambda value, index: arrays[value][index])
     client.ax = SimpleNamespace(AXUIElementGetTypeID=lambda: "element", AXValueGetTypeID=lambda: "value",
         AXValueGetType=lambda value: value - 40, AXValueGetValue=get_value,
         AXUIElementCreateSystemWide=lambda: 99, AXUIElementSetMessagingTimeout=lambda *_a: 0,
@@ -434,8 +438,60 @@ def test_positive_menu_visibility_uses_owned_parent_or_exact_global_hit(error):
     assert result["tray_path"] == client.nodes[0]["path"] and result["item_path"] == client.nodes[-1]["path"]
 
 
+@pytest.mark.parametrize("reverse", [{"parent": 11}, {"tray_parent": 12}])
+def test_fresh_forward_containment_does_not_require_reverse_parent_identity(reverse):
+    client, calls = visibility_client(**reverse)
+    result = client.menu_visibility(client.nodes[-1], client.nodes[0])
+    assert result["visible"] is True
+    assert [(element, attribute) for element, attribute in calls if attribute == "AXChildren"] == [
+        (11, "AXChildren"), (12, "AXChildren")]
+    assert not any(call[1] == "AXParent" for call in calls)
+
+
+@pytest.mark.parametrize(("kwargs", "edge", "status", "count", "matches"), [
+    ({"tray_children": ()}, "tray_to_menu", "child_not_unique", 0, 0),
+    ({"tray_children": (12, 12)}, "tray_to_menu", "child_not_unique", 2, 2),
+    ({"tray_children": (13,)}, "tray_to_menu", "child_not_unique", 1, 0),
+    ({"tray_children": (14,)}, "tray_to_menu", "child_check_failed", 1, 0),
+    ({"tray_children": (41,)}, "tray_to_menu", "invalid_child", 1, 0),
+    ({"tray_children": (12,) * 65}, "tray_to_menu", "count_out_of_bounds", 65, None),
+    ({"forward_error": -25204}, "tray_to_menu", "read_failed", None, None),
+    ({"forward_value": 11}, "tray_to_menu", "invalid_array", None, None),
+    ({"forward_value": None}, "tray_to_menu", "invalid_array", None, None),
+    ({"menu_children": ()}, "menu_to_item", "child_not_unique", 0, 0),
+    ({"menu_children": (13, 13)}, "menu_to_item", "child_not_unique", 2, 2),
+    ({"menu_children": (11,)}, "menu_to_item", "child_not_unique", 1, 0),
+    ({"menu_children": (14,)}, "menu_to_item", "child_check_failed", 1, 0),
+])
+def test_fresh_containment_refuses_and_retains_exact_partial_edge(kwargs, edge, status, count, matches):
+    client, calls = visibility_client(**kwargs)
+    observation = {"stage": "menu_selection", "edges": []}
+    with pytest.raises(ax.Blocked): client.menu_visibility(client.nodes[-1], client.nodes[0], observation)
+    assert observation["stage"] == "forward_containment"
+    last = observation["edges"][-1]
+    assert (last["edge"], last["status"], last["count"], last["match_count"]) == (edge, status, count, matches)
+    assert len(observation["edges"]) == (1 if edge == "tray_to_menu" else 2)
+    if edge == "menu_to_item": assert observation["edges"][0]["status"] == "matched"
+    assert not any(call[1] in {"AXParent", "AXVisibleChildren"} for call in calls)
+
+
+def test_actor_preserves_partial_containment_diagnostic_before_failure(monkeypatch):
+    args, report, calls, _ = ax_actor_fixture(monkeypatch)
+    def fail(self, node, tray, observation):
+        observation["stage"] = "forward_containment"
+        observation["edges"].append({"edge": "menu_to_item", "ax_error": -25204, "status": "read_failed"})
+        raise ax.Blocked("fresh menu children read failed")
+    monkeypatch.setattr(ax.AX, "menu_visibility", fail)
+    with pytest.raises(ax.Blocked): ax.run(args, report)
+    assert report["actions"][0]["observation"] == {
+        "stage": "forward_containment", "edges": [{"edge": "menu_to_item", "ax_error": -25204, "status": "read_failed"}]}
+    assert report["actions"][0]["ax_error"] == -25204
+    assert "postcondition" not in report["actions"][0]
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+
+
 @pytest.mark.parametrize("kwargs", [
-    {"children": ()}, {"children": (13, 13)}, {"children": (14,)}, {"parent": 11}, {"error": -25204},
+    {"children": ()}, {"children": (13, 13)}, {"children": (14,)}, {"error": -25204},
     {"error": -25205, "hit": 14}, {"error": -25205, "hit": 12}, {"error": -25205, "hit": None},
     {"error": -25205, "hit_error": -25204}, {"error": -25205, "frame": (0, 0, 0, 10)},
     {"error": -25205, "frame": (float("nan"), 0, 10, 10)}, {"error": -25205, "frame": (0, 0, float("inf"), 10)},
