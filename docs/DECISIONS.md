@@ -1,5 +1,19 @@
 # Decisions
 
+### 2026-10-31: rejected requests do not renew circuit inactivity
+
+The bounded route-circuit registry updates its idle TTL and LRU activity only
+for admitted requests (`Allow`) and recorded outcomes (`Record`). Rejected
+requests and ignored stale completions still advance the registry's monotonic
+clock, but do not renew an existing entry. An abandoned half-open probe therefore
+expires under the existing five-minute idle TTL even when clients keep retrying.
+This rule is identical in the Python runtime and shared Rust implementation.
+
+Expiry removes this circuit's suppression for the selected backend; normal
+backend-readiness gates still apply. It does not change route classification,
+grant Geph to Discord/YouTube, or replay committed traffic. This restores bounded eventual recovery; immediate permit release on
+cancellation and generation-bound late completions remain separate work.
+
 ### 2026-10-31: separate RSA client replacement
 
 Continue the existing RSA-only candidate independently of native SQLite research.

@@ -1,5 +1,37 @@
 # Routing Research Notes
 
+## 2026-10-31: rejected retries kept an inactive route circuit alive
+
+Both `spike/route_circuit_registry.py` and the shared Rust registry refreshed
+`last_touched` whenever the reducer retained an entry. That included `Reject`
+and `Ignore`: denied traffic or stale outcomes could prevent idle expiry despite
+no new backend activity. An admitted half-open probe without a completion was
+therefore retained indefinitely by clients retrying faster than the idle TTL.
+
+The narrow repair refreshes activity only on `Allow` and `Record`. Two paired
+Python/Rust regression cases cover denied retries after an abandoned permit and
+an ignored completion against an open circuit. The Python cases fail on base
+`b15879d8483e8d60fe0f1e07575c1688732da858` and pass after the repair; the18 existing
+pure registry vectors and backward-clock refusal/state preservation still pass.
+Rust compilation/testing is delegated to hosted CI.
+
+A third causal regression calls the actual `tproxy.handle`, first-payload dial
+and relay with in-memory streams. Explicit cancellation during the first read
+closes both writers and releases session/task/counter ownership. Requests at
+60000,120000,300000ms are denied without another dial; at301001ms the fixed
+handler delivers the complete fixture response, while the old registry returns
+no bytes. The production300000ms idle TTL is unchanged. Guards prohibit external
+connections, DNS, subprocesses and account/config reads. Independent backend
+health/cooldown reporting is stubbed: this proves registry/handler composition,
+not general backend availability or an end-to-end connection to a remote server.
+
+The identified explicit production task-cancellation caller is shutdown drain,
+after which the daemon exits; closing a browser tab does not itself cancel this
+handler. No evidence attributes historical user reconnects to this defect.
+Immediate cancellation release and generation-safe late completions are separate
+work. Source/evidence hashes, exact RED/GREEN commands and logs are retained in
+`output/continuation-20261031/remaining-scope/circuit-idle-ttl/`.
+
 
 ## 2026-10-30: independent app-owned DoH after Xbox provider retirement
 

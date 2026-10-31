@@ -5,6 +5,8 @@ import threading
 from typing import Optional
 
 from route_circuit import (
+    DECISION_ALLOW,
+    DECISION_RECORD,
     CircuitEvent,
     CircuitState,
     RouteCircuitKey,
@@ -80,7 +82,10 @@ class RouteCircuitRegistry:
                 self._circuit_config,
             )
             if event.key in self._states:
-                self._last_touched[event.key] = event.now_ms
+                # Denied retries and stale results are not backend activity.
+                # They must not keep an abandoned half-open permit alive.
+                if decision.kind in (DECISION_ALLOW, DECISION_RECORD):
+                    self._last_touched[event.key] = event.now_ms
             else:
                 self._last_touched.pop(event.key, None)
             self._enforce_capacity(event.key)
