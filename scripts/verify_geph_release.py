@@ -392,6 +392,9 @@ def verify_release_assets(
 ) -> dict[str, object]:
     if not release_dir.is_dir() or release_dir.is_symlink():
         raise ValueError("Geph release directory is missing or unsafe")
+    # The caller's download parent may be an OS alias (macOS /tmp). Preserve
+    # the release-directory leaf so strict reads still reject its replacement.
+    release_dir = release_dir.parent.resolve(strict=True) / release_dir.name
     required, reviewed_contract, reviewed_source = _asset_contract(source)
     names = {entry.name for entry in release_dir.iterdir()}
     if names != required:
