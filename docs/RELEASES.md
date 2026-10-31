@@ -5,24 +5,29 @@
 [Slipstream 0.1.9-preview.32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
 was published from `fd7d43c271e4a46ac2d10fc5ca4a032b92adae73` by
 [publisher 41168865517/1](https://github.com/aiwaki/slipstream/actions/runs/41168865517).
-It is a pre-release for manual DMG installation; the stable release is unchanged.
+It is a pre-release; the stable release is unchanged. The DMG supports manual
+installation, and the ordinary public updater evidence is recorded below.
 
 **RU:** Выпуск включает отдельные исправления отмены параллельных соединений и
 разделённых строк размера HTTP-блока, обновлённый Chromium и Geph 0.4.3-r4 с
 заменой старой RSA-зависимости и правкой Free/Plus-кеша авторизации. В CI четыре сайта открылись
 в Safari и Chrome; проверены отказ и восстановление Geph. Наблюдение в течение
 1800,103 секунды подтвердило отсутствие окон и оставшихся служб, но не проверяло
-длительную передачу видео или звука. Commit и откат пары публичной `.31` и
-кандидата `.32` проверены в CI; обычный путь через меню и запрос администратора
-и установка на пользовательском Mac ещё не подтверждены.
+длительную передачу видео или звука. Переход между публичными `.31` и `.32`
+через меню и запрос администратора проверен в CI: отмена сохраняет старую версию,
+а повторная установка завершается подтверждённым запуском новой. Отдельная
+проверка подтвердила возврат к `.31`, если `.32` завершить до подтверждения запуска.
+Установка на пользовательском Mac ещё не проверялась.
 
 **EN:** This release includes scoped connection-cancellation and split HTTP
 chunk-size repairs, an updated Chromium runtime, and Geph 0.4.3-r4 with the old
 RSA dependency replaced and the Free/Plus auth cache repaired. Four sites worked
 in Safari and Chrome; Geph outage and recovery passed. The 1800.103-second soak
 verified background invisibility and clean teardown, not sustained media traffic.
-Commit and rollback of the public `.31` / candidate `.32` pair passed in CI;
-the ordinary tray/admin path and installation on the user's Mac remain unverified.
+The ordinary public `.31 → .32` menu/admin path passed in CI: native Cancel
+preserves the old version, and retry commits after the new app acknowledges startup.
+A separate public run verified restoration of `.31` after terminating `.32`
+before its startup acknowledgement. Installation on the user's Mac remains unverified.
 
 The app candidate has manifest
 `3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823`.
@@ -55,6 +60,27 @@ public discovery and download; the driver supplies no feed or prepared update.
 | Cancel | One real native Cancel; the same OLD tray and daemon remain healthy; the full OLD app is unchanged; local preparation and root operation are absent. |
 | Retry and install | Ordinary menu actions and one confirmed administrator submission; normal OLD exit, exact NEW bundle and daemon, real successor ACK, commit and clean teardown. |
 | Pre-ACK rollback | Run only after independently verified public commit evidence for this pair. Kill only the identified successor before ACK; require production abort, restored OLD app and daemon, and clean teardown. |
+
+[Public commit 41180680911/1](https://github.com/aiwaki/slipstream/actions/runs/41180680911)
+passed independent verification: native Cancel left the OLD app and daemon intact
+and removed preparation; automatic rediscovery and one administrator confirmation
+then produced normal OLD exit, the exact NEW app and daemon, a real successor ACK,
+root commit before lease expiry, and clean teardown. The final public metadata
+recheck matched all 12 assets for each release. The observer revision was
+`91e66888bec93be9f6c0bffabd09e300693b4c09`; the published product sources were unchanged.
+
+The separate [public rollback run 41181835221/1](https://github.com/aiwaki/slipstream/actions/runs/41181835221)
+verified the identified NEW process stopped before ACK, a fresh read confirming
+no commit decision, then termination and production abort. The exact OLD app and
+daemon were restored with an advancing heartbeat; the watchdog exited and all
+transient paths were removed. Final public release identities matched. Together,
+these runs establish the public commit and pre-ACK abort paths for this pair.
+
+The earlier [run 41181471448/1](https://github.com/aiwaki/slipstream/actions/runs/41181471448)
+stopped before any menu action or fault injection: the app reported discovery
+HTTP 403, and a separate unauthenticated diagnostic request confirmed an exhausted
+GitHub API quota. The original response headers
+were not retained. That attempt does not assess rollback behavior.
 
 An ambiguous menu click or authorization response must not be replayed. The
 authorization UI observation has its own deadline; it does not shorten or extend
@@ -114,7 +140,7 @@ path on that image, not runtime compatibility with every earlier supported OS.
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|
 | Stable app | `vX.Y.Z` | Release and latest | Signed updater feed and first installation |
-| Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Qualified build from `main`; use the DMG while public auto-update remains unverified |
+| Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Qualified build from `main`; manual DMG and separately qualified updater transitions |
 | Geph dependency | `geph-vendor-X.Y.Z-rN` | Internal pre-release, never latest | Reviewed and attested build input, not an app release |
 
 Preview and internal dependency releases never replace GitHub's latest pointer
@@ -133,17 +159,18 @@ readiness and publisher verification gates pass. Then qualify the first real
 public `.23 -> .24` upgrade and forced rollback against the immutable published
 assets. This post-publication gate must prove notification identity/submission,
 the bounded signed install, successor health, rollback on failure, and no Dock
-tile, window or focus change. Until it passes, release notes and user-facing
-claims must describe preview auto-update and public upgrade/rollback as
-unverified. Local MockRuntime tests are updater mechanics evidence only and do
+tile, window or focus change. For that historical `.23 → .24` transition,
+release notes and user-facing claims must describe public upgrade/rollback as
+unverified until its gate passes. Local MockRuntime tests are updater mechanics evidence only and do
 not satisfy this live gate. No other publication requirement changes.
 
 The 2026-10-15 public `.23 -> .24` attempt stopped before installation: the
 GitHub releases listing exceeded the released client's per-page byte limit.
 The pagination repair in source is not present in either published binary.
 Keep both releases' signed assets unchanged and use the DMG for this transition.
-Public success, forced rollback and the separate daemon-identity acknowledgement
-boundary remain open; no source-only or modified-old-client test closes them.
+For that pair, public success, forced rollback and the separate daemon-identity
+acknowledgement boundary remain open; no source-only or modified-old-client test
+closes them. Later pairs are qualified separately above.
 
 Root READMEs link to the releases list and instruct users to select the newest
 Slipstream app release, excluding internal dependency releases. Keep installation
@@ -161,8 +188,8 @@ the same PID across fresh advancing heartbeat observations. A pending successor
 with a mismatched daemon refuses startup without spawning a privileged installer;
 the watchdog restores the previous application. Coordinated replacement of both
 daemon and app is implemented in source. The private-pair native commit and
-pre-ACK rollback checks below have passed; ordinary public upgrade/rollback
-qualification remains open.
+pre-ACK rollback checks below have passed. The current public upgrade/rollback
+status is recorded in [Ordinary public update qualification](#ordinary-public-update-qualification).
 In updated clients, a restored rollback app also waits for the watchdog's lock,
 terminal cleanup and exact old-app receipt before resuming daemon installation.
 It emits no successor ACK. Existing published clients retain their old behavior.

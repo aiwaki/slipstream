@@ -1,115 +1,97 @@
 # Current Project State
 
-## Current continuation — 2026-10-31 UTC, preview .32 published; public UI gate pending
+## Current continuation — 2026-10-31 UTC, public update and pre-ACK rollback verified
 
 [Preview .32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
-is published (release429722639, 04:33:42Z), source C9
-`fd7d43c271e4a46ac2d10fc5ca4a032b92adae73`, tree
-`c4580d44874e081a668b8dc62023c8d2760861be`. Publisher41168865517/1 PASS;
-all12 public assets/signed subjects independently verified. OLD31 retains its
-12assets (only display title archival); stable1.4 retains its5assets.
-No workstation install or network/settings changes in this phase.
+is published (release429722639, 04:33:42Z). Source C9
+`fd7d43c271e4a46ac2d10fc5ca4a032b92adae73`, manifest
+`3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823`.
+Publisher41168865517/1 verified all12 public assets/signed subjects. OLD31 retains
+all12 assets; stable1.4 retains all5. No workstation install in this phase.
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/public-update-ax-containment`, based on main
-`92289b053f16180946e2321dd2a5612b3798a420`. Reconcile actual HEAD/PR/CI before
-resuming. Private output, original checkout/user edits and all backups retained.
-Original locator first checkpoint block is synced; do not replace its older tail.
+branch `codex/public-update-evidence`, HEAD
+`91e66888bec93be9f6c0bffabd09e300693b4c09` (merged PR440).
+Only docs/CURRENT_STATE.md and docs/RELEASES.md are being finalized for a docs-only
+PR; private untracked output is retained. Reconcile actual HEAD/PR/CI before work.
+Original locator first checkpoint block is synced; preserve its older tail/user edits.
 
 Frozen C9 evidence: output/continuation-20261031/rsa-release-remediation/main-c9/.
-- CI41164190639/1 PASS; candidate artifact13029245735; archive SHA
-  34eb2c68b80242bd299278b1698aaffddb7aa74c15199e60dc91fc31032f1f58;
-  manifest3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823.
-- Audit41164190626/1/current-UTC publication admission PASS: Geph408registry+3owned,
-  app361+1integrity; accepted vulnerability exceptions0. No exception extensions.
-- G41165429293/1 PASS26/26; P41165942199/1 PASS15/15: real native commit and
-  crash/pre-ACK rollback, OLD restoration, no late commit and cleanup[].
-- R41165941890/1 verified PASS31/31: four sites×Safari/Chrome, owned Geph outage
-  and recovery, external sentinel, 1800.103s idle invisibility/heartbeat soak,
-  3600samples/maxgap1.568s/counters0/cleanup[]. Not a routed media/voice soak.
-- Publication receipt publication/publisher/verification.json SHA
-  112489484a6c64da99929b76c4a5793270e551af64a22ecd6014615a40c6cb1f.
-- R receipt readiness-r/verification.json SHA
-  9503e83cf7b0bec24b1aaa820ee11ba122dd9be1a1cc5ec6b284aafe54f1186e.
-Geph r4 producer41160514353/1 already passed30native cases/both architectures;
-PR435 fixed checked release-parent normalization only (37tests+32subchecks).
-Review expires2026-11-07; no extensions. Oct31 account-backed usage remains1/3.
+| Gate | Exact verified result |
+|---|---|
+| CI41164190639/1 | Candidate13029245735, archive SHA34eb2c68b80242bd299278b1698aaffddb7aa74c15199e60dc91fc31032f1f58; packaged browser/lifecycle/notification/Stop-Quit checks passed. |
+| Audit41164190626/1 | October31 publication admission passed, app361+1integrity and Geph408registry+3owned; accepted vulnerability exceptions0. |
+| G41165429293/1 | PASS26/26: native commit, crash restoration, late-commit refusal, cleanup[]. |
+| P41165942199/1 | PASS15/15: NEW ACK commit and pre-ACK termination restores OLD app/daemon. |
+| R41165941890/1 | PASS31/31: four sites×Safari/Chrome, owned Geph outage/recovery, external sentinel,1800.103s idle invisibility/heartbeat;3600samples/maxgap1.568s/cleanup[]. Not sustained media/voice. |
+| Publisher41168865517/1 | PASS28/28; public receipt SHA112489484a6c64da99929b76c4a5793270e551af64a22ecd6014615a40c6cb1f. |
 
-Public updater work/evidence: output/continuation-20261031/public-updater/.
-PR436 published docs; PR437 restored normal public UI driver; PR438 fixed local
-release-notes projection required by the unchanged canonical verifier. All merged
-normally with all three required contexts green. PR438 headc0aea8db7 has the same
-tree as merged23f747eea; CI41173972141/1 and audit41173972021/1 PASS. Receipt
-pr438/receipt.json SHA3e43dc962fe38e3d9f98155792805a603caee931850aca8a712f4308af3f9f98.
-Focused baseline:80 pair tests plus53 UI/visibility, docs8/continuity/diff checks;
-independent review passed. Product binaries and shared native G/P helpers unchanged.
+Geph r4 producer41160514353/1 passed30native cases/both architectures.
+Source-owned review expires2026-11-07; no extensions. Oct31 protected account
+usage remains1/3. Reuse G/P/R and unchanged source tests; no further native repeats.
 
-Two exact public commit attempts, no blind reruns:
-- 41173004768/1 failed before materialization: missing local release-notes.md.
- PR438 causal canonical RED/GREEN repaired preparation without changing12public assets.
-- 41174944739/1 on23f747eea passed public authentication/materialization and real
- native Cancel: exact public .32 archive, prepared cleanup, same OLD app/daemon,
- heartbeat22→33, no root operation/active index and cleanup_errors[]. Then the
- sole reopen-menu AXPress returned-25204. No confirm, OLD exit, NEW ACK/commit,
- final public identity recheck or handoff visibility was reached.
- Artifact13032705581,120388bytes,SHA
- d3dbf22c8da82c1bf1803f8453434fa35f0a47284415d474b969ddd945083c92.
- Independent receipt commit-41174944739/independent-verification.json SHA
- 245253a1cb4f4a1a202ced8bbcbe02c10b0196a60d90d8374baab2b57fb88992.
+Public updater evidence: output/continuation-20261031/public-updater/.
+OLD31 source3eb32bd3029d6acd88b380a8c767c19c7abc76a4, manifest
+9fcf9be84f199eed9dd178fa82333ae0bbc4cd2a4660df36052ef9513163a874.
+Both successful public runs used harness91e66888b and unchanged OLD31/C9 assets.
 
-Source-confirmed next correction: OLD31/C9 lib.rs are identical. Cancel log2904
-precedes UI reset2905–2909 and automatic refresh2933; availability is refreshed
-by the2s status poll4614–4617. Runtime cleanup is not a UI-ready barrier. The
-harness incorrectly requires manual Check after Cancel even when the app itself
-returns Install. Observe busy/disabled state read-only and accept its automatic
-exact-version offer. AX-25204 can mean modal timeout, not certain action failure
-(Apple AXUIElementPerformAction docs); current actor retained only pre-action
-nodes. Add bounded fresh post-read with explicit visible owned menu evidence,
-without repeating AXPress. Install/Check still require error0 and single submit.
-Implementation and independent review PASS. Six causal old-code failures retained;
-combined159 mock tests PASS in1.63s, unchanged visibility baseline reused. Root
-reviewed both production-driver diffs; no product/shared G/P/workflow change.
-Receipt menu-state-fix/verification.json SHA
-24b2894153f4324f0b939ff42956c3fd96b7f96860f09d3a16485950383f4d52;
-independent-review.json SHA
- dce6ede5d826369d90faf988163a7916c4de0c7413a87ed5cea6b7d38d75595d.
-PR439 merged at92289b053f16180946e2321dd2a5612b3798a420, tree equal to
-checked head01513c2b8c135cb3baed79e323168c2a3b104684. All three required
-contexts PASS; CI41176694085/1 and audit41176694232/1 fully SUCCESS.
-Receipt pr439/receipt.json SHA
-1796319e8175d0f769989d53cbc7b246fc02aa706494c178cba0505a10faf4d1.
-Public commit41177729418/1 FAILED before first Install/Cancel. Exact published
-payloads/materialization passed. One initial open_menu returned-25204; fresh
-exact enabled .32 item was found but reciprocal AXParent comparison refused
-with menu ancestry changed. Report cannot identify which reverse edge.
-Artifact13034005344,112565bytes,SHA
-2b5b428559126b8485764e635c3088752192c4939096ea3c1d82a2af9857d6c9;
-independent-verification.json SHA
-612435c7bd8e74fbd62ccc5d1d3915964125b6276feb3e7a80ccf3b268899383.
-No installation/authorization; cleanup_errors[]. Earlier actual Cancel proof
-still stands independently. No product UI failure is established by this refusal.
-Next narrow correction: use two fresh native AXChildren arrays to prove exact
-unique CFEqual tray→menu→item membership, as the actual tree was discovered.
-Do not require undocumented reciprocal Parent equality; retain same-PID/process,
-positive visibility, deadlines and single-action guards. Save per-edge bounded
-diagnostics before any exception. Independent design and final code review PASS;
-two real-method causal RED and89 observer tests PASS, unchanged159 baseline
-reused for other contracts. Receipt ax-containment-fix/verification.json SHA
-f48e3a1bf2ddb1786e7ddc6464e0560d162894ff185be25e41b53b9d1e27ef32;
-independent-review.json SHA
-083bcfc81ff0a731f7cdea565357652179e695a3c4ec485323a6e8cb5a3d743c.
-Next normal PR/required checks; no native or rollback dispatch yet.
-After that: one public commit+Cancel run, independently verify evidence, then and
-only then a separate kill-successor-before-ack run. No additional G/P/R repeats.
+- Commit41180680911/1: independent PASS49/49. Native Cancel preserves OLD app,
+ daemon and advancing heartbeat and removes preparation. Automatic rediscovery,
+ one administrator confirmation, OLD normal exit0, NEW ACK/committed seq2 before
+ deadline, NEW heartbeat53→54, watchdog/transient cleanup[]. All12 public assets
+ for each release rechecked after transition. Artifact13034404938,145264bytes,
+ SHA0c7b43f3b5725406d6441424acb839cee1d86c14b01aacf358d96c9202c781f6.
+ Independent receipt SHA1aef19f44bdbde804fd2f69a92fd986b0f8e47abbc24f7c3b6686a7690090f3b.
+- Rollback41181835221/1: independent PASS38/38. Exact NEW process STOP→fresh
+ stopped/no-ACK/no-decision observation→KILL before deadlines; production abort
+ seq2, exact OLD app/daemon restored, heartbeat6→7, watchdogexit0/transient
+ absence/cleanup[]. Final public identities unchanged. Artifact13035342559,
+ 132185bytes,SHA82325659820f5ccb34dcaa2f7da8c99e5fa9aec27fe0e831c9ebfe3dbca1b4c6.
+ Independent receipt SHAb2913619fd172bc47e79ba5a5ac497fb21d4fc908ac1eb5b241cb7f141d88a79.
+- Combined pair-verification.json SHA
+ 9a0c075dbda8d0a857467e71567f3d93fa79b5a4d38015dfe354f483f7e32cf2
+ binds these two receipts and precisely limits the qualified public paths.
+ Individual case public_pair_qualified=false is intentional; combine cases here.
 
-Unqualified: whole public update/rollback pair, ordinary notification UI delivery,
-normal Quit in this driver, installed .32 on user's Mac, sustained media/Discord
-calls/sleep-wake. C9 native notification hook is a separate already-green proof.
-Historic Safari/HTTP403 causes are not established by current green site tests.
-Broader PR376/Telegram386/Geph384 remain open. No SDK/platform/nativeSQLite scope.
+Harness corrections already merged normally with all three required contexts:
+PR437 restored ordinary driver; PR438 projected required local release notes;
+PR439 accepted actual post-Cancel automatic discovery and fresh visible menu after
+ambiguous open timeout; PR440 replaced undocumented reciprocal AXParent equality
+with two fresh exact native AXChildren membership proofs. Actual successful
+commit exercised both edges and AXVisibleChildren; no repeated AXPress.
+PR440 headcfe32bff6 equals merged91e66888b tree; CI41178629187/1 and
+Audit41178629202/1 SUCCESS. Receipt pr440/receipt.json SHA
+20ac68d64deb7e238a92937c3383fa35d3810a10d0d8388c6df0961a7b3c6ee8.
+Focused evidence:159 combined tests; containment2 causal RED→89 PASS, independent
+review; docs8/continuity/diff passed before PR440. Product/shared G/P unchanged.
+
+Do not rediscover resolved attempt failures:
+- 41173004768: missing local release-notes projection (PR438).
+- 41174944739: real Cancel passed, reopen AX timeout (PR439).
+- 41177729418: reciprocal parent proof refused before Install (PR440).
+- 41179688367 and41181471448: OLD discovery403 before any AX or transaction;
+ separate one-shot probes proved GitHub quota0/60 with reset times. Original
+ app headers/page were not retained. One same-source retry after each observed
+ reset produced the successful runs above. Cleanup was empty in both failures.
+ Source review1d13f1619e3e42a0606bb5887d04f5f80e9b897e1c12812c764000f57bdeb4b3:
+35 public releases→4 GET per cycle, six-hour schedule, preparation authenticated;
+no proven preparation self-exhaustion. No ETag/rate-limit backoff in OLD/C9, but
+no product/actor edit was justified by these failures. Detailed prior chronology
+retained in public-updater/checkpoint-before-pair-summary.md and per-run receipts.
+
+Next: finish the docs-only PR with scoped docs checks and all required CI contexts;
+record merged exact head. No additional binaries, public asset/body changes or
+workstation transaction are needed for this evidence update.
+Unqualified by these public runs: ordinary notification delivery/removal, normal
+Quit, browser routing, full continuous invisibility between samples, other fault
+windows, installed .32 on user's Mac, sustained media/Discord calls/sleep-wake.
+C9 notification hook/Stop-Quit/browser proofs remain separate already-green gates.
+Historic Safari/HTTP403 causes are not established by the green browser matrix.
+Broader work PR376/Telegram386/Geph384 was not advanced here; no SDK/platform scope.
 Preserve working external Geph/workstation: no local native/scanner/app/browser/
 install/PF/service/DNS/proxy/PAC/VPN/account actions. Small mocks/static checks and
-disposable hosted CI only. Graph unavailable; bounded direct/rg/git-object reads.
+disposable hosted CI only. All public UI watchers completed; no active native run.
+Graph unavailable; bounded direct/rg/git-object fallback used.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
