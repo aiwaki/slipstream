@@ -1,88 +1,95 @@
 # Current Project State
 
-## Current continuation — 2026-10-31 UTC, circuit inactivity recovery
+## Current continuation — 2026-10-31 UTC, Geph admission-only cooldown repair
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/circuit-rejected-idle-ttl`, base/main
-`b15879d8483e8d60fe0f1e07575c1688732da858` (PR441, required CI all green).
-This fix is newer than published .32; verify actual HEAD/PR/required CI status
-before work. Original locator first block is synced; preserve its older tail.
+branch `codex/geph-admission-cooldown`, base/main
+`41c614c993ed8a242a51a5e2c44ed996c9ddc299` (merged PR442).
+This guard fix is newer than published .32. Reconcile source/PR/required CI
+before continuing. Original locator first block is synced; preserve older tails.
 
 ### Current bounded fix
 
-Python and Rust route-circuit registries renewed `last_touched` on rejected
-requests and ignored completions. Repeated retries could therefore retain an
-abandoned half-open permit forever. Both now renew activity only for `Allow` or
-`Record`; monotonic event time, backend separation, capacity and reducer stay intact.
-The existing production five-minute idle TTL is retained: this is eventual
-recovery, not immediate cancellation release or late-completion generation safety.
+A rejected owned-Geph circuit invoked global `suspend_geo_exit_backend` without
+any dial, setting `_geph_up=false` and a30s hold for other service groups.
+The narrow repair gates common suspension with `geph_attempt_failed`, which is set
+only after an admitted unsuccessful helper result. Real failure backoff and the
+early external-Geph zero-payload branch stay unchanged. No policy/account edits.
+Held retries do not themselves renew the hold; do not call this infinite renewal.
+Synthetic circuit failure recording on unready/draining admission is a separate
+observation, not repaired or qualified by this slice.
 
-- Two causal RED tests against base, then two GREEN tests; 18 unchanged pure
-  contract vectors and backward-clock refusal/state preservation passed.
-- Rust formatter and scoped diff passed; no local native compilation or sockets.
-- Independent four-file review verified source/evidence hashes; no blockers.
-- Real-handler cancellation → denied retries → fresh payload: one causal RED
-  on base → one GREEN (0.08s), including actual writer/session/task cleanup.
-  In-memory transport with forbidden-I/O guards; independent health reporting
-  stubbed. Independent review verified exact old source and retained hashes.
-- The only identified explicit production cancellation caller is shutdown drain;
-  that daemon exits. Closing a tab does not itself cancel the asyncio handler.
-  This defect is not established as the cause of the historical reconnects.
+Private `output/continuation-20261031/remaining-scope/circuit-idle-ttl/admission-cooldown/`:
+on unchanged7e6ec072e,1 causal RED (OpenAI rejection, no dial, readinessfalse and
+hold130 at clock100, independent Steam blocked) and1 positive GREEN (actual
+first-payload EOF retains30s backoff and cleanup),0.16s. `verification.json` SHA
+`a28a879230801cbe82cfc80dc69749dd22535cd742fd07f66cd242d8746c9f34`.
+Promoted3-case handler test also proves unready→healthy reducer→full Steam
+payload at105s (old source still held until130). Two defect cases have causal
+old-source RED, positive EOF control retains real backoff. Final4 new/updated
+cases PASS;14 adjacent cases PASS reused. Independent final3-file review verified
+source/log hashes without reruns; no blockers. `implementation-verification.json`
+SHA211e5bc3a6d161cff6d1a726a52f5458e6c2f9ec661bc672c2b58c28aa8f41cf.
+Actual monitor/network not exercised; fixture uses its reducer and in-memory streams.
+Next: docs/continuity checks, ordinary PR and all3 required CI contexts. No local
+native or new protected account run. Root owns Git/docs.
 
-Evidence: `output/continuation-20261031/remaining-scope/circuit-idle-ttl/`;
-initial `verification.json` SHA
-`a95605bfbc985baa30a056e175b6376e80ed26b39c8dbcfa6d6ac6bf3f47c330`.
-Handler receipt `handler-verification.json` SHA
-`a8782965aaf050dc5f2f6c4ebb94a46502ffbfd122277cf774de5798fe2aa9f5`.
-Docs8/continuity/diff checks passed. Next: regular PR and all three required contexts. Rust tests run only in hosted CI.
-No new public updater dispatch or account-backed run is needed for this slice.
+### Completed circuit inactivity fix — PR442
+
+PR442 checked head `7e6ec072ea2a655663f6ffaf1a21b2704d80138c` equals merged
+`41c614c993ed8a242a51a5e2c44ed996c9ddc299` tree. CI41184109613/1 and
+audit41184109565/1 SUCCESS; all3 required contexts SUCCESS. Python1862passed;
+new Rust2 cases explicitly passed. Packaged browser/lifecycle paths passed.
+Evidence `circuit-idle-ttl/pr442/receipt.json` SHA
+`7429aa54d037c4c9c76c6d4292657545fdcdf30a6aa77df6371373ff9ce328e6`,
+merge.json SHA6d6ddd61d20f98dfd6246b3e8befee89bd1e76ee11f5b018fcd79a98bc7ca45d.
+
+Python/Rust now renew registry activity only on Allow/Record, not Reject/Ignore.
+Two registry and one actual handler regression are causal RED→GREEN;18 unchanged
+contract vectors/backward-clock refusal preserved. Handler cancellation closes
+writers/counters; denied retries no longer prevent the existing five-minute idle
+expiry. This is eventual recovery, not immediate cancellation release or safe
+late-result generations. Explicit production cancellation caller identified was
+shutdown; tab close does not cancel the handler. Historical reconnect cause not
+established. No claim that this newer-than-.32 source is installed or released.
 
 ### Reconciled remaining scope
 
-Private read-only reports: `output/continuation-20261031/remaining-scope/`.
-PR376 is stale/open; only the narrow circuit-inactivity defect is selected here.
-PR384 is stale/draft/conflicting: all13 Geph source fixes already exist in main
-(release_revision4 versus old1). Do not import it wholesale or enable native SQLite.
-PR386 is stale/conflicting: main remains Telegram proxy1.8.1; the old1.11.2/H2
-candidate needs a narrow refresh and causal checks, including CF pool refill and
-quick-ACK parsing. No Telegram edits in this slice. Review receipts pr376.json,
-pr386.json and coverage.json retain exact sources and limits.
-Coverage gaps: established-stream reset → fresh reconnect composition, sustained
-YouTube/Discord payload progress, and physical sleep/default-route changes. These
-are missing evidence, not proven additional bugs. Do not repeat idle-soak proofs.
+Read-only reports in `output/continuation-20261031/remaining-scope/` retain exact
+PR/source evidence. PR376 stale/open: only scoped source-backed repairs selected.
+PR384 stale/draft/conflicting: all13 Geph source fixes already in main r4; do not
+import wholesale or activate native SQLite. PR386 stale/conflicting: main proxy
+1.8.1 versus old1.11.2/H2 candidate; refresh narrowly with CF pool/quick-ACK proofs.
+No Telegram edits here. Missing evidence: established stream reset→fresh reconnect,
+sustained YouTube/Discord payload, physical sleep/default-route changes. These
+coverage gaps are not proven new bugs. No SDK/platform scope.
 
-### Completed public release/update baseline — reuse
+### Published .32 and public updater baseline — reuse
 
 [Preview .32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
-is published (release429722639); source C9
-`fd7d43c271e4a46ac2d10fc5ca4a032b92adae73`, manifest
-`3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823`.
-Publisher41168865517/1 verified all12 assets; OLD31 all12/stable1.4 all5 retained.
-C9 gates CI41164190639/1, audit41164190626/1, G41165429293/1 (26/26),
-P41165942199/1 (15/15), R41165941890/1 (31/31) passed. R covers four sites in
-Safari/Chrome, owned Geph outage/recovery and1800.103s idle heartbeat, not media.
+release429722639; C9 sourcefd7d43c271e4a46ac2d10fc5ca4a032b92adae73,
+manifest3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823.
+Publisher41168865517/1 verified12assets; OLD31 retains12/stable1.4 retains5.
+C9 CI41164190639/1,audit41164190626/1,G41165429293/1(26/26),
+P41165942199/1(15/15),R41165941890/1(31/31) passed. R=4sites×2browsers,
+owned Geph outage/recovery,1800.103s idle heartbeat; not sustained media.
 Geph r4 producer41160514353/1 passed30native cases/both architectures.
-Source-owned review expires2026-11-07, no extensions; Oct31 account usage1/3.
+Source review expires2026-11-07,no extensions; Oct31 account usage remains1/3.
 
-Unchanged public OLD31 → NEW32, harness91e66888b: commit41180680911/1 independent
-PASS49/49 (Cancel, rediscovery, one administrator confirmation, old normal exit,
-NEW ACK/commit/heartbeat/cleanup); rollback41181835221/1 independent PASS38/38
-(exact NEW stopped/killed before ACK, OLD app/daemon/heartbeat restored, cleanup).
-All12 public assets per release rechecked after each path. Combined receipt
+Unchanged public OLD31→NEW32/harness91e66888b: commit41180680911/1 independent
+49/49 and rollback41181835221/1 independent38/38, including Cancel/rediscovery,
+one admin confirmation, ACK/commit and exact pre-ACK OLD restoration/cleanup.
+All12 public assets per release rechecked. Combined receipt
 `output/continuation-20261031/public-updater/pair-verification.json` SHA
 `9a0c075dbda8d0a857467e71567f3d93fa79b5a4d38015dfe354f483f7e32cf2`.
-PR440 harness and PR441 evidence merged with all required contexts; PR441
-CI41182580126/1/audit41182580158/1 green. Full proofs/limits: docs/RELEASES.md
-and frozen private public-updater/ receipts. Do not reopen resolved harness or
-GitHub-quota failures; prior checkpoint retained there as checkpoint-before-pair-summary.md.
+PR440/441 merged/all required green; full limits in docs/RELEASES.md/private
+receipts. Do not reopen resolved harness/quota failures or rerun unchanged G/P/R.
+No installed .32/user-Mac or sustained media/sleep/wake success claim.
 
-No installed .32/user-Mac claim. Sustained media, physical sleep/wake and historical
-Safari/403 causes remain unqualified. Existing C9 browser/notification/Stop-Quit
-proofs are separate and unchanged. The broader repair goal remains active.
 Preserve working external Geph/workstation: no local native/scanner/app/browser/
 install/PF/service/DNS/proxy/PAC/VPN/account actions. Small mocks/static checks and
-disposable hosted CI only. No SDK/platform scope. Graph unavailable; narrow direct
-reads/rg/git-object fallback. Previous public UI watchers completed.
+disposable hosted CI only. PR442 watcher finished; no active native CI watcher yet
+for the new guard. Graph unavailable; bounded direct/rg/git fallback. Broader goal active.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 

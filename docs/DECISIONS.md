@@ -1,5 +1,18 @@
 # Decisions
 
+### 2026-10-31: route admission refusal is not a Geph transport failure
+
+The shared Geph suspension after a request is gated by a completed unsuccessful
+backend helper attempt. A circuit rejecting one service group must not mark the
+whole Geph backend down or start its30-second cooldown. Other groups may continue
+using the healthy backend. Initial not-readiness still prevents dispatch, but a
+request that did not run the helper must not add a new transport-failure cooldown
+that outlives the monitor's recovery. Genuine SOCKS/first-payload failures retain
+the existing backoff and cleanup, including the separate early external-Geph
+failure path.
+A helper can fail because its port disappeared before connecting; this rule does
+not assert that every failed attempt sent bytes on the wire.
+
 ### 2026-10-31: rejected requests do not renew circuit inactivity
 
 The bounded route-circuit registry updates its idle TTL and LRU activity only
