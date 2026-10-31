@@ -1,0 +1,8 @@
+[package]
+name = "slipstream-rsa-client"
+version = "0.1.0"
+license = "MIT"
+edition = "2021"
+publish = false
+[dependencies]
+aws-lc-sys = "=0.45.0"

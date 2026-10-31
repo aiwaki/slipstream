@@ -12,6 +12,73 @@ import ci_scope
 
 
 class CiScopeTests(unittest.TestCase):
+    def rsa_only_fixture(self):
+        deltas = {
+            "vendor/geph/SOURCE.json": (b"old source", b"embedded source"),
+            "vendor/geph/Cargo.lock": (b"rsa", b"aws-lc"),
+            ci_scope.RSA_ONLY_REVIEW: (None, b"exact source review"),
+            "scripts/dependency_audit.py": (b"old audit", b"review-aware audit"),
+            "security/geph-dependency-audit-policy.json": (b"exceptions", b"new source review"),
+        }
+        bindings = {path: (None if before is None else hashlib.sha256(before).hexdigest(),
+                          hashlib.sha256(after).hexdigest())
+                    for path, (before, after) in deltas.items()}
+        return deltas, bindings
+
+    def test_rsa_only_bootstrap_requires_every_reviewed_byte_and_path(self):
+        deltas, bindings = self.rsa_only_fixture()
+        paths = [*bindings, "scripts/ci_scope.py", "docs/CURRENT_STATE.md"]
+        with patch.object(ci_scope, "RSA_ONLY_FILE_BINDINGS", bindings):
+            self.assertEqual(ci_scope.classify_paths(paths, event_name="pull_request",
+                rsa_only_delta=deltas), ci_scope.CiScope(True, True, False))
+            self.assertFalse(ci_scope.classify_paths(paths, event_name="push",
+                rsa_only_delta=deltas).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(paths,
+                event_name="pull_request").geph_bootstrap)
+            for path, (before, after) in deltas.items():
+                with self.subTest(path=path):
+                    self.assertFalse(ci_scope.classify_paths(
+                        [p for p in paths if p != path], event_name="pull_request",
+                        rsa_only_delta=deltas).geph_bootstrap)
+                    for pair in ((b"foreign base", after), (before, after + b"foreign")):
+                        self.assertFalse(ci_scope.classify_paths(paths,
+                            event_name="pull_request", rsa_only_delta={**deltas, path: pair}).geph_bootstrap)
+            for extra in ("spike/tproxy.py", "app-tauri/src-tauri/src/main.rs",
+                          "security/dependency-audit-policy.json", "security/geph-source-owned-review/extra.json"):
+                with self.subTest(extra=extra):
+                    self.assertFalse(ci_scope.classify_paths([*paths, extra],
+                        event_name="pull_request", rsa_only_delta=deltas).geph_bootstrap)
+
+    def test_rsa_only_delta_refuses_empty_partial_malformed_and_existing_empty_base(self):
+        deltas, bindings = self.rsa_only_fixture()
+        with patch.object(ci_scope, "RSA_ONLY_FILE_BINDINGS", {}):
+            self.assertFalse(ci_scope.reviewed_rsa_only_delta({}))
+        with patch.object(ci_scope, "RSA_ONLY_FILE_BINDINGS", bindings):
+            path = ci_scope.RSA_ONLY_REVIEW
+            for invalid in (None, {}, {path: deltas[path]}, {**deltas, "extra": (None, b"x")},
+                            {**deltas, path: (b"", deltas[path][1])},
+                            {**deltas, path: (None, "not bytes")},
+                            {**deltas, path: [None, deltas[path][1]]}):
+                self.assertFalse(ci_scope.reviewed_rsa_only_delta(invalid))
+
+    def test_rsa_only_git_reader_proves_absence_and_rejects_missing_head(self):
+        deltas, bindings = self.rsa_only_fixture()
+        base, head = "1" * 40, "2" * 40
+        def read(argv, **kwargs):
+            if argv[1] == "ls-tree":
+                present = bindings if argv[4] == head else [p for p, pair in deltas.items() if pair[0] is not None]
+                return "\n".join(present) + "\n"
+            ref, path = argv[2].split(":", 1)
+            return deltas[path][ref == head]
+        with patch.object(ci_scope, "RSA_ONLY_FILE_BINDINGS", bindings), \
+             patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+             patch.object(ci_scope.subprocess, "check_output", side_effect=read):
+            self.assertEqual(ci_scope.rsa_only_delta_from_git(), deltas)
+        with patch.object(ci_scope, "RSA_ONLY_FILE_BINDINGS", bindings), \
+             patch.dict(os.environ, {"BASE_SHA": base, "GITHUB_SHA": head}), \
+             patch.object(ci_scope.subprocess, "check_output", return_value=""):
+            self.assertIsNone(ci_scope.rsa_only_delta_from_git())
+
     def python_lock_delta(self):
         deltas = {
             path: (f"# {path}\ncertifi==2026.6.17\n".encode(),

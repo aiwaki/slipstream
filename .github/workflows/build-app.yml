@@ -709,13 +709,24 @@ jobs:
           SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
+          geph_args=(--geph-policy security/geph-dependency-audit-policy.json)
+          if python3 -c 'import json,sys; sys.exit("embedded_packages" not in json.load(open("vendor/geph/SOURCE.json")))'; then
+            review_parent="$(mktemp -d "$RUNNER_TEMP/admit-geph-source-review.XXXXXX")"
+            source_review="$review_parent/evidence"
+            python3 scripts/geph_source_owned_bundle.py unpack \
+              --policy security/geph-dependency-audit-policy.json \
+              --bundle dist-geph-audit/geph5-client-source-review-evidence.tar \
+              --output "$source_review" >/dev/null
+            geph_args+=(--geph-source vendor/geph/SOURCE.json
+              --geph-source-owned-evidence "$source_review")
+          fi
           python3 scripts/dependency_audit.py admit-release \
             --report dist-candidate/dependency-audit.json \
             --sbom dist-candidate/Slipstream.spdx.json \
             --policy security/dependency-audit-policy.json \
             --geph-report dist-geph-audit/geph5-client-dependency-audit.json \
             --geph-sbom dist-geph-audit/geph5-client.spdx.json \
-            --geph-policy security/geph-dependency-audit-policy.json \
+            "${geph_args[@]}" \
             --source-commit "$SOURCE_COMMIT" \
             --target "$SLIPSTREAM_TAURI_TARGET"
 
@@ -921,6 +932,17 @@ jobs:
           SOURCE_COMMIT: ${{ steps.ver.outputs.source_commit }}
         run: |
           set -euo pipefail
+          geph_args=(--geph-policy security/geph-dependency-audit-policy.json)
+          if python3 -c 'import json,sys; sys.exit("embedded_packages" not in json.load(open("vendor/geph/SOURCE.json")))'; then
+            review_parent="$(mktemp -d "$RUNNER_TEMP/publish-geph-source-review.XXXXXX")"
+            source_review="$review_parent/evidence"
+            python3 scripts/geph_source_owned_bundle.py unpack \
+              --policy security/geph-dependency-audit-policy.json \
+              --bundle dist-geph-audit/geph5-client-source-review-evidence.tar \
+              --output "$source_review" >/dev/null
+            geph_args+=(--geph-source vendor/geph/SOURCE.json
+              --geph-source-owned-evidence "$source_review")
+          fi
           published=false
           for attempt in 1 2 3 4; do
             python3 scripts/dependency_audit.py admit-release \
@@ -929,7 +951,7 @@ jobs:
               --policy security/dependency-audit-policy.json \
               --geph-report dist-geph-audit/geph5-client-dependency-audit.json \
               --geph-sbom dist-geph-audit/geph5-client.spdx.json \
-              --geph-policy security/geph-dependency-audit-policy.json \
+              "${geph_args[@]}" \
               --source-commit "$SOURCE_COMMIT" \
               --target "$SLIPSTREAM_TAURI_TARGET"
             if gh api --method PATCH \

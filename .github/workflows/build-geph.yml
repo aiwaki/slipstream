@@ -23,7 +23,13 @@ on:
       - ".github/workflows/build-geph.yml"
       - "scripts/dependency_audit.py"
       - "scripts/geph_vendor_source.py"
+      - "scripts/geph_source_owned_*.py"
+      - "scripts/geph_native_sqlite*.py"
+      - "scripts/make_release_sbom.py"
+      - "security/geph-source-owned-review/**"
       - "scripts/run_geph_synthetic_tests.py"
+      - "scripts/geph_rsa_fixture.py"
+      - "scripts/fixtures/geph-rsa-auth/**"
       - "scripts/make_geph_vendor_sbom.py"
       - "security/geph-dependency-audit-policy.json"
       - "vendor/geph/**"
@@ -133,6 +139,13 @@ jobs:
             geph5-client-dependency-audit.json
             SHA256SUMS
           )
+          source_owned=false
+          review_patterns=(--pattern geph5-client-dependency-audit.json)
+          if python3 -c 'import json,sys; sys.exit("embedded_packages" not in json.load(open("vendor/geph/SOURCE.json")))'; then
+            source_owned=true
+            required+=(geph5-client-source-review-evidence.tar)
+            review_patterns+=(--pattern geph5-client-source-review-evidence.tar)
+          fi
           if ! assets="$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>/dev/null)"; then
             should_build=true
           else
@@ -150,7 +163,7 @@ jobs:
               --pattern geph5-client.SOURCE.json \
               --pattern geph5-client.Cargo.lock \
               --pattern geph5-client.spdx.json \
-              --pattern geph5-client-dependency-audit.json
+              "${review_patterns[@]}"
             cmp vendor/geph/SOURCE.json /tmp/geph-existing/geph5-client.SOURCE.json || {
               echo "release $tag has a different source contract; bump release_revision"
               exit 1
@@ -183,10 +196,21 @@ jobs:
             test ! -L "$historical_policy"
             test -s "$historical_policy"
             python3 -m json.tool "$historical_policy" >/dev/null
+            review_args=(--policy "$historical_policy")
+            if [ "$source_owned" = true ]; then
+              review_parent="$(mktemp -d "$RUNNER_TEMP/geph-existing-source-review.XXXXXX")"
+              source_review="$review_parent/evidence"
+              python3 scripts/geph_source_owned_bundle.py unpack \
+                --policy "$historical_policy" \
+                --bundle /tmp/geph-existing/geph5-client-source-review-evidence.tar \
+                --output "$source_review" >/dev/null
+              review_args+=(--source vendor/geph/SOURCE.json
+                --source-owned-evidence "$source_review")
+            fi
             python3 scripts/dependency_audit.py verify \
               --report /tmp/geph-existing/geph5-client-dependency-audit.json \
               --sbom /tmp/geph-existing/geph5-client.spdx.json \
-              --policy "$historical_policy" \
+              "${review_args[@]}" \
               --source-commit "$vendor_commit" \
               --target macos-universal \
               --vendored-transitive-dependencies full
@@ -357,6 +381,7 @@ jobs:
           set -euo pipefail
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
           python3 scripts/make_geph_vendor_sbom.py generate \
+            --source-root "${{ steps.source.outputs.root }}" \
             --source vendor/geph/SOURCE.json \
             --version-file vendor/geph/VERSION \
             --cargo-lock vendor/geph/Cargo.lock \
@@ -371,23 +396,52 @@ jobs:
             --policy security/geph-dependency-audit-policy.json \
             --platform darwin-arm64 \
             --output /tmp/osv-scanner
+          review_args=(--policy security/geph-dependency-audit-policy.json)
+          source_owned=false
+          if python3 -c 'import json,sys; sys.exit("embedded_packages" not in json.load(open("vendor/geph/SOURCE.json")))'; then
+            source_owned=true
+            review_args+=(--source vendor/geph/SOURCE.json
+              --source-owned-evidence security/geph-source-owned-review)
+          fi
           python3 scripts/dependency_audit.py scan \
             --scanner /tmp/osv-scanner \
             --platform darwin-arm64 \
             --sbom out/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
+            "${review_args[@]}" \
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
             --vendored-transitive-dependencies full \
             --evaluation-date "$(date -u +%F)" \
+            --evidence-dir "$RUNNER_TEMP/geph-audit-evidence" \
             --output out/geph5-client-dependency-audit.json
+          if [ "$source_owned" = true ]; then
+            review_args=(--policy security/geph-dependency-audit-policy.json
+              --source vendor/geph/SOURCE.json
+              --source-owned-evidence "$RUNNER_TEMP/geph-audit-evidence/source-owned")
+          fi
           python3 scripts/dependency_audit.py verify \
             --report out/geph5-client-dependency-audit.json \
             --sbom out/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
+            "${review_args[@]}" \
             --source-commit "$GITHUB_SHA" \
             --target macos-universal \
             --vendored-transitive-dependencies full
+
+          if [ "$source_owned" = true ]; then
+            python3 scripts/geph_source_owned_bundle.py pack \
+              --policy security/geph-dependency-audit-policy.json \
+              --evidence-root "$RUNNER_TEMP/geph-audit-evidence/source-owned" \
+              --output out/geph5-client-source-review-evidence.tar
+          fi
+
+      - name: Retain the Geph audit snapshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-audit-evidence-${{ needs.resolve.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/geph-audit-evidence/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Assemble the internal release payload
         run: |

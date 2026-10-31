@@ -1,5 +1,37 @@
 # Decisions
 
+### 2026-10-31: separate RSA client replacement
+
+Continue the existing RSA-only candidate independently of native SQLite research.
+The exact Geph 0.4.3-r4 source preserves all thirteen r3 session/cache edits and
+adds the reviewed client-only Mizaru, broker protocol and AWS-LC adapter packages.
+Keep the candidate's separately tested Free/Plus cache invalidation repair explicit.
+Preserve the current rustls, webpki, trust-root and ctutils fixes when reconciling
+its older lock. Do not import PR384 wholesale or activate its native SQLite lane.
+
+Remove the two rsa 0.8.2 exceptions only together with the dependency's removal.
+A new exact source-owned review covers the three embedded packages; it does not
+clear registry dependencies, native AWS-LC, a compiled binary or installed behavior.
+Retained fixture results remain historical. Portable projections of older evidence
+must identify the original hash and transformation. Source and lock identities,
+package/file closure, fresh ancestor queries and review expiry remain mandatory.
+
+Historical artifact verification uses its recorded evaluation date. Publication
+admission separately rechecks every used allowance/review against the current UTC
+date. Neither an old passing audit nor an immutable archive renews admission.
+Source bootstrap remains PR-only, bound to the reviewed file changes; both fresh
+dependency audits and product checks run. Main must build and attest the immutable
+Geph revision and pass all app/package/readiness gates before an app is published.
+
+The producer also executes eleven retained RSA/auth composition fixtures against
+an exact current-source copy, alongside the nineteen existing session/cache tests.
+Only test-only wrappers and the broker mock hook are inserted into that copy.
+The legacy signing oracle has its own frozen test lock and deliberately public
+synthetic keys; it is never linked or shipped and does not restore an RSA allowance
+to the production policy. All runtime fixtures retain the existing network/private
+file sandbox and owned-process cleanup. Native execution must be fresh in CI;
+static preparation and retained logs are not a substitute.
+
 ### 2026-10-30: retire bundled Xbox DNS and its cached routing authority
 
 At the user's request, Slipstream no longer bundles or contacts `xbox-dns.ru`.

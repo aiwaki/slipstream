@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "packages": [
+        {
+          "package": {
+            "ecosystem": "crates.io",
+            "name": "mizaru2",
+            "version": "0.2.21"
+          },
+          "vulnerabilities": []
+        }
+      ]
+    },
+    {
+      "packages": [
+        {
+          "package": {
+            "ecosystem": "crates.io",
+            "name": "geph5-broker-protocol",
+            "version": "0.4.3"
+          },
+          "vulnerabilities": []
+        }
+      ]
+    }
+  ]
+}

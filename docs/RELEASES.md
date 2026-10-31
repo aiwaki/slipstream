@@ -1,5 +1,22 @@
 # Release Policy
 
+## RSA-only candidate, 2026-10-31
+
+The pending Geph 0.4.3-r4 candidate replaces the old RSA dependency with three
+exact embedded client packages. Its source-owned review is separate from the
+registry/native dependency audit. The two expired rsa 0.8.2 exceptions are removed,
+not extended. The new lock retains the currently repaired TLS and ctutils versions.
+Native SQLite research is not activated by this candidate.
+
+The review directory is `security/geph-source-owned-review/`. Its catalog binds
+every retained file; prior local-path projections are labeled with original and
+portable hashes. The producer publishes the bounded immutable review archive with
+the Geph assets. Consumers verify that archive against the historical tag policy;
+fresh release admission additionally requires the current SOURCE, policy, exact
+review evidence and current UTC expiry checks. Registry and native AWS-LC coverage,
+both architecture builds, and installed/readiness behavior still require fresh CI.
+The source review alone does not admit preview .32 or qualify its public updater.
+
 Slipstream publishes three distinct kinds of GitHub release. Their tags and
 purpose must remain visually and mechanically separate.
 

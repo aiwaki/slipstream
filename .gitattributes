@@ -1,0 +1,9 @@
+# Preserve the exact reviewed upstream bytes and historical transcript hashes.
+# Only their existing final blank lines are exempt; other whitespace checks remain.
+security/geph-source-owned-review/retained/backend-2-compat-prototype-test.log whitespace=-blank-at-eof
+security/geph-source-owned-review/retained/backend-4-async-prototype-test.log whitespace=-blank-at-eof
+security/geph-source-owned-review/retained/backend-5-compatibility-corrected-independent.log whitespace=-blank-at-eof
+security/geph-source-owned-review/sources/slipstream-vendor/aws-lc-backend/src/lib.rs whitespace=-blank-at-eof
+security/geph-source-owned-review/sources/slipstream-vendor/aws-lc-backend/src/owned.rs whitespace=-blank-at-eof
+security/geph-source-owned-review/sources/slipstream-vendor/geph5-broker-protocol/src/lib.rs whitespace=-blank-at-eof
+security/geph-source-owned-review/sources/slipstream-vendor/geph5-broker-protocol/src/puzzle.rs whitespace=-blank-at-eof

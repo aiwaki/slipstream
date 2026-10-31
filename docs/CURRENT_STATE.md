@@ -1,5 +1,78 @@
 # Current Project State
 
+## Current continuation — 2026-10-31, RSA-only remediation in progress
+
+Draft PR433: https://github.com/aiwaki/slipstream/pull/433, first head
+`0ceffd6076126c949c0547a363e34d472fcdc4d1`. Real-ref classifier replay passed:
+PR source bootstrap allowed; push bootstrap refused. PR audit41154777207/1 passed; its verified merge SHA is
+`8ca3359a5c4079668e4d697afbfc40b8c97cfe64`. App361 packages, Geph408 registry
++3 source-owned packages: blocking0, accepted exceptions0. The transported
+review archive passes canonical current-date admission; this is not main/binary
+qualification. Evidence: rsa-release-remediation/ci/41154777207-1/.
+No merge or producer/publication dispatch while the new fixture gate is pending.
+
+Main remains `9a02e262063f32415c28cb72263204168fdcb5a7` (PR432 merged;
+ordinary main CI41146511419 passed). Release admission failed after the two RSA
+exceptions expired at 00:00 UTC. Preview .32 is not published or installed;
+protected readiness is still unqualified. This is incomplete work, not a final
+product result and not an impasse while the prepared RSA-only repair is available.
+
+The active branch is `codex/geph-rsa-only-remediation`, based on that exact main.
+The separate retained candidate, rather than old PR384 wholesale, supplies three
+embedded packages/20 files and three source transforms. All thirteen r3 source
+edits remain identical. The tested Free/Plus auth-cache hunk is explicitly retained.
+The reconciled lock preserves rustls0.23.46, rustls-webpki0.103.16,
+webpki-roots1.0.10 and ctutils0.4.4. No rsa/blind-rsa-signatures package remains.
+SOURCE SHA256: `69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7`;
+lock: `560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb`.
+This is a static reconciliation, not fresh Cargo resolution/build evidence.
+
+Fresh independent source review found no new concrete defect in the three packages;
+all unchanged source bytes and retained causal auth evidence were checked. Two
+current official OSV ancestor queries returned no findings. Registry/native AWS-LC
+audit and combined-build evidence are still required. The new source-owned policy
+removes the two old RSA exceptions; it does not extend them. Historical review/log
+projections are labeled and cannot be mistaken for fresh test execution.
+
+Canonical archive materialization and the production source-owned review passed:
+16 transforms, 3 packages/20 files, no native SQLite descriptor. Core scoped tests:
+199 passed, including five causal regressions; independent review confirmed all
+23 changed core file hashes and six evidence hashes. Documentation tests: 8 passed.
+The source-bootstrap classifier's 22 tests passed before its final file catalog
+was frozen. Workflow commands are being checked against the actual CLI parsers.
+These are static/mock checks, not a fresh Cargo build or installed-app result.
+Core receipt: `output/continuation-20261031/rsa-source-owned-tooling/verification.json`
+SHA256 `909e873433dacd5b44dae5256739d1cf844695f8ef4b823077c385da9c6daee1`.
+
+Producer/consumer tests:55 passed; all ten workflow CLI callsites were checked.
+Independent integration review passed and confirmed106 exact CI bindings.
+Root found a separate release-coverage gap: the producer executes19 existing
+session/cache fixtures but no new RSA/auth composition fixtures. The existing isolated runner now adds11 retained composition cases against an
+exact current-source test copy. The legacy signing oracle has a separate lock
+and synthetic public keys; it is not linked or shipped.16 static/mock tests passed,
+including an old-code failure; source/lock remain unchanged after preparation.
+Independent review passed. Fresh native execution of all30 cases is still required.
+The separate three account-level cache regressions remain reused historical evidence.
+
+CI41154777253 passed product/Chromium/Windows checks, but its final gate refused
+seven existing blank EOF lines in immutable review source/transcripts. Exact-path
+.gitattributes now preserves those bytes; trailing whitespace and ordinary EOF
+checks remain enforced, verified in a disposable Git fixture. No global waiver.
+
+NEXT: commit the fixture gate and121-file exact classifier catalog, rerun remote
+checks for that head, then normal merge and producer build. Source review/audit
+passes do not replace the pending fresh native and protected readiness gates.
+Do not activate native SQLite, SDK/platform or
+Telegram work. No local native build/browser/install/account/network-setting work;
+preserve the working external Geph and workstation. No protected readiness or
+publisher dispatch until the dependency and candidate gates pass.
+
+Evidence: `output/continuation-20261031/rsa-release-remediation/`,
+`rsa-only-feasibility/` and `rsa-upstream-review/` in the same continuation directory.
+The old RSA-only policy/lock and PR384 remote5b80ff436 are historical inputs, not
+current release authority. Source-owned helper code is ported onto current main,
+preserving newer snapshot and UTC admission fixes.
+
 ## Verified Checkpoint
 
 ### Active: preserve Safari failure evidence, 2026-10-30

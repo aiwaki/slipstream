@@ -1,0 +1,32 @@
+   Compiling slipstream-mizaru-awslc-prototype v0.0.0 (retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/aws-lc-prototype)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 07s
+     Running unittests src/lib.rs (output/continuation-20261009/rsa-migration/aws-lc-target/debug/deps/slipstream_mizaru_awslc_prototype-86941bf78c74b136)
+
+running 18 tests
+test tests::compatibility::cache_decode_rejects_trailing_truncated_or_unknown_account_level ... ok
+test tests::auto_salt_preserves_legacy_acceptance_but_zero_mode_rejects_32 ... ok
+test tests::compatibility::extended_zero_and_n_plus_one_representatives_fail_in_verify_and_finalize ... ok
+test tests::compatibility::response_der_epoch_root_and_branch_ownership_is_bound ... ok
+test tests::abandon_pending_drops_inverse_and_shared_key_owner ... ok
+test tests::compatibility::spki_and_pkcs1_preserve_original_der_and_reject_trailing_or_unknown_oid ... ok
+test tests::compatibility::spki_algorithm_identifier_requires_rsa_encryption_and_null_parameters ... ok
+test tests::compatibility::response_accepts_same_key_in_other_der_container_with_exact_response_merkle ... ok
+test tests::compatibility::cross_key_and_cross_operation_responses_never_finalize ... ok
+test tests::malformed_keys_and_noninvertible_values_return_errors ... ok
+test tests::compatibility::exponent_three_and_non_byte_aligned_keys_use_native_pss_and_roundtrip ... ok
+test tests::sampler_returned_error_does_not_return_or_retain_partial_state ... ok
+test tests::salt_zero_emission_and_legacy_blind_finalize_are_exact ... ok
+test tests::finalize_rejects_length_range_mutation_and_wrong_token ... ok
+test tests::rfc_all_four_profiles_verify_and_finalize_exactly ... ok
+test tests::backend_random_factor_roundtrips_both_2048_and_4096_keys ... ok
+test tests::compatibility::mizaru_dtos_merkle_and_account_cache_cross_backend_bytes ... ok
+test tests::every_injected_allocation_error_releases_owned_backend_handles ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+   Doc-tests slipstream_mizaru_awslc_prototype
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

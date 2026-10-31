@@ -1,0 +1,11 @@
+[package]
+name = "mizaru2-slipstream-client"
+version = "0.1.0"
+license = "ISC"
+edition = "2021"
+publish = false
+[dependencies]
+backend = { package = "slipstream-rsa-client", path = "../aws-lc-backend" }
+serde = { version = "1", features = ["derive"] }
+blake3 = { version = "1", features = ["serde"] }
+rand = "=0.9.5"

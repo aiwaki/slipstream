@@ -1,0 +1,382 @@
+{
+  "evaluation_date": "2026-10-13",
+  "evaluator_sha256": "2e68397c40a34200b82832abe4d9837563ea89750e86d19badeaf0fb50d8faba",
+  "finished_at": "2026-10-13T14:13:54.852473+00:00",
+  "generator": "slipstream-dependency-audit-evidence-1",
+  "inputs": {
+    "native_receipt": {
+      "path": "native_receipt.json",
+      "sha256": "a6f0f07b91023544af76a553e33c00d6f5fb31356307bc03fc1fac210d9bf484",
+      "size_bytes": 961
+    },
+    "policy": {
+      "path": "policy.json",
+      "sha256": "79ddb5ae821b5138a412adf22142dfe3dd5fe462c4d21290e2ba1359fe57e69d",
+      "size_bytes": 262142
+    },
+    "sbom": {
+      "path": "input.spdx.json",
+      "sha256": "d7e3d0999d6c8c56e88592dd7d96ddbe640e1de3f34c46a76ec6109dbbc28167",
+      "size_bytes": 420932
+    },
+    "scanner_sbom": {
+      "path": "native-scanner.spdx.json",
+      "sha256": "a4f333d1a326189a63412efe9cb02709eba60b7a968c0404cf00e70d11bf74b7",
+      "size_bytes": 418308
+    },
+    "source": {
+      "path": "source.json",
+      "sha256": "c173f2beed654a3d64a9770bb4e536897ec20fc157558c56bba69ee048e44402",
+      "size_bytes": 46409
+    }
+  },
+  "native_advisory_evidence": {
+    "bytes": 2593471,
+    "files": [
+      {
+        "id": "aliases",
+        "path": "aliases.json",
+        "role": "aliases",
+        "sha256": "536df4241b5050c82f43e136d1cd238e60b316683cfc853e6a19ee417d27aa21",
+        "size": 91454,
+        "target": null
+      },
+      {
+        "id": "census",
+        "path": "census.json",
+        "role": "census",
+        "sha256": "97bee4a373f1a9c83dca86a20f644b8f957536fa19e56a44b507cef8d4ad6e8f",
+        "size": 1320049,
+        "target": null
+      },
+      {
+        "id": "census-receipt",
+        "path": "census-receipt.json",
+        "role": "receipt",
+        "sha256": "566df9a92e6db235340d40989114b1b40c677a9e59bf403903a515d4fc1dd527",
+        "size": 408858,
+        "target": null
+      },
+      {
+        "id": "census-scope",
+        "path": "census-scope.json",
+        "role": "review",
+        "sha256": "20ba26544a012d692971f1a06a0140ecc8aa476ec73c892c318017f8b2dc057b",
+        "size": 732,
+        "target": null
+      },
+      {
+        "id": "fts5-7709-advisory",
+        "path": "fts5-7709-advisory.json",
+        "role": "primary",
+        "sha256": "4e166be4e98d04dae22fbbbca34e8921983417fc33bab4d45b011dd8dbc7af27",
+        "size": 6962,
+        "target": null
+      },
+      {
+        "id": "fts5-7709-branch-commit",
+        "path": "fts5-7709-branch-commit.json",
+        "role": "primary",
+        "sha256": "e878fc6bdbcd4b8fe1c2517b0009ce1c0e18ff709acce64e716f1c29431cb0bc",
+        "size": 8948,
+        "target": null
+      },
+      {
+        "id": "fts5-7709-trunk-commit",
+        "path": "fts5-7709-trunk-commit.json",
+        "role": "primary",
+        "sha256": "04ec1783198704ef3728da843479aecb978b233777a89281985a721ad12c95f6",
+        "size": 8628,
+        "target": null
+      },
+      {
+        "id": "fts5-9936-commit",
+        "path": "fts5-9936-commit.json",
+        "role": "primary",
+        "sha256": "0c4def1b33fb3d8bd10219f39cf5b54d0d546c4662fcfd92f786c5b625ebb9f0",
+        "size": 7612,
+        "target": null
+      },
+      {
+        "id": "fts5-9937-commit",
+        "path": "fts5-9937-commit.json",
+        "role": "primary",
+        "sha256": "8c9955035bbfe63222d924f8bc39a817bf0438407f67b01eaf58b3cf69b68b64",
+        "size": 15064,
+        "target": null
+      },
+      {
+        "id": "fts5-adjudications",
+        "path": "fts5-adjudications.json",
+        "role": "review",
+        "sha256": "a0be46cdc1a2b867b75e297055dda8b12c4a17200fa26b03ac37ce5db822b3f0",
+        "size": 2043,
+        "target": null
+      },
+      {
+        "id": "fts5-exact-source",
+        "path": "fts5-exact-source.txt",
+        "role": "exact_source",
+        "sha256": "d33e45485ed0a298b18adb60ad4ba4a462fb7a3f69238eeaca86cc4ef222a90a",
+        "size": 6064,
+        "target": null
+      },
+      {
+        "id": "fts5-inspection",
+        "path": "fts5-inspection.json",
+        "role": "exact_source",
+        "sha256": "c2c43b7986039b2a219c30db27e127f5768d9fbf35a175a6b2971895f0317e8b",
+        "size": 61064,
+        "target": null
+      },
+      {
+        "id": "fts5-receipt",
+        "path": "fts5-receipt.json",
+        "role": "receipt",
+        "sha256": "75d208f27ba7a03d1a53644afe9730bbcf3d4e21e5c06b392e8c72151e4f5be1",
+        "size": 64731,
+        "target": null
+      },
+      {
+        "id": "fts5-report",
+        "path": "fts5-report.md",
+        "role": "review",
+        "sha256": "4217ad11cdc3ef5780c669aa70a78ec94054638518c929169a554139228055d0",
+        "size": 8678,
+        "target": null
+      },
+      {
+        "id": "session-50812-primary",
+        "path": "session-50812-primary.json",
+        "role": "primary",
+        "sha256": "eb85c9f6457530637ac50e973754b675222eb5e1bb6d3fcd4e4d3b4bab36d6ea",
+        "size": 9159,
+        "target": null
+      },
+      {
+        "id": "session-50813-primary",
+        "path": "session-50813-primary.json",
+        "role": "primary",
+        "sha256": "e0d10c957ace06c2b817167a122023e6734a495784db0850b6b0cd702fc9803b",
+        "size": 7690,
+        "target": null
+      },
+      {
+        "id": "session-exact-analysis",
+        "path": "session-exact-analysis.json",
+        "role": "exact_source",
+        "sha256": "4bf2f500443592e09e764ecf0c16135ec2c889e89b59f6b36b28e1b0b09f8bdd",
+        "size": 2043,
+        "target": null
+      },
+      {
+        "id": "session-exact-excerpts",
+        "path": "session-exact-excerpts.txt",
+        "role": "exact_source",
+        "sha256": "5615e9c1c54e258304d8994c3dd2cb0b271a468a324a5278974cdc8f1a3e33a8",
+        "size": 3095,
+        "target": null
+      },
+      {
+        "id": "session-guards-primary",
+        "path": "session-guards-primary.html",
+        "role": "primary",
+        "sha256": "5410c53bab447ac791594e11698ac331aed9d2168838150c4f030b4dcbb11dc2",
+        "size": 28049,
+        "target": null
+      },
+      {
+        "id": "session-positive-arm64",
+        "path": "session-positive-arm64.json",
+        "role": "positive_control",
+        "sha256": "852d28540400af10ce77c7be79b97c319ce67707d4ce0c9880d8339820cd1dc0",
+        "size": 16883,
+        "target": "aarch64-apple-darwin"
+      },
+      {
+        "id": "session-positive-x86_64",
+        "path": "session-positive-x86_64.json",
+        "role": "positive_control",
+        "sha256": "852d28540400af10ce77c7be79b97c319ce67707d4ce0c9880d8339820cd1dc0",
+        "size": 16883,
+        "target": "x86_64-apple-darwin"
+      },
+      {
+        "id": "session-receipt",
+        "path": "session-receipt.json",
+        "role": "receipt",
+        "sha256": "8ff5b66fc1a6a1ed5104b6bc350e2e305df9dde7056d55e706c0d9787aea7dfa",
+        "size": 14756,
+        "target": null
+      },
+      {
+        "id": "session-report",
+        "path": "session-report.md",
+        "role": "review",
+        "sha256": "9e1a317fc3122fce7f30e526fcd0587e35bcffea517bc1920cbf6d03830b3368",
+        "size": 9818,
+        "target": null
+      },
+      {
+        "id": "sqlar-allocation-width-commit",
+        "path": "sqlar-allocation-width-commit.json",
+        "role": "primary",
+        "sha256": "49d905d9196fcb475a0474b578bd463b1a22335828ad61d7607e96273936f16b",
+        "size": 46272,
+        "target": null
+      },
+      {
+        "id": "sqlar-archive-inventory",
+        "path": "sqlar-archive-inventory.json",
+        "role": "exact_source",
+        "sha256": "f806258dc73beeaac76e32f926f051396f66b613d90b9718d83576870563696a",
+        "size": 1193,
+        "target": null
+      },
+      {
+        "id": "sqlar-cited-commit",
+        "path": "sqlar-cited-commit.json",
+        "role": "primary",
+        "sha256": "10d14de9af94506ef786c42af7531f413afbcf792f5c508928e6da445adb9745",
+        "size": 10180,
+        "target": null
+      },
+      {
+        "id": "sqlar-component-positive",
+        "path": "sqlar-component-positive.json",
+        "role": "positive_control",
+        "sha256": "7add2ff2873c0f7e9a119321190596404a31cb72d9da8ab8bb0799c12c8ab330",
+        "size": 40328,
+        "target": null
+      },
+      {
+        "id": "sqlar-receipt",
+        "path": "sqlar-receipt.json",
+        "role": "receipt",
+        "sha256": "56078c17d96065f16de40a23a813214d2172648385a17e951373558eb61398e2",
+        "size": 33427,
+        "target": null
+      },
+      {
+        "id": "sqlar-release-component",
+        "path": "sqlar-release-component.c",
+        "role": "primary",
+        "sha256": "af8e7e9c56981cf840e133b75b712ba5b2549f50990b48e2618a3fd1f4a0b9f4",
+        "size": 3898,
+        "target": null
+      },
+      {
+        "id": "sqlar-release-generator",
+        "path": "sqlar-release-generator.tcl",
+        "role": "primary",
+        "sha256": "2e4e3a1b907fee657157c48ce20e41180c46a8bed85de2e2a6580c2a8b669daa",
+        "size": 14630,
+        "target": null
+      },
+      {
+        "id": "sqlar-report",
+        "path": "sqlar-report.md",
+        "role": "review",
+        "sha256": "153524942431f7bf73428bc149d6f2b3bb44250e7089191eb19c97e5ef4aad34",
+        "size": 7585,
+        "target": null
+      },
+      {
+        "id": "sqlar-source-exclusion-arm64",
+        "path": "sqlar-source-exclusion-arm64.json",
+        "role": "target_exclusion",
+        "sha256": "7add2ff2873c0f7e9a119321190596404a31cb72d9da8ab8bb0799c12c8ab330",
+        "size": 40328,
+        "target": "aarch64-apple-darwin"
+      },
+      {
+        "id": "sqlar-source-exclusion-x86_64",
+        "path": "sqlar-source-exclusion-x86_64.json",
+        "role": "target_exclusion",
+        "sha256": "7add2ff2873c0f7e9a119321190596404a31cb72d9da8ab8bb0799c12c8ab330",
+        "size": 40328,
+        "target": "x86_64-apple-darwin"
+      },
+      {
+        "id": "v2-adjudications",
+        "path": "v2-adjudications.json",
+        "role": "review",
+        "sha256": "e9924cc244f993a27d04281f2c882dadaf99711b6a283f696947216729bd0836",
+        "size": 1603,
+        "target": null
+      },
+      {
+        "id": "v2-exclusion-arm64",
+        "path": "v2-exclusion-arm64.json",
+        "role": "target_exclusion",
+        "sha256": "9a055331a14fad26fd9005c0b88831b17f05bfb72a28ab5fcd7228c745f5134e",
+        "size": 57288,
+        "target": "aarch64-apple-darwin"
+      },
+      {
+        "id": "v2-exclusion-x86_64",
+        "path": "v2-exclusion-x86_64.json",
+        "role": "target_exclusion",
+        "sha256": "9a055331a14fad26fd9005c0b88831b17f05bfb72a28ab5fcd7228c745f5134e",
+        "size": 57288,
+        "target": "x86_64-apple-darwin"
+      },
+      {
+        "id": "v2-inspection",
+        "path": "v2-inspection.json",
+        "role": "review",
+        "sha256": "9a055331a14fad26fd9005c0b88831b17f05bfb72a28ab5fcd7228c745f5134e",
+        "size": 57288,
+        "target": null
+      },
+      {
+        "id": "v2-receipt",
+        "path": "v2-receipt.json",
+        "role": "receipt",
+        "sha256": "bcd2c73290c64008f3db7479dcd4a2150559cc0beabc993130ef0f1e9d303b1b",
+        "size": 54584,
+        "target": null
+      },
+      {
+        "id": "v2-report",
+        "path": "v2-report.md",
+        "role": "review",
+        "sha256": "5a1136366c821572bb4abb2818bf04922369d2e5d59d61ced5acfa223d8bd93f",
+        "size": 7988,
+        "target": null
+      }
+    ],
+    "path": "native-advisories"
+  },
+  "platform": "darwin-arm64",
+  "raw": {
+    "path": "osv.json",
+    "sha256": "7d3bdafd66c88d34aed97e26eff8f5b7b19456ec9f8b77fc6d0a8cde2ced227f",
+    "size_bytes": 90368,
+    "state": "complete"
+  },
+  "report": {
+    "sha256": "eacef3236a8a3255346fa69465f9e0ed9c415f50a7df7d6c415d474232b63b89",
+    "status": "fail"
+  },
+  "scan": {
+    "exit_code": 1,
+    "state": "completed"
+  },
+  "scanner": {
+    "asset": "osv-scanner_darwin_arm64",
+    "name": "osv-scanner",
+    "platform": "darwin-arm64",
+    "sha256": "a8cd6507b06239f463a7642430cfd2d154882f150f6e30cdc0653e28dfc34216",
+    "version": "2.3.8"
+  },
+  "schema_version": 1,
+  "source": {
+    "commit": "eb91da9dd1ed1e4dd96bee473af38734cc3e8c81",
+    "target": "macos-universal"
+  },
+  "stage": "complete",
+  "started_at": "2026-10-13T14:13:49.436677+00:00",
+  "status": "fail",
+  "vendored_transitive_dependencies": "full"
+}

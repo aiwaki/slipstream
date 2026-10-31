@@ -1,0 +1,328 @@
+{
+  "source": {
+    "path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/rsa-isc-local-notices-20261013/inputs/SOURCE.json",
+    "sha256": "3c2cf6d98b19edf77d20f7105f20ddc509e9e1422dc137720acf7f103de51a6e"
+  },
+  "packages": [
+    {
+      "name": "mizaru2-slipstream-client",
+      "version": "0.1.0",
+      "path": "slipstream-vendor/mizaru-client",
+      "sha256": "b51d00b9d21979f21d5ae806f4e06b90bf87b3ce16ee9b5a802cfdb4b1b4b18a",
+      "provenance": {
+        "kind": "derivative",
+        "name": "mizaru2",
+        "original_files": {
+          "Cargo.toml": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+          "src/lib.rs": "3d69be0b3f98b93fb6a0f3664e725c66f51eeb36c3b5e1b4ef176b3e5583d910"
+        },
+        "sha256": "db4ea54ffedc62011081b18940996e37453bf029553b40964302f7efc5dcaff7",
+        "url": "https://static.crates.io/crates/mizaru2/mizaru2-0.2.21.crate",
+        "version": "0.2.21"
+      },
+      "candidate_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+          "bytes": 317
+        },
+        {
+          "path": "LICENSE-ISC.txt",
+          "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "bytes": 740
+        },
+        {
+          "path": "SOURCE-NOTICE.md",
+          "sha256": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+          "bytes": 2228
+        },
+        {
+          "path": "provenance/Cargo.toml",
+          "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+          "bytes": 1215
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+          "bytes": 9180
+        }
+      ],
+      "verified_archive": {
+        "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/isc-notice-provenance/bound-archives/mizaru2-0.2.21.crate",
+        "sha256": "db4ea54ffedc62011081b18940996e37453bf029553b40964302f7efc5dcaff7",
+        "bytes": 13140
+      },
+      "archive_members": [
+        {
+          "name": "mizaru2-0.2.21/.cargo_vcs_info.json",
+          "size": 130,
+          "regular": true
+        },
+        {
+          "name": "mizaru2-0.2.21/Cargo.lock",
+          "size": 20876,
+          "regular": true
+        },
+        {
+          "name": "mizaru2-0.2.21/Cargo.toml",
+          "size": 1215,
+          "regular": true
+        },
+        {
+          "name": "mizaru2-0.2.21/Cargo.toml.orig",
+          "size": 388,
+          "regular": true
+        },
+        {
+          "name": "mizaru2-0.2.21/README.md",
+          "size": 7221,
+          "regular": true
+        },
+        {
+          "name": "mizaru2-0.2.21/src/lib.rs",
+          "size": 13160,
+          "regular": true
+        }
+      ],
+      "original_files_verification": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+          "matches_provenance": true,
+          "candidate_status": "changed"
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "3d69be0b3f98b93fb6a0f3664e725c66f51eeb36c3b5e1b4ef176b3e5583d910",
+          "matches_provenance": true,
+          "candidate_status": "changed"
+        }
+      ]
+    },
+    {
+      "name": "slipstream-rsa-client",
+      "version": "0.1.0",
+      "path": "slipstream-vendor/aws-lc-backend",
+      "sha256": "ca128627b932eb5cb5f80e7de0524d70c9068aff31689b94db8b871c63bc3592",
+      "provenance": {
+        "kind": "first-party",
+        "repository": "https://github.com/aiwaki/slipstream"
+      },
+      "candidate_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+          "bytes": 146
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+          "bytes": 1063
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+          "bytes": 14176
+        },
+        {
+          "path": "src/owned.rs",
+          "sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+          "bytes": 2288
+        }
+      ]
+    },
+    {
+      "name": "geph5-broker-protocol",
+      "version": "0.4.3",
+      "path": "slipstream-vendor/geph5-broker-protocol",
+      "sha256": "5c2d8819035ca6f55da1d8cceca30fba28f274457b00c2375a1ef05abf713cde",
+      "provenance": {
+        "kind": "derivative",
+        "name": "geph5-broker-protocol",
+        "original_files": {
+          "Cargo.toml": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+          "src/bridge.rs": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+          "src/exit.rs": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+          "src/lib.rs": "4b995a4c5ef4079df3ff350fed1627cb2022e2bae6be2d6770e2489ef50f7e43",
+          "src/mac.rs": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+          "src/puzzle.rs": "15fb01aa7be9023975631ff0b9eeaf8c6d4dc1a7e86a2bdebf66302ed451f116",
+          "src/route.rs": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+          "src/signed.rs": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2"
+        },
+        "sha256": "c0f8b70695d21757da473ffba32eeeba85f9f79708b11b54812cb77b9fc4e0d1",
+        "url": "https://static.crates.io/crates/geph5-broker-protocol/geph5-broker-protocol-0.4.3.crate",
+        "version": "0.4.3"
+      },
+      "candidate_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+          "bytes": 1945
+        },
+        {
+          "path": "LICENSE-ISC.txt",
+          "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "bytes": 740
+        },
+        {
+          "path": "SOURCE-NOTICE.md",
+          "sha256": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+          "bytes": 2344
+        },
+        {
+          "path": "provenance/Cargo.toml",
+          "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+          "bytes": 1884
+        },
+        {
+          "path": "src/bridge.rs",
+          "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+          "bytes": 277
+        },
+        {
+          "path": "src/exit.rs",
+          "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+          "bytes": 2891
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+          "bytes": 8383
+        },
+        {
+          "path": "src/mac.rs",
+          "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+          "bytes": 1039
+        },
+        {
+          "path": "src/puzzle.rs",
+          "sha256": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+          "bytes": 1172
+        },
+        {
+          "path": "src/route.rs",
+          "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+          "bytes": 1007
+        },
+        {
+          "path": "src/signed.rs",
+          "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+          "bytes": 4095
+        }
+      ],
+      "verified_archive": {
+        "path": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/isc-notice-provenance/bound-archives/geph5-broker-protocol-0.4.3.crate",
+        "sha256": "c0f8b70695d21757da473ffba32eeeba85f9f79708b11b54812cb77b9fc4e0d1",
+        "bytes": 26306
+      },
+      "archive_members": [
+        {
+          "name": "geph5-broker-protocol-0.4.3/.cargo_vcs_info.json",
+          "size": 144,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/Cargo.lock",
+          "size": 74109,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/Cargo.toml",
+          "size": 1884,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/Cargo.toml.orig",
+          "size": 964,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/bridge.rs",
+          "size": 277,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/exit.rs",
+          "size": 2891,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/lib.rs",
+          "size": 10764,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/mac.rs",
+          "size": 1039,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/puzzle.rs",
+          "size": 1475,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/route.rs",
+          "size": 1007,
+          "regular": true
+        },
+        {
+          "name": "geph5-broker-protocol-0.4.3/src/signed.rs",
+          "size": 4095,
+          "regular": true
+        }
+      ],
+      "original_files_verification": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+          "matches_provenance": true,
+          "candidate_status": "changed"
+        },
+        {
+          "path": "src/bridge.rs",
+          "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+          "matches_provenance": true,
+          "candidate_status": "unchanged"
+        },
+        {
+          "path": "src/exit.rs",
+          "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+          "matches_provenance": true,
+          "candidate_status": "unchanged"
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "4b995a4c5ef4079df3ff350fed1627cb2022e2bae6be2d6770e2489ef50f7e43",
+          "matches_provenance": true,
+          "candidate_status": "changed"
+        },
+        {
+          "path": "src/mac.rs",
+          "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+          "matches_provenance": true,
+          "candidate_status": "unchanged"
+        },
+        {
+          "path": "src/puzzle.rs",
+          "sha256": "15fb01aa7be9023975631ff0b9eeaf8c6d4dc1a7e86a2bdebf66302ed451f116",
+          "matches_provenance": true,
+          "candidate_status": "changed"
+        },
+        {
+          "path": "src/route.rs",
+          "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+          "matches_provenance": true,
+          "candidate_status": "unchanged"
+        },
+        {
+          "path": "src/signed.rs",
+          "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+          "matches_provenance": true,
+          "candidate_status": "unchanged"
+        }
+      ]
+    }
+  ],
+  "upstream_retention_receipt": "retained-home/Developer/slipstream-codebase-audit-20260905/output/continuation-20261009/rsa-migration/isc-notice-provenance/report.json"
+}

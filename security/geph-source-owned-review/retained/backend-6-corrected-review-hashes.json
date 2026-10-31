@@ -1,0 +1,10 @@
+{
+  "aws-lc-prototype/src/lib.rs": "f788fce3e805f720e2f5d082ae84fcfb7a696286d56507d0b9c2167cf4420b99",
+  "aws-lc-prototype/src/tests/compatibility.rs": "70a713054f977c8ff6fb220139fcdecc1082704d0396a8cd705604025f36faa8",
+  "aws-lc-prototype/Cargo.toml": "517223f0bf9b724f413409c4f08f664a67d827b5418f3b40f8f949b8c79d9b09",
+  "aws-lc-prototype/Cargo.lock": "889bc989559c9a03beeb41f57e75af742d2318b3416983de8779947f67b20836",
+  "independent-compat-review/compatibility-corrected-independent.log": "589544c9880f2a0ca3dac06086c80ed76c5841c894cf4ea07cf8c51efdbfe62b",
+  "independent-compat-review/spki-algorithm-probe-corrected.log": "364ac2be8d3cbedb9f53c1d92e8e7755e25becc91b878fe250547df45cbf624f",
+  "independent-compat-review/mixed-der-legacy.json": "c7591613d6be9aad729680f3ea745e1619a7356bdf505c293f5ea4d386828eb6",
+  "independent-compat-review/HANDOFF.md": "37689b35f3f7f319dd16f285d30f06a46a2e716e7f5e7e9cc8e76dcaf20aed7c"
+}

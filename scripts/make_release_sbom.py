@@ -27,6 +27,7 @@ GENERATOR = "slipstream-release-sbom-1"
 SOURCE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REQUIREMENT_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)")
+CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 
 
 @dataclass(frozen=True)
@@ -101,9 +102,10 @@ def _python_components(path: Path) -> list[Component]:
     return components
 
 
-def _cargo_lock_checksums(path: Path) -> dict[tuple[str, str, str | None], str]:
-    with path.open("rb") as handle:
-        lock = tomllib.load(handle)
+def _cargo_lock_checksums(
+    path: Path, *, payload: bytes | None = None,
+) -> dict[tuple[str, str, str | None], str]:
+    lock = tomllib.loads((path.read_bytes() if payload is None else payload).decode("utf-8"))
     packages = lock.get("package")
     if not isinstance(packages, list):
         raise ValueError(f"{path} does not contain Cargo packages")
@@ -186,6 +188,42 @@ def _reachable_cargo_package_ids(metadata: dict, path: Path) -> set[str]:
     reachable.remove(root)
     return reachable
 
+
+def _cargo_registry_component(
+    package: dict, checksums: dict[tuple[str, str, str | None], str],
+) -> Component:
+    """Convert a proven crates.io package; never invent identity for local sources."""
+    name, version, source = package.get("name"), package.get("version"), package.get("source")
+    if not all(isinstance(value, str) and value for value in (name, version)):
+        raise ValueError("Cargo package is missing name/version")
+    # A crates.io PURL is a provenance claim. Local forks, Git dependencies
+    # and other registries need their own reviewed source-bound inventory;
+    # preserving an upstream name/version does not make them that release.
+    # The application's own root and dev-only nodes are excluded above.
+    if source != CRATES_IO_SOURCE:
+        raise ValueError(f"unsupported Cargo source for {name} {version}")
+    checksum_value = checksums.get((name, version, source))
+    if checksum_value is None:
+        raise ValueError(f"Cargo package has no matching locked checksum: {name} {version}")
+    download_location = (
+        f"https://crates.io/api/v1/crates/{quote(name, safe='')}/"
+        f"{quote(version, safe='')}/download"
+    )
+
+    return Component(
+        ecosystem="cargo",
+        name=name,
+        version=version,
+        download_location=download_location,
+        purl=_purl("cargo", name, version),
+        license_declared=(
+            package["license"]
+            if isinstance(package.get("license"), str) and package["license"]
+            else "NOASSERTION"
+        ),
+        checksum_algorithm="SHA256" if checksum_value else None,
+        checksum_value=checksum_value,
+    )
 
 def _cargo_components(metadata_path: Path, lock_path: Path) -> list[Component]:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

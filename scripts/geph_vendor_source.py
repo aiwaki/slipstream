@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -14,6 +15,8 @@ import tarfile
 import tempfile
 import tomllib
 from pathlib import Path, PurePosixPath
+
+import geph_native_sqlite
 
 
 SCHEMA_VERSION = 1
@@ -65,6 +68,48 @@ RSA_CTUTILS_REVIEW_POLICY_BINDING = (
     "467fa124869eb562ec6402af8802df28c7e096028179bea3aa40274d9be35ae7",
     "e3edd0ab492b298b6e30a32e0f6cb4a20422f613e3a06880cb06d85f157506b0",
 )
+# One reviewed r3 -> RSA-free r4 replacement. This removes the two RSA
+# allowances and introduces an exact source-owned review; it is not renewal.
+RSA_REMOVAL_REVIEW_SOURCE_BINDING = (
+    "de39d92abd79787d432bcd45f074398f91dbbf3baa843401b90f7bcbb1b36286",
+    "c941a26c6fd308f0057544166c153945ecd54456507a836c155dff8877d5e4f0",
+    "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+)
+RSA_REMOVAL_REVIEW_POLICY_BINDING = (
+    "5886209fdaf1059b02051993ab56181e6ad93c4e36363b69f2c53547c1800a02",
+    "9a7bbd5d240c14d921bb7d31f4be4a5e4f0c309db217a14815a33c1a1bfe166f",
+)
+MAX_SOURCE_BYTES = 4 * 1024 * 1024
+MAX_EMBEDDED_FILE_BYTES = 256 * 1024
+MAX_EMBEDDED_BYTES = 1024 * 1024
+MAX_CRATE_BYTES = 64 * 1024 * 1024
+MAX_CRATE_UNPACKED_BYTES = 128 * 1024 * 1024
+MAX_CRATE_ENTRIES = 4096
+REPOSITORY_MIT_SHA256 = "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15"
+# Standard template from https://opensource.org/license/isc, including literal
+# <YEAR>/<OWNER> placeholders; this is not a recovered upstream copyright notice.
+ISC_STANDARD_TEXT_SHA256 = "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee"
+# Deliberately not a general path-package or build-script extension point.
+EMBEDDED_PACKAGES = {
+    "slipstream-vendor/mizaru-client": {
+        "name": "mizaru2-slipstream-client", "version": "0.1.0", "license": "ISC",
+        "upstream": ("mizaru2", "0.2.21"), "sources": {"src/lib.rs"},
+        "local_dependency": ("backend", "slipstream-rsa-client", "../aws-lc-backend"),
+    },
+    "slipstream-vendor/aws-lc-backend": {
+        "name": "slipstream-rsa-client", "version": "0.1.0", "license": "MIT",
+        "upstream": None, "sources": {"src/lib.rs", "src/owned.rs"},
+        "local_dependency": None,
+    },
+    "slipstream-vendor/geph5-broker-protocol": {
+        "name": "geph5-broker-protocol", "version": "0.4.3", "license": "ISC",
+        "upstream": ("geph5-broker-protocol", "0.4.3"),
+        "sources": {"src/lib.rs", "src/bridge.rs", "src/exit.rs", "src/mac.rs",
+                    "src/puzzle.rs", "src/route.rs", "src/signed.rs"},
+        "local_dependency": ("mizaru2", "mizaru2-slipstream-client", "../mizaru-client"),
+    },
+}
 
 
 def hash_file(path: Path) -> str:
@@ -75,14 +120,34 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_json_object(path: Path, label: str) -> dict:
+def _read_bounded_json(path: Path, label: str) -> bytes:
+    with path.open("rb") as handle:
+        payload = handle.read(MAX_SOURCE_BYTES + 1)
+    if len(payload) > MAX_SOURCE_BYTES:
+        raise ValueError(f"{label} exceeds size limit")
+    return payload
+
+
+def _json_object(payload: bytes, label: str) -> dict:
+    def unique_object(pairs: list[tuple[str, object]]) -> dict:
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"{label} has a duplicate JSON field")
+            result[key] = value
+        return result
+
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_object)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{label} is not valid JSON") from exc
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object")
     return value
+
+
+def _read_json_object(path: Path, label: str) -> dict:
+    return _json_object(_read_bounded_json(path, label), label)
 
 
 def _require_exact_keys(value: dict, expected: set[str], label: str) -> None:
@@ -98,7 +163,17 @@ def _version_file(path: Path) -> str:
 
 
 def load_source_contract(path: Path) -> dict:
-    source = _read_json_object(path, "Geph source contract")
+    return _source_contract_snapshot(path)[0]
+
+
+def _source_contract_snapshot(path: Path) -> tuple[dict, str]:
+    payload = _read_bounded_json(path, "Geph source contract")
+    source = _json_object(payload, "Geph source contract")
+    _validate_source_contract(source)
+    return source, hashlib.sha256(payload).hexdigest()
+
+
+def _validate_source_contract(source: dict) -> None:
     _require_exact_keys(
         source,
         {
@@ -108,7 +183,9 @@ def load_source_contract(path: Path) -> dict:
             "targets",
             "lock_sha256",
             "release_revision",
-        } | ({"source_edits"} if "source_edits" in source else set()),
+        } | ({"source_edits"} if "source_edits" in source else set())
+        | ({"embedded_packages"} if "embedded_packages" in source else set())
+        | ({"native_sqlite"} if "native_sqlite" in source else set()),
         "Geph source contract",
     )
     schema_version = source["schema_version"]
@@ -156,7 +233,147 @@ def load_source_contract(path: Path) -> dict:
         for field in ("before", "after"):
             if not isinstance(edit[field], str) or not edit[field] or len(edit[field]) > 131072:
                 raise ValueError("invalid Geph source edit text")
-    return source
+    if "embedded_packages" in source:
+        _validate_embedded_packages(source["embedded_packages"])
+    if "native_sqlite" in source:
+        geph_native_sqlite.validate_descriptor(source["native_sqlite"])
+
+
+def _canonical_digest(value: dict) -> str:
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+
+
+def _manifest_text(text: str, label: str) -> dict:
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{label} is not valid TOML") from exc
+
+
+def _validate_embedded_manifest(manifest: dict, spec: dict) -> None:
+    if not set(manifest).issubset({"package", "lib", "dependencies", "features"}):
+        raise ValueError("embedded manifest has unreviewed build/configuration tables")
+    package = manifest.get("package")
+    allowed = {"name", "version", "license", "edition", "publish", "build", "autolib",
+               "autobins", "autoexamples", "autotests", "autobenches", "description",
+               "readme", "repository", "resolver"}
+    if not isinstance(package, dict) or not set(package).issubset(allowed):
+        raise ValueError("embedded manifest package fields are invalid")
+    if any(package.get(key) != spec[key] for key in ("name", "version", "license")):
+        raise ValueError("embedded manifest identity does not match descriptor")
+    if package.get("build", False) is not False or package.get("readme", False) is not False:
+        raise ValueError("embedded manifest must not load undeclared build/readme files")
+    if package.get("publish") is not False:
+        raise ValueError("embedded local package must disable registry publication")
+    lib = manifest.get("lib", {})
+    if not isinstance(lib, dict) or not set(lib).issubset({"name", "path"}):
+        raise ValueError("embedded library target is invalid")
+    if lib.get("path", "src/lib.rs") != "src/lib.rs":
+        raise ValueError("embedded library target escapes reviewed source")
+    dependencies = manifest.get("dependencies", {})
+    if not isinstance(dependencies, dict):
+        raise ValueError("embedded dependencies must be a table")
+    local = []
+    for alias, dependency in dependencies.items():
+        if isinstance(dependency, str):
+            continue
+        if not isinstance(dependency, dict) or not set(dependency).issubset({
+            "version", "features", "default-features", "optional", "package", "path",
+        }):
+            raise ValueError("embedded dependency uses an unreviewed source/configuration")
+        if "path" in dependency:
+            local.append((alias, dependency.get("package", alias), dependency["path"]))
+    expected = [spec["local_dependency"]] if spec["local_dependency"] else []
+    if local != expected:
+        raise ValueError("embedded local dependency edges do not match reviewed packages")
+
+
+def _validate_embedded_packages(section: object) -> None:
+    if not isinstance(section, dict):
+        raise ValueError("embedded packages must be an object")
+    _require_exact_keys(section, {"schema_version", "packages"}, "embedded packages")
+    if type(section["schema_version"]) is not int or section["schema_version"] != 1:
+        raise ValueError("unsupported embedded packages schema")
+    packages = section["packages"]
+    if not isinstance(packages, list) or len(packages) != len(EMBEDDED_PACKAGES):
+        raise ValueError("exactly three reviewed embedded packages are required")
+    seen = set()
+    total_bytes = 0
+    for package in packages:
+        if not isinstance(package, dict):
+            raise ValueError("invalid embedded package")
+        _require_exact_keys(package, {"path", "name", "version", "license", "provenance",
+                                      "files", "sha256"}, "embedded package")
+        path = package["path"]
+        if not isinstance(path, str) or path not in EMBEDDED_PACKAGES or path in seen:
+            raise ValueError("unknown or duplicate embedded package path")
+        seen.add(path)
+        spec = EMBEDDED_PACKAGES[path]
+        if any(package[key] != spec[key] for key in ("name", "version", "license")):
+            raise ValueError("embedded package identity is not reviewed")
+        descriptor = {key: value for key, value in package.items() if key != "sha256"}
+        if package["sha256"] != _canonical_digest(descriptor):
+            raise ValueError("embedded package descriptor digest mismatch")
+        file_list = package["files"]
+        mandatory = {"Cargo.toml"} | spec["sources"]
+        mandatory |= {"SOURCE-NOTICE.md", "provenance/Cargo.toml", "LICENSE-ISC.txt"} if spec["upstream"] else {"LICENSE"}
+        if not isinstance(file_list, list) or len(file_list) != len(mandatory):
+            raise ValueError("embedded package file set is incomplete or unreviewed")
+        contents = {}
+        for entry in file_list:
+            if not isinstance(entry, dict):
+                raise ValueError("invalid embedded file")
+            _require_exact_keys(entry, {"path", "sha256", "content"}, "embedded file")
+            name = entry["path"]
+            if not isinstance(name, str) or name not in mandatory or name in contents:
+                raise ValueError("unknown or duplicate embedded file path")
+            content = entry["content"]
+            if not isinstance(content, str) or not content or "\0" in content:
+                raise ValueError("invalid embedded UTF-8 content")
+            try:
+                payload = content.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise ValueError("invalid embedded UTF-8 content") from exc
+            total_bytes += len(payload)
+            if len(payload) > MAX_EMBEDDED_FILE_BYTES or total_bytes > MAX_EMBEDDED_BYTES:
+                raise ValueError("embedded source exceeds size limit")
+            if entry["sha256"] != hashlib.sha256(payload).hexdigest():
+                raise ValueError("embedded file digest mismatch")
+            contents[name] = content
+        _validate_embedded_manifest(_manifest_text(contents["Cargo.toml"], "embedded manifest"), spec)
+        provenance = package["provenance"]
+        if not isinstance(provenance, dict):
+            raise ValueError("embedded provenance must be an object")
+        if spec["upstream"]:
+            if hashlib.sha256(contents["LICENSE-ISC.txt"].encode()).hexdigest() != ISC_STANDARD_TEXT_SHA256:
+                raise ValueError("embedded derivative must preserve the standard ISC license text")
+            _require_exact_keys(provenance, {"kind", "name", "version", "url", "sha256",
+                                             "original_files"}, "embedded derivative provenance")
+            name, version = spec["upstream"]
+            if (provenance["kind"] != "derivative" or provenance["name"] != name
+                    or provenance["version"] != version
+                    or provenance["url"] != CRATE_URL.format(name=name, version=version)
+                    or not isinstance(provenance["sha256"], str)
+                    or not SHA256_PATTERN.fullmatch(provenance["sha256"])):
+                raise ValueError("embedded upstream identity is invalid")
+            originals = provenance["original_files"]
+            if not isinstance(originals, dict) or set(originals) != {"Cargo.toml"} | spec["sources"]:
+                raise ValueError("embedded original source file set is invalid")
+            if any(not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest)
+                   for digest in originals.values()):
+                raise ValueError("embedded original source digest is invalid")
+            if originals["Cargo.toml"] != hashlib.sha256(contents["provenance/Cargo.toml"].encode()).hexdigest():
+                raise ValueError("embedded upstream manifest digest mismatch")
+            original = _manifest_text(contents["provenance/Cargo.toml"], "upstream manifest").get("package", {})
+            if not isinstance(original, dict) or (original.get("name"), original.get("version"), original.get("license")) != (name, version, "ISC"):
+                raise ValueError("embedded upstream license declaration/identity mismatch")
+        else:
+            if provenance != {"kind": "first-party", "repository": "https://github.com/aiwaki/slipstream"}:
+                raise ValueError("embedded first-party provenance is invalid")
+            if hashlib.sha256(contents["LICENSE"].encode()).hexdigest() != REPOSITORY_MIT_SHA256:
+                raise ValueError("embedded backend must preserve the repository MIT license")
 
 
 def verify_source_contract(
@@ -168,13 +385,28 @@ def verify_source_contract(
     expected_version: str | None = None,
     expected_crate_sha256: str | None = None,
 ) -> dict:
-    source = load_source_contract(source_path)
+    source, source_sha256 = _source_contract_snapshot(source_path)
+    return _verify_source_contract_files(
+        source=source, source_sha256=source_sha256, version_path=version_path,
+        cargo_lock_path=cargo_lock_path, crate_path=crate_path,
+        expected_version=expected_version, expected_crate_sha256=expected_crate_sha256,
+    )
+
+
+def _verify_source_contract_files(
+    *, source: dict, source_sha256: str, version_path: Path, cargo_lock_path: Path,
+    crate_path: Path | None = None, expected_version: str | None = None,
+    expected_crate_sha256: str | None = None,
+) -> dict:
     crate = source["crate"]
     version = _version_file(version_path)
     if version != crate["version"]:
         raise ValueError("Geph source contract and VERSION disagree")
     if hash_file(cargo_lock_path) != source["lock_sha256"]:
         raise ValueError("Geph Cargo.lock does not match the source contract")
+    if "native_sqlite" in source:
+        geph_native_sqlite.verify_wrapper_lock(
+            source["native_sqlite"], cargo_lock_path.read_bytes(), source["lock_sha256"])
     if expected_version is not None and version != expected_version:
         raise ValueError("reviewed Geph version is not the requested upstream version")
     if expected_crate_sha256 is not None:
@@ -192,6 +424,13 @@ def verify_source_contract(
         "targets": list(TARGETS),
         "version": version,
         "release_tag": f"geph-vendor-{version}-r{source['release_revision']}",
+        "source_sha256": source_sha256,
+        "embedded_packages": {
+            package["name"]: package["sha256"]
+            for package in source.get("embedded_packages", {}).get("packages", [])
+        },
+        **({"native_sqlite": geph_native_sqlite.descriptor_sha256(source["native_sqlite"])}
+           if "native_sqlite" in source else {}),
     }
 
 
@@ -349,6 +588,13 @@ def _verify_policy_transition(
     if (
         not previous_h2_present
         and not current_h2_present
+        and verified_source_binding == RSA_REMOVAL_REVIEW_SOURCE_BINDING
+        and policy_binding == RSA_REMOVAL_REVIEW_POLICY_BINDING
+    ):
+        return "removed-rsa-with-reviewed-source-owned-replacement"
+    if (
+        not previous_h2_present
+        and not current_h2_present
         and verified_source_binding == RSA_CTUTILS_REVIEW_SOURCE_BINDING
         and policy_binding == RSA_CTUTILS_REVIEW_POLICY_BINDING
     ):
@@ -392,19 +638,18 @@ def verify_source_transition(
 ) -> dict:
     """Verify an immutable Geph vendor release transition and its temporary policy."""
 
-    previous_summary = verify_source_contract(
-        source_path=previous_source_path,
+    previous, previous_digest = _source_contract_snapshot(previous_source_path)
+    current, current_digest = _source_contract_snapshot(current_source_path)
+    previous_summary = _verify_source_contract_files(
+        source=previous, source_sha256=previous_digest,
         version_path=previous_version_path,
         cargo_lock_path=previous_cargo_lock_path,
     )
-    current_summary = verify_source_contract(
-        source_path=current_source_path,
+    current_summary = _verify_source_contract_files(
+        source=current, source_sha256=current_digest,
         version_path=current_version_path,
         cargo_lock_path=current_cargo_lock_path,
     )
-    previous = load_source_contract(previous_source_path)
-    current = load_source_contract(current_source_path)
-
     for field in ("schema_version", "features", "targets"):
         if current[field] != previous[field]:
             raise ValueError(f"Geph {field} must not change during a vendor transition")
@@ -459,31 +704,45 @@ def verify_source_transition(
         label="current Geph dependency audit policy",
         h2_present=current_h2_present,
     )
+    verified_source_binding = (
+        previous_summary["source_sha256"], previous_summary["lock_sha256"],
+        current_summary["source_sha256"], current_summary["lock_sha256"],
+    )
+    if verified_source_binding == RSA_REMOVAL_REVIEW_SOURCE_BINDING:
+        if "native_sqlite" in current or len(current.get("embedded_packages", {}).get("packages", [])) != 3:
+            raise ValueError("RSA replacement must use only the reviewed three source-owned packages")
+        lock_bytes = current_cargo_lock_path.read_bytes()
+        if hashlib.sha256(lock_bytes).hexdigest() != current_summary["lock_sha256"]:
+            raise ValueError("RSA replacement lock changed after source verification")
+        locked = tomllib.loads(lock_bytes.decode("utf-8"))
+        if any(package.get("name") in {"rsa", "blind-rsa-signatures"} for package in locked["package"]):
+            raise ValueError("RSA replacement lock still contains the removed implementations")
     policy_transition = _verify_policy_transition(
         previous_policy=previous_policy,
         current_policy=current_policy,
         previous_h2_present=previous_h2_present,
         current_h2_present=current_h2_present,
-        verified_source_binding=(
-            hash_file(previous_source_path), previous_summary["lock_sha256"],
-            hash_file(current_source_path), current_summary["lock_sha256"],
-        ),
+        verified_source_binding=verified_source_binding,
     )
     return {
         "current_release_tag": current_summary["release_tag"],
         "h2_0_4_15_present": current_h2_present,
         "policy_transition": policy_transition,
         "previous_release_tag": previous_summary["release_tag"],
+        "previous_source_sha256": previous_summary["source_sha256"],
+        "current_source_sha256": current_summary["source_sha256"],
         "transition": transition,
     }
 
 
 def _safe_members(archive: tarfile.TarFile, expected_root: str) -> list[tarfile.TarInfo]:
-    members = archive.getmembers()
-    if not members:
-        raise ValueError("Geph crate archive is empty")
+    members = []
     names: set[str] = set()
-    for member in members:
+    unpacked_bytes = 0
+    for member in archive:
+        unpacked_bytes += member.size
+        if len(members) >= MAX_CRATE_ENTRIES or unpacked_bytes > MAX_CRATE_UNPACKED_BYTES:
+            raise ValueError("Geph crate contents exceed size limit")
         path = PurePosixPath(member.name)
         if (
             path.is_absolute()
@@ -495,22 +754,52 @@ def _safe_members(archive: tarfile.TarFile, expected_root: str) -> list[tarfile.
             or not (member.isfile() or member.isdir())
         ):
             raise ValueError(f"unsafe Geph crate member: {member.name}")
-        normalized = path.as_posix()
+        normalized = path.as_posix().casefold()
         if normalized in names:
             raise ValueError(f"duplicate Geph crate member: {member.name}")
         names.add(normalized)
+        members.append(member)
+    if not members:
+        raise ValueError("Geph crate archive is empty")
     return members
 
 
-def extract_crate(*, crate_path: Path, version: str, output: Path) -> Path:
+def extract_crate(
+    *, crate_path: Path, version: str, output: Path, expected_sha256: str | None = None,
+) -> Path:
     expected_root = f"{CRATE_NAME}-{version}"
     output.mkdir(parents=True, exist_ok=True)
     root = output / expected_root
-    if root.exists() or root.is_symlink():
-        raise ValueError("Geph crate output root already exists")
-    with tarfile.open(crate_path, mode="r:gz") as archive:
-        members = _safe_members(archive, expected_root)
-        archive.extractall(output, members=members, filter="data")
+    try:
+        root.mkdir(mode=0o700)
+    except FileExistsError as exc:
+        raise ValueError("Geph crate output root already exists") from exc
+    # Hash the exact bounded private snapshot that tarfile consumes. Reopening
+    # an externally replaceable pathname after verification loses that binding.
+    with tempfile.TemporaryFile() as snapshot, crate_path.open("rb") as original:
+        digest = hashlib.sha256()
+        size = 0
+        while block := original.read(1024 * 1024):
+            size += len(block)
+            if size > MAX_CRATE_BYTES:
+                raise ValueError("Geph crate exceeds size limit")
+            digest.update(block)
+            snapshot.write(block)
+        if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+            raise ValueError("Geph extracted crate does not match the source contract")
+        snapshot.seek(0)
+        with tarfile.open(fileobj=snapshot, mode="r:gz") as archive:
+            members = _safe_members(archive, expected_root)
+            relative_members = []
+            for member in members:
+                parts = PurePosixPath(member.name).parts[1:]
+                if not parts:
+                    continue
+                relative = copy.copy(member)
+                relative.name = PurePosixPath(*parts).as_posix()
+                relative.mode = 0o700 if relative.isdir() else 0o644
+                relative_members.append(relative)
+            archive.extractall(root, members=relative_members, filter="data")
     if not root.is_dir() or not (root / "Cargo.toml").is_file():
         raise ValueError("Geph crate archive has no expected Cargo.toml")
     return root
@@ -563,7 +852,8 @@ def prepare_source_contract(
         raise ValueError("Geph release revision is invalid")
 
     with tempfile.TemporaryDirectory(prefix="slipstream-geph-source-") as temporary:
-        root = extract_crate(crate_path=crate_path, version=version, output=Path(temporary))
+        root = extract_crate(crate_path=crate_path, version=version, output=Path(temporary),
+                             expected_sha256=crate_sha256)
         _verify_manifest(root, version)
         (root / "Cargo.lock").unlink(missing_ok=True)
         completed = subprocess.run(
@@ -622,21 +912,86 @@ def apply_source_edits(root: Path, edits: list[dict]) -> None:
         path.write_bytes(changed)
 
 
+def _materialize_embedded_packages(root: Path, section: dict) -> None:
+    _validate_embedded_packages(section)
+    # The upstream archive cannot preseed this namespace, including a spelling
+    # that aliases it on a case-insensitive filesystem.
+    if any(path.name.casefold() == "slipstream-vendor" for path in root.iterdir()):
+        raise ValueError("embedded source namespace already exists in upstream crate")
+    root.chmod(0o700)
+    for package in sorted(section["packages"], key=lambda value: value["path"]):
+        for entry in sorted(package["files"], key=lambda value: value["path"]):
+            destination = root / package["path"] / entry["path"]
+            current = root
+            for part in destination.relative_to(root).parts[:-1]:
+                current /= part
+                try:
+                    current.mkdir(mode=0o700)
+                except FileExistsError:
+                    if current.is_symlink() or not current.is_dir():
+                        raise ValueError("embedded source parent is not a private directory")
+            payload = entry["content"].encode("utf-8")
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+            if hash_file(destination) != entry["sha256"]:
+                raise ValueError("materialized embedded file digest mismatch")
+
+
+def _verify_embedded_root_edges(root: Path) -> None:
+    manifest = _manifest_text((root / "Cargo.toml").read_text(encoding="utf-8"), "Geph manifest")
+    expected = {
+        ("dependencies", "mizaru2"): ("mizaru2-slipstream-client", "slipstream-vendor/mizaru-client"),
+        ("patch", "crates-io", "geph5-broker-protocol"): ("geph5-broker-protocol", "slipstream-vendor/geph5-broker-protocol"),
+    }
+    found = {}
+
+    def visit(value: object, location: tuple[str, ...]) -> None:
+        if isinstance(value, dict):
+            if "path" in value and location[:1] in {("dependencies",), ("patch",), ("target",), ("build-dependencies",), ("dev-dependencies",), ("replace",), ("workspace",)}:
+                found[location] = (value.get("package", location[-1]), value["path"])
+                if any(key in value for key in ("git", "registry", "registry-index", "workspace")):
+                    raise ValueError("Geph embedded dependency has conflicting source")
+            for key, child in value.items():
+                visit(child, (*location, key))
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, location)
+
+    visit(manifest, ())
+    if found != expected:
+        raise ValueError("Geph manifest does not select exactly the reviewed embedded packages")
+
+
 def materialize_source(
-    *, source_path: Path, version_path: Path, cargo_lock_path: Path, crate_path: Path, output: Path
+    *, source_path: Path, version_path: Path, cargo_lock_path: Path, crate_path: Path, output: Path,
+    native_sqlite_archive: Path | None = None,
 ) -> Path:
-    summary = verify_source_contract(
-        source_path=source_path,
+    # Parse and bind one SOURCE snapshot; never verify one set of descriptors
+    # and then re-read potentially replaced embedded bytes before materializing.
+    source, source_sha256 = _source_contract_snapshot(source_path)
+    if ("native_sqlite" in source) != (native_sqlite_archive is not None):
+        raise ValueError("native SQLite SOURCE and explicit archive must be supplied together")
+    summary = _verify_source_contract_files(
+        source=source, source_sha256=source_sha256,
         version_path=version_path,
         cargo_lock_path=cargo_lock_path,
         crate_path=crate_path,
     )
-    root = extract_crate(crate_path=crate_path, version=summary["version"], output=output)
+    root = extract_crate(crate_path=crate_path, version=summary["version"], output=output,
+                         expected_sha256=source["crate"]["sha256"])
     _verify_manifest(root, summary["version"])
     shutil.copyfile(cargo_lock_path, root / "Cargo.lock")
-    apply_source_edits(root, load_source_contract(source_path).get("source_edits", []))
+    if hash_file(root / "Cargo.lock") != source["lock_sha256"]:
+        raise ValueError("materialized Geph Cargo.lock does not match the source contract")
+    apply_source_edits(root, source.get("source_edits", []))
     # Dependency-only manifest edits cannot rewrite the attested crate identity.
     _verify_manifest(root, summary["version"])
+    if "embedded_packages" in source:
+        _verify_embedded_root_edges(root)
+        _materialize_embedded_packages(root, source["embedded_packages"])
+    if "native_sqlite" in source:
+        geph_native_sqlite.materialize(source["native_sqlite"], native_sqlite_archive, root)
     return root
 
 
@@ -681,6 +1036,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     extract.add_argument("--cargo-lock", required=True, type=Path)
     extract.add_argument("--crate", required=True, type=Path)
     extract.add_argument("--output", required=True, type=Path)
+    extract.add_argument("--native-sqlite-archive", type=Path)
     return parser.parse_args(argv)
 
 
@@ -726,6 +1082,7 @@ def main(argv: list[str] | None = None) -> int:
             cargo_lock_path=args.cargo_lock,
             crate_path=args.crate,
             output=args.output,
+            native_sqlite_archive=args.native_sqlite_archive,
         )
         result = {"root": str(root)}
     print(json.dumps(result, sort_keys=True))

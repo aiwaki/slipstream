@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-13T18:43:36.952683+00:00",
+  "status": "BOUNDED_SOURCE_REVIEW_WITH_OPEN_INHERITED_P2_AND_UNRESOLVED_QUALIFICATION",
+  "source": {
+    "path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/rsa-isc-local-notices-20261013/inputs/SOURCE.json",
+    "sha256": "3c2cf6d98b19edf77d20f7105f20ddc509e9e1422dc137720acf7f103de51a6e"
+  },
+  "checkout": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905",
+  "observed_head": "5a3b3341d31d42d32d48610b502408f28dc52f9d",
+  "review_mode": "Read-only static review of all10 embedded Rust files and3 manifests; exact retained archive/hash validation; reuse of retained matching tests. No build, scanner, network, live account, installed-service or source/policy/docs modification.",
+  "scope": {
+    "embedded_packages": [
+      {
+        "name": "mizaru2-slipstream-client",
+        "version": "0.1.0",
+        "descriptor_sha256": "b51d00b9d21979f21d5ae806f4e06b90bf87b3ce16ee9b5a802cfdb4b1b4b18a",
+        "descriptor_digest_recomputed": true,
+        "path": "slipstream-vendor/mizaru-client"
+      },
+      {
+        "name": "slipstream-rsa-client",
+        "version": "0.1.0",
+        "descriptor_sha256": "ca128627b932eb5cb5f80e7de0524d70c9068aff31689b94db8b871c63bc3592",
+        "descriptor_digest_recomputed": true,
+        "path": "slipstream-vendor/aws-lc-backend"
+      },
+      {
+        "name": "geph5-broker-protocol",
+        "version": "0.4.3",
+        "descriptor_sha256": "5c2d8819035ca6f55da1d8cceca30fba28f274457b00c2375a1ef05abf713cde",
+        "descriptor_digest_recomputed": true,
+        "path": "slipstream-vendor/geph5-broker-protocol"
+      }
+    ],
+    "rust_files": 10,
+    "manifests": 3,
+    "candidate_files": 20,
+    "all10_upstream_original_files_verified": true,
+    "locked_aws_lc_dependency_files_verified": 13,
+    "source_owned_assessment_gate_approval": false
+  },
+  "changed_inherited": [
+    {
+      "package": "mizaru2-slipstream-client",
+      "changed": "Client-only rewrite/adaptation from exact mizaru2 archive: removes private signing/generation, binds pending ownership, adds bounded DTO decode, uses AWS-LC backend. Wire field order and exact DER Merkle authentication retained.",
+      "inherited": "Epoch schedule, client token representation and broker protocol semantics; no upstream security provenance is claimed for new backend."
+    },
+    {
+      "package": "slipstream-rsa-client",
+      "changed": "First-party FFI/RSA adapter. Runtime source exactly equals retained async prototype after removing only cfg(test) test modules/instrumentation. Manifest pins aws-lc-sys0.45.0.",
+      "inherited": "AWS-LC arithmetic, PSS/hash/DER implementation is locked third-party code; inspected local files match exact9bff6c3b... crate checksum."
+    },
+    {
+      "package": "geph5-broker-protocol",
+      "changed": "Manifest replaces mizaru2 dependency with local client adapter; src/lib.rs and puzzle.rs only lose cfg(test) blocks.",
+      "inherited": "All7 runtime Rust files semantically unchanged;5 files byte-identical. Route/signature/MAC semantics remain upstream."
+    },
+    {
+      "package": "root-source-edits",
+      "changed": "auth/bw fallible owned pending and validation flow read directly; candidate protocol bodies match final real-callsite fixture runtime bodies.",
+      "inherited": "Expired Plus cache invalidation bug confirmed separately; whole RPC allocation boundary remains inherited."
+    }
+  ],
+  "backend_observations": [
+    {
+      "id": "FFI-OWNERSHIP",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        39,
+        131
+      ],
+      "result": "Bn/Ctx/Mont/Rsa acquire non-null native owners immediately; partial failure unwinds through Drop. RSA_get0_key pointers are borrowed only while Rc<Rsa> remains alive; no raw pointer ownership duplication or unsafe Send/Sync found. SecretBytes clears its live initialized bytes before Vec deallocation.",
+      "limits": "Rust allocation aborts and native allocator failures are not all recoverable. No proof about compiler/register copies or crash dumps."
+    },
+    {
+      "id": "FFI-MEMORY",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        60,
+        129
+      ],
+      "result": "Pinned AWS-LC BN_clear_free aliases BN_free; BN_CTX_free frees pooled BIGNUMs. Default OPENSSL_free cleanses allocation before free, so BN_CTX use is not an obvious uncleaned-heap path.",
+      "dependency_locations": [
+        "aws-lc/crypto/fipsmodule/bn/bn.c:39",
+        "aws-lc/crypto/fipsmodule/bn/ctx.c:71",
+        "aws-lc/crypto/mem.c:171"
+      ],
+      "limits": "Custom allocator hooks bypass default cleanse; effective release allocator and stack-temporary cleanup are not established by this static review."
+    },
+    {
+      "id": "RSA-ADMISSION",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        170,
+        247
+      ],
+      "result": "DER capped at800; SPKI must be fully consumed and exact rsaEncryption+NULL; PKCS1 decoder independently enforces full consumption. n/e must exist, width256..512, exponent3/65537, modulus odd. Exact incoming DER preserved. No private-key API is embedded.",
+      "limits": "Legacy width contract admits2041..4096 actual bits. This intentionally retains legacy admission; it is not a new minimum2048-bit policy or proof that arbitrary issuer modulus is product of two large primes."
+    },
+    {
+      "id": "RSA-PSS",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        258,
+        323
+      ],
+      "result": "EVP hashes input before native PSS; same hash used for MGF1. Blind-token emission uses SHA256/salt0. Final verification recovers salt(-2), intentionally preserving legacy signature acceptance; retained auto_salt and RFC/legacy vectors cover this. Native encoder uses actual modulus bits, including2049-bit zero-leading representative; does not duplicate legacy rounded-bit bug.",
+      "limits": "No new vector execution, malformed-input fuzzing or exhaustive PSS parser corpus was performed."
+    },
+    {
+      "id": "BLINDING",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        310,
+        429
+      ],
+      "result": "Factor sampled within[1,n); inverse and encoded-message invertibility use BN_mod_inverse_blinded. No secret BN_gcd/nonblinded inverse used. BN_mod_exp_mont uses secret base/public exponent under the pinned header contract. Montgomery multiplications receive reduced values; PSS encoding lies below n. Fixed-width BN_bin2bn input retains public byte-derived width, and export uses BN_bn2bin_padded.",
+      "dependency_locations": [
+        "aws-lc/include/openssl/bn.h:746",
+        "aws-lc/include/openssl/bn.h:834",
+        "aws-lc/crypto/fipsmodule/bn/bytes.c:40"
+      ],
+      "limits": "BN_mod_inverse_blinded can report noninvertible if its own random mask is noninvertible; propagated error is fail-closed. Source inspection is not timing/side-channel qualification."
+    },
+    {
+      "id": "FINALIZATION",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        431,
+        454
+      ],
+      "result": "Consuming finalize enforces exact width and representative<n, unblinds, verifies against retained original message/key, releases signature only after success. Invalid reply consumes and cleans pending state; API cannot import, clone or serialize inverse state."
+    },
+    {
+      "id": "ASYNC-BOUNDARY",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/owned.rs",
+      "lines": [
+        1,
+        60
+      ],
+      "result": "Native handles are Rc-based !Send/!Sync and finish within synchronous begin/finalize. OwnedPending contains owned bytes only, has no Debug/Clone/Serialize, and private inverse export is fixed-width. Finalize compares mathematical n/e while caller authenticates exact response DER. Cancellation drops inverse/message buffers; no mutex or shared mutable native cache crosses await.",
+      "limits": "Caller token is Copy and credential DTOs intentionally serializable; all caller copies/persisted credentials are not erased. Process abort does not run Rust destructors."
+    },
+    {
+      "id": "ERROR-PATHS",
+      "candidate_path": "slipstream-vendor/aws-lc-backend/src/lib.rs",
+      "lines": [
+        24,
+        29,
+        418,
+        429
+      ],
+      "result": "FFI statuses are checked; failed parser/BN/hash/PSS work returns an error before publication. Allocation checks from prototype are removed only under cfg(test); production helper was already no-op.",
+      "limits": "AWS-LC RAND insufficient entropy calls abort; returned RandomGeneration tests only cover returned failure cleanup. Exact packaged containment/recovery remains unqualified by this review."
+    }
+  ],
+  "findings": [
+    {
+      "id": "PROTOCOL-01",
+      "severity": "P2",
+      "status": "confirmed-by-static-counterexample; inherited, not introduced by RSA migration",
+      "title": "Expired nonzero Plus expiry deletes valid Free connection-token cache",
+      "path": "src/auth.rs",
+      "materialized_path": "output/source-owned-review-20261013/protocol-callsites/materialized/src/auth.rs",
+      "sha256": "6b56eb3cb0f652c4274c498e830b0c73a5592e54805a547cbfee563f7bf8d3d0",
+      "lines": [
+        119,
+        131,
+        133,
+        134
+      ],
+      "cause": "is_plus compares expiry to now, but cache invalidation checks expiry > 0 instead of the computed active subscription status. An expired positive timestamp and cached Free token therefore look like a gained Plus subscription on every refresh.",
+      "impact": "Deletes current/next valid Free cache before broker subkey/signing RPCs. If refresh subsequently fails, callers lose a usable cache fallback and may wait/fail until broker recovery. Actual broker behavior returning expired Some(timestamp), and a live user-visible incident, were not exercised.",
+      "counterexample": {
+        "now": 2000,
+        "plus_expiry": 1000,
+        "cached_account_level": "Free",
+        "currently_plus": false,
+        "is_plus": false,
+        "current_code_invalidates_cache": true,
+        "expected_level_changed": false,
+        "execution": "Boolean counterexample to source condition; no Rust/live account execution"
+      },
+      "recommended_next_action": "Separate source-owned repair using computed is_plus for level transition; deterministic tests must cover expired nonzero expiry with cached Free and failing broker, preserving valid cache. Keep migration and inherited-fix provenance distinct."
+    }
+  ],
+  "reviewer_independent_confirmation": {
+    "finding_id": "PROTOCOL-01",
+    "source_condition_read": true,
+    "before_and_after_same_defective_condition": true,
+    "counterexample": {
+      "now": 2000,
+      "plus_expiry": 1000,
+      "cached_level": "Free",
+      "is_plus": false,
+      "current_eviction": true,
+      "actual_level_changed": false
+    },
+    "confirmation": "Arithmetic/source-control-flow proof only. Both current/next db_remove precede subkey/signing RPC; no live broker execution or incident attribution."
+  },
+  "reused_evidence": {
+    "runtime_backend_equal_after_cfg_test_removal": true,
+    "historical_logs": "18 primitive+compat tests; independent9 corrected compatibility tests; independent6 async tests;6 adapter tests;11 actual-callsite synthetic tests. These were retained, not rerun in this review.",
+    "limits": "Whole SOURCE/lock/manifest aggregate differs from historical fixtures. Evidence reuse is at exact runtime source/API boundary, not fresh full-candidate runtime qualification."
+  },
+  "unresolved": [
+    {
+      "topic": "RPC whole-body memory limits",
+      "path": "src/broker/fronted_http.rs",
+      "materialized_sha256": "c216756ebfa276d3278789eaeabea554f1a27ce9cc1ba1265dbda5b06dd892a2",
+      "lines": [
+        55,
+        64
+      ],
+      "status": "Known inherited unbounded response.bytes()/JSON allocation before bounded Mizaru DTO validation; transport size/JSON depth hardening not proven by DTO tests."
+    },
+    {
+      "topic": "Bandwidth SQLite cancellation notification",
+      "path": "src/bw_token.rs",
+      "lines": [
+        69,
+        75
+      ],
+      "status": "Retained tests cover cancellation before signing/write and committed misc db_write semantics; they do not prove notification/recovery for an already-submitted bandwidth INSERT canceled before BW_TOKEN_SUPPLIED.notify. Reachable operational failure not established; no new confirmed finding asserted."
+    },
+    {
+      "topic": "Exact full candidate release qualification",
+      "status": "SOURCE differs from retained fixture aggregate in manifest/package paths, lock and SQLite revision. Reused byte-equivalent protocol/client tests do not establish fresh full-candidate compile, accounts, broker interoperability in production, Intel/Windows ABI or installed behavior."
+    },
+    {
+      "topic": "Cryptographic safety",
+      "status": "No new protocol-authentication or serialization defect found in reviewed migration; FFI/math/side-channel/entropy assurance belongs to separate backend review and cannot be inferred from absence of findings here."
+    },
+    {
+      "topic": "Side-channel and FFI qualification",
+      "status": "Native API contracts and exact source reviewed; no sanitizers, timing measurements, fuzzing, stack/register erasure proof, custom-allocator qualification or full cryptographic proof."
+    },
+    {
+      "topic": "Entropy/process boundary",
+      "status": "RNG fail-stop documented; this review does not qualify final packaged Geph restart/containment behavior."
+    },
+    {
+      "topic": "Advisory coverage",
+      "status": "No scanner or network queries. Source review findings do not substitute fresh registry/native/source-owned advisory evidence or policy assessment."
+    },
+    {
+      "topic": "Native SQLite composition",
+      "status": "Candidate SOURCE3c2 includes SQLite source edits but lacks native_sqlite descriptor. No claim that this is final combined release inventory or qualification."
+    }
+  ],
+  "evidence": [
+    {
+      "path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/provenance.json",
+      "sha256": "edac7273bd60e8312009d1710d360fc52ebc03f0c8964a21d8f5f91420a14e1f"
+    },
+    {
+      "path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/backend-bindings.json",
+      "sha256": "a49a9887b82f3e4dbe4f907845260ee5d4253c8ff42be77f0e41dac1eb16079b"
+    },
+    {
+      "path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-review.json",
+      "sha256": "ff3f0897e7a837c7a41248a1b039356450d129829c5d0d20b1edef012c73cf7c"
+    },
+    {
+      "path": "retained-home/.codex/worktrees/geph-rustls-02345/slipstream-codebase-audit-20260905/output/source-owned-review-20261013/protocol-review.md",
+      "sha256": "97f11694bcce60c1ac176b87857008d0d19a45f81ff9ddb199d29b1b1e4d2e90"
+    }
+  ],
+  "production_changes": false,
+  "old_candidate_unchanged": true,
+  "next_action": "Separate output-only auth-expiry repair requested by root; keep this reviewed SOURCE and inherited finding immutable. Root reviews later candidate before any integration."
+}
