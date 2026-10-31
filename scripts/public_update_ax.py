@@ -205,20 +205,51 @@ class AX:
         finally:
             self.cf.CFRelease(action)
 
-    def menu_visibility(self, item, pressed_tray):
+    def menu_visibility(self, item, pressed_tray, observation=None):
         """Prove a fresh exact item is visible; never act on a hit-test result."""
+        if observation is None:
+            observation = {"stage": "menu_selection", "edges": []}
         tray = unique([node for node in self.nodes if node["role"] == "AXMenuBarItem"
                        and self.cf.CFEqual(node["element"], pressed_tray["element"])], "fresh owned tray")
         menu = unique([node for node in self.nodes if node["role"] == "AXMenu"
                        and item["path"].rsplit("/AXChildren[", 1)[0] == node["path"]
                        and node["path"].rsplit("/AXChildren[", 1)[0] == tray["path"]], "fresh owned submenu")
-        for child, parent in ((item, menu), (menu, tray)):
-            error, value = self.attribute(child["element"], "AXParent")
-            if error != 0 or not value or self.cf.CFGetTypeID(value) != self.ax.AXUIElementGetTypeID():
-                raise Blocked("menu ancestry unavailable")
-            self.check(value)
-            if not self.cf.CFEqual(value, parent["element"]):
-                raise Blocked("menu ancestry changed")
+        observation["stage"] = "forward_containment"
+        for name, parent, child in (("tray_to_menu", tray, menu), ("menu_to_item", menu, item)):
+            edge = {"edge": name, "ax_error": None, "array_valid": False, "count": None,
+                    "match_count": None, "status": "reading"}
+            observation["edges"].append(edge)  # Retain the exact failing edge even if the next read raises.
+            error, value = self.attribute(parent["element"], "AXChildren")
+            edge["ax_error"] = error
+            if error != 0:
+                edge["status"] = "read_failed"
+                raise Blocked("fresh menu children read failed")
+            if not value or self.cf.CFGetTypeID(value) != self.cf.CFArrayGetTypeID():
+                edge["status"] = "invalid_array"
+                raise Blocked("fresh menu children array unavailable")
+            edge["array_valid"] = True
+            count = self.cf.CFArrayGetCount(value)
+            edge["count"] = count
+            if not 0 <= count <= 64:
+                edge["status"] = "count_out_of_bounds"
+                raise Blocked("fresh menu child count exceeds bound")
+            edge["match_count"] = 0
+            for index in range(count):
+                member = self.cf.CFArrayGetValueAtIndex(value, index)
+                if not member or self.cf.CFGetTypeID(member) != self.ax.AXUIElementGetTypeID():
+                    edge["status"] = "invalid_child"
+                    raise Blocked("fresh menu child is not an AX element")
+                try:
+                    self.check(member)
+                except Blocked:
+                    edge["status"] = "child_check_failed"
+                    raise
+                edge["match_count"] += bool(self.cf.CFEqual(member, child["element"]))
+            if edge["match_count"] != 1:
+                edge["status"] = "child_not_unique"
+                raise Blocked("fresh menu child is missing or ambiguous")
+            edge["status"] = "matched"
+        observation["stage"] = "visibility"
         error, children = self.attribute(menu["element"], "AXVisibleChildren")
         if error == 0:
             if not children or self.cf.CFGetTypeID(children) != self.cf.CFArrayGetTypeID():
@@ -268,6 +299,7 @@ class AX:
         else:
             raise Blocked("visible menu inspection failed")
         self.check(item["element"])
+        observation["stage"] = "complete"
         return {"post_read": True, "visible": True, "visibility_method": method,
                 "tray_path": tray["path"], "menu_path": menu["path"], "item_path": item["path"], "title": item["title"]}
 
@@ -337,7 +369,9 @@ def run(args, report):
                 titles = {f"Install Slipstream {args.expected_version}…", f"Установить Slipstream {args.expected_version}…"}
                 item = unique([node for node in client.nodes if node["role"] == "AXMenuItem"
                                and node["title"] in titles and node["enabled"] is True], "fresh enabled exact-version offer")
-                action["postcondition"] = {**client.menu_visibility(item, tray), "expected_version": args.expected_version}
+                action["observation"] = {"stage": "menu_selection", "edges": []}
+                action["postcondition"] = {**client.menu_visibility(item, tray, action["observation"]),
+                                           "expected_version": args.expected_version}
                 recheck()
         if args.press_update:
             exact_titles = {f"Install Slipstream {args.expected_version}…", f"Установить Slipstream {args.expected_version}…"}
