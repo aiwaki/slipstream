@@ -18,10 +18,10 @@ small PR with tests and matching documentation.
 На отдельных Mac в CI проверены выход, отказ и восстановление Geph, четыре сайта
 в Safari и Chrome и 1800,103 секунды работы в фоне без появления окон. Последняя
 проверка относится к работе в фоне, не к длительной передаче видео или звука.
-Пара публичной `.31` и кандидата `.32` прошла commit и аварийный откат в CI.
-Обычный путь через обнаружение обновления, меню и запрос администратора, установка
-на пользовательском Mac, длительные звонки, видео и сон/пробуждение ещё требуют
-отдельной проверки. Источники и границы доказательств — в [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31).
+Переход между публичными `.31` и `.32` через обнаружение обновления, меню и
+запрос администратора проверен в CI вместе с отменой и откатом при завершении
+новой версии до подтверждения запуска. Установка на пользовательском Mac,
+длительные звонки, видео и сон/пробуждение ещё требуют отдельной проверки. Источники и границы доказательств — в [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31).
 
 | Продолжающаяся работа | Что ещё не вошло в выпуск полностью |
 |---|---|
@@ -41,10 +41,10 @@ These are individually qualified changes, not every open branch.
 Disposable Macs in CI covered Quit, Geph outage and recovery, four sites in
 Safari and Chrome, and 1800.103 seconds of background operation without visible
 windows. That last check measures background behavior, not sustained media traffic.
-The public `.31` and candidate `.32` pair passed commit and crash rollback in CI.
-The ordinary discovery, tray-menu and administrator-dialog path, installation
-on the user's Mac, sustained calls, video, and sleep/wake still need separate
-validation. See [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31) for evidence and its limits.
+The ordinary public `.31 → .32` discovery, tray-menu and administrator-dialog
+path passed in CI, including cancellation and rollback after terminating the new
+version before its startup acknowledgement. Installation on the user's Mac,
+sustained calls, video, and sleep/wake still need separate validation. See [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31) for evidence and its limits.
 
 | Ongoing work | Scope not yet fully shipped |
 |---|---|
