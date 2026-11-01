@@ -391,7 +391,8 @@ def test_timeout_report_rejects_incomplete_or_mismatched_proof(monkeypatch, muta
 
 
 def visibility_client(*, error=0, children=(13,), hit=13, frame=(10, 20, 80, 16), parent=12, hit_error=0,
-                      tray_parent=11, tray_children=(12,), menu_children=(13,), forward_error=0, forward_value=32):
+                      tray_parent=11, tray_children=(12,), menu_children=(13,), forward_error=0, forward_value=32,
+                      visible_value=31):
     client = ax.AX.__new__(ax.AX)
     client.nodes, client.refs, client.pid = menu_nodes(), [], 111
     calls = []
@@ -399,7 +400,7 @@ def visibility_client(*, error=0, children=(13,), hit=13, frame=(10, 20, 80, 16)
     arrays = {31: children, 32: tray_children, 33: menu_children}
     attributes = {(13, "AXParent"): (0, parent), (12, "AXParent"): (0, tray_parent),
                   (11, "AXChildren"): (forward_error, forward_value), (12, "AXChildren"): (0, 33),
-                  (12, "AXVisibleChildren"): (error, 31 if error == 0 else None),
+                  (12, "AXVisibleChildren"): (error, visible_value if error == 0 else None),
                   (13, "AXPosition"): (0, 41), (13, "AXSize"): (0, 42)}
     def attribute(element, name):
         calls.append((element, name))
@@ -499,3 +500,95 @@ def test_actor_preserves_partial_containment_diagnostic_before_failure(monkeypat
 def test_menu_visibility_refuses_hidden_foreign_unknown_or_invalid_geometry(kwargs):
     client, _ = visibility_client(**kwargs)
     with pytest.raises(ax.Blocked): client.menu_visibility(client.nodes[-1], client.nodes[0])
+
+
+@pytest.mark.parametrize("kwargs,status,count,matches,array_valid", [
+    ({"children": ()}, "item_missing", 0, 0, True),
+    ({"children": (11,)}, "item_missing", 1, 0, True),
+    ({"children": (13, 13)}, "item_ambiguous", 2, 2, True),
+    ({"children": (13, 14)}, "child_check_failed", 2, 1, True),
+    ({"children": (None,)}, "invalid_child", 1, 0, True),
+    ({"children": (13,) * 65}, "count_out_of_bounds", 65, None, True),
+    ({"visible_value": None}, "invalid_array", None, None, False),
+    ({"visible_value": 41}, "invalid_array", None, None, False),
+    ({"error": -25204}, "read_failed", None, None, False),
+])
+def test_visible_children_diagnostic_retains_exact_failure(kwargs, status, count, matches, array_valid):
+    client, calls = visibility_client(**kwargs)
+    observation = {"stage": "menu_selection", "edges": []}
+    with pytest.raises(ax.Blocked):
+        client.menu_visibility(client.nodes[-1], client.nodes[0], observation)
+    assert observation["stage"] == "visibility"
+    assert observation["visible_children"] == {
+        "ax_error": kwargs.get("error", 0), "array_valid": array_valid,
+        "count": count, "match_count": matches, "status": status}
+    if status != "item_missing":
+        assert "shadow_hit_test" not in observation
+        assert not any(call[0] == "hit" for call in calls)
+
+
+@pytest.mark.parametrize("kwargs,stage,matched", [
+    ({}, "exact_match", True),
+    ({"hit": 12}, "exact_match", False),
+    ({"hit": 14}, "hit_check", False),
+    ({"hit": None}, "hit_read", False),
+    ({"hit_error": -25204}, "hit_read", False),
+    ({"frame": (0, 0, 0, 10)}, "frame", False),
+    ({"frame": (float("nan"), 0, 10, 10)}, "frame", False),
+])
+def test_visibility_shadow_hit_never_admits_missing_item(kwargs, stage, matched):
+    client, calls = visibility_client(children=(), **kwargs)
+    observation = {"stage": "menu_selection", "edges": []}
+    with pytest.raises(ax.Blocked, match="^exact update item is not uniquely visible$"):
+        client.menu_visibility(client.nodes[-1], client.nodes[0], observation)
+    shadow = observation["shadow_hit_test"]
+    assert shadow["diagnostic_only"] is True and shadow["stage"] == stage
+    assert shadow["status"] == ("matched" if matched else "failed")
+    assert observation["visible_children"]["status"] == "item_missing"
+    if kwargs.get("hit") == 14:
+        assert shadow["owner_checked"] is False
+        assert calls[-1] == ("check", 14)  # No foreign attribute read or traversal.
+    if matched:
+        assert shadow["exact_match"] is True and shadow["owner_checked"] is True
+    else:
+        assert shadow["error_type"] == "Blocked"
+
+
+@pytest.mark.parametrize("failure", ["exception", "deadline"])
+def test_visibility_shadow_error_preserves_original_refusal(failure):
+    client, calls = visibility_client(children=())
+    if failure == "exception":
+        def broken_hit(*_args):
+            raise RuntimeError("unretained native detail")
+        client.ax.AXUIElementCopyElementAtPosition = broken_hit
+    else:
+        check = client.check
+        def expired_check(element):
+            if any(call[0] == "hit" for call in calls):
+                raise ax.Blocked("AX 20 second budget exhausted")
+            check(element)
+        client.check = expired_check
+    observation = {"stage": "menu_selection", "edges": []}
+    with pytest.raises(ax.Blocked, match="^exact update item is not uniquely visible$"):
+        client.menu_visibility(client.nodes[-1], client.nodes[0], observation)
+    assert observation["shadow_hit_test"]["status"] == "failed"
+    assert observation["shadow_hit_test"]["error_type"] == ("RuntimeError" if failure == "exception" else "Blocked")
+    assert "unretained native detail" not in repr(observation)
+    assert "AX 20 second budget exhausted" not in repr(observation)
+
+
+def test_actor_visibility_shadow_positive_keeps_single_press_and_no_install(monkeypatch):
+    client, native_calls = visibility_client(children=())
+    args, report, calls, _ = ax_actor_fixture(monkeypatch)
+    def actual_visibility(_self, _item, _tray, observation):
+        return client.menu_visibility(client.nodes[-1], client.nodes[0], observation)
+    monkeypatch.setattr(ax.AX, "menu_visibility", actual_visibility)
+    with pytest.raises(ax.Blocked, match="^exact update item is not uniquely visible$"):
+        ax.run(args, report)
+    assert len(report["actions"]) == 1
+    action = report["actions"][0]
+    assert action["kind"] == "open_menu" and action["ax_error"] == -25204
+    assert action["observation"]["shadow_hit_test"]["status"] == "matched"
+    assert "postcondition" not in action and report["installation_attempted"] is False
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert [call for call in native_calls if call[0] == "hit"] == [("hit", 99, 50.0, 28.0)]
