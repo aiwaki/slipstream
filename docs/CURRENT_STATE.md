@@ -1,245 +1,126 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, .33 public Cancel/commit accepted; rollback discovery refused
+## Current continuation — 2026-11-01, public .32 → .33 update and rollback
 
 Primary checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/preview-33-public-observation`; HEAD/main
-`45ec528e6c149922abc9bd348d5849d1e1d2c762` (PR450 merged).
-Checked PR head `c09e820dc34f2d6e16e70992ca856b0df750f97f` has the same tree,
-`b211e4dc947c73d7427ec30407ff3a96ffe883d1`. CI 41316937787/1 and audit
-41316937820/1 passed all three required contexts; packaged browser, lifecycle and
-native Stop/Quit completed. Watcher 85007 is terminal, not to be restarted.
-Root fresh premerge/merge/tree proof is in `public-next/pr450/head-c09e820dc/`;
-watcher receipt SHA256
-c6ae38bd0072955ee1f886e6761dcdf22fc4d1edf775b32748d34533b406b678.
-Expected changes: a reviewed-scope .33 public-feed prelaunch admission, focused
-tests, evidence docs and private output. Root owns Git and dispatches.
+Branch `codex/preview-33-public-rollback`, based on merged main
+`459e5393d742b4ee9d3ca6a3d4be2464abca4f32` (PR #451).
+Root owns Git, PRs and workflow dispatches. All qualification watchers are
+terminal. No user-Mac app, service, browser or network settings changed.
 
 Evidence paths below are relative to
 `output/continuation-20261101/remaining-pr376/preview33-release/`.
-Published product source remains `9eccd1ddf691aef5f76d493103513f2fada2fd5c`;
-no app payload or user-Mac installation/network/service was changed this turn.
+The longer preceding checkpoint is retained at
+`public-next/public-rollback-admission/checkpoint-before-compact.md`.
+Detailed public-run history is in [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01).
 
-### Current failure and reviewed change
+### Published product and reusable gates
 
-Actual public `.32 → .33` commit run **41313348427/1 failed** at job
-124868157895, step “Exercise normal public discovery, update UI and transaction”.
-Both public payloads/signatures were authenticated. The normal old tray had one
-enabled `Install Slipstream 0.1.9-preview.33…` item in its AX tree. Its sole action
-was opening the menu: AXPress returned −25204. Fresh tray/menu/item containment
-passed, but AXVisibleChildren did not contain exactly one matching item.
-The old observer discarded the count, so zero versus duplicates is unknown.
-A menu window appeared briefly in the independent visibility samples; that does
-not establish why it disappeared or prove that the exact item was visible.
-A scoped exact-OLD32 source read found no direct root-menu close/rebuild path.
-Background Geph-submenu mutation exists, but its execution or effect in this
-failure window is unproved; the visibility sampler only makes read-only calls.
-**No Install, Cancel, admin prompt or update transaction occurred. Cleanup was
-empty. This is not an observed updater/Geph transaction failure.**
+[Preview .33](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33)
+(release 430591253) is published from product source
+`9eccd1ddf691aef5f76d493103513f2fada2fd5c`. Publisher 41309441046/1 passed 23/23;
+all 12 assets authenticated; six candidate payloads matched byte for byte. OLD32 release 429722639 body/assets
+and stable 350205640/v0.1.4 remain unchanged. OLD source is
+`fd7d43c271e4a46ac2d10fc5ca4a032b92adae73` (no leading9).
 
-The exact run/source/job/upload artifact was authenticated: artifact 13085553489,
-112277 bytes, SHA256 66c0cae0072eb2fbc08efdd74630eb4eede832a1ee62d0dfc7115cea754c11b6.
-Receipt `public-next/public-commit/commit-41313348427/verification.json`, SHA256
-50f4c30d8d89239f24f655d0f7e662e10418e892de192483fa6722f6c32f72bd.
-Public watcher 45826 and PR449 watcher 38525 are terminal. Do not restart them.
+CI 41302269258/1 and audit 41302269288/1 passed. Candidate manifest:
+`e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0`.
+Reusable exact-candidate evidence, not to be rerun without a relevant change:
 
-Reviewed patch changes only `scripts/public_update_ax.py` and
-`scripts/test_public_update_observer.py`: retain attribute error, array validity,
-count, exact matches and failure stage. A valid zero-match array additionally
-gets one bounded read-only global hit-test **for diagnosis only**. Even a positive
-shadow hit preserves the original refusal. Duplicates, foreign and malformed
-children never get this fallback. Unsupported/no-value acceptance is unchanged;
-PID/identity, exact CFEqual, finite geometry, deadlines and one AXPress remain.
-No extra activation, click, retry or weaker Install admission was added.
+| Gate | Evidence |
+|---|---|
+| Native G41303686569/1 | Durable commit, crash restore, late-commit refusal, cleanup; `native-g/verification.json`. |
+| Packaged P41305039817/1 | Real ACK commit and pre-ACK termination/OLD restore; `packaged-p/receipt.json`. |
+| Readiness R41305043535/1 | Four sites × Safari/Chrome, controlled Geph stop then fresh-request recovery, transport 3/3, 1800.12s background soak/3600 samples, six attested reports; `readiness-r/verification.json`. |
 
-Nine causal RED cases on the unchanged source → 49 focused PASS, 59 deselected,
-0.15 seconds. No native/local UI or broad suite rerun. Source hashes:
-AX `3145311abd1a52e93ddffe2c45a56054dce198631986779bf1d7529b2c423911`;
-tests `474b349e5eea6e44f8b259b19d86e86e1b564b0f8df482e27d02005cc8cbfe5a`.
-`public-next/visibility-diagnostic-fix/verification.json` SHA256
-8dd455cd67100f2cbe5dffea0c255285167cff47d43735ecfd891df61e09ae2d;
-independent-review.json SHA256
-8ee775987afceb1de8394cad6edc617b73f76cc6da8d44eb0e9cfa74774b1bfe — PASS.
-The first native UI refusal remains unexplained. The subsequent actual public
-Cancel/commit passed the existing strict visibility requirement (see below).
+R consumed 1/3 protected attempts on November 1 UTC. It did not keep a media stream
+open or synchronize a request inside the production drain. Current app/full-Geph
+admission was checked twice November 1 UTC with zero accepted exceptions.
+Current bindings: `public-next/new33-bindings.json` and `old32-bindings.json`;
+use archived OLD title from `publisher/old32-after.json`.
 
-New diagnostic public commit **41319073498/1** was dispatched once at
-2026-11-01T15:01:20Z, observer `45ec528e6c149922abc9bd348d5849d1e1d2c762`,
-product 9ecc unchanged. Root checked fresh main, no live duplicate, and both
-public release bodies/asset ID-size-digest triples against accepted publisher
-snapshots. Admission/dispatch are in `public-next/public-commit-observation/`.
-release_preflight is the sole watcher; actual report directory will be
-`public-next/public-commit-observation/commit-41319073498/`.
-CI 41319073498/1 is terminal SUCCESS (job 124885231270), and actual
-**Cancel + commit is independently accepted**. Artifact 13088418385 is 140455
-bytes, SHA256 ec1458f14c918e33b1c5a7c01b698837de7b853d904469391d08ea6501364d44.
-The normal old app cancelled authorization, removed local preparation and stayed
-healthy; no root transaction began. It rediscovered .33, then a new Install/
-confirmation led to normal OLD exit0,
-NEW ACK and root committed seq2/quiescent before the immutable lease deadline.
-New daemon heartbeat advanced 17→18; cleanup was empty and transient paths gone.
-Both public releases' 12 assets, eight candidate pins and 14 observer sources
-were bound. After Cancel, menu AXPress again returned −25204, but the fresh
-visible array had count16/exact-match1 and both containment edges matched;
-acceptance used the original strict rule, not the diagnostic shadow hit.
+### Actual public update and rollback
 
-`commit-41319073498/verification.json` SHA256
-44a6614cefc215b3ae2ccde626ba98735d724093e832e3eb97c88241d694dbad;
-independent-review.json SHA256
-64ea6f6a1f571b46046ab560af75e29c7264da3efbdde200f249b6aa08af9542.
-Its initial private checker refusal was a strict JSON envelope mismatch, not
-wrong app pins; corrected checker and causal controls were independently reviewed.
-Watcher 55796 is terminal. Do not rerun the accepted public commit.
+Cancel + commit **41319073498/1** is independently accepted and immutable.
+Observer 45ec528e6c149922abc9bd348d5849d1e1d2c762; unchanged published apps.
+Native Cancel removed local preparation and kept OLD healthy; it did not start a
+root transaction. Fresh discovery/new Install/one admin confirmation led to
+normal OLD exit 0, NEW ACK and root committed sequence 2 before the immutable lease.
+NEW heartbeat 17→18, cleanup empty. Do not claim no initial local staging.
+Directory `public-next/public-commit-observation/commit-41319073498/`:
+verification SHA256 44a6614cefc215b3ae2ccde626ba98735d724093e832e3eb97c88241d694dbad;
+independent review64ea6f6a1f571b46046ab560af75e29c7264da3efbdde200f249b6aa08af9542.
 
-Root independently admitted one separate public rollback **41321512323/1** at
-2026-11-01T15:29:51Z, mode `kill-successor-before-ack`, same observer45ec/product9ecc.
-Fresh main, no live/duplicate run, unchanged release bodies/assets and accepted
-commit receipt/review were required. Admission/dispatch: `public-next/public-rollback/`.
-Run 41321512323/1 is terminal FAILURE (job 124892574517), watcher54308
-exited1. It stopped **before menu/Install/transaction**: the sole OLD log line was
-`preview discovery returned HTTP403 Forbidden`. No AX reports, identity=null,
-transaction=false and cleanup_errors=[]. The separate after-failure probe returned
-403 with limit60/remaining0 and reset1793547163 (15:32:43UTC). The UI step ran
-15:31:22–15:32:27UTC; the original OLD request's exact page/headers are unknown.
-The later probe proves its own rate-limited response, not the exact cause or
-cache freshness of the original OLD response. No rollback mechanics were exercised.
+Actual pre-ACK rollback **41327714069/1** is independently accepted (33
+bounded artifact assertions, no findings). Observer 459e5393d742b4ee9d3ca6a3d4be2464abca4f32;
+job 124911064937, artifact 13091767467 (131205 bytes), ZIP SHA256
+5a2479b1d9dd7937d3101353be7304427536a64295236eb7151fe15506a0438c.
+One anonymous prelaunch sample returned 200/remaining quota 43/60 before OLD install.
+Normal public discovery/Install/admin started the transaction. STOP/window/KILL
+observed successor stopped before ACK while root was ready; root then aborted.
+Exact OLD32 app/daemon restored, heartbeat 10→11, one OLD tray, watchdog exit 0,
+lock available, transient paths absent, cleanup_errors[].
+Directory `public-next/public-rollback-admission/rollback-41327714069/`:
+verification SHA256 72d91206b09b9672b9098e6e4ed6e1ae0f5b2d461a11dcb2d4d91ab5781af004;
+collector receipt 3e681aa7f08b0e41d50eb0cf8e376e307c1ae48b32b31f9570522a2fd9beb656;
+independent review cd7158fea722f7ad3aa8abcbfe78de85b3df7acf5b19a19a73fca7c5cfa09b14.
+Combined acceptance: `public-next/public-rollback-admission/root-pair-acceptance.json`.
+Root admission/dispatch are in its parent. This was a single dispatch, not a
+retry of accepted commit. Sole watcher `pr451_watcher_resume` is terminal.
 
-Authenticated artifact13089493264, 111280bytes, SHA256
-e4b61a42c3d65c5a184527cb545fd61277bd4d9bc82b331f241b146a19a8e02e.
-`public-next/public-rollback/rollback-41321512323/verification.json` SHA256
-85ac11e5015d7fe3df74228770b9866c41c7b88938597a43f4019694f0a683b0;
-independent-review.json SHA256
-1a493d3697b561066ccf4cd96d92af278ceb2f73a3e175ed78681cd67c270152.
-The accepted commit remains valid and is not to be repeated. No positive rollback
-checker or workflow retry ran; all old watchers are terminal.
+Failed earlier runs are retained separately:41313348427/1 refused menu visibility
+before Install (native cause unproved);41321512323/1 refused discovery HTTP403
+before Install. A later independent probe had exhausted anonymous quota; original
+OLD headers were not captured. Neither run exercised a failing updater transaction.
+PR #450 retained AX diagnostics without weakening visibility; PR #451 added mandatory
+same-runner anonymous feed admission before OLD. A positive sample is not a
+reservation of future shared-IP quota. Do not add retries/auth/seeded offers.
 
-A minimal .33-only anonymous feed admission at the start of drive(), before
-install_old, is implemented and independently reviewed. One fixed-URL sample
-on that same hosted runner, stripped tokens/proxy/redirect, bounded body/list and
-quota/cache/time metadata. Only current200/valid list/valid positive remaining
-admits OLD; external refusal leaves installation and transaction unattempted.
-No authentication, product change, app retry, waiting loop or seeded offer/cache.
-A positive sample proves current availability, not reserved future shared-IP quota.
-Three causal RED cases on the old source → 34 focused PASS, 100 deselected,
-0.18 seconds; old after-failure probe and all other existing menu functions/classes
-are AST-unchanged. Source/check receipt `public-next/feed-admission-fix/verification.json`
-SHA256 29c9911b38f14333306ea7246c5202cc94b3720a2234f32aad8c0f2fe4560f5c;
-independent-review.json SHA256
-1b43888617ad5a9f4379c89c4b5627d9f23fdaaf35c60167a1d71083690ba614 — PASS.
-Actual Native.env/run and early cleanup were reviewed; no tokens/proxies or root/
-OLD side effects on refusal. Result schema2/pair schema1 remain unchanged.
-Next action: commit/PR the scoped change and evidence docs, await required checks,
-then merge exact reviewed tree. Advance only reviewed observer pins in a new
-rollback context that requires this prelaunch evidence. Accepted commit45ec stays
-frozen and reusable. Only then admit a separate actual rollback attempt. Do not rebuild or republish product, or repeat accepted commit.
-Official GitHub rate-limit documentation was checked; response headers are current
-endpoint evidence, while /rate_limit or an elapsed reset alone is insufficient.
-Public pair remains unqualified until actual rollback is independently accepted.
-User Mac, ordinary Quit, notification delivery and media/sleep are not qualified
-by these public-pair runs. The full goal remains active.
+### Frozen checker and observer provenance
 
-### Published .33 and reusable evidence
+PR #451 checked head a5efb34395a5a732228e17392d69c98949eedb21 and merged 459e share
+tree a6c28a9b7094c938d8183bd38a31141833a0b1e2. CI 41325511379/1 and audit
+41325511585/1 passed all three required contexts. Root merge/tree receipts and
+watcher receipt are in `public-next/pr451/head-a5efb3439/`.
+No additional product main build is required for observer-only changes.
 
-Release **430591253**, `v0.1.9-preview.33`, published 2026-11-01T13:07:29Z by
-publisher **41309441046/1**. All 23 acceptance checks passed; all 12 public assets
-and six candidate payload bytes authenticated. OLD32 release 429722639 retained
-its body/assets, with only its archival title changed. Stable 350205640/v0.1.4
-is unchanged. Current app and full-Geph admission passed twice on November 1 UTC
-with zero accepted exceptions, including immediately before publication.
-`publisher/verification.json` SHA256
-cf12afbb0f17a5688d52f201f0e6595f4b666189ec046263abde7ca90399be4c.
+New frozen checker: `public-next/offline-verifier/observer-459e5393d742/`.
+verify.py SHA256 3b07a3df8db8b1450d57923812a2d76ecf6ffd1e4334ca707ce759c5e4123421;
+pins 5cca905b569c726267a4fc77f727e60b4aa328f3b0ce20e5788a9c6295c992f5;
+activation 5fb192dbce5374a29cdbcc5d45c266196390995fb8e8310d204be8df9c5246e7.
+All 14 observer hashes/workflow match exact merge. Six tiny activation checks
+passed; reviewed prelaunch predicates had 2 causal RED → 7 GREEN / 48 mutation subcases.
+Canonical45ec verifier/pins and accepted commit receipts remain unchanged;
+independent snapshots are in the new checker directory. The checker ran once
+on the actual rollback. Do not edit predicates to accept a failed runtime.
 
-Candidate CI **41302269258/1** and audit **41302269288/1** passed on exact product
-9ecc. Manifest `e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0`.
-G **41303686569/1**, 26/26: durable commit, crash restoration, late-commit refusal,
-cleanup. Receipt `native-g/verification.json` SHA256
-7700d3defba99b0a698baa9a788705abeed54d490a027454dca93f1d10c12fc8.
-P **41305039817/1**, 13 groups: real ACK commits; STOP/window/KILL before ACK
-restores exact OLD, ACK0, root abort, watchdog exits, lock available, cleanup empty.
-Receipt `packaged-p/receipt.json` SHA256
-16061050226c7940c9435a6b093e29ab3471414c516d34186c5b63c894a2fda7.
-R **41305043535/1**, 27/27: four sites × Safari/Chrome, transport 3/3, controlled
-owned-Geph stop then fresh-request recovery; six attested report subjects.
-1800.12-second background soak: 3600 samples, max gap 0.656 seconds, stable PID,
-advancing heartbeat, zero visibility counters and empty cleanup. This is not a
-sustained stream/call test or a request synchronized inside production drain.
-Receipt `readiness-r/verification.json` SHA256
-f51642dd45272fbc6721bb311535f466595cc6b28dddd222e122654b6451f5a2.
-Protected R used 1/3 allowed attempts on November 1 UTC; no rerun is needed.
+### Next action and boundaries
 
-Actual pins: `public-next/new33-bindings.json` SHA256
-d7d81669cc0f7010a1d7e6366844884842f95fd2508824a730de5f0090a89df9;
-`public-next/old32-bindings.json` SHA256
-1ba5ec31cb003132d308d16e564ba519388eb1631ce1b354800f845ee81e2b15.
-Use the current OLD32 archival title from `publisher/old32-after.json`.
-PR449 added reviewed minimal .33 driver/menu/workflow clones; older .31 → .32
-success remains historical. Its green PR checks and identical merge tree were
-sufficient for the observer; another product main build was not required.
+The ordinary public pair is accepted. Publish the docs-only evidence update
+(RELEASES, ROADMAP, this compact checkpoint) from the current branch; its scoped
+validation is `git diff --check` and the independent evidence review above.
+Reconcile the PR/CI before proceeding; do not rerun the product suites.
+No product republish, accepted gate rerun or local installation is needed for it.
+User-Mac installation, sustained calls/video, live Telegram and sleep/wake remain
+unqualified. Public-pair proof does not itself establish ordinary Quit, notification
+delivery, continuous invisibility or external sentinel/global PF preservation.
+Separate existing lifecycle evidence is not to be relabelled as this run's proof.
+The full goal remains active; no universal site/reconnect/media guarantee.
 
-### Private acceptance checker and reporting limits
+No local native/Cargo/scanner builds, app/browser/live probes, installation,
+PF/service/DNS/proxy/PAC/VPN/account mutations. Preserve external Geph and user
+settings. Use tiny pure checks, static reads, Git/GitHub and disposable hosted CI.
+Discord/YouTube/googlevideo stay local; no global UDP/443 block. No upstream
+messages, blind reruns, new exceptions or native SQLite expansion. PRs #376/#384
+remain historical partial work, not required wholesale imports. Telegram 1.11.2
+shipped via PR #445; Geph r4 unchanged. Review deadlines: block-buffer November 6, Geph source November 7, Chromium November 13; do not extend allowances.
 
-`public-next/offline-verifier/verify.py` is complete and independently reviewed:
-Current SHA256 2efd7075605fcee6e8ee28a3dd2cf071e2f56efa54d2e79925e6fd29a1aaf2ec.
-Initial 35 negative controls and two historical schema calibrations were retained.
-Review found two private assertion gaps: canonical stopped-window/receipt identity
-binding, and exact public event order. Thirteen new causal RED → GREEN controls
-and both calibrations passed, without rerunning unchanged controls or native I/O.
-Final receipt SHA256 c79acd2c751091f0df88285752520d63c63682cd6a039b23eb90c553dc7aa504;
-independent review SHA256
-825ca97f6a0f1896f22b846ea27b278369ee068f79942333203d6069bb08d802.
-Following reviewed PR450 merge, only the AX reference hash and observer pin
-were advanced to 3145311a… and 45ec528e…; old verifier/context/receipts retained
-in `offline-verifier/snapshots/observer-d0cb0a8abc2d955fcad5150a3a82bc86ed24b08a/`.
-Current binding passes while stale AX and stale observer bindings are refused;
-this was pure synthetic binding validation, not an actual public update result.
-Transition receipt SHA256
-cc5802b1c418a5fdaa1bdc7c783e26fdcc47f1f9feead6209eabd01922ac44c1;
-current verification.json SHA256
-646b633e494105121b343d0b872bac449d7c0bfc5ee0ed27970e7938bcff11d9.
-The first actual commit exposed a private checker envelope defect: actual pair.json
-has exactly `{schema_version: 1, old, new}`, while the checker compared it to bare
-independent `{old, new}` pins. All eight pins and JSON types already matched.
-The corrected check requires exactly three keys, exact integer schema1 and
-unchanged strict independently sourced OLD/NEW values and types. Actual-boundary
-RED→two GREEN checks with 18 negative subcases; no broad/native rerun.
-`pair-envelope-verification.json` SHA256
-e1a643db8e0e1e487b9072532069482b2c87068cc737c410a6c373ee9488d7b8;
-`pair-envelope-independent-review.json` SHA256
-58d083bf9991195b0e4a86a668222354bcdcf297d82c3527df0b68ac160a407b.
-The approved checker then accepted actual commit41319073498; rollback is pending.
-Normal OLD update exit does not separately prove ordinary Quit or external
-sentinel preservation in the public pair.
-
-README RU/EN, GitHub About/topics and the actual .33 release body were reviewed
-again after publication: accurate macOS Preview scope, version-independent links,
-no public-updater or universal-media success claim. No edits needed.
-`public-next/release-hygiene.json` SHA256
-2091e9b69dee3a539c5323e6023eaf87ddbe68fe7d3cc6527807e78a4252fa33.
-The real application screenshot remains deferred by the user.
-
-### Scope and workstation boundaries
-
-PR445 Telegram 1.11.2, PR446 shared DNS/circuit/listener ownership and PR447
-incomplete DoH/DNS, semantic writer cleanup and lazy worker shutdown are included
-in published .33. Geph r4 is unchanged. PR376/384 remain historical drafts;
-do not import unproved gzip/critical-object/redirect/native SQLite changes.
-Installed StatusV2, sustained media, physical sleep/default-route, live Telegram
-and established-stream reset remain qualification gaps, not automatic new bugs.
-Source review expiry: block-buffer November 6, Geph source November 7,
-Chromium November 13; no extensions were authorized.
-
-No local native/Cargo/scanner builds, app/browser/live probes, installations,
-PF/service/DNS/proxy/PAC/VPN/account changes, app binary downloads or upstream
-messages. Tiny guarded pure checks, static reads, Git/GitHub and disposable hosted
-CI only. Preserve the working Mac and external Geph. Discord/YouTube/googlevideo
-stay local; no global UDP443 block. No blind reruns or new vulnerability exceptions.
-The full goal remains active; publication and passing probes are partial evidence.
-
-Xerj rc.100 and Entire 0.12.2 are installed globally; seven Entire hooks approved,
-push_sessions/telemetry false; Depot deferred. No new indexing/models/cloud login.
-The Xerj index predates these scoped files, so direct known-path reads were used.
-Original locator receives only this compact block; its historical tail is retained.
+Xerj rc.100 and Entire 0.12.2 installed globally; user confirmed 7 Entire hooks.
+Current config has all 7 matching trusted hashes; telemetry/push_sessions=false,
+local git-ref checkpoints. Current-chat hook execution is not separately proven.
+Depot deferred. No new indexing/models/scanners/cloud login. README RU/EN/About/
+release hygiene already checked; real app screenshot remains deferred by user.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
