@@ -1,5 +1,18 @@
 # Decisions
 
+### 2026-11-01: no circuit admission or outcome without a backend attempt
+
+Initial Geph unreadiness and a refused session reservation during drain must not
+call the route circuit's admission or result functions. They are availability
+gates, not completed backend attempts. In particular, an expired Open circuit
+must keep its probe available for a real request after readiness returns; a
+no-dial request must neither acquire that permit nor reopen the circuit.
+
+The handler keeps the order session reservation, circuit admission, then backend
+helper, and releases the reservation in `finally`. Actual unsuccessful attempts
+still record failure and retain their existing backoff. This does not change
+route classification, the one-second circuit interval, or cancellation recovery.
+
 ### 2026-10-31: route admission refusal is not a Geph transport failure
 
 The shared Geph suspension after a request is gated by a completed unsuccessful

@@ -1,5 +1,31 @@
 # Routing Research Notes
 
+## 2026-11-01: unavailable Geph recorded failures without a dial
+
+After the shared cooldown repair, a separate `handle` branch still called circuit
+admission and recorded failure when initial readiness was false or a drain
+refused a session reservation. No backend helper had run. Two such outcomes could
+open the service group's circuit; after its one-second interval, another no-dial
+request could consume the half-open permit and reopen it. The monitor's healthy
+probe reducer does not reset that circuit, so a newly ready backend could still
+reject the next request to this group.
+
+The fix removes the entire no-attempt branch, including admission. Removing only
+the failure record would leave an acquired half-open permit without an outcome.
+Normal attempts and actual failure handling remain unchanged. This is a bounded
+route-scoped recovery delay, distinct from the previously repaired 30-second
+shared hold. It is not evidence for the cause of historical reconnect incidents.
+
+Two guarded in-memory tests use the actual handler and registry. Both fail on
+base `cbc3502e` and pass with the branch removed: repeated unreadiness preserves
+an empty registry, and drain preserves an expired Open entry including its idle
+activity and permit. After the real healthy-probe reducer, the first request to
+the same group delivers all 43 response bytes. The existing payload-EOF control
+still records a real failure and pauses the backend. Five focused cases pass.
+Evidence is retained under `output/continuation-20261101/no-dial-circuit/`; exact
+receipt and baseline references are in `CURRENT_STATE.md`. No workstation route,
+live monitor or Geph process was exercised.
+
 ## 2026-10-31: one rejected circuit suspended unrelated Geph routes
 
 The owned Geph handler already distinguished failed attempts with
