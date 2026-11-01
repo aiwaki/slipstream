@@ -1,11 +1,11 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, shared Geph recovery lifetime
+## Current continuation — 2026-11-01, Geph restart drain cleanup
 
 Primary checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/geph-recovery-overlap-contract`, based on merged main
-`b7587b51d9e50c0355c05ba7b4613354df0b3018` (PR #452).
+Branch `codex/geph-restart-drain-cleanup`, based on merged main
+`05c223c75ee0323d79798820ab078b1e20054e20` (PR #453).
 Root owns Git, PRs and workflow dispatches. All qualification watchers are
 terminal. No user-Mac app, service, browser or network settings changed.
 
@@ -15,7 +15,7 @@ The longer preceding checkpoint is retained at
 `public-next/public-rollback-admission/checkpoint-before-compact.md`.
 Detailed public-run history is in [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01).
 
-### Active scoped repair
+### Accepted shared-recovery repair
 
 Three guarded causal tests reproduce lost/poisoned shared owned-Geph recovery
 results after caller cancellation or timeout. The first caller formerly owned
@@ -31,6 +31,37 @@ receipts/source snapshots are retained. `verification-final.json` SHA256
 Root checked source/test/evidence hashes in `root-acceptance.json`.
 Production changes only the coalescer.
 Do not describe it as proof of any particular historical reconnect or media fix.
+
+PR #453: https://github.com/aiwaki/slipstream/pull/453, checked head
+`5d724ac963696c43fc61245786b7901b79722917`, merged as
+`05c223c75ee0323d79798820ab078b1e20054e20`; trees match. CI41331829344/1 and
+dependency-audit41331829292/1 passed all three required contexts, including
+packaged browser and lifecycle checks. Watcher is terminal; receipts under
+`geph-recovery-lifetime/pr453/head-5d724ac96/` in the same continuation root.
+Watcher receipt SHA e3f944d33781d0855b4a2c1bbf5a6a20a456db9d582e6e3e9cbed6c4a9dfdea1;
+root independently checked required jobs and empty review threads before merge.
+Root merge/tree proof is retained. No release or local installation occurred.
+
+### Active drain repair
+
+Separate from PR #453: successor polling after kickstart can
+propagate `OSError(EMFILE)` from `lsof` before the replay caller enters its drain
+cleanup. One guarded causal RED completed in 0.25s/RSS 94.9MB: drain stayed true,
+fresh session admission was refused; no forbidden I/O, test state restored.
+`geph-recovery-lifetime/drain-followup/verification-red.json` SHA256
+7e3f99d6d08cc8c665b0fdf2294da5c1d2d83e78607bf48c74d2a4ac6401a0a7.
+Root applied the reviewed outer-finally patch to the real source; expected source
+SHA256 6c5e802e8ace5f75b923dbe0c49a2cbcc1d25b80d408040619e056e25f513830 matches.
+Seven manual releases became one managed-owner cleanup; only normal `restarted`
+retains the drain for payload handoff. `verifier_activation` owns the new
+self-contained guarded test; author and independent reviewer are now terminal.
+Five new controls plus eight shared-recovery cases passed in 1.31s/RSS 99.4MB;
+no external effects. Original RED helper body is AST-identical to the public
+regression. `verification-green.json` SHA256
+b64e66bce936a39ce3f6b5e6ce43cb808b542ff1535b757d11a58c0600a9e013;
+independent `review.json` SHA256
+4a9a70c71beb509db901fd34a6fbc028ecd6911e83044caa9e76b8fd62a1b682, no findings.
+Do not alter accepted PR #453 evidence or rerun it.
 
 ### Published product and reusable gates
 
@@ -121,8 +152,8 @@ CI41329055695/1 and audit41329055664/1 passed all three required contexts;
 root merge/tree proof and final watcher receipt are in
 `public-next/pr452/head-72e648e45/`. The watcher is terminal.
 Do not repeat the completed public-pair or docs work. The current branch contains
-the separate recovery-lifetime repair above. Focused checks/review are accepted;
-open its scoped PR and obtain the required exact-head CI. Published .33 remains
+the separate drain cleanup repair above. Focused checks/review are accepted;
+open its scoped PR and obtain the required CI. Published .33 remains
 unchanged and does not contain this new repair. Its accepted gates remain valid
 for that release, not automatic qualification of a later product build.
 User-present workstation smoke and sustained media/Telegram/sleep checks remain
