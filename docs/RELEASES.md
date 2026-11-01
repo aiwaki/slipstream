@@ -49,6 +49,17 @@ Ordinary public `.32 → .33` cancellation, commit and pre-ACK rollback must use
 these actual published assets. The `.31 → .32` results below remain historical
 evidence for their source snapshots; they do not qualify `.33`.
 
+The first ordinary public attempt,
+[41313348427/1](https://github.com/aiwaki/slipstream/actions/runs/41313348427),
+authenticated both releases and found the enabled `.33` Install item in the old
+tray's Accessibility tree. Opening the menu returned AX error −25204; its fresh
+visibility check then refused the item. The observer did not retain the visible
+child count, so the native cause remains unresolved. No Install, cancellation,
+admin prompt or transaction occurred, and cleanup reported no errors. This run
+qualifies neither the public update nor a failure of the updater transaction.
+The follow-up observer records the missing diagnostics without relaxing the
+visibility requirement or retrying the action.
+
 ## Published preview .32 — 2026-10-31
 
 [Slipstream 0.1.9-preview.32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)

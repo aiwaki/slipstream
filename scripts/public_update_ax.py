@@ -205,6 +205,53 @@ class AX:
         finally:
             self.cf.CFRelease(action)
 
+    def _visibility_hit_test(self, item, diagnostic):
+        """Read-only exact global hit; the caller decides whether it is admissible."""
+        diagnostic.update(ax_error=None, frame_valid=False, element_valid=False,
+                          owner_checked=False, exact_match=None)
+        position, size = Point(), Size()
+        for name, kind, target in (("AXPosition", 1, position), ("AXSize", 2, size)):
+            diagnostic["stage"] = name
+            code, value = self.attribute(item["element"], name)
+            diagnostic["ax_error"] = code
+            if (code != 0 or not value or self.cf.CFGetTypeID(value) != self.ax.AXValueGetTypeID()
+                    or self.ax.AXValueGetType(value) != kind
+                    or not self.ax.AXValueGetValue(value, kind, C.byref(target))):
+                raise Blocked("update item frame unavailable")
+        diagnostic["stage"] = "frame"
+        values = (position.x, position.y, size.width, size.height)
+        if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values) or size.width <= 0 or size.height <= 0:
+            raise Blocked("update item frame is not finite and positive")
+        diagnostic["frame_valid"] = True
+        diagnostic["stage"] = "system_wide"
+        system = self.ax.AXUIElementCreateSystemWide()
+        if not system:
+            raise Blocked("visibility hit-test unavailable")
+        self.refs.append(system)
+        diagnostic["stage"] = "messaging_timeout"
+        if self.ax.AXUIElementSetMessagingTimeout(system, 0.5) != 0:
+            raise Blocked("visibility hit-test timeout unavailable")
+        diagnostic["stage"] = "target_check"
+        self.check(item["element"])
+        hit = C.c_void_p()
+        diagnostic["stage"] = "hit_read"
+        code = self.ax.AXUIElementCopyElementAtPosition(system, position.x + size.width / 2,
+                                                      position.y + size.height / 2, C.byref(hit))
+        diagnostic["ax_error"] = code
+        if hit.value:
+            self.refs.append(hit.value)
+        if code != 0 or not hit.value or self.cf.CFGetTypeID(hit.value) != self.ax.AXUIElementGetTypeID():
+            raise Blocked("update item visibility not observed")
+        diagnostic["element_valid"] = True
+        diagnostic["stage"] = "hit_check"
+        self.check(hit.value)  # Only PID is read on a foreign hit; never traverse it or act on it.
+        diagnostic["owner_checked"] = True
+        diagnostic["stage"] = "exact_match"
+        diagnostic["exact_match"] = bool(self.cf.CFEqual(hit.value, item["element"]))
+        if not diagnostic["exact_match"]:
+            raise Blocked("update item is hidden or obscured")
+        diagnostic["status"] = "matched"
+
     def menu_visibility(self, item, pressed_tray, observation=None):
         """Prove a fresh exact item is visible; never act on a hit-test result."""
         if observation is None:
@@ -250,53 +297,58 @@ class AX:
                 raise Blocked("fresh menu child is missing or ambiguous")
             edge["status"] = "matched"
         observation["stage"] = "visibility"
-        error, children = self.attribute(menu["element"], "AXVisibleChildren")
+        visible = {"ax_error": None, "array_valid": False, "count": None,
+                   "match_count": None, "status": "reading"}
+        observation["visible_children"] = visible
+        try:
+            error, children = self.attribute(menu["element"], "AXVisibleChildren")
+        except Exception:
+            visible["status"] = "read_failed"
+            raise
+        visible["ax_error"] = error
         if error == 0:
             if not children or self.cf.CFGetTypeID(children) != self.cf.CFArrayGetTypeID():
+                visible["status"] = "invalid_array"
                 raise Blocked("visible menu children unavailable")
+            visible["array_valid"] = True
             count = self.cf.CFArrayGetCount(children)
+            visible["count"] = count
             if not 0 <= count <= 64:
+                visible["status"] = "count_out_of_bounds"
                 raise Blocked("visible menu child count exceeds bound")
-            matches = 0
+            visible["match_count"] = 0
             for index in range(count):
                 child = self.cf.CFArrayGetValueAtIndex(children, index)
                 if not child or self.cf.CFGetTypeID(child) != self.ax.AXUIElementGetTypeID():
+                    visible["status"] = "invalid_child"
                     raise Blocked("invalid visible menu child")
-                self.check(child)
-                matches += bool(self.cf.CFEqual(child, item["element"]))
-            if matches != 1:
+                try:
+                    self.check(child)
+                except Blocked:
+                    visible["status"] = "child_check_failed"
+                    raise
+                visible["match_count"] += bool(self.cf.CFEqual(child, item["element"]))
+            if visible["match_count"] != 1:
+                visible["status"] = "item_missing" if visible["match_count"] == 0 else "item_ambiguous"
+                if visible["match_count"] == 0:
+                    # Independent shadow evidence never replaces this supported
+                    # attribute's refusal, even when the exact global hit succeeds.
+                    shadow = {"diagnostic_only": True, "status": "reading"}
+                    observation["shadow_hit_test"] = shadow
+                    try:
+                        self._visibility_hit_test(item, shadow)
+                    except Exception as error:
+                        shadow.update(status="failed", error_type=type(error).__name__)
                 raise Blocked("exact update item is not uniquely visible")
+            visible["status"] = "matched"
             method = "visible_children"
         elif error in {-25205, -25212}:  # Unsupported/no-value: require independent positive hit-test proof.
-            position, size = Point(), Size()
-            for name, kind, target in (("AXPosition", 1, position), ("AXSize", 2, size)):
-                code, value = self.attribute(item["element"], name)
-                if (code != 0 or not value or self.cf.CFGetTypeID(value) != self.ax.AXValueGetTypeID()
-                        or self.ax.AXValueGetType(value) != kind
-                        or not self.ax.AXValueGetValue(value, kind, C.byref(target))):
-                    raise Blocked("update item frame unavailable")
-            values = (position.x, position.y, size.width, size.height)
-            if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values) or size.width <= 0 or size.height <= 0:
-                raise Blocked("update item frame is not finite and positive")
-            system = self.ax.AXUIElementCreateSystemWide()
-            if not system:
-                raise Blocked("visibility hit-test unavailable")
-            self.refs.append(system)
-            if self.ax.AXUIElementSetMessagingTimeout(system, 0.5) != 0:
-                raise Blocked("visibility hit-test timeout unavailable")
-            self.check(item["element"])
-            hit = C.c_void_p()
-            code = self.ax.AXUIElementCopyElementAtPosition(system, position.x + size.width / 2,
-                                                          position.y + size.height / 2, C.byref(hit))
-            if hit.value:
-                self.refs.append(hit.value)
-            if code != 0 or not hit.value or self.cf.CFGetTypeID(hit.value) != self.ax.AXUIElementGetTypeID():
-                raise Blocked("update item visibility not observed")
-            self.check(hit.value)  # Only PID is read on a foreign hit; never traverse it or act on it.
-            if not self.cf.CFEqual(hit.value, item["element"]):
-                raise Blocked("update item is hidden or obscured")
+            visible["status"] = "unsupported" if error == -25205 else "no_value"
+            observation["hit_test"] = {"status": "reading"}
+            self._visibility_hit_test(item, observation["hit_test"])
             method = "global_hit_test"
         else:
+            visible["status"] = "read_failed"
             raise Blocked("visible menu inspection failed")
         self.check(item["element"])
         observation["stage"] = "complete"
