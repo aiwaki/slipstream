@@ -17,9 +17,9 @@ small PR with tests and matching documentation.
 На отдельных Mac в CI проверены выход, остановка и восстановление Geph, четыре
 сайта в Safari и Chrome, установка пакета, откат и 1800,12 секунды работы в фоне.
 Обычный публичный переход `.32 → .33` через меню с отменой и повторной установкой
-подтверждён. Отдельный аварийный откат с этого пути ещё не проверен: попытка
-остановилась на HTTP 403 при поиске релиза, до установки. Установка на
-пользовательском Mac, длительные звонки, видео и сон/пробуждение не подтверждены.
+подтверждён. Отдельный публичный сценарий подтвердил восстановление `.32`,
+если `.33` завершить до подтверждения запуска. Установка на пользовательском
+Mac, длительные звонки, видео и сон/пробуждение не подтверждены.
 Источники и границы проверок — в [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01).
 
 | Продолжающаяся работа | Что осталось |
@@ -39,9 +39,9 @@ auth-cache repair. The stable release is unchanged.
 Disposable Macs in CI covered Quit, Geph stop/recovery, four sites in Safari
 and Chrome, package update, rollback and 1800.12 seconds of background operation.
 The ordinary public `.32 → .33` menu path passed cancellation and installation.
-Its separate pre-ACK rollback remains unverified: the attempt stopped at a
-discovery HTTP 403 before installation. Installation on the user's Mac, sustained
-calls, video and sleep/wake also remain unverified.
+A separate public run verified restoration of `.32` after terminating `.33`
+before its startup acknowledgement. Installation on the user's Mac, sustained
+calls, video and sleep/wake remain unverified.
 See [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01) for evidence and its limits.
 
 | Ongoing work | What remains |

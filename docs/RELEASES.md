@@ -17,8 +17,8 @@ DNS-ответов и остановки обработчиков. Недост�
 подтверждения запуска. Наблюдение в течение 1800,12 секунды проверяло работу в
 фоне и очистку, а не непрерывное видео или звонок. Обычный публичный переход
 `.32 → .33` через меню, включая отмену и повторную установку, подтверждён.
-Аварийный откат с этого публичного пути и установка на пользовательском Mac
-пока не подтверждены.
+Отдельно подтверждён аварийный возврат к `.32` при завершении `.33` до
+подтверждения запуска. Установка на пользовательском Mac пока не проверена.
 
 **EN:** This release repairs scoped request-cancellation, incomplete DNS response
 and worker-shutdown failures. Geph unavailability before a connection attempt
@@ -27,8 +27,9 @@ CI covered four sites in Safari and Chrome, Geph stop/recovery, package update
 and rollback after terminating the successor before its startup acknowledgement.
 The 1800.12-second observation covered background operation and cleanup, not a
 continuous video or call. The ordinary public `.32 → .33` menu path, including
-cancellation and a new installation attempt, is verified. Pre-ACK rollback from
-that public path and installation on the user's Mac remain unverified.
+cancellation and a new installation attempt, is verified. A separate public run
+verified restoration of `.32` after terminating `.33` before its startup
+acknowledgement. Installation on the user's Mac remains unverified.
 
 The candidate manifest is
 `e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0`.
@@ -48,8 +49,9 @@ a media stream open across the outage. Discord and YouTube remain on local bypas
 These results do not establish the cause of every earlier reconnect or HTTP 403.
 
 Public `.32 → .33` cancellation and commit used these actual published assets.
-Its separate pre-ACK rollback remains pending. The `.31 → .32` results below
-remain historical evidence for their source snapshots; they do not qualify `.33`.
+A separate public run verified pre-ACK rollback to `.32`. The `.31 → .32`
+results below remain historical evidence for their source snapshots; they do
+not qualify `.33`.
 
 The first ordinary public attempt,
 [41313348427/1](https://github.com/aiwaki/slipstream/actions/runs/41313348427),
@@ -88,7 +90,25 @@ installing or launching OLD. It records bounded status, quota, cache and timing
 data and refuses the attempt when the sample is unavailable. A successful sample
 is a prerequisite observation, not a reservation of future shared-IP quota. It
 does not authenticate, retry the app or seed its update offer. The accepted
-Cancel/commit evidence is retained; a separate actual rollback is still required.
+Cancel/commit evidence is retained without rerunning it.
+
+[Public pre-ACK rollback 41327714069/1](https://github.com/aiwaki/slipstream/actions/runs/41327714069)
+passed with observer `459e5393d742b4ee9d3ca6a3d4be2464abca4f32` and the unchanged
+published apps. The anonymous prelaunch sample returned HTTP 200 with remaining
+quota, then OLD discovered the offer and the normal Install/admin path began.
+The observer stopped NEW before acknowledgement, observed the stopped process
+and root `ready` phase, then terminated NEW. The root transaction reached
+`aborted`, the exact `.32` app and daemon were restored, and the restored
+daemon heartbeat advanced from 10 to 11. One OLD tray remained; the watchdog
+exited successfully, the lock was available, transient transaction files were
+absent and cleanup reported no errors.
+
+The small evidence artifact `13091767467` (131205 bytes, SHA-256
+`5a2479b1d9dd7937d3101353be7304427536a64295236eb7151fe15506a0438c`) binds
+run, attempt, job, source and public asset identities. Together with the accepted
+Cancel/commit run, this qualifies the ordinary public `.32 → .33` update and
+pre-ACK rollback on a disposable hosted Mac. It does not qualify installation
+on the user's Mac, sustained media, sleep/wake or every reconnect scenario.
 
 ## Published preview .32 — 2026-10-31
 
