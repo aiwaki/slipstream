@@ -1,5 +1,48 @@
 # Routing Research Notes
 
+## 2026-11-01: Telegram transport update and candidate reconciliation
+
+The shipped source base was tg-ws-proxy 1.8.1. Retained PR386 contained a 1.11.2
+candidate alongside unrelated changes; only its Telegram sources, tests and
+source inventory are carried forward. The official archive for commit
+`307a384ab7f522e34bb1a045884d0bd90f40bee5` matches SHA-256
+`db9048b56faaf64f43f1a4f4833e45ad4ba8a7b1ee27c8ed5f7f4467db7326d1`;
+all 15 original modules and LICENSE match the retained inventory. Local patches
+are recorded in `vendor/tg-ws-proxy/LOCAL_CHANGES.md`, not represented as pristine
+upstream files. The [1.11.3 release notes](https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.11.3)
+recommend 1.11.2 because of TLS compatibility failures. A comparison with
+unreleased `1636903c8fd4c2b58db5c6f81736fec5489cdec8` does not qualify that snapshot.
+
+The old review's missing CF refill applies to the candidate, not shipped 1.8.1.
+Scheduling refill on a miss restores cold-start, failed-warmup and redirected-DC
+recovery while preserving single-flight admission and owned cleanup. A separate
+completed-connector/cancel interleaving exposes an unclaimed socket in 1.8.1;
+the candidate's retained cleanup closes it. These fixtures establish lifecycle
+defects, not the cause of historical reconnects. Explicit CF workers default to
+an empty list in the embedded launcher.
+
+The quick-ACK concern was not substantiated. The WebSocket path preserves native
+framing and ACK bytes. The new HTTP adapter is a different transport:
+[TDLib's HTTP transport](https://github.com/tdlib/td/blob/master/td/mtproto/HttpTransport.h#L30-L32)
+declares quick ACK unsupported. Without endpoint-specific evidence, interpreting
+an arbitrary negative four-byte HTTP body as a native ACK would be speculative.
+The candidate's error classification is therefore retained. Fourteen guarded
+characterization cases passed; they do not qualify live Telegram or cryptography.
+
+The daemon's Telegram startup catches import failures and keeps the main daemon
+running, so a healthy generic lifecycle status cannot prove the frozen Telegram
+closure. The existing offline transport self-test now requires the vendor H2
+modules and HTTPX dependency imports, constructs an H2 frame and client, and
+closes them without a request. Missing modules or initialization failure fail the
+self-test. Its existing JSON contract and QUIC matrix are preserved. Pull-request
+packaging invokes that same CLI in the built daemon after resource verification;
+no second app verifier or privileged transport qualification is introduced.
+
+Private source verification, old/new pool evidence and protocol characterization
+are retained under `output/continuation-20261101/telegram-recovery/`. Actual frozen
+execution and exact-head CI remain separate gates. No workstation
+service, browser, live target endpoint or account was exercised in this review.
+
 ## 2026-11-01: unavailable Geph recorded failures without a dial
 
 After the shared cooldown repair, a separate `handle` branch still called circuit

@@ -35,3 +35,6 @@ redistributed or launched by this runtime.
 - Project: <https://github.com/Flowseal/tg-ws-proxy>
 - License: MIT
 - Vendored license: [`vendor/tg-ws-proxy/LICENSE`](vendor/tg-ws-proxy/LICENSE)
+- Upstream source and local changes: [`SOURCE.json`](vendor/tg-ws-proxy/SOURCE.json),
+  [`LOCAL_CHANGES.md`](vendor/tg-ws-proxy/LOCAL_CHANGES.md). The upstream input is
+  version 1.11.2; Slipstream retains local transport lifecycle fixes.

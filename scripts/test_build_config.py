@@ -151,6 +151,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("PYTHONPATH=scripts python3 -c", gate)
         self.assertLess(gate.index('test -d "$app"'), gate.index(check))
         self.assertLess(gate.index(check), gate.index('Print :CFBundleExecutable'))
+        frozen_test = 'sudo env CI=true GITHUB_ACTIONS=true SLIPSTREAM_RELEASE_READINESS=1'
+        self.assertLess(gate.index(check), gate.index(frozen_test))
 
     def test_local_build_disables_updater_artifacts(self) -> None:
         config = json.loads(
@@ -1534,7 +1536,13 @@ class BuildConfigTests(unittest.TestCase):
     def test_python_lock_update_tool_is_pinned_and_syntax_checked(self) -> None:
         updater = ROOT / "scripts/update_python_locks.sh"
         text = updater.read_text(encoding="utf-8")
-        self.assertIn('pip_tools_version="7.5.3"', text)
+        self.assertIn('pip_version="26.2.2"', text)
+        self.assertIn('pip_tools_version="7.6.2"', text)
+        self.assertIn('"pip==$pip_version"', text)
+        self.assertIn("export PIP_ONLY_BINARY=:all:", text)
+        self.assertIn("export PIP_DEFAULT_TIMEOUT=15", text)
+        self.assertIn("export PIP_RETRIES=1", text)
+        self.assertIn("--no-emit-options", text)
         self.assertIn('python_minor" != "3.13"', text)
         self.assertIn("--generate-hashes", text)
         self.assertIn("--allow-unsafe", text)

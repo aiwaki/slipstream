@@ -1,5 +1,21 @@
 # Decisions
 
+### 2026-11-01: pinned Telegram source with retained transport ownership
+
+The bundled Telegram transport advances from tg-ws-proxy 1.8.1 to the reviewed
+1.11.2 source commit `307a384ab7f522e34bb1a045884d0bd90f40bee5`. The 1.11.3
+release notes recommend this base pending TLS compatibility repair; an
+unreleased upstream snapshot is not substituted for a qualified release.
+`SOURCE.json` records original upstream input hashes, while the enclosing
+Slipstream commit and `LOCAL_CHANGES.md` identify the patched implementation.
+
+Local ownership of setup, refill, rotation, accepted clients and shutdown is
+retained. An empty CF worker pool schedules the same coalesced refill as a hit;
+cancellation reclaims completed but unclaimed sockets. HTTP/2 remains upstream's
+CF media fallback, not a new route through Geph. Ordinary TLS verifies the chain
+and hostname; explicit fronting retains upstream's chain-only hostname policy.
+No system DNS, proxy, PAC or VPN setting changes are part of this update.
+
 ### 2026-11-01: no circuit admission or outcome without a backend attempt
 
 Initial Geph unreadiness and a refused session reservation during drain must not
