@@ -15,6 +15,21 @@ See the October 23 entry in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) for the
 causal DNS regression and the limits of the current Safari observation. Preserve
 external Geph and user-managed network settings while collecting evidence.
 
+### Incomplete DoH replies and cancelled semantic IPC
+
+HTTP200 alone does not prove a complete DoH reply. The app-owned resolver rejects
+a short declared HTTP body and DNS TC-marked answers; its existing provider
+fallback and cache policies still apply. This is separate from an incomplete web
+page response, a browser's system-DNS error or HTTP403 from the target site.
+
+A cancelled semantic request must close its accepted IPC writer, including when
+cancellation occurs during frame reading or dispatch. Cleanup also covers JSON
+encoding failure and bounds waiting for close by two seconds. Closing the writer
+does not establish that a previously dispatched thread effect was cancelled.
+Check the installed source before attributing a user's symptom to these repairs;
+see the November1 input/cleanup investigation in
+[ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
+
 ### Recovery stalls after a cancelled request
 
 Preserve the request phase and the circuit key/generation: resolver wait,

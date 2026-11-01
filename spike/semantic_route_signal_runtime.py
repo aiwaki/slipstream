@@ -201,34 +201,38 @@ async def _read_frame(reader):
 
 async def handle_semantic_signal_client(reader, writer, runtime):
     try:
-        payload = await _read_frame(reader)
-        response = await asyncio.to_thread(runtime.handle, payload)
-    except asyncio.TimeoutError:
-        response = _response(False, ACTION_NONE, REASON_READ_TIMEOUT)
-    except (asyncio.IncompleteReadError, struct.error):
-        response = _response(False, ACTION_NONE, REASON_INVALID_FRAME)
-    except SemanticSignalError as error:
-        response = _response(False, ACTION_NONE, error.code)
-    except Exception:
-        response = _response(False, ACTION_NONE, REASON_CONTEXT_UNAVAILABLE)
-    encoded = json.dumps(
-        response,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("ascii")
-    try:
-        writer.write(encode_frame(encoded))
-        await asyncio.wait_for(
-            writer.drain(),
-            timeout=IPC_WRITE_TIMEOUT_SECONDS,
-        )
-    except (asyncio.TimeoutError, ConnectionError, OSError):
-        pass
+        try:
+            payload = await _read_frame(reader)
+            response = await asyncio.to_thread(runtime.handle, payload)
+        except asyncio.TimeoutError:
+            response = _response(False, ACTION_NONE, REASON_READ_TIMEOUT)
+        except (asyncio.IncompleteReadError, struct.error):
+            response = _response(False, ACTION_NONE, REASON_INVALID_FRAME)
+        except SemanticSignalError as error:
+            response = _response(False, ACTION_NONE, error.code)
+        except Exception:
+            response = _response(False, ACTION_NONE, REASON_CONTEXT_UNAVAILABLE)
+        encoded = json.dumps(
+            response,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        try:
+            writer.write(encode_frame(encoded))
+            await asyncio.wait_for(
+                writer.drain(),
+                timeout=IPC_WRITE_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            pass
     finally:
         writer.close()
         try:
-            await writer.wait_closed()
-        except (ConnectionError, OSError):
+            await asyncio.wait_for(
+                writer.wait_closed(),
+                timeout=IPC_WRITE_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, ConnectionError, OSError):
             pass
 
 

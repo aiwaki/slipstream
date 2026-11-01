@@ -102,7 +102,7 @@ def parse_a_response(packet, query_id):
     response_id, flags, questions, answers, _authority, _additional = struct.unpack(
         "!HHHHHH", packet[:12]
     )
-    if response_id != query_id or not (flags & 0x8000) or flags & 0x000F:
+    if response_id != query_id or not (flags & 0x8000) or flags & 0x0200 or flags & 0x000F:
         return []
     try:
         offset = 12
@@ -154,6 +154,10 @@ def _query_endpoint(connect_ip, server_name, host, timeout):
             return []
         packet = response.read(APP_DOH_MAX_RESPONSE + 1)
         if len(packet) > APP_DOH_MAX_RESPONSE:
+            return []
+        # A sized HTTPResponse.read may return early at EOF without raising
+        # IncompleteRead. Do not cache DNS from an unfinished declared body.
+        if response.length is not None and response.length != 0:
             return []
         return parse_a_response(packet, query_id)
     except (OSError, ValueError, http.client.HTTPException, ssl.SSLError):

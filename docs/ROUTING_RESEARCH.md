@@ -1,5 +1,36 @@
 # Routing Research Notes
 
+## 2026-11-01: incomplete DNS responses and semantic client cancellation
+
+The remaining PR376 checks were reconciled against merged main `3c18627f8`.
+Two source areas had reproducible defects independent of live sites or accounts:
+
+| Boundary | Reproduced failure | Scoped repair |
+|---|---|---|
+| DoH HTTP body | The standard library's sized read returned a valid DNS prefix even though nine declared body bytes never arrived. | Reject a nonzero remaining Content-Length before accepting DNS records. |
+| DNS message | A TC-marked reply containing an A record was accepted. | Reject the truncation flag before answer parsing. |
+| Accepted semantic IPC client | Cancellation before the write stage skipped writer cleanup; encoding failure did likewise, and waiting for close had no deadline. | Cover the whole handler with cleanup and retain the existing two-second budget for closing. |
+
+The DNS tests use actual `http.client.HTTPResponse` framing over BytesIO. The
+two causal cases fail on the old source and pass with the repair; all18 focused
+cases cover complete length/chunked/EOF framing, malformed chunking, size limits,
+provider fallback and positive/negative caches. TLS verification and existing
+cache bounds/TTLs remain unchanged. The existing HTTP response stub now exposes
+its completed length; it does not stand in for the new framing regressions.
+
+Semantic IPC uses the same guarded fixtures before and after: five failures and
+eight passing controls become thirteen passes. Header/body/dispatch/drain
+cancellation, exact normal/error responses, encoding failure and bounded close
+are covered. Dispatch is simulated in memory; these tests neither create a real
+Unix listener nor prove revocation of a thread effect after cancellation.
+
+Both patches were independently reviewed before applying. Their source/test
+hashes and before/after evidence are retained privately under
+`output/continuation-20261101/remaining-pr376/recovery/{dns-next,semantic-next}/`.
+The source fixes do not identify a historical reconnect or qualify an installed
+app. They complete these two validated input/cleanup findings without importing
+unproved gzip, critical-object or redirect behavior from the old branch.
+
 ## 2026-11-01: cancellation and late outcomes in shared recovery work
 
 PR376 reconciliation against merged main `dcbc56f40` found two independently
