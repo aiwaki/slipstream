@@ -30,6 +30,13 @@ Check the installed source before attributing a user's symptom to these repairs;
 see the November1 input/cleanup investigation in
 [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
 
+### Closing while a browser-probe worker starts
+
+An exception saying a thread cannot be joined before it starts points to the
+worker publication/start boundary. Thread publication and start now share the
+same lock, with shutdown rechecked after admission. This change does not prove
+that an established video or call failure came from that worker.
+
 ### Recovery stalls after a cancelled request
 
 Preserve the request phase and the circuit key/generation: resolver wait,

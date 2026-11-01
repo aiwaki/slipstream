@@ -31,6 +31,33 @@ The source fixes do not identify a historical reconnect or qualify an installed
 app. They complete these two validated input/cleanup findings without importing
 unproved gzip, critical-object or redirect behavior from the old branch.
 
+## 2026-11-01: lazy worker start/close and terminal updater checks
+
+A deterministic fake-thread schedule exposed two lazy-worker races: closing
+between thread publication and start raised join-before-start, and stopping
+between the fast stop check and lock admission still allowed thread creation.
+The same fixtures change from two failures and six passing controls to eight
+passes; no real thread, browser or network is used. The repair rechecks stop and
+starts the published thread under the lifecycle lock. The existing stop check inside the worker prevents a late browser launch;
+these cases do not establish a leaked browser or explain a past reconnect.
+
+PR447's first hosted Rust run failed the rollback identity mutation assertion at
+updater_transaction.rs:3804. The log discarded the Result and does not establish
+which early-return branch or lock owner was involved. The public completion
+check deliberately returns false while its nonblocking transaction lock is busy,
+before reading the changed executable. Parallel fork retention of an open file
+description is an already documented fixture concern in daemon_update tests.
+
+Terminal mutation fixtures therefore keep one owned lock while exercising the
+unchanged validation body. A separate public-path control retains a cloned file
+description, checks exact deferral for both healthy and changed executables,
+then explicitly releases it and checks completion or the identity error. Explicit
+unlock belongs only to test cleanup. Production lock inheritance, nonblocking
+admission, ACK requirements, receipt validation and executable hashing stay intact.
+This makes the two contracts independently testable without treating a delayed
+validation as acceptance or retrying until a failure disappears. Hosted native
+results are recorded in the current checkpoint; no local native run was made.
+
 ## 2026-11-01: cancellation and late outcomes in shared recovery work
 
 PR376 reconciliation against merged main `dcbc56f40` found two independently

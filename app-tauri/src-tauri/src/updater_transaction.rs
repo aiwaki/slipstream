@@ -2749,9 +2749,22 @@ fn startup_transaction_finished_at(
         .parent()
         .ok_or_else(|| "update journal parent is missing".to_string())?;
     ensure_user_directory(state_dir, true)?;
-    let Some(_lock) = try_transaction_lock(state_dir)? else {
+    let Some(lock) = try_transaction_lock(state_dir)? else {
         return Ok(false);
     };
+    startup_transaction_finished_locked(&lock, context, current_exe, current_version)
+}
+
+// The caller keeps this transaction's live lock through all terminal validation.
+fn startup_transaction_finished_locked(
+    _lock: &File,
+    context: &PendingSuccessorAck,
+    current_exe: &Path,
+    current_version: &str,
+) -> Result<bool, String> {
+    if context.needs_daemon_ack() && !context.ack_written {
+        return Ok(false);
+    }
     let failed = failed_receipt_path(&context.journal_path, &context.nonce);
     for path in [
         &context.journal_path,
@@ -2825,6 +2838,14 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::os::unix::fs::{symlink, PermissionsExt};
     use tempfile::TempDir;
+
+    fn release_fixture_lock(lock: File) {
+        // Test-only: a parallel fork can retain the same open description after
+        // drop. Production lock inheritance must remain unchanged.
+        // SAFETY: the fixture owns this live descriptor and has finished its work.
+        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) }, 0);
+        drop(lock);
+    }
 
     fn journal(root: &Path) -> (PathBuf, UpdateJournalV1) {
         let state = root.join("state");
@@ -3425,19 +3446,23 @@ mod tests {
         let never_acknowledged = context.clone();
         acknowledge_successor(&mut context, 7).unwrap();
         let expected_version = value.expected_version.clone();
-        let committed = |context: &PendingSuccessorAck| {
-            startup_transaction_finished_at(context, &current_exe, &expected_version)
-        };
-        assert!(!committed(&context).unwrap(), "ACK alone is not commit");
         let watchdog_lock = try_transaction_lock(path.parent().unwrap())
             .unwrap()
             .unwrap();
+        let committed = |context: &PendingSuccessorAck| {
+            startup_transaction_finished_locked(
+                &watchdog_lock,
+                context,
+                &current_exe,
+                &expected_version,
+            )
+        };
+        assert!(!committed(&context).unwrap(), "ACK alone is not commit");
         complete_success(&path, &mut value).unwrap();
         assert!(
-            !committed(&context).unwrap(),
+            !startup_transaction_finished_at(&context, &current_exe, &expected_version).unwrap(),
             "watchdog still owns its lock"
         );
-        drop(watchdog_lock);
         assert!(!committed(&never_acknowledged).unwrap());
         assert!(committed(&context).unwrap());
         for residue in [&context.backup, &context.stage, &context.launch_agent] {
@@ -3445,9 +3470,16 @@ mod tests {
             assert!(!committed(&context).unwrap());
             fs::remove_file(residue).unwrap();
         }
-        assert!(startup_transaction_finished_at(&context, &current_exe, "wrong-version").is_err());
+        assert!(startup_transaction_finished_locked(
+            &watchdog_lock,
+            &context,
+            &current_exe,
+            "wrong-version",
+        )
+        .is_err());
         fs::write(&current_exe, b"changed").unwrap();
         assert!(committed(&context).is_err());
+        release_fixture_lock(watchdog_lock);
     }
 
     #[test]
@@ -3467,15 +3499,20 @@ mod tests {
         assert!(!path.exists());
         assert!(!context.backup.exists());
         assert!(!context.stage.exists());
-        assert!(
-            !startup_transaction_finished_at(&context, &current_exe, &context.version).unwrap()
-        );
+        let lock = try_transaction_lock(path.parent().unwrap())
+            .unwrap()
+            .unwrap();
+        let finished = || {
+            startup_transaction_finished_locked(&lock, &context, &current_exe, &context.version)
+        };
+        assert!(!finished().unwrap());
         fs::remove_file(path.with_file_name(format!(
             "app-update-transaction-failed-{}.json",
             context.nonce
         )))
         .unwrap();
-        assert!(startup_transaction_finished_at(&context, &current_exe, &context.version).is_err());
+        assert!(finished().is_err());
+        release_fixture_lock(lock);
     }
 
     #[test]
@@ -3668,13 +3705,18 @@ mod tests {
         assert!(!path.exists());
         let context = rollback_context.into_inner().unwrap();
         let current_exe = bundle_executable(&value.target);
-        let finished =
-            || startup_transaction_finished_at(&context, &current_exe, &value.current_version);
+        let finished = || {
+            startup_transaction_finished_locked(
+                &_watchdog_lock,
+                &context,
+                &current_exe,
+                &value.current_version,
+            )
+        };
         assert!(
-            !finished().unwrap(),
+            !startup_transaction_finished_at(&context, &current_exe, &value.current_version).unwrap(),
             "cleanup alone cannot bypass the watchdog lock"
         );
-        drop(_watchdog_lock);
         assert!(finished().unwrap());
         for residue in [
             &context.journal_path,
@@ -3688,6 +3730,7 @@ mod tests {
             fs::remove_file(residue).unwrap();
         }
         assert!(finished().unwrap());
+        release_fixture_lock(_watchdog_lock);
     }
 
     #[test]
@@ -3770,8 +3813,14 @@ mod tests {
         assert!(acknowledge_successor(&mut context, 7).is_err());
         assert!(!context.ack_written);
         assert!(!context.ack_path.exists());
-        let finished =
-            || startup_transaction_finished_at(&context, &current_exe, &value.current_version);
+        // Keep semantic mutation checks under one owned lock. Reacquiring after
+        // each call can legitimately be busy while another test's fork inherits it.
+        let lock = try_transaction_lock(path.parent().unwrap())
+            .unwrap()
+            .unwrap();
+        let finished = || {
+            startup_transaction_finished_locked(&lock, &context, &current_exe, &value.current_version)
+        };
         assert!(finished().unwrap());
         let mut incomplete = value.clone();
         incomplete.phase = TransactionPhase::RolledBack;
@@ -3802,6 +3851,53 @@ mod tests {
         fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o600)).unwrap();
         fs::write(&current_exe, b"different old executable").unwrap();
         assert!(finished().is_err());
+        release_fixture_lock(lock);
+    }
+
+    #[test]
+    fn startup_guard_retained_lock_description_defers_terminal_validation() {
+        for tampered in [false, true] {
+            let root = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+            let (path, mut value) = journal(root.path());
+            value.old_executable_sha256 = executable(&value.target, b"old");
+            bundle_metadata(&value.target, &value.current_version);
+            value.phase = TransactionPhase::OldRelaunched;
+            let receipt = failed_receipt_path(&path, &value.nonce);
+            write_private_atomic(&receipt, &serde_json::to_vec(&value).unwrap()).unwrap();
+            let current_exe = bundle_executable(&value.target);
+            let context = pending_successor_ack_at(
+                &current_exe,
+                &value.current_version,
+                Some(&path),
+                Some(&receipt),
+            )
+            .unwrap()
+            .unwrap();
+            let lock = try_transaction_lock(path.parent().unwrap())
+                .unwrap()
+                .unwrap();
+            // A duplicate retains the same locked open description, just as an
+            // inherited descriptor can. No process or timing race is needed.
+            let retained = lock.try_clone().unwrap();
+            drop(lock);
+            if tampered {
+                fs::write(&current_exe, b"different old executable").unwrap();
+            }
+            let blocked =
+                startup_transaction_finished_at(&context, &current_exe, &value.current_version);
+            assert_eq!(blocked, Ok(false), "tampered={tampered}");
+            release_fixture_lock(retained);
+            let released =
+                startup_transaction_finished_at(&context, &current_exe, &value.current_version);
+            if tampered {
+                assert_eq!(
+                    released,
+                    Err("running rollback does not match its retained transaction".into())
+                );
+            } else {
+                assert_eq!(released, Ok(true));
+            }
+        }
     }
 
     #[test]

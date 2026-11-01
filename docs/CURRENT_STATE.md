@@ -1,22 +1,60 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, incomplete-input and IPC cleanup candidate
+## Current continuation — 2026-11-01, PR447 corrected candidate ready
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/incomplete-input-cleanup`, base/main
-`3c18627f8d988eff6513b146f160e63a25eab141` (PR446 merged). Fresh Git/PR/API
-reconciliation matched that main and checked head0f5442ad6. The previous goal
-turn made progress: PR446 merged and source-tree equality was verified.
-Current candidate applies only two already reviewed private patches; their
-baseline and resulting tracked hashes match exactly. Expected changes: five
-source/test files, four existing topic/checkpoint docs, private `output/`.
-No dependency, workflow, app-version or native/Rust changes.
+branch `codex/incomplete-input-cleanup`, PR447. Base/main
+`3c18627f8d988eff6513b146f160e63a25eab141` (PR446 merged).
+Previous checked head `64e811b949b8a5c2dd042c4da8db5fc72c7395c6` failed only its
+native product-checks; package, browser, lifecycle and audit passed. No rerun.
 
-Next verified action: finish documentation/continuity/diff checks, commit/push
-this branch, open one scoped PR and observe its exact-head required CI. Freshly
-check head/base and all required contexts before expected-head merge. No duplicate
-watcher, local full suite, native build or old RED replay. The next release scope
-is being reconciled separately; do not mix a version bump into this patch.
+The corrected candidate retains the reviewed DNS/semantic changes and adds the
+reviewed lazy-worker start/close repair and deterministic native terminal fixtures.
+Both new patches were applied with exact baseline/candidate hash verification.
+No dependency, workflow, app-version, routing policy or production lock primitive
+changes. Next action: commit/push this coherent candidate, then one watcher for
+its exact-head required CI; root verifies current head/base and all three required
+contexts before merge. Native compilation/control execution remain hosted-only.
+
+First CI41296088844/1: Rust242 pass/1 fail at
+`rollback_guard_revalidates_terminal_receipt_and_old_identity`, line3804;
+Python2037,metadata949,traffic90,public-updater111,transport9 pass.
+Audit41296088805/1, package, browser and native lifecycle SUCCESS.
+`pr447/verification.json` SHA236d10a47359585ec81462eb19ae0bee91ac3c0724e8b4567f5d5a00e28a4080;
+final-snapshot SHA63510a49bc96ded15c26249412b0fcdcbf54c640a2634b05e0f393d025f3ef44.
+The original assertion discarded its Result; historical branch/owner is unknown.
+
+`pr447/rollback-guard-fix/verification.json` SHA
+ a42ea31500889d126c2019297d47fc291e71bb57eebff02321bb6a98b610909b;
+independent-review6145be4d52e728e826e74b96f03494623b2c80c53c5098a22d7320f07e0163e7.
+The post-lock validation body and production lock primitive are byte-identical.
+Four mutation fixtures hold one guard; a new real-file cloned-description control
+must prove public busy->false, then explicit test unlock->true or exact hash error.
+No sleep/retry or weakened identity assertion. That control has not run locally.
+
+`lazy-worker-next/verification.json` SHA
+ e0e980bdd03f0bd0e1e58fce84fd3a28bf54ff56347a202fe9e81a257ea18d25;
+independent-reviewd502875fa21975d4104e2c64a027b6ea0248f956a1481d94a0c705de2d1bc606.
+Two causal failures (join-before-start; stop before lock still admits thread) and
+six controls become8GREEN with fake threads/lock schedules,0 forbidden calls.
+Actual tracked-import integration:8PASS,0.03s; no real thread/browser/network.
+Publication/start/failure rollback share the lock; stop is rechecked inside it.
+Existing launch/stop/completion/bounded join behavior is unchanged. No historical
+Reconnecting attribution or browser-process leak claim follows from this proof.
+
+`residual-lifetime-triage.json` SHA3dd159f8ec8dc769894a964599a84a7318620fe1239d35f513dd2178da03aa57.
+Semantic late thread effects after successful close remain unproved; Python3.13
+wait_closed includes accepted transports. Do not invent a listener-generation
+blocker. Root owns integration/Git; preview33 preparation remains private.
+
+Read-only release reconciliation is complete: `after-input-fixes-scope.json`
+SHA76f3df096401729c5765506329b5539247b76b2e7e63cc96045d70ecf0d4cf7c. New preview
+needs coherent.33 and.32→.33 guards before a fresh exact-main candidate, then
+G first/P/R and current-date audit. Old.32/public31→32 proofs remain baselines.
+The source-only next-preview33 plan is complete in next-preview33-plan.md/json
+(JSON270c5397b9a3b3e9a208cfee08876df0970f0a0a5c8096d7dbefd2252bb15db2):
+13 coherent prebuild files; keep it outside PR447. ROADMAP's stale PR386 rows belong in that next cleanup; corrected
+canonical public32source below is fd7d43…, not the previous extra-leading9 typo.
 
 ### Applied source and verified behavior
 
@@ -85,7 +123,7 @@ circuit admission; PR443 mergedcbc3502e fixes false shared cooldown; PR442 merge
 41c614c9 fixes rejected/ignored activity renewing idle TTL. All required CI green.
 The first PR444 DMG failure's cause remains unknown; final verbose build passed.
 
-Published preview.32 release429722639/source9fd7d43c271e4a46ac2d10fc5ca4a032b92adae73
+Published preview.32 release429722639/sourcefd7d43c271e4a46ac2d10fc5ca4a032b92adae73
 has12assets verified by publisher41168865517/1. G41165429293/1(26/26),
 P41165942199/1(15/15),R41165941890/1(31/31) passed; R includes1800s idle heartbeat,
 not sustained media. Public31→32 commit41180680911/1(49/49) and

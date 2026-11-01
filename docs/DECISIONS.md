@@ -18,6 +18,13 @@ are separate stage budgets, not a new whole-request deadline. Writer cleanup
 does not revoke an already dispatched thread effect or establish a new listener
 generation boundary.
 
+The lazy browser worker publishes and starts its thread under the same lifecycle
+lock. It rechecks shutdown after acquiring that lock, so close cannot observe an
+unstarted published thread or admit a notification after shutdown. Start failure
+clears that exact thread reference before releasing the lock. The worker's stop
+checks and bounded join remain in place; no browser or route is selected by this
+lifecycle rule.
+
 ### 2026-11-01: recovery work owns its lifetime and result
 
 A shared DoH or app-owned DNS lookup belongs to its executor completion, not the
