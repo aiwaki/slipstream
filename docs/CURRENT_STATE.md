@@ -1,17 +1,142 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, preview .33 preparation after PR447
+## Current continuation — 2026-11-01, .33 published; public updater qualification next
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/preview-33-release-preparation`, base/main
-`17fc7bd57b44b6a3514b0b8053b5fd6fd459d22f` (PR447 merged). Worktree now applies
-13 reviewed version/pair files plus RELEASES/ROADMAP and this checkpoint.
-No other runtime change, dependency upgrade, source-policy change or local install.
-Next verified action: final scoped checks, commit/push/open the preview preparation
-PR, then one exact-head CI/audit watcher. Do not monitor unchanged main447 CI for
-reassurance. Working external Geph and this Mac remain untouched.
+branch `codex/preview-33-release-preparation`, HEAD/main
+`9eccd1ddf691aef5f76d493103513f2fada2fd5c` (PR448 merged).
+Checked PR head `71b954b46b1f8e55ca5e3564703baaa32c20cc5f` has identical tree
+`4b7d95dc0daba30ec30eafe8f6de36ec378b3773`. Root freshly checked all3required
+contexts/head/base, merged with expected head, regular-fetched and fast-forwarded.
+Expected dirt: post-merge checkpoint and private output only. No app install.
+
+Current goal turn made progress: accepted R27/27, published preview .33 and
+verified remote identity/assets (23/23). Publisher41309441046/1 SUCCESS, actual
+release430591253, tagv0.1.9-preview.33/source9ecc, 12assets; OLD32 body and asset
+ID/size/digests unchanged with only archival title; stable350205640/v0.1.4 unchanged.
+No local installation or product-media claim. Publication freeze is complete.
+Root is on codex/public-preview-33-update-qualification based on9ecc. The three
+public33 clones plus15 additive focused tests are complete and independently
+reviewed;15 tests PASS (0.19s), one post-diagnostic test PASS (0.04s). Original
+31->32 and all15 protectedshared files are byte-identical; only diagnosticlabel
+and comment were additionally updated in newdriver. Root owns Git/PR/dispatch/docs.
+
+PR448 CI41300920588/1 and audit41300920651/1 SUCCESS. Python2047,Rust244,
+metadata949,traffic90,updater111,transport9; native7/7,Chrome4/Safari4,
+original CSS/JS/image navigation without reload, active-worker uninstall clean,
+external sentinel preserved/globalPF unchanged. verification.json in
+`remaining-pr376/pr448/head-71b954b46/` SHA
+c5bbe190dfa38f006a7bf16ab1cec2337d53d8dfbf16a4199a64e4e130faef95;
+root-premerge.json/merge.json retained there. Prior PR watcher stopped.
+
+Next verified action: create/qualify PR for the reviewed public32->33 clones and
+docs, then verify exact merged workflow source and run normalpublic
+Cancel+commit qualification followed by separate preACKrollback. No placeholders,
+oldpair rerun, localnative/app/service/browser/proxy/account changes or broad
+reruns without changedinputs. G/P do not qualify normalpublicUI by themselves.
+
+Public clone implementation receipt public-next/implementation/verification-final.json
+SHA6a472de469f8932fff0401a830a9a63f7611c19c38bb8d88a5eeb7c098d85f2f;
+independent27staticchecks+sourcebindings review public-next/independent-review.json
+SHAaaaf7ab1f24b6932c71457df1ec316542470811fea7a602ca0ac3a020794a84a.
+No ordinarypublicUI result is claimed yet. Acceptance contracts reuse historical
+49commit/38rollback assertions; no extra local/native execution required.
+Normal OLD update exit is distinct from ordinaryQuit; external sentinel before/
+after was not separately measured by this public pair, so do not overclaim it.
+
+Publisher41309441046/1 SUCCESS, 23/23 acceptance checks. Currentapplication and
+fullGeph admission both ran twice successfully on2026-11-01UTC with0 accepted
+exceptions, including immediately beforepublication. Actualmanifest e2e0e543...
+and all6 candidatepayload bytes preserved; whole12assetpublicset authenticated.
+Receipt preview33-release/publisher/verification.json SHA
+cf12afbb0f17a5688d52f201f0e6595f4b666189ec046263abde7ca90399be4c.
+Actual NEW33 pins public-next/new33-bindings.json SHA
+ d7d81669cc0f7010a1d7e6366844884842f95fd2508824a730de5f0090a89df9.
+OLD32 actualtitle is now 'Slipstream 0.1.9-preview.32 (архивная)' in
+publisher/old32-after.json; reuse immutablepins but this currenttitle for newpair.
+No publisher rerun, morewatcher polls or localbinarydownloads needed.
+
+R41305043535/1 SUCCESS, accepted27/27. Exact9ecc/manifest e2e0e543.../candidate
+41302269258/1, all6reportJSON subjects cryptographically attested to R/attempt1.
+Safari4/4 +Chrome4/4 usable, transport3/3, backgroundsoak1800.12s/3600samples,
+maxsamplegap0.656s,zero visibilitycounters,stablePID/advancingheartbeat,cleanup[].
+Actual protected budget1/3 allowed onNov1UTC. No more R polls/reruns required.
+Receipt preview33-release/readiness-r/verification.json SHA
+f51642dd45272fbc6721bb311535f466595cc6b28dddd222e122654b6451f5a2.
+Qualificationreport6787d267edd1961a0ac3480fda05373718e7f92fe67b3b66e37e2a9e4f834591;
+readinessreportde650703209c5e0eadca1d3a1ef8b43409e3921bf1ef9cb5a79f0d963204bca6.
+This soak proves background UI/PID/heartbeat/cleanup, not sustainedGeph/video/calls.
+
+P41305039817/1 SUCCESS and accepted13checkgroups. Both real commit and
+kill-successor-before-ACK plus aggregator passed. Commit received one realACK,
+NEW tray/daemon live, root committed/commit/quiescent. PreACK observedSTOP,
+stoppedwindow,KILL beforedeadline,ACK0,OLD relaunched with rootaborted/abort.
+Heartbeat advanced in both; watchdog exited0,lockavailable,transactionpathsabsent,
+cleanup_errors=[]. No inherited-watchdog assertion adaptation was needed.
+Receipt preview33-release/packaged-p/receipt.json SHA
+16061050226c7940c9435a6b093e29ab3471414c516d34186c5b63c894a2fda7;
+checker verification.json SHA6d19ba1f2fd30592b87d9dcae44d72ce7f920b566880c580081a135d7cf41570.
+Only46,561bytes of reports downloaded. Public UI/feed/admin/workstation unqualified.
+P watcher78585 completed0; do not restart. app_update_implementation now only
+prepares OLD32 public asset bindings privately; never invent NEW33 public pins.
+
+G41303686569/1 SUCCESS and accepted26/26, canonical pure prerequisite PASS.
+Exact OLD32/NEW33 pair used in both modes. Commit kept live NEW; SIGKILL before
+commit restored live OLD, rejected late commit and left both cleanup_errors=[].
+Receipt preview33-release/native-g/verification.json SHA
+7700d3defba99b0a698baa9a788705abeed54d490a027454dca93f1d10c12fc8.
+Only small evidence ZIPs downloaded; no app binaries/native/local network changes.
+Final private P checker SHA153b3537b6b2587332a6195c2c8c300fe40670a4f16dd0c61f5bcdf276f69ac7
+uses actual inputs.json path and current Glist26 schema; originaleventassertions
+remain. Its narrowerwatchdog-state branch passed unchanged in actualevidence.
+
+Exact-main CI41302269258/1 and audit41302269288/1 SUCCESS. All producer, signature,
+assembly, attestation, notification, browser and native lifecycle jobs passed.
+Main receipt preview33-release/main-9eccd1ddf/verification.json SHA
+a27694c326becb48904c9c444ddb8aad74fd7ae615eed6667c40d7dd56f4a1c2.
+NEW manifest e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0
+(1988bytes,6payloads). Unique candidate artifact13081049724,452663624bytes,
+archive digest3a863a27e5e7f8e1ce25eeaef1548c44bfbd3ab0e4dc880a7f0c53ebee1834cd,
+expires2026-11-15T11:40:33Z. Root native-g/root-preflight.json binds admission.
+
+Actual publication/pins and reviewedcloneimplementation are complete. Required
+PR CI/merge precede normalpublicCancel+commit then independentpreACKrollback.
+No new source build is needed without a concrete failure. Root owns dispatches;
+watchers retain exact attempt evidence only. Current external Geph/Mac untouched.
+Installed behavior/every-site/media stability and complete goal remain unproved.
+
+Concise RU/EN release-notes draft and exact diff mapping are privately prepared
+in preview33-release/preflight/release-notes.md (SHAc9920f7530bbee5e9ef7a1eea7efe2dcaedd4ab31690a84c2892411bf48010a2).
+No public notes update yet; they do not claim all reconnect/media issues resolved.
+
+During the verified R wait, OLD32 public bindings were extracted from retained
+verified metadata with no API/binary/test repeat: public-next/old32-bindings.json
+SHA1ba5ec31cb003132d308d16e564ba519388eb1631ce1b354800f845ee81e2b15. All12asset
+triples/source/tag/config/key/policy match exactOLD. Recheck its release_name only
+after33 finalizer archives it. NEW public pins/placeholder drivers remain absent.
+Publisher fiveinputs in publisher/inputs-prepared.json include readiness_run_id
+41305043535. Historical prepared-not-admitted.json remains unchanged; it is now
+superseded by root-admission.json and actual dispatch41309441046/1 after Rpassed.
+Real-Geph coverage mapping completed: preflight/real-geph-coverage.md SHA
+986931e81f045c7532726dbaf6abd69abea13549102b02b8c620017c552e7895. ProtectedR
+has initial ownedpayload ->exactstop/confirmeddown ->3NEWrequestsclosedwithout
+systemfallback ->restart/fullownedpayload. It does not synchronize requests
+inside productiondrain or maintain a stream across reset. Those no-dial/drain
+accounting decisions have separate actual-handler fake/loopback regression proof;
+committed-prefix reset proves no unsafe replay, but nextfreshconnect is not part
+of that account-backed scenario.30minsoak is background-only. These are reporting
+limits, not new defects/gates/rebuild reasons. Preserve this precision in notes.
+
 
 ### Applied .33 preparation
+
+Release-facing README/About preflight PASS (no edit needed): version-independent
+latest-release links, adaptive-routing distinction, current Mac/Apple Silicon
+and future-platform limits remain accurate; real screenshot still deferred per
+user. preview33-next/readme-preflight.json SHA
+de85ae4cc98dfd726532f380e045f8267a1b40182db6be6df60ec46a3e7bb458.
+No local browser/app/native or user-network changes; existing screenshot task is
+not a new release blocker. New fixes belong in final release notes.
 
 Private root `output/continuation-20261101/remaining-pr376/preview33-next/`.
 All13 before hashes matched merged17fc7bd57; all resulting source and two doc
@@ -67,6 +192,20 @@ identity assertion. Detailed receipts: pr447/rollback-guard-fix/ and
 lazy-worker-next/. Successful final native execution closes that fixture gate.
 
 ### Next release path and remaining scope
+
+Fresh OLD32 GitHub preflight passed: CI41164190639/1 exact push/main fd7d43c…
+success; unique candidate artifact13029245735 unexpired until2026-11-14T03:32:23Z,
+450268749bytes, archive digest34eb2c68b80242bd299278b1698aaffddb7aa74c15199e60dc91fc31032f1f58.
+No app binary downloaded or old qualification repeated. Canonical8inputs/dispatch
+and hosted materialize/auth argv in preview33-next/g-preflight/verification.json
+SHA9a3263e6996356249221478962364c40b86c80ca3ed41686077d4bb2c0cfb6ad.
+NEW manifest and whole-main admission are now recorded above. Retain the interim
+candidate-create-observation.json as historical evidence; final root admission
+supersedes its full_ci_admitted=false. No app archive was downloaded to this Mac.
+metadata-extraction.md SHAb078173127204c92335d84521389988453bf206e333f05c090bc21b93c47a01d
+records that producer CI verifies Ed25519; G authenticates attestation/hash/source
+for six payload files plus manifest on its hosted runner. Previous
+goal turn was progress: merged447 and opened448; this turn starts from live448 CI.
 
 `next-preview33-plan.json/md` and `after-input-fixes-scope.json/md` hold the scoped
 plan. After the version PR merges, freeze its exact main candidate. Authenticate
