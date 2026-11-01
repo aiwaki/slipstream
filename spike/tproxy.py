@@ -7741,8 +7741,45 @@ def _transport_selftest_quic_initial(version, host):
     return bytes(packet)
 
 
+def _telegram_frozen_import_selftest():
+    """Require the bundled Telegram HTTP/2 closure without opening a connection."""
+    import asyncio
+    import importlib
+
+    modules = {
+        name: importlib.import_module(name)
+        for name in (
+            "proxy.cf_h2", "proxy.h2_transport", "httpx", "httpcore",
+            "h2.config", "h2.connection", "hpack", "hyperframe.frame",
+        )
+    }
+    connection = modules["h2.connection"].H2Connection(
+        config=modules["h2.config"].H2Configuration(client_side=True)
+    )
+    connection.initiate_connection()
+    connection.send_headers(1, [
+        (":method", "GET"), (":scheme", "https"),
+        (":authority", "fixture.invalid"), (":path", "/"),
+    ], end_stream=True)
+    if not connection.data_to_send().startswith(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"):
+        raise RuntimeError("packaged Telegram HTTP/2 initialization failed")
+
+    async def check_client():
+        transport = modules["proxy.h2_transport"].H2Transport()
+        try:
+            async with modules["httpx"].AsyncClient(
+                transport=transport, trust_env=False,
+            ):
+                pass
+        finally:
+            await transport.aclose()
+
+    asyncio.run(check_client())
+
+
 def transport_mechanics_selftest():
-    """Exercise the packaged QUIC parser/fallback without network mutation."""
+    """Exercise packaged Telegram imports and QUIC without network mutation."""
+    _telegram_frozen_import_selftest()
     global _pf_applied, GEPH_ENABLED, _geph_up, _geph_owned, _geph_port
     global transparent_routing_ready
     previous = (

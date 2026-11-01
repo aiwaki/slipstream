@@ -2,4 +2,5 @@
 certifi>=2024.2.2
 cryptography>=50.0.0
 h2>=4.3.0
+httpx[http2]==0.28.1
 scapy>=2.5.0

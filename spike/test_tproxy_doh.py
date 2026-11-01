@@ -6662,6 +6662,8 @@ def test_quic_v1_v2_observation_and_exact_host_fallback_cover_ipv4_ipv6(
 def test_packaged_transport_mechanics_selftest_covers_fixed_matrix_without_network(
     monkeypatch,
 ):
+    # Actual offline Telegram imports/initialization have their own regression.
+    monkeypatch.setattr(tproxy, "_telegram_frozen_import_selftest", lambda: None)
     monkeypatch.setattr(tproxy, "_pf_applied", False)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
     monkeypatch.setattr(tproxy, "_geph_up", False)

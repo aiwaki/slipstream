@@ -1,53 +1,113 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, no-dial circuit outcome repair
+## Current continuation — 2026-11-01, Telegram update in progress
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-no-dial-circuit-outcomes`, based on merged PR443/main
-`cbc3502e4e141c9a65099060cded1e394f58f068`, equal tree to verified PR head
-`1eaa89e19be1c51dd5433dddacd13d4504c6d640`. PR442 is also merged.
-This guard fix is newer than published .32. Reconcile source/PR/required CI
-before continuing. Original locator first block is synced; preserve older tails.
+branch `codex/telegram-transport-update`, base main/merged PR444
+`46a30d97d3b6c3847adcea6854e7d432b434dac3`. The base tree equals checked PR head
+`9a3521a43ca5f5e8c3a9157b5aec1de8de53b1bb`; root fetched and fast-forwarded.
+PR442/443 are also merged. These routing fixes are newer than published .32 and
+have not been installed on the user's Mac. Original locator first block synced;
+preserve older tails. Source, PR and CI remain authoritative. Telegram changes
+below are the scoped candidate; its new PR and exact-head CI are pending.
 
-### Current bounded fix — PR444, DMG diagnostics added after first CI failure
+### Active Telegram source integration
 
-Removed the no-attempt `elif` from `tproxy.handle`: unreadiness or a refused
-session reservation during drain must not acquire a route-circuit permit and
-record failure. The whole branch is removed to avoid leaking a HalfOpen permit.
-This fixes false route-scoped one-second suppression; normal attempts, their
-backoff and the established route policy are unchanged. Historical reconnects
-are not attributed to this finding.
+Imported only the Telegram vendor sources, source inventory and tests from
+retained PR386 head 4360003ca05444683aaed74b7b69b51198f27bdf; unrelated app/Geph
+changes and stale dependency locks were excluded. Selected upstream 1.11.2
+commit 307a384ab7f522e34bb1a045884d0bd90f40bee5: latest 1.11.3 release notes
+recommend 1.11.2 pending TLS compatibility repairs. Unreleased 1636903 was compared,
+not imported. Official archive SHA and all 15 original modules plus MIT license
+verified. Private `output/continuation-20261101/telegram-recovery/upstream.json`
+SHAe7d7d2e4af02175cc26f683db2ec8e79deda001d6477a3e9c2a57bb86fc67238.
 
-Two guarded memory-only regressions fail on immutable base source and pass on
-this patch: unreadiness must not create Open, and drain must leave an expired Open
-circuit untouched until a real request can probe it. Both recover the full 43-byte
-response on the first ready same-group request. The real payload-EOF control
-passes on both sources; all five new/adjacent cases pass in 0.19s. Actual handler,
-circuit registry, readiness reducer and cleanup are used with guarded in-memory
-streams. No live monitor or backend was exercised. Reuse PR443's green full suite
-and unchanged adjacent evidence; do not rerun unchanged protected G/P/R.
-Private originals, logs and `verification.json` are retained in
-`output/continuation-20261101/no-dial-circuit/`; receipt SHA
-`4442be68d76fa753e795929ed1b1c8a2b1db4743cddca31aeb6899b005366afc`.
-Independent review PASS, 15 checks/no findings; `independent-review.json` SHA
-`e6bff52e802860cbf95034ef6eb364ea40955e6a43d6f06a94eb172c869cc4c5`.
-Docs8, continuity and diff passed. PR444 head
-`5e655ec602ce777f3e85d57b96ee0ae8b2d60e73` is open. CI41284288845/1
-failed packaged-app-build job124782360065 while running `bundle_dmg.sh`, after
-successful app bundling/signing; the command's internal failure is absent from
-the default log. Audit41284288852/1 and product checks passed; hosted Python1867 passed (+2 new cases).
-This is not evidence that the routing regression failed. Do not infer a DMG
-root cause or repeat the same job without improving its missing diagnostics.
-One watcher (`app_update_implementation`) polls at 60s with terminal cache;
-evidence under `no-dial-circuit/pr444/`. The source/test patch remains frozen.
-Added `--verbose` only to the unsigned PR Tauri build command. Official pinned
-Tauri CLI2.11.3 source confirms Debug exposes the DMG child stdout/stderr that
-Info hides. No bundling target/verifier/signing/main-build change; no inferred
-DMG cause. This is diagnostic qualification of a new head, not a blind rerun.
-The route source and tests remain identical to the 1867-test green result.
-Next: observe final-head CI and fix a concrete bundler error if reported; merge
-only after all three required checks pass. Then reconcile main and refresh Xerj. No workstation
-installation or new published release yet.
+Restored the candidate's missing CF-pool refill-on-miss without losing its owned
+cleanup. Current 1.8.1 already refills; do not attribute this regression to shipped
+code. Three old-candidate RED cases become GREEN (100 concurrent cold misses, failed warmup,
+redirected DC), with completed-connector/cancel control: 4 PASS, 0.05s.
+`admission-tests/verification.json` SHA
+70cbd1c39da8b23f89d3bcaedf36ae0d9ac09f899ba51221f8c9c60372a8a4b0.
+Separate retained evidence proves an unclaimed-socket cancellation defect in 1.8.1
+that the candidate's cleanup fixes. CF workers default empty in the embedded launcher;
+no historical user-visible cause is established. Quick-ACK allegation is
+unsubstantiated for HTTP; 14 guarded characterization checks pass, semantics kept.
+
+Three locks freshly generated using Python 3.13.15 and the compatible pinned
+pip 26.2.2/pip-tools 7.6.2 tool pair. Exactly 6 additions for HTTPX 0.28.1; all old
+versions and hash sets preserved. Seven lock/generator/packaging checks PASS;
+`locks/verification.json` SHA329486c44b3ea8619f0c0734f5a91d184a7c7fdb02e4b2ad4f1f13d410dc3aff.
+Vendor review: 9 checks found no blockers; `review.json` SHA
+76dcdb7e896eebed6e4699d0c210682f639e68091136ed6577e71d770ed3549a.
+
+Closed a packaging gap: startup could swallow Telegram import failure while
+daemon status stayed active. Existing offline transport self-test now requires
+the real Telegram/H2 imports and client initialization/close; 8 missing-module
+cases fail on the old function, 12 focused checks PASS. JSON/capability and old
+QUIC implementation unchanged. `frozen-imports/verification.json` SHA
+350073cbbdfa59d286323e5b3f29e7d5c14e81a02e0a7ec37ab6b715c4fe7377.
+CI's existing Verify packaged resources step now invokes this CLI in the built
+daemon; actual frozen execution is pending. One workflow wiring check passed.
+
+Final independent review has no remaining blockers. An initial CI command lacked
+the existing privileged capability; the corrected invocation supplies all required
+flags via sudo on the disposable runner. Actual CLI guard regression: old command
+RED, corrected command and workflow check PASS (2 checks, 0.12s). Guards unchanged.
+`frozen-imports/capability-verification.json` SHA
+f2d6053d9146654012d7c3bbcc20a9879f70f4f7b931794513be51a0c9ea8e0b;
+`review-final-after-ci-fix.json` SHA
+dd84f0caa62ebeacffb83405edd423d07183bb03cb2dcb3fabb53ca8a3920cda.
+Next: scoped PR and exact-head CI/audit. Docs, continuity and diff checks follow
+the final evidence-text update; previous unchanged broad suites are reused.
+Existing local guards and MIT notice retained. No native build, local listener/
+live endpoint, workstation install, service/network/account mutation authorized.
+Working external Geph untouched; neither published .32 nor installed-product
+success is advanced. All agent implementation slices are frozen; root owns Git.
+
+### Completed no-attempt circuit repair — PR444
+
+Removed the no-attempt `elif` from `tproxy.handle`: initial unreadiness or a
+refused session reservation during drain no longer acquires a circuit permit and
+records failure. This prevents false route-scoped one-second suppression after
+readiness returns. The whole branch is removed so a HalfOpen permit cannot be
+acquired without a backend attempt. Actual failure/backoff, session cleanup and
+route classification are unchanged. Historical reconnect cause is not established.
+
+Two guarded real-handler cases fail on base `cbc3502e` and pass with the fix.
+Unready requests leave the circuit empty; drain preserves an expired Open entry,
+its permit and idle activity. The first ready same-group request gets the full
+43-byte response. The actual payload-EOF backoff control remains green; five
+focused cases passed in0.19s. These use real registry/reducer/cleanup with in-memory
+streams and I/O guards, not a live monitor/backend. Independent review15 checks
+PASS; docs8, continuity, diff and three scoped workflow-config checks passed.
+Evidence `output/continuation-20261101/no-dial-circuit/`:
+`verification.json` SHA4442be68d76fa753e795929ed1b1c8a2b1db4743cddca31aeb6899b005366afc;
+`independent-review.json` SHAe6bff52e802860cbf95034ef6eb364ea40955e6a43d6f06a94eb172c869cc4c5.
+
+Final CI41284897728/1 and audit41284897714/1 SUCCESS on exact9a3521a43;
+all three required contexts SUCCESS. Hosted Python1867 passed,1 warning in77.54s
+(+2 new cases); package/DMG, browser and native lifecycle checks passed.
+Quiet pytest logs show the aggregate, not individual case names. Final receipt
+`pr444/head-9a3521a43/receipt.json` SHA
+`4480ac896042d1c077061ec7c824e0c49e2651f8959b97b0075b5e8a5cd9b9b3`;
+`merge.json` binds the equal tree. Watcher1867 completed; no active CI watcher.
+
+First-head CI41284288845/1 passed Python1867 and audit but failed in
+`bundle_dmg.sh` after app signing. Its internal error was absent from the Info
+log. Retained failed receipt `pr444/receipt.json` SHA
+`1bfa0c32bd9ae8a8856a71abc911b1d4be338097dbca10b2046b5c10f1647ad7`.
+A PR-only `tauri build --verbose` flag now exposes child stdout/stderr; no DMG,
+verifier or main signing gate changed. The final build passed; the first failure's
+root cause remains unknown. No blind rerun or protected G/P/R repeat occurred.
+`diagnostic-review.json` binds the unchanged routing source/tests across heads.
+
+Next verified work is the scoped Telegram integration above.
+Do not redo completed circuit, tooling, release or public-updater qualification.
+Xerj was incrementally refreshed once at this merged source (exit0); actual MCP
+search finds the new handler regression in `spike/test_geph_no_dial_circuit.py`.
+Refresh log SHA550b3c02464bbb45bd29edde2fdb0901e16f698719d052921b66e83c6fbdc9ea;
+this checkpoint's final status lines were updated after indexing. No native build,
+workstation install or runtime/network/account change is authorized here.
 
 ### Completed shared cooldown fix — PR443
 
@@ -160,7 +220,7 @@ No installed .32/user-Mac or sustained media/sleep/wake success claim.
 
 Preserve working external Geph/workstation: no local native/scanner/app/browser/
 install/PF/service/DNS/proxy/PAC/VPN/account actions. Small mocks/static checks and
-disposable hosted CI only. PR442/443 watchers finished; PR444 has one active watcher as above. Graph unavailable; bounded direct/rg/git fallback. Xerj code index is at prior cbc3502e and must refresh after this patch. Broader goal active.
+disposable hosted CI only. All PR442/443/444 watchers finished. Graph unavailable; bounded direct/rg/git fallback. Xerj refresh is recorded above. Broader goal active.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 

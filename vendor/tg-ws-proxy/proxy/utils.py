@@ -3,6 +3,12 @@ import ssl
 import time
 import urllib.request
 import http.client
+import logging
+import os
+import re
+import sys
+
+import certifi
 
 from typing import Callable, Hashable, Optional, Dict, List
 from urllib.request import Request
@@ -28,7 +34,8 @@ PROTO_PADDED_INTERMEDIATE_INT = 0xDDDDDDDD
 RESERVED_FIRST_BYTES = {0xEF}
 RESERVED_STARTS = {b'\x48\x45\x41\x44', b'\x50\x4F\x53\x54',
                     b'\x47\x45\x54\x20', b'\xee\xee\xee\xee',
-                    b'\xdd\xdd\xdd\xdd', b'\x16\x03\x01\x02'}
+                    b'\xdd\xdd\xdd\xdd', b'\x16\x03\x01\x02',
+                    b'\x4F\x50\x54\x49'}
 RESERVED_CONTINUE = b'\x00\x00\x00\x00'
 
 _GITHUB_IPS: Dict[str, str] = {
@@ -64,14 +71,6 @@ def log_limited(
     log_method(message, *args)
 
 
-def _github_ssl_context() -> ssl.SSLContext:
-    try:
-        import certifi
-
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        return ssl.create_default_context()
-
 DC_DEFAULT_IPS: Dict[int, str] = {
     1: '149.154.175.50',
     2: '149.154.167.51',
@@ -81,13 +80,22 @@ DC_DEFAULT_IPS: Dict[int, str] = {
     203: '91.105.192.100'
 }
 
+DC_TEST_IPS: Dict[int, str] = {
+    1: '149.154.175.10',
+    2: '149.154.167.40',
+    3: '149.154.175.117',
+}
 
-def ws_domains(dc: int, is_media) -> List[str]:
+WS_PATH = '/apiws'
+WS_PATH_TEST = WS_PATH + '_test'
+
+
+def ws_domains(dc: int, is_media: bool) -> List[str]:
     if dc == 203:
         dc = 2
-    if is_media is None or is_media:
-        return [f'kws{dc}-1.web.telegram.org', f'kws{dc}.web.telegram.org']
-    return [f'kws{dc}.web.telegram.org', f'kws{dc}-1.web.telegram.org']
+    if not is_media:
+        return [f'kws{dc}.web.telegram.org']
+    return [f'kws{dc}-1.web.telegram.org', f'kws{dc}.web.telegram.org']
 
 
 def human_bytes(n: int) -> str:
@@ -111,9 +119,35 @@ def get_link_host(host: str) -> Optional[str]:
         return host
 
 
+class DomainCensorFilter(logging.Filter):
+    domain_pattern = re.compile(
+        r'(?<![\w-])(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+'
+        r'[a-zA-Z]{2,}(?![\w-])'
+    )
+
+    def _censor_match(self, match):
+        domain = match.group()
+        normalized = domain.casefold().rstrip('.')
+        if normalized == 'telegram.org' or normalized.endswith('.telegram.org') or normalized.endswith('.log'):
+            return domain
+        parts = domain.split('.')
+        if len(parts) < 2:
+            return domain
+        return '.'.join(
+            part if i == len(parts) - 1 else
+            part[:len(part) // 2] + '*' * (len(part) - len(part) // 2)
+            for i, part in enumerate(parts)
+        )
+
+    def filter(self, record):
+        record.msg = self.domain_pattern.sub(self._censor_match, record.getMessage())
+        record.args = ()
+        return True
+
+
 class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
     def __init__(self):
-        super().__init__(context=_github_ssl_context())
+        super().__init__(context=create_ssl_context())
 
     def https_open(self, req: Request):
         host = req.host.split(":")[0]
@@ -136,9 +170,19 @@ class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
                 )
 
         try:
-            return self.do_open(_Conn, req)
+            return self.do_open(_Conn, req, context=self._context)
         except Exception:
             return super().https_open(req)
+
+
+def create_ssl_context(*, check_hostname: bool = True) -> ssl.SSLContext:
+    bundle_dir = getattr(sys, '_MEIPASS', None)
+    cafile = (os.path.join(bundle_dir, 'certifi', 'cacert.pem')
+              if bundle_dir else certifi.where())
+    context = ssl.create_default_context(cafile=cafile)
+    context.load_default_certs()
+    context.check_hostname = check_hostname
+    return context
 
 
 def build_github_opener() -> urllib.request.OpenerDirector:

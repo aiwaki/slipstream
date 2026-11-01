@@ -2,7 +2,14 @@
 set -euo pipefail
 
 readonly root="$(cd "$(dirname "$0")/.." && pwd)"
-readonly pip_tools_version="7.5.3"
+# pip-tools uses pip's private resolver API; pin a compatible pair.
+readonly pip_version="26.2.2"
+readonly pip_tools_version="7.6.2"
+export PIP_ONLY_BINARY=:all:
+export PIP_DEFAULT_TIMEOUT=15
+export PIP_RETRIES=1
+export PIP_NO_INPUT=1
+export PIP_DISABLE_PIP_VERSION_CHECK=1
 python="${PYTHON:-python3}"
 
 python_minor="$($python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
@@ -19,6 +26,7 @@ trap 'rm -rf "$lock_env"' EXIT
 "$lock_env/venv/bin/python" -m pip install \
   --quiet \
   --disable-pip-version-check \
+  "pip==$pip_version" \
   "pip-tools==$pip_tools_version"
 
 cd "$root"
@@ -34,6 +42,7 @@ for lock in runtime test build; do
       --allow-unsafe \
       --annotation-style=line \
       --generate-hashes \
+      --no-emit-options \
       --resolver=backtracking \
       --strip-extras \
       --output-file "$output" \
