@@ -1,5 +1,33 @@
 # Routing Research Notes
 
+## 2026-11-01: cancelled callers broke shared owned-Geph recovery
+
+Review after the public .32 → .33 update qualification found a separate runtime
+defect in `_coalesced_owned_geph_recovery_for_replay` at main `b7587b51d`.
+Three event-controlled tests reproduce it without sockets, native service
+operations or account access:
+
+| Schedule | Old result | Required result |
+|---|---|---|
+| First caller cancelled while the blocking worker runs | Worker returns true but nobody publishes it; a follower times out. | The follower receives the completed worker result. |
+| Follower cancelled while other callers wait | Its unshielded wrapper cancels the shared future; other callers receive cancellation. | Only the departing caller is cancelled. |
+| Follower reaches its own deadline | Its timeout cancels the shared future and other callers. | Only that caller times out; the others retain their own deadlines. |
+
+The repair publishes the executor's actual job under the existing lock. Each
+caller wraps and shields it separately. Worker completion owns the result even
+when no caller remains; wrapper callbacks observe abandoned exceptions. The
+existing bounded executor is reused, with the first caller's context preserved.
+Queue time now counts toward every caller's existing wait budget, including the
+first caller. A timeout cannot remove queued work or authorize a duplicate job.
+This does not add a new executor, change route policy or cancel blocking effects.
+
+Private before/after source snapshots, guarded logs and review are retained in
+`output/continuation-20261101/geph-recovery-lifetime/`. The identical three causal
+assertions fail before the fix and pass afterwards. These tests exercise the
+production coalescer with a controlled worker, not an installed Geph restart.
+They do not identify the cause of a historical reconnect, prove continuous media
+delivery or cover every exceptional drain-cleanup path.
+
 ## 2026-11-01: incomplete DNS responses and semantic client cancellation
 
 The remaining PR376 checks were reconciled against merged main `3c18627f8`.

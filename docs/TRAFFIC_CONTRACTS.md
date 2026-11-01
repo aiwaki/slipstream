@@ -300,3 +300,10 @@ circuit, Smart DNS suppression still permits the separately keyed owned-Geph
 candidate, an owned-Geph half-open permit is released on the first payload of a
 still-live WebSocket, and unknown hosts neither persist state nor acquire a Geph
 edge.
+
+`spike/test_geph_recovery_lifetime.py` exercises the production replay coalescer
+with bounded, event-controlled executor work and guards against external I/O.
+Cancelling the first caller must still deliver the worker result to a follower;
+cancelling or timing out a follower must preserve the other callers and the
+single shared job. These are recovery ownership checks, not installed Geph,
+browser rendering, sustained-media or restart-drain qualification.

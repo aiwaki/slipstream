@@ -14251,27 +14251,29 @@ def _recover_owned_geph_for_replay_blocking(host):
 async def _coalesced_owned_geph_recovery_for_replay(host):
     """Share one bounded owned-Geph recovery across simultaneous failures."""
     global _owned_geph_runtime_recovery_future
-    owner = False
-    with _owned_geph_runtime_recovery_lock:
-        future = _owned_geph_runtime_recovery_future
-        if future is None or future.done():
-            future = Future()
-            _owned_geph_runtime_recovery_future = future
-            owner = True
-    if owner:
-        try:
-            recovered = await asyncio.to_thread(
-                _recover_owned_geph_for_replay_blocking,
-                host,
-            )
-        except (ConnectionError, OSError, RuntimeError):
-            recovered = False
-        if not future.done():
-            future.set_result(bool(recovered))
     try:
+        with _owned_geph_runtime_recovery_lock:
+            future = _owned_geph_runtime_recovery_future
+            if future is None or future.done():
+                # The executor owns completion even if the first caller leaves.
+                # Keep this exact job published while queued or running.
+                future = _POOL.submit(
+                    contextvars.copy_context().run,
+                    _recover_owned_geph_for_replay_blocking,
+                    host,
+                )
+                _owned_geph_runtime_recovery_future = future
+        waiter = asyncio.wrap_future(future)
+
+        def observe_completion(done):
+            if not done.cancelled():
+                done.exception()
+
+        # A departed caller must not leave an unobserved wrapper exception.
+        waiter.add_done_callback(observe_completion)
         return bool(
             await asyncio.wait_for(
-                asyncio.wrap_future(future),
+                asyncio.shield(waiter),
                 timeout=(
                     GEPH_RESTART_SUCCESSOR_GRACE
                     + GEPH_RESTART_PAYLOAD_READY_GRACE
@@ -14279,7 +14281,7 @@ async def _coalesced_owned_geph_recovery_for_replay(host):
                 ),
             )
         )
-    except (asyncio.TimeoutError, RuntimeError):
+    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
         return False
 
 

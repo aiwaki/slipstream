@@ -1,11 +1,11 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, public .32 → .33 update and rollback
+## Current continuation — 2026-11-01, shared Geph recovery lifetime
 
 Primary checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/preview-33-public-rollback`, based on merged main
-`459e5393d742b4ee9d3ca6a3d4be2464abca4f32` (PR #451).
+Branch `codex/geph-recovery-overlap-contract`, based on merged main
+`b7587b51d9e50c0355c05ba7b4613354df0b3018` (PR #452).
 Root owns Git, PRs and workflow dispatches. All qualification watchers are
 terminal. No user-Mac app, service, browser or network settings changed.
 
@@ -14,6 +14,23 @@ Evidence paths below are relative to
 The longer preceding checkpoint is retained at
 `public-next/public-rollback-admission/checkpoint-before-compact.md`.
 Detailed public-run history is in [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01).
+
+### Active scoped repair
+
+Three guarded causal tests reproduce lost/poisoned shared owned-Geph recovery
+results after caller cancellation or timeout. The first caller formerly owned
+publication; an unshielded follower could cancel the shared result. The repair
+publishes the actual executor job and shields each caller independently.
+3 causal RED → 3 GREEN, then 8 focused checks passed in 1.31s (peak RSS 95MB;
+no external I/O). Independent review passed with no findings.
+Evidence is separately rooted at
+`output/continuation-20261101/geph-recovery-lifetime/`; original and adapted RED
+receipts/source snapshots are retained. `verification-final.json` SHA256
+583457d263fa584dfbcdaf966eca59e4f9a7c5b9e44ad116703200471bdb1522;
+`review.json` SHA256 4478a6b12ee2a41fdd00bffc6c893af41d21e4d97fa7ba8462ed7e27fe25f047.
+Root checked source/test/evidence hashes in `root-acceptance.json`.
+Production changes only the coalescer.
+Do not describe it as proof of any particular historical reconnect or media fix.
 
 ### Published product and reusable gates
 
@@ -97,11 +114,19 @@ on the actual rollback. Do not edit predicates to accept a failed runtime.
 
 ### Next action and boundaries
 
-The ordinary public pair is accepted. Publish the docs-only evidence update
-(RELEASES, ROADMAP, this compact checkpoint) from the current branch; its scoped
-validation is `git diff --check` and the independent evidence review above.
-Reconcile the PR/CI before proceeding; do not rerun the product suites.
-No product republish, accepted gate rerun or local installation is needed for it.
+The ordinary public pair is accepted. Docs-only PR #452 is merged as
+`b7587b51d9e50c0355c05ba7b4613354df0b3018` (current origin/main).
+Checked head72e648e45d9779c7048ccffac03d5dbe8b84d1b3 has the same tree.
+CI41329055695/1 and audit41329055664/1 passed all three required contexts;
+root merge/tree proof and final watcher receipt are in
+`public-next/pr452/head-72e648e45/`. The watcher is terminal.
+Do not repeat the completed public-pair or docs work. The current branch contains
+the separate recovery-lifetime repair above. Focused checks/review are accepted;
+open its scoped PR and obtain the required exact-head CI. Published .33 remains
+unchanged and does not contain this new repair. Its accepted gates remain valid
+for that release, not automatic qualification of a later product build.
+User-present workstation smoke and sustained media/Telegram/sleep checks remain
+separate pending gates, respecting the local-work boundary below.
 User-Mac installation, sustained calls/video, live Telegram and sleep/wake remain
 unqualified. Public-pair proof does not itself establish ordinary Quit, notification
 delivery, continuous invisibility or external sentinel/global PF preservation.

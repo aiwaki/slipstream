@@ -33,6 +33,15 @@ lookup and other callers intact. Completion removes only its own inflight entry;
 a worker failure is observed even when every caller has left. Existing resolver
 queries, cache bounds/TTLs and `None` versus `[]` meanings remain unchanged.
 
+Owned-Geph replay recovery follows the same lifetime rule. Its shared future is
+the executor's actual queued/running job; no client owns publication of the
+result. Each caller has an independent shielded wait and the existing timeout,
+including queue time. Cancellation or timeout cannot cancel the shared job or
+admit a second one before it finishes. Expected recovery failures return false;
+unexpected exceptions reach remaining waiters and are observed even after all
+waiters leave. This does not interrupt blocking native operations, change restart
+admission or extend the existing shutdown guarantees.
+
 Runtime circuit admission creates a once-only permit for the admitting task and
 registry generation. A late result from an older phase, expired/evicted key or
 cleared registry cannot finish another probe. Task completion abandons unfinished

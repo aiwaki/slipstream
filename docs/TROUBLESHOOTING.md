@@ -44,7 +44,13 @@ backend admission, first payload and established stream are different boundaries
 A completed HTTP403 is not a missing DNS answer. An available backend also does
 not prove that its next request has a free circuit probe.
 
-Source regressions now isolate shared DNS cancellation and stale circuit results.
+Source regressions now isolate shared DNS cancellation, shared owned-Geph recovery
+cancellation and stale circuit results. In the Geph case, the first caller could
+leave before publishing a completed worker's result, or another caller's timeout
+could cancel the result shared by every waiter. Recovery now keeps its result
+with the worker and isolates each caller's wait. A completed worker returning
+true with failed/cancelled surviving callers is the causal regression signature;
+a historical reconnect message alone does not establish this cause.
 Their in-memory checks do not qualify installed behavior, arbitrary sites or an
 already established media stream. Confirm the installed source before attributing
 a new report to a repaired path. See the November 1 ownership investigation in
