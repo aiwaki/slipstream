@@ -15,8 +15,9 @@ DNS-ответов и остановки обработчиков. Недост�
 обновлён до 1.11.2. В CI проверены четыре сайта в Safari и Chrome, остановка и
 восстановление Geph, установка пакета и откат при завершении новой версии до
 подтверждения запуска. Наблюдение в течение 1800,12 секунды проверяло работу в
-фоне и очистку, а не непрерывное видео или звонок. Обычный переход между
-публичными `.32` и `.33` через меню, а также установка на пользовательском Mac
+фоне и очистку, а не непрерывное видео или звонок. Обычный публичный переход
+`.32 → .33` через меню, включая отмену и повторную установку, подтверждён.
+Аварийный откат с этого публичного пути и установка на пользовательском Mac
 пока не подтверждены.
 
 **EN:** This release repairs scoped request-cancellation, incomplete DNS response
@@ -25,8 +26,9 @@ is no longer counted as a failed dial. Telegram transport is updated to 1.11.2.
 CI covered four sites in Safari and Chrome, Geph stop/recovery, package update
 and rollback after terminating the successor before its startup acknowledgement.
 The 1800.12-second observation covered background operation and cleanup, not a
-continuous video or call. The ordinary public `.32 → .33` menu path and
-installation on the user's Mac remain unverified.
+continuous video or call. The ordinary public `.32 → .33` menu path, including
+cancellation and a new installation attempt, is verified. Pre-ACK rollback from
+that public path and installation on the user's Mac remain unverified.
 
 The candidate manifest is
 `e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0`.
@@ -45,9 +47,9 @@ confirmed stopped; it does not reproduce every production restart race or keep
 a media stream open across the outage. Discord and YouTube remain on local bypass.
 These results do not establish the cause of every earlier reconnect or HTTP 403.
 
-Ordinary public `.32 → .33` cancellation, commit and pre-ACK rollback must use
-these actual published assets. The `.31 → .32` results below remain historical
-evidence for their source snapshots; they do not qualify `.33`.
+Public `.32 → .33` cancellation and commit used these actual published assets.
+Its separate pre-ACK rollback remains pending. The `.31 → .32` results below
+remain historical evidence for their source snapshots; they do not qualify `.33`.
 
 The first ordinary public attempt,
 [41313348427/1](https://github.com/aiwaki/slipstream/actions/runs/41313348427),
@@ -59,6 +61,34 @@ admin prompt or transaction occurred, and cleanup reported no errors. This run
 qualifies neither the public update nor a failure of the updater transaction.
 The follow-up observer records the missing diagnostics without relaxing the
 visibility requirement or retrying the action.
+
+[Public Cancel + commit 41319073498/1](https://github.com/aiwaki/slipstream/actions/runs/41319073498)
+passed with observer `45ec528e6c149922abc9bd348d5849d1e1d2c762` and the unchanged
+published apps. The old app discovered the offer without authentication,
+cancelled authorization, removed the local preparation while OLD kept running,
+then rediscovered it. A new Install and
+one confirmation led to normal OLD exit, a real NEW acknowledgement and durable
+root commit before the lease deadline. The new daemon heartbeat advanced and
+cleanup was empty. Both releases' 12 assets, eight candidate pins and 14 observer
+sources were independently bound. A second menu-open timeout was accepted only
+after fresh containment and one exact visible match; no shadow-hit admission or
+action replay was used. The cause of the earlier menu refusal remains unknown.
+
+[Public rollback attempt 41321512323/1](https://github.com/aiwaki/slipstream/actions/runs/41321512323)
+stopped before menu interaction: OLD logged a discovery HTTP 403. No Install or
+transaction occurred, and cleanup was empty. A separate later diagnostic request
+returned 403 with an exhausted anonymous quota. The original request's page and
+headers were not captured, so that later result does not establish its exact
+cause or exclude a cached response. The rollback mechanism was not exercised.
+GitHub associates anonymous REST quotas with the originating IP; its endpoint
+response headers report the current limit state. [GitHub rate-limit documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
+
+The follow-up observer samples the fixed anonymous public feed once before
+installing or launching OLD. It records bounded status, quota, cache and timing
+data and refuses the attempt when the sample is unavailable. A successful sample
+is a prerequisite observation, not a reservation of future shared-IP quota. It
+does not authenticate, retry the app or seed its update offer. The accepted
+Cancel/commit evidence is retained; a separate actual rollback is still required.
 
 ## Published preview .32 — 2026-10-31
 

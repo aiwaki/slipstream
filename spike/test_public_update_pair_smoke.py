@@ -938,6 +938,209 @@ def preview33_modules(monkeypatch):
     return next_driver, next_menu
 
 
+@pytest.mark.parametrize("classification", ["external_rate_limited", "external_unknown"])
+def test_preview33_prelaunch_refusal_prevents_install_and_retains_receipt(preview33_modules, monkeypatch, classification):
+    receipt = {"kind": "prelaunch_public_feed_admission", "admitted": False,
+               "classification": classification, "status": 403 if classification == "external_rate_limited" else None}
+    events, commands = [], []
+    backend = SimpleNamespace(env={"HOME": "/fixture", "PATH": "/usr/bin"},
+                              record=lambda kind, value: events.append((kind, value)))
+    def run(command, **kwargs):
+        commands.append((command, kwargs))
+        return SimpleNamespace(stdout=json.dumps(receipt).encode())
+    backend.run = run
+    def forbidden_install(_backend):
+        pytest.fail("OLD installation reached before external admission")
+    monkeypatch.setattr(driver, "install_old", forbidden_install)
+    monkeypatch.setenv("GH_TOKEN", "must-not-inherit")
+    monkeypatch.setenv("GITHUB_TOKEN", "must-not-inherit")
+    monkeypatch.setenv("HTTPS_PROXY", "http://invalid.example")
+    with pytest.raises(Refused, match="public feed admission"):
+        driver.drive(backend)
+    assert events == [("public_feed_admission", receipt)]
+    assert len(commands) == 1
+    command, options = commands[0]
+    assert Path(command[1]).name == "public_update_preview33_menu_smoke.py"
+    assert command[2:] == ["--prelaunch-public-feed"]
+    assert options == {"timeout": 10, "env": backend.env}
+    assert not any(key in options["env"] for key in ("GH_TOKEN", "GITHUB_TOKEN", "HTTPS_PROXY"))
+
+
+def test_preview33_prelaunch_ready_is_recorded_before_install(preview33_modules, monkeypatch):
+    receipt = {"kind": "prelaunch_public_feed_admission", "admitted": True, "classification": "ready"}
+    events = []
+    backend = SimpleNamespace(env={}, record=lambda kind, value: events.append((kind, value)),
+        run=lambda *_a, **_k: SimpleNamespace(stdout=json.dumps(receipt).encode()))
+    class AtInstall(Exception): pass
+    def install(value):
+        assert value is backend
+        assert events == [("public_feed_admission", receipt)]
+        raise AtInstall
+    monkeypatch.setattr(driver, "install_old", install)
+    with pytest.raises(AtInstall):
+        driver.drive(backend)
+
+
+@pytest.fixture
+def preview33_feed_guard(preview33_modules, monkeypatch):
+    import socket
+    import threading
+    def forbidden(*_a, **_k):
+        pytest.fail("network/thread forbidden in public feed fixture")
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(threading.Thread, "start", forbidden)
+    monkeypatch.setattr(menu.urllib.request, "urlopen", forbidden)
+    monkeypatch.setattr(menu.urllib.request, "build_opener", forbidden)
+
+
+def feed_headers(**changes):
+    return {"X-RateLimit-Limit": "60", "X-RateLimit-Remaining": "20", "X-RateLimit-Reset": "1793548800",
+            "Date": "Sun, 01 Nov 2026 15:30:00 GMT", "Age": "0", "Cache-Control": "private",
+            "ETag": '"public"', "X-Cache": "MISS", "X-GitHub-Request-Id": "public-request",
+            "Content-Type": "application/json", **changes}
+
+
+def test_preview33_feed_ready_exact_anonymous_single_request_and_bounds(preview33_feed_guard, monkeypatch):
+    response = DiscoveryResponse(200, feed_headers(**{"Set-Cookie": "omit", "Authorization": "omit"}),
+                                 json.dumps([{"id": 1}] * 10).encode())
+    opener, calls = diagnostic_opener(response)
+    handlers = []
+    def build(*values):
+        handlers.extend(values)
+        return opener
+    monkeypatch.setattr(menu.urllib.request, "build_opener", build)
+    monkeypatch.setenv("GH_TOKEN", "must-not-inherit")
+    monkeypatch.setenv("HTTPS_PROXY", "http://invalid.example")
+    result = menu.public_feed_admission()
+    assert result["admitted"] is True and result["classification"] == "ready"
+    assert result["kind"] == "prelaunch_public_feed_admission" and result["list_count"] == 10
+    assert result["authenticated"] is False and result["future_request_availability_guaranteed"] is False
+    assert result["requests_attempted"] == len(calls) == 1
+    request, timeout = calls[0]
+    assert request.full_url == menu.DISCOVERY_URL and request.get_method() == "GET" and timeout == 5
+    assert {k.lower(): v for k, v in request.header_items()} == {k.lower(): v for k, v in menu.DISCOVERY_HEADERS.items()}
+    assert handlers[0].proxies == {} and isinstance(handlers[1], menu.NoRedirect)
+    assert handlers[1].redirect_request(None, None, 302, None, {}, "https://invalid.example") is None
+    assert response.read_sizes == [256 * 1024 + 1]
+    assert result["quota"] == {"limit": 60, "remaining": 20, "reset": 1793548800}
+    assert {k: result["headers"][k] for k in ("date", "age", "cache-control", "etag", "x-cache")}
+    assert "set-cookie" not in result["headers"] and "authorization" not in result["headers"]
+    assert result["finished_at_unix"] >= result["started_at_unix"] > 0 and result["elapsed_seconds"] >= 0
+
+
+@pytest.mark.parametrize("status,remaining,body,classification", [
+    (403, "0", b'{"message":"API rate limit exceeded"}', "external_rate_limited"),
+    (429, "0", b'{"message":"Too Many Requests"}', "external_rate_limited"),
+    (403, "20", b'{"message":"Forbidden"}', "external_unavailable"),
+    (302, "20", b'[]', "external_unavailable"),
+    (200, "0", b'[]', "external_unavailable"),
+    (200, "20", b'not json', "external_unavailable"),
+    (200, "20", b'{}', "external_unavailable"),
+    (200, "20", b'[null]', "external_unavailable"),
+    (200, "20", json.dumps([{}] * 11).encode(), "external_unavailable"),
+    (200, "20", b' ' * (256 * 1024 + 1), "external_unavailable"),
+])
+def test_preview33_feed_refuses_bad_environment_without_retry(preview33_feed_guard, status, remaining, body, classification):
+    response = DiscoveryResponse(status, feed_headers(**{"X-RateLimit-Remaining": remaining, "Retry-After": "30"}), body)
+    opener, calls = diagnostic_opener(response)
+    result = menu.public_feed_admission(opener=opener)
+    assert result["admitted"] is False and result["classification"] == classification
+    assert result["status"] == status and result["headers"]["retry-after"] == "30"
+    assert result["requests_attempted"] == len(calls) == 1
+    assert result["body_truncated"] is (len(body) > 256 * 1024)
+
+
+@pytest.mark.parametrize("header,value", [
+    ("X-RateLimit-Remaining", None), ("X-RateLimit-Remaining", "-1"),
+    ("X-RateLimit-Remaining", "true"), ("X-RateLimit-Remaining", "1.0"),
+    ("X-RateLimit-Remaining", True), ("X-RateLimit-Remaining", 20),
+    ("X-RateLimit-Remaining", "nan"), ("X-RateLimit-Remaining", "61"),
+    ("X-RateLimit-Remaining", " 20"), ("X-RateLimit-Remaining", "01"),
+    ("X-RateLimit-Limit", "0"), ("X-RateLimit-Reset", "0"),
+    ("X-RateLimit-Reset", str(2**53)), ("X-RateLimit-Reset", "9" * 400),
+])
+def test_preview33_feed_requires_valid_quota_metadata(preview33_feed_guard, header, value):
+    headers = feed_headers()
+    if value is None:
+        headers.pop(header)
+    else:
+        headers[header] = value
+    response = DiscoveryResponse(200, headers, b'[]')
+    opener, calls = diagnostic_opener(response)
+    result = menu.public_feed_admission(opener=opener)
+    assert not result["admitted"] and result["quota"] is None and len(calls) == 1
+    assert all(len(value) <= 256 for value in result["headers"].values())
+
+
+def test_preview33_feed_duplicate_quota_and_transport_failure_are_not_admitted(preview33_feed_guard):
+    response = DiscoveryResponse(200, feed_headers(), b'[]')
+    response.headers["X-RateLimit-Remaining"] = "20"
+    opener, calls = diagnostic_opener(response)
+    assert menu.public_feed_admission(opener=opener)["admitted"] is False
+    assert len(calls) == 1
+    errors = []
+    def opened(*_a, **_k):
+        errors.append(True)
+        raise TimeoutError("private transport detail")
+    result = menu.public_feed_admission(opener=SimpleNamespace(open=opened))
+    assert errors == [True] and result["classification"] == "external_unknown"
+    assert result["error_type"] == "TimeoutError" and result["admitted"] is False
+    assert "private transport detail" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("response", [None, b'not json', b'{}', b'x' * 8193])
+def test_preview33_feed_command_failure_retains_unknown_and_never_installs(preview33_feed_guard, monkeypatch, response):
+    events, calls = [], []
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        if response is None:
+            raise subprocess.TimeoutExpired(command, 10, output=b'private detail')
+        return SimpleNamespace(stdout=response)
+    backend = SimpleNamespace(env={}, run=run, record=lambda kind, value: events.append((kind, value)))
+    monkeypatch.setattr(driver, "install_old", lambda _b: pytest.fail("install after failed admission"))
+    with pytest.raises(Refused, match="public feed admission"):
+        driver.drive(backend)
+    assert len(calls) == len(events) == 1
+    assert events[0][1]["classification"] == "external_unknown" and events[0][1]["admitted"] is False
+    assert "private detail" not in json.dumps(events)
+
+
+def test_preview33_feed_refusal_is_saved_by_actual_driver_finally(preview33_feed_guard, tmp_path, monkeypatch):
+    args = SimpleNamespace(repository="aiwaki/slipstream", gh="gh", mode="kill-successor-before-ack",
+                           root_gate_run_id=driver.ROOT_GATE[0], root_gate_attempt=driver.ROOT_GATE[1],
+                           output_dir=tmp_path / "public-update")
+    for name in ("repo", "old_candidate_dir", "new_candidate_dir", "old_app", "new_app", "root_gate_dir", "public_root"):
+        path = tmp_path / name
+        path.mkdir()
+        setattr(args, name, path)
+    args.pair_manifest = tmp_path / "pair.json"
+    args.pair_manifest.write_text(json.dumps({"schema_version": 1, **driver.PAIR}))
+    denied = {"kind": "prelaunch_public_feed_admission", "classification": "external_rate_limited",
+              "admitted": False, "status": 403}
+    backend = SimpleNamespace(env={}, expected={}, events=[], identity=None, install_attempted=False)
+    backend.record = lambda kind, value: backend.events.append({"kind": kind, "value": value})
+    backend.artifact = lambda *_a: {}
+    backend.run = lambda command, **_k: SimpleNamespace(stdout=json.dumps({} if command[0] == "gh" else denied).encode())
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(driver, "parse_args", lambda _a: args)
+    monkeypatch.setattr(driver, "guard", lambda: UID)
+    monkeypatch.setattr(driver.os, "umask", lambda _value: 0o077)
+    monkeypatch.setattr(driver, "modules", lambda _repo: (None, None))
+    monkeypatch.setattr(driver, "PublicPreAckObserver", lambda *_a: backend)
+    monkeypatch.setattr(driver, "source_binding", lambda _b: {"fixture": "unchanged source"})
+    monkeypatch.setattr(driver, "public_binding", lambda _b: {"fixture": "authenticated"})
+    monkeypatch.setattr(driver, "prerequisite", lambda *_a: {"fixture": "accepted G"})
+    monkeypatch.setattr(driver.Native, "teardown", lambda b: None if not b.install_attempted else pytest.fail("native teardown"))
+    monkeypatch.setattr(driver, "install_old", lambda _b: pytest.fail("OLD must not be installed"))
+    assert driver.main([]) == 2
+    saved = json.loads((args.output_dir / "public-update-result.json").read_bytes())
+    assert saved["status"] == "failed" and saved["cleanup_errors"] == []
+    assert saved["public_pair_qualified"] is saved["public_update_transaction_qualified"] is saved["transaction_observed"] is False
+    assert saved["events"] == [{"kind": "public_feed_admission", "value": denied}]
+    assert backend.old_launch_attempted is backend.click_attempted is backend.install_attempted is False
+
+
 def test_preview33_pins_match_the_published_pair(preview33_modules):
     assert driver.PAIR == {"schema_version": 1,
         "old": {"source_commit": "fd7d43c271e4a46ac2d10fc5ca4a032b92adae73",

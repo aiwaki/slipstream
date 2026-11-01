@@ -20,7 +20,7 @@ import sys
 from build_packaged_update_trigger import pins
 from native_root_update import Native, Refused, bounded_output, digest, document, guard, modules, require
 from packaged_update_observer import exact_equal, same_process
-from public_update_preview33_menu_smoke import PublicMenu, VERSION
+from public_update_preview33_menu_smoke import PublicMenu, VERSION, require_public_feed
 from public_update_observer import PublicObserver, PublicPreAckObserver
 from qualify_packaged_update_commit import cleanup_committed, install_old, prerequisite
 from stop_quit_ui_smoke import fixture_admin
@@ -352,6 +352,7 @@ def cleanup_before_click(backend):
 
 def drive(backend):
     from public_update_visibility import PublicUpdateVisibility
+    require_public_feed(backend)
     install_old(backend)
     backend.menu = PublicMenu(backend)
     backend.visibility = PublicUpdateVisibility()
