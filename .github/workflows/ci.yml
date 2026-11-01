@@ -749,7 +749,7 @@ jobs:
         working-directory: app-tauri
         run: |
           set -euo pipefail
-          ./node_modules/.bin/tauri build \
+          ./node_modules/.bin/tauri build --verbose \
             --config src-tauri/tauri.local.conf.json \
             --target "$SLIPSTREAM_TAURI_TARGET"
 

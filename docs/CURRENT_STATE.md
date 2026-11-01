@@ -9,7 +9,7 @@ branch `codex/geph-no-dial-circuit-outcomes`, based on merged PR443/main
 This guard fix is newer than published .32. Reconcile source/PR/required CI
 before continuing. Original locator first block is synced; preserve older tails.
 
-### Current bounded fix — causal proof complete, PR qualification next
+### Current bounded fix — PR444, DMG diagnostics added after first CI failure
 
 Removed the no-attempt `elif` from `tproxy.handle`: unreadiness or a refused
 session reservation during drain must not acquire a route-circuit permit and
@@ -29,8 +29,25 @@ and unchanged adjacent evidence; do not rerun unchanged protected G/P/R.
 Private originals, logs and `verification.json` are retained in
 `output/continuation-20261101/no-dial-circuit/`; receipt SHA
 `4442be68d76fa753e795929ed1b1c8a2b1db4743cddca31aeb6899b005366afc`.
-Next: independent review, docs checks and exact-head PR CI, then merge only if all
-required checks pass. No workstation installation or new published release yet.
+Independent review PASS, 15 checks/no findings; `independent-review.json` SHA
+`e6bff52e802860cbf95034ef6eb364ea40955e6a43d6f06a94eb172c869cc4c5`.
+Docs8, continuity and diff passed. PR444 head
+`5e655ec602ce777f3e85d57b96ee0ae8b2d60e73` is open. CI41284288845/1
+failed packaged-app-build job124782360065 while running `bundle_dmg.sh`, after
+successful app bundling/signing; the command's internal failure is absent from
+the default log. Audit41284288852/1 and product checks passed; hosted Python1867 passed (+2 new cases).
+This is not evidence that the routing regression failed. Do not infer a DMG
+root cause or repeat the same job without improving its missing diagnostics.
+One watcher (`app_update_implementation`) polls at 60s with terminal cache;
+evidence under `no-dial-circuit/pr444/`. The source/test patch remains frozen.
+Added `--verbose` only to the unsigned PR Tauri build command. Official pinned
+Tauri CLI2.11.3 source confirms Debug exposes the DMG child stdout/stderr that
+Info hides. No bundling target/verifier/signing/main-build change; no inferred
+DMG cause. This is diagnostic qualification of a new head, not a blind rerun.
+The route source and tests remain identical to the 1867-test green result.
+Next: observe final-head CI and fix a concrete bundler error if reported; merge
+only after all three required checks pass. Then reconcile main and refresh Xerj. No workstation
+installation or new published release yet.
 
 ### Completed shared cooldown fix — PR443
 
@@ -143,7 +160,7 @@ No installed .32/user-Mac or sustained media/sleep/wake success claim.
 
 Preserve working external Geph/workstation: no local native/scanner/app/browser/
 install/PF/service/DNS/proxy/PAC/VPN/account actions. Small mocks/static checks and
-disposable hosted CI only. PR442/443 watchers finished; no active CI watcher. Graph unavailable; bounded direct/rg/git fallback. Broader goal active.
+disposable hosted CI only. PR442/443 watchers finished; PR444 has one active watcher as above. Graph unavailable; bounded direct/rg/git fallback. Xerj code index is at prior cbc3502e and must refresh after this patch. Broader goal active.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
