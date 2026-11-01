@@ -15055,17 +15055,6 @@ async def _handle_impl(reader, writer):
                     geph_suspend = "geo-exit backend cooling down"
             finally:
                 _geph_session_finished()
-        elif geph_expected and not geph_cooling and runtime_route_circuit_allows(
-            policy,
-            GEO_BACKEND_GEPH,
-            owned=geph_owned,
-        ):
-            runtime_route_circuit_record_result(
-                policy,
-                GEO_BACKEND_GEPH,
-                False,
-                owned=geph_owned,
-            )
 
         replay_safe_owned_failure = bool(
             geph_attempt_failed

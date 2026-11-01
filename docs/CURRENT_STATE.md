@@ -1,14 +1,38 @@
 # Current Project State
 
-## Current continuation — 2026-10-31 UTC, Geph admission-only cooldown repair
+## Current continuation — 2026-11-01, no-dial circuit outcome repair
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/geph-admission-cooldown`, base/main
-`41c614c993ed8a242a51a5e2c44ed996c9ddc299` (merged PR442).
+branch `codex/geph-no-dial-circuit-outcomes`, based on merged PR443/main
+`cbc3502e4e141c9a65099060cded1e394f58f068`, equal tree to verified PR head
+`1eaa89e19be1c51dd5433dddacd13d4504c6d640`. PR442 is also merged.
 This guard fix is newer than published .32. Reconcile source/PR/required CI
 before continuing. Original locator first block is synced; preserve older tails.
 
-### Current bounded fix
+### Current bounded fix — causal proof complete, PR qualification next
+
+Removed the no-attempt `elif` from `tproxy.handle`: unreadiness or a refused
+session reservation during drain must not acquire a route-circuit permit and
+record failure. The whole branch is removed to avoid leaking a HalfOpen permit.
+This fixes false route-scoped one-second suppression; normal attempts, their
+backoff and the established route policy are unchanged. Historical reconnects
+are not attributed to this finding.
+
+Two guarded memory-only regressions fail on immutable base source and pass on
+this patch: unreadiness must not create Open, and drain must leave an expired Open
+circuit untouched until a real request can probe it. Both recover the full 43-byte
+response on the first ready same-group request. The real payload-EOF control
+passes on both sources; all five new/adjacent cases pass in 0.19s. Actual handler,
+circuit registry, readiness reducer and cleanup are used with guarded in-memory
+streams. No live monitor or backend was exercised. Reuse PR443's green full suite
+and unchanged adjacent evidence; do not rerun unchanged protected G/P/R.
+Private originals, logs and `verification.json` are retained in
+`output/continuation-20261101/no-dial-circuit/`; receipt SHA
+`4442be68d76fa753e795929ed1b1c8a2b1db4743cddca31aeb6899b005366afc`.
+Next: independent review, docs checks and exact-head PR CI, then merge only if all
+required checks pass. No workstation installation or new published release yet.
+
+### Completed shared cooldown fix — PR443
 
 A rejected owned-Geph circuit invoked global `suspend_geo_exit_backend` without
 any dial, setting `_geph_up=false` and a30s hold for other service groups.
@@ -16,8 +40,8 @@ The narrow repair gates common suspension with `geph_attempt_failed`, which is s
 only after an admitted unsuccessful helper result. Real failure backoff and the
 early external-Geph zero-payload branch stay unchanged. No policy/account edits.
 Held retries do not themselves renew the hold; do not call this infinite renewal.
-Synthetic circuit failure recording on unready/draining admission is a separate
-observation, not repaired or qualified by this slice.
+Synthetic circuit failure recording on unready/draining admission was separate
+from PR443; the current slice above addresses it.
 
 Private `output/continuation-20261031/remaining-scope/circuit-idle-ttl/admission-cooldown/`:
 on unchanged7e6ec072e,1 causal RED (OpenAI rejection, no dial, readinessfalse and
@@ -31,8 +55,39 @@ cases PASS;14 adjacent cases PASS reused. Independent final3-file review verifie
 source/log hashes without reruns; no blockers. `implementation-verification.json`
 SHA211e5bc3a6d161cff6d1a726a52f5458e6c2f9ec661bc672c2b58c28aa8f41cf.
 Actual monitor/network not exercised; fixture uses its reducer and in-memory streams.
-Next: docs/continuity checks, ordinary PR and all3 required CI contexts. No local
-native or new protected account run. Root owns Git/docs.
+Docs8/continuity/diff passed. PR443 merged after CI41186097912/1 and
+ audit41186098002/1 SUCCESS, all three required contexts SUCCESS. Python1865
+ passed (three new parameter cases plus the updated unready case in unfiltered
+ suite); packaged browser and native lifecycle PASS. Quiet pytest logs do not
+ print individual names. Final receipt SHA
+ `dc76e44d42f41885042b0b43b07bb52fb37853ff36d1a8e9b9624620adcb8385`;
+ resumed verification SHA
+ `ed177a26da250558b0b4ddcb2f5d4841b86fb97707460db60c5e5538bf9251c9`.
+ Same-run watcher finished; no rerun. Both fixes remain newer than published .32
+ and have not been installed on the user's Mac.
+
+User-requested tooling is installed globally: Xerj v1.0.0-rc.100 and Entire
+0.12.2, official ARM64 archives verified against release checksums and digests.
+Xerj: authenticated loopback user LaunchAgent, 1024 MiB admission budget (not OS
+RSS ceiling), two indexing workers, BM25/code analyzer, no external rerank/feedback.
+585 unique files/15,796 records/419 code files indexed in active AUD-17 checkout;
+private output/hidden/build/vendor paths excluded. Real MCP search matched current
+source; current Codex exposes five read-only search/map tools. Refresh explicitly
+with `~/.local/bin/xerj-index-slipstream`; no continuous index watcher.
+Entire: both AUD-17 worktrees enabled with local settings, push_sessions=false and
+telemetry=false; no past transcript import. User approved seven hooks. Public Codex
+project trust for the shared Git root was added after config/read identified the
+missing trust boundary. Current bundled Codex hooks/list confirms all seven Entire
+project hooks enabled/trusted plus four unchanged global hooks, zero errors.
+Entire status still flags the worktree-local copy as not discovered; the actual
+same-byte common-root copy is discovered/trusted by Codex. A real future Desktop
+session/capture and its event PATH have not yet been exercised. Do not claim those.
+Five shared Git hooks and settings have backups. Baseline root has only the
+Codex discovery hook file, not Entire settings or substituted AUD-17 source.
+Depot not connected: personal repository unsupported by its GitHub Actions runners;
+separate Depot CI is Linux-only, and cost/qualification changes are not justified.
+Evidence, configuration backups, reports: `~/.local/share/slipstream-tooling-setup/`.
+No Slipstream runtime or external Geph changes; broader repair goal remains active.
 
 ### Completed circuit inactivity fix — PR442
 
@@ -88,8 +143,7 @@ No installed .32/user-Mac or sustained media/sleep/wake success claim.
 
 Preserve working external Geph/workstation: no local native/scanner/app/browser/
 install/PF/service/DNS/proxy/PAC/VPN/account actions. Small mocks/static checks and
-disposable hosted CI only. PR442 watcher finished; no active native CI watcher yet
-for the new guard. Graph unavailable; bounded direct/rg/git fallback. Broader goal active.
+disposable hosted CI only. PR442/443 watchers finished; no active CI watcher. Graph unavailable; bounded direct/rg/git fallback. Broader goal active.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
