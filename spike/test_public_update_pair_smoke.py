@@ -925,3 +925,138 @@ def test_validator_diagnostics_cannot_be_enabled_for_an_unrelated_command(tmp_pa
     with pytest.raises(Refused, match="fixed public validator"):
         driver.run_public_validator(backend, [sys.executable, tmp_path / "private.py"],
                                     public=tmp_path, kind="publication")
+
+
+@pytest.fixture
+def preview33_modules(monkeypatch):
+    import public_update_preview33_pair_smoke as next_driver
+    import public_update_preview33_menu_smoke as next_menu
+    # Reuse the existing inert public-file fixtures without altering historical
+    # .31 -> .32 tests or the shared observer/AX implementations.
+    monkeypatch.setattr(sys.modules[__name__], "driver", next_driver)
+    monkeypatch.setattr(sys.modules[__name__], "menu", next_menu)
+    return next_driver, next_menu
+
+
+def test_preview33_pins_match_the_published_pair(preview33_modules):
+    assert driver.PAIR == {"schema_version": 1,
+        "old": {"source_commit": "fd7d43c271e4a46ac2d10fc5ca4a032b92adae73",
+                "run_id": 41164190639, "run_attempt": 1,
+                "candidate_manifest_sha256": "3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823"},
+        "new": {"source_commit": "9eccd1ddf691aef5f76d493103513f2fada2fd5c",
+                "run_id": 41302269258, "run_attempt": 1,
+                "candidate_manifest_sha256": "e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0"}}
+    assert driver.NEW_SOURCE == driver.PAIR["new"]["source_commit"]
+    assert driver.ROOT_GATE == (41303686569, 1)
+    assert driver.PublicMenu is menu.PublicMenu and driver.VERSION == menu.VERSION == "0.1.9-preview.33"
+    expected = {
+        "old": (429722639, "Slipstream 0.1.9-preview.32 (архивная)",
+                "1f1fec117833b18bb163648b7b48c7459c67178797be95fc167d55da4d665bd0",
+                "db7c9e7e1ed3b4ac06b1b6bf9bb0b81fc25e77b736476fcb2c0cb5c76b48cac2"),
+        "new": (430591253, "Slipstream 0.1.9-preview.33",
+                "f41a5a64023e21d53fab1783179403d435c0bcd949a1904c92d994a8d62c8eb5",
+                "aee5994fbfbdfb5c57b62e837abc8c8d36090c0404c4b307b6a011ff20845591")}
+    for side, (release_id, title, config_sha, inventory_sha) in expected.items():
+        spec = driver.PUBLIC_RELEASES[side]
+        assert (spec["release_id"], spec["release_name"], spec["tauri_config_sha256"]) == (release_id, title, config_sha)
+        assert len(spec["assets"]) == 12
+        inventory = json.dumps(spec["assets"], sort_keys=True, separators=(",", ":")).encode()
+        assert hashlib.sha256(inventory).hexdigest() == inventory_sha
+
+
+@pytest.mark.parametrize("target", ["0.1.9-preview.33", "0.1.9-preview.32"])
+def test_preview33_menu_accepts_only_its_actual_successor(preview33_modules, tmp_path, target):
+    process = original(tmp_path)
+    executable = tmp_path / "Contents/MacOS/slipstream"
+    report = ax_report(process, executable, pressed=True)
+    report["actions"][0]["title"] = report["update_items"][0]["title"] = f"Install Slipstream {target}…"
+    if target == menu.VERSION:
+        menu.validate_ax(report, process, executable, "a" * 64, pressed=True)
+    else:
+        with pytest.raises(Refused):
+            menu.validate_ax(report, process, executable, "a" * 64, pressed=True)
+
+
+def test_preview33_public_binding_keeps_source_specific_validation(preview33_modules, tmp_path, monkeypatch):
+    test_both_public_releases_use_frozen_inventory_and_source_specific_signature_config(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize("side", ["old", "new"])
+@pytest.mark.parametrize("mutation", ["candidate", "asset_id", "source_config"])
+def test_preview33_public_binding_rejects_pair_drift(preview33_modules, tmp_path, monkeypatch, side, mutation):
+    test_public_binding_rejects_drift_on_either_published_side(tmp_path, monkeypatch, side, mutation)
+
+
+@pytest.mark.parametrize("mode", ["commit", "kill-successor-before-ack"])
+def test_preview33_workflow_invokes_the_real_clone_parser(preview33_modules, mode):
+    import re
+    import shlex
+    source = (REPO / ".github/workflows/public-update-preview33-qualification.yml").read_text()
+    assert "  push:" not in source and "  pull_request:" not in source and "  workflow_dispatch:" in source
+    assert "github.event_name == 'workflow_dispatch'" in source and "github.ref == 'refs/heads/main'" in source
+    assert "environment:" not in source and "secrets." not in source
+    assert "old_download" not in source and "name: release-candidate-" not in source
+    assert 'group: public-preview33-update-${{ github.ref }}' in source
+    assert f'ref: "{driver.NEW_SOURCE}"' in source
+    for side in ("old", "new"):
+        for env, key in (("RUN_ID", "run_id"), ("RUN_ATTEMPT", "run_attempt"),
+                         ("SOURCE_SHA", "source_commit"), ("MANIFEST_SHA", "candidate_manifest_sha256")):
+            assert f'{side.upper()}_{env}: "{driver.PAIR[side][key]}"' in source
+    assert f'ROOT_GATE_RUN_ID: "{driver.ROOT_GATE[0]}"' in source
+    assert f'ROOT_GATE_ATTEMPT: "{driver.ROOT_GATE[1]}"' in source
+    assert f'pattern: native-root-update-*-{driver.ROOT_GATE[0]}-{driver.ROOT_GATE[1]}' in source
+    entry = "scripts/public_update_preview33_pair_smoke.py"
+    assert source.count(entry) == 2 and "scripts/public_update_pair_smoke.py" not in source
+    assert "qualified-source/scripts/materialize_pair.py" in source
+    command = re.search(r'bin/python" ' + re.escape(entry) + r' \\\n(.*?)\n          # The driver', source, re.S).group(1)
+    command = command.replace("$ROOT_GATE_RUN_ID", str(driver.ROOT_GATE[0])).replace("$ROOT_GATE_ATTEMPT", str(driver.ROOT_GATE[1])).replace("$CASE_MODE", mode)
+    parsed = driver.parse_args(shlex.split(command.replace("\\\n", " ")))
+    assert parsed.mode == mode and (parsed.root_gate_run_id, parsed.root_gate_attempt) == driver.ROOT_GATE
+    assert parsed.repo == Path("$GITHUB_WORKSPACE/qualified-source")
+    assert parsed.public_root == Path("$RUNNER_TEMP/public-releases")
+    assert source.index("id: public_download") < source.index("id: materialize") < source.index("id: qualify")
+    assert "commit (Cancel then confirm) first" in source and "if: always()" in source
+
+
+@pytest.mark.parametrize("drift", [None, "shared", "public"])
+def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp_path, monkeypatch, drift):
+    qualified = tmp_path / "qualified-source"
+    (qualified / "scripts").mkdir(parents=True)
+    for name in driver.REUSED:
+        (qualified / "scripts" / name).write_bytes((REPO / "scripts" / name).read_bytes())
+    if drift == "shared":
+        with (qualified / "scripts" / driver.REUSED[0]).open("ab") as stream:
+            stream.write(b"\n# changed helper\n")
+    harness_sha = "a" * 40
+    for key, value in {"GITHUB_REPOSITORY": "aiwaki/slipstream", "GITHUB_EVENT_NAME": "workflow_dispatch",
+                       "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": harness_sha}.items():
+        monkeypatch.setenv(key, value)
+    calls = []
+    def fake_git(command):
+        assert command[:2] == ["/usr/bin/git", "-C"]
+        directory, args = Path(command[2]), command[3:]
+        assert directory in (qualified, REPO)
+        if args == ["rev-parse", "HEAD"]:
+            data = (driver.NEW_SOURCE if directory == qualified else harness_sha).encode() + b"\n"
+        elif args == ["status", "--porcelain", "--untracked-files=no"]:
+            data = b""
+        else:
+            assert args[0] == "show" and len(args) == 2
+            ref, relative = args[1].split(":", 1)
+            assert ref == (driver.NEW_SOURCE if directory == qualified else harness_sha)
+            calls.append(relative)
+            data = (REPO / relative).read_bytes()
+            if drift == "public" and relative == "scripts/public_update_preview33_pair_smoke.py":
+                data += b"\n# different committed public harness\n"
+        return SimpleNamespace(stdout=data)
+    backend = SimpleNamespace(args=SimpleNamespace(repo=qualified), run=fake_git)
+    if drift:
+        with pytest.raises(Refused, match="shared qualification helper|public harness bytes"):
+            driver.source_binding(backend)
+    else:
+        binding = driver.source_binding(backend)
+        assert binding["qualified_product_source"] == driver.NEW_SOURCE and binding["harness_source"] == harness_sha
+        assert "scripts/public_update_preview33_pair_smoke.py" in binding["sha256"]
+        assert "scripts/public_update_preview33_menu_smoke.py" in binding["sha256"]
+        assert "scripts/public_update_pair_smoke.py" not in calls and "scripts/public_update_menu_smoke.py" not in calls
+        assert {"scripts/" + name for name in driver.REUSED} <= set(binding["sha256"])

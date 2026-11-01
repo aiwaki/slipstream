@@ -4,52 +4,46 @@ Roadmap is informational and not a release promise. Each milestone lands as a
 small PR with tests and matching documentation.
 
 <a id="development-status"></a>
-## Статус разработки / Development status — 2026-10-31
+## Статус разработки / Development status — 2026-11-01
 
 ### Русский
 
-[Slipstream 0.1.9-preview.32 опубликован](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
-для ручной установки из DMG. В него вошли исправления очистки отменённых
-параллельных соединений и распознавания разделённой строки размера HTTP-блока,
-обновлённый Chromium и Geph 0.4.3-r4: замена старой RSA-зависимости и исправление
-кеша авторизации Free/Plus. Исключения для уязвимостей старой RSA удалены,
-а не продлены. Это отдельные проверенные изменения, а не все открытые ветки.
+[Slipstream 0.1.9-preview.33 опубликован](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33).
+В выпуск вошли исправления отмены запросов, обработки неполных DNS-ответов,
+учёта недоступности Geph и остановки обработчиков, а также Telegram transport
+1.11.2. Geph 0.4.3-r4 сохраняет ранее выпущенные замену RSA и правку кеша
+авторизации Free/Plus. Стабильный релиз не изменился.
 
-На отдельных Mac в CI проверены выход, отказ и восстановление Geph, четыре сайта
-в Safari и Chrome и 1800,103 секунды работы в фоне без появления окон. Последняя
-проверка относится к работе в фоне, не к длительной передаче видео или звука.
-Переход между публичными `.31` и `.32` через обнаружение обновления, меню и
-запрос администратора проверен в CI вместе с отменой и откатом при завершении
-новой версии до подтверждения запуска. Установка на пользовательском Mac,
-длительные звонки, видео и сон/пробуждение ещё требуют отдельной проверки. Источники и границы доказательств — в [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31).
+На отдельных Mac в CI проверены выход, остановка и восстановление Geph, четыре
+сайта в Safari и Chrome, установка пакета, откат и 1800,12 секунды работы в фоне.
+Обычный публичный переход `.32 → .33` через меню ещё проверяется. Установка на
+пользовательском Mac, длительные звонки, видео и сон/пробуждение не подтверждены.
+Источники и границы проверок — в [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01).
 
-| Продолжающаяся работа | Что ещё не вошло в выпуск полностью |
+| Продолжающаяся работа | Что осталось |
 |---|---|
-| Восстановление соединений | Исправления владения запросами, отмены, неполных DNS-ответов и остановки обработчиков подготовлены для следующего preview. Старый PR #376 не включается целиком; неподтверждённые расширения из него не считаются обязательными исправлениями. |
-| Telegram ([PR #445](https://github.com/aiwaki/slipstream/pull/445)) | Транспорт 1.11.2 включён в main; PR #386 закрыт как заменённый. Изменение ещё не опубликовано в preview, живой сеанс Telegram требует отдельной проверки. |
+| Восстановление соединений | Проверить длительные пользовательские сеансы. Отдельные исправления выпущены в `.33`; старый PR #376 не включён целиком, его неподтверждённые расширения не считаются обязательными исправлениями. |
+| Telegram ([PR #445](https://github.com/aiwaki/slipstream/pull/445)) | Транспорт 1.11.2 опубликован в `.33`; живой сеанс Telegram требует отдельной проверки. PR #386 закрыт как заменённый. |
 | Сборка Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | PR остаётся открытым. Исправления сессий и SQLite-кеша вошли ранее через PR #388; замена RSA и правка Free/Plus-кеша выпущены отдельно в `.32`. PR целиком не включён; исследовательская native SQLite не активирована. |
 
 ### English
 
-[Slipstream 0.1.9-preview.32 is published](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
-for manual DMG installation. It includes cleanup fixes for cancelled connection
-races, recognition of split HTTP chunk-size lines, an updated Chromium runtime,
-and Geph 0.4.3-r4 with the old RSA dependency replaced and the Free/Plus auth cache
-repaired. The old RSA vulnerability exceptions were removed, not extended.
-These are individually qualified changes, not every open branch.
+[Slipstream 0.1.9-preview.33 is published](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33).
+It includes request-cancellation, incomplete DNS response, Geph admission
+accounting and worker-shutdown repairs, plus Telegram transport 1.11.2.
+Geph 0.4.3-r4 retains the previously released RSA replacement and Free/Plus
+auth-cache repair. The stable release is unchanged.
 
-Disposable Macs in CI covered Quit, Geph outage and recovery, four sites in
-Safari and Chrome, and 1800.103 seconds of background operation without visible
-windows. That last check measures background behavior, not sustained media traffic.
-The ordinary public `.31 → .32` discovery, tray-menu and administrator-dialog
-path passed in CI, including cancellation and rollback after terminating the new
-version before its startup acknowledgement. Installation on the user's Mac,
-sustained calls, video, and sleep/wake still need separate validation. See [RELEASES.md](RELEASES.md#published-preview-32--2026-10-31) for evidence and its limits.
+Disposable Macs in CI covered Quit, Geph stop/recovery, four sites in Safari
+and Chrome, package update, rollback and 1800.12 seconds of background operation.
+The ordinary public `.32 → .33` menu path is still being qualified. Installation
+on the user's Mac, sustained calls, video and sleep/wake remain unverified.
+See [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01) for evidence and its limits.
 
-| Ongoing work | Scope not yet fully shipped |
+| Ongoing work | What remains |
 |---|---|
-| Connection recovery | Request ownership, cancellation, incomplete DNS and worker shutdown repairs are prepared for the next preview. The old PR #376 is not imported wholesale; its unproved extensions are not required fixes. |
-| Telegram ([PR #445](https://github.com/aiwaki/slipstream/pull/445)) | Transport 1.11.2 is on main; PR #386 is closed as superseded. The change is not yet in a published preview, and a live Telegram session still needs validation. |
+| Connection recovery | Validate sustained user sessions. Scoped repairs shipped in `.33`; the old PR #376 is not imported wholesale and its unproved extensions are not required fixes. |
+| Telegram ([PR #445](https://github.com/aiwaki/slipstream/pull/445)) | Transport 1.11.2 shipped in `.33`; a live Telegram session still needs validation. PR #386 is closed as superseded. |
 | Geph build ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | The PR remains open. Session and SQLite-cache fixes shipped earlier through PR #388; the RSA replacement and Free/Plus auth-cache repair shipped separately in `.32`. The whole PR is not included; native SQLite research is not activated. |
 
 For exact commits, checks, and remaining gates, see [CURRENT_STATE.md](CURRENT_STATE.md).

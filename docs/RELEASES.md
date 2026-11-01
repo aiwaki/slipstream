@@ -1,18 +1,53 @@
 # Release Policy
 
-## Preview .33 preparation — 2026-11-01
+## Published preview .33 — 2026-11-01
 
-The next candidate targets the public `.32 → .33` update path. It includes the
-reviewed recovery ownership, incomplete DNS, accepted-client cleanup and lazy
-worker lifecycle changes, plus Telegram transport 1.11.2. Geph r4 is unchanged.
-This is preparation, not a published or locally installed release.
+[Slipstream 0.1.9-preview.33](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33)
+was published from `9eccd1ddf691aef5f76d493103513f2fada2fd5c` by
+[publisher 41309441046/1](https://github.com/aiwaki/slipstream/actions/runs/41309441046).
+The pre-release includes scoped recovery ownership, incomplete DNS,
+accepted-client cleanup and lazy worker shutdown repairs, plus Telegram
+transport 1.11.2. Geph 0.4.3-r4 and the stable release are unchanged.
 
-The final `.33` main commit still needs its exact signed candidate, current audit,
-native root update gate, packaged update gate and protected readiness results.
-After publication, test ordinary public `.32 → .33` cancellation, commit and
-pre-ACK rollback using the actual public assets. The `.31 → .32` results below
-remain historical evidence bound to their source snapshots; they do not qualify
-`.33`. The stable feed, signature checks and admission rules are unchanged.
+**RU:** Выпуск исправляет отдельные ошибки отмены запросов, обработки неполных
+DNS-ответов и остановки обработчиков. Недоступность Geph до начала соединения
+больше не учитывается как ошибка уже выполненной попытки. Telegram transport
+обновлён до 1.11.2. В CI проверены четыре сайта в Safari и Chrome, остановка и
+восстановление Geph, установка пакета и откат при завершении новой версии до
+подтверждения запуска. Наблюдение в течение 1800,12 секунды проверяло работу в
+фоне и очистку, а не непрерывное видео или звонок. Обычный переход между
+публичными `.32` и `.33` через меню, а также установка на пользовательском Mac
+пока не подтверждены.
+
+**EN:** This release repairs scoped request-cancellation, incomplete DNS response
+and worker-shutdown failures. Geph unavailability before a connection attempt
+is no longer counted as a failed dial. Telegram transport is updated to 1.11.2.
+CI covered four sites in Safari and Chrome, Geph stop/recovery, package update
+and rollback after terminating the successor before its startup acknowledgement.
+The 1800.12-second observation covered background operation and cleanup, not a
+continuous video or call. The ordinary public `.32 → .33` menu path and
+installation on the user's Mac remain unverified.
+
+The candidate manifest is
+`e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0`.
+All pre-publication gates are bound to that source and candidate attempt:
+
+| Gate | Verified evidence |
+|---|---|
+| [CI 41302269258/1](https://github.com/aiwaki/slipstream/actions/runs/41302269258) | Signed candidate, packaged browser/lifecycle checks, notification and Stop/Quit cleanup. |
+| [Audit 41302269288/1](https://github.com/aiwaki/slipstream/actions/runs/41302269288) | App and full Geph/source-owned admission passed on November 1 UTC; publisher repeated current admission. |
+| [Native G 41303686569/1](https://github.com/aiwaki/slipstream/actions/runs/41303686569) | Durable commit, crash-before-commit restoration, late-commit refusal and cleanup. |
+| [Packaged P 41305039817/1](https://github.com/aiwaki/slipstream/actions/runs/41305039817) | Real successor ACK commits; pre-ACK termination restores the exact old app and daemon; both cases clean up. |
+| [Readiness R 41305043535/1](https://github.com/aiwaki/slipstream/actions/runs/41305043535) | Four sites × two browsers, controlled owned-Geph stop and fresh-request recovery, transport checks, 3600 background samples and clean teardown; six report subjects are attested to this attempt. |
+
+The controlled Geph outage check makes fresh requests after the backend is
+confirmed stopped; it does not reproduce every production restart race or keep
+a media stream open across the outage. Discord and YouTube remain on local bypass.
+These results do not establish the cause of every earlier reconnect or HTTP 403.
+
+Ordinary public `.32 → .33` cancellation, commit and pre-ACK rollback must use
+these actual published assets. The `.31 → .32` results below remain historical
+evidence for their source snapshots; they do not qualify `.33`.
 
 ## Published preview .32 — 2026-10-31
 
