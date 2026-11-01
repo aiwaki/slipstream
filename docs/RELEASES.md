@@ -1,5 +1,23 @@
 # Release Policy
 
+## Preview .34 in preparation — 2026-11-01
+
+The next candidate combines the shared Geph recovery lifetime repair in
+[PR #453](https://github.com/aiwaki/slipstream/pull/453) with restart reservation
+cleanup in [PR #454](https://github.com/aiwaki/slipstream/pull/454). Caller
+cancellation no longer owns or poisons the shared recovery result; an exception
+while observing a restarted process releases the owned reservation instead of
+refusing later sessions indefinitely. Both changes have causal regression tests
+and passed their required PR checks. They are not in published `.33`.
+
+Prepare an ordinary `.34` candidate and qualify the exact `.33 -> .34` pair.
+The old release's G/P/R and public-update results remain evidence for its original
+bytes. The successor needs fresh exact-candidate gates and current admission.
+Geph 0.4.3-r4 remains unchanged. Add the new public observer only after publication
+provides its real release and asset identities; preserve the `.32 -> .33`
+observer and evidence. No new candidate, publication or user-Mac verification is
+claimed by this preparation.
+
 ## Published preview .33 — 2026-11-01
 
 [Slipstream 0.1.9-preview.33](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33)
@@ -870,10 +888,10 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.33`, with
-  `VERSION` and `preview_sequence=33` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.34`, with
+  `VERSION` and `preview_sequence=34` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.33`; the new preview requires its own
+  `.23` source and is rejected for `.34`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact
