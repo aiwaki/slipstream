@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -2717,6 +2718,287 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     ),
                     "terminal_error",
                 )
+
+    def test_control_observation_keeps_cause_without_private_response(self) -> None:
+        cases = (
+            (35, b"000", "unavailable", "tls_handshake", 0),
+            (28, b"000", "unavailable", "timeout", 0),
+            (51, b"000", "unavailable", "curl_error", 0),
+            (0, None, "unavailable", "status_missing", None),
+            (0, b"private-token", "unavailable", "status_invalid", None),
+            (0, b"200", "usable", "completed", 200),
+            (63, b"200", "usable", "size_limit", 200),
+        )
+        for exit_code, code, expected, category, status in cases:
+            with self.subTest(exit_code=exit_code, code=code):
+                body = b"private-token https://secret/?cookie=private " + b"x" * 600
+                output = body if code is None else body + b"\n__SLIPSTREAM_STATUS__:" + code
+                response = SimpleNamespace(
+                    returncode=exit_code, stdout=output,
+                    stderr=b"private-token https://secret/?cookie=private",
+                )
+                observation = {}
+                with mock.patch.object(smoke.subprocess, "run", return_value=response) as run:
+                    result = smoke._control_route(
+                        "xpersonatoy.com", "owned_geph", failure_observation=observation
+                    )
+                self.assertEqual(result, expected)
+                self.assertEqual(observation, {
+                    "curl_exit_code": exit_code, "http_status": status,
+                    "status_marker_present": code is not None, "category": category,
+                })
+                run.assert_called_once()
+                self.assertIn("--socks5-hostname", run.call_args.args[0])
+                self.assertNotIn("private", smoke.json.dumps(observation))
+
+    def test_chrome_failure_observation_keeps_only_net_token_or_exception_class(self) -> None:
+        for response, expected in (
+            ({"errorText": "net::ERR_CONNECTION_CLOSED https://secret/?cookie=private"},
+             {"net_error": "net::ERR_CONNECTION_CLOSED"}),
+            (TimeoutError("private-token https://secret/"),
+             {"exception_class": "TimeoutError"}),
+            ({"errorText": "private-token https://secret/"},
+             {"exception_class": "LiveSiteError"}),
+            ({"errorText": " " * 240 + "net::ERR_" + "A" * 100},
+             {"exception_class": "LiveSiteError"}),
+        ):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as temporary:
+                observation = {}
+                with ExitStack() as stack:
+                    lifecycle = self._enter_chrome_lifecycle(stack, smoke.Path(temporary))
+                    stack.enter_context(mock.patch.object(smoke.chromium, "_wait_for_devtools_port", return_value=9222))
+                    stack.enter_context(mock.patch.object(smoke.chromium, "_devtools_json", return_value=[{
+                        "type": "page", "url": "about:blank",
+                        "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/1",
+                    }]))
+                    options = {"side_effect": response} if isinstance(response, BaseException) else {"return_value": response}
+                    commands = stack.enter_context(mock.patch.object(smoke.chromium, "_devtools_command", **options))
+                    result = smoke._run_chrome(
+                        "xpersonatoy.com", lifecycle.executable, 501, 20,
+                        failure_observation=observation,
+                    )
+                self.assertEqual((result["outcome"], result["reason"]), ("terminal_error", "navigation_rejected"))
+                self.assertEqual(observation, expected)
+                commands.assert_called_once()
+                self.assertEqual(commands.call_args.args[2], "Page.navigate")
+                self.assertNotIn("private", smoke.json.dumps(observation))
+
+    def test_safari_failure_observation_keeps_only_existing_context_booleans(self) -> None:
+        observation = {}
+        signals = self._signals(https=False, secure_context=False, host_matches=True,
+                                title="private-token https://secret/")
+        def webdriver(_base, method, path, _payload=None, **_kwargs):
+            if path == "/session":
+                return {"value": {"sessionId": "session-id"}}
+            if path.endswith("/execute/sync"):
+                return {"value": smoke.json.dumps(self._browser_evidence(signals=signals))}
+            return {}
+        with (
+            mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+            mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_wait_for_safari_process", return_value=4321),
+            mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+            mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=webdriver) as requests,
+            mock.patch.object(smoke.time, "monotonic", side_effect=[0, 1, 1, 1.1, 1.2, 21.1, 21.2, 21.3]),
+            mock.patch.object(smoke.time, "sleep"),
+        ):
+            result = smoke._run_safari("xpersonatoy.com", "http://127.0.0.1:1", 501,
+                                       failure_observation=observation)
+        self.assertEqual((result["outcome"], result["reason"]), ("terminal_error", "readiness_context_invalid"))
+        self.assertEqual(observation, {"context": {
+            "https": False, "secure_context": False, "host_matches": True,
+        }})
+        self.assertEqual(sum(c.args[2].endswith("/execute/sync") for c in requests.call_args_list), 1)
+        self.assertNotIn("private", smoke.json.dumps(observation))
+
+    def test_safari_missing_final_signals_clear_previous_context(self) -> None:
+        for malformed in (None, "private-token", "missing"):
+            with self.subTest(malformed=malformed):
+                observation = {}
+                first = self._browser_evidence(signals=self._signals(https=False))
+                last = self._browser_evidence()
+                if malformed == "missing":
+                    del last["signals"]
+                else:
+                    last["signals"] = malformed
+                snapshots = iter((first, last))
+                def webdriver(_base, method, path, _payload=None, **_kwargs):
+                    if path == "/session":
+                        return {"value": {"sessionId": "session-id"}}
+                    if path.endswith("/execute/sync"):
+                        return {"value": smoke.json.dumps(next(snapshots))}
+                    return {}
+                with (
+                    mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+                    mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+                    mock.patch.object(smoke.lifecycle, "_wait_for_safari_process", return_value=4321),
+                    mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+                    mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=webdriver) as requests,
+                    mock.patch.object(smoke.time, "monotonic", side_effect=[0, 1, 1, 1.1, 1.2, 1.3, 2, 2.1, 2.2, 21.1, 21.2, 21.3]),
+                    mock.patch.object(smoke.time, "sleep"),
+                ):
+                    result = smoke._run_safari("xpersonatoy.com", "http://127.0.0.1:1", 501,
+                                               failure_observation=observation)
+                self.assertEqual(result["outcome"], "terminal_error")
+                self.assertEqual(result["reason"], "document_invalid" if malformed == "missing" else "readiness_signals_invalid")
+                self.assertEqual(observation, {"context": {
+                    "https": None, "secure_context": None, "host_matches": None,
+                }})
+                self.assertEqual(sum(c.args[2].endswith("/execute/sync") for c in requests.call_args_list), 2)
+
+    def test_failure_report_write_failure_keeps_authoritative_result(self) -> None:
+        for exit_status, result in ((0, "passed"), (2, "inconclusive")):
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as temporary:
+                root = smoke.Path(temporary)
+                reports = {label: root / (label + ".json") for label in ("failure", "safari_startup")}
+                authoritative = root / "live-sites.json"
+                report = {"result": result, "harness_exit_status": exit_status}
+                write_text = smoke.Path.write_text
+                def writer(path, text, **kwargs):
+                    if path == reports["failure"]:
+                        raise PermissionError("private-token /secret/report.json")
+                    return write_text(path, text, **kwargs)
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(smoke.sys, "argv", ["smoke", "--app-bundle", "/app", "--chrome-executable", "/chrome", "--safaridriver-url", "http://127.0.0.1:1", "--output", str(authoritative), "--failure-report", str(reports["failure"]), "--safari-startup-report", str(reports["safari_startup"])]),
+                    mock.patch.object(smoke, "run_gate", return_value=(report, exit_status)),
+                    mock.patch.object(smoke.Path, "write_text", autospec=True, side_effect=writer),
+                    mock.patch.object(smoke.sys, "stderr", stderr),
+                ):
+                    self.assertEqual(smoke.main(), exit_status)
+                self.assertEqual(smoke.json.loads(authoritative.read_text()), report)
+                self.assertTrue(reports["safari_startup"].is_file())
+                self.assertEqual(smoke.json.loads(stderr.getvalue()), {
+                    "warning": "optional_report_write_failed", "report": "failure",
+                    "exception_class": "PermissionError",
+                })
+                self.assertNotIn("private", stderr.getvalue())
+                self.assertNotIn("/secret/", stderr.getvalue())
+
+    def test_failure_report_write_failure_does_not_mask_gate_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            reports = {label: root / (label + ".json") for label in ("failure", "safari_startup")}
+            authoritative = root / "live-sites.json"
+            original_error = smoke.LiveSiteError("private original gate failure")
+            write_text = smoke.Path.write_text
+            def writer(path, text, **kwargs):
+                if path == reports["failure"]:
+                    raise PermissionError("private-token /secret/report.json")
+                return write_text(path, text, **kwargs)
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(smoke.sys, "argv", ["smoke", "--app-bundle", "/app", "--chrome-executable", "/chrome", "--safaridriver-url", "http://127.0.0.1:1", "--output", str(authoritative), "--failure-report", str(reports["failure"]), "--safari-startup-report", str(reports["safari_startup"])]),
+                mock.patch.object(smoke, "run_gate", side_effect=original_error),
+                mock.patch.object(smoke.Path, "write_text", autospec=True, side_effect=writer),
+                mock.patch.object(smoke.sys, "stderr", stderr),
+            ):
+                with self.assertRaises(smoke.LiveSiteError) as caught:
+                    smoke.main()
+            self.assertIs(caught.exception, original_error)
+            self.assertFalse(authoritative.exists())
+            self.assertTrue(reports["safari_startup"].is_file())
+            self.assertEqual(smoke.json.loads(stderr.getvalue())["exception_class"], "PermissionError")
+            self.assertNotIn("private", stderr.getvalue())
+
+    def test_existing_startup_write_failure_still_raises_original_oserror(self) -> None:
+        for gate_fails in (False, True):
+            with self.subTest(gate_fails=gate_fails), tempfile.TemporaryDirectory() as temporary:
+                root = smoke.Path(temporary)
+                authoritative = root / "live-sites.json"
+                startup = root / "startup.json"
+                failure = root / "failure.json"
+                original_error = PermissionError("private startup write failure")
+                write_text = smoke.Path.write_text
+                def writer(path, text, **kwargs):
+                    if path == startup:
+                        raise original_error
+                    return write_text(path, text, **kwargs)
+                gate = mock.Mock(side_effect=smoke.LiveSiteError("gate failed")) if gate_fails else mock.Mock(return_value=({"result": "passed"}, 0))
+                with (
+                    mock.patch.object(smoke.sys, "argv", ["smoke", "--app-bundle", "/app", "--chrome-executable", "/chrome", "--safaridriver-url", "http://127.0.0.1:1", "--output", str(authoritative), "--failure-report", str(failure), "--safari-startup-report", str(startup)]),
+                    mock.patch.object(smoke, "run_gate", gate),
+                    mock.patch.object(smoke.Path, "write_text", autospec=True, side_effect=writer),
+                    mock.patch.object(smoke.sys, "stderr", io.StringIO()),
+                ):
+                    with self.assertRaises(PermissionError) as caught:
+                        smoke.main()
+                self.assertIs(caught.exception, original_error)
+                self.assertFalse(authoritative.exists())
+                self.assertTrue(failure.exists())
+
+    def test_failure_sidecar_is_written_even_when_gate_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report = smoke.Path(temporary) / "live-sites.json"
+            sidecar = smoke.Path(temporary) / "failure.json"
+            def fail_gate(*args, failure_observations):
+                failure_observations.append({"host": "xpersonatoy.com", "chrome": {"net_error": "net::ERR_CONNECTION_CLOSED"}})
+                raise smoke.LiveSiteError("private-token https://secret/")
+            with (
+                mock.patch.object(smoke.sys, "argv", ["smoke", "--app-bundle", "/app", "--chrome-executable", "/chrome", "--safaridriver-url", "http://127.0.0.1:1", "--output", str(report), "--failure-report", str(sidecar)]),
+                mock.patch.object(smoke, "run_gate", side_effect=fail_gate),
+            ):
+                with self.assertRaises(smoke.LiveSiteError):
+                    smoke.main()
+            value = smoke.json.loads(sidecar.read_text())
+            self.assertEqual(value["schema_version"], 1)
+            self.assertEqual(value["harness"], "live_site_failure_observation")
+            self.assertEqual(len(value["sites"]), 1)
+            self.assertNotIn("private", sidecar.read_text())
+            self.assertFalse(report.exists())
+
+    def test_failure_observations_preserve_pass_and_inconclusive_gate_results(self) -> None:
+        for inconclusive in (False, True):
+            with self.subTest(inconclusive=inconclusive):
+                observations = []
+                def browser_result(host, browser, failure_observation=None):
+                    failed = inconclusive and host == "xpersonatoy.com"
+                    reason = "navigation_rejected" if browser == "chrome" else "readiness_context_invalid"
+                    if failure_observation is not None and failed:
+                        failure_observation.update(
+                            {"net_error": "net::ERR_CONNECTION_CLOSED"} if browser == "chrome"
+                            else {"context": {"https": False, "secure_context": False, "host_matches": False}}
+                        )
+                    return {
+                        "browser": browser, "deadline_ms": smoke.SITES[host]["deadline_ms"],
+                        "elapsed_ms": 100, "outcome": "terminal_error" if failed else "usable",
+                        "reason": reason if failed else "", "route": "slipstream_selected",
+                    }
+                def safari(host, driver, uid, *, failure_observation=None):
+                    return browser_result(host, "safari", failure_observation)
+                def chrome(host, executable, uid, gid, *, failure_observation=None):
+                    return browser_result(host, "chrome", failure_observation)
+                with (
+                    mock.patch.object(smoke, "_require_protected_ci"),
+                    mock.patch.object(smoke.pf, "PfctlRunner"),
+                    mock.patch.object(smoke.lifecycle, "_preflight", return_value=("before", 501, 20)),
+                    mock.patch.object(smoke.lifecycle, "packaged_app_target", return_value=SimpleNamespace(install_command=("install",))),
+                    mock.patch.object(smoke.lifecycle, "SystemRunner"),
+                    mock.patch.object(smoke.lifecycle, "_wait_for_status"),
+                    mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+                    mock.patch.object(smoke, "_run_safari", side_effect=safari) as safari_call,
+                    mock.patch.object(smoke, "_run_chrome", side_effect=chrome) as chrome_call,
+                    mock.patch.object(smoke.subprocess, "run", return_value=SimpleNamespace(returncode=35, stdout=b"\n__SLIPSTREAM_STATUS__:000", stderr=b"private-token")) as curl,
+                    mock.patch.object(smoke.lifecycle, "_fallback_uninstall", return_value=[]),
+                    mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
+                    mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
+                    mock.patch.object(smoke.pf, "_assert_same_snapshot"),
+                ):
+                    original = smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:1")
+                    observed = smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:1",
+                                              failure_observations=observations)
+                self.assertEqual(observed, original)
+                self.assertEqual(readiness.validate_live_report(*observed), "inconclusive" if inconclusive else "passed")
+                self.assertEqual(len(observations), 4)
+                self.assertEqual((safari_call.call_count, chrome_call.call_count), (8, 8))
+                self.assertEqual(curl.call_count, 4 if inconclusive else 0)
+                self.assertEqual(observations[0]["controls"], {
+                    route: {"curl_exit_code": 35, "http_status": 0,
+                            "status_marker_present": True, "category": "tls_handshake"}
+                    for route in ("direct", "owned_geph")
+                } if inconclusive else {})
+                self.assertLess(len(smoke.json.dumps(observations)), 4096)
+                self.assertNotIn("private", smoke.json.dumps(observations))
 
     def test_control_route_tolerates_non_utf8_document_bytes(self) -> None:
         response = mock.Mock(

@@ -259,6 +259,118 @@ def bare_observer(journal):
     return result
 
 
+def watchdog_identity_fixture(journal, monkeypatch, process, hash_result):
+    backend = bare_observer(journal)
+    backend.watchdog = None
+    backend.state = Path(journal["helper"]).parent.parent
+    backend.journal_path = backend.state / observer.JOURNAL
+    backend.agent = backend.state / "agent.plist"
+    backend.watchdog_hash = "9" * 64
+    calls = []
+    def run(argv, **kwargs):
+        assert argv == ["/bin/launchctl", "print", f"gui/{UID}/{observer.WATCHDOG}"]
+        assert kwargs == {"check": False}
+        calls.append("launchctl")
+        return SimpleNamespace(returncode=0, stdout=b"pid = 333\n")
+    def snapshot(process_id):
+        assert process_id == 333
+        calls.append("process")
+        return process
+    def digest(path):
+        assert path == Path(journal["helper"])
+        calls.append("hash")
+        if isinstance(hash_result, Exception):
+            raise hash_result
+        return hash_result
+    backend.run, backend.process_snapshot = run, snapshot
+    monkeypatch.setattr(observer, "digest", digest)
+    monkeypatch.setattr(observer, "private_bytes", lambda *_a, **_k: pytest.fail("policy read before identity proof"))
+    monkeypatch.setattr(observer, "watchdog_policy", lambda *_a, **_k: pytest.fail("policy check before identity proof"))
+    return backend, calls
+
+
+@pytest.mark.parametrize("case,process,hash_result,expected", [
+    ("missing", None, None, (False, None, None, None, False, None, None)),
+    ("uid", {"uid": UID + 1}, None, (True, False, None, None, False, None, None)),
+    ("zombie", {"uid": UID, "state": "Z"}, None, (True, True, False, None, False, None, None)),
+    ("stopped", {"uid": UID, "state": "T"}, None, (True, True, False, None, False, None, None)),
+    ("command", {"uid": UID, "state": "S", "command": "PRIVATE_ARG"}, None,
+     (True, True, True, False, False, None, None)),
+    ("hash", "matching", "8" * 64, (True, True, True, True, True, False, None)),
+    ("missing_hash", "matching", FileNotFoundError("PRIVATE_PATH"), (True, True, True, True, True, None, "missing")),
+    ("denied_hash", "matching", PermissionError("PRIVATE_PATH"), (True, True, True, True, True, None, "permission")),
+    ("io_hash", "matching", OSError("PRIVATE_PATH"), (True, True, True, True, True, None, "os_error")),
+    ("other_hash", "matching", ValueError("PRIVATE_VALUE"), (True, True, True, True, True, None, "other")),
+])
+def test_watchdog_identity_failure_retains_same_observations(journal, monkeypatch, case, process, hash_result, expected):
+    if process == "matching":
+        process = {"uid": UID, "state": "S", "command": f"{journal['helper']} --journal {Path(journal['helper']).parent.parent / observer.JOURNAL}"}
+    backend, calls = watchdog_identity_fixture(journal, monkeypatch, process, hash_result)
+    error_type = type(hash_result) if isinstance(hash_result, Exception) else observer.Refused
+    with pytest.raises(error_type) as caught:
+        backend.observe_watchdog()
+    if isinstance(hash_result, Exception):
+        assert caught.value is hash_result
+    else:
+        assert str(caught.value) == "packaged watchdog process mismatch"
+    assert backend.watchdog is None
+    assert calls == ["launchctl", "process"] + (["hash"] if expected[4] else [])
+    assert len(backend.events) == 1
+    diagnostic = backend.events[0]
+    assert diagnostic == {"kind": "watchdog_identity_diagnostic", "value": dict(zip(
+        ("process_present", "uid_match", "state_allowed", "command_match", "helper_hash_evaluated",
+         "helper_hash_match", "helper_hash_error"), expected))}
+    serialized = json.dumps(diagnostic)
+    assert "PRIVATE" not in serialized and journal["nonce"] not in serialized and journal["helper"] not in serialized
+
+
+@pytest.mark.parametrize("hash_error", [False, True])
+def test_watchdog_diagnostic_storage_failure_preserves_original_refusal(journal, monkeypatch, hash_error):
+    process = {"uid": UID, "state": "S", "command": f"{journal['helper']} --journal {Path(journal['helper']).parent.parent / observer.JOURNAL}"}
+    original = FileNotFoundError("PRIVATE_PATH") if hash_error else "8" * 64
+    backend, calls = watchdog_identity_fixture(journal, monkeypatch, process, original)
+    def record(*_args):
+        raise RuntimeError("evidence storage failed")
+    backend.record = record
+    with pytest.raises(FileNotFoundError if hash_error else observer.Refused) as caught:
+        backend.observe_watchdog()
+    assert caught.value is original if hash_error else str(caught.value) == "packaged watchdog process mismatch"
+    assert backend.watchdog is None and calls == ["launchctl", "process", "hash"]
+
+
+def test_watchdog_identity_success_keeps_existing_policy_and_process_evidence(journal, monkeypatch):
+    process = {"pid": 333, "uid": UID, "state": "S", "started": START,
+               "command": f"{journal['helper']} --journal {Path(journal['helper']).parent.parent / observer.JOURNAL}"}
+    backend, calls = watchdog_identity_fixture(journal, monkeypatch, process, "9" * 64)
+    policy = {"validated": True}
+    def policy_bytes(path, uid):
+        assert path == backend.agent and uid == UID
+        calls.append("policy_bytes")
+        return b"policy"
+    def validate_policy(raw, helper, journal_path, state):
+        assert (raw, helper, journal_path, state) == (b"policy", Path(journal["helper"]), backend.journal_path, backend.state)
+        calls.append("policy")
+        return policy
+    monkeypatch.setattr(observer, "private_bytes", policy_bytes)
+    monkeypatch.setattr(observer, "watchdog_policy", validate_policy)
+    backend.observe_watchdog()
+    assert backend.watchdog is process and backend.observed_watchdog_policy is policy
+    assert calls == ["launchctl", "process", "hash", "policy_bytes", "policy"]
+    assert backend.events == [{"kind": "watchdog_policy", "value": policy}, {"kind": "packaged_watchdog", "value": process}]
+    backend.observe_watchdog()
+    assert len(calls) == 5
+
+
+@pytest.mark.parametrize("reply", [SimpleNamespace(returncode=113, stdout=b""), SimpleNamespace(returncode=0, stdout=b"no pid")])
+def test_watchdog_not_yet_observed_still_returns_without_diagnostics(journal, monkeypatch, reply):
+    backend = bare_observer(journal)
+    backend.watchdog = None
+    backend.run = lambda *_a, **_k: reply
+    backend.process_snapshot = lambda *_a: pytest.fail("no process query without launchd PID")
+    backend.observe_watchdog()
+    assert backend.watchdog is None and backend.events == []
+
+
 def test_root_status_dedup_is_per_kind_and_immutable(journal):
     backend = bare_observer(journal)
     backend.tproxy = SimpleNamespace(_update_read_json=lambda *a, **k: copy.deepcopy(PREPARED))

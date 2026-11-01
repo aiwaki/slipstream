@@ -1,218 +1,143 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, preview .34 preparation
+## Current continuation — 2026-11-01 UTC, preview .34 failure observations
 
 Primary checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/preview34-geph-recovery`, based on merged main
-`d79e78a33364800a4c702e68236ba017392fd1a9` (PR #454).
-Root owns Git, PRs and workflow dispatches. All qualification watchers are
-terminal. No user-Mac app, service, browser or network settings changed.
+Locator: `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`.
+Branch `codex/preview34-failure-observations`, base candidate **C**:
+`91d49cc04c06299aa853b80647f96ac2ba73b2c7` (main still C at last API read).
+Root owns Git, PRs and dispatches. No watcher is active. `output/` is private.
+User-Mac app/services/browser/network settings were not changed.
 
-Evidence paths below are relative to
-`output/continuation-20261101/remaining-pr376/preview33-release/`.
-The longer preceding checkpoint is retained at
-`public-next/public-rollback-admission/checkpoint-before-compact.md`.
-Detailed public-run history is in [RELEASES.md](RELEASES.md#published-preview-33--2026-11-01).
+Evidence root **B**: `output/continuation-20261101/preview34-release/`.
+Previous release **OLD**: `output/continuation-20261101/remaining-pr376/preview33-release/`.
+Detailed preceding checkpoint: B/preparation/checkpoint-before-candidate.md.
 
-### Accepted shared-recovery repair
+### Next verified action
 
-Three guarded causal tests reproduce lost/poisoned shared owned-Geph recovery
-results after caller cancellation or timeout. The first caller formerly owned
-publication; an unshielded follower could cancel the shared result. The repair
-publishes the actual executor job and shields each caller independently.
-3 causal RED → 3 GREEN, then 8 focused checks passed in 1.31s (peak RSS 95MB;
-no external I/O). Independent review passed with no findings.
-Evidence is separately rooted at
-`output/continuation-20261101/geph-recovery-lifetime/`; original and adapted RED
-receipts/source snapshots are retained. `verification-final.json` SHA256
-583457d263fa584dfbcdaf966eca59e4f9a7c5b9e44ad116703200471bdb1522;
-`review.json` SHA256 4478a6b12ee2a41fdd00bffc6c893af41d21e4d97fa7ba8462ed7e27fe25f047.
-Root checked source/test/evidence hashes in `root-acceptance.json`.
-Production changes only the coalescer.
-Do not describe it as proof of any particular historical reconnect or media fix.
+The scoped diagnostic patch is implemented, tested and independently reviewed.
+Open its PR and verify its exact head CI/audit before merging. This patch changes
+only the two observers, their tests, the diagnostic-artifact workflow wiring and
+this checkpoint. No routing, authority, site, deadline, retry or success condition
+is changed. It does not establish or fix the underlying P/R failure causes.
 
-PR #453: https://github.com/aiwaki/slipstream/pull/453, checked head
-`5d724ac963696c43fc61245786b7901b79722917`, merged as
-`05c223c75ee0323d79798820ab078b1e20054e20`; trees match. CI41331829344/1 and
-dependency-audit41331829292/1 passed all three required contexts, including
-packaged browser and lifecycle checks. Watcher is terminal; receipts under
-`geph-recovery-lifetime/pr453/head-5d724ac96/` in the same continuation root.
-Watcher receipt SHA e3f944d33781d0855b4a2c1bbf5a6a20a456db9d582e6e3e9cbed6c4a9dfdea1;
-root independently checked required jobs and empty review threads before merge.
-Root merge/tree proof is retained. No release or local installation occurred.
+The combined patch requires a new exact-main candidate **D** after merge:
+R requires candidate source == GITHUB_SHA. The existing P-only audited-descendant
+exception cannot cover the three R files (outside verify_packaged_observer_source
+ALLOWED). Do not invent an exception, replay unchanged failed workflows, or carry
+C's G receipt over to D. Build/qualify D under existing CI/audit -> G -> P/R rules.
+No new protected dispatch has occurred. Before R/owned-Geph diagnostics, refresh
+complete admission lists; 2026-11-01 consumed position2 of3 (R below), all outcomes
+count. Local date is November2 but admission uses UTC. R reruns remain forbidden.
 
-### Accepted drain repair
+If exact D passes: publish .34, verify remote assets/finalizer, then qualify the
+actual published .33 -> .34 Cancel/commit and pre-ACK rollback. Do not claim
+workstation sustained media, Discord voice/stream, Telegram or sleep/wake passed.
+No new estimate is justified while original failure causes remain unknown.
 
-Separate from PR #453: successor polling after kickstart can
-propagate `OSError(EMFILE)` from `lsof` before the replay caller enters its drain
-cleanup. One guarded causal RED completed in 0.25s/RSS 94.9MB: drain stayed true,
-fresh session admission was refused; no forbidden I/O, test state restored.
-`geph-recovery-lifetime/drain-followup/verification-red.json` SHA256
-7e3f99d6d08cc8c665b0fdf2294da5c1d2d83e78607bf48c74d2a4ac6401a0a7.
-Root applied the reviewed outer-finally patch to the real source; expected source
-SHA256 6c5e802e8ace5f75b923dbe0c49a2cbcc1d25b80d408040619e056e25f513830 matches.
-Seven manual releases became one managed-owner cleanup; only normal `restarted`
-retains the drain for payload handoff. `verifier_activation` owns the new
-self-contained guarded test; author and independent reviewer are now terminal.
-Five new controls plus eight shared-recovery cases passed in 1.31s/RSS 99.4MB;
-no external effects. Original RED helper body is AST-identical to the public
-regression. `verification-green.json` SHA256
-b64e66bce936a39ce3f6b5e6ce43cb808b542ff1535b757d11a58c0600a9e013;
-independent `review.json` SHA256
-4a9a70c71beb509db901fd34a6fbc028ecd6911e83044caa9e76b8fd62a1b682, no findings.
-Do not alter accepted PR #453 evidence or rerun it.
+### Reviewed diagnostic patch
 
-PR #454: https://github.com/aiwaki/slipstream/pull/454, exact head
-`057912969388f3fab42d6111508963512cd47a86`; base is merged PR #453 above.
-Merged as `d79e78a33364800a4c702e68236ba017392fd1a9`; checked and merged tree
-`ec279096d3b5b1d7327a3ae0f28bf26a4ee5cffa` match.
-CI41334495060/1 and dependency-audit41334495058/1 passed all three required
-contexts, including packaged browser and lifecycle consumers. Sole watcher
-`app_update_implementation`, session98394, is terminal. Receipt SHA256
-3c1a74fdad519ddeae05cbbba533a6ea280d88776bef194b0c49c378c66df205;
-root independently confirmed exact head, checks and empty review threads.
-Receipts, root admission and merge/tree proof are under
-`geph-recovery-lifetime/drain-followup/pr454/head-057912969/`.
-No product republish or local installation occurred.
+P retains a fixed bounded watchdog_identity_diagnostic on the existing identity
+failure: same process/hash observations and short-circuit order; no extra native
+call, retry, argv, nonce or raw error. Original exceptions/refusals survive failed
+evidence storage; success events are unchanged. Seventeen focused guarded cases
+passed (0.10s, RSS51.3MB, forbidden calls0), including ten old-code missing-evidence
+regressions. Root independently confirmed the unwrapped guard AST equals C.
+B/failure-observations/P/verification.json SHA
+0af4913849bed4bd8cea7462f97acf7d7a68026e13007bbfa1460dedbd4e759b;
+root-review.json SHA055fd9c55dbc576b7954d6b4b514455f8153027a808e8d2eb510734feef48660.
 
-### Preparing the successor
+R adds a separate --failure-report containing existing curl exit/status/category,
+Chrome net-error/class and final Safari context booleans. No new network/browser
+observation. Missing final signals clear stale context. Only the new sidecar write
+is tolerant; existing startup/authoritative writes and schema2 remain strict.
+Always-stage/upload preserves flat diagnostic ZIP members separately from attested
+dist-readiness. Focused RED/GREEN, unchanged15-case baseline, five affected writer
+checks and final curl metadata subcases are retained; no broad repeat.
+B/failure-observations/R/receipt.json SHA
+47b0fc48a10c0f2592e1b208a3aee2f2cdef5888e67a35c72d42d89c18b04f8a;
+root-review.json SHA2bbf363fa29e49a0f7826ebda361a2facfa8a13107e314e1e43ef9e99687bd50.
+Independent reviewer approved final source/test/workflow hashes in that receipt.
 
-Both runtime repairs above are merged, but published `.33` contains neither.
-The `.34` tag and preparation branch/PR did not exist at admission. Root used
-`scripts/sync_version.py` for VERSION and all six generated metadata targets;
-its `--check` passed. Runtime changes relative to merged PR #454 are limited
-to DAEMON_VERSION; the 13 focused regression results remain reusable.
-Minimal publisher/fixed-pair wiring is complete. Its 41 tests plus 5 subtests
-passed in 0.12s (peak RSS 50.7MB, forbidden I/O zero); author receipt is
-`geph-recovery-lifetime/preview34-preparation/admission/verification.json`
-SHA256 a2ac93473f71c6d0e68d1a1b7cecb35ec4adda8dabdd4ac8cc6ede5663cf35b4.
-Independent review passed with no findings; all 15 changed files and retained
-public-observer evidence were checked. `preview34-release/preparation/review.json`
-SHA256 51940f5126b758baca1ef4003d146930e9835600841520e0b5bbe072f6670f19.
-Root checked every reviewed hash before updating only this status paragraph.
-No candidate or protected run exists yet; root owns Git and dispatches.
-Evidence for the next release belongs in
-`output/continuation-20261101/preview34-release/`.
+### Failed C qualification: preserved, not accepted
 
-The next candidate needs its own exact-main CI/audit, G, P and R; `.33` is
-an authenticated OLD baseline, not evidence for the changed successor. Geph
-r4 stays unchanged. Current admission and source deadlines still apply.
-Freeze reused public-observer helpers before building the candidate. New
-public `.33 -> .34` siblings/pins and checker context must wait until the new
-candidate is published and actual asset identities are available. Keep old
-public `.32 -> .33` entrypoints and accepted receipts unchanged. The later
-observer uses its own audited source without changing the product candidate;
-do not advance main with that observer before publisher completion.
+P41342380406/1: commit job124954948234 passed; pre-ACK job124954947986 failed
+before STOP/KILL/ACK at `Refused('packaged watchdog process mismatch')`.
+The process presence/UID/state/command/helper hash mismatch was not retained;
+no runtime, quoting or infrastructure cause was proven. Both authenticated ZIPs
+and all8 members are in B/packaged-p. failure-diagnosis.json SHA
+cdaa0d94568a01f99bd6200e54747048051ec97f3728892767d46c20d8790618.
+The success-only P checker is unchanged/unrun (SHA078e7ad971400d0697073b08a81878c476320663851d181f8ffeccac8f96d891).
 
-### Published product and reusable gates
+R41342383932/1: failed before soak at Require passed live-site matrix.
+xpersonatoy.com: Safari readiness_context_invalid after20s; Chrome
+navigation_rejected after336ms; both direct/owned-Geph controls unavailable.
+The other3 hosts passed both browsers; all Safari starts and product cleanup passed.
+Control reasons were discarded; this does not prove origin outage or product bug.
+The three logged SSLEOFErrors were intentional earlier closed-route probes, also
+present in successful .33; do not misattribute them to the failed site.
+B/readiness-r/failure-diagnostics/bounded-static-diagnosis.json SHA
+0a9deba76f33008e198f730ca0917f3c9eeda7fbfa76e918f00bb68088107732.
+Budget job124954957424 recorded position2/limit3 at19:34:14Z on2026-11-01;
+budget-verification.json SHAc9e6127c093110ffbfee84013569aab7456849d78b05bb7f146c0a91d631edcc.
+Combined watcher78446 exited1. No readiness/soak PASS or .34 publication exists.
 
-[Preview .33](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33)
-(release 430591253) is published from product source
-`9eccd1ddf691aef5f76d493103513f2fada2fd5c`. Publisher 41309441046/1 passed 23/23;
-all 12 assets authenticated; six candidate payloads matched byte for byte. OLD32 release 429722639 body/assets
-and stable 350205640/v0.1.4 remain unchanged. OLD source is
-`fd7d43c271e4a46ac2d10fc5ca4a032b92adae73` (no leading9).
+### Accepted baseline C (not proof for future D)
 
-CI 41302269258/1 and audit 41302269288/1 passed. Candidate manifest:
-`e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0`.
-Reusable exact-candidate evidence, not to be rerun without a relevant change:
+C came from PR455, checked75bc0988b23a73f775b87bfbe202d10b175a359d;
+merge tree1dcf44d7fc8a00318e9d429440f37470785b26b5 matches reviewed head.
+Main CI41339429427/1 and audit41339429363/1 passed. All12 common CI jobs passed;
+unchanged Windows adapter skipped. B/main-91d49cc04/receipt.json SHA
+eb46eb4f8d2095e37b79b2c5104426f33277ac348c242c169a214f1514afbec8.
+Candidate manifest454e6a0132e7e0cb02b6774080fc52bd485cad450ab8441495289674565ea059,
+artifact13097336246,452662995B, transport SHA5d43b14bd1cd3cfd728e39d34c12ab4b2bcfef74ede041f5ecf48076415e22f8.
+Producer assemble124948863014 passed; B/main-91d49cc04/producer-receipt.json
+and root-producer-review.json retain producer evidence. No app downloaded locally.
 
-| Gate | Evidence |
-|---|---|
-| Native G41303686569/1 | Durable commit, crash restore, late-commit refusal, cleanup; `native-g/verification.json`. |
-| Packaged P41305039817/1 | Real ACK commit and pre-ACK termination/OLD restore; `packaged-p/receipt.json`. |
-| Readiness R41305043535/1 | Four sites × Safari/Chrome, controlled Geph stop then fresh-request recovery, transport 3/3, 1800.12s background soak/3600 samples, six attested reports; `readiness-r/verification.json`. |
+G41341351547/1 accepted: commit and crash-before-commit native outcomes, matching
+pair/source/provenance, live PID/heartbeat and cleanup all verified.
+B/native-g/verification.json SHAb93064d26e43082398f45215d60cec362aa769951def4da88b749ef97eef0c32;
+root-acceptance.json SHA00718e6faa8d2cb9c7228a889dc22e9c6744f55692a0f0544a78f98712825d05.
+Retained initial checker refusal was corrected only for source-proven terminal
+attestation refresh on unchanged old PID after rejected late commit; phases,
+sequence, helper identity and within-heartbeat/final attestations remain strict.
+Original checker/result and eleven trace controls remain in B/native-g.
 
-R consumed 1/3 protected attempts on November 1 UTC. It did not keep a media stream
-open or synchronize a request inside the production drain. Current app/full-Geph
-admission was checked twice November 1 UTC with zero accepted exceptions.
-Current bindings: `public-next/new33-bindings.json` and `old32-bindings.json`;
-use archived OLD title from `publisher/old32-after.json`.
+### Product repairs already merged; do not repeat
 
-### Actual public update and rollback
+PR453 (05c223c75ee0323d79798820ab078b1e20054e20): actual shared executor job
+owns Geph recovery publication; cancelled callers/followers cannot cancel the shared
+result. Three old-code regressions and eight focused tests; CI/audit passed.
+PR454 (d79e78a33364800a4c702e68236ba017392fd1a9): owned restart drain releases
+on every non-restarted/exception path, including successor lsof EMFILE. Five new
+cases plus prior eight passed; CI/audit passed. No historical universal cause claim.
+Evidence: output/continuation-20261101/geph-recovery-lifetime/ and drain-followup/.
+PR455 bumps .34 and admission pins; version/admission41tests+5subtests passed.
+Its one targeted PR lifecycle rerun addressed observed artifact-upload ETIMEDOUT
+(after native Quit passed), not a protected R rerun. Original failure retained.
 
-Cancel + commit **41319073498/1** is independently accepted and immutable.
-Observer 45ec528e6c149922abc9bd348d5849d1e1d2c762; unchanged published apps.
-Native Cancel removed local preparation and kept OLD healthy; it did not start a
-root transaction. Fresh discovery/new Install/one admin confirmation led to
-normal OLD exit 0, NEW ACK and root committed sequence 2 before the immutable lease.
-NEW heartbeat 17→18, cleanup empty. Do not claim no initial local staging.
-Directory `public-next/public-commit-observation/commit-41319073498/`:
-verification SHA256 44a6614cefc215b3ae2ccde626ba98735d724093e832e3eb97c88241d694dbad;
-independent review64ea6f6a1f571b46046ab560af75e29c7264da3efbdde200f249b6aa08af9542.
+### Published baseline and remaining boundaries
 
-Actual pre-ACK rollback **41327714069/1** is independently accepted (33
-bounded artifact assertions, no findings). Observer 459e5393d742b4ee9d3ca6a3d4be2464abca4f32;
-job 124911064937, artifact 13091767467 (131205 bytes), ZIP SHA256
-5a2479b1d9dd7937d3101353be7304427536a64295236eb7151fe15506a0438c.
-One anonymous prelaunch sample returned 200/remaining quota 43/60 before OLD install.
-Normal public discovery/Install/admin started the transaction. STOP/window/KILL
-observed successor stopped before ACK while root was ready; root then aborted.
-Exact OLD32 app/daemon restored, heartbeat 10→11, one OLD tray, watchdog exit 0,
-lock available, transient paths absent, cleanup_errors[].
-Directory `public-next/public-rollback-admission/rollback-41327714069/`:
-verification SHA256 72d91206b09b9672b9098e6e4ed6e1ae0f5b2d461a11dcb2d4d91ab5781af004;
-collector receipt 3e681aa7f08b0e41d50eb0cf8e376e307c1ae48b32b31f9570522a2fd9beb656;
-independent review cd7158fea722f7ad3aa8abcbfe78de85b3df7acf5b19a19a73fca7c5cfa09b14.
-Combined acceptance: `public-next/public-rollback-admission/root-pair-acceptance.json`.
-Root admission/dispatch are in its parent. This was a single dispatch, not a
-retry of accepted commit. Sole watcher `pr451_watcher_resume` is terminal.
+Preview .33 is published at https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.33
+(release430591253, source9eccd1ddf691aef5f76d493103513f2fada2fd5c,
+CI41302269258/1, audit41302269288/1, manifest
+e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0).
+Its G/P/R and actual public .32 -> .33 Cancel/commit/rollback are accepted under
+OLD/public-next. Do not rerun that completed pair or alter its observer/checkers.
+B/old33-reference.json retains candidate availability and OLD identities.
+Stable v0.1.4 remains unchanged; .32 is only title-archived, not deleted.
 
-Failed earlier runs are retained separately:41313348427/1 refused menu visibility
-before Install (native cause unproved);41321512323/1 refused discovery HTTP403
-before Install. A later independent probe had exhausted anonymous quota; original
-OLD headers were not captured. Neither run exercised a failing updater transaction.
-PR #450 retained AX diagnostics without weakening visibility; PR #451 added mandatory
-same-runner anonymous feed admission before OLD. A positive sample is not a
-reservation of future shared-IP quota. Do not add retries/auth/seeded offers.
+B/publication/publisher-verification-preparation.json and B/readiness-r/acceptance-recipe.md
+are preparation only. The only found old publisher checker is the .32 fallback,
+with incompatible IDs/schema/timestamps/size: never execute it as a .34 proof.
+After actual publication use the existing public-next source_binding contract;
+it is not a private G/P/R source-override exemption.
 
-### Frozen checker and observer provenance
-
-PR #451 checked head a5efb34395a5a732228e17392d69c98949eedb21 and merged 459e share
-tree a6c28a9b7094c938d8183bd38a31141833a0b1e2. CI 41325511379/1 and audit
-41325511585/1 passed all three required contexts. Root merge/tree receipts and
-watcher receipt are in `public-next/pr451/head-a5efb3439/`.
-No additional product main build is required for observer-only changes.
-
-New frozen checker: `public-next/offline-verifier/observer-459e5393d742/`.
-verify.py SHA256 3b07a3df8db8b1450d57923812a2d76ecf6ffd1e4334ca707ce759c5e4123421;
-pins 5cca905b569c726267a4fc77f727e60b4aa328f3b0ce20e5788a9c6295c992f5;
-activation 5fb192dbce5374a29cdbcc5d45c266196390995fb8e8310d204be8df9c5246e7.
-All 14 observer hashes/workflow match exact merge. Six tiny activation checks
-passed; reviewed prelaunch predicates had 2 causal RED → 7 GREEN / 48 mutation subcases.
-Canonical45ec verifier/pins and accepted commit receipts remain unchanged;
-independent snapshots are in the new checker directory. The checker ran once
-on the actual rollback. Do not edit predicates to accept a failed runtime.
-
-### Next action and boundaries
-
-Finish the minimal `.34` preparation and independently review its version and
-admission wiring. Create one PR, accept exact required CI, merge and verify tree
-equality. Then build and qualify one exact-main candidate under the existing
-G/P/R and publication policy. Reuse prior tests only where code is unchanged;
-do not relabel old exact-candidate gates. After publication, qualify the actual
-new public pair with a separately bound observer. No additional broad audit or
-unrelated work is part of this step.
-
-Published `.33`, its public `.32 -> .33` pair and docs PR #452 remain accepted.
-Their evidence stays immutable. User-present workstation smoke, sustained
-calls/video, live Telegram and sleep/wake remain separate unqualified gates.
-The full goal remains active; no universal site/reconnect/media guarantee.
-
-No local native/Cargo/scanner builds, app/browser/live probes, installation,
-PF/service/DNS/proxy/PAC/VPN/account mutations. Preserve external Geph and user
-settings. Use tiny pure checks, static reads, Git/GitHub and disposable hosted CI.
-Discord/YouTube/googlevideo stay local; no global UDP/443 block. No upstream
-messages, blind reruns, new exceptions or native SQLite expansion. PRs #376/#384
-remain historical partial work, not required wholesale imports. Telegram 1.11.2
-shipped via PR #445; Geph r4 unchanged. Review deadlines: block-buffer November 6, Geph source November 7, Chromium November 13; do not extend allowances.
-
-Xerj rc.100 and Entire 0.12.2 installed globally; user confirmed 7 Entire hooks.
-Current config has all 7 matching trusted hashes; telemetry/push_sessions=false,
-local git-ref checkpoints. Current-chat hook execution is not separately proven.
-Depot deferred. No new indexing/models/scanners/cloud login. README RU/EN/About/
-release hygiene already checked; real app screenshot remains deferred by user.
+No local native/Cargo/scanner builds, app downloads/installs, browser/live probes,
+service/PF/DNS/proxy/PAC/VPN/account changes. Small authenticated report/log ZIPs,
+Git/GitHub, guarded pure tests and disposable hosted CI are allowed. Preserve the
+user's external Geph and workstation. Discord/YouTube remain local bypass.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -470,7 +471,10 @@ def _browser_evidence_expression(host: str) -> str:
 """
 
 
-def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, object]:
+def _run_chrome(
+    host: str, executable: Path, uid: int, gid: int, *,
+    failure_observation: dict[str, object] | None = None,
+) -> dict[str, object]:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
     profile = Path(tempfile.mkdtemp(prefix="slipstream-release-chrome-"))
@@ -568,6 +572,11 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
             response_timeout=10,
         )
         if navigation.get("errorText") not in (None, ""):
+            error_text = navigation.get("errorText")
+            if failure_observation is not None and isinstance(error_text, str):
+                token = re.match(r"net::ERR_[A-Z0-9_]{1,64}(?![A-Za-z0-9_])", error_text)
+                if token:
+                    failure_observation["net_error"] = token[0]
             raise LiveSiteError("Chrome rejected the HTTPS navigation")
         failure_reason = "browser_observation_failed"
         reason = failure_reason
@@ -632,6 +641,12 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         finished = time.monotonic()
     except BaseException as exc:
         failure = exc
+        if failure_observation is not None and failure_reason == "navigation_rejected":
+            if "net_error" not in failure_observation:
+                name = type(exc).__name__
+                failure_observation["exception_class"] = (
+                    name if len(name) <= 64 and name.isidentifier() else "Exception"
+                )
         finished = time.monotonic()
     finally:
         cleanup_failed = False
@@ -733,6 +748,7 @@ def _is_safari_observation_timeout(error: lifecycle.LifecycleError) -> bool:
 def _run_safari(
     host: str, driver_url: str, uid: int, *,
     startup_diagnostics: list[dict[str, object]] | None = None,
+    failure_observation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -834,9 +850,20 @@ def _run_safari(
                     time.sleep(min(0.25, remaining))
                 continue
             failure_reason = "readiness_signals_invalid"
+            if failure_observation is not None:
+                # A new but invalid snapshot must not leave older context
+                # booleans looking like the final observation.
+                failure_observation["context"] = dict.fromkeys(
+                    ("https", "secure_context", "host_matches")
+                )
             evidence = _decode_safari_evidence(serialized_evidence)
             outcome, reason = _classify_browser_evidence(host, evidence)
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
+            if failure_observation is not None and isinstance(signals, dict):
+                failure_observation["context"] = {
+                    key: signals.get(key) if type(signals.get(key)) is bool else None
+                    for key in ("https", "secure_context", "host_matches")
+                }
             document_activation_id = (
                 _parse_document_activation_id(
                     evidence.get("document_activation_id")
@@ -921,7 +948,10 @@ def _run_safari(
     }
 
 
-def _control_route(host: str, route: str) -> str:
+def _control_route(
+    host: str, route: str, *,
+    failure_observation: dict[str, object] | None = None,
+) -> str:
     command = [
         "/usr/bin/curl",
         "--location",
@@ -944,6 +974,31 @@ def _control_route(host: str, route: str) -> str:
     command.append(f"https://{host}/")
     result = subprocess.run(command, capture_output=True, check=False)
     status_marker = b"\n__SLIPSTREAM_STATUS__:"
+    if failure_observation is not None:
+        # Keep only scalar facts already returned by this one curl call. Its
+        # body and stderr can contain URLs, cookies or credentials.
+        marker_present = status_marker in result.stdout
+        status_bytes = result.stdout.rsplit(status_marker, 1)[-1].strip() if marker_present else b""
+        http_status = int(status_bytes) if re.fullmatch(rb"[0-9]{3}", status_bytes) else None
+        category = {
+            5: "proxy_dns", 6: "host_dns", 7: "connect", 28: "timeout",
+            35: "tls_handshake", 60: "tls_certificate",
+            52: "empty_reply", 55: "send", 56: "receive", 97: "proxy_handshake",
+        }.get(result.returncode)
+        if category is None:
+            category = (
+                "curl_error" if result.returncode not in (0, 63)
+                else "status_missing" if not marker_present
+                else "status_invalid" if http_status in (None, 0)
+                else "size_limit" if result.returncode == 63
+                else "completed"
+            )
+        failure_observation.update({
+            "curl_exit_code": result.returncode,
+            "http_status": http_status,
+            "status_marker_present": marker_present,
+            "category": category,
+        })
     if result.returncode not in (0, 63) or status_marker not in result.stdout:
         return "unavailable"
     body, code_bytes = result.stdout.rsplit(status_marker, 1)
@@ -971,6 +1026,7 @@ def _control_route(host: str, route: str) -> str:
 def run_gate(
     app_bundle: Path, chrome: Path, driver_url: str, *,
     startup_diagnostics: list[dict[str, object]] | None = None,
+    failure_observations: list[dict[str, object]] | None = None,
 ) -> tuple[dict, int]:
     failure_stage = "require_protected_ci"
     try:
@@ -1000,25 +1056,33 @@ def run_gate(
         failure_stage = "assert_anchor_active"
         lifecycle._assert_anchor_active(runner)
         for host in SITES:
+            observation = None
+            safari_kwargs = {}
+            chrome_kwargs = {}
+            if startup_diagnostics is not None:
+                safari_kwargs["startup_diagnostics"] = startup_diagnostics
+            if failure_observations is not None and len(failure_observations) < len(SITES):
+                observation = {"host": host, "safari": {}, "chrome": {}, "controls": {}}
+                failure_observations.append(observation)
+                safari_kwargs["failure_observation"] = observation["safari"]
+                chrome_kwargs["failure_observation"] = observation["chrome"]
             failure_stage = f"safari:{host}"
-            if startup_diagnostics is None:
-                safari = _run_safari(host, driver_url, uid)
-            else:
-                safari = _run_safari(
-                    host, driver_url, uid, startup_diagnostics=startup_diagnostics
-                )
+            safari = _run_safari(host, driver_url, uid, **safari_kwargs)
             failure_stage = f"chrome:{host}"
-            chrome_result = _run_chrome(host, chrome, uid, gid)
+            chrome_result = _run_chrome(host, chrome, uid, gid, **chrome_kwargs)
             browsers = (safari, chrome_result)
             usable = all(item["outcome"] == "usable" for item in browsers)
             controls = {"direct": "not_needed", "owned_geph": "not_needed"}
             result = "usable" if usable else "terminal_error"
             if not usable:
                 failure_stage = f"controls:{host}"
-                controls = {
-                    "direct": _control_route(host, "direct"),
-                    "owned_geph": _control_route(host, "owned_geph"),
-                }
+                controls = {}
+                for route in ("direct", "owned_geph"):
+                    control_kwargs = {}
+                    if observation is not None:
+                        observation["controls"][route] = {}
+                        control_kwargs["failure_observation"] = observation["controls"][route]
+                    controls[route] = _control_route(host, route, **control_kwargs)
                 if set(controls.values()) == {"unavailable"}:
                     result = "inconclusive"
             results.append(
@@ -1073,6 +1137,26 @@ def run_gate(
     return report, exit_status
 
 
+def _write_failure_report(path: Path | None, report: dict) -> None:
+    if path is None:
+        return
+    try:
+        path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception as exc:
+        # Optional observation persistence cannot replace the gate verdict or
+        # its original exception. Never print a path or exception message.
+        name = type(exc).__name__
+        warning = {
+            "warning": "optional_report_write_failed",
+            "report": "failure",
+            "exception_class": name if len(name) <= 64 and name.isidentifier() else "Exception",
+        }
+        try:
+            print(json.dumps(warning, sort_keys=True), file=sys.stderr)
+        except Exception:
+            pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", type=Path, required=True)
@@ -1080,17 +1164,26 @@ def main() -> int:
     parser.add_argument("--safaridriver-url", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--safari-startup-report", type=Path)
+    parser.add_argument("--failure-report", type=Path)
     args = parser.parse_args()
     startup_diagnostics: list[dict[str, object]] = []
+    failure_observations: list[dict[str, object]] = []
     try:
         kwargs = (
             {"startup_diagnostics": startup_diagnostics}
             if args.safari_startup_report is not None else {}
         )
+        if args.failure_report is not None:
+            kwargs["failure_observations"] = failure_observations
         report, exit_status = run_gate(
             args.app_bundle, args.chrome_executable, args.safaridriver_url, **kwargs
         )
     finally:
+        _write_failure_report(args.failure_report, {
+            "schema_version": 1,
+            "harness": "live_site_failure_observation",
+            "sites": failure_observations,
+        })
         if args.safari_startup_report is not None:
             args.safari_startup_report.write_text(json.dumps({
                 "schema_version": 1,

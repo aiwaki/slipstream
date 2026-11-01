@@ -242,7 +242,7 @@ jobs:
           SLIPSTREAM_GEPH_ACCOUNT_SECRET: ${{ secrets.SLIPSTREAM_GEPH_ACCOUNT_SECRET }}
         run: |
           set -euo pipefail
-          mkdir -p dist-readiness
+          mkdir -p dist-readiness dist-live-site-diagnostics
           # Preserve a bounded nonzero marker even when account-backed Geph
           # fails before SafariDriver or the browser matrix can start.
           printf '%s\n' 125 > dist-readiness/live-sites.exit
@@ -252,7 +252,8 @@ jobs:
           geph_log="$RUNNER_TEMP/readiness-geph.log"
           driver_log="$RUNNER_TEMP/readiness-safaridriver.log"
           safari_startup_report="$RUNNER_TEMP/live-site-safari-startup.json"
-          sudo /bin/rm -f "$safari_startup_report"
+          failure_report="$RUNNER_TEMP/live-site-failure-observations.json"
+          sudo /bin/rm -f "$safari_startup_report" "$failure_report"
           rm -f "$ready" "$release" "$geph_log" "$driver_log"
           python3 scripts/geph_owned_lifecycle_smoke.py \
             --app-bundle "$RUNNER_TEMP/candidate-app/Slipstream.app" \
@@ -275,6 +276,11 @@ jobs:
               sudo /usr/bin/install -m 600 -o "$(id -u)" "$safari_startup_report" \
                 dist-readiness/live-site-safari-startup.json
               sudo /bin/rm -f "$safari_startup_report"
+            fi
+            if [ -f "$failure_report" ]; then
+              sudo /usr/bin/install -m 600 -o "$(id -u)" "$failure_report" \
+                dist-live-site-diagnostics/live-site-failure-observations.json
+              sudo /bin/rm -f "$failure_report"
             fi
             rm -f "$ready" "$release" "$geph_log" "$driver_log"
             exit "$status"
@@ -330,6 +336,7 @@ jobs:
             --chrome-executable "${{ steps.chrome.outputs.chrome-path }}" \
             --safaridriver-url "$driver_url" \
             --safari-startup-report "$safari_startup_report" \
+            --failure-report "$failure_report" \
             --output "$RUNNER_TEMP/live-sites.json"
           live_status=$?
           set -e
@@ -337,6 +344,11 @@ jobs:
             sudo /usr/bin/install -m 600 -o "$(id -u)" "$safari_startup_report" \
               dist-readiness/live-site-safari-startup.json
             sudo /bin/rm -f "$safari_startup_report"
+          fi
+          if [ -f "$failure_report" ]; then
+            sudo /usr/bin/install -m 600 -o "$(id -u)" "$failure_report" \
+              dist-live-site-diagnostics/live-site-failure-observations.json
+            sudo /bin/rm -f "$failure_report"
           fi
           /usr/bin/install -m 600 "$RUNNER_TEMP/live-sites.json" \
             dist-readiness/live-sites.json
@@ -351,15 +363,22 @@ jobs:
           trap - EXIT
           rm -f "$ready" "$release" "$geph_log" "$driver_log"
 
+      - name: Stage bounded live-site diagnostics for this attempt
+        if: always()
+        run: |
+          mkdir -p dist-live-site-diagnostics
+          for report in live-sites.json live-sites.exit live-site-safari-startup.json; do
+            if [ -f "dist-readiness/$report" ]; then
+              cp "dist-readiness/$report" "dist-live-site-diagnostics/$report"
+            fi
+          done
+
       - name: Preserve bounded live-site diagnostics for this attempt
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
-          path: |
-            dist-readiness/live-sites.json
-            dist-readiness/live-sites.exit
-            dist-readiness/live-site-safari-startup.json
+          path: dist-live-site-diagnostics/
           if-no-files-found: error
           retention-days: 7
 
