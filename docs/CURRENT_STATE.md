@@ -1,162 +1,120 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, PR447 corrected candidate ready
+## Current continuation — 2026-11-01, preview .33 preparation after PR447
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/incomplete-input-cleanup`, PR447. Base/main
-`3c18627f8d988eff6513b146f160e63a25eab141` (PR446 merged).
-Previous checked head `64e811b949b8a5c2dd042c4da8db5fc72c7395c6` failed only its
-native product-checks; package, browser, lifecycle and audit passed. No rerun.
+branch `codex/preview-33-release-preparation`, base/main
+`17fc7bd57b44b6a3514b0b8053b5fd6fd459d22f` (PR447 merged). Worktree now applies
+13 reviewed version/pair files plus RELEASES/ROADMAP and this checkpoint.
+No other runtime change, dependency upgrade, source-policy change or local install.
+Next verified action: final scoped checks, commit/push/open the preview preparation
+PR, then one exact-head CI/audit watcher. Do not monitor unchanged main447 CI for
+reassurance. Working external Geph and this Mac remain untouched.
 
-The corrected candidate retains the reviewed DNS/semantic changes and adds the
-reviewed lazy-worker start/close repair and deterministic native terminal fixtures.
-Both new patches were applied with exact baseline/candidate hash verification.
-No dependency, workflow, app-version, routing policy or production lock primitive
-changes. Next action: commit/push this coherent candidate, then one watcher for
-its exact-head required CI; root verifies current head/base and all three required
-contexts before merge. Native compilation/control execution remain hosted-only.
+### Applied .33 preparation
 
-First CI41296088844/1: Rust242 pass/1 fail at
-`rollback_guard_revalidates_terminal_receipt_and_old_identity`, line3804;
-Python2037,metadata949,traffic90,public-updater111,transport9 pass.
-Audit41296088805/1, package, browser and native lifecycle SUCCESS.
-`pr447/verification.json` SHA236d10a47359585ec81462eb19ae0bee91ac3c0724e8b4567f5d5a00e28a4080;
-final-snapshot SHA63510a49bc96ded15c26249412b0fcdcbf54c640a2634b05e0f393d025f3ef44.
-The original assertion discarded its Result; historical branch/owner is unknown.
+Private root `output/continuation-20261101/remaining-pr376/preview33-next/`.
+All13 before hashes matched merged17fc7bd57; all resulting source and two doc
+hashes match independently reviewed candidates. `applied.json` binds integration.
+`preview33-prebuild.patch` SHA92e5b89d5f8b72de8e417779b3df9796373a21ca3240775017ffe09e3e3a13a8;
+verificationc16b54b31e74cb2bdd721117b51d6cb84dfe57fc59a60daf3643be18b98b00b0;
+independent-reviewa298901bf43e59c69bffa4300944fb7e7d314916d8ee37acdcc9a68993ccbc68.
+Docs patch eac5af838d7518948eb455a71a0664a0451a1f0ec9f16b687a8629270f610ba9;
+independent-docs-reviewefcf81f5d78a624749db536ffb8c577224f21630701c26c2ce97e65e3903942b.
 
-`pr447/rollback-guard-fix/verification.json` SHA
- a42ea31500889d126c2019297d47fc291e71bb57eebff02321bb6a98b610909b;
-independent-review6145be4d52e728e826e74b96f03494623b2c80c53c5098a22d7320f07e0163e7.
-The post-lock validation body and production lock primitive are byte-identical.
-Four mutation fixtures hold one guard; a new real-file cloned-description control
-must prove public busy->false, then explicit test unlock->true or exact hash error.
-No sleep/retry or weakened identity assertion. That control has not run locally.
+VERSION and six generated values are33; publisher permits only33; packaged P
+admits exactly32->33. Both exact driver/workflow observer fingerprints updated;
+allowlist, eight shared helpers, G/R, signatures, UTC budget and repair23 unchanged.
+The source graph changes only its own package version, not dependencies.
+Reused exact-byte scratch evidence: sync/check,15 guarded metadata/pair cases
+(no forbidden calls,52MB peak), independent review. Integrated sync --check PASS.
+Two workflows passed actionlint with optional shellcheck/pyflakes disabled;
+workflow-static-check.json binds their bytes. Actual-shell publisher/source-proof
+and broader wiring/native validation remain for hosted CI. No repeated local suite.
+Docs now state preparation rather than publication; current publisher admission
+says33 while published32 evidence and pinned23 historical repair stay intact.
+ROADMAP's old Telegram386-open rows now point to merged445 and separate live testing.
 
-`lazy-worker-next/verification.json` SHA
- e0e980bdd03f0bd0e1e58fce84fd3a28bf54ff56347a202fe9e81a257ea18d25;
-independent-reviewd502875fa21975d4104e2c64a027b6ea0248f956a1481d94a0c705de2d1bc606.
-Two causal failures (join-before-start; stop before lock still admits thread) and
-six controls become8GREEN with fake threads/lock schedules,0 forbidden calls.
-Actual tracked-import integration:8PASS,0.03s; no real thread/browser/network.
-Publication/start/failure rollback share the lock; stop is rechecked inside it.
-Existing launch/stop/completion/bounded join behavior is unchanged. No historical
-Reconnecting attribution or browser-process leak claim follows from this proof.
+### PR447 complete and reusable
 
-`residual-lifetime-triage.json` SHA3dd159f8ec8dc769894a964599a84a7318620fe1239d35f513dd2178da03aa57.
-Semantic late thread effects after successful close remain unproved; Python3.13
-wait_closed includes accepted transports. Do not invent a listener-generation
-blocker. Root owns integration/Git; preview33 preparation remains private.
+https://github.com/aiwaki/slipstream/pull/447 merged17fc7bd57 from
+`0089005718c317ce56c0f63bbd2032b7c3ae09d0`; equal tree
+`8b7ad0f24c0ba7205e3169bac8a6bb4f7d9f1de2`. CI41299267499/1 and audit41299267479/1
+SUCCESS; root freshly verified all3required contexts before expected-head merge.
+`pr447/head-008900571/verification.json` SHA
+13485a3b9021fe111c1c0d41aae33e52a4923c180e3072d35d87bc4cb4bbd1e1;
+root-premerge.json and merge.json retained there. Watcher stopped.
 
-Read-only release reconciliation is complete: `after-input-fixes-scope.json`
-SHA76f3df096401729c5765506329b5539247b76b2e7e63cc96045d70ecf0d4cf7c. New preview
-needs coherent.33 and.32→.33 guards before a fresh exact-main candidate, then
-G first/P/R and current-date audit. Old.32/public31→32 proofs remain baselines.
-The source-only next-preview33 plan is complete in next-preview33-plan.md/json
-(JSON270c5397b9a3b3e9a208cfee08876df0970f0a0a5c8096d7dbefd2252bb15db2):
-13 coherent prebuild files; keep it outside PR447. ROADMAP's stale PR386 rows belong in that next cleanup; corrected
-canonical public32source below is fd7d43…, not the previous extra-leading9 typo.
+Python2045, Rust244, metadata949,traffic90,public-updater111 passed. The original
+rollback mutation and new retained-description control passed. Stop/Quit7/7,
+Chrome4/Safari4, original navigation CSS/JS/image recovery without reload,
+active-worker uninstall and clean sentinel-preserving/global-PF-unchanged cleanup
+passed. Frozen packaged self-test passed with network_mutated=false. Hosted proof
+only; no local installed/live-site claim or historical Reconnecting attribution.
 
-### Applied source and verified behavior
+Source rejects unfinished DoH Content-Length/DNS TC, closes semantic writers on
+all cancellation/encoding exits with bounded wait, and serializes lazy worker
+publication/start with shutdown. In-memory causal evidence is31 DNS/IPC cases
+plus8 lazy-worker cases, not a substitute for the hosted app checks. Runtime
+policy/Geph invariants remain unchanged.
 
-Private root `output/continuation-20261101/remaining-pr376/recovery/`.
-`applied-input-fixes.json` binds both reviewed patches and candidate source bytes.
+First PR447 head64e811b9 CI41296088844/1 had242 Rust pass/1 failure at3804;
+all other jobs passed. Its assertion lost the Result; historical lock owner is
+unknown. Post-lock validation and production flock stayed byte-identical; four
+mutation fixtures now hold one lock, while the separate public control proves
+busy->false then unlock->true or identity error. No blind retry, sleep or weakened
+identity assertion. Detailed receipts: pr447/rollback-guard-fix/ and
+lazy-worker-next/. Successful final native execution closes that fixture gate.
 
-- `app_dns.py`: reject an unfinished declared HTTP body after the bounded read,
-  and reject DNS TC before accepting answer records. Actual HTTPResponse over
-  BytesIO gives two causal old-code failures;18 final focused cases retain
-  complete length/chunked/EOF framing, malformed chunk and size guards, provider
-  fallback, TLS and positive/negative cache behavior. Existing test_app_dns.py
-  response stub exposes completed length; new test_app_dns_framing.py exercises
-  real standard-library framing instead of relying on that stub.
-  `dns-next/verification.json` SHA
-  18eff434756acd03ffa5e9a3a952ca02ef3c9f4867e5089540d76ee98c51086c;
-  independent-review SHA
-  a768c6d2d57e5cf512ef59a5657665175b30891386c7fbc8ee5ced5032669d9e.
-- `semantic_route_signal_runtime.py`: whole-handler finally closes the accepted
-  writer on read/dispatch cancellation or encoding failure, and wait_closed uses
-  the existing2s timeout. Five old failures/eight controls become13 passes in
-  new test_semantic_signal_client_lifecycle.py. Error responses, CancelledError,
-  dispatch and separate stage budgets are unchanged. This does not revoke an
-  already dispatched thread effect or add a supervisor generation boundary.
-  `semantic-next/verification.json` SHA
-  d8028b7d436d51f62255fe28f47e7a32c73c304eae0f9bd551005c7505600706;
-  independent-review SHA
-  95ce18f924f9c72bc577ba7ae91c90c9eb4b9cb7776f172a7fe51e19fe6704e0.
+### Next release path and remaining scope
 
-One integrated guarded run on actual tracked imports:31/31 PASS,0.10s,
-forbidden_calls=[],44MB peak. Before/after all five file hashes equal scratch;
-imports resolved to primary/spike. No real socket listener, executor/thread,
-subprocess or backend. `integrated-input-fixes/verification.json` SHA
-5f37418b1824e0926674b37c0895c7aa1d06b7ccd9a823a5ffaf7901e661d96f.
-Both production diffs and the new topic-doc entries were independently reviewed:
-no blocker. Reuse their unchanged proofs; new exact-head CI remains required.
-Historical Reconnecting attribution and installed behavior are not proved here.
+`next-preview33-plan.json/md` and `after-input-fixes-scope.json/md` hold the scoped
+plan. After the version PR merges, freeze its exact main candidate. Authenticate
+candidate/archive/source/tree/attestations, then native G both modes first, P
+commit/preACK and R protected live/semantic/1800s idle on that same candidate.
+Check fresh UTC dispatch budget and current-date audit; never rerun old G/P/R
+just for reassurance or extend vulnerability/source-review policy dates.
 
-### Reusable PR446 baseline
+Publisher inputs: version33, sequence33, exact candidate run, audit run, readiness
+run. G/P remain separate prerequisites. After actual publication, create the
+reviewed minimal public32->33 driver/menu/workflow clones with actual asset pins,
+then ordinary Cancel/commit and separate preACK rollback. Do not invent .33 pins
+or claim old31->32 qualifies33. Old public runnable91e668/C9 snapshot retained;
+shared successor P/C9 guards intentionally fail closed for old entry on new main.
 
-PR446 merged3c18627f8 from0f5442ad699a8dfe02cfca6e1f5c2f1cc20f8958;
-equal tree620063ebc7e8916508b33c0fdc6439c4db985c62. It repaired shared DNS
-cancellation, once-only task/generation circuit ownership and accepted browser
-listener cleanup. Its reviewer-caught replay regression and stale fixture were
-resolved before merge; do not reopen them. Pure reducer v1/Rust stayed unchanged.
-Final CI41293868617/1 and audit41293868837/1 SUCCESS: Python2014,
-metadata949,traffic90,public-updater111. Package/frozen self-test passed;
-native Stop/Quit7/7 includes Cancel/lock failure/partial cleanup/reopen;
-Chrome4/4+Safari4/4 and composed CSS/JS/image navigation without manual reload
-passed. Worker/uninstall cleanup clean; sentinel preserved/global PF unchanged.
-This is disposable hosted qualification, not a local installed/live-site result.
-`../pr446/head-0f5442ad6/verification.json` relative to the private recovery root
-SHA bc4243b2b1ab065eca620419b01f39b85097e9ee98e6b68961fd612ac9fbedc9;
-merge.json SHA3f5f5d1c93cb16b9c735fb94efdd032da86d6868a969cd7f482cc7f857bb2ed1.
-All old watchers terminal; do not monitor/repeat automatic main CI for reassurance.
+Published32 release429722639/source`fd7d43c271e4a46ac2d10fc5ca4a032b92adae73`
+(publisher41168865517/1) has12verified assets; G41165429293/1(26),
+P41165942199/1(15),R41165941890/1(31,1800s idle), public commit41180680911/1(49)
+and rollback41181835221/1(38) passed. RELEASES/workflows are authoritative.
+PR442 onward has not been published or installed on this Mac yet.
 
-### Earlier merged and public baselines
+PR446 merged3c18627f8: shared DNS cancellation, owned circuit outcomes and browser
+listener cleanup; CI41293868617/1/audit41293868837/1 passed. PR445 mergeddcbc56f40:
+Telegram1.11.2 official307a384 and HTTPX/H2 closure, CI41288152234/1/audit41288152178/1
+passed; PR386 closed as superseded. Geph r4 unchanged; all13 reviewed old PR384
+source transforms already landed. PR376/384 remain draft historical branches;
+do not import unproved gzip/critical-object/redirect/nativeSQLite expansions.
 
-PR445 merged dcbc56f40: pinned Telegram1.11.2 source307a384, retained pool/socket
-ownership, HTTPX/H2 locked frozen closure. CI41288152234/1 +audit41288152178/1
-SUCCESS, Python1967 plus package/DMG/browser/native lifecycle. Real packaged
-self-test schema1/resultpassed/network_mutatedfalse. Private
-`output/continuation-20261101/telegram-recovery/pr445/verification.json` SHA
-0be1199e4d30b57428a434863197d27962507ee16324c66f3489bebafd3602d2.
-PR386 is CLOSED/superseded, branch retained. PR444 merged46a30d97 fixes no-attempt
-circuit admission; PR443 mergedcbc3502e fixes false shared cooldown; PR442 merged
-41c614c9 fixes rejected/ignored activity renewing idle TTL. All required CI green.
-The first PR444 DMG failure's cause remains unknown; final verbose build passed.
+Residual-lifetime-triage.json records that semantic late effects after successful
+close remain unproved; Python3.13 waits for accepted transports. Missing tokens
+alone are no release blocker. Established-stream reset/fresh reconnect, sustained
+media, physical sleep/default-route, live Telegram and installed/StatusV2 behavior
+remain qualification gaps, not automatically new defects. Source-owned review
+expires2026-11-07; block-buffer disposition2026-11-06, Chromium review2026-11-13.
 
-Published preview.32 release429722639/sourcefd7d43c271e4a46ac2d10fc5ca4a032b92adae73
-has12assets verified by publisher41168865517/1. G41165429293/1(26/26),
-P41165942199/1(15/15),R41165941890/1(31/31) passed; R includes1800s idle heartbeat,
-not sustained media. Public31→32 commit41180680911/1(49/49) and
-rollback41181835221/1(38/38) passed exact assets. Reuse as unchanged baselines, not
-as exact proof for a new product/version. Source review expires2026-11-07;
-no extension or vulnerability exception. PR442 onward is neither published nor
-installed on this Mac. RELEASES/current workflows determine new candidate gates.
+### Workstation and tooling boundaries
 
-### Remaining scope and boundaries
+No local native/Cargo/scanner builds, app/browser/live endpoint probes, installs,
+PF/service/DNS/proxy/PAC/VPN/account changes. Tiny guarded checks, static reads and
+disposable hosted CI only. Discord/YouTube/googlevideo stay local; no global
+UDP443 block. No upstream messages or new vulnerability exceptions. Goal active.
 
-PR376 is still draft/open/conflicting at35284416b6b835aad9c3ae035f009605c31288f3.
-Its validated input/cleanup findings are covered by this candidate. Do not import
-unproved gzip/critical-object/redirect expansions. PR384 is draft/open/conflicting;
-all13 Geph source fixes are already main r4. No native SQLite or SDK/platform work.
-Established-stream reset→fresh reconnect, sustained media and physical
-sleep/default-route qualification remain coverage gaps, not proved new bugs.
-Read-only release reconciliation is under `remaining-pr376/after-input-fixes-scope.*`;
-check its final receipt before choosing the release action.
-
-Preserve working external Geph/current Mac. No local native/Cargo/scanner builds,
-app/browser/live endpoint probes, installs, PF/service/DNS/proxy/PAC/VPN/account
-changes. Tiny guarded checks, static reads and disposable hosted CI only.
-Discord/YouTube/googlevideo remain local; no global UDP443 block. No external
-upstream messages. Broader goal remains active, not complete or blocked.
-
-Xerj rc.100 and Entire0.12.2 global setup is complete; Entire7hooks user-approved,
-push_sessions/telemetry false, no cloud login/transcript import. Depot deferred.
-Xerj manual refresh at3c18627f8 completed17.09s/exit0; new shared DNS definition
-ranked first with no failed shards. Current input fixes are newer than the index;
-known-path direct reads suffice until a single post-merge refresh. No models or
-watcher; never dump key/daemon logs. requirements-runtime.in had an earlier
-text-family omission: read it directly rather than forcing repeated reindexing.
-Original locator receives only this first checkpoint block; preserve older tails.
+Xerj rc.100 and Entire0.12.2 global setup complete; user-approved7hooks,
+push_sessions/telemetry false. No cloud login/transcript import, models or watcher;
+Depot deferred. Xerj index last refreshed at3c18627f8; current scoped files are
+newer, so known-path reads were used. No repeated reindex; never dump admin key
+or daemon logs. Current private preparation and source receipts are preserved.
+Original locator gets only this first block; older tails remain untouched.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 
