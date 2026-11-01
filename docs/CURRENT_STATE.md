@@ -1,17 +1,85 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, Telegram update in progress
+## Current continuation — 2026-11-01, asynchronous recovery ownership
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/telegram-transport-update`, base main/merged PR444
-`46a30d97d3b6c3847adcea6854e7d432b434dac3`. The base tree equals checked PR head
-`9a3521a43ca5f5e8c3a9157b5aec1de8de53b1bb`; root fetched and fast-forwarded.
-PR442/443 are also merged. These routing fixes are newer than published .32 and
-have not been installed on the user's Mac. Original locator first block synced;
-preserve older tails. Source, PR and CI remain authoritative. Telegram changes
-below are the scoped candidate; its new PR and exact-head CI are pending.
+branch `codex/async-recovery-ownership`, base/main/merged PR445
+`dcbc56f40d33a5678b059babe1890ea60ba03e18`. Root fetched and fast-forwarded;
+tree `1acb28fc0bac5e5ea8bd2d8a819b9a0bcd05d239` equals checked PR head
+`d0cf869e9ee35eb64daaa821113be7c8d7a9e0fd`. Source, PR and CI remain authoritative.
+Original locator first block synced; preserve older tails. PR442–445 are newer
+than published .32 and have not been installed on the user's Mac.
 
-### Active Telegram source integration
+Exact-head CI41288152234/1 and audit41288152178/1 SUCCESS. Root independently
+confirmed all three required contexts before the expected-head merge. Hosted
+Python1967 passed,1 Scapy deprecation warning; metadata949, traffic90,
+public-updater111 and transport-matrix9 checks passed. Package/DMG, browser and
+native lifecycle checks passed. The built daemon actually executed the guarded
+transport self-test: schema1/resultpassed/network_mutatedfalse, with the new
+Telegram/H2 import and client-initialization boundary. This is not live Telegram.
+
+Private `output/continuation-20261101/telegram-recovery/pr445/verification.json`
+SHA0be1199e4d30b57428a434863197d27962507ee16324c66f3489bebafd3602d2;
+`source-evidence.json` SHA160e083edc23a37cde1e37843b2f1d156385b4be88f9d42d46db5a2719a87d4d
+binds all37 changed commit files and scoped receipts. Watcher is terminal;
+no CI rerun or protected G/P/R repeat was requested. Old PR386 was still at
+4360003 and is now closed as superseded, with its branch retained.
+
+### Active scoped reconciliation — PR376
+
+Live PR376 remains open at `35284416b6b835aad9c3ae035f009605c31288f3`.
+Its previously selected idle-TTL defect is already fixed by PR442. PR443–444
+also remove no-attempt failure accounting; PR445 supersedes its Telegram work.
+Do not reimport the stale branch or repeat unchanged broad verification.
+
+Three ownership defects were reproduced against current main and are being
+fixed separately in this branch:
+
+- Shared DNS: six old-code failures/two controls; all12 final guarded cases pass.
+  `recovery/dns-implementation.json` SHA
+  e3ee37b65145a63b8ed54e2ae0e07562332c805f377b193bf052381450594270.
+  Root reviewed the shield/completion cleanup; resolver/TTL/policy stay unchanged.
+- Circuit permits: three old-code failures;20 focused plus28 affected caller,
+  vector and no-dial cases pass. The real handler recovers immediately after
+  explicit cancellation. Reducer v1 and Rust are byte-identical to main.
+  `permits/verification.json` SHA
+  54a634372c0407eef5bfac9b319eb476d14bd91c98ec7767251c8a918d3ddc95.
+  Independent review caught and closed a candidate-only replay regression.
+  Replay now captures a separate Closed-generation observation before dialing;
+  it preserves admission policy and cannot complete another probe. Four new
+  registry controls and one affected normal path pass; the same independent
+  actual-handler test changed RED→GREEN: three recovered requests all receive
+  their complete payload, with empty circuit snapshots and full cleanup.
+  `permits/replay-fix-verification.json` SHA
+  72e190fc5d1940b50b2449b870512bd2c1aac8c3f2c0963fbba5f7ae618510de;
+  final `permits/independent-review.json` SHA
+  98d33e205ec6f4db840e3b0e50411bc41dc477a2d787ea36a8ce403b48e0a3bd.
+  The earlier pending review is retained as chronology, not an open blocker.
+- Browser IPC: three causal RED become17 guarded passes, including cancellation,
+  nonblocking callback drain, timeout/retry, concurrent close and inode ownership.
+  Final independent review found no blockers. Implementation receipt
+  `browser/implementation-verification.json` SHA
+  0b4da524dceea17d1b789643a62e809a93d58a3499f8271e0bf33f8ac14fe6ed;
+  `browser/independent-review.json` SHA
+  93b27ff7a3b5f15b38362b06a9e581adf533796aa079e83b40f30be4a8a15145.
+  A bounded timeout retains the old supervisor handle and forbids replacement;
+  successful close waits for admitted effects. Source/test slice is frozen.
+
+Private evidence root: `output/continuation-20261101/remaining-pr376/`.
+No historical Reconnecting cause or installed-product repair is established.
+All three slices are frozen and independently reviewed with no remaining
+blocker. No full suite has been repeated locally. Next: documentation checks,
+commit/push this fresh branch, one exact-head required CI run and expected-head
+merge if green. Source routing policy and workstation state stay unchanged.
+
+Two additional proved defects are deliberately next scope, not lost: app-owned
+DNS accepts incomplete HTTP/TC-marked DNS answers; semantic IPC cancellation
+before write leaks its writer. Three RED/two normal controls are retained in
+`recovery/remaining-boundaries-red.log`; report `recovery/reconciliation.json`
+SHA eb014706cc57c94f3fd5dc5696b6c5a1c1853e9ecf3b874ad43bd9013b6ce25c.
+Do not import the unproven gzip/critical-object/redirect expansion from PR376.
+
+### Completed Telegram source integration — PR445
 
 Imported only the Telegram vendor sources, source inventory and tests from
 retained PR386 head 4360003ca05444683aaed74b7b69b51198f27bdf; unrelated app/Geph
@@ -47,7 +115,8 @@ cases fail on the old function, 12 focused checks PASS. JSON/capability and old
 QUIC implementation unchanged. `frozen-imports/verification.json` SHA
 350073cbbdfa59d286323e5b3f29e7d5c14e81a02e0a7ec37ab6b715c4fe7377.
 CI's existing Verify packaged resources step now invokes this CLI in the built
-daemon; actual frozen execution is pending. One workflow wiring check passed.
+daemon; actual frozen execution passed in the exact-head package job. The
+workflow wiring check and its actual CLI capability contract passed.
 
 Final independent review has no remaining blockers. An initial CI command lacked
 the existing privileged capability; the corrected invocation supplies all required
@@ -57,8 +126,12 @@ RED, corrected command and workflow check PASS (2 checks, 0.12s). Guards unchang
 f2d6053d9146654012d7c3bbcc20a9879f70f4f7b931794513be51a0c9ea8e0b;
 `review-final-after-ci-fix.json` SHA
 dd84f0caa62ebeacffb83405edd423d07183bb03cb2dcb3fabb53ca8a3920cda.
-Next: scoped PR and exact-head CI/audit. Docs, continuity and diff checks follow
-the final evidence-text update; previous unchanged broad suites are reused.
+Final docs8, continuity and diff checks passed before the source freeze. The
+dependency/transport update passed fresh required CI; unchanged protected G/P/R
+and public-updater qualification are reused. No live Telegram or installed-product
+result is claimed. Next verified work: reconcile the remaining PR376 findings
+against current source and the merged circuit repairs before choosing a new fix.
+Do not repeat this Telegram update or substitute old PR branches for main.
 Existing local guards and MIT notice retained. No native build, local listener/
 live endpoint, workstation install, service/network/account mutation authorized.
 Working external Geph untouched; neither published .32 nor installed-product
@@ -103,7 +176,13 @@ root cause remains unknown. No blind rerun or protected G/P/R repeat occurred.
 
 Next verified work is the scoped Telegram integration above.
 Do not redo completed circuit, tooling, release or public-updater qualification.
-Xerj was incrementally refreshed once at this merged source (exit0); actual MCP
+Xerj refreshed once to merged dcbc: exit3/completed-with-junk, all427 code
+files indexed,0 code junk. The dependency input requirements-runtime.in alone
+was skipped after txt-prose→txt-lines schema inference; use a direct read for it.
+Actual MCP finds `_telegram_frozen_import_selftest` at tproxy.py:7744. Receipt
+`telegram-recovery/pr445/xerj-verification.json` records the scope; no full rebuild
+was performed for one text file. Final checkpoint lines were updated after indexing.
+The previous refresh at46a also succeeded (exit0); actual MCP
 search finds the new handler regression in `spike/test_geph_no_dial_circuit.py`.
 Refresh log SHA550b3c02464bbb45bd29edde2fdb0901e16f698719d052921b66e83c6fbdc9ea;
 this checkpoint's final status lines were updated after indexing. No native build,
@@ -190,9 +269,10 @@ established. No claim that this newer-than-.32 source is installed or released.
 Read-only reports in `output/continuation-20261031/remaining-scope/` retain exact
 PR/source evidence. PR376 stale/open: only scoped source-backed repairs selected.
 PR384 stale/draft/conflicting: all13 Geph source fixes already in main r4; do not
-import wholesale or activate native SQLite. PR386 stale/conflicting: main proxy
-1.8.1 versus old1.11.2/H2 candidate; refresh narrowly with CF pool/quick-ACK proofs.
-No Telegram edits here. Missing evidence: established stream reset→fresh reconnect,
+import wholesale or activate native SQLite. PR386 is superseded/closed: PR445
+now carries the reviewed Telegram1.11.2 source, pool repair and frozen checks.
+Its five old findings were reconciled by source/protocol evidence and targeted
+changes, not by importing the unrelated branch. Missing evidence: established stream reset→fresh reconnect,
 sustained YouTube/Discord payload, physical sleep/default-route changes. These
 coverage gaps are not proven new bugs. No SDK/platform scope.
 

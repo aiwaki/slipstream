@@ -15,6 +15,19 @@ See the October 23 entry in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) for the
 causal DNS regression and the limits of the current Safari observation. Preserve
 external Geph and user-managed network settings while collecting evidence.
 
+### Recovery stalls after a cancelled request
+
+Preserve the request phase and the circuit key/generation: resolver wait,
+backend admission, first payload and established stream are different boundaries.
+A completed HTTP403 is not a missing DNS answer. An available backend also does
+not prove that its next request has a free circuit probe.
+
+Source regressions now isolate shared DNS cancellation and stale circuit results.
+Their in-memory checks do not qualify installed behavior, arbitrary sites or an
+already established media stream. Confirm the installed source before attributing
+a new report to a repaired path. See the November 1 ownership investigation in
+[ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).
+
 ### Quit reports that root process absence is unconfirmed
 
 `cleanup incomplete: root process census is unknown` means the stop operation

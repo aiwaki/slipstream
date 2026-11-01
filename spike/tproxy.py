@@ -1845,6 +1845,34 @@ def _apply_runtime_route_circuit(event):
         return None
 
 
+def _runtime_route_circuit_request_task():
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
+
+
+def _retain_runtime_route_circuit_permit(task, key, registry, permit):
+    permits = getattr(task, "_slipstream_route_circuit_permits", None)
+    if permits is None:
+        permits = {}
+        task._slipstream_route_circuit_permits = permits
+
+        def finished(done):
+            retained = getattr(done, "_slipstream_route_circuit_permits", {})
+            for item in retained.values():
+                if item is not None:
+                    owner, token = item
+                    owner.abandon_owned(token)
+            retained.clear()
+            del done._slipstream_route_circuit_permits
+
+        task.add_done_callback(finished)
+    # None is a tombstone: duplicate/rejected results must not fall back to
+    # independent health evidence. It retains neither the registry nor token.
+    permits[key] = (registry, permit) if permit is not None else None
+
+
 def runtime_route_circuit_before_request(
     policy,
     backend,
@@ -1864,7 +1892,20 @@ def runtime_route_circuit_before_request(
             else int(now_ms)
         ),
     )
-    return _apply_runtime_route_circuit(event)
+    task = _runtime_route_circuit_request_task()
+    if task is None:
+        return _apply_runtime_route_circuit(event)
+    registry = _runtime_route_circuits
+    previous = getattr(task, "_slipstream_route_circuit_permits", {}).get(key)
+    if previous is not None:
+        previous[0].abandon_owned(previous[1])
+    try:
+        decision, permit = registry.before_request_owned(key, event.now_ms)
+    except Exception:
+        registry.clear()
+        decision, permit = None, None
+    _retain_runtime_route_circuit_permit(task, key, registry, permit)
+    return decision
 
 
 def runtime_route_circuit_record_result(
@@ -1891,7 +1932,26 @@ def runtime_route_circuit_record_result(
             else int(now_ms)
         ),
     )
-    return _apply_runtime_route_circuit(event)
+    task = _runtime_route_circuit_request_task()
+    permits = getattr(task, "_slipstream_route_circuit_permits", {})
+    registry = _runtime_route_circuits
+    if key not in permits:
+        try:
+            return registry.record_unowned(event)
+        except Exception:
+            registry.clear()
+            return None
+    retained = permits[key]
+    permit = None
+    if retained is not None:
+        registry, permit = retained
+    try:
+        return registry.complete_owned(permit, ok, event.now_ms)
+    except Exception:
+        registry.clear()
+        return None
+    finally:
+        permits[key] = None
 
 
 def runtime_route_circuit_allows(policy, backend, *, owned=True, now_ms=None):
@@ -1902,6 +1962,19 @@ def runtime_route_circuit_allows(policy, backend, *, owned=True, now_ms=None):
         now_ms=now_ms,
     )
     return decision is None or decision.kind == route_circuit.DECISION_ALLOW
+
+
+def _runtime_route_circuit_closed_observation(policy, backend, *, owned=True):
+    key = _runtime_route_circuit_key(policy, backend, owned=owned)
+    if key is None:
+        return None
+    registry = _runtime_route_circuits
+    try:
+        permit = registry.begin_closed_observation(key, _runtime_route_circuit_now_ms())
+    except Exception:
+        registry.clear()
+        return None
+    return (registry, permit) if permit is not None else None
 
 
 def reset_runtime_route_circuits():
@@ -11530,25 +11603,36 @@ def doh_resolve(host):
     return ips
 
 
-async def doh_resolve_async(host):
-    """Resolve on the dedicated pool, collapsing concurrent first-time lookups
-    for the same host into a single query (no await between get+set -> race-free
-    on the single-threaded loop)."""
-    fut = _doh_inflight.get(host)
-    if fut is not None:
-        return await fut
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    _doh_inflight[host] = fut
+async def _shared_dns_resolve(host, resolver, inflight):
+    """Let resolver completion, not a caller, own shared lookup work."""
+    future = inflight.get(host)
+    if future is None:
+        # Publication has no await, so callers on this loop share one worker.
+        try:
+            future = asyncio.get_running_loop().run_in_executor(_POOL, resolver, host)
+        except RuntimeError:
+            return []
+        inflight[host] = future
+
+        def finished(done):
+            if inflight.get(host) is done:
+                inflight.pop(host, None)
+            # Every caller may have left before a resolver fails.
+            if not done.cancelled():
+                done.exception()
+
+        future.add_done_callback(finished)
     try:
-        ips = await loop.run_in_executor(_POOL, doh_resolve, host)
+        # A cancelled socket must neither cancel another socket's answer nor
+        # evict this entry while its blocking resolver is still running.
+        return await asyncio.shield(future)
     except Exception:
-        ips = []
-    finally:
-        _doh_inflight.pop(host, None)
-        if not fut.done():
-            fut.set_result(ips)
-    return ips
+        return []
+
+
+async def doh_resolve_async(host):
+    """Collapse concurrent lookups without sharing caller cancellation."""
+    return await _shared_dns_resolve(host, doh_resolve, _doh_inflight)
 
 
 async def app_dns_resolve_async(host):
@@ -11556,21 +11640,7 @@ async def app_dns_resolve_async(host):
     host = normalize_host(host)
     if not host:
         return []
-    fut = _app_dns_inflight.get(host)
-    if fut is not None:
-        return await fut
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    _app_dns_inflight[host] = fut
-    try:
-        ips = await loop.run_in_executor(_POOL, app_dns_resolve, host)
-    except Exception:
-        ips = []
-    finally:
-        _app_dns_inflight.pop(host, None)
-        if not fut.done():
-            fut.set_result(ips)
-    return ips
+    return await _shared_dns_resolve(host, app_dns_resolve, _app_dns_inflight)
 
 
 def system_resolve(host, port=443):
@@ -14213,24 +14283,36 @@ async def _coalesced_owned_geph_recovery_for_replay(host):
         return False
 
 
+_NORMAL_CIRCUIT_COMPLETION = object()
+
+
 async def _commit_owned_geph_first_payload(
     policy,
     host,
     reader,
     writer,
     geph_result,
+    *,
+    circuit_observation=_NORMAL_CIRCUIT_COMPLETION,
 ):
     """Commit a replay-safe owned stream only after its first target bytes."""
     gr, gw, server_first = geph_result
     if VERBOSE:
         print(f"OK {host}:443 via geph tunnel", file=sys.stderr)
     t0 = time.monotonic()
-    runtime_route_circuit_record_result(
-        policy,
-        GEO_BACKEND_GEPH,
-        True,
-        owned=True,
-    )
+    if circuit_observation is _NORMAL_CIRCUIT_COMPLETION:
+        runtime_route_circuit_record_result(
+            policy,
+            GEO_BACKEND_GEPH,
+            True,
+            owned=True,
+        )
+    elif circuit_observation is not None:
+        registry, permit = circuit_observation
+        try:
+            registry.complete_owned(permit, True, _runtime_route_circuit_now_ms())
+        except Exception:
+            registry.clear()
     clear_geph_route_failure()
     try:
         writer.write(server_first)
@@ -15110,6 +15192,11 @@ async def _handle_impl(reader, writer):
             recovered = await _coalesced_owned_geph_recovery_for_replay(host)
             if recovered and _geph_session_started():
                 try:
+                    # Replay is already authorized by the exact successor proof.
+                    # Observe Closed health without taking another task's probe.
+                    replay_observation = _runtime_route_circuit_closed_observation(
+                        policy, GEO_BACKEND_GEPH, owned=True,
+                    )
                     retry_result, retry_failure = (
                         await _dial_via_geph_first_payload(
                             host,
@@ -15124,6 +15211,7 @@ async def _handle_impl(reader, writer):
                             reader,
                             writer,
                             retry_result,
+                            circuit_observation=replay_observation,
                         )
                         return
                     geph_failure = retry_failure or geph_failure
