@@ -1,5 +1,57 @@
 # Routing Research Notes
 
+## 2026-11-01: cancellation and late outcomes in shared recovery work
+
+PR376 reconciliation against merged main `dcbc56f40` found two independently
+reproduced defects beyond the already repaired idle TTL and no-dial accounting.
+The evidence is local, deterministic and in memory; it does not identify the
+cause of any particular historical Reconnecting report.
+
+| Boundary | Reproduced old behavior | Required ownership |
+|---|---|---|
+| Shared DoH/app-owned DNS lookup | Cancelling a follower cancels the shared future; cancelling the first caller can raise `UnboundLocalError` in cleanup and discard still-running work. | Resolver completion owns the inflight entry; individual callers await through a cancellation shield. |
+| Route circuit probe | A cancelled admitted HalfOpen probe retains its slot until the five-minute idle expiry. | The admitting task must release its unfinished permit without reporting a transport failure. |
+| Route circuit result | A slow Closed attempt can complete a different task's newer HalfOpen probe, either clearing it or reopening the circuit. | A result consumes its own attempt token once, and only in its original registry generation. |
+
+The DNS repair keeps the blocking resolvers, cache TTLs, route eligibility and
+system-DNS path unchanged. It preserves `None` versus `[]`, retains one executor
+job while any caller leaves, and consumes an abandoned worker exception. The
+repository regression originally had six failures and two passing error-path
+controls on the old functions; all twelve final focused cases pass with the
+repair. Source-function hashes and guarded receipts are in private
+`output/continuation-20261101/remaining-pr376/recovery/`.
+
+The three route-circuit failures use the actual runtime wrappers and registry;
+no socket, real shutdown or live backend is exercised. The explicit production
+cancel caller observed in this review is daemon shutdown; ordinary browser tab
+closure has not been established as that trigger. Separately, late results from
+concurrent admitted attempts need no shutdown to cross the old key-only boundary.
+Private causal evidence is in `remaining-pr376/permits/` under the same root.
+
+Independent review caught a candidate-only replay regression before publication:
+a successful second Geph attempt was treated as a duplicate result of its failed
+first attempt. Two recovered requests then accumulated enough Closed failures to
+suppress a third request. The same guarded full-handler fixture fails on that
+candidate and passes after replay receives a separate generation-bound Closed
+observation. All three clients receive the complete fixture payload. General
+duplicate completion remains rejected, and late replay success cannot alter a
+newer Open/HalfOpen/Closed generation. This is not a defect attributed to main.
+
+The browser-probe server had the same missing lifetime boundary at a different
+layer: listener close returned while an accepted client's delayed `to_thread`
+work could still submit a result. Cancellation during frame reading also skipped
+writer cleanup. Two in-memory old-code cases fail, while the before-close control
+passes. The candidate scopes authority to one listener generation and drains
+admitted callbacks asynchronously; a timeout fails closed and retains the handle
+for retry. It does not revoke the shared runtime used by a later listener or
+remove a socket with a different inode. Evidence is in `remaining-pr376/browser/`.
+These are IPC lifetime checks, not a physical browser navigation qualification.
+
+The retained gzip/critical-object diff expands existing identity-only or JS-only
+contracts and is not admitted merely because it exists in an older branch.
+Established-stream recovery, sustained media and physical sleep/network changes
+remain distinct qualification gaps, not conclusions from these fixtures.
+
 ## 2026-11-01: Telegram transport update and candidate reconciliation
 
 The shipped source base was tg-ws-proxy 1.8.1. Retained PR386 contained a 1.11.2

@@ -1,5 +1,38 @@
 # Decisions
 
+### 2026-11-01: recovery work owns its lifetime and result
+
+A shared DoH or app-owned DNS lookup belongs to its executor completion, not the
+first client waiting for it. Cancelling any caller must leave the one inflight
+lookup and other callers intact. Completion removes only its own inflight entry;
+a worker failure is observed even when every caller has left. Existing resolver
+queries, cache bounds/TTLs and `None` versus `[]` meanings remain unchanged.
+
+Runtime circuit admission creates a once-only permit for the admitting task and
+registry generation. A late result from an older phase, expired/evicted key or
+cleared registry cannot finish another probe. Task completion abandons unfinished
+permits neutrally: no success, failure, backoff or new route is inferred. Closed
+health evidence without admission remains supported, but it cannot complete an
+owned HalfOpen probe. Repeated completion in the same task is not independent
+evidence. A separately authorized Geph replay captures its own Closed-generation
+observation before dialing. Its successful payload may clear that same Closed
+failure counter, but cannot complete a newer probe; an inert observation does
+not prevent the already authorized replay. Generation storage stays bounded with
+circuit storage, and completed task entries retain neither registry nor token.
+
+An owned browser-probe listener has its own revocable runtime authority. Closing
+it prevents new queued work, closes accepted writers and drains both client tasks
+and already admitted callbacks before allowing a replacement listener. Effects
+run outside the short authority lock; the event loop waits asynchronously. A
+bounded drain timeout is a failed close, retains the old supervisor handle and
+cannot authorize a successor generation. Concurrent/cancelled callers share the
+close operation; retry must handle prior failure or cancellation explicitly.
+Socket removal still requires the original device/inode identity.
+
+The pure route-circuit v1 reducer and shared Rust contract stay unchanged. These
+are ownership boundaries around existing runtime attempts, not new recovery
+routes; external Geph and protected Discord/YouTube policy remain unaffected.
+
 ### 2026-11-01: pinned Telegram source with retained transport ownership
 
 The bundled Telegram transport advances from tg-ws-proxy 1.8.1 to the reviewed

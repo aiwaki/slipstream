@@ -1,226 +1,141 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, Telegram update in progress
+## Current continuation — 2026-11-01, PR446 replay-fixture follow-up
 
 Primary `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`,
-branch `codex/telegram-transport-update`, base main/merged PR444
-`46a30d97d3b6c3847adcea6854e7d432b434dac3`. The base tree equals checked PR head
-`9a3521a43ca5f5e8c3a9157b5aec1de8de53b1bb`; root fetched and fast-forwarded.
-PR442/443 are also merged. These routing fixes are newer than published .32 and
-have not been installed on the user's Mac. Original locator first block synced;
-preserve older tails. Source, PR and CI remain authoritative. Telegram changes
-below are the scoped candidate; its new PR and exact-head CI are pending.
+branch `codex/async-recovery-ownership`, PR446 initial head
+`9c7fd63447345ca1d978b19c15c7b97a585732e7`, base/main
+`dcbc56f40d33a5678b059babe1890ea60ba03e18` (merged PR445).
+Root verified source/review bindings, fetched unchanged main, committed12files
+and pushed normally. PR446 is open. First CI41292867976/1 failed one stale
+replay fixture;2013 passed in76.48s. Complete payload/two-dial assertions passed,
+but the old normal-result recorder misses the new explicit owned observation.
+Audit41292868013/1 and packaged-app-build124807590695 SUCCESS. Receipt
+`remaining-pr376/pr446/verification.json` SHA
+5ca5c81a718bfeb64122a85352c143e0786ae560444ab69ee025d1cba84a61b0.
+The fixture now uses real admission/registry and two distinct consumed permits,
+retaining payload/session assertions and adding actual health reset. Guarded
+1PASS/0 forbidden I/O/186MB peak; root independently reviewed, no blocker.
+`permits/ci-fixture-fix/verification.json` SHA
+5da117980ef483fea8094f3136aac9c0b800e09b8295fd5adecc27a315c65a18.
+Production source/dependencies are byte-identical to the first head.
+Expected dirt: checkpoint, affected test and private `output/`.
+Original locator receives only this first block; preserve both older tails.
+Source, exact PR head and CI remain authoritative.
 
-### Active Telegram source integration
+Next verified action: commit the reviewed test/checkpoint correction and push
+one new head, then one watcher
+(`release_preflight`) observes required `checks`, `packaged-app-lifecycle` and
+`Required dependency audit` at >=60-second intervals. First watcher is terminal;
+no blind rerun or duplicate monitoring. If green, root freshly verifies
+head/base/required contexts, expected-head merges, fetches and proves merge-tree
+equality. No workstation installation is authorized.
 
-Imported only the Telegram vendor sources, source inventory and tests from
-retained PR386 head 4360003ca05444683aaed74b7b69b51198f27bdf; unrelated app/Geph
-changes and stale dependency locks were excluded. Selected upstream 1.11.2
-commit 307a384ab7f522e34bb1a045884d0bd90f40bee5: latest 1.11.3 release notes
-recommend 1.11.2 pending TLS compatibility repairs. Unreleased 1636903 was compared,
-not imported. Official archive SHA and all 15 original modules plus MIT license
-verified. Private `output/continuation-20261101/telegram-recovery/upstream.json`
-SHAe7d7d2e4af02175cc26f683db2ec8e79deda001d6477a3e9c2a57bb86fc67238.
+### Frozen candidate and scoped evidence
 
-Restored the candidate's missing CF-pool refill-on-miss without losing its owned
-cleanup. Current 1.8.1 already refills; do not attribute this regression to shipped
-code. Three old-candidate RED cases become GREEN (100 concurrent cold misses, failed warmup,
-redirected DC), with completed-connector/cancel control: 4 PASS, 0.05s.
-`admission-tests/verification.json` SHA
-70cbd1c39da8b23f89d3bcaedf36ae0d9ac09f899ba51221f8c9c60372a8a4b0.
-Separate retained evidence proves an unclaimed-socket cancellation defect in 1.8.1
-that the candidate's cleanup fixes. CF workers default empty in the embedded launcher;
-no historical user-visible cause is established. Quick-ACK allegation is
-unsubstantiated for HTTP; 14 guarded characterization checks pass, semantics kept.
+Private root `output/continuation-20261101/remaining-pr376/`:
 
-Three locks freshly generated using Python 3.13.15 and the compatible pinned
-pip 26.2.2/pip-tools 7.6.2 tool pair. Exactly 6 additions for HTTPX 0.28.1; all old
-versions and hash sets preserved. Seven lock/generator/packaging checks PASS;
-`locks/verification.json` SHA329486c44b3ea8619f0c0734f5a91d184a7c7fdb02e4b2ad4f1f13d410dc3aff.
-Vendor review: 9 checks found no blockers; `review.json` SHA
-76dcdb7e896eebed6e4699d0c210682f639e68091136ed6577e71d770ed3549a.
+- Shared DoH/app-owned DNS now belongs to executor completion, shielded from
+  individual caller cancellation. Six old-code failures/two controls become
+  twelve focused passes; resolver/TTL/system-DNS/policy stay unchanged.
+  `recovery/dns-implementation.json` SHA
+  e3ee37b65145a63b8ed54e2ae0e07562332c805f377b193bf052381450594270;
+  independent `recovery/root-review.json` SHA
+  9d3f20d65392520b3a349583e2cbac5a8674d733e4da2f99cba66dbc19892fba.
+- Circuit results have once-only task/generation permits. Cancellation abandons
+  unfinished probes neutrally; old completions cannot finish a newer probe.
+  Three causal RED become20 focused passes;28 existing caller/vector/no-dial
+  checks pass. Real handler recovery no longer waits for five-minute idle expiry.
+  `permits/verification.json` SHA
+  54a634372c0407eef5bfac9b319eb476d14bd91c98ec7767251c8a918d3ddc95.
+- Independent review caught a candidate-only Geph replay regression: successful
+  replay was mistaken for a duplicate result. Replay now captures a separate
+  Closed-generation observation before dial; admission policy is preserved.
+  Four new controls, one affected normal path and the unchanged independent
+  actual-handler RED→GREEN pass. Three recovered clients receive full payloads,
+  empty circuit snapshots and complete cleanup. Final fix receipt
+  `permits/replay-fix-verification.json` SHA
+  72e190fc5d1940b50b2449b870512bd2c1aac8c3f2c0963fbba5f7ae618510de;
+  final independent `permits/independent-review.json` SHA
+  98d33e205ec6f4db840e3b0e50411bc41dc477a2d787ea36a8ce403b48e0a3bd.
+  Pending review is retained as chronology, not an open blocker.
+- Browser-probe listener close revokes queued work and asynchronously drains
+  accepted clients/effects. Timeout retains its handle and forbids replacement;
+  cancelled/concurrent callers may retry. Three causal RED become17 passes
+  (13 lifecycle plus4 existing protocol), including a bounded memory-only thread.
+  `browser/implementation-verification.json` SHA
+  0b4da524dceea17d1b789643a62e809a93d58a3499f8271e0bf33f8ac14fe6ed;
+  independent `browser/independent-review.json` SHA
+  93b27ff7a3b5f15b38362b06a9e581adf533796aa079e83b40f30be4a8a15145.
 
-Closed a packaging gap: startup could swallow Telegram import failure while
-daemon status stayed active. Existing offline transport self-test now requires
-the real Telegram/H2 imports and client initialization/close; 8 missing-module
-cases fail on the old function, 12 focused checks PASS. JSON/capability and old
-QUIC implementation unchanged. `frozen-imports/verification.json` SHA
-350073cbbdfa59d286323e5b3f29e7d5c14e81a02e0a7ec37ab6b715c4fe7377.
-CI's existing Verify packaged resources step now invokes this CLI in the built
-daemon; actual frozen execution is pending. One workflow wiring check passed.
+All three source slices independently reviewed: no remaining blocker. Reducer
+v1 and Rust are byte-identical to base. Docs8, continuity and staged diff checks
+passed before commit. Staging caught one trailing blank line in the new permit
+test; `precommit-normalization.json` binds old/new hashes and identical AST.
+Reuse scoped evidence across that whitespace-only normalization; fresh exact-head
+CI contains the final bytes. No historical Reconnecting cause or installed repair
+is established by the fixtures. Details/invariants are in ROUTING_RESEARCH,
+DECISIONS and TROUBLESHOOTING, not inferred from this checkpoint.
 
-Final independent review has no remaining blockers. An initial CI command lacked
-the existing privileged capability; the corrected invocation supplies all required
-flags via sudo on the disposable runner. Actual CLI guard regression: old command
-RED, corrected command and workflow check PASS (2 checks, 0.12s). Guards unchanged.
-`frozen-imports/capability-verification.json` SHA
-f2d6053d9146654012d7c3bbcc20a9879f70f4f7b931794513be51a0c9ea8e0b;
-`review-final-after-ci-fix.json` SHA
-dd84f0caa62ebeacffb83405edd423d07183bb03cb2dcb3fabb53ca8a3920cda.
-Next: scoped PR and exact-head CI/audit. Docs, continuity and diff checks follow
-the final evidence-text update; previous unchanged broad suites are reused.
-Existing local guards and MIT notice retained. No native build, local listener/
-live endpoint, workstation install, service/network/account mutation authorized.
-Working external Geph untouched; neither published .32 nor installed-product
-success is advanced. All agent implementation slices are frozen; root owns Git.
+### Next source scope after this merge
 
-### Completed no-attempt circuit repair — PR444
+PR376 remains open at35284416b6b835aad9c3ae035f009605c31288f3. Reconciliation found
+two further proved defects, deliberately outside PR446: app-owned DNS accepts an
+incomplete HTTP response or DNS TC-marked answer; semantic IPC cancellation
+before write leaks its writer. Three RED/two normal controls retained in
+`recovery/remaining-boundaries-red.log`; `recovery/reconciliation.json` SHA
+ eb014706cc57c94f3fd5dc5696b6c5a1c1853e9ecf3b874ad43bd9013b6ce25c.
+Repair these narrowly next; do not import old gzip/critical-object/redirect
+expansions merely because they exist. PR384 is stale/draft/conflicting; all13
+Geph source fixes are already main r4. No native SQLite or SDK/platform work.
+Missing established-stream reset→fresh reconnect, sustained media and physical
+sleep/default-route qualification remain coverage gaps, not proved new bugs.
 
-Removed the no-attempt `elif` from `tproxy.handle`: initial unreadiness or a
-refused session reservation during drain no longer acquires a circuit permit and
-records failure. This prevents false route-scoped one-second suppression after
-readiness returns. The whole branch is removed so a HalfOpen permit cannot be
-acquired without a backend attempt. Actual failure/backoff, session cleanup and
-route classification are unchanged. Historical reconnect cause is not established.
+### Reusable merged/released baselines
 
-Two guarded real-handler cases fail on base `cbc3502e` and pass with the fix.
-Unready requests leave the circuit empty; drain preserves an expired Open entry,
-its permit and idle activity. The first ready same-group request gets the full
-43-byte response. The actual payload-EOF backoff control remains green; five
-focused cases passed in0.19s. These use real registry/reducer/cleanup with in-memory
-streams and I/O guards, not a live monitor/backend. Independent review15 checks
-PASS; docs8, continuity, diff and three scoped workflow-config checks passed.
-Evidence `output/continuation-20261101/no-dial-circuit/`:
-`verification.json` SHA4442be68d76fa753e795929ed1b1c8a2b1db4743cddca31aeb6899b005366afc;
-`independent-review.json` SHAe6bff52e802860cbf95034ef6eb364ea40955e6a43d6f06a94eb172c869cc4c5.
+PR445 merged dcbc56f40 from checked head d0cf869e9, equal tree
+1acb28fc0bac5e5ea8bd2d8a819b9a0bcd05d239. CI41288152234/1 and
+ audit41288152178/1 SUCCESS: Python1967, metadata949, traffic90, public-updater111,
+transport-matrix9, package/DMG/browser/native lifecycle. Built daemon actually ran
+transport self-test schema1/resultpassed/network_mutatedfalse, including frozen
+Telegram/H2 imports. Private `telegram-recovery/pr445/verification.json` SHA
+0be1199e4d30b57428a434863197d27962507ee16324c66f3489bebafd3602d2 and
+`source-evidence.json` bind source/tests. PR386 is CLOSED as superseded; branch
+retained. Telegram1.11.2 source307a384, locks and frozen closure are complete;
+do not reimport that branch or chase an unqualified upstream snapshot.
 
-Final CI41284897728/1 and audit41284897714/1 SUCCESS on exact9a3521a43;
-all three required contexts SUCCESS. Hosted Python1867 passed,1 warning in77.54s
-(+2 new cases); package/DMG, browser and native lifecycle checks passed.
-Quiet pytest logs show the aggregate, not individual case names. Final receipt
-`pr444/head-9a3521a43/receipt.json` SHA
-`4480ac896042d1c077061ec7c824e0c49e2651f8959b97b0075b5e8a5cd9b9b3`;
-`merge.json` binds the equal tree. Watcher1867 completed; no active CI watcher.
+PR444 merged46a30d97 from9a3521a43: no circuit admission/outcome without backend
+attempt, CI41284897728/1 +audit41284897714/1 green, Python1867. First DMG failure's
+cause remains unknown; final verbose build passed. PR443 mergedcbc3502e:
+no shared cooldown for rejected/no-dial requests, CI41186097912/1 and
+audit41186098002/1 green. PR442 merged41c614c9: rejected/ignored activity cannot
+renew idle TTL, CI41184109613/1 and audit41184109565/1 green. All prior watchers
+are terminal. PR442–446 are newer than published .32 and not installed on this Mac.
 
-First-head CI41284288845/1 passed Python1867 and audit but failed in
-`bundle_dmg.sh` after app signing. Its internal error was absent from the Info
-log. Retained failed receipt `pr444/receipt.json` SHA
-`1bfa0c32bd9ae8a8856a71abc911b1d4be338097dbca10b2046b5c10f1647ad7`.
-A PR-only `tauri build --verbose` flag now exposes child stdout/stderr; no DMG,
-verifier or main signing gate changed. The final build passed; the first failure's
-root cause remains unknown. No blind rerun or protected G/P/R repeat occurred.
-`diagnostic-review.json` binds the unchanged routing source/tests across heads.
+Published preview.32 release429722639, source9fd7d43c271e4a46ac2d10fc5ca4a032b92adae73.
+Publisher41168865517/1 verified12assets. G41165429293/1(26/26),
+P41165942199/1(15/15),R41165941890/1(31/31) passed; R includes1800s idle heartbeat,
+not sustained media. Public31→32 commit41180680911/1(49/49) and
+rollback41181835221/1(38/38) passed exact assets. Reuse unchanged qualification;
+full details in RELEASES/private receipts. Source review expires2026-11-07;
+no extension or new vulnerability exception. Geph account qualification remains
+separate from static changes. Do not reopen resolved updater/harness/quota cases.
 
-Next verified work is the scoped Telegram integration above.
-Do not redo completed circuit, tooling, release or public-updater qualification.
-Xerj was incrementally refreshed once at this merged source (exit0); actual MCP
-search finds the new handler regression in `spike/test_geph_no_dial_circuit.py`.
-Refresh log SHA550b3c02464bbb45bd29edde2fdb0901e16f698719d052921b66e83c6fbdc9ea;
-this checkpoint's final status lines were updated after indexing. No native build,
-workstation install or runtime/network/account change is authorized here.
+### Workstation/tooling boundary
 
-### Completed shared cooldown fix — PR443
+Preserve working external Geph/current Mac. No local native/Cargo/scanner builds,
+app/browser/live endpoint probes, installs, PF/service/DNS/proxy/PAC/VPN/account
+changes. Only tiny guarded in-memory checks, static reads and disposable hosted
+CI. Discord/YouTube/googlevideo remain local; no global UDP443 block.
 
-A rejected owned-Geph circuit invoked global `suspend_geo_exit_backend` without
-any dial, setting `_geph_up=false` and a30s hold for other service groups.
-The narrow repair gates common suspension with `geph_attempt_failed`, which is set
-only after an admitted unsuccessful helper result. Real failure backoff and the
-early external-Geph zero-payload branch stay unchanged. No policy/account edits.
-Held retries do not themselves renew the hold; do not call this infinite renewal.
-Synthetic circuit failure recording on unready/draining admission was separate
-from PR443; the current slice above addresses it.
-
-Private `output/continuation-20261031/remaining-scope/circuit-idle-ttl/admission-cooldown/`:
-on unchanged7e6ec072e,1 causal RED (OpenAI rejection, no dial, readinessfalse and
-hold130 at clock100, independent Steam blocked) and1 positive GREEN (actual
-first-payload EOF retains30s backoff and cleanup),0.16s. `verification.json` SHA
-`a28a879230801cbe82cfc80dc69749dd22535cd742fd07f66cd242d8746c9f34`.
-Promoted3-case handler test also proves unready→healthy reducer→full Steam
-payload at105s (old source still held until130). Two defect cases have causal
-old-source RED, positive EOF control retains real backoff. Final4 new/updated
-cases PASS;14 adjacent cases PASS reused. Independent final3-file review verified
-source/log hashes without reruns; no blockers. `implementation-verification.json`
-SHA211e5bc3a6d161cff6d1a726a52f5458e6c2f9ec661bc672c2b58c28aa8f41cf.
-Actual monitor/network not exercised; fixture uses its reducer and in-memory streams.
-Docs8/continuity/diff passed. PR443 merged after CI41186097912/1 and
- audit41186098002/1 SUCCESS, all three required contexts SUCCESS. Python1865
- passed (three new parameter cases plus the updated unready case in unfiltered
- suite); packaged browser and native lifecycle PASS. Quiet pytest logs do not
- print individual names. Final receipt SHA
- `dc76e44d42f41885042b0b43b07bb52fb37853ff36d1a8e9b9624620adcb8385`;
- resumed verification SHA
- `ed177a26da250558b0b4ddcb2f5d4841b86fb97707460db60c5e5538bf9251c9`.
- Same-run watcher finished; no rerun. Both fixes remain newer than published .32
- and have not been installed on the user's Mac.
-
-User-requested tooling is installed globally: Xerj v1.0.0-rc.100 and Entire
-0.12.2, official ARM64 archives verified against release checksums and digests.
-Xerj: authenticated loopback user LaunchAgent, 1024 MiB admission budget (not OS
-RSS ceiling), two indexing workers, BM25/code analyzer, no external rerank/feedback.
-585 unique files/15,796 records/419 code files indexed in active AUD-17 checkout;
-private output/hidden/build/vendor paths excluded. Real MCP search matched current
-source; current Codex exposes five read-only search/map tools. Refresh explicitly
-with `~/.local/bin/xerj-index-slipstream`; no continuous index watcher.
-Entire: both AUD-17 worktrees enabled with local settings, push_sessions=false and
-telemetry=false; no past transcript import. User approved seven hooks. Public Codex
-project trust for the shared Git root was added after config/read identified the
-missing trust boundary. Current bundled Codex hooks/list confirms all seven Entire
-project hooks enabled/trusted plus four unchanged global hooks, zero errors.
-Entire status still flags the worktree-local copy as not discovered; the actual
-same-byte common-root copy is discovered/trusted by Codex. A real future Desktop
-session/capture and its event PATH have not yet been exercised. Do not claim those.
-Five shared Git hooks and settings have backups. Baseline root has only the
-Codex discovery hook file, not Entire settings or substituted AUD-17 source.
-Depot not connected: personal repository unsupported by its GitHub Actions runners;
-separate Depot CI is Linux-only, and cost/qualification changes are not justified.
-Evidence, configuration backups, reports: `~/.local/share/slipstream-tooling-setup/`.
-No Slipstream runtime or external Geph changes; broader repair goal remains active.
-
-### Completed circuit inactivity fix — PR442
-
-PR442 checked head `7e6ec072ea2a655663f6ffaf1a21b2704d80138c` equals merged
-`41c614c993ed8a242a51a5e2c44ed996c9ddc299` tree. CI41184109613/1 and
-audit41184109565/1 SUCCESS; all3 required contexts SUCCESS. Python1862passed;
-new Rust2 cases explicitly passed. Packaged browser/lifecycle paths passed.
-Evidence `circuit-idle-ttl/pr442/receipt.json` SHA
-`7429aa54d037c4c9c76c6d4292657545fdcdf30a6aa77df6371373ff9ce328e6`,
-merge.json SHA6d6ddd61d20f98dfd6246b3e8befee89bd1e76ee11f5b018fcd79a98bc7ca45d.
-
-Python/Rust now renew registry activity only on Allow/Record, not Reject/Ignore.
-Two registry and one actual handler regression are causal RED→GREEN;18 unchanged
-contract vectors/backward-clock refusal preserved. Handler cancellation closes
-writers/counters; denied retries no longer prevent the existing five-minute idle
-expiry. This is eventual recovery, not immediate cancellation release or safe
-late-result generations. Explicit production cancellation caller identified was
-shutdown; tab close does not cancel the handler. Historical reconnect cause not
-established. No claim that this newer-than-.32 source is installed or released.
-
-### Reconciled remaining scope
-
-Read-only reports in `output/continuation-20261031/remaining-scope/` retain exact
-PR/source evidence. PR376 stale/open: only scoped source-backed repairs selected.
-PR384 stale/draft/conflicting: all13 Geph source fixes already in main r4; do not
-import wholesale or activate native SQLite. PR386 stale/conflicting: main proxy
-1.8.1 versus old1.11.2/H2 candidate; refresh narrowly with CF pool/quick-ACK proofs.
-No Telegram edits here. Missing evidence: established stream reset→fresh reconnect,
-sustained YouTube/Discord payload, physical sleep/default-route changes. These
-coverage gaps are not proven new bugs. No SDK/platform scope.
-
-### Published .32 and public updater baseline — reuse
-
-[Preview .32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
-release429722639; C9 sourcefd7d43c271e4a46ac2d10fc5ca4a032b92adae73,
-manifest3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823.
-Publisher41168865517/1 verified12assets; OLD31 retains12/stable1.4 retains5.
-C9 CI41164190639/1,audit41164190626/1,G41165429293/1(26/26),
-P41165942199/1(15/15),R41165941890/1(31/31) passed. R=4sites×2browsers,
-owned Geph outage/recovery,1800.103s idle heartbeat; not sustained media.
-Geph r4 producer41160514353/1 passed30native cases/both architectures.
-Source review expires2026-11-07,no extensions; Oct31 account usage remains1/3.
-
-Unchanged public OLD31→NEW32/harness91e66888b: commit41180680911/1 independent
-49/49 and rollback41181835221/1 independent38/38, including Cancel/rediscovery,
-one admin confirmation, ACK/commit and exact pre-ACK OLD restoration/cleanup.
-All12 public assets per release rechecked. Combined receipt
-`output/continuation-20261031/public-updater/pair-verification.json` SHA
-`9a0c075dbda8d0a857467e71567f3d93fa79b5a4d38015dfe354f483f7e32cf2`.
-PR440/441 merged/all required green; full limits in docs/RELEASES.md/private
-receipts. Do not reopen resolved harness/quota failures or rerun unchanged G/P/R.
-No installed .32/user-Mac or sustained media/sleep/wake success claim.
-
-Preserve working external Geph/workstation: no local native/scanner/app/browser/
-install/PF/service/DNS/proxy/PAC/VPN/account actions. Small mocks/static checks and
-disposable hosted CI only. All PR442/443/444 watchers finished. Graph unavailable; bounded direct/rg/git fallback. Xerj refresh is recorded above. Broader goal active.
+Xerj rc.100 and Entire0.12.2 are installed globally. Entire7hooks were explicitly
+approved; push_sessions/telemetry false. No cloud login/transcript import or past
+session capture claim. Depot deferred; no paid service configured. Existing
+Xerj loopback instance is low-resource/manual, no models or watcher. Last refresh
+at dcbc: all427codefiles indexed, only requirements-runtime.in skipped after
+text-family change; use direct read for it. Current unmerged edits are newer than
+the index. Do not dump key/daemon logs or reindex repeatedly. Graph unavailable;
+known-path bounded rg/direct reads are valid. Broader goal remains active.
 
 ## Current continuation — 2026-10-31, RSA-only remediation in progress
 

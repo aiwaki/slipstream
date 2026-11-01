@@ -12,7 +12,7 @@ from test_traffic_contracts import (
 )
 
 
-def test_cancelled_owned_geph_handler_recovers_after_idle_ttl(monkeypatch):
+def test_cancelled_owned_geph_handler_releases_probe_without_waiting_for_idle_ttl(monkeypatch):
     isolate_runtime_state(monkeypatch)
     registry = tproxy.route_circuit_registry.RouteCircuitRegistry(
         tproxy.RUNTIME_ROUTE_CIRCUIT_CONFIG,
@@ -116,13 +116,12 @@ def test_cancelled_owned_geph_handler_recovers_after_idle_ttl(monkeypatch):
             assert tproxy._conn_count == 0 and not tproxy._connection_tasks
             return bytes(writer.payload)
 
-        ttl = tproxy.RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG.idle_ttl_ms
-        assert ttl == 300000
-        for now_ms in (60000, 120000, 300000):
-            clock[0] = now_ms
-            assert await request() == b""
-            assert len(calls) == 1
-        clock[0] = 1001 + ttl
+        entry = registry.snapshot()[0]
+        assert entry.state.phase == "half_open"
+        assert entry.state.half_open_in_flight == 0
+        assert entry.last_touched_ms == 1001
+        assert tproxy.RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG.idle_ttl_ms == 300000
+        clock[0] = 1002
         assert await request() == response
         assert calls == [(host, 443, first_flight)] * 2
         assert all(upstream.closed for upstream in upstream_writers)
