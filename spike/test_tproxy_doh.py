@@ -5178,6 +5178,23 @@ def test_reviewed_geo_exit_replays_once_after_payload_proven_owned_recovery(
 
     session_events = []
     circuit_results = []
+    completions = []
+    health_events = []
+    registry = tproxy.route_circuit_registry.RouteCircuitRegistry(
+        tproxy.RUNTIME_ROUTE_CIRCUIT_CONFIG,
+        tproxy.RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG,
+    )
+    complete_owned = registry.complete_owned
+
+    def record_completion(permit, ok, now_ms):
+        consumed_before = getattr(permit, "consumed", None)
+        decision = complete_owned(permit, ok, now_ms)
+        circuit_results.append(ok)
+        completions.append((permit, consumed_before, decision, registry.snapshot()))
+        return decision
+
+    monkeypatch.setattr(tproxy, "_runtime_route_circuits", registry)
+    monkeypatch.setattr(registry, "complete_owned", record_completion)
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
     monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
@@ -5199,13 +5216,7 @@ def test_reviewed_geo_exit_replays_once_after_payload_proven_owned_recovery(
     )
     monkeypatch.setattr(tproxy, "relay_local_stream", lambda *_args: asyncio.sleep(0, result=(0, 0)))
     monkeypatch.setattr(tproxy, "geo_exit_backend_ready", lambda now=None: True)
-    monkeypatch.setattr(tproxy, "runtime_route_circuit_allows", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(
-        tproxy,
-        "runtime_route_circuit_record_result",
-        lambda _policy, _backend, ok, **_kwargs: circuit_results.append(ok),
-    )
-    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: None)
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: health_events.append("clear"))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
@@ -5220,6 +5231,17 @@ def test_reviewed_geo_exit_replays_once_after_payload_proven_owned_recovery(
     ]
     assert writer.writes == [b"successor-first"]
     assert circuit_results == [False, True]
+    assert [before for _permit, before, _decision, _state in completions] == [False, False]
+    assert all(permit.owner is registry._permit_owner and permit.consumed
+               for permit, _before, _decision, _state in completions)
+    assert completions[0][0] is not completions[1][0]
+    assert completions[0][0].key == completions[1][0].key
+    assert [decision.kind for _permit, _before, decision, _state in completions] == [
+        tproxy.route_circuit.DECISION_RECORD, tproxy.route_circuit.DECISION_RECORD,
+    ]
+    assert completions[0][3][0].state.consecutive_failures == 1
+    assert completions[1][3] == () and registry.snapshot() == ()
+    assert health_events == ["clear"]
     assert session_events == ["start", "finish", "start", "finish"]
 
 
