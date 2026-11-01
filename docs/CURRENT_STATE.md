@@ -1,11 +1,11 @@
 # Current Project State
 
-## Current continuation — 2026-11-01, Geph restart drain cleanup
+## Current continuation — 2026-11-01, preview .34 preparation
 
 Primary checkout:
 `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/geph-restart-drain-cleanup`, based on merged main
-`05c223c75ee0323d79798820ab078b1e20054e20` (PR #453).
+Branch `codex/preview34-geph-recovery`, based on merged main
+`d79e78a33364800a4c702e68236ba017392fd1a9` (PR #454).
 Root owns Git, PRs and workflow dispatches. All qualification watchers are
 terminal. No user-Mac app, service, browser or network settings changed.
 
@@ -42,7 +42,7 @@ Watcher receipt SHA e3f944d33781d0855b4a2c1bbf5a6a20a456db9d582e6e3e9cbed6c4a9df
 root independently checked required jobs and empty review threads before merge.
 Root merge/tree proof is retained. No release or local installation occurred.
 
-### Active drain repair
+### Accepted drain repair
 
 Separate from PR #453: successor polling after kickstart can
 propagate `OSError(EMFILE)` from `lsof` before the replay caller enters its drain
@@ -62,6 +62,48 @@ b64e66bce936a39ce3f6b5e6ce43cb808b542ff1535b757d11a58c0600a9e013;
 independent `review.json` SHA256
 4a9a70c71beb509db901fd34a6fbc028ecd6911e83044caa9e76b8fd62a1b682, no findings.
 Do not alter accepted PR #453 evidence or rerun it.
+
+PR #454: https://github.com/aiwaki/slipstream/pull/454, exact head
+`057912969388f3fab42d6111508963512cd47a86`; base is merged PR #453 above.
+Merged as `d79e78a33364800a4c702e68236ba017392fd1a9`; checked and merged tree
+`ec279096d3b5b1d7327a3ae0f28bf26a4ee5cffa` match.
+CI41334495060/1 and dependency-audit41334495058/1 passed all three required
+contexts, including packaged browser and lifecycle consumers. Sole watcher
+`app_update_implementation`, session98394, is terminal. Receipt SHA256
+3c1a74fdad519ddeae05cbbba533a6ea280d88776bef194b0c49c378c66df205;
+root independently confirmed exact head, checks and empty review threads.
+Receipts, root admission and merge/tree proof are under
+`geph-recovery-lifetime/drain-followup/pr454/head-057912969/`.
+No product republish or local installation occurred.
+
+### Preparing the successor
+
+Both runtime repairs above are merged, but published `.33` contains neither.
+The `.34` tag and preparation branch/PR did not exist at admission. Root used
+`scripts/sync_version.py` for VERSION and all six generated metadata targets;
+its `--check` passed. Runtime changes relative to merged PR #454 are limited
+to DAEMON_VERSION; the 13 focused regression results remain reusable.
+Minimal publisher/fixed-pair wiring is complete. Its 41 tests plus 5 subtests
+passed in 0.12s (peak RSS 50.7MB, forbidden I/O zero); author receipt is
+`geph-recovery-lifetime/preview34-preparation/admission/verification.json`
+SHA256 a2ac93473f71c6d0e68d1a1b7cecb35ec4adda8dabdd4ac8cc6ede5663cf35b4.
+Independent review passed with no findings; all 15 changed files and retained
+public-observer evidence were checked. `preview34-release/preparation/review.json`
+SHA256 51940f5126b758baca1ef4003d146930e9835600841520e0b5bbe072f6670f19.
+Root checked every reviewed hash before updating only this status paragraph.
+No candidate or protected run exists yet; root owns Git and dispatches.
+Evidence for the next release belongs in
+`output/continuation-20261101/preview34-release/`.
+
+The next candidate needs its own exact-main CI/audit, G, P and R; `.33` is
+an authenticated OLD baseline, not evidence for the changed successor. Geph
+r4 stays unchanged. Current admission and source deadlines still apply.
+Freeze reused public-observer helpers before building the candidate. New
+public `.33 -> .34` siblings/pins and checker context must wait until the new
+candidate is published and actual asset identities are available. Keep old
+public `.32 -> .33` entrypoints and accepted receipts unchanged. The later
+observer uses its own audited source without changing the product candidate;
+do not advance main with that observer before publisher completion.
 
 ### Published product and reusable gates
 
@@ -145,23 +187,17 @@ on the actual rollback. Do not edit predicates to accept a failed runtime.
 
 ### Next action and boundaries
 
-The ordinary public pair is accepted. Docs-only PR #452 is merged as
-`b7587b51d9e50c0355c05ba7b4613354df0b3018` (current origin/main).
-Checked head72e648e45d9779c7048ccffac03d5dbe8b84d1b3 has the same tree.
-CI41329055695/1 and audit41329055664/1 passed all three required contexts;
-root merge/tree proof and final watcher receipt are in
-`public-next/pr452/head-72e648e45/`. The watcher is terminal.
-Do not repeat the completed public-pair or docs work. The current branch contains
-the separate drain cleanup repair above. Focused checks/review are accepted;
-open its scoped PR and obtain the required CI. Published .33 remains
-unchanged and does not contain this new repair. Its accepted gates remain valid
-for that release, not automatic qualification of a later product build.
-User-present workstation smoke and sustained media/Telegram/sleep checks remain
-separate pending gates, respecting the local-work boundary below.
-User-Mac installation, sustained calls/video, live Telegram and sleep/wake remain
-unqualified. Public-pair proof does not itself establish ordinary Quit, notification
-delivery, continuous invisibility or external sentinel/global PF preservation.
-Separate existing lifecycle evidence is not to be relabelled as this run's proof.
+Finish the minimal `.34` preparation and independently review its version and
+admission wiring. Create one PR, accept exact required CI, merge and verify tree
+equality. Then build and qualify one exact-main candidate under the existing
+G/P/R and publication policy. Reuse prior tests only where code is unchanged;
+do not relabel old exact-candidate gates. After publication, qualify the actual
+new public pair with a separately bound observer. No additional broad audit or
+unrelated work is part of this step.
+
+Published `.33`, its public `.32 -> .33` pair and docs PR #452 remain accepted.
+Their evidence stays immutable. User-present workstation smoke, sustained
+calls/video, live Telegram and sleep/wake remain separate unqualified gates.
 The full goal remains active; no universal site/reconnect/media guarantee.
 
 No local native/Cargo/scanner builds, app/browser/live probes, installation,

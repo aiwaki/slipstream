@@ -1004,7 +1004,7 @@ class BuildConfigTests(unittest.TestCase):
             ["build-geph.yml", "ci.yml"],
         )
 
-    def test_current_preview_guard_accepts33_and_rejects_stale_or_mismatched_inputs(self) -> None:
+    def test_current_preview_guard_accepts34_and_rejects_stale_or_mismatched_inputs(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
         start = '            preview_sequence="${{ github.event.inputs.preview_sequence }}"\n'
         block = workflow[workflow.index(start):].split('            tag="v${v}"', 1)[0]
@@ -1012,11 +1012,11 @@ class BuildConfigTests(unittest.TestCase):
             '${{ github.event.inputs.preview_sequence }}', '$PREVIEW_INPUT'
         )
         for sequence, version, accepted in (
-            ("33", "0.1.9-preview.33", True),
-            ("32", "0.1.9-preview.32", False),
-            ("34", "0.1.9-preview.34", False),
-            ("33", "0.1.9-preview.32", False),
-            ("33x", "0.1.9-preview.33x", False),
+            ("34", "0.1.9-preview.34", True),
+            ("33", "0.1.9-preview.33", False),
+            ("35", "0.1.9-preview.35", False),
+            ("34", "0.1.9-preview.33", False),
+            ("34x", "0.1.9-preview.34x", False),
         ):
             with self.subTest(sequence=sequence, version=version):
                 result = subprocess.run(
@@ -1032,8 +1032,8 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn('tag="v${v}"', workflow)
         self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
-        self.assertIn('[ "$preview_sequence" = 33 ]', workflow)
-        self.assertIn('default: "33"', workflow)
+        self.assertIn('[ "$preview_sequence" = 34 ]', workflow)
+        self.assertIn('default: "34"', workflow)
         sequence = (ROOT / "VERSION").read_text(encoding="utf-8").strip().rsplit(".", 1)[1]
         self.assertIn(f'[ "$preview_sequence" = {sequence} ]', workflow)
         self.assertIn(f'default: "{sequence}"', workflow)
