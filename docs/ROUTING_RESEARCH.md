@@ -1,5 +1,34 @@
 # Routing Research Notes
 
+## 2026-10-31: one rejected circuit suspended unrelated Geph routes
+
+The owned Geph handler already distinguished failed attempts with
+`geph_attempt_failed`, but its common `suspend_geo_exit_backend` call did not use
+that flag. A rejected OpenAI circuit therefore set the global `_geph_up=false`
+and `hold_until=now+30s` without any dial. A healthy Steam route in a different
+service group was then suppressed too. Retries during the hold do not extend it;
+this is a cross-group false cooldown, not the registry's separate infinite-renewal
+bug. The historical reconnect incidents are not attributed to either fixture.
+
+The guarded in-memory handler draft on source7e6ec072e reproduced that exact
+failure, while a positive control using the actual first-payload helper retained
+the expected pause on EOF. Shared readiness/cooldown, health and cleanup helpers
+are real in this fixture; backend streams and recovery are in memory, with
+external-I/O, subprocess and persistence guards. Evidence is in
+`output/continuation-20261031/remaining-scope/circuit-idle-ttl/admission-cooldown/`.
+A third case starts with a not-ready backend: the old request adds a hold until
+130s without dialing, and even the monitor's healthy-probe reducer at105s cannot
+make an independent group usable. The fixed handler adds no hold and delivers the
+full response. Both defect cases have retained old-source RED evidence. The
+three cases plus the updated existing unready expectation pass;14 adjacent
+failure/backoff/helper cases remain green. The fixture uses the actual reducer,
+not a running monitor or a live probe. Independent review verified the frozen
+source/log hashes in `implementation-verification.json`.
+
+The narrow repair requires `geph_attempt_failed` at the common suspension call.
+It retains the early external-Geph zero-payload branch and does not change the
+separate synthetic circuit-failure recording on unready/draining admission.
+
 ## 2026-10-31: rejected retries kept an inactive route circuit alive
 
 Both `spike/route_circuit_registry.py` and the shared Rust registry refreshed

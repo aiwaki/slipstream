@@ -4774,7 +4774,7 @@ def test_unavailable_geph_keeps_geo_policy_without_disarming_local_pf(monkeypatc
     assert tproxy.route_policy("chatgpt.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
 
 
-def test_geo_exit_tunnel_down_cools_geph_but_keeps_private_pf(monkeypatch):
+def test_geo_exit_unready_does_not_start_new_cooldown(monkeypatch):
     class Reader:
         def __init__(self):
             self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
@@ -4805,12 +4805,15 @@ def test_geo_exit_tunnel_down_cools_geph_but_keeps_private_pf(monkeypatch):
     monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspended.append)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "dial_plain", direct_miss)
 
     asyncio.run(tproxy._handle_impl(Reader(), writer))
 
-    assert suspended == ["geo-exit tunnel down"]
+    assert suspended == []
+    assert tproxy._geph_up is False
+    assert tproxy._geph_backend_hold_until == 0.0
     assert writer.closed is True
 
 
