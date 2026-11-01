@@ -68,6 +68,86 @@ def discovery_http_diagnostic(*, opener=None):
     return result
 
 
+def public_feed_admission(*, opener=None):
+    """One prelaunch sample of this runner's anonymous feed, not a reserved quota."""
+    started = time.monotonic()
+    result = {"kind": "prelaunch_public_feed_admission", "url": DISCOVERY_URL,
+              "authenticated": False, "redirects_followed": False, "requests_attempted": 0,
+              "started_at_unix": time.time(), "status": None, "headers": {},
+              "list_count": None, "body_truncated": False, "message": None,
+              "quota": None, "admitted": False, "classification": "external_unknown",
+              "future_request_availability_guaranteed": False}
+    try:
+        if opener is None:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        request = urllib.request.Request(DISCOVERY_URL, headers=DISCOVERY_HEADERS, method="GET")
+        result["requests_attempted"] = 1
+        try:
+            response = opener.open(request, timeout=5)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            result["status"] = response.status
+            result["classification"] = "external_unavailable"
+            for name in (*DIAGNOSTIC_HEADERS, "date", "age", "cache-control", "etag", "x-cache"):
+                values = response.headers.get_all(name, [])
+                if len(values) == 1 and isinstance(values[0], str):
+                    result["headers"][name] = values[0][:256]
+            # Decimal header strings only; no coercion of booleans, floats or
+            # malformed/duplicate values. These are observations, not guarantees.
+            quota = {}
+            for key in ("limit", "remaining", "reset"):
+                value = result["headers"].get("x-ratelimit-" + key, "")
+                if re.fullmatch(r"0|[1-9][0-9]{0,15}", value) and int(value) <= 2**53 - 1:
+                    quota[key] = int(value)
+            if (set(quota) == {"limit", "remaining", "reset"} and quota["limit"] > 0
+                    and quota["remaining"] <= quota["limit"] and quota["reset"] > 0):
+                result["quota"] = quota
+            if response.status in (403, 429) and quota.get("remaining") == 0:
+                result["classification"] = "external_rate_limited"
+            # The OLD updater's per-page cap is 256 KiB; the existing later
+            # after-failure diagnostic deliberately retains its smaller 16 KiB cap.
+            body = response.read(256 * 1024 + 1)
+        result["body_truncated"] = len(body) > 256 * 1024
+        if not result["body_truncated"]:
+            try:
+                value = json.loads(body)
+            except (ValueError, UnicodeError):
+                value = None
+            if type(value) is dict and type(value.get("message")) is str:
+                result["message"] = value["message"][:512]
+            if type(value) is list:
+                result["list_count"] = len(value)
+                if (result["status"] == 200 and len(value) <= 10 and all(type(item) is dict for item in value)
+                        and result["quota"] is not None and result["quota"]["remaining"] > 0):
+                    result.update(admitted=True, classification="ready")
+    except Exception as error:
+        result["error_type"] = type(error).__name__
+    finally:
+        result["finished_at_unix"] = time.time()
+        result["elapsed_seconds"] = time.monotonic() - started
+    return result
+
+
+def require_public_feed(backend):
+    started, started_at = time.monotonic(), time.time()
+    try:
+        response = backend.run([sys.executable, str(Path(__file__).resolve()), "--prelaunch-public-feed"],
+                               timeout=10, env=backend.env)
+        require(len(response.stdout) <= 8192, "public feed admission output exceeded bound")
+        report = json.loads(response.stdout)
+        require(type(report) is dict and report.get("kind") == "prelaunch_public_feed_admission",
+                "public feed admission response invalid")
+    except Exception as error:
+        report = {"kind": "prelaunch_public_feed_admission", "admitted": False,
+                  "classification": "external_unknown", "error_type": type(error).__name__,
+                  "started_at_unix": started_at, "finished_at_unix": time.time(),
+                  "elapsed_seconds": time.monotonic() - started, "requests_attempted": None}
+    backend.record("public_feed_admission", report)
+    require(report.get("admitted") is True and report.get("classification") == "ready",
+            "public feed admission refused; external sample retained; OLD not launched")
+
+
 def helper_environment(backend):
     # The AX actor needs disposable-runner guards. The product never receives them.
     allowed = ("CI", "GITHUB_ACTIONS", "SLIPSTREAM_DISPOSABLE_CI", "RUNNER_OS",
@@ -332,6 +412,9 @@ class PublicMenu:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] != ["--diagnose-discovery"]:
+    if sys.argv[1:] == ["--prelaunch-public-feed"]:
+        print(json.dumps(public_feed_admission(), sort_keys=True))
+    elif sys.argv[1:] == ["--diagnose-discovery"]:
+        print(json.dumps(discovery_http_diagnostic(), sort_keys=True))
+    else:
         raise SystemExit("only the fixed read-only discovery diagnostic is supported")
-    print(json.dumps(discovery_http_diagnostic(), sort_keys=True))
