@@ -1,5 +1,63 @@
 # Routing Research Notes
 
+## 2026-11-01: incomplete DNS responses and semantic client cancellation
+
+The remaining PR376 checks were reconciled against merged main `3c18627f8`.
+Two source areas had reproducible defects independent of live sites or accounts:
+
+| Boundary | Reproduced failure | Scoped repair |
+|---|---|---|
+| DoH HTTP body | The standard library's sized read returned a valid DNS prefix even though nine declared body bytes never arrived. | Reject a nonzero remaining Content-Length before accepting DNS records. |
+| DNS message | A TC-marked reply containing an A record was accepted. | Reject the truncation flag before answer parsing. |
+| Accepted semantic IPC client | Cancellation before the write stage skipped writer cleanup; encoding failure did likewise, and waiting for close had no deadline. | Cover the whole handler with cleanup and retain the existing two-second budget for closing. |
+
+The DNS tests use actual `http.client.HTTPResponse` framing over BytesIO. The
+two causal cases fail on the old source and pass with the repair; all18 focused
+cases cover complete length/chunked/EOF framing, malformed chunking, size limits,
+provider fallback and positive/negative caches. TLS verification and existing
+cache bounds/TTLs remain unchanged. The existing HTTP response stub now exposes
+its completed length; it does not stand in for the new framing regressions.
+
+Semantic IPC uses the same guarded fixtures before and after: five failures and
+eight passing controls become thirteen passes. Header/body/dispatch/drain
+cancellation, exact normal/error responses, encoding failure and bounded close
+are covered. Dispatch is simulated in memory; these tests neither create a real
+Unix listener nor prove revocation of a thread effect after cancellation.
+
+Both patches were independently reviewed before applying. Their source/test
+hashes and before/after evidence are retained privately under
+`output/continuation-20261101/remaining-pr376/recovery/{dns-next,semantic-next}/`.
+The source fixes do not identify a historical reconnect or qualify an installed
+app. They complete these two validated input/cleanup findings without importing
+unproved gzip, critical-object or redirect behavior from the old branch.
+
+## 2026-11-01: lazy worker start/close and terminal updater checks
+
+A deterministic fake-thread schedule exposed two lazy-worker races: closing
+between thread publication and start raised join-before-start, and stopping
+between the fast stop check and lock admission still allowed thread creation.
+The same fixtures change from two failures and six passing controls to eight
+passes; no real thread, browser or network is used. The repair rechecks stop and
+starts the published thread under the lifecycle lock. The existing stop check inside the worker prevents a late browser launch;
+these cases do not establish a leaked browser or explain a past reconnect.
+
+PR447's first hosted Rust run failed the rollback identity mutation assertion at
+updater_transaction.rs:3804. The log discarded the Result and does not establish
+which early-return branch or lock owner was involved. The public completion
+check deliberately returns false while its nonblocking transaction lock is busy,
+before reading the changed executable. Parallel fork retention of an open file
+description is an already documented fixture concern in daemon_update tests.
+
+Terminal mutation fixtures therefore keep one owned lock while exercising the
+unchanged validation body. A separate public-path control retains a cloned file
+description, checks exact deferral for both healthy and changed executables,
+then explicitly releases it and checks completion or the identity error. Explicit
+unlock belongs only to test cleanup. Production lock inheritance, nonblocking
+admission, ACK requirements, receipt validation and executable hashing stay intact.
+This makes the two contracts independently testable without treating a delayed
+validation as acceptance or retrying until a failure disappears. Hosted native
+results are recorded in the current checkpoint; no local native run was made.
+
 ## 2026-11-01: cancellation and late outcomes in shared recovery work
 
 PR376 reconciliation against merged main `dcbc56f40` found two independently

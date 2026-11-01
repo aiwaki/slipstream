@@ -104,6 +104,8 @@ def test_endpoint_uses_bounded_wire_post_and_closes_on_rejected_replies(monkeypa
         calls = []
 
         class Connection:
+            length = 0
+
             def __init__(self, ip, name, timeout):
                 calls.append((ip, name, timeout))
 

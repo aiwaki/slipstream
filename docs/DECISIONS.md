@@ -1,5 +1,30 @@
 # Decisions
 
+### 2026-11-01: reject incomplete DNS input and finish accepted IPC cleanup
+
+An app-owned DoH response must satisfy its HTTP framing before its DNS answer
+can be accepted. A sized `HTTPResponse.read` can return an early EOF without
+raising `IncompleteRead`; a remaining declared Content-Length therefore rejects
+the response. DNS replies with the TC bit set are also rejected before parsing
+answer records. Complete length-delimited, chunked and EOF-delimited bodies keep
+the existing size bound, verified TLS, provider fallback and cache policies.
+This adds no resolver setting or routing-policy change.
+
+The semantic IPC handler owns its accepted writer from frame reading through
+dispatch, encoding and writing. Every exit closes that writer and bounds
+`wait_closed` by the existing two-second write timeout. Cancellation propagates;
+existing framed error responses and dispatch behavior remain unchanged. These
+are separate stage budgets, not a new whole-request deadline. Writer cleanup
+does not revoke an already dispatched thread effect or establish a new listener
+generation boundary.
+
+The lazy browser worker publishes and starts its thread under the same lifecycle
+lock. It rechecks shutdown after acquiring that lock, so close cannot observe an
+unstarted published thread or admit a notification after shutdown. Start failure
+clears that exact thread reference before releasing the lock. The worker's stop
+checks and bounded join remain in place; no browser or route is selected by this
+lifecycle rule.
+
 ### 2026-11-01: recovery work owns its lifetime and result
 
 A shared DoH or app-owned DNS lookup belongs to its executor completion, not the

@@ -2270,7 +2270,7 @@ class LazyPendingNavigationProbeWorker:
         if self._stop.is_set() or not self._job_count():
             return False
         with self._lock:
-            if self._thread is not None:
+            if self._stop.is_set() or self._thread is not None:
                 return False
             thread = self._thread_factory(
                 target=self._run,
@@ -2278,13 +2278,13 @@ class LazyPendingNavigationProbeWorker:
                 daemon=True,
             )
             self._thread = thread
-        try:
-            thread.start()
-        except BaseException:
-            with self._lock:
+            # close() must never observe a published but unstarted thread.
+            try:
+                thread.start()
+            except BaseException:
                 if self._thread is thread:
                     self._thread = None
-            raise
+                raise
         return True
 
     def active(self):
