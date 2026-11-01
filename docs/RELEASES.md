@@ -1,5 +1,19 @@
 # Release Policy
 
+## Preview .33 preparation — 2026-11-01
+
+The next candidate targets the public `.32 → .33` update path. It includes the
+reviewed recovery ownership, incomplete DNS, accepted-client cleanup and lazy
+worker lifecycle changes, plus Telegram transport 1.11.2. Geph r4 is unchanged.
+This is preparation, not a published or locally installed release.
+
+The final `.33` main commit still needs its exact signed candidate, current audit,
+native root update gate, packaged update gate and protected readiness results.
+After publication, test ordinary public `.32 → .33` cancellation, commit and
+pre-ACK rollback using the actual public assets. The `.31 → .32` results below
+remain historical evidence bound to their source snapshots; they do not qualify
+`.33`. The stable feed, signature checks and admission rules are unchanged.
+
 ## Published preview .32 — 2026-10-31
 
 [Slipstream 0.1.9-preview.32](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.32)
@@ -760,10 +774,10 @@ refs. It does not bypass lock, archive, audit, attestation, or immutable-tag che
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.32`, with
-  `VERSION` and `preview_sequence=32` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.33`, with
+  `VERSION` and `preview_sequence=33` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.32`; the new preview requires its own
+  `.23` source and is rejected for `.33`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact

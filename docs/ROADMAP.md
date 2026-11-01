@@ -25,8 +25,8 @@ small PR with tests and matching documentation.
 
 | Продолжающаяся работа | Что ещё не вошло в выпуск полностью |
 |---|---|
-| Восстановление соединений ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | Более широкий набор исправлений неполных ответов и гонок остаётся в открытом PR. Выпуск отдельных исправлений не означает завершения этой ветки. |
-| Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | Обновление транспорта остаётся в открытом PR; живой сеанс Telegram также требует проверки. |
+| Восстановление соединений | Исправления владения запросами, отмены, неполных DNS-ответов и остановки обработчиков подготовлены для следующего preview. Старый PR #376 не включается целиком; неподтверждённые расширения из него не считаются обязательными исправлениями. |
+| Telegram ([PR #445](https://github.com/aiwaki/slipstream/pull/445)) | Транспорт 1.11.2 включён в main; PR #386 закрыт как заменённый. Изменение ещё не опубликовано в preview, живой сеанс Telegram требует отдельной проверки. |
 | Сборка Geph ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | PR остаётся открытым. Исправления сессий и SQLite-кеша вошли ранее через PR #388; замена RSA и правка Free/Plus-кеша выпущены отдельно в `.32`. PR целиком не включён; исследовательская native SQLite не активирована. |
 
 ### English
@@ -48,8 +48,8 @@ sustained calls, video, and sleep/wake still need separate validation. See [RELE
 
 | Ongoing work | Scope not yet fully shipped |
 |---|---|
-| Connection recovery ([PR #376](https://github.com/aiwaki/slipstream/pull/376)) | The broader incomplete-response and race repairs remain in an open PR. Shipping individual fixes does not complete that branch. |
-| Telegram ([PR #386](https://github.com/aiwaki/slipstream/pull/386)) | The transport update remains in an open PR; a live Telegram session also needs validation. |
+| Connection recovery | Request ownership, cancellation, incomplete DNS and worker shutdown repairs are prepared for the next preview. The old PR #376 is not imported wholesale; its unproved extensions are not required fixes. |
+| Telegram ([PR #445](https://github.com/aiwaki/slipstream/pull/445)) | Transport 1.11.2 is on main; PR #386 is closed as superseded. The change is not yet in a published preview, and a live Telegram session still needs validation. |
 | Geph build ([PR #384](https://github.com/aiwaki/slipstream/pull/384)) | The PR remains open. Session and SQLite-cache fixes shipped earlier through PR #388; the RSA replacement and Free/Plus auth-cache repair shipped separately in `.32`. The whole PR is not included; native SQLite research is not activated. |
 
 For exact commits, checks, and remaining gates, see [CURRENT_STATE.md](CURRENT_STATE.md).
