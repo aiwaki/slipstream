@@ -538,9 +538,32 @@ class Observer(Native):
             return
         process = self.process_snapshot(int(match[1]))
         helper = self.state / "runtime/slipstream-update-watchdog"
-        require(process is not None and process["uid"] == self.uid and process["state"] not in {"Z", "T"}
-                and process["command"] == f"{helper} --journal {self.journal_path}"
-                and digest(helper) == self.watchdog_hash, "packaged watchdog process mismatch")
+        diagnostic = {"process_present": process is not None, "uid_match": None,
+                      "state_allowed": None, "command_match": None, "helper_hash_evaluated": False,
+                      "helper_hash_match": None, "helper_hash_error": None}
+        def observed(field, value):
+            diagnostic[field] = value
+            return value
+        try:
+            require(process is not None and observed("uid_match", process["uid"] == self.uid)
+                    and observed("state_allowed", process["state"] not in {"Z", "T"})
+                    and observed("command_match", process["command"] == f"{helper} --journal {self.journal_path}")
+                    and observed("helper_hash_match", digest(helper) == self.watchdog_hash),
+                    "packaged watchdog process mismatch")
+        except Exception as error:
+            # Keep the original short-circuit observations; never sample again
+            # or retain argv, paths, the nonce, or raw exception messages.
+            diagnostic["helper_hash_evaluated"] = diagnostic["command_match"] is True
+            if diagnostic["helper_hash_evaluated"] and diagnostic["helper_hash_match"] is None:
+                diagnostic["helper_hash_error"] = (
+                    "missing" if isinstance(error, FileNotFoundError) else
+                    "permission" if isinstance(error, PermissionError) else
+                    "os_error" if isinstance(error, OSError) else "other")
+            try:
+                self.record("watchdog_identity_diagnostic", diagnostic)
+            except Exception:
+                pass  # Evidence storage must not replace the identity failure.
+            raise
         self.observed_watchdog_policy = watchdog_policy(
             private_bytes(self.agent, self.uid), helper, self.journal_path, self.state)
         self.watchdog = process
