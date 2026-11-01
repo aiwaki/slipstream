@@ -1,5 +1,29 @@
 # Routing Research Notes
 
+## 2026-11-01: successor observation failure retained the restart drain
+
+After the recovery-lifetime repair, a separate guarded test reproduced a drain
+leak in `execute_owned_geph_restart`. The real execute → successor polling →
+listener → `_run` chain received a synthetic `OSError(EMFILE)` from `subprocess.run`
+on the successor `lsof`, after one successful kickstart. The exception escaped
+the manual cleanup branches: the drain stayed reserved and a fresh session was
+refused. The replay caller had not entered its payload-cleanup `finally`, which
+starts only after execute returns `restarted`.
+
+The repair puts all work after a successful drain reservation under one
+owner-only `finally`. It removes the seven manual releases rather than adding
+another potentially overlapping release. Only the final normal `restarted`
+return transfers ownership to payload qualification; exceptions and unsuccessful
+returns release it. Existing command handling, ownership checks, statuses and
+exception propagation remain intact. The injected unmanaged mode leaves an
+existing reservation untouched.
+
+The original RED, candidate patch and guarded checks are retained privately in
+`output/continuation-20261101/geph-recovery-lifetime/drain-followup/`. No actual
+descriptor exhaustion, subprocess, service or network operation is needed to
+reproduce this cleanup defect. This evidence does not attribute a historical
+reconnect to resource exhaustion or qualify an installed app.
+
 ## 2026-11-01: cancelled callers broke shared owned-Geph recovery
 
 Review after the public .32 → .33 update qualification found a separate runtime

@@ -307,3 +307,10 @@ Cancelling the first caller must still deliver the worker result to a follower;
 cancelling or timing out a follower must preserve the other callers and the
 single shared job. These are recovery ownership checks, not installed Geph,
 browser rendering, sustained-media or restart-drain qualification.
+
+`spike/test_geph_restart_drain_lifetime.py` separately covers restart-drain
+ownership. The real restart executor and successor polling use controlled
+subprocess results. A successor observation error must release the owned drain;
+a successful restart must retain it for payload qualification. Explicitly
+unmanaged calls cannot release another reservation. These checks do not start
+an actual Geph process or exercise the installed daemon.

@@ -3435,94 +3435,86 @@ def execute_owned_geph_restart(
     if managed_drain and not _begin_geph_restart_drain():
         return "busy"
 
-    _geph_restart_hint["last_attempt_at"] = now
-    if backend_suspender is None:
-        backend_suspender = lambda: suspend_geo_exit_backend(
-            "owned Geph restart in progress",
-            now=now,
-        )
-    runner = _run if runner is None else runner
+    keep_drain = False
     try:
-        if _shutdown_started.is_set():
-            if managed_drain:
-                _finish_geph_restart_drain()
-            return "shutdown"
-        backend_suspender()
-        if _shutdown_started.is_set():
-            if managed_drain:
-                _finish_geph_restart_drain()
-            return "shutdown"
-        previous_pid = _geph_listener_pid(GEPH_OWNED_PORT)
-        if (
-            not isinstance(previous_pid, int)
-            or isinstance(previous_pid, bool)
-            or previous_pid <= 0
-            or not geph_listener_owned(GEPH_OWNED_PORT)
-        ):
-            if managed_drain:
-                _finish_geph_restart_drain()
-            return "unverified"
-        result = runner("/bin/launchctl", "kickstart", "-k", target)
-    except subprocess.TimeoutExpired as error:
-        def timeout_output(value):
-            if isinstance(value, bytes):
-                return value.decode("utf-8", errors="replace")
-            if isinstance(value, str):
-                return value
-            if value is None:
-                return ""
-            return repr(value)
+        _geph_restart_hint["last_attempt_at"] = now
+        if backend_suspender is None:
+            backend_suspender = lambda: suspend_geo_exit_backend(
+                "owned Geph restart in progress",
+                now=now,
+            )
+        runner = _run if runner is None else runner
+        try:
+            if _shutdown_started.is_set():
+                return "shutdown"
+            backend_suspender()
+            if _shutdown_started.is_set():
+                return "shutdown"
+            previous_pid = _geph_listener_pid(GEPH_OWNED_PORT)
+            if (
+                not isinstance(previous_pid, int)
+                or isinstance(previous_pid, bool)
+                or previous_pid <= 0
+                or not geph_listener_owned(GEPH_OWNED_PORT)
+            ):
+                return "unverified"
+            result = runner("/bin/launchctl", "kickstart", "-k", target)
+        except subprocess.TimeoutExpired as error:
+            def timeout_output(value):
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", errors="replace")
+                if isinstance(value, str):
+                    return value
+                if value is None:
+                    return ""
+                return repr(value)
 
-        result = subprocess.CompletedProcess(
-            ("/bin/launchctl", "kickstart", "-k", target),
-            124,
-            timeout_output(error.stdout),
-            timeout_output(error.stderr),
-        )
-    except Exception as error:
-        if managed_drain:
-            _finish_geph_restart_drain()
-        print(f">> owned Geph recovery unavailable: {error}", file=sys.stderr)
-        return "unavailable"
-    command_outcome = _owned_geph_restart_command_outcome(result)
-    if command_outcome == "rejected":
-        if managed_drain:
-            _finish_geph_restart_drain()
-        detail = (result.stderr or result.stdout or "launchctl returned an error").strip()
-        print(f">> owned Geph recovery unavailable: {detail[:200]}", file=sys.stderr)
-        return "unavailable"
+            result = subprocess.CompletedProcess(
+                ("/bin/launchctl", "kickstart", "-k", target),
+                124,
+                timeout_output(error.stdout),
+                timeout_output(error.stderr),
+            )
+        except Exception as error:
+            print(f">> owned Geph recovery unavailable: {error}", file=sys.stderr)
+            return "unavailable"
+        command_outcome = _owned_geph_restart_command_outcome(result)
+        if command_outcome == "rejected":
+            detail = (result.stderr or result.stdout or "launchctl returned an error").strip()
+            print(f">> owned Geph recovery unavailable: {detail[:200]}", file=sys.stderr)
+            return "unavailable"
 
-    successor_state = _wait_for_owned_geph_successor(previous_pid)
-    if successor_state == "shutdown":
-        if managed_drain:
-            _finish_geph_restart_drain()
-        return "shutdown"
-    if successor_state != "ready":
-        if managed_drain:
-            _finish_geph_restart_drain()
-        detail = (result.stderr or result.stdout or "").strip()
+        successor_state = _wait_for_owned_geph_successor(previous_pid)
+        if successor_state == "shutdown":
+            return "shutdown"
+        if successor_state != "ready":
+            detail = (result.stderr or result.stdout or "").strip()
+            if command_outcome == "indeterminate":
+                reason = "launchctl completion was indeterminate"
+            else:
+                reason = "launchctl completed"
+            print(
+                f">> owned Geph recovery unavailable: {reason}, but no verified "
+                f"owned successor appeared ({successor_state})"
+                + (f": {detail[:120]}" if detail else ""),
+                file=sys.stderr,
+            )
+            return "unavailable"
+
+        clear_geph_restart_hint()
+        note_runtime_rearm("geph_restart")
         if command_outcome == "indeterminate":
-            reason = "launchctl completion was indeterminate"
-        else:
-            reason = "launchctl completed"
-        print(
-            f">> owned Geph recovery unavailable: {reason}, but no verified "
-            f"owned successor appeared ({successor_state})"
-            + (f": {detail[:120]}" if detail else ""),
-            file=sys.stderr,
-        )
-        return "unavailable"
-
-    clear_geph_restart_hint()
-    note_runtime_rearm("geph_restart")
-    if command_outcome == "indeterminate":
-        print(
-            ">> launchctl completion was indeterminate; verified the exact owned "
-            "Geph successor before resuming",
-            file=sys.stderr,
-        )
-    print(">> owned Geph LaunchAgent restarted after routing became idle", file=sys.stderr)
-    return "restarted"
+            print(
+                ">> launchctl completion was indeterminate; verified the exact owned "
+                "Geph successor before resuming",
+                file=sys.stderr,
+            )
+        print(">> owned Geph LaunchAgent restarted after routing became idle", file=sys.stderr)
+        keep_drain = True
+        return "restarted"
+    finally:
+        if managed_drain and not keep_drain:
+            _finish_geph_restart_drain()
 
 
 def prune_auto_geph(now=None):

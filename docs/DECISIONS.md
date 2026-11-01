@@ -42,6 +42,14 @@ unexpected exceptions reach remaining waiters and are observed even after all
 waiters leave. This does not interrupt blocking native operations, change restart
 admission or extend the existing shutdown guarantees.
 
+Once an owned-Geph restart reserves the idle-backend drain, its executor releases
+that reservation in one `finally` on every unsuccessful return or exception.
+Only a normal `restarted` return transfers the still-held drain to the caller
+for successor payload qualification. The explicit `active_sessions` injection
+does not own a drain and cannot release somebody else's reservation. Ownership
+validation, existing statuses, timeout diagnostics and exception propagation
+remain unchanged; failure cleanup does not bypass restart admission.
+
 Runtime circuit admission creates a once-only permit for the admitting task and
 registry generation. A late result from an older phase, expired/evicted key or
 cleared registry cannot finish another probe. Task completion abandons unfinished

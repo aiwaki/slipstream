@@ -51,6 +51,14 @@ could cancel the result shared by every waiter. Recovery now keeps its result
 with the worker and isolates each caller's wait. A completed worker returning
 true with failed/cancelled surviving callers is the causal regression signature;
 a historical reconnect message alone does not establish this cause.
+
+A separate failure can leave new Geph sessions refused after a restart attempt:
+an OS error while observing the successor process used to escape before clearing
+the restart drain. A synthetic `EMFILE` from successor `lsof` reproduces that
+state. The restart executor now releases its own reservation on every failed
+exit and retains it only for successful payload handoff. Preserve the actual
+exception and drain state; do not infer resource exhaustion from reconnects alone.
+
 Their in-memory checks do not qualify installed behavior, arbitrary sites or an
 already established media stream. Confirm the installed source before attributing
 a new report to a repaired path. See the November 1 ownership investigation in
