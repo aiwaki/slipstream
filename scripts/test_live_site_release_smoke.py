@@ -882,6 +882,73 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     ("terminal_error", "readiness_timeout"),
                 )
 
+    def _observe_pending_navigation(self, *, budget_ms=20_000, navigation_elapsed=10.0,
+                                    evaluation_elapsed=1.0, evaluation_timeout=False,
+                                    navigation_result=None):
+        clock = [0.0]
+        calls = []
+        def command(_debugger, _port, method, params, **kwargs):
+            calls.append((method, kwargs))
+            if method == "Page.navigate":
+                clock[0] += navigation_elapsed
+                if navigation_result is not None:
+                    return navigation_result
+                raise TimeoutError("private navigation response")
+            clock[0] += evaluation_elapsed
+            if evaluation_timeout:
+                raise TimeoutError("private observation response")
+            return self._chrome_evidence(signals=self._signals(title="Starrtoy"))
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            lifecycle = self._enter_chrome_lifecycle(stack, smoke.Path(temporary))
+            stack.enter_context(mock.patch.object(smoke.chromium, "_wait_for_devtools_port", return_value=9222))
+            stack.enter_context(mock.patch.object(smoke.chromium, "_devtools_json", return_value=[{
+                "type": "page", "url": "about:blank",
+                "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/1",
+            }]))
+            stack.enter_context(mock.patch.object(smoke.chromium, "_devtools_command", side_effect=command))
+            stack.enter_context(mock.patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]))
+            stack.enter_context(mock.patch.object(smoke.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)))
+            stack.enter_context(mock.patch.dict(smoke.SITES, {"xpersonatoy.com": {
+                **smoke.SITES["xpersonatoy.com"], "deadline_ms": budget_ms,
+            }}))
+            observation = {}
+            result = smoke._run_chrome("xpersonatoy.com", lifecycle.executable, 501, 20,
+                                       failure_observation=observation)
+        return result, calls, observation
+
+    def test_chrome_pending_navigation_observes_late_content_without_reloading(self):
+        result, calls, observation = self._observe_pending_navigation()
+        self.assertEqual((result["outcome"], result["reason"]), ("usable", ""))
+        self.assertEqual(result["elapsed_ms"], 11_000)
+        self.assertEqual([method for method, _ in calls], ["Page.navigate", "Runtime.evaluate"])
+        self.assertEqual(observation, {"exception_class": "TimeoutError"})
+
+    def test_chrome_pending_navigation_observes_only_until_original_deadline(self):
+        result, calls, _ = self._observe_pending_navigation(evaluation_timeout=True)
+        self.assertEqual(result["outcome"], "terminal_error")
+        self.assertNotEqual(result["reason"], "navigation_rejected")
+        self.assertGreater(len(calls), 1)
+        self.assertEqual(sum(method == "Page.navigate" for method, _ in calls), 1)
+        self.assertTrue(all(options["response_timeout"] <= 2.0 for _, options in calls[1:]))
+
+    def test_chrome_pending_navigation_respects_short_site_budget(self):
+        result, calls, _ = self._observe_pending_navigation(budget_ms=500, navigation_elapsed=0.5)
+        self.assertEqual(result["outcome"], "terminal_error")
+        self.assertEqual(len(calls), 1)
+        self.assertLessEqual(calls[0][1]["response_timeout"], 0.5)
+
+    def test_chrome_pending_navigation_cannot_accept_late_positive_evidence(self):
+        result, calls, _ = self._observe_pending_navigation(evaluation_elapsed=10.0)
+        self.assertEqual(result["outcome"], "terminal_error")
+        self.assertEqual(sum(method == "Page.navigate" for method, _ in calls), 1)
+
+    def test_chrome_explicit_navigation_rejection_does_not_enter_observation(self):
+        result, calls, observation = self._observe_pending_navigation(
+            navigation_elapsed=1.0, navigation_result={"errorText": "net::ERR_CONNECTION_CLOSED"})
+        self.assertEqual((result["outcome"], result["reason"]), ("terminal_error", "navigation_rejected"))
+        self.assertEqual([method for method, _ in calls], ["Page.navigate"])
+        self.assertEqual(observation, {"net_error": "net::ERR_CONNECTION_CLOSED"})
+
     def test_chrome_navigation_deadline_starts_after_browser_setup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = smoke.Path(temporary)
@@ -2755,8 +2822,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         for response, expected in (
             ({"errorText": "net::ERR_CONNECTION_CLOSED https://secret/?cookie=private"},
              {"net_error": "net::ERR_CONNECTION_CLOSED"}),
-            (TimeoutError("private-token https://secret/"),
-             {"exception_class": "TimeoutError"}),
+            (smoke.chromium.QualificationError("private-token https://secret/"),
+             {"exception_class": "QualificationError"}),
             ({"errorText": "private-token https://secret/"},
              {"exception_class": "LiveSiteError"}),
             ({"errorText": " " * 240 + "net::ERR_" + "A" * 100},

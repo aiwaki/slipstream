@@ -1,40 +1,78 @@
 # Current Project State
 
-## Current continuation — 2026-11-01 UTC, preview .34 failure observations
+## Current continuation — 2026-11-02 UTC, Chrome navigation observation repair
 
-Primary checkout:
-`/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Primary checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Locator: `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`.
-Branch `codex/preview34-failure-observations`, base candidate **C**:
-`91d49cc04c06299aa853b80647f96ac2ba73b2c7` (main still C at last API read).
-Root owns Git, PRs and dispatches. No watcher is active. `output/` is private.
-User-Mac app/services/browser/network settings were not changed.
+Branch `codex/preview34-chrome-navigation-deadline`, based on main/source D
+`a2761595c719542d541f2df7da63aedab5ccae3d`. Root owns Git/PR/dispatch.
+Only observer, focused tests and this checkpoint are in the new patch.
+User-Mac app/services/browser/network/account state was not changed.
 
-Evidence root **B**: `output/continuation-20261101/preview34-release/`.
-Previous release **OLD**: `output/continuation-20261101/remaining-pr376/preview33-release/`.
-Detailed preceding checkpoint: B/preparation/checkpoint-before-candidate.md.
+**B** = `output/continuation-20261101/preview34-release/`.
+**DROOT** = B/post-observation-main-a2761595/.
+Prior compact checkpoint retained under DROOT/readiness-r/chrome-navigation-repair/.
+Detailed older checkpoint: B/preparation/checkpoint-before-candidate.md.
 
 ### Next verified action
 
-The scoped diagnostic patch is implemented, tested and independently reviewed.
-Open its PR and verify its exact head CI/audit before merging. This patch changes
-only the two observers, their tests, the diagnostic-artifact workflow wiring and
-this checkpoint. No routing, authority, site, deadline, retry or success condition
-is changed. It does not establish or fix the underlying P/R failure causes.
+Create/reconcile PR for this branch, inspect exact head/base/review/CI and merge
+only after required gates pass. Never redispatch D's completed G/P/R.
+This observer repair changes an R file outside the P-only source exception;
+existing rules require a fresh exact-main candidate, CI/audit -> G -> P/R before
+publishing .34. Do not weaken that source binding or carry D PASS to new source.
+No .34 release exists. After qualified publication, actual published .33 -> .34
+Cancel/commit and pre-ACK rollback remain, plus user-workstation sustained media,
+Discord voice/stream and sleep/wake (not qualified by hosted gates).
 
-The combined patch requires a new exact-main candidate **D** after merge:
-R requires candidate source == GITHUB_SHA. The existing P-only audited-descendant
-exception cannot cover the three R files (outside verify_packaged_observer_source
-ALLOWED). Do not invent an exception, replay unchanged failed workflows, or carry
-C's G receipt over to D. Build/qualify D under existing CI/audit -> G -> P/R rules.
-No new protected dispatch has occurred. Before R/owned-Geph diagnostics, refresh
-complete admission lists; 2026-11-01 consumed position2 of3 (R below), all outcomes
-count. Local date is November2 but admission uses UTC. R reruns remain forbidden.
+### Cause and reviewed repair
 
-If exact D passes: publish .34, verify remote assets/finalizer, then qualify the
-actual published .33 -> .34 Cancel/commit and pre-ACK rollback. Do not claim
-workstation sustained media, Discord voice/stream, Telegram or sleep/wake passed.
-No new estimate is justified while original failure causes remain unknown.
+D R41349606587/1 failed before soak. Safari xpersonatoy usable8737ms;
+Chrome terminal navigation_rejected10039ms, sidecar exception_class TimeoutError.
+Page.navigate response timeout10s escaped the observation loop despite the
+existing20s semantic host window. Timeout does not prove rejected navigation.
+Both controls: HTTP200/curl56/markertrue/categoryreceive. Full payload and origin
+health are unproven; no blanket transport/network explanation is claimed.
+Authenticated four-member diagnostics artifact13101096744/1534B SHA
+36e9ecb6cdbec50fb1e1a5068f5277e4136d0e3604353d34cab875940e92fde6.
+DROOT/readiness-r/failure-diagnostics/failure-diagnosis.json SHA
+a488f6d5121c8d559e9f3168f41e675eed6cf90551b133765f60b77912e1522e.
+
+Repair catches only Page.navigate TimeoutError as pending, then observes same
+owned page without navigation resend/reload, within the original deadline.
+Navigation response budget min(10s, site budget); explicit errors stay terminal.
+Classifiers, positive signals, HTTPS/ownership/activation confirmation and late
+observation rejection unchanged (all production AST except _run_chrome identical).
+This preserves semantic acceptance deadline, not a hard wall-clock cap on every
+socket read: shared CDP helper has per-read timeout; no helper redesign here.
+Five new guarded cases: exact-D RED3/5 -> repaired GREEN5/5; five affected existing
+controls GREEN5/5. No native/network calls; no broad suite repeated locally.
+Observer SHA45f884f4a470cfdb9ec875a3c32b3a6be7f552cefbed2c7ee8a9d0de492884f0;
+tests SHA56d377afab2c11e4dacc11e91400e5f86a161e47f3babbbc85c9faf0b998ed13.
+Independent review DROOT/readiness-r/independent-chrome-pending-review.json SHA
+c1fb0792c7fcae58989d05ab6be359d6c19371db8ed895ae80c8058fe7fe7727.
+All source/guarded runners/logs/diff/baseline evidence retained under readiness-r.
+
+### Immutable D evidence
+
+Exact-main CI41347397805/1 and audit41347397796/1 passed all12 common consumers.
+DROOT/receipt.json SHA002c561df15c1b26245c453171a48ebb1e32833c1b491ffc1d7b8e27e40b319d.
+Candidate manifest73b4c0d25958507cde3ac9d2bb9008b335e5bc4e4b431dfadfa7aca9ddb26d92;
+artifact13099578792/452665654B/transport
+9b9d62983aa1da5e520363b1cbc330896a5733f9c36c66c9b4c49a163e8db462.
+G41349034621/1 accepted12 checks; verification SHA
+f12b2673f9d7d0e2654fd96a30a91fb700bc4a4c1b4218efe0ead8b03d6c9559;
+root acceptance efbbf118d4ec1f4f88fc29d5d1a166f3fac2a488f16d21a71c3fe1584dc4fac6.
+P41349603079/1 accepted13 checks: real ACK committed NEW, pre-ACK STOP/KILL
+restored OLD; both same-PID heartbeat, watchdog terminal and empty cleanup.
+P verification SHA f9de617d191be683574c5c7ca8422efba4d0133665e5be7517e7eef65e12e332;
+root acceptance9dd27952ebc099556c4194336016c46fdd2fbc98decd9fd80514cc0466095f50.
+Pin-only P checker independently reviewed, executed once, no predicate weakening.
+D R remains FAILURE/inconclusive; no soak, retry, waiver, or publication.
+Budget124976746208 proved Nov1 UTC position3/3. Fresh complete admission lists
+required before future changed-source R/owned-Geph dispatch; new day is not a
+reason for an unchanged rerun. Old watchers16513/92809 terminal; no active watcher
+remains. Bounded d_p_verify/d_r_diagnose agents finished their reviews/diagnosis.
 
 ### Reviewed diagnostic patch
 
@@ -85,6 +123,7 @@ Combined watcher78446 exited1. No readiness/soak PASS or .34 publication exists.
 
 ### Accepted baseline C (not proof for future D)
 
+C = 91d49cc04c06299aa853b80647f96ac2ba73b2c7.
 C came from PR455, checked75bc0988b23a73f775b87bfbe202d10b175a359d;
 merge tree1dcf44d7fc8a00318e9d429440f37470785b26b5 matches reviewed head.
 Main CI41339429427/1 and audit41339429363/1 passed. All12 common CI jobs passed;
