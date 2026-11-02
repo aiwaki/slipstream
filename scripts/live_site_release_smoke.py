@@ -564,13 +564,22 @@ def _run_chrome(
         debugger = pages[0]["webSocketDebuggerUrl"]
         failure_reason = "navigation_rejected"
         observation_started = time.monotonic()
-        navigation = chromium._devtools_command(
-            debugger,
-            port,
-            "Page.navigate",
-            {"url": f"https://{host}/"},
-            response_timeout=10,
-        )
+        deadline = observation_started + SITES[host]["deadline_ms"] / 1000
+        try:
+            navigation = chromium._devtools_command(
+                debugger,
+                port,
+                "Page.navigate",
+                {"url": f"https://{host}/"},
+                response_timeout=min(10.0, deadline - observation_started),
+            )
+        except TimeoutError:
+            # A missing command response does not prove navigation failed.
+            # Observe the same owned page within its original site deadline;
+            # do not resend navigation or relax any readiness predicate.
+            navigation = {}
+            if failure_observation is not None:
+                failure_observation["exception_class"] = "TimeoutError"
         if navigation.get("errorText") not in (None, ""):
             error_text = navigation.get("errorText")
             if failure_observation is not None and isinstance(error_text, str):
@@ -580,7 +589,6 @@ def _run_chrome(
             raise LiveSiteError("Chrome rejected the HTTPS navigation")
         failure_reason = "browser_observation_failed"
         reason = failure_reason
-        deadline = observation_started + SITES[host]["deadline_ms"] / 1000
         while time.monotonic() < deadline:
             observation_started_at = time.monotonic()
             remaining = deadline - observation_started_at
