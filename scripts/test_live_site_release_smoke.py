@@ -297,47 +297,17 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertFalse(any(argument.startswith("--headless") for argument in command))
         self.assertNotIn("--no-sandbox", command)
 
-    def test_chrome_navigation_timeout_is_not_an_observation_retry(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = smoke.Path(temporary)
-            with ExitStack() as stack:
-                lifecycle = self._enter_chrome_lifecycle(stack, root)
-                stack.enter_context(
-                    mock.patch.object(
-                        smoke.chromium, "_wait_for_devtools_port", return_value=9222
-                    )
-                )
-                stack.enter_context(
-                    mock.patch.object(
-                        smoke.chromium,
-                        "_devtools_json",
-                        return_value=[
-                            {
-                                "type": "page",
-                                "url": "about:blank",
-                                "webSocketDebuggerUrl": (
-                                    "ws://127.0.0.1/devtools/page/1"
-                                ),
-                            }
-                        ],
-                    )
-                )
-                commands = stack.enter_context(
-                    mock.patch.object(
-                        smoke.chromium,
-                        "_devtools_command",
-                        side_effect=TimeoutError("timed out"),
-                    )
-                )
-                result = smoke._run_chrome(
-                    "app.aikido.dev", lifecycle.executable, 501, 20
-                )
-
+    def test_chrome_navigation_timeout_at_deadline_does_not_retry(self) -> None:
+        result, calls, observation = self._observe_pending_navigation(
+            navigation_elapsed=20.0,
+        )
         self.assertEqual(
             (result["outcome"], result["reason"]),
-            ("terminal_error", "navigation_rejected"),
+            ("terminal_error", "browser_observation_failed"),
         )
-        commands.assert_called_once()
+        self.assertEqual(result["elapsed_ms"], 20_000)
+        self.assertEqual([method for method, _ in calls], ["Page.navigate"])
+        self.assertEqual(observation, {"exception_class": "TimeoutError"})
 
     def test_chrome_setup_failures_keep_exact_bounded_stages(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -16,8 +16,24 @@ Detailed older checkpoint: B/preparation/checkpoint-before-candidate.md.
 
 ### Next verified action
 
-Create/reconcile PR for this branch, inspect exact head/base/review/CI and merge
-only after required gates pass. Never redispatch D's completed G/P/R.
+PR458 https://github.com/aiwaki/slipstream/pull/458 is OPEN, exact reviewed head
+39778b35ee772927adae3cd6e1d6b61b75a289f8, base D confirmed by fresh root API.
+Evidence B/chrome-navigation-pr458/head-39778b35e/; d_p_verify is sole PR CI/audit
+watcher session9000 (handle there), confirmed LIVE: exact pull_request/head
+CI41489807865/1 and audit41489807654/1. No binary downloads or retries.
+Do not duplicate the watcher; poll its same session or inspect exact run API.
+Inspect final required
+contexts, applicable consumers, fresh head/base and review threads before merge.
+PR review PRRT_kwDOTLueX86yx7tX found one missed existing timeout test.
+Follow-up fixes ONLY that test with fake-clock deadline exhaustion/no navigation
+retry. Complete live-site module now83/83 PASS in0.102s/RSS42.3MB, forbidden calls0.
+Evidence DROOT/readiness-r/failure-diagnostics/pr458-module-verification.json SHA
+d1097ffd1d442db1582999c1b33deeb60c2aacb6474b2ca3f025dbf5f63fb27d.
+Tests now SHAeafcaee361080617b3118b83cd9000b4f0e10d8bbb295bf8daa056cbe104b3ea;
+production remains45f884f4a470cfdb9ec875a3c32b3a6be7f552cefbed2c7ee8a9d0de492884f0.
+Old watcher9000 is only for39778b35e; root is pushing follow-up test/doc commit.
+Reconcile NEW PR head and CI before merge; old head result cannot qualify it.
+Never redispatch D's completed G/P/R.
 This observer repair changes an R file outside the P-only source exception;
 existing rules require a fresh exact-main candidate, CI/audit -> G -> P/R before
 publishing .34. Do not weaken that source binding or carry D PASS to new source.
