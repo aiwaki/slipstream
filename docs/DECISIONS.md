@@ -411,6 +411,14 @@ separate requirements. Preflight still requires no preexisting watchdog.
 Retain decisive completion diagnostics; an observation timeout alone does not
 establish a product cleanup failure.
 
+A watchdog identity refusal retains bounded diagnostics from the same process
+and launchd samples that caused it. Command classes and nullable launchd identity
+matches must not retain raw arguments, paths or transaction values, trigger extra
+native queries, or change the original short-circuit identity/hash check. Missing
+or ambiguous diagnostic fields mean unknown, never ownership. Diagnostic parsing
+or storage failure must preserve the original refusal. A command mismatch alone
+does not establish a transient launchd process or justify accepting it.
+
 ### 2026-10-19: updater mailbox ancestry
 
 Both updater protocol sides use `/var/db/dev.slipstream-update/requests`. The

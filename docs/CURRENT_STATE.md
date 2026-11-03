@@ -1,12 +1,12 @@
 # Current Project State
 
-## Current continuation — 2026-11-02T20:00 UTC, exact-main E candidate
+## Current continuation — 2026-11-03T09:15 UTC, F qualification and watchdog evidence
 
 Primary physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Historical locator `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`
 is now DIFFERENT checkout at7945f963; preserve its user edits. Use primary above.
-Branch `codex/safari-navigation-evidence`, based on HEAD/main E
-80004f469eaedfc332a6ac5e490fff229ae0d0d2. Root owns Git/PR/dispatch.
+Branch `codex/watchdog-command-diagnostics`, based on main F
+f612f97a59e83688e1c7c798ecbeb77a4bbf6cc8. Root owns Git/PR/dispatch.
 PR458 MERGED; E tree is equal to reviewed49c39dc31 (fresh git fetch/diff/tree proof).
 Goal ACTIVE. .34 unpublished. No user-Mac app/services/network/account changes;
 no local native/Cargo/scanner builds, app binary downloads or live probes allowed.
@@ -17,7 +17,97 @@ no local native/Cargo/scanner builds, app binary downloads or live probes allowe
 **EROOT** = B/post-chrome-main-80004f469/.
 Previous complete checkpoint preserved EROOT/checkpoint-before-main.md.
 
+### Current main F — Safari diagnostics merged
+
+PR459 MERGED as f612f97a59e83688e1c7c798ecbeb77a4bbf6cc8.
+Candidate base F matches main; the current branch adds observer diagnostics only.
+Reviewed62f6f05dd and mainF trees equal. All8 applicable PR consumers and3
+required contexts passed, no unresolved review threads. PR observer11145 terminal.
+Main CI41601618690/1 and audit41601618546/1 SUCCESS; all12 applicable
+consumers passed. Observer6074 terminal. Root independently matched producer
+125805278379 logs/API, manifest a22f671c3bed6d30a80d97936328ef8442cd4cce877c96feef63ef06e10388ff,
+artifact13215890729/452662762B/digest9a30270a449bd1b6bf620d1bdf571c5299cee28060d81f136701b5b370545bf5.
+FROOT = B/post-safari-evidence-main-f612f97a5. Main receipt SHA
+2ca8e15edaa2138db82cf55827cd052404359a20cba3c406c906ecb4ed441135.
+Root producer proof FROOT/root-producer-preflight.json; canonical candidate
+bytes authentication happens in hosted R before installation, no local app download.
+
+R41604292643/1 dispatched ONCE08:34:30Z on mainF, candidateCI41601618690.
+FROOT/readiness-r/root-admission.json verified current main/CI/audit/artifact and
+complete Nov3 budget lists: previous1run41593333393, prospective rank2/3.
+Actual budget125810198194 confirms rank2/3; log SHA
+b02da19cb14e17962d1206fcda9cf9fc0a754fcb768b0a2020cde0632c078ef8.
+d_p_verify observer88503 terminal. No redispatch.
+Live-site guard PASSED08:40:16Z; measured soak PASSED09:10:27Z.
+R full acceptance is recorded below with authenticated reports/attestations.
+Known failing site gate is now passed. While independent R soak runs, root
+admitted and dispatched G41605285175/1 ONCE08:42:32Z for exact .33->F pair.
+FROOT/native-g root-preflight/inputs/dispatch saved. d_r_diagnose owns one
+read-only G observer and unchanged verifier; no app archive local download.
+G41605285175/1 accepted12checks, raw/source hashes and live terminal jobs
+independently matched. Verification SHA d53b15350bffb459cfb745930fcf5bcfebcc358397ca234315f11a5aaf6f7dd3;
+root-acceptance SHA fb84af70f6e3d64c54062f51cba808bbc75824710043e2acb0dc24c8bf42e43f.
+G observer18169 terminal. P41606509130/1 dispatched ONCE08:52:16Z;
+d_r_diagnose owns P observer/verification, FROOT/packaged-p evidence.
+P checker a10e0d368ad63f075951b1a2541a4277c05a05e9d3f50db21b71097142f68c08
+is identity-only adaptation of E9595c880, exact reverse matches; no predicates changed.
+R41604292643/1 is hosted SUCCESS09:11:42Z: live sites passed,
+measured soak08:40:16–09:10:27, attestation and final require-passed steps passed.
+Observer88503 terminal. R accepted79checks: two small proof ZIPs, exact
+certificate/statement source/ref/run1 and6subjects, canonical live/soak/transport,
+budgetrank2/3 and G NEW app_tree cross-binding all passed. Measured1800.15s,
+3600samples,maxgap0.749s,11zero counters,stablePID/heartbeatadvance/cleanup[].
+FROOT/readiness-r/verification.json SHA
+4911602e4b1d41700dbcbee569a291135b7167b0ff84f0bce1439bd8308dcf06;
+root independently verified retained hashes and fresh terminal jobs:
+root-acceptance.json SHA8019338db9f453fca2f0a7e2feec2d030138652d169e671983e4f89b80459cb8.
+This is fixed-site/mechanics/background-invisibility evidence, not user-Mac
+continuous media, Discord or sleep/wake qualification.
+
+P41606509130/1 FAILED commit at09:01:10Z; preACK rollback scenario passed.
+Same-sample watchdog diagnostic: PID present, UID/state valid, command_match=false;
+helper hash not evaluated. The failing command form was not retained, so launchd
+pre-exec/path/argv/foreign-process causes remain unproved. No pass checker or retry.
+Both small report ZIPs authenticated; FROOT/packaged-p/failure-diagnosis.json
+SHA9742109fa7add6edcb426dad2866a0fac920735fb396553e8fcbdfa6407259ba.
+P observer24461 terminal. Same-sample command classification and nullable
+launchd identity facts are implemented; errors preserve the original booleans.
+39 scoped tests PASS after old-code RED;0.126s/RSS53MB/forbidden_calls0.
+Root reviewed46 source invariants; all existing functions and original guard
+AST-identical except isolated best-effort enrichment in the failure handler.
+FROOT/packaged-p/command-diagnostics/review-corrections/verification.json
+SHAfd29a248d0949cf20f52c0659c8a686022021be063add5068ed9f5e672ca374f;
+root-review.json SHAe14a2460faa0063b55627cbbf1c089ff869bea89eba9b6091f6c92e8f747d030.
+This is diagnostic repair, not a claimed product fix. Next: PR review and required
+CI for this observer-only diff before a single diagnostic P attempt; no P retry
+or protected R dispatch has been made. Root owns checkpoint/Git/PR.
+
+All mandatory gates remain required; E G/P does not qualify F. Publication remains
+blocked by F P failure, not by completed R polling. Observer-only main descendants
+may diagnose unchanged candidates under docs/DECISIONS.md, but publisher .34 still
+requires its exact main source; do not broaden publisher policy or silently reuse F
+as a newer payload. Preserve accepted F evidence and do not rerun green suites.
+User-Mac limits and .34 unpublished status remain unchanged.
+
 ### Safari evidence repair — 2026-11-03T07:15 UTC
+
+PR459 OPEN, exact head62f6f05ddba2ed25539c732fa7472ba120640bc9.
+https://github.com/aiwaki/slipstream/pull/459
+CI41599663839/1 running; audit41599663739/1 SUCCESS.
+At08:03Z packaged-app-build and Chromium passed; packaged browser/heavy lifecycle
+executing, product lifecycle sentinel executing. Root confirmed empty review
+threads and exact head/base. d_p_verify owns observer11145; root cannot poll
+agent-owned tool handle directly. Do not infer termination from root Unknown ID.
+Evidence B/safari-navigation-pr459/head-62f6f05dd. Do not dispatch duplicates.
+Next: verify required CI/review at exact head, then merge if all gates pass.
+
+Git commit session50232 terminal SUCCESS after auxiliary Entire post-commit
+failed to finish in >17min. Root verified ownedPID62710 and sent SIGTERM, then
+SIGKILL after >60s without exit. Only own hook process stopped; no hook/config
+changes or checkpoint/session deletion. Commit and ordinary git push succeeded;
+PIDs62676/62710 now absent. New Entire checkpoint completion is NOT asserted.
+Interruption/sample evidence EROOT/readiness-r/failure-diagnostics/entire-*.
+Do not restart commit or old hook; current continuation is PR459 CI.
 
 Current branch `codex/safari-navigation-evidence`, based on exact main E.
 E main CI41514778142/2 + audit41514778253/1 SUCCESS (12common consumers).
@@ -51,8 +141,8 @@ root review/evidence in EROOT/readiness-r/failure-diagnostics. Agent frozen.
 Smoke SHA c5af0185e55169942eee65597d38cdd97bb0f5ff30fa332aced4cff68efb3071;
 tests SHA4162e4725e37727768ac31eb63f69dfe2e99be082b15cf86ea14e0bfc3d45701.
 Root verified unchanged classifier/readiness/settle/Chrome AST and reviewed
-privacy/exception/cleanup boundaries. Next: commit/open PR for observer evidence,
-verify required CI/review before merge and new exact-source qualification.
+privacy/exception/cleanup boundaries. PR459 is already open; await required
+CI before merge and new exact-source qualification. Do not repeat commit/push.
 Do not re-dispatch R unchanged or call it origin-down. No new P/R/publication.
 Prepared publication baseline EROOT/publication/existing-publication-baseline.json
 SHA cb3edcfbd13de30a14eb3ae65ba0ab7fac227690640fb4d9b317e314fca77946

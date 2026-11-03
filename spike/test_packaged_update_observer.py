@@ -317,11 +317,120 @@ def test_watchdog_identity_failure_retains_same_observations(journal, monkeypatc
     assert calls == ["launchctl", "process"] + (["hash"] if expected[4] else [])
     assert len(backend.events) == 1
     diagnostic = backend.events[0]
-    assert diagnostic == {"kind": "watchdog_identity_diagnostic", "value": dict(zip(
+    original = dict(zip(
         ("process_present", "uid_match", "state_allowed", "command_match", "helper_hash_evaluated",
-         "helper_hash_match", "helper_hash_error"), expected))}
+         "helper_hash_match", "helper_hash_error"), expected))
+    assert diagnostic["kind"] == "watchdog_identity_diagnostic"
+    assert {key: diagnostic["value"][key] for key in original} == original
+    assert set(diagnostic["value"]) == set(original) | {
+        "command_kind", "launchd_domain_label_match", "launchd_program_match", "launchd_arguments_match"}
+    assert diagnostic["value"]["command_kind"] == (
+        "exact_expected" if expected[3] is True else "other" if case == "command" else "unobserved")
+    assert diagnostic["value"]["launchd_domain_label_match"] is None
+    assert diagnostic["value"]["launchd_program_match"] is None
+    assert diagnostic["value"]["launchd_arguments_match"] is None
     serialized = json.dumps(diagnostic)
     assert "PRIVATE" not in serialized and journal["nonce"] not in serialized and journal["helper"] not in serialized
+
+
+@pytest.mark.parametrize("command,kind", [
+    ("exact", "exact_expected"),
+    ("helper_only", "expected_helper_wrong_arguments"),
+    ("wrong_args", "expected_helper_wrong_arguments"),
+    ("near_helper", "other"),
+    ("/usr/libexec/xpcproxy dev.slipstream.update-watchdog", "system_xpcproxy_prefix"),
+    ("/usr/libexec/xpcproxy PRIVATE_ARG", "system_xpcproxy_prefix"),
+    ("/usr/libexec/xpcproxy-foreign PRIVATE_ARG", "other"),
+    ("PRIVATE_COMMAND", "other"),
+])
+def test_watchdog_failed_same_sample_command_classification(journal, monkeypatch, command, kind):
+    helper = journal["helper"]
+    expected = f"{helper} --journal {Path(helper).parent.parent / observer.JOURNAL}"
+    command = {"exact": expected, "helper_only": helper,
+               "wrong_args": helper + " --journal PRIVATE_ARG",
+               "near_helper": helper + "-foreign PRIVATE_ARG"}.get(command, command)
+    process = {"uid": UID, "state": "S", "command": command}
+    backend, calls = watchdog_identity_fixture(journal, monkeypatch, process, "8" * 64)
+    with pytest.raises(observer.Refused, match="packaged watchdog process mismatch"):
+        backend.observe_watchdog()
+    value = backend.events[0]["value"]
+    assert value["command_kind"] == kind
+    assert value["command_match"] is (kind == "exact_expected")
+    assert value["helper_hash_evaluated"] is (kind == "exact_expected")
+    assert calls == ["launchctl", "process"] + (["hash"] if kind == "exact_expected" else [])
+    assert backend.watchdog is None
+    assert "PRIVATE" not in json.dumps(value) and helper not in json.dumps(value)
+
+
+def _watchdog_launchctl_sample(journal):
+    return (f"gui/{UID}/{observer.WATCHDOG} = {{\n"
+            f"  pid = 333\n  program = {journal['helper']}\n  arguments = {{\n"
+            f"    {journal['helper']}\n    --journal\n"
+            f"    {Path(journal['helper']).parent.parent / observer.JOURNAL}\n  }}\n}}\n").encode()
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("exact", (True, True, True)),
+    ("wrong_domain", (False, True, True)),
+    ("wrong_program", (True, False, True)),
+    ("wrong_arguments", (True, True, False)),
+    ("missing_header", (None, True, True)),
+    ("malformed_header", (None, True, True)),
+    ("duplicate_header", (None, True, True)),
+    ("duplicate_arguments", (True, True, None)),
+    ("missing_program", (True, None, True)),
+    ("duplicate_program", (True, None, True)),
+    ("missing_arguments", (True, True, None)),
+    ("invalid_utf8", (None, None, None)),
+    ("oversize", (None, None, None)),
+])
+def test_watchdog_diagnostics_use_same_launchctl_sample(journal, monkeypatch, case, expected):
+    raw = _watchdog_launchctl_sample(journal)
+    program = f"  program = {journal['helper']}\n".encode()
+    args = (f"  arguments = {{\n    {journal['helper']}\n    --journal\n"
+            f"    {Path(journal['helper']).parent.parent / observer.JOURNAL}\n  }}\n").encode()
+    if case == "wrong_domain": raw = raw.replace(f"gui/{UID}/".encode(), b"system/")
+    elif case == "missing_header": raw = raw.split(b"\n", 1)[1]
+    elif case == "malformed_header": raw = raw.replace(f"gui/{UID}/".encode(), b"PRIVATE_HEADER/")
+    elif case == "duplicate_header": raw = raw + raw.split(b"\n", 1)[0] + b"\n"
+    elif case == "duplicate_arguments": raw = raw.replace(args, args + args)
+    elif case == "wrong_program": raw = raw.replace(program, b"  program = PRIVATE_PATH\n")
+    elif case == "wrong_arguments": raw = raw.replace(b"    --journal\n", b"    PRIVATE_ARG\n")
+    elif case == "missing_program": raw = raw.replace(program, b"")
+    elif case == "duplicate_program": raw = raw.replace(program, program + program)
+    elif case == "missing_arguments": raw = raw.replace(args, b"")
+    elif case == "invalid_utf8": raw += b"\xff"
+    elif case == "oversize": raw += b"x" * 65536
+    backend, calls = watchdog_identity_fixture(journal, monkeypatch,
+        {"uid": UID, "state": "S", "command": "PRIVATE_COMMAND"}, None)
+    def run(argv, **kwargs):
+        assert argv == ["/bin/launchctl", "print", f"gui/{UID}/{observer.WATCHDOG}"]
+        assert kwargs == {"check": False}
+        calls.append("launchctl")
+        return SimpleNamespace(returncode=0, stdout=raw)
+    backend.run = run
+    with pytest.raises(observer.Refused, match="packaged watchdog process mismatch"):
+        backend.observe_watchdog()
+    value = backend.events[0]["value"]
+    assert tuple(value[key] for key in ("launchd_domain_label_match", "launchd_program_match", "launchd_arguments_match")) == expected
+    assert calls == ["launchctl", "process"]
+    assert "PRIVATE" not in json.dumps(value) and journal["nonce"] not in json.dumps(value)
+    assert journal["helper"] not in json.dumps(value)
+
+
+def test_watchdog_enrichment_failure_cannot_replace_original_refusal(journal, monkeypatch):
+    backend, calls = watchdog_identity_fixture(journal, monkeypatch,
+        {"uid": UID, "state": "S", "command": "PRIVATE_COMMAND"}, None)
+    def fail(*_args): raise ValueError("PRIVATE diagnostics failure")
+    monkeypatch.setattr(observer, "watchdog_identity_context", fail)
+    with pytest.raises(observer.Refused, match="packaged watchdog process mismatch"):
+        backend.observe_watchdog()
+    assert backend.watchdog is None and calls == ["launchctl", "process"]
+    assert backend.events == [{"kind": "watchdog_identity_diagnostic", "value": {
+        "process_present": True, "uid_match": True, "state_allowed": True,
+        "command_match": False, "helper_hash_evaluated": False,
+        "helper_hash_match": None, "helper_hash_error": None,
+    }}]
 
 
 @pytest.mark.parametrize("hash_error", [False, True])
