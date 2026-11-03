@@ -15,6 +15,33 @@ See the October 23 entry in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) for the
 causal DNS regression and the limits of the current Safari observation. Preserve
 external Geph and user-managed network settings while collecting evidence.
 
+### Safari live-site gate stays outside the expected HTTPS document
+
+`readiness_context_invalid` means the observed document failed the HTTPS,
+secure-context or exact-host checks. It does not identify a DNS, TLS or routing
+failure. A secure context with a different host and a non-HTTPS scheme does not
+by itself prove that Safari stayed on `about:blank`.
+
+In readiness run `41593333393/1` for source `80004f469`, Safari exhausted the
+20-second window for `xpersonatoy.com`; Chrome opened it in 6.3 seconds and both
+browsers opened the other three matrix sites. The control requests returned
+HTTP200 followed by curl exit56, so neither control proved a complete response.
+The release gate remained inconclusive and the long soak did not run. Preserve
+that failure; a later working request does not make the earlier gate pass.
+
+Use the retained `live-sites.json`, `live-site-failure-observations.json` and
+Safari startup report together. Successful session creation and cleanup do not
+establish successful navigation. The Safari sidecar records the navigation
+request stage, bounded observation counters and first/final document snapshots.
+A fixed document category distinguishes a blank page, another origin or scheme,
+and the expected HTTPS document. Readiness and response-timing flags describe
+only that observed document; they do not prove which route or server failed.
+
+A later timeout or invalid response clears the final snapshot rather than leaving
+older context looking current. The original observation deadline and success
+criteria still apply. No extra navigation or reload is performed, and raw URLs,
+titles, page contents and credentials are excluded from the sidecar.
+
 ### Incomplete DoH replies and cancelled semantic IPC
 
 HTTP200 alone does not prove a complete DoH reply. The app-owned resolver rejects

@@ -2820,6 +2820,116 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 self.assertEqual(commands.call_args.args[2], "Page.navigate")
                 self.assertNotIn("private", smoke.json.dumps(observation))
 
+    def test_safari_diagnostics_keep_first_context_and_refresh_final(self) -> None:
+        observation = {}
+        blank = self._browser_evidence(signals=self._signals(
+            https=False, host_matches=False, document_kind="about_blank",
+            ready_state="complete", response_started=False, response_complete=False,
+        ))
+        committed = self._browser_evidence(signals=self._signals(
+            document_kind="expected_https", response_started=True, response_complete=False,
+            title="private-token https://secret/?cookie=private",
+        ))
+        for elapsed, evidence in ((100, blank), (500, committed)):
+            smoke._record_safari_observation(observation, "pending", elapsed)
+            smoke._record_safari_observation(observation, "observed", elapsed + 10, evidence)
+        first = observation["observations"]["first"]
+        final = observation["observations"]["final"]
+        self.assertEqual(first["document_kind"], "about_blank")
+        self.assertEqual(first["elapsed_ms"], 110)
+        self.assertEqual(final["document_kind"], "expected_https")
+        self.assertEqual(final["elapsed_ms"], 510)
+        self.assertTrue(final["response_started"])
+        self.assertFalse(final["response_complete"])
+        self.assertNotIn("private", smoke.json.dumps(observation))
+        for stage in ("timeout", "invalid", "request_failed"):
+            smoke._record_safari_observation(observation, "pending", 600)
+            smoke._record_safari_observation(observation, stage, 610)
+            self.assertEqual(observation["observations"]["first"], first)
+            self.assertEqual(observation["observations"]["final"]["stage"], stage)
+            self.assertIsNone(observation["observations"]["final"]["document_kind"])
+            self.assertEqual(set(observation["context"].values()), {None})
+        self.assertEqual(observation["observations"]["attempted"], 5)
+        self.assertEqual(observation["observations"]["completed"], 2)
+        self.assertEqual(observation["observations"]["timeouts"], 1)
+
+    def test_safari_diagnostic_values_are_fixed_bounded_and_not_raw_content(self) -> None:
+        for kind in smoke.SAFARI_DOCUMENT_KINDS:
+            observation = {}
+            smoke._record_safari_observation(observation, "observed", 10,
+                self._browser_evidence(signals=self._signals(document_kind=kind)))
+            self.assertEqual(observation["observations"]["final"]["document_kind"], kind)
+        for elapsed, expected in ((True, None), (1.5, None), (-1, 0), (1000000, 60000)):
+            observation = {}
+            smoke._record_safari_observation(observation, "observed", elapsed,
+                self._browser_evidence(signals=self._signals(
+                    document_kind="private-token https://secret/", ready_state="private",
+                    next_hop_protocol="private", response_started=1, response_complete="private")))
+            final = observation["observations"]["final"]
+            self.assertEqual(final["elapsed_ms"], expected)
+            self.assertIsNone(final["document_kind"])
+            self.assertIsNone(final["ready_state"])
+            self.assertIsNone(final["next_hop_protocol"])
+            self.assertIsNone(final["response_started"])
+            self.assertIsNone(final["response_complete"])
+            self.assertNotIn("private", smoke.json.dumps(observation))
+        observation = {"observations": {"attempted": 1000, "completed": 1000,
+                                        "timeouts": 1000, "first": None}}
+        for stage in ("pending", "observed", "timeout"):
+            smoke._record_safari_observation(observation, stage, 1)
+        self.assertTrue(all(observation["observations"][key] == 1000
+                            for key in ("attempted", "completed", "timeouts")))
+        self.assertEqual(smoke._safari_exception_class(type("private", (Exception,), {})("private")), "Exception")
+
+    def test_safari_navigation_stage_is_fixed_and_does_not_add_requests(self) -> None:
+        for error, stage, category in (
+            (None, "response_received", None),
+            (self._safari_observation_timeout(), "response_timeout", "LifecycleError"),
+            (TimeoutError("private"), "response_timeout", "TimeoutError"),
+            (smoke.lifecycle.LifecycleError("private"), "request_failed", "LifecycleError"),
+        ):
+            with self.subTest(stage=stage):
+                observation = {}
+                def webdriver(_base, method, path, _payload=None, **_kwargs):
+                    if path == "/session":
+                        return {"value": {"sessionId": "session-id"}}
+                    if path.endswith("/url") and error is not None:
+                        raise error
+                    if path.endswith("/execute/sync"):
+                        return {"value": smoke.json.dumps(self._browser_evidence(
+                            signals=self._signals(document_kind="expected_https")))}
+                    return {}
+                with (
+                    mock.patch.object(smoke, "_wait_for_safaridriver_ready"),
+                    mock.patch.object(smoke.lifecycle, "_assert_no_safari_process"),
+                    mock.patch.object(smoke.lifecycle, "_wait_for_safari_process", return_value=4321),
+                    mock.patch.object(smoke.lifecycle, "_stop_owned_safari_process"),
+                    mock.patch.object(smoke.lifecycle, "_webdriver_request", side_effect=webdriver) as requests,
+                    mock.patch.object(smoke.time, "monotonic", side_effect=[0, 1, 1, 1.1, 1.2, 2]),
+                    mock.patch.object(smoke.time, "sleep"),
+                ):
+                    result = smoke._run_safari("app.aikido.dev", "http://127.0.0.1:1", 501,
+                                               failure_observation=observation)
+                expected = {"stage": stage}
+                if category is not None:
+                    expected["exception_class"] = category
+                self.assertEqual(observation["navigation"], expected)
+                paths = [call.args[2] for call in requests.call_args_list]
+                self.assertEqual(sum(path.endswith("/url") for path in paths), 1)
+                self.assertEqual(sum(path.endswith("/execute/sync") for path in paths), int(error is None))
+                self.assertEqual(result["outcome"], "usable" if error is None else "terminal_error")
+                if error is not None:
+                    self.assertEqual(result["reason"], "navigation_rejected")
+                self.assertNotIn("private", smoke.json.dumps(observation))
+
+    def test_safari_document_kind_comes_from_same_fixed_atomic_snapshot(self) -> None:
+        expression = smoke._readiness_expression("xpersonatoy.com")
+        for marker in ("location.pathname === 'blank'", "scheme === 'https:'",
+                       "scheme === 'http:'", "document_kind: documentKind",
+                       "response_started:", "response_complete:"):
+            self.assertIn(marker, expression)
+        self.assertNotIn("fetch(", expression)
+
     def test_safari_failure_observation_keeps_only_existing_context_booleans(self) -> None:
         observation = {}
         signals = self._signals(https=False, secure_context=False, host_matches=True,
@@ -2842,9 +2952,13 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             result = smoke._run_safari("xpersonatoy.com", "http://127.0.0.1:1", 501,
                                        failure_observation=observation)
         self.assertEqual((result["outcome"], result["reason"]), ("terminal_error", "readiness_context_invalid"))
-        self.assertEqual(observation, {"context": {
+        self.assertEqual(set(observation), {"context", "navigation", "observations"})
+        self.assertEqual(observation["context"], {
             "https": False, "secure_context": False, "host_matches": True,
-        }})
+        })
+        self.assertEqual(observation["navigation"], {"stage": "response_received"})
+        self.assertEqual(observation["observations"]["completed"], 1)
+        self.assertEqual(observation["observations"]["first"], observation["observations"]["final"])
         self.assertEqual(sum(c.args[2].endswith("/execute/sync") for c in requests.call_args_list), 1)
         self.assertNotIn("private", smoke.json.dumps(observation))
 
@@ -2878,9 +2992,13 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                                                failure_observation=observation)
                 self.assertEqual(result["outcome"], "terminal_error")
                 self.assertEqual(result["reason"], "document_invalid" if malformed == "missing" else "readiness_signals_invalid")
-                self.assertEqual(observation, {"context": {
+                self.assertEqual(set(observation), {"context", "navigation", "observations"})
+                self.assertEqual(observation["context"], {
                     "https": None, "secure_context": None, "host_matches": None,
-                }})
+                })
+                self.assertEqual(observation["observations"]["completed"], 2)
+                self.assertFalse(observation["observations"]["first"]["context"]["https"])
+                self.assertEqual(observation["observations"]["final"]["context"], observation["context"])
                 self.assertEqual(sum(c.args[2].endswith("/execute/sync") for c in requests.call_args_list), 2)
 
     def test_failure_report_write_failure_keeps_authoritative_result(self) -> None:

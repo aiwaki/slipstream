@@ -387,6 +387,8 @@ READINESS_EXPRESSION = r"""
     app_text_length: textLength(app),
     body_text_length: textLength(document.body),
     dom_content_loaded: Boolean(navigation && navigation.domContentLoadedEventEnd > 0),
+    response_started: Boolean(navigation && navigation.responseStart > 0),
+    response_complete: Boolean(navigation && navigation.responseEnd > 0),
     https: location.protocol === 'https:',
     main_text_length: textLength(document.querySelector('main')),
     next_hop_protocol: navigation ? boundedString(navigation.nextHopProtocol, 32) : '',
@@ -412,9 +414,19 @@ def _readiness_expression(host: str) -> str:
         "(() => {\n"
         f"  const expectedHost = {json.dumps(host)};\n"
         f"  const signals = ({READINESS_EXPRESSION});\n"
+        "  const scheme = location.protocol;\n"
+        "  const sameHost = location.hostname.toLowerCase() === expectedHost;\n"
+        "  const documentKind = scheme === 'about:' && location.pathname === 'blank' &&\n"
+        "    !location.search && !location.hash ? 'about_blank' :\n"
+        "    scheme === 'about:' ? 'other_about' :\n"
+        "    scheme === 'https:' ? (sameHost ? 'expected_https' : 'other_https') :\n"
+        "    scheme === 'http:' ? (sameHost ? 'expected_http' : 'other_http') :\n"
+        "    scheme === 'file:' ? 'file' : scheme === 'data:' ? 'data' :\n"
+        "    scheme === 'blob:' ? 'blob' : 'other';\n"
         "  return {\n"
         "    ...signals,\n"
-        "    host_matches: location.hostname.toLowerCase() === expectedHost\n"
+        "    document_kind: documentKind,\n"
+        "    host_matches: sameHost\n"
         "  };\n"
         "})()"
     )
@@ -753,6 +765,58 @@ def _is_safari_observation_timeout(error: lifecycle.LifecycleError) -> bool:
     return isinstance(error.__cause__, TimeoutError)
 
 
+SAFARI_DOCUMENT_KINDS = frozenset({
+    "about_blank", "other_about", "expected_https", "other_https",
+    "expected_http", "other_http", "file", "data", "blob", "other",
+})
+
+
+def _safari_exception_class(error: BaseException) -> str:
+    # Fixed vocabulary only; exception messages and user-defined names stay out.
+    for cls in (TimeoutError, lifecycle.LifecycleError, LiveSiteError, OSError):
+        if isinstance(error, cls):
+            return cls.__name__
+    return "Exception"
+
+
+def _record_safari_observation(
+    observation: dict[str, object] | None, stage: str, elapsed_ms: object,
+    evidence: object = None,
+) -> None:
+    if observation is None:
+        return
+    progress = observation.setdefault("observations", {
+        "attempted": 0, "completed": 0, "timeouts": 0, "first": None,
+    })
+    counter = {"pending": "attempted", "observed": "completed", "timeout": "timeouts"}.get(stage)
+    if counter is not None:
+        value = progress[counter]
+        progress[counter] = min(1000, value + 1) if type(value) is int and value >= 0 else 1
+    signals = evidence.get("signals") if isinstance(evidence, dict) else None
+    signals = signals if isinstance(signals, dict) else {}
+    def choice(key: str, allowed: object) -> str | None:
+        value = signals.get(key)
+        return value if isinstance(value, str) and value in allowed else None
+    context = {
+        key: signals.get(key) if type(signals.get(key)) is bool else None
+        for key in ("https", "secure_context", "host_matches")
+    }
+    snapshot = {
+        "stage": stage,
+        "elapsed_ms": max(0, min(60_000, elapsed_ms)) if type(elapsed_ms) is int else None,
+        "document_kind": choice("document_kind", SAFARI_DOCUMENT_KINDS),
+        "ready_state": choice("ready_state", {"loading", "interactive", "complete"}),
+        "next_hop_protocol": choice("next_hop_protocol", ALLOWED_PROTOCOLS),
+        "context": context,
+        **{key: signals.get(key) if type(signals.get(key)) is bool else None
+           for key in ("dom_content_loaded", "response_started", "response_complete")},
+    }
+    observation["context"] = context
+    if stage == "observed" and progress["first"] is None:
+        progress["first"] = snapshot
+    progress["final"] = snapshot
+
+
 def _run_safari(
     host: str, driver_url: str, uid: int, *,
     startup_diagnostics: list[dict[str, object]] | None = None,
@@ -814,13 +878,29 @@ def _run_safari(
         failure_reason = "navigation_rejected"
         observation_started = time.monotonic()
         absolute_deadline = observation_started + deadline / 1000
-        lifecycle._webdriver_request(
-            driver_url,
-            "POST",
-            f"/session/{encoded}/url",
-            {"url": f"https://{host}/"},
-            timeout=deadline / 1000 + 5,
-        )
+        if failure_observation is not None:
+            failure_observation["navigation"] = {"stage": "request_started"}
+        try:
+            lifecycle._webdriver_request(
+                driver_url,
+                "POST",
+                f"/session/{encoded}/url",
+                {"url": f"https://{host}/"},
+                timeout=deadline / 1000 + 5,
+            )
+        except BaseException as exc:
+            if failure_observation is not None:
+                timed_out = isinstance(exc, TimeoutError) or (
+                    isinstance(exc, lifecycle.LifecycleError)
+                    and _is_safari_observation_timeout(exc)
+                )
+                failure_observation["navigation"] = {
+                    "stage": "response_timeout" if timed_out else "request_failed",
+                    "exception_class": _safari_exception_class(exc),
+                }
+            raise
+        if failure_observation is not None:
+            failure_observation["navigation"] = {"stage": "response_received"}
         failure_reason = "browser_observation_failed"
         reason = failure_reason
         interactive_confirmation: InteractiveConfirmation | None = None
@@ -834,6 +914,10 @@ def _run_safari(
                 remaining = absolute_deadline - observation_started_at
                 if remaining <= 0:
                     break
+                _record_safari_observation(
+                    failure_observation, "pending",
+                    round((observation_started_at - observation_started) * 1000),
+                )
                 serialized_evidence = lifecycle._webdriver_request(
                     driver_url,
                     "POST",
@@ -851,27 +935,35 @@ def _run_safari(
                 observation_completed_at = time.monotonic()
             except lifecycle.LifecycleError as exc:
                 if not _is_safari_observation_timeout(exc):
+                    _record_safari_observation(
+                        failure_observation, "request_failed",
+                        round((observation_started_at - observation_started) * 1000),
+                    )
                     raise
                 interactive_confirmation = None
                 remaining = absolute_deadline - time.monotonic()
+                _record_safari_observation(
+                    failure_observation, "timeout",
+                    round((absolute_deadline - remaining - observation_started) * 1000),
+                )
                 if remaining > 0:
                     time.sleep(min(0.25, remaining))
                 continue
             failure_reason = "readiness_signals_invalid"
-            if failure_observation is not None:
-                # A new but invalid snapshot must not leave older context
-                # booleans looking like the final observation.
-                failure_observation["context"] = dict.fromkeys(
-                    ("https", "secure_context", "host_matches")
+            try:
+                evidence = _decode_safari_evidence(serialized_evidence)
+            except BaseException:
+                _record_safari_observation(
+                    failure_observation, "invalid",
+                    round((observation_completed_at - observation_started) * 1000),
                 )
-            evidence = _decode_safari_evidence(serialized_evidence)
+                raise
             outcome, reason = _classify_browser_evidence(host, evidence)
             signals = evidence.get("signals") if isinstance(evidence, dict) else None
-            if failure_observation is not None and isinstance(signals, dict):
-                failure_observation["context"] = {
-                    key: signals.get(key) if type(signals.get(key)) is bool else None
-                    for key in ("https", "secure_context", "host_matches")
-                }
+            _record_safari_observation(
+                failure_observation, "observed",
+                round((observation_completed_at - observation_started) * 1000), evidence,
+            )
             document_activation_id = (
                 _parse_document_activation_id(
                     evidence.get("document_activation_id")
