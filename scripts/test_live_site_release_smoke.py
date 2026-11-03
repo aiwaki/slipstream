@@ -2881,6 +2881,66 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                             for key in ("attempted", "completed", "timeouts")))
         self.assertEqual(smoke._safari_exception_class(type("private", (Exception,), {})("private")), "Exception")
 
+    def test_safari_diagnostics_retain_document_and_visibility_without_changing_outcome(self) -> None:
+        observation = {}
+        for present, hidden, positive in ((False, None, None), (True, True, True),
+                                          (True, False, False), (True, False, True)):
+            evidence = self._browser_evidence(document_bytes=16384, signals=self._signals(
+                ready_state="loading", dom_content_loaded=False, visible_body=False,
+                body_text_length=0, main_text_length=0, app_text_length=0,
+            ))
+            before = smoke._classify_browser_evidence("xpersonatoy.com", evidence)
+            evidence["signals"]["document_diagnostics"] = {
+                "body_present": present, "body_display_none": hidden,
+                "body_visibility_hidden": False if present else None,
+                "body_opacity_nonpositive": False if present else None,
+                "body_rect_positive": positive,
+                "private_html": "private-token",
+            }
+            smoke._record_safari_observation(observation, "observed", 500, evidence)
+            final = observation["observations"]["final"]
+            self.assertEqual(final["document_bytes"], 16384)
+            self.assertEqual(final["body_text_length"], 0)
+            self.assertEqual(final["main_text_length"], 0)
+            self.assertEqual(final["app_text_length"], 0)
+            self.assertFalse(final["visible_body"])
+            self.assertTrue(final["visible_app"])
+            self.assertFalse(final["preloader_visible"])
+            self.assertEqual(final["document_diagnostics"]["body_present"], present)
+            self.assertEqual(final["document_diagnostics"]["body_display_none"], hidden)
+            self.assertEqual(final["document_diagnostics"]["body_rect_positive"], positive)
+            self.assertEqual(smoke._classify_browser_evidence("xpersonatoy.com", evidence), before)
+            self.assertNotIn("private", smoke.json.dumps(observation))
+        self.assertFalse(observation["observations"]["first"]["document_diagnostics"]["body_present"])
+
+    def test_safari_diagnostics_reject_malformed_counts_and_visibility(self) -> None:
+        for value, expected in ((True, None), (-1, None), (1.5, None),
+                                ("private", None), (None, None), (0, 0),
+                                (10**30, 16 * 1024 * 1024)):
+            evidence = self._browser_evidence(document_bytes=value, signals=self._signals(
+                body_text_length=value, main_text_length=value, app_text_length=value,
+                visible_body="private", visible_app=1, preloader_visible=[],
+            ))
+            evidence["signals"]["document_diagnostics"] = {
+                key: "private" for key in ("body_present", "body_display_none",
+                    "body_visibility_hidden", "body_opacity_nonpositive", "body_rect_positive")
+            }
+            observation = {}
+            smoke._record_safari_observation(observation, "observed", 10, evidence)
+            final = observation["observations"]["final"]
+            for key in ("document_bytes", "body_text_length", "main_text_length", "app_text_length"):
+                self.assertEqual(final[key], expected)
+            for key in ("visible_body", "visible_app", "preloader_visible"):
+                self.assertIsNone(final[key])
+            self.assertEqual(set(final["document_diagnostics"].values()), {None})
+            self.assertNotIn("private", smoke.json.dumps(observation))
+        for diagnostics in (None, "private", [], 12):
+            observation = {}
+            evidence = self._browser_evidence()
+            evidence["signals"]["document_diagnostics"] = diagnostics
+            smoke._record_safari_observation(observation, "observed", 10, evidence)
+            self.assertEqual(set(observation["observations"]["final"]["document_diagnostics"].values()), {None})
+
     def test_safari_navigation_stage_is_fixed_and_does_not_add_requests(self) -> None:
         for error, stage, category in (
             (None, "response_received", None),

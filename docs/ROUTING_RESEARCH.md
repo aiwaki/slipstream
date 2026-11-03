@@ -1,5 +1,51 @@
 # Routing Research Notes
 
+## 2026-11-03: Safari visibility failure with insufficient document evidence
+
+Readiness run `41624356058/1` for candidate `0b4cc942b` failed its live-site
+guard before the soak. On `xpersonatoy.com`, Safari completed 62 observations
+without an observation timeout, but remained unusable at 20.122 seconds.
+The final observation was the expected HTTPS origin over h2, with a secure
+context, `readyState=loading`, no DOMContentLoaded, and a nonvisible body.
+Chrome reached usable content in 6.073 seconds; the other three fixed sites
+passed in both browsers. Both control requests reported HTTP 200 followed by
+curl receive error 56, so neither control established an available route.
+
+This does not identify the cause. The existing `response_complete` field means
+only `navigation.responseEnd > 0`: Resource Timing also records end timing for
+[aborted fetches](https://www.w3.org/TR/resource-timing/#sec-resources-included).
+The [HTML parser](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-incdata)
+can also wait for a parser-blocking script or a stylesheet blocking that script.
+Neither timing nor a loading document alone proves a truncated response, a
+network-routing defect, or a page-script defect. The failing H and passing F
+live-site harness/workflow sources were identical; that does not establish
+identical network conditions or attribute the failure to their unrelated diff.
+
+The report previously discarded document size, text lengths and visibility
+signals already measured in the same browser observation. First/final snapshots
+now retain those counts (nonnegative integers capped at 16 MiB) and visibility
+booleans. Optional body presence, display-none, visibility-hidden, nonpositive
+opacity and positive-rectangle flags distinguish absent, hidden and zero-size
+bodies. Style/geometry flags are null when the body is absent; diagnostic read
+failure produces unknown values, not a failed or successful readiness result.
+Only fixed keys, booleans and bounded counts enter the report. HTML, text, URLs,
+CSS values and exception messages are not retained by this addition.
+
+`document_bytes` is UTF-8 serialized DOM size, not network transfer size;
+text lengths are trimmed JavaScript string lengths, not byte counts. These
+diagnostics cannot by themselves distinguish incomplete HTML from a blocked
+parser. Routing, navigation count, polling schedule, deadlines, classification
+and interactive settlement remain unchanged. The next admitted observation must
+be interpreted alongside these limits, not treated as a reason to retry until
+the site passes or to relax the release gate.
+
+Scoped verification: 89 guarded Python tests passed without native/network
+calls; eight offline JavaScript VM cases compared the original observation with
+the extended one, including absent/hidden/zero-size bodies and a diagnostic
+exception. The original evidence stayed identical. Private evidence is under
+`output/continuation-20261101/preview34-release/safari-stall-evidence/`.
+These fixtures do not qualify browser rendering or prove the live stall fixed.
+
 ## 2026-11-01: successor observation failure retained the restart drain
 
 After the recovery-lifetime repair, a separate guarded test reproduced a drain
