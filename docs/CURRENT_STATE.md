@@ -1,15 +1,92 @@
 # Current Project State
 
-## Current continuation — 2026-11-03T09:15 UTC, F qualification and watchdog evidence
+## Current continuation — 2026-11-03, Safari stall diagnostic patch; H R remains failed
 
-Primary physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Historical locator `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`
-is now DIFFERENT checkout at7945f963; preserve its user edits. Use primary above.
-Branch `codex/watchdog-command-diagnostics`, based on main F
-f612f97a59e83688e1c7c798ecbeb77a4bbf6cc8. Root owns Git/PR/dispatch.
-PR458 MERGED; E tree is equal to reviewed49c39dc31 (fresh git fetch/diff/tree proof).
-Goal ACTIVE. .34 unpublished. No user-Mac app/services/network/account changes;
-no local native/Cargo/scanner builds, app binary downloads or live probes allowed.
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Historical `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905` is a
+DIFFERENT checkout; preserve its user edits. Branch
+`codex/safari-stall-evidence`, base/main H
+0b4cc942b8b266454d0dba9d381b53f52f5483c0, tree
+6b37f91a540ca261bfe6ce7e6a5a98ae0b0bb5ee. PR460 MERGED; diagnostics only.
+HROOT = B/post-watchdog-main-0b4cc942b.
+
+H CI41614316712/1 and audit41614316806/1 SUCCESS, all12 common consumers.
+Root checked fresh jobs, exact producer log/API and retained hashes.
+Main receipt440a19cea3c741ba4d2bb35f27a6717591f940e26f83f4ae62a08f595a07cf5a.
+Candidate artifact13221236884/452667944B/digest
+76f1a5d902c6e345ea287da6bbe49c25d69e7083fc7fdb2abd7b756f02c13abc;
+manifest7ee9bdb1135eadf7dadc725af26de102760b79a0d3eebb7c9234a0b1071f0e7e.
+
+H G41617940486/1 ACCEPTED12checks: commit NEW, crash-before-commit OLD,
+heartbeat advance/late-request guard/cleanup[]. Watcher49191 terminal.
+HROOT/native-g/verification.json SHA
+ a946ef4d070e643d61f27db0fd88eadeae5173e364256e8c329f19611dabaeaf;
+canonical95ae69a190c8d1a8205d16671e9e8677529c511c5f073a4a2e6d6cd96b20ff5c.
+Root-acceptance.json independently verifies8extractedfiles and actual terminaljobs.
+Two local missing/schema metadata refusals preserved; unchanged checker passed
+once evidence complete. No remote rerun. Original admission65419d04 retained;
+JSON-only map normalization b08539ed preserves all conditions/raw log hashes.
+
+H P41620091372/1 ACCEPTED13checks: real successor ACK/NEW commit and
+preACK STOP+KILL/OLD rollback, same-PID heartbeat/terminal watchdog/cleanup[].
+HROOT/packaged-p/verification.json SHA
+ d741241ff1f205a0e05eb7d91f6c6307d001fb0269eb4ecf591be8ff32bb55f3.
+Root acceptance binds16smallreportmembers+fresh successful3jobs. Watcher22967
+terminal. Reviewed checker2cd8fa4d executed once, no metadata correction/retry.
+
+H R41624356058/1 FAILED at live-site guard; soak SKIPPED. Watcher69123
+terminal exit1. Budget125877837261 confirmed Nov3 position3/observed3/limit3;
+no account-backed dispatch remains today. No retries or passchecker execution.
+readiness125877908106 failed only Require passed live-site matrix before longsoak;
+actual cleanup checks passed. HROOT/readiness-r/failure-diagnostics contains
+small4reportZIP source/digest/member proof, actual joblog and diagnosis:
+ a21fb49a20fb97c6e55c6cec6b5f708ecee97af1faddec34676a02f869aaab08.
+Root independently confirmed terminalrun/step and frozen diagnosis hash.
+
+Failure: xpersonatoy.com Safari20.122s visibilitymissing,62successful observations,
+firstabout_blank, finalexpected_https/h2/securecorrecthost, documentloading and
+DCLfalse. responseEndtrue alone does not prove completepayload. Chromeusable6.073s;
+other3hosts bothusable. Direct+ownedGeph controls HTTP200 then curl56receive.
+No proof whether incompleteHTML, blockedCSS/JS or page logic caused blankbody.
+Not old earlyobservercutoff/wrongfinalorigin. No justified routing/deadline/gate
+relaxation. Fpassing and Hfailing R harness/workflow are byte-identical; only4
+PR460 diagnostic-P observer/test/doc files differ, no runtime fix/regression claim.
+source-comparison.json records limits; equal source is not equalnetwork/runtime.
+
+Current patch retains existing DOM/text/visibility measurements in first/final
+Safari observations and adds optional body presence/style/geometry booleans.
+Diagnostic read failures remain unknown; no readiness/classifier/deadline or
+routing changes. Strict evidence envelope preserved by nesting under signals.
+89 guarded Python tests passed, zero native/network calls; eight offline JS VM
+before/after cases preserve original evidence, including diagnostic exceptions.
+Evidence: B/safari-stall-evidence. Research/interpretation limits documented in
+ROUTING_RESEARCH.md. Independent d_p_verify review found no actionable issues;
+review.json binds source/test hashes. Nine readiness/browser/control functions
+are AST-identical to H. No protected dispatch or Mac changes.
+
+Next: submit and inspect scoped PR CI for this diagnostic patch, preserving H's failed R. The
+additional report narrows absent/hidden/zero-size body cases but cannot alone
+prove incomplete transfer versus parser blocking. Do not change production or
+admit another protected attempt without reviewing that limitation and evidence.
+No blind retries.
+H G/P remain accepted and reusable until relevant changes invalidate them.
+Publication unadmitted due failedR; .34release/tag absent, no activepublisher.
+HROOT/publication/preparation-only.json retains5actualfutureinputs and unchanged
+.33/stablemetadata, but no permission to dispatch without accepted exactR.
+Public .33->.34 transition/rollback still requires future actualpublished assets.
+Goal ACTIVE; failure diagnosis is progress, not completion or3-turn blocker.
+Root owns dispatch/merge. Main H remains unchanged; no production source fix is claimed.
+
+Diagnostic P41614756790/1 on unchanged F payload under H observer passed.
+PDIR=B/watchdog-command-pr/packaged-descendant; verificationac8b9bce4b330b8fcbe9d857c2d5a27bcbb0b21a0e4605d7b3ad921178723f9e.
+Root verified all16smallreportmembers+terminaljobs. No failure diagnostic occurred;
+original F watchdog mismatch cause remains unestablished. Original failedF P
+staysfailed. Historical observers70227/16850 terminal; don't repeat green F gates.
+
+No user-Mac app/services/network/account changes; no local native/Cargo/scanner
+builds, app binary downloads or live probes. Preserve external Geph. Only small
+reports/logs and disposable hosted qualification. Do not broaden source policy.
+Earlier top retained HROOT/checkpoint-before-H-G.md.
 
 **B** = `output/continuation-20261101/preview34-release/`.
 **DROOT** = B/post-observation-main-a2761595/.
@@ -17,10 +94,10 @@ no local native/Cargo/scanner builds, app binary downloads or live probes allowe
 **EROOT** = B/post-chrome-main-80004f469/.
 Previous complete checkpoint preserved EROOT/checkpoint-before-main.md.
 
-### Current main F — Safari diagnostics merged
+### Candidate F — accepted G/R and failed original P
 
 PR459 MERGED as f612f97a59e83688e1c7c798ecbeb77a4bbf6cc8.
-Candidate base F matches main; the current branch adds observer diagnostics only.
+F remains the immutable candidate; main H adds observer diagnostics only.
 Reviewed62f6f05dd and mainF trees equal. All8 applicable PR consumers and3
 required contexts passed, no unresolved review threads. PR observer11145 terminal.
 Main CI41601618690/1 and audit41601618546/1 SUCCESS; all12 applicable
@@ -78,9 +155,9 @@ AST-identical except isolated best-effort enrichment in the failure handler.
 FROOT/packaged-p/command-diagnostics/review-corrections/verification.json
 SHAfd29a248d0949cf20f52c0659c8a686022021be063add5068ed9f5e672ca374f;
 root-review.json SHAe14a2460faa0063b55627cbbf1c089ff869bea89eba9b6091f6c92e8f747d030.
-This is diagnostic repair, not a claimed product fix. Next: PR review and required
-CI for this observer-only diff before a single diagnostic P attempt; no P retry
-or protected R dispatch has been made. Root owns checkpoint/Git/PR.
+This is diagnostic repair, not a claimed product fix. PR460 has passed and merged;
+the one new H-harness diagnostic P is recorded at the top. Original F P remains
+failed. No protected R redispatch. Root owns checkpoint/Git/PR.
 
 All mandatory gates remain required; E G/P does not qualify F. Publication remains
 blocked by F P failure, not by completed R polling. Observer-only main descendants

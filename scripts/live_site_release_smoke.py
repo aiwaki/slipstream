@@ -432,6 +432,28 @@ def _readiness_expression(host: str) -> str:
     )
 
 
+DOCUMENT_DIAGNOSTICS_EXPRESSION = r"""
+(() => {
+  // Optional observations only. A failed style/layout read must not invalidate
+  // the independently collected readiness signals or make a page usable.
+  try {
+    const body = document.body;
+    const style = body ? getComputedStyle(body) : null;
+    const rect = body ? body.getBoundingClientRect() : null;
+    return {
+      body_present: Boolean(body),
+      body_display_none: style ? style.display === 'none' : null,
+      body_visibility_hidden: style ? style.visibility === 'hidden' : null,
+      body_opacity_nonpositive: style ? Number(style.opacity || 1) <= 0 : null,
+      body_rect_positive: rect ? rect.width > 0 && rect.height > 0 : null
+    };
+  } catch (_) {
+    return null;
+  }
+})()
+"""
+
+
 def _browser_evidence_expression(host: str) -> str:
     denials = json.dumps(SITES[host]["denials"])
     challenges = json.dumps(CHALLENGE_MARKERS)
@@ -472,6 +494,7 @@ def _browser_evidence_expression(host: str) -> str:
   const documentSource = root ? root.outerHTML : '';
   const lowered = documentSource.toLowerCase();
   const signals = ({_readiness_expression(host)});
+  signals.document_diagnostics = ({DOCUMENT_DIAGNOSTICS_EXPRESSION});
   return {{
     challenge_detected: {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true,
     denial_detected: {denials}.some((marker) => lowered.includes(marker)),
@@ -794,6 +817,11 @@ def _record_safari_observation(
         progress[counter] = min(1000, value + 1) if type(value) is int and value >= 0 else 1
     signals = evidence.get("signals") if isinstance(evidence, dict) else None
     signals = signals if isinstance(signals, dict) else {}
+    diagnostics = signals.get("document_diagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    def bounded_count(value: object) -> int | None:
+        # Counts describe the current DOM, not bytes received over the network.
+        return min(16 * 1024 * 1024, value) if type(value) is int and value >= 0 else None
     def choice(key: str, allowed: object) -> str | None:
         value = signals.get(key)
         return value if isinstance(value, str) and value in allowed else None
@@ -808,8 +836,17 @@ def _record_safari_observation(
         "ready_state": choice("ready_state", {"loading", "interactive", "complete"}),
         "next_hop_protocol": choice("next_hop_protocol", ALLOWED_PROTOCOLS),
         "context": context,
+        "document_bytes": bounded_count(evidence.get("document_bytes")) if isinstance(evidence, dict) else None,
+        **{key: bounded_count(signals.get(key))
+           for key in ("body_text_length", "main_text_length", "app_text_length")},
+        "document_diagnostics": {
+            key: diagnostics.get(key) if type(diagnostics.get(key)) is bool else None
+            for key in ("body_present", "body_display_none", "body_visibility_hidden",
+                        "body_opacity_nonpositive", "body_rect_positive")
+        },
         **{key: signals.get(key) if type(signals.get(key)) is bool else None
-           for key in ("dom_content_loaded", "response_started", "response_complete")},
+           for key in ("dom_content_loaded", "response_started", "response_complete",
+                       "visible_body", "visible_app", "preloader_visible")},
     }
     observation["context"] = context
     if stage == "observed" and progress["first"] is None:
