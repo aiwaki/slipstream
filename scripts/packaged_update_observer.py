@@ -112,6 +112,46 @@ def private_json(path, uid, *, limit=32768, writing=False):
     return value
 
 
+def watchdog_identity_context(raw, process, uid, helper, journal):
+    """Classify existing samples only; these strings never authorize a process."""
+    command = process.get("command") if isinstance(process, dict) else None
+    helper_text = str(helper)
+    if not isinstance(command, str):
+        kind = "unobserved"
+    elif command == f"{helper} --journal {journal}":
+        kind = "exact_expected"
+    elif command == helper_text or command.startswith(helper_text + " "):
+        kind = "expected_helper_wrong_arguments"
+    elif command == "/usr/libexec/xpcproxy" or command.startswith("/usr/libexec/xpcproxy "):
+        # A literal prefix classification, not executable/argv/ownership proof.
+        kind = "system_xpcproxy_prefix"
+    else:
+        kind = "other"
+    result = {"command_kind": kind, "launchd_domain_label_match": None,
+              "launchd_program_match": None, "launchd_arguments_match": None}
+    if not isinstance(raw, bytes) or len(raw) > 65536:
+        return result
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return result
+    lines = text.splitlines()
+    if not lines:
+        return result
+    headers = re.findall(
+        r"^(?:(?:gui|user)/[0-9]{1,10}|system)/[A-Za-z0-9_.-]+ = \{$", text, re.M)
+    if len(headers) == 1 and headers[0] == lines[0]:
+        result["launchd_domain_label_match"] = headers[0] == f"gui/{uid}/{WATCHDOG} = {{"
+    programs = re.findall(r"^\s+program = (.*?)\s*$", text, re.M)
+    if len(programs) == 1:
+        result["launchd_program_match"] = programs[0] == helper_text
+    blocks = re.findall(r"(?m)^([ \t]+)arguments = \{\n(.*?)^\1\}", text, re.S)
+    if len(blocks) == 1:
+        arguments = [line.strip() for line in blocks[0][1].strip().splitlines()]
+        result["launchd_arguments_match"] = arguments == [helper_text, "--journal", str(journal)]
+    return result
+
+
 def watchdog_policy(raw, helper, journal, state):
     """Only the production unsuccessful-exit policy, with no extra triggers."""
     require(raw is not None, "watchdog LaunchAgent policy was not observed")
@@ -559,6 +599,11 @@ class Observer(Native):
                     "missing" if isinstance(error, FileNotFoundError) else
                     "permission" if isinstance(error, PermissionError) else
                     "os_error" if isinstance(error, OSError) else "other")
+            try:
+                diagnostic.update(watchdog_identity_context(
+                    value.stdout, process, self.uid, helper, self.journal_path))
+            except Exception:
+                pass  # Enrichment failure must not discard the original facts.
             try:
                 self.record("watchdog_identity_diagnostic", diagnostic)
             except Exception:
