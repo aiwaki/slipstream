@@ -1,45 +1,159 @@
 # Current Project State
 
-## Current continuation — 2026-11-02 UTC, Chrome navigation observation repair
+## Current continuation — 2026-11-02T20:00 UTC, exact-main E candidate
 
-Primary checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Locator: `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`.
-Branch `codex/preview34-chrome-navigation-deadline`, based on main/source D
-`a2761595c719542d541f2df7da63aedab5ccae3d`. Root owns Git/PR/dispatch.
-Only observer, focused tests and this checkpoint are in the new patch.
-User-Mac app/services/browser/network/account state was not changed.
+Primary physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Historical locator `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905`
+is now DIFFERENT checkout at7945f963; preserve its user edits. Use primary above.
+Branch `codex/safari-navigation-evidence`, based on HEAD/main E
+80004f469eaedfc332a6ac5e490fff229ae0d0d2. Root owns Git/PR/dispatch.
+PR458 MERGED; E tree is equal to reviewed49c39dc31 (fresh git fetch/diff/tree proof).
+Goal ACTIVE. .34 unpublished. No user-Mac app/services/network/account changes;
+no local native/Cargo/scanner builds, app binary downloads or live probes allowed.
 
 **B** = `output/continuation-20261101/preview34-release/`.
 **DROOT** = B/post-observation-main-a2761595/.
-Prior compact checkpoint retained under DROOT/readiness-r/chrome-navigation-repair/.
-Detailed older checkpoint: B/preparation/checkpoint-before-candidate.md.
+**H** = B/chrome-navigation-pr458/head-49c39dc31/.
+**EROOT** = B/post-chrome-main-80004f469/.
+Previous complete checkpoint preserved EROOT/checkpoint-before-main.md.
+
+### Safari evidence repair — 2026-11-03T07:15 UTC
+
+Current branch `codex/safari-navigation-evidence`, based on exact main E.
+E main CI41514778142/2 + audit41514778253/1 SUCCESS (12common consumers).
+Candidate13210440053 manifest
+f3de6f8af3aa2a954b8a4d940178c561e234a8f9569a84587dbc1b363058b355.
+G41591766189/1 accepted,12checks; root-acceptance SHA
+ d359573b271a9952f9c2e8eb31d4faeb8b5a2e012ff50e4d5265478ef927cf12.
+P41593326142/1 accepted,13checks; real successor ACK and preACKSTOP+KILL
+restored OLD, heartbeat/watchdog/cleanup passed. Verification SHA
+4532394f5ee78cf25ee234090f6c6c9a586c756ff6ec54687f3d92899af1ecc6;
+root-acceptance SHA6176cff037137cc51532ae61b35968d096b6493a001a116294b1beea77f409df.
+Evidence EROOT/native-g and EROOT/packaged-p. Watchers60742/29003/6497 terminal.
+
+R41593333393/1 FAILED live-site gate, no soak. Watcher37253 terminal exit0
+(observer completion, NOT gate success). Nov3 actual budget position1/3.
+Safari xpersonatoy20106ms readiness_context_invalid: https=false,
+host_matches=false,secure_context=true. Chrome samehost usable6265ms; other3
+hosts usable in both. Both controls HTTP200/curl56 receive failure: origin full
+payload unknown. No proven routing cause and no source repair inferred.
+Four-member diagnostic ZIP13211745454/1531B authenticated SHA
+ e30af9ad1bff5c7fa93f6c0c7950976590165d67a6f36057176f0ca2330f3449.
+R log/failure-diagnostics/failure-diagnosis.json retained EROOT/readiness-r.
+
+Observer-only patch is ready on this branch: fixed document kind, first/final
+snapshots and bounded counters within existing Safari snapshot; no raw URLs,
+extra browser requests or changed gate/deadline/cleanup. New cases old-source
+RED then GREEN; guarded affected module87PASS,0.090s/RSS49.8MB/forbidden0;
+33 pure V8 fixtures PASS. Verification SHA
+cc3c234fa23769bcc127d340365577a16b6a903fca6210de5f4aeae1678e047e;
+root review/evidence in EROOT/readiness-r/failure-diagnostics. Agent frozen.
+Smoke SHA c5af0185e55169942eee65597d38cdd97bb0f5ff30fa332aced4cff68efb3071;
+tests SHA4162e4725e37727768ac31eb63f69dfe2e99be082b15cf86ea14e0bfc3d45701.
+Root verified unchanged classifier/readiness/settle/Chrome AST and reviewed
+privacy/exception/cleanup boundaries. Next: commit/open PR for observer evidence,
+verify required CI/review before merge and new exact-source qualification.
+Do not re-dispatch R unchanged or call it origin-down. No new P/R/publication.
+Prepared publication baseline EROOT/publication/existing-publication-baseline.json
+SHA cb3edcfbd13de30a14eb3ae65ba0ab7fac227690640fb4d9b317e314fca77946
+preserves .33 twelve assets and stablev0.1.4 five assets; .34 absent. Prepared
+inputs are NOT admitted; fresh exact-source P/R/current audit required first.
+.34 UNPUBLISHED. Public update/media/Discord/sleep-wake remain unproven.
+No workstation app/services/network/externalGeph changes or local native builds.
+
+### Resumed main recovery — 2026-11-03T06:25 UTC
+
+User reactivated goal; fresh blocked audit starts here. E/source/main unchanged.
+Fresh API: CI41514778142/1 terminal failure; audit41514778253/1 success;
+no active/queued repo workflows, no candidate artifacts. All three macOS jobs
+have zero steps and confirmed hosted acquisition failure. About10h cooldown.
+Root admits ONE --failed/dependency rerun of missing main gates, preserving
+successful audit and all source/runner/gate policy. No local app/native work.
+Admission and fresh snapshots EROOT/attempt-2/retry-admission.json.
+Admitted rerun command accepted once; latest API attempt2 statusin_progress.
+Existing d_p_verify assigned read-only observer. Do not resend rerun command.
+Watcher60742 is live (d_p_verify); handle EROOT/attempt-2/watcher-handle.json.
+Actual attempt2 jobs: build125763266080 runner1000013703,
+product125763266265 runner1000013702, Chromium125763266313 runner1000013704.
+All got runners; Chromium SUCCESS, build/product executing at last fresh poll.
+Next: await same attempt2 closure, capture producer log + candidate manifest hash
+and metadata without app binary download; root authenticates admission before G.
+Candidate manifest/producer/attestation AND successful CI must bind attempt2;
+no blind PR-style mixed-attempt admission. Stop and diagnose any new failure.
+Scheduled one-shot slipstream-34 ran at20:35UTC Nov2, confirmed unchanged
+capacity failure and was deleted. Old watcher81064 terminal, never restart it.
+All blocked/queued/live statements below are historical, superseded here.
+
+### Main CI external blocker — 2026-11-02T20:16 UTC
+
+E CI41514778142/1 terminal FAILURE. Root independently verified exact source
+and all three actual macOS job cancellations with zero steps and explicit
+hosted runner-not-acquired annotations: product125515613762,
+build125515613784, Chromium125515613830. Audit41514778253 SUCCESS.
+Root evidence: EROOT/root-capacity-blocked-audit.json plus exact job/annotation
+snapshots. No E candidate was built. Watcher81064 already terminal exit1;
+no signals/cancel/rerun sent. Persistent macOS capacity blocker recurred over
+consecutive main waiting turns; goal marked BLOCKED pending external capacity.
+This is not a source/test failure and not completion. User-scheduled heartbeat
+slipstream-34 remains active for01:35 local; no immediate retry, no local build.
+On user resume perform fresh blocked audit; historical PR recovery is not E proof.
+
+### User-scheduled follow-up — 2026-11-02T20:13 UTC
+
+User requested a later check. Created one-shot thread heartbeat `slipstream-34`
+for 2026-11-03 01:35 Asia/Yekaterinburg (2026-11-02 20:35 UTC), read-only status
+of existing E CI41514778142/audit41514778253. No duplicate workflow dispatch.
+d_p_verify instructed to stop ONLY local metadata watcher81064; GitHub workflows
+continue. Scheduled check reads this checkpoint and actual API state, reports
+result or active step, and performs no release/local app/network mutation.
+Goal is not marked complete or paused; user asked scheduling, not goal closure.
 
 ### Next verified action
 
-PR458 https://github.com/aiwaki/slipstream/pull/458 is OPEN, exact reviewed head
-39778b35ee772927adae3cd6e1d6b61b75a289f8, base D confirmed by fresh root API.
-Evidence B/chrome-navigation-pr458/head-39778b35e/; d_p_verify is sole PR CI/audit
-watcher session9000 (handle there), confirmed LIVE: exact pull_request/head
-CI41489807865/1 and audit41489807654/1. No binary downloads or retries.
-Do not duplicate the watcher; poll its same session or inspect exact run API.
-Inspect final required
-contexts, applicable consumers, fresh head/base and review threads before merge.
-PR review PRRT_kwDOTLueX86yx7tX found one missed existing timeout test.
-Follow-up fixes ONLY that test with fake-clock deadline exhaustion/no navigation
-retry. Complete live-site module now83/83 PASS in0.102s/RSS42.3MB, forbidden calls0.
-Evidence DROOT/readiness-r/failure-diagnostics/pr458-module-verification.json SHA
-d1097ffd1d442db1582999c1b33deeb60c2aacb6474b2ca3f025dbf5f63fb27d.
-Tests now SHAeafcaee361080617b3118b83cd9000b4f0e10d8bbb295bf8daa056cbe104b3ea;
-production remains45f884f4a470cfdb9ec875a3c32b3a6be7f552cefbed2c7ee8a9d0de492884f0.
-Old watcher9000 is only for39778b35e; root is pushing follow-up test/doc commit.
-Reconcile NEW PR head and CI before merge; old head result cannot qualify it.
-Never redispatch D's completed G/P/R.
-This observer repair changes an R file outside the P-only source exception;
-existing rules require a fresh exact-main candidate, CI/audit -> G -> P/R before
-publishing .34. Do not weaken that source binding or carry D PASS to new source.
-No .34 release exists. After qualified publication, actual published .33 -> .34
-Cancel/commit and pre-ACK rollback remain, plus user-workstation sustained media,
-Discord voice/stream and sleep/wake (not qualified by hosted gates).
+Fresh exact-E main CI41514778142/1 queued/running and audit41514778253/1
+in_progress, both auto-triggered by merge. Observe THESE actual runs, no extra
+workflow dispatch. EROOT/merge-source.json binds PR/tree/source/run IDs.
+Read-only watcher81064 (d_p_verify), EROOT/watcher-handle.json, is live.
+Audit41514778253/1 SUCCESS; CI jobs product125515613762/build125515613784/
+Chromium125515613830 queued at last fresh check; no duplicate run.
+Main recovery caution: Native.verified_manifest requires the SAME pinned
+manifest builder attempt to have successful exact-main CI. Do not copy PR
+leaf-rerun strategy blindly if main later fails: EROOT/attempt-binding-preflight.json.
+Old .33 publication/artifact13081049724 and unchanged G checker verified in
+EROOT/old-reference-preflight.json; no E candidate/G admission yet.
+Verify actual jobs/required consumers,
+attested immutable candidate artifact/manifest after CI closes. Never use
+PR success as main-candidate payload proof. Retain all producer outputs.
+After fresh E CI/audit acceptance: native G -> packaged P and readiness R;
+use original .33 as OLD, E as NEW. D G/P cannot qualify E; D R failed and must
+not be rerun. Re-read current R budget/UTC admission and source rules before
+any new protected dispatch (max3/day including failures); no secret output.
+After accepted E gates: publish .34, verify public assets/finalizer, real published
+.33 -> .34 Cancel/commit and pre-ACK rollback. User-workstation sustained media,
+Discord voice/stream and sleep/wake remain separate/unproven; do not claim done.
+
+### Completed PR458 proof; do not repeat
+
+Root fresh CI41490482724/5 SUCCESS, audit41490482859/1 SUCCESS; all three
+required contexts green, all applicable jobs success/skipped. Actual original
+execution lineage independently fetched, not GitHub copied sibling job IDs:
+build2/125443004101; Chromium2/125443003971; product3/125492080660;
+checks3/125501689147; browser4/125502711270; heavy5/125505126780;
+required lifecycle5/125514278804. Review threadPRRT_kwDOTLueX86yx7tX resolved;
+fresh head/base/source verified before protected expected-head squash merge.
+Root acceptance H/merge-admission/root-acceptance.json SHA
+1a4fefb910335677b005e9af8ab3ee4a246c372bcadd8e332da69b561590693a.
+Heavy watcher28548 terminal exit0; receiptacc1fcd432b2bb0acbc7c04df0bdc300936d526e200526924c0fc1ea90a62b57.
+All earlier watcher handles terminal; NEVER restart them. Actual product963
+metadata tests plus daemon/Rust/contracts passed; local module83/83 alreadygreen.
+Build artifact13165409068,453572589B,digestd1551be119876d995a7431a3bbdc03d185568e9305b5d0dbb4d6d3b790d759a3,
+expiresNov9. Browser actual download ID+digest verified; packaged headless smoke
+passed, not the future protected live-site matrix. Product receipt SHAaa0ecaae2497d89d4a1019d3904091bfef4cbb94e45f2524d3a0189642a6e192;
+browser receiptd8f79a1cffa87a7ed17311887da37d7f73fbaa94357c6914e8b8a8c69b1bf618.
+Root checked all those retained hash maps. First two attempts failed because
+macOS runners never acquired jobs; only missing leaves were retried serially,
+without source/runner changes or repeats of successful build/tests. This blocker
+has cleared for PR458; no historical blocked status applies to current goal.
 
 ### Cause and reviewed repair
 
