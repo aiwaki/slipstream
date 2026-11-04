@@ -927,10 +927,12 @@ def test_validator_diagnostics_cannot_be_enabled_for_an_unrelated_command(tmp_pa
                                     public=tmp_path, kind="publication")
 
 
-@pytest.fixture
-def preview33_modules(monkeypatch):
-    import public_update_preview33_pair_smoke as next_driver
-    import public_update_preview33_menu_smoke as next_menu
+@pytest.fixture(params=("33", "34"))
+def preview33_modules(monkeypatch, request):
+    import importlib
+    next_driver = importlib.import_module(f"public_update_preview{request.param}_pair_smoke")
+    next_menu = importlib.import_module(f"public_update_preview{request.param}_menu_smoke")
+    assert next_driver.VERSION == next_menu.VERSION == f"0.1.9-preview.{request.param}"
     # Reuse the existing inert public-file fixtures without altering historical
     # .31 -> .32 tests or the shared observer/AX implementations.
     monkeypatch.setattr(sys.modules[__name__], "driver", next_driver)
@@ -960,7 +962,7 @@ def test_preview33_prelaunch_refusal_prevents_install_and_retains_receipt(previe
     assert events == [("public_feed_admission", receipt)]
     assert len(commands) == 1
     command, options = commands[0]
-    assert Path(command[1]).name == "public_update_preview33_menu_smoke.py"
+    assert Path(command[1]).name == Path(menu.__file__).name
     assert command[2:] == ["--prelaunch-public-feed"]
     assert options == {"timeout": 10, "env": backend.env}
     assert not any(key in options["env"] for key in ("GH_TOKEN", "GITHUB_TOKEN", "HTTPS_PROXY"))
@@ -1142,16 +1144,18 @@ def test_preview33_feed_refusal_is_saved_by_actual_driver_finally(preview33_feed
 
 
 def test_preview33_pins_match_the_published_pair(preview33_modules):
-    assert driver.PAIR == {"schema_version": 1,
-        "old": {"source_commit": "fd7d43c271e4a46ac2d10fc5ca4a032b92adae73",
-                "run_id": 41164190639, "run_attempt": 1,
-                "candidate_manifest_sha256": "3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823"},
-        "new": {"source_commit": "9eccd1ddf691aef5f76d493103513f2fada2fd5c",
-                "run_id": 41302269258, "run_attempt": 1,
-                "candidate_manifest_sha256": "e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0"}}
+    candidates = {
+        "32": {"source_commit": "fd7d43c271e4a46ac2d10fc5ca4a032b92adae73", "run_id": 41164190639, "run_attempt": 1,
+               "candidate_manifest_sha256": "3ddfb32e6b7ab1d2101ca96feba173bd30d3883eb5bc5a1204896d93f518e823"},
+        "33": {"source_commit": "9eccd1ddf691aef5f76d493103513f2fada2fd5c", "run_id": 41302269258, "run_attempt": 1,
+               "candidate_manifest_sha256": "e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0"},
+        "34": {"source_commit": "a0a60e080cc97214cebd7491f4ea5d56dff66e0e", "run_id": 41634434348, "run_attempt": 1,
+               "candidate_manifest_sha256": "e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb"}}
+    sequence = menu.VERSION.rsplit(".", 1)[1]
+    assert driver.PAIR == {"schema_version": 1, "old": candidates[str(int(sequence)-1)], "new": candidates[sequence]}
     assert driver.NEW_SOURCE == driver.PAIR["new"]["source_commit"]
-    assert driver.ROOT_GATE == (41303686569, 1)
-    assert driver.PublicMenu is menu.PublicMenu and driver.VERSION == menu.VERSION == "0.1.9-preview.33"
+    assert driver.ROOT_GATE == {"33": (41303686569, 1), "34": (41808901780, 1)}[sequence]
+    assert driver.PublicMenu is menu.PublicMenu and driver.VERSION == menu.VERSION
     expected = {
         "old": (429722639, "Slipstream 0.1.9-preview.32 (архивная)",
                 "1f1fec117833b18bb163648b7b48c7459c67178797be95fc167d55da4d665bd0",
@@ -1159,6 +1163,14 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
         "new": (430591253, "Slipstream 0.1.9-preview.33",
                 "f41a5a64023e21d53fab1783179403d435c0bcd949a1904c92d994a8d62c8eb5",
                 "aee5994fbfbdfb5c57b62e837abc8c8d36090c0404c4b307b6a011ff20845591")}
+    if sequence == "34":
+        expected = {
+            "old": (430591253, "Slipstream 0.1.9-preview.33 (архивная)",
+                    "f41a5a64023e21d53fab1783179403d435c0bcd949a1904c92d994a8d62c8eb5",
+                    "aee5994fbfbdfb5c57b62e837abc8c8d36090c0404c4b307b6a011ff20845591"),
+            "new": (433775703, "Slipstream 0.1.9-preview.34",
+                    "6cfee75f192ca05507d3c29b3e548874929ddfe18bfa6691e98dc6bcce66d220",
+                    "e550933fd4bad5834f6b2b55d2541c7516b4f7539205d1f7db02f8c4f1c28d6b")}
     for side, (release_id, title, config_sha, inventory_sha) in expected.items():
         spec = driver.PUBLIC_RELEASES[side]
         assert (spec["release_id"], spec["release_name"], spec["tauri_config_sha256"]) == (release_id, title, config_sha)
@@ -1167,7 +1179,7 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
         assert hashlib.sha256(inventory).hexdigest() == inventory_sha
 
 
-@pytest.mark.parametrize("target", ["0.1.9-preview.33", "0.1.9-preview.32"])
+@pytest.mark.parametrize("target", ["0.1.9-preview.34", "0.1.9-preview.33", "0.1.9-preview.32"])
 def test_preview33_menu_accepts_only_its_actual_successor(preview33_modules, tmp_path, target):
     process = original(tmp_path)
     executable = tmp_path / "Contents/MacOS/slipstream"
@@ -1194,12 +1206,13 @@ def test_preview33_public_binding_rejects_pair_drift(preview33_modules, tmp_path
 def test_preview33_workflow_invokes_the_real_clone_parser(preview33_modules, mode):
     import re
     import shlex
-    source = (REPO / ".github/workflows/public-update-preview33-qualification.yml").read_text()
+    sequence = menu.VERSION.rsplit(".", 1)[1]
+    source = (REPO / f".github/workflows/public-update-preview{sequence}-qualification.yml").read_text()
     assert "  push:" not in source and "  pull_request:" not in source and "  workflow_dispatch:" in source
     assert "github.event_name == 'workflow_dispatch'" in source and "github.ref == 'refs/heads/main'" in source
     assert "environment:" not in source and "secrets." not in source
     assert "old_download" not in source and "name: release-candidate-" not in source
-    assert 'group: public-preview33-update-${{ github.ref }}' in source
+    assert f'group: public-preview{sequence}-update-' + '${{ github.ref }}' in source
     assert f'ref: "{driver.NEW_SOURCE}"' in source
     for side in ("old", "new"):
         for env, key in (("RUN_ID", "run_id"), ("RUN_ATTEMPT", "run_attempt"),
@@ -1208,7 +1221,7 @@ def test_preview33_workflow_invokes_the_real_clone_parser(preview33_modules, mod
     assert f'ROOT_GATE_RUN_ID: "{driver.ROOT_GATE[0]}"' in source
     assert f'ROOT_GATE_ATTEMPT: "{driver.ROOT_GATE[1]}"' in source
     assert f'pattern: native-root-update-*-{driver.ROOT_GATE[0]}-{driver.ROOT_GATE[1]}' in source
-    entry = "scripts/public_update_preview33_pair_smoke.py"
+    entry = "scripts/" + Path(driver.__file__).name
     assert source.count(entry) == 2 and "scripts/public_update_pair_smoke.py" not in source
     assert "qualified-source/scripts/materialize_pair.py" in source
     command = re.search(r'bin/python" ' + re.escape(entry) + r' \\\n(.*?)\n          # The driver', source, re.S).group(1)
@@ -1249,7 +1262,7 @@ def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp
             assert ref == (driver.NEW_SOURCE if directory == qualified else harness_sha)
             calls.append(relative)
             data = (REPO / relative).read_bytes()
-            if drift == "public" and relative == "scripts/public_update_preview33_pair_smoke.py":
+            if drift == "public" and relative == "scripts/" + Path(driver.__file__).name:
                 data += b"\n# different committed public harness\n"
         return SimpleNamespace(stdout=data)
     backend = SimpleNamespace(args=SimpleNamespace(repo=qualified), run=fake_git)
@@ -1259,7 +1272,7 @@ def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp
     else:
         binding = driver.source_binding(backend)
         assert binding["qualified_product_source"] == driver.NEW_SOURCE and binding["harness_source"] == harness_sha
-        assert "scripts/public_update_preview33_pair_smoke.py" in binding["sha256"]
-        assert "scripts/public_update_preview33_menu_smoke.py" in binding["sha256"]
+        assert "scripts/" + Path(driver.__file__).name in binding["sha256"]
+        assert "scripts/" + Path(menu.__file__).name in binding["sha256"]
         assert "scripts/public_update_pair_smoke.py" not in calls and "scripts/public_update_menu_smoke.py" not in calls
         assert {"scripts/" + name for name in driver.REUSED} <= set(binding["sha256"])
