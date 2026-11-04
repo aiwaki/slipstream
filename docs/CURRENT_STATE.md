@@ -106,10 +106,12 @@ docs/RELEASES.md; publish/review the docs-only evidence PR before later runtime 
 no dependent Mac transaction is authorized by lack of reply and none started.
 Independent commit review saved public-commit-after-reset/independent-review.json
 SHA58ae7badb6dc64bab4c8cb9da11dda098cf7906d0677c6b0201b8d2193213e0b.
-For actual rollback receipt also assert fault_kill_sent.unix is strictly less
-than fault_stopped_window.root.deadline_unix; frozen verifier already checks
-successor/root-prepare deadlines, but this narrower recorded root deadline is
-explicit in canonical hosted injector and needs independent root acceptance.
+The frozen rollback verifier already binds the root deadline to the prepare
+deadline through validate_root -> validate_status, then requires fault kill
+before that deadline and the successor deadline. An explicit comparison with
+fault_stopped_window.root.deadline_unix would be redundant, not a missing gate.
+The first independent review overstated this point; no verifier change or
+qualification rerun is required.
 One-off heartbeat slipstream-34 completed its purpose and was deleted successfully.
 No user Mac apps/services/network/account changes or local app downloads.
 Read-only workstation snapshot in public-update34/workstation-readonly-snapshot.json:
