@@ -794,6 +794,22 @@ discovery still proposes the latest upstream version for separate review. A manu
 `build_reviewed=true` dispatch uses the same reviewed-main path and refuses other
 refs. It does not bypass lock, archive, audit, attestation, or immutable-tag checks.
 
+## Published .33 to .34 updater qualification
+
+The manual `public-update-preview34-qualification.yml` workflow exercises the
+published `.33` application's ordinary update discovery and menu against the
+published `.34` payload. Its observer pins both release inventories, their
+candidate manifests and the accepted native root-update prerequisite. It does
+not rebuild or alter either application or override the updater endpoint.
+
+Run `commit` first: it must observe Cancel leaving OLD unchanged, followed by
+normal confirmation, administrator authorization, successor ACK and clean
+completion. Accept the retained public receipt before dispatching the separate
+`kill-successor-before-ack` case, which must restore OLD. The existing `.32` to
+`.33` observer and evidence remain historical records. Hosted UI capability,
+source binding, public asset identity and cleanup failures remain failures;
+packaged qualification alone does not prove this public update path.
+
 ## Candidate and publication pipeline
 
 - Required exact-main CI builds the frozen daemon, app, updater archives and

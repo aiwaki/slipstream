@@ -1,92 +1,69 @@
 # Current Project State
 
-## Current continuation — 2026-11-03, Safari stall diagnostic patch; H R remains failed
+## Current continuation — 2026-11-04, preview .34 published; public update gate next
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Historical `/Users/aiwaki/Developer/slipstream-codebase-audit-20260905` is a
-DIFFERENT checkout; preserve its user edits. Branch
-`codex/safari-stall-evidence`, base/main H
-0b4cc942b8b266454d0dba9d381b53f52f5483c0, tree
-6b37f91a540ca261bfe6ce7e6a5a98ae0b0bb5ee. PR460 MERGED; diagnostics only.
-HROOT = B/post-watchdog-main-0b4cc942b.
+Observer branch `codex/public-preview34-update`; qualified product source/main before observer PR
+`a0a60e080cc97214cebd7491f4ea5d56dff66e0e`, tree
+`79dfb9c10f9196c1b7520ba6f76bd65d0604aeb8`. PR461 merged.
+Historical Developer checkout is different; preserve user changes.
+ROOT=`output/continuation-20261101/preview34-release/post-stall-main-a0a60e080`.
 
-H CI41614316712/1 and audit41614316806/1 SUCCESS, all12 common consumers.
-Root checked fresh jobs, exact producer log/API and retained hashes.
-Main receipt440a19cea3c741ba4d2bb35f27a6717591f940e26f83f4ae62a08f595a07cf5a.
-Candidate artifact13221236884/452667944B/digest
-76f1a5d902c6e345ea287da6bbe49c25d69e7083fc7fdb2abd7b756f02c13abc;
-manifest7ee9bdb1135eadf7dadc725af26de102760b79a0d3eebb7c9234a0b1071f0e7e.
+Exact CI41634434348/1 and audit41634434632/1 SUCCESS; reusable candidate
+artifact13229144546, digest60483c70999b7986dcee9ea640456c5a4a345d65c48f4613881a02bb679151d6,
+manifest e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb.
+All exact G/P/R hosted runs now terminal SUCCESS; no live qualification observers.
+- G41808901780/1 accepted: native-g/verification.json SHA719b93a111280962618b513b831c24dd71c8e150ddb9bd6a2b86b824c7f10327; 12 checks.
+- R41806799686/1 accepted: readiness-r/verification.json SHAba860744f32cfca9b22ac5a14b286c5ba0cbe88b56a1768a19477e32012c8193; 81 checks, authenticated six reports, 8/8 live sites, measured1800.046s soak. Daily guarded rank1/3.
+- P41809745407/1 accepted: packaged-p/verification.json SHA27ac166dd91af558f8b9de9dc572aae799994035f2c658daa9df93ce6b8d8daf; 13 checks, real ACK commit and pre-ACK kill/rollback.
+Each directory has root-acceptance.json. R/G retained evidence hashes rechecked.
 
-H G41617940486/1 ACCEPTED12checks: commit NEW, crash-before-commit OLD,
-heartbeat advance/late-request guard/cleanup[]. Watcher49191 terminal.
-HROOT/native-g/verification.json SHA
- a946ef4d070e643d61f27db0fd88eadeae5173e364256e8c329f19611dabaeaf;
-canonical95ae69a190c8d1a8205d16671e9e8677529c511c5f073a4a2e6d6cd96b20ff5c.
-Root-acceptance.json independently verifies8extractedfiles and actual terminaljobs.
-Two local missing/schema metadata refusals preserved; unchanged checker passed
-once evidence complete. No remote rerun. Original admission65419d04 retained;
-JSON-only map normalization b08539ed preserves all conditions/raw log hashes.
+P initially refused locally because private checker only accepted a registered
+exited watchdog. Canonical unchanged observer also accepts a missing job after
+observing its authenticated process, safe free transaction lock and exact five
+absent paths. Actual commit returned113/no job fields; preACK retained exited0.
+Original checker/refusal/execution preserved. terminal-checker-fix.diff and
+17 positive/negative pure fixtures document corrected private checker. Independent
+d_p_verify reviewed it. Raw absence stderr is not serialized; proof relies on
+successful exact-source hosted predicate, not independently reconstructed stderr.
+No production source or release policy changed; no qualification rerun.
 
-H P41620091372/1 ACCEPTED13checks: real successor ACK/NEW commit and
-preACK STOP+KILL/OLD rollback, same-PID heartbeat/terminal watchdog/cleanup[].
-HROOT/packaged-p/verification.json SHA
- d741241ff1f205a0e05eb7d91f6c6307d001fb0269eb4ecf591be8ff32bb55f3.
-Root acceptance binds16smallreportmembers+fresh successful3jobs. Watcher22967
-terminal. Reviewed checker2cd8fa4d executed once, no metadata correction/retry.
+Publication COMPLETE, verified from fresh public API and small JSON assets.
+Publisher41813047079/1 SUCCESS; release433775703 is non-draft prerelease,
+https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.34 .
+Lightweight tag binds exact a0a60e080; all12 unique public asset sizes/digests
+match artifact-manifest and immutable candidate manifest. Qualified manifest
+hash unchanged. Publisher verified full remote bytes and current-date policy;
+local verification downloaded only three small JSONs. Previous .33 release430591253
+retains12assets and is now titled `Slipstream 0.1.9-preview.33 (архивная)`.
+ROOT/publication/publication-verification.json SHA
+0476d0a6dea80b540d4d973173a35d87a57bdc4b8088a72dde28f61bc0d9d6c9
+binds run/jobs/release/tag/manifests/previous metadata. Do NOT redispatch publisher.
+All workflow/observer processes are terminal; no pending live qualification.
 
-H R41624356058/1 FAILED at live-site guard; soak SKIPPED. Watcher69123
-terminal exit1. Budget125877837261 confirmed Nov3 position3/observed3/limit3;
-no account-backed dispatch remains today. No retries or passchecker execution.
-readiness125877908106 failed only Require passed live-site matrix before longsoak;
-actual cleanup checks passed. HROOT/readiness-r/failure-diagnostics contains
-small4reportZIP source/digest/member proof, actual joblog and diagnosis:
- a21fb49a20fb97c6e55c6cec6b5f708ecee97af1faddec34676a02f869aaab08.
-Root independently confirmed terminalrun/step and frozen diagnosis hash.
-
-Failure: xpersonatoy.com Safari20.122s visibilitymissing,62successful observations,
-firstabout_blank, finalexpected_https/h2/securecorrecthost, documentloading and
-DCLfalse. responseEndtrue alone does not prove completepayload. Chromeusable6.073s;
-other3hosts bothusable. Direct+ownedGeph controls HTTP200 then curl56receive.
-No proof whether incompleteHTML, blockedCSS/JS or page logic caused blankbody.
-Not old earlyobservercutoff/wrongfinalorigin. No justified routing/deadline/gate
-relaxation. Fpassing and Hfailing R harness/workflow are byte-identical; only4
-PR460 diagnostic-P observer/test/doc files differ, no runtime fix/regression claim.
-source-comparison.json records limits; equal source is not equalnetwork/runtime.
-
-Current patch retains existing DOM/text/visibility measurements in first/final
-Safari observations and adds optional body presence/style/geometry booleans.
-Diagnostic read failures remain unknown; no readiness/classifier/deadline or
-routing changes. Strict evidence envelope preserved by nesting under signals.
-89 guarded Python tests passed, zero native/network calls; eight offline JS VM
-before/after cases preserve original evidence, including diagnostic exceptions.
-Evidence: B/safari-stall-evidence. Research/interpretation limits documented in
-ROUTING_RESEARCH.md. Independent d_p_verify review found no actionable issues;
-review.json binds source/test hashes. Nine readiness/browser/control functions
-are AST-identical to H. No protected dispatch or Mac changes.
-
-Next: submit and inspect scoped PR CI for this diagnostic patch, preserving H's failed R. The
-additional report narrows absent/hidden/zero-size body cases but cannot alone
-prove incomplete transfer versus parser blocking. Do not change production or
-admit another protected attempt without reviewing that limitation and evidence.
-No blind retries.
-H G/P remain accepted and reusable until relevant changes invalidate them.
-Publication unadmitted due failedR; .34release/tag absent, no activepublisher.
-HROOT/publication/preparation-only.json retains5actualfutureinputs and unchanged
-.33/stablemetadata, but no permission to dispatch without accepted exactR.
-Public .33->.34 transition/rollback still requires future actualpublished assets.
-Goal ACTIVE; failure diagnosis is progress, not completion or3-turn blocker.
-Root owns dispatch/merge. Main H remains unchanged; no production source fix is claimed.
-
-Diagnostic P41614756790/1 on unchanged F payload under H observer passed.
-PDIR=B/watchdog-command-pr/packaged-descendant; verificationac8b9bce4b330b8fcbe9d857c2d5a27bcbb0b21a0e4605d7b3ad921178723f9e.
-Root verified all16smallreportmembers+terminaljobs. No failure diagnostic occurred;
-original F watchdog mismatch cause remains unestablished. Original failedF P
-staysfailed. Historical observers70227/16850 terminal; don't repeat green F gates.
-
-No user-Mac app/services/network/account changes; no local native/Cargo/scanner
-builds, app binary downloads or live probes. Preserve external Geph. Only small
-reports/logs and disposable hosted qualification. Do not broaden source policy.
-Earlier top retained HROOT/checkpoint-before-H-G.md.
+NEXT: review/merge prepared public .33->.34 observer PR, then UI qualification. Independent
+read-only d_p_verify review identified three isolated new observer files based
+on existing preview33 family (workflow, pair and menu); all three now added,
+with historical files preserved. Existing hermetic tests parameterized for both
+.32->.33 and .33->.34;315 focused tests passed in3.12s (pair, observer, visibility).
+No production files changed; no local native execution. No public workflow run yet.
+Pin OLD .33 CI41302269258/1/source9eccd1ddf691aef5f76d493103513f2fada2fd5c,
+manifest e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0;
+NEW uses current candidate above, G41808901780/1. Freeze public12asset IDs from
+fresh retained release metadata, not guesses; previous .33 archive title changed.
+Update pair NEW_SOURCE/PAIR/PUBLIC_RELEASES/ROOT_GATE/source_binding helper names,
+menu VERSION and import (its class uses its own module globals), workflowpins.
+Retain eight reused helpers byteequal qualified source, with separately reviewed
+observer-only descendant source binding. Add focused contract tests; PR by default.
+Run public commit (ordinary discovery, Cancel->confirm) first, verify receipt,
+then independently admit pre-ACK kill/rollback. Hosted UI/Accessibility preflight
+must actually pass. Packaged P cannot substitute this public product path.
+Physical workstation/media/Discord/sleepwake remain open. Previous intermittent
+Safari stall not reproduced; cause unproven.
+Green fixed-site matrix is not proof for arbitrary sites or product completion.
+No Mac app/service/PF/DNS/proxy/PAC/VPN/account changes, local native builds,
+app downloads or live probes. External Geph untouched; only small evidence/Git/API.
+Full preceding checkpoint: publication/checkpoint-before-publication.md.
 
 **B** = `output/continuation-20261101/preview34-release/`.
 **DROOT** = B/post-observation-main-a2761595/.
