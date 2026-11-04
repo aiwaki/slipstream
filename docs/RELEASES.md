@@ -810,6 +810,16 @@ completion. Accept the retained public receipt before dispatching the separate
 source binding, public asset identity and cleanup failures remain failures;
 packaged qualification alone does not prove this public update path.
 
+### Observed public updater results
+
+On November 4, 2026, [commit run 41823085631/1](https://github.com/aiwaki/slipstream/actions/runs/41823085631/attempts/1) verified the ordinary public update on a disposable hosted Mac using the published, unchanged `.33` and `.34` bundles. Native Cancel preserved `.33`. A fresh Install offer and administrator confirmation then led to the original app exiting normally, a real `.34` acknowledgement and a durable committed transaction. The new daemon heartbeat advanced, the watchdog finished and cleanup reported no errors.
+
+[Earlier commit run 41818750355/1](https://github.com/aiwaki/slipstream/actions/runs/41818750355/attempts/1) and [rollback run 41880503074/1](https://github.com/aiwaki/slipstream/actions/runs/41880503074/attempts/1) stopped at the anonymous GitHub feed preflight: HTTP 403 with no remaining API quota. Both stopped before installing or launching the old app. Their authenticated failure reports do not establish an updater transaction or rollback failure.
+
+[Follow-up rollback run 41882183022/1](https://github.com/aiwaki/slipstream/actions/runs/41882183022/attempts/1) never started: GitHub could not assign a hosted runner and reported macOS ARM64 capacity constraints. The job was cancelled without executing any steps or producing an artifact.
+
+Public pre-ACK rollback remains unverified. The accepted Cancel/commit result does not qualify installation on the user's Mac, sustained YouTube or Discord media, sleep/wake, network changes, ordinary Quit or delivery of an ordinary update notification.
+
 ## Candidate and publication pipeline
 
 - Required exact-main CI builds the frozen daemon, app, updater archives and

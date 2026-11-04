@@ -1,11 +1,13 @@
 # Current Project State
 
-## Current continuation — 2026-11-04, preview .34 published; public update gate next
+## Current continuation — 2026-11-04, public rollback blocked by hosted Mac capacity
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Observer branch `codex/public-preview34-update`; qualified product source/main before observer PR
-`a0a60e080cc97214cebd7491f4ea5d56dff66e0e`, tree
-`79dfb9c10f9196c1b7520ba6f76bd65d0604aeb8`. PR461 merged.
+Documentation branch `codex/public-preview34-evidence` is based on observer/main
+`0a451afe62691180d845443d01176a4220ca9090` (PR462 merged; tree equals
+reviewed470fce8585db9e285de8e5cdb18fa22e3d5f77b8).
+Qualified product source remains `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,
+tree79dfb9c10f9196c1b7520ba6f76bd65d0604aeb8; never substitute a new CI build.
 Historical Developer checkout is different; preserve user changes.
 ROOT=`output/continuation-20261101/preview34-release/post-stall-main-a0a60e080`.
 
@@ -41,12 +43,101 @@ ROOT/publication/publication-verification.json SHA
 binds run/jobs/release/tag/manifests/previous metadata. Do NOT redispatch publisher.
 All workflow/observer processes are terminal; no pending live qualification.
 
-NEXT: review/merge prepared public .33->.34 observer PR, then UI qualification. Independent
-read-only d_p_verify review identified three isolated new observer files based
-on existing preview33 family (workflow, pair and menu); all three now added,
-with historical files preserved. Existing hermetic tests parameterized for both
-.32->.33 and .33->.34;315 focused tests passed in3.12s (pair, observer, visibility).
-No production files changed; no local native execution. No public workflow run yet.
+PR462 MERGED after all17 check contexts completed (expected Windows skip),
+CI41816640607/1 and audit41816637269/1 SUCCESS; review threads empty.
+Observer session2820 terminal. GitHub outage required exact-SHA Git API push;
+public-update34/api-{tree,commit,ref}.json and merge-verification.json bind this.
+All14 helper hashes/workflow match reviewed source. Historical .32->.33 unchanged.
+315 hermetic tests plus final12 pin/source/workflow checks passed.
+
+Public commit41818750355/1 is terminal FAILURE, not an updater transaction failure.
+Fresh exact-attempt GitHub metadata and authenticated report show the anonymous
+prelaunch feed returned HTTP403 with x-ratelimit-remaining=0; classification
+external_rate_limited. OLD was NOT installed/launched by the trial, no transaction
+occurred, cleanup_errors=[], no public commit acceptance or rollback dispatch.
+Observer session66026 is terminal. Source-bound report artifact13315454267 is
+109574 bytes, ZIP SHA f20c1f7dec39cb061154a1fb5271421df05f3b76583d606177c598358861e1e3.
+public-update34/public-commit/artifact-authentication.json SHA
+fa8e9d0df52486f3bfd59c4a2435cc49eb1bbecd3aea8ba4a5f129f525ddf8ac
+verifies exact run/attempt/source/job/upload windows, ZIP bounds and source binding;
+status AUTHENTICATED_FAILED_RUN_EVIDENCE, runtime_accepted=false, context_created=false.
+No success context or full semantic acceptance was fabricated.
+GitHub's captured reset time is 2026-11-04 11:36:37 UTC / 16:36:37 Yekaterinburg.
+This is not a guarantee of available quota on another shared runner IP.
+Post-reset run41823085631/1 SUCCESS and independently ACCEPTED for public
+Cancel + commit. Observer session11522 and collector67662 are terminal exit0.
+Anonymous feed returned200, remaining57; normal OLD background discovery and
+visible Install, native Cancel preserving OLD, fresh discovery/Install/admin
+confirmation, normal OLD exit, NEW acknowledgement and durable committed root
+transaction before lease deadline were verified. NEW heartbeat advanced;
+watchdog registered-successfully-exited; cleanup_errors=[]. No app feed override.
+Report artifact13318475913,142151bytes, SHA
+9eeb22316bd54c5b05c6a4470f697707d2929a434299db9c7238d769cfb0e991.
+ROOT/public-update34/public-commit-after-reset/verification.json SHA
+2e71cba42bccbe7102a7391499f0a3b5e8b74f24db677004a27e9a35c12d19b9;
+artifact-authentication.json/context.json/metadata and root-acceptance.json bind
+actual attempt/source/job/upload windows/public inventories and semantic proof.
+Source remains observer0a451afe6/producta0a60e080; original refusal41818750355
+retained independently. Old quota blocker is no longer the next blocking gate.
+Public rollback41880503074/1 terminal FAILURE before OLD launch: anonymous
+feed403, remaining0, new runnerIP13.105.117.253; reset17:56:46UTC/22:56:46local.
+No transaction observed, cleanup_errors=[]. This does not qualify or disprove
+rollback. Observer85644 and collector19116 are terminal. Initial cached job
+snapshot remained queued after run terminal; fresh exact-attempt metadata then
+confirmed completed failed UI step and successful report upload (no job restart).
+ROOT/public-update34/public-rollback/artifact-authentication.json SHA
+cae118112a194ddeb9d54b48b131e673bc2845486b19613f22f2063c5086dfd5;
+artifact13349840109,109607bytes,SHAef17a019f227925a7afb9459b131a1201380a3dadd2bd2fcff1c6fe4c3207a87.
+Exact source/run/attempt/job/upload provenance verified; failure-diagnosis.json
+retains original response, no success context created. Accepted commit retained.
+Post-reset rollback41882183022/1 terminal FAILURE without acquiring a hosted
+Mac. Exact-attempt job126757224971 is completed/cancelled, no runner name,
+steps=[], artifacts total0. GitHub failure annotation: "The job was not acquired
+by Runner of type hosted even after multiple attempts"; accompanying notices
+state macOS arm64 capacity constraints. No app preparation or rollback occurred.
+Observer20651 is terminal. Collector8130 correctly refused missing successful
+upload; no ZIP or success context was created. API metadata and annotations are
+retained in ROOT/public-update34/public-rollback-after-reset/;
+failure-diagnosis.json binds their hashes and exact source/run/attempt/job.
+NEXT: do not blind-retry the same external capacity failure or repeat accepted
+commit. Retain public rollback as unverified pending a later changed external
+condition. Documentation now records accepted commit and all refused attempts in
+docs/RELEASES.md; publish/review the docs-only evidence PR before later runtime work. User was asked asynchronously for a later short workstation window;
+no dependent Mac transaction is authorized by lack of reply and none started.
+Independent commit review saved public-commit-after-reset/independent-review.json
+SHA58ae7badb6dc64bab4c8cb9da11dda098cf7906d0677c6b0201b8d2193213e0b.
+The frozen rollback verifier already binds the root deadline to the prepare
+deadline through validate_root -> validate_status, then requires fault kill
+before that deadline and the successor deadline. An explicit comparison with
+fault_stopped_window.root.deadline_unix would be redundant, not a missing gate.
+The first independent review overstated this point; no verifier change or
+qualification rerun is required.
+One-off heartbeat slipstream-34 completed its purpose and was deleted successfully.
+No user Mac apps/services/network/account changes or local app downloads.
+Read-only workstation snapshot in public-update34/workstation-readonly-snapshot.json:
+/Applications/Slipstream.app reports preview.31; launchctl print of owned system
+service returns113 with exact missing-service diagnostic. This is not canonical
+installed verification of .34, nor proof about external Geph state. No native
+verifier or app was launched. DECISIONS.md workstation-window rule still applies.
+Current checkout does NOT provide npm verify:local-install or scripts/verify_macos_app_bundle.py;
+those external instructions are stale for observer0a451afe6. Existing canonical
+source paths: scripts/release_candidate.py verify (read-only package/tree proof,
+requires manifest + all six candidate files and exact pins); status_client.rs +
+slipstream-core/status_v2.rs parse fresh /var/run/slipstream.status;
+install_attestation.rs validates root-owned schema3 record and daemon witness.
+There is no combined read-only installed app/launchd/fresh StatusV2 CLI here.
+Do not run build/install commands to compensate for that missing entrypoint.
+Checker prepared from accepted .33 verifier; root-reviewed diff and22 pure
+terminal fixtures pass. Pins now bind actual merge0a451afe6 + reviewed patch470fce858;
+14source hashes and G/P/public identities retained. No fabricated run acceptance.
+Watchdog absence113 permitted only by source-bound successful hosted predicate,
+all5jobfields empty, no process, free safe lock, exact5paths absent; raw stderr
+not serialized. Loaded exit0 branch remains strictly checked. Do not weaken UI,
+Cancel/ACK/kill/deadline/visibility/final-public or cleanup evidence.
+Accept real public commit BEFORE dispatching separate pre-ACK rollback.
+
+Git post-commit session68613 ended0 but Entire PID25510 ended signal9; causeunknown,
+Entire history checkpoint success unproven. Source commit intact; don't restart hook.
 Pin OLD .33 CI41302269258/1/source9eccd1ddf691aef5f76d493103513f2fada2fd5c,
 manifest e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0;
 NEW uses current candidate above, G41808901780/1. Freeze public12asset IDs from
