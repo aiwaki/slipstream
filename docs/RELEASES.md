@@ -1,5 +1,35 @@
 # Release Policy
 
+## Preview .35 in preparation — 2026-11-05
+
+The next preview includes [PR #464](https://github.com/aiwaki/slipstream/pull/464).
+When the kernel has already lost Slipstream's saved PF reference, ordinary Stop
+and update recovery can now retire that obsolete record after proving that all
+owned writers stopped, the installer lock is held and no PF references remain.
+Unknown evidence, another live reference or a changed record still prevents
+cleanup. The repair does not disable PF or change another application's rules.
+
+Final PR source f85d5c39 passed CI42017506255/1 and audit42017505491/1. The real
+source and packaged-app Stop tests both rejected the synthetic invalid token,
+removed its record and preserved the global PF snapshot. They started with PF
+disabled; enabled-PF preservation is covered by effect-free tests. These results
+qualify the fix, not a .35 release candidate or a workstation update.
+
+The version preparation synchronizes the package metadata and publisher's strict
+preview-sequence guard. Its shell test checks the current version plus neighboring,
+mismatched and malformed inputs; all57 build-configuration tests passed.
+The packaged-update prerequisite is pinned to the new .34 -> .35 candidate pair;
+the previous pair's accepted reports remain historical evidence. Candidate
+authentication and terminal cleanup checks are unchanged. The two reviewed
+observer-source hashes cover only the pair-version guard and matching workflow
+input description changes. All140 prerequisite, source-boundary and workflow tests
+passed, including refusal of historical and unreviewed pairs.
+Geph 0.4.3-r4, dependencies and routing remain unchanged.
+Build and qualify one exact-main .35 candidate before publication;
+do not relabel or replace published .34 assets. The restored workstation remains
+on .31. A new workstation update requires separate authorization after the failed
+.31 -> .34 transaction; the approved restoration is complete.
+
 ## Workstation update failure and .31 restoration — 2026-11-05
 
 The ordinary `.31 -> .34` menu attempt on the user's Mac did not complete.
@@ -25,7 +55,8 @@ tests and160 updater/PF regressions. It is not in published .34 or installed .31
 The first PR464 revision also passed native source and packaged-app lifecycle
 checks in CI42014542528/1, including real invalid-token rejection, ordinary stop
 and an unchanged PF snapshot. A follow-up explicitly excludes unlocked foreground
-cleanup; its130 stop/adapter and138 updater/lock tests pass, with native CI pending.
+cleanup; its130 stop/adapter and138 updater/lock tests pass. Final source and
+packaged native reports passed in CI42017506255/1, and PR464 is merged.
 The separate one-operation receipt repair passed8 isolated fixtures. After the
 user explicitly approved .31 restoration, it ran once with administrator
 authorization, saved the proven stale token privately, and removed only that
@@ -956,10 +987,10 @@ Public Cancel, commit and pre-ACK rollback are now verified for `.33 → .34`. T
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.34`, with
-  `VERSION` and `preview_sequence=34` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.35`, with
+  `VERSION` and `preview_sequence=35` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.34`; the new preview requires its own
+  `.23` source and is rejected for `.35`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact

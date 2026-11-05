@@ -1011,12 +1011,16 @@ class BuildConfigTests(unittest.TestCase):
         command = 'v="$PACKAGE_VERSION"\n' + textwrap.dedent(block).replace(
             '${{ github.event.inputs.preview_sequence }}', '$PREVIEW_INPUT'
         )
+        current_version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        prefix, current_sequence = current_version.rsplit(".", 1)
+        previous_sequence = str(int(current_sequence) - 1)
+        next_sequence = str(int(current_sequence) + 1)
         for sequence, version, accepted in (
-            ("34", "0.1.9-preview.34", True),
-            ("33", "0.1.9-preview.33", False),
-            ("35", "0.1.9-preview.35", False),
-            ("34", "0.1.9-preview.33", False),
-            ("34x", "0.1.9-preview.34x", False),
+            (current_sequence, current_version, True),
+            (previous_sequence, f"{prefix}.{previous_sequence}", False),
+            (next_sequence, f"{prefix}.{next_sequence}", False),
+            (current_sequence, f"{prefix}.{previous_sequence}", False),
+            (f"{current_sequence}x", f"{current_version}x", False),
         ):
             with self.subTest(sequence=sequence, version=version):
                 result = subprocess.run(
@@ -1032,8 +1036,6 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn('tag="v${v}"', workflow)
         self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
-        self.assertIn('[ "$preview_sequence" = 34 ]', workflow)
-        self.assertIn('default: "34"', workflow)
         sequence = (ROOT / "VERSION").read_text(encoding="utf-8").strip().rsplit(".", 1)[1]
         self.assertIn(f'[ "$preview_sequence" = {sequence} ]', workflow)
         self.assertIn(f'default: "{sequence}"', workflow)

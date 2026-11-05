@@ -1,6 +1,6 @@
 # Current Project State
 
-## Current continuation — 2026-11-05, .31 restored after the aborted .34 update
+## Current continuation — 2026-11-05, .31 restored; .35 preparation
 
 The user explicitly approved completing restoration of .31. The scoped repair
 ran ONCE, with administrator authorization, at 09:19:37–09:20:41 UTC. Under the
@@ -40,9 +40,9 @@ an explicit successful empty-reference response; changed token, foreign/live
 references or uncertain evidence retain the record and fail cleanup. It never
 disables PF or changes external rules. The failure was reproduced before the fix
 (`stale-pf-baseline-test.txt`). Initial focused verification:128 stop/adapter tests
-and160 updater/PF regressions passed. This fix is NOT merged, published or
-installed. The installed
-old worker cannot acquire the fix merely by downloading a new app.
+and160 updater/PF regressions passed. The final fix is now merged in PR464;
+it is not in published .34 or installed .31. The installed old worker cannot
+acquire the fix merely by downloading a new app.
 
 The executed guard `workstation-check-20261105/recover_stale_receipt.py` has SHA
 b74ea69d47a2d8eaa970177b450b7dc6709936e0906a93910834e790e0a521c4 and passed
@@ -66,13 +66,39 @@ Caller review found unlocked foreground cleanup_stale also enters the shared
 cleanup helper. Two new regressions reproduced unwanted receipt retirement
 without the installer lock. The follow-up now explicitly requires the installed
 lock context. Final scoped checks:130 stop/adapter and138 updater/lock tests pass;
-the native fixture and its99 harness tests are unchanged. This small production
-follow-up still needs its own required CI; do not rerun the completed old run.
-Graph tools were unavailable; review used bounded direct source reads.
+the native fixture and its99 harness tests are unchanged. Final source
+`f85d5c39ca326debde1ee756813f55f86c1e47ee` passed CI42017506255/1 and
+dependency-audit42017505491/1; all17 check contexts are green or expected skipped.
+Both actual native reports again prove stale-receipt cleanup with unchanged PF.
+`workstation-check-20261105/ci464-final-native-proof.json` binds the full reports,
+logs, run/attempt and job IDs; its SHA is
+dfe3ebba8cb1b07feb1c9355f977b721276e40c591fb067ddb2ae3ddf88502be.
+PR464 merged as `b0e1724e5675cd6613b4f563ab45bbf8af0413f9`; fetched main has
+identical production/test bytes. Graph tools were unavailable; review used
+bounded direct source reads. Do not rerun these accepted tests.
 
-PR464 is open; the first revision9740915a9 is a verified baseline. NEXT: push
-the explicit lock guard and observe its automatically created required CI, then
-finish PR review before including the fix in a future package.
+Preparing .35 from that merge changes version metadata, the publisher's exact
+sequence pin, the packaged gate's reviewed .34 -> .35 pair and documentation;
+dependencies, routing and the verified stop fix are unchanged. PR465 is open. Initial source
+`b6d1158eef781d4cbf48400e6cd72941aac562b2` passed audit42022986190/1, but
+CI42022986292/1 product-checks failed one of971 metadata tests: build-app.yml
+still admitted preview sequence34. The complete job127230184492 log is retained
+under `output/continuation-20261105/preview35-release/pr465-product-checks-failed.log`.
+The follow-up sets the publisher's default and strict guard to35. Its existing
+shell-execution test derives current/neighbor/mismatched cases from VERSION;
+57 build-config tests now pass, including those acceptance/refusal cases.
+The packaged prerequisite now admits only .34 -> .35, with its two source hashes
+updated after reviewing the exact version-guard/workflow-description-only diff.
+140 packaged prerequisite/source-boundary/workflow tests pass, including rejection
+of historical, reversed, identical and unreviewed pairs. Candidate authentication,
+root evidence, transaction handling and cleanup are unchanged. Evidence is in
+`output/continuation-20261105/preview35-release/{build-config-tests,pair35-contract-tests}.txt`.
+Version synchronization, project-state continuity and diff whitespace checks pass.
+NEXT: push the scoped release-pair follow-up, observe its new exact-head CI, then obtain the
+exact-main .35 candidate and qualify it before publication. Do not rerun the old
+failed attempt or dispatch duplicates. Published .34 and its assets
+must remain unchanged. Main CI42021590721/1 belongs to b0e1724e5
+(still version .34); it is not the .35 candidate. Its audit42021591004/1 passed.
 Existing .31 restoration is accepted; .34 workstation update
 and browser/media/Quit qualification remain open. No browser qualification is
 claimed by the recovery report. Accepted public .33 -> .34 commit/rollback below
@@ -80,11 +106,12 @@ remain evidence for that tested pair, not this failed .31 -> .34 transition.
 Preserve external Geph, learning, backups and all earlier evidence.
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/stale-pf-receipt-recovery` is based on main
-`67ceb1c0001fbd8efd369440c73b378cb282a514` (docs-only PR463 merged;
-reviewed tree70ceaf3f6af8b77896764d2614c7afd1b757d330 and17 green/skipped checks).
-All14 observer helpers and workflow remain byte-identical to0a451afe6.
-Qualified product source remains `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,
+Branch `codex/preview35-stale-pf-recovery` is based on main
+`b0e1724e5675cd6613b4f563ab45bbf8af0413f9` (PR464 merged after verified
+final source and packaged lifecycle checks).
+The accepted .33 -> .34 public proof below binds14 observer helpers and workflow
+to0a451afe6; those historical pins do not qualify the new candidate.
+Published .34 qualified product source is `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,
 tree79dfb9c10f9196c1b7520ba6f76bd65d0604aeb8; never substitute a new CI build.
 Historical Developer checkout is different; preserve user changes.
 ROOT=`output/continuation-20261101/preview34-release/post-stall-main-a0a60e080`.
