@@ -1,10 +1,10 @@
 # Current Project State
 
-## Current continuation — 2026-11-05, .35 Safari gate open; observer expanded
+## Current continuation — 2026-11-05, .35 observer merged; main Stop-Quit gate failed
 
 Qualified main/candidate baseline: `82b3c2a77b22657524c28678422342799fdf1745`.
-The continuation branch adds the focused control-observation correction below;
-its source is not covered by the baseline's candidate acceptance.
+Main is now adf6521c4bcb853e2beb5aef6a1eb9ea1cb2876b after the reviewed
+observer correction below; the old candidate acceptance does not cover it.
 PR465 is merged. Exact-main CI42027514369/1 and audit42027514435/1 are
 SUCCESS, including all12 required common consumers. E/main-ci/watcher-receipt.json
 SHAbe23f249aefe414e3d1dc60e5ffe698556be1fd669475313298dfeb71d83bacb binds
@@ -47,15 +47,55 @@ No long soak, success attestations or publication; do not retry blindly. This is
 today's first combined account-backed dispatch. Check complete live budget before
 any justified fresh run; never rerun R.
 
-NEXT: Publish the expanded observer in the existing draft PR466 and verify its
-fresh CI before review/merge. It now retains navigation body sizes, bounded
-script/stylesheet evidence and the last completed observation when the terminal
-observation times out. Focused105 Python tests, eight JS VM cases and three real
-Chromium loopback paths passed. The unchanged99-test/PR baseline is reused;
-only the two affected followups were rerun after review. The owned fixture browser
-and server exited. E/safari-diagnosis/transport-diagnostics-verification.json
-binds source/test hashes and output/playwright/transport-20261105/result.json.
-The `.35` Safari failure itself remains unexplained, not fixed by this telemetry.
+PR466 merged as adf6521c4bcb853e2beb5aef6a1eb9ea1cb2876b after
+exact-head CI42077737545/1 and audit42077737899/1 passed at6885e0b92.
+All8 required PR jobs and all4 audit jobs passed;5 expected PR skips matched.
+E/safari-diagnosis/pr466-transport/verification.json
+SHA784b7893739d5f4a93f7957f6b09e66255bff754ac2f732a9aac71e220376114
+binds their exact terminal metadata. merge-verification.json confirms the fetched
+main tree equals the reviewed source tree. The merge introduced no production routing change. The current physical branch
+is codex/native-authorization-evidence, based on that merged SHA.
+The prior PR observer79672 exited0 and must not be restarted.
+
+Exact-main CI42080793003/1 FAILED; audit42080793122/1 SUCCESS.
+The failed packaged-app-lifecycle-heavy step was Native Stop-and-Quit:
+`native authorization observation unavailable; stage=script code=None`.
+Its required aggregate also failed. The archive was produced, but this is NOT
+candidate acceptance. E/main-observer-ci/lifecycle-failure.log and annotations
+retain the failure. Observer39922 exited1 after terminal metadata verification;
+do not restart it or rerun CI. Its watcher-receipt.json SHA
+e415b947c69fa4421ef3ff6ab77e3dccadb7840aa58e6d1a99ba56687e4fa94c binds the failure.
+Artifact13440838699 was authenticated against SHA
+5de4bbc10176dd80f56d513a4c450fe9272ce16c2ecb48c215d596559e71cc79.
+E/main-observer-ci/failed-ui-verification.json SHA
+39cf47e3e19e07bcef501d3059e141a437bb1a9f42772e9f3558d35140030992
+binds the report: native_cancel passed; root_lock_failure submitted once,
+then176 pending observations; cleanup_errors=[]; final snapshot is post-unwind.
+
+NEXT: Publish/review the focused native-authorization-evidence patch and observe
+its fresh PR CI. It preserves safe timeout/deadline classification and the first
+snapshot/primary error before fixture cleanup, and validates temporary admin
+credentials once before UI use. Focused50 tests and8 review followups passed;
+independent review found no new blocker. E/main-observer-ci/auth-review/ contains
+the deterministic old-behavior reproduction and review. Runtime routing, UI actions,
+one-submit and90s acceptance deadline are unchanged. The cause of the native
+window remaining pending is still unknown; this is not release acceptance.
+No protected readiness/account-backed dispatch or workstation retry occurred.
+
+E/observer-adf6521c4/producer-receipt.json records ONLY successful assembly:
+artifact13440253770 / ZIP56e6a793e2b5c3a43529676486ae5a9be126d1aa9883b3d98fa6fc4e1f5de648;
+manifest21d8e3ee147e72c83bf561993251bc6892caaff63ffbde41a2f1703a5b3a910f,
+1988bytes,6 payloads. It does not admit a release or a protected readiness run.
+No local app archive was downloaded and the restored .31 remains unchanged.
+
+The observer retains navigation body sizes, bounded script/stylesheet evidence
+and the last completed observation when a later observation times out. Focused105
+Python tests, eight JS VM cases and three real Chromium loopback paths passed.
+The unchanged99-test/PR baseline is reused; only the two affected followups were
+rerun after review. The owned fixture browser and server exited.
+E/safari-diagnosis/transport-diagnostics-verification.json binds source/test hashes
+and output/playwright/transport-20261105/result.json. The `.35` Safari failure
+itself remains unexplained, not fixed by this telemetry.
 
 Protected readiness currently requires its observer, candidate and workflow at
 the same exact main SHA. Thus the next justified live observation requires this
@@ -112,7 +152,7 @@ local installation was started. Existing candidate acceptance applies only to82b
 The workstation independently downloaded full HTML and all14 early body CSS
 files (each under2s), followed by the one Safari observation above. These are
 another network/version observation, not `.35` reproduction/acceptance.
-G/P/R are terminal; no active observer.
+The old candidate's G/P/R are terminal; the current main observer is listed above.
 The GitHub connector lacks workflow dispatch/listing support; normal gh is used.
 No local app archive downloads, workstation installation retry, service mutation
 or external Geph change is authorized by the .31 restoration approval.
