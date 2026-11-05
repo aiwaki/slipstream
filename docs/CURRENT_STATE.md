@@ -77,11 +77,21 @@ PR464 merged as `b0e1724e5675cd6613b4f563ab45bbf8af0413f9`; fetched main has
 identical production/test bytes. Graph tools were unavailable; review used
 bounded direct source reads. Do not rerun these accepted tests.
 
-Preparing .35 from that merge changes only version metadata and release/checkpoint
-documentation; dependencies, routing and the verified stop fix are unchanged.
-NEXT: submit the .35 preparation PR and observe its required checks, then obtain
-the exact-main .35 candidate and qualify it before publication. Published .34
-and its assets must remain unchanged. Main CI42021590721/1 belongs to b0e1724e5
+Preparing .35 from that merge changes version metadata, the publisher's exact
+sequence pin and release/checkpoint documentation; dependencies, routing and
+the verified stop fix are unchanged. PR465 is open. Initial source
+`b6d1158eef781d4cbf48400e6cd72941aac562b2` passed audit42022986190/1, but
+CI42022986292/1 product-checks failed one of971 metadata tests: build-app.yml
+still admitted preview sequence34. The complete job127230184492 log is retained
+under `output/continuation-20261105/preview35-release/pr465-product-checks-failed.log`.
+The follow-up sets the publisher's default and strict guard to35. Its existing
+shell-execution test derives current/neighbor/mismatched cases from VERSION;
+57 build-config tests now pass, including those acceptance/refusal cases.
+Version synchronization, project-state continuity and diff whitespace checks pass.
+NEXT: push the scoped follow-up, observe its new exact-head CI, then obtain the
+exact-main .35 candidate and qualify it before publication. Do not rerun the old
+failed attempt or dispatch duplicates. Published .34 and its assets
+must remain unchanged. Main CI42021590721/1 belongs to b0e1724e5
 (still version .34); it is not the .35 candidate. Its audit42021591004/1 passed.
 Existing .31 restoration is accepted; .34 workstation update
 and browser/media/Quit qualification remain open. No browser qualification is

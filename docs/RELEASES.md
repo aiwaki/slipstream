@@ -15,8 +15,11 @@ removed its record and preserved the global PF snapshot. They started with PF
 disabled; enabled-PF preservation is covered by effect-free tests. These results
 qualify the fix, not a .35 release candidate or a workstation update.
 
-The version preparation keeps Geph 0.4.3-r4 and all dependencies and routing
-unchanged. Build and qualify one exact-main .35 candidate before publication;
+The version preparation synchronizes the package metadata and publisher's strict
+preview-sequence guard. Its shell test checks the current version plus neighboring,
+mismatched and malformed inputs; all57 build-configuration tests passed.
+Geph 0.4.3-r4, dependencies and routing remain unchanged. Build and qualify one
+exact-main .35 candidate before publication;
 do not relabel or replace published .34 assets. The restored workstation remains
 on .31. A new workstation update requires separate authorization after the failed
 .31 -> .34 transaction; the approved restoration is complete.
