@@ -179,6 +179,21 @@ def remove_token(path):
         pass
 
 
+def no_enable_references(runner):
+    """Require an explicit empty kernel reference list, even if PF is enabled."""
+    result = runner("pfctl", "-s", "References")
+    allowed_warnings = {
+        "No ALTQ support in kernel",
+        "ALTQ related functions disabled",
+    }
+    return (
+        result.returncode == 0
+        and result.stdout.strip() == "No pf starter references held"
+        and all(line.strip() in allowed_warnings
+                for line in result.stderr.splitlines() if line.strip())
+    )
+
+
 def enabled_state(runner):
     """Return PF's enabled state, or None when it cannot be inspected."""
     info = runner("pfctl", "-s", "info")

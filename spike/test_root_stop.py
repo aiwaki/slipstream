@@ -33,7 +33,8 @@ def stopped_runtime(monkeypatch, tmp_path):
     state = SimpleNamespace(loaded=True, alive=True, disabled=False, calls=[], kill=[],
                             ps_error=False, lsof_error=False, bootout_error=False,
                             disable_error=False, pf_error=False, disable_readback=True,
-                            final_job_unknown=False, survive=False, listener=True)
+                            final_job_unknown=False, survive=False, listener=True,
+                            release_token=tproxy._pf_release_enable_token)
     command = '/fixture/slipstreamd --port 1080'
     monkeypatch.setattr(tproxy, '_daemon_status_record', lambda: {'pid': 4242})
     monkeypatch.setattr(tproxy, '_installed_daemon_command_owned', lambda c: c == command)
@@ -95,6 +96,70 @@ def stopped_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, '_wait_for_listener_state', lambda *_, **__: not state.alive)
     monkeypatch.setattr(tproxy, '_remove_install_runtime_artifacts', lambda: pytest.fail('stop removed runtime'))
     return state, paths
+
+
+@pytest.mark.parametrize('operation', ['stop', 'update-cleanup'])
+@pytest.mark.parametrize('observation,interference,expected_clean', [
+    (result(stdout='No pf starter references held\n', stderr='No ALTQ support in kernel\nALTQ related functions disabled\n'), None, True),
+    (result(stdout='No pf starter references held\n'), 'replace-token', False),
+    (result(1, stdout='No pf starter references held\n', stderr='Permission denied'), None, False),
+    (result(stdout=''), None, False),
+    (result(stdout='No pf starter references held\ntruncated output'), None, False),
+    (result(stdout='No pf starter references held\n', stderr='unexpected diagnostic'), None, False),
+    (result(stdout='PID 99 external-client token 987654'), None, False),
+    (result(stdout='No pf starter references held\n'), 'job-reappeared', False),
+    (result(stdout='No pf starter references held\n'), 'census-unknown', False),
+    (result(stdout='No pf starter references held\n'), 'listener-reappeared', False),
+])
+def test_stop_handles_stale_pf_reference_without_disabling_pf(
+    stopped_runtime, monkeypatch, tmp_path, observation, interference, expected_clean,
+    operation,
+):
+    state, paths = stopped_runtime
+    token_file = tmp_path / 'pf.token'
+    token_file.write_text('123456\n')
+    monkeypatch.setattr(tproxy, 'PF_TOKEN_PATH', str(token_file))
+    monkeypatch.setattr(tproxy, '_pf_enable_token', None)
+    monkeypatch.setattr(tproxy, '_pf_release_enable_token', state.release_token)
+    original_run = tproxy._run
+    pf_calls = []
+
+    def run(*args):
+        if args[0] != 'pfctl':
+            return original_run(*args)
+        pf_calls.append(args)
+        assert not state.loaded and not state.alive
+        if args == ('pfctl', '-X', '123456'):
+            if interference == 'job-reappeared':
+                state.loaded = True
+            elif interference == 'census-unknown':
+                state.ps_error = True
+            elif interference == 'listener-reappeared':
+                monkeypatch.setattr(tproxy, '_stop_listener_pids', lambda _: [777])
+            return result(1, stderr='DIOCSTOPREF: No such file or directory')
+        assert args == ('pfctl', '-s', 'References')
+        if interference == 'replace-token':
+            token_file.write_text('987654\n')
+        return observation
+
+    monkeypatch.setattr(tproxy, '_run', run)
+    runtime_before = {p.name: p.read_bytes() for p in paths['INSTALL_DIR'].iterdir()}
+    clean = (tproxy.do_stop() if operation == 'stop' else
+             tproxy._disable_and_cleanup_install(remove_runtime=False))
+    assert clean is expected_clean
+    expected_calls = [('pfctl', '-X', '123456')]
+    if interference not in {'job-reappeared', 'census-unknown', 'listener-reappeared'}:
+        expected_calls.append(('pfctl', '-s', 'References'))
+    assert pf_calls == expected_calls
+    assert {p.name: p.read_bytes() for p in paths['INSTALL_DIR'].iterdir()} == runtime_before
+    if expected_clean:
+        assert not token_file.exists()
+        assert tproxy._pf_enable_token is None
+        assert not paths['STATUS_PATH'].exists()
+    else:
+        assert token_file.read_text().strip() == ('987654' if interference == 'replace-token' else '123456')
+        assert tproxy._pf_enable_token == '123456'
+        assert paths['STATUS_PATH'].exists()
 
 
 def test_stop_preserves_installed_runtime_settings_and_learning(stopped_runtime):

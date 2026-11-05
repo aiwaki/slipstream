@@ -1,5 +1,30 @@
 # Decisions
 
+### 2026-11-05: retire a proven dead PF receipt only after installed writers stop
+
+Local source change, pending review and disposable qualification. The installed
+stop/update cleanup path may retire its persisted PF token after `pfctl -X`
+fails only when the owned job is absent and disabled, the owned process census
+and listener set are empty, and a successful `pfctl -s References` explicitly
+reports no starter references. The exact receipt must still match the failed
+release token before removal. This is a narrow exception to retaining every
+failed-release receipt: the reference is proven absent, even if PF remains
+enabled. The global enabled state and external rules are never changed.
+
+Missing, failed, malformed or nonempty reference observations, unfamiliar
+diagnostics, a changed token value, or uncertain quiescence preserve
+the receipt and report incomplete cleanup. Active-daemon acquisition/teardown
+continues to use its existing rules. The installer lock and drained daemon
+exclude a concurrent owned acquisition in this cleanup path. No workstation
+reinstall or new update is authorized merely by this source change.
+
+Both disposable installed-lifecycle lanes exercise a synthetic dead receipt
+through the normal source/frozen `--stop` command. The kernel must first reject
+that reference; successful cleanup must preserve the complete global PF snapshot.
+The fixture requires an absent owned job and an empty reference list, acquires no
+reference and never globally enables/disables PF. Its native result is required
+in addition to effect-free refusal and race tests.
+
 ### 2026-11-01: reject incomplete DNS input and finish accepted IPC cleanup
 
 An app-owned DoH response must satisfy its HTTP framing before its DNS answer

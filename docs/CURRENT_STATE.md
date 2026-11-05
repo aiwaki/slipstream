@@ -1,11 +1,76 @@
 # Current Project State
 
-## Current continuation — 2026-11-04, public rollback blocked by hosted Mac capacity
+## Current continuation — 2026-11-05, .31 restored after the aborted .34 update
+
+The user explicitly approved completing restoration of .31. The scoped repair
+ran ONCE, with administrator authorization, at 09:19:37–09:20:41 UTC. Under the
+existing installer lock it rechecked the exact abort, old daemon bytes, absent
+disabled service, empty listener/process census, empty PF references and unchanged
+receipt; it saved the stale receipt privately and removed only that record.
+The existing abort then restored the old service and app. No new .34 installation
+was attempted; settings, learning and external Geph were not changed.
+
+`ROOT/public-update34/workstation-check-20261105/recovery-acceptance.json` records
+RESTORED_PREVIEW31 at 09:28:35 UTC, all 16 checks true. Installed app and live daemon
+are .31 with the expected old hashes; launchd PID91087 matches fresh active
+StatusV2, the abort receipt and attestation. Heartbeat advanced 37 -> 272 on that
+PID; status age was 0.92s. App PID91171 is running. Root operation
+`ca941b66fa411f74ed882a5f4468ab6a` is terminal aborted, writer_quiescent=true,
+error=null. Root worker and user watchdog are registered but exited successfully
+(exit0), with no running process. App journal and transaction stage/backup slots
+were cleaned by the existing recovery; the saved .31 ZIP and verified .34 archive
+remain. External Geph has exactly the same process identities as before repair.
+The private retired receipt is retained inside this operation's private directory.
+`recovery-apply-result.json`, `recovery-observer.jsonl` and
+`recovery-final-local-state.json` are bound by the acceptance report's hashes.
+
+Failure history: the ordinary .31 -> .34 menu attempt stopped the old daemon,
+then entered repeated abort/recovery_incomplete before a runtime snapshot or app
+replacement. `read-only-verification.json` and `root-private-diagnostic.json`
+retain that state. `owned-pf-reference.json` proved successful
+`pfctl -s References` returned `No pf starter references held` while the owned
+receipt persisted and PF remained enabled. Releasing that nonexistent reference
+prevented cleanup. What invalidated it is unknown. .31 source3eb32bd has identical
+relevant original cleanup/update functions. The worker also discards the original
+exception and sends stderr to /dev/null; that observability defect remains open.
+
+Local source fix in pf_adapter.py/tproxy.py retires this stale receipt only in
+the installed-stop path, after strict job/disabled/process/listener checks and
+an explicit successful empty-reference response; changed token, foreign/live
+references or uncertain evidence retain the record and fail cleanup. It never
+disables PF or changes external rules. The failure was reproduced before the fix
+(`stale-pf-baseline-test.txt`). Final focused verification:128 stop/adapter tests
+and160 updater/PF regressions passed; no unchanged full suite/CI was repeated.
+This source patch is NOT merged, packaged, published or installed. The installed
+old worker cannot acquire the fix merely by downloading a new app.
+
+The executed guard `workstation-check-20261105/recover_stale_receipt.py` has SHA
+b74ea69d47a2d8eaa970177b450b7dc6709936e0906a93910834e790e0a521c4 and passed
+8 isolated refusal/success fixtures. Do NOT execute it again, re-arm the update,
+or delete transaction state. This approval covered restoration only.
+
+Native coverage is now wired into both installed-lifecycle targets before any
+fixture PF reference is acquired. On a disposable runner, after absent-job and
+empty-reference checks, a real `pfctl -X` must reject the synthetic dead receipt.
+The normal source/frozen `--stop` CLI must then retire it and preserve the full
+global PF snapshot. Replacement records are retained on fixture failure.
+99 lifecycle/anchor harness tests and64 subtests passed locally; these are
+effect-free tests, not the pending native result. The earlier128 +160 production
+test results are reused because those production files have not changed again.
+Graph tools were unavailable; review used bounded direct source reads.
+
+NEXT: submit the scoped fix for native CI and review before including it in
+a future package. Existing .31 restoration is accepted; .34 workstation update
+and browser/media/Quit qualification remain open. No browser qualification is
+claimed by the recovery report. Accepted public .33 -> .34 commit/rollback below
+remain evidence for that tested pair, not this failed .31 -> .34 transition.
+Preserve external Geph, learning, backups and all earlier evidence.
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Documentation branch `codex/public-preview34-evidence` is based on observer/main
-`0a451afe62691180d845443d01176a4220ca9090` (PR462 merged; tree equals
-reviewed470fce8585db9e285de8e5cdb18fa22e3d5f77b8).
+Branch `codex/stale-pf-receipt-recovery` is based on main
+`67ceb1c0001fbd8efd369440c73b378cb282a514` (docs-only PR463 merged;
+reviewed tree70ceaf3f6af8b77896764d2614c7afd1b757d330 and17 green/skipped checks).
+All14 observer helpers and workflow remain byte-identical to0a451afe6.
 Qualified product source remains `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,
 tree79dfb9c10f9196c1b7520ba6f76bd65d0604aeb8; never substitute a new CI build.
 Historical Developer checkout is different; preserve user changes.
@@ -41,7 +106,7 @@ retains12assets and is now titled `Slipstream 0.1.9-preview.33 (архивная
 ROOT/publication/publication-verification.json SHA
 0476d0a6dea80b540d4d973173a35d87a57bdc4b8088a72dde28f61bc0d9d6c9
 binds run/jobs/release/tag/manifests/previous metadata. Do NOT redispatch publisher.
-All workflow/observer processes are terminal; no pending live qualification.
+Earlier workflow/observer processes are terminal; new rollback41896398249 is pending below.
 
 PR462 MERGED after all17 check contexts completed (expected Windows skip),
 CI41816640607/1 and audit41816637269/1 SUCCESS; review threads empty.
@@ -99,11 +164,41 @@ Observer20651 is terminal. Collector8130 correctly refused missing successful
 upload; no ZIP or success context was created. API metadata and annotations are
 retained in ROOT/public-update34/public-rollback-after-reset/;
 failure-diagnosis.json binds their hashes and exact source/run/attempt/job.
-NEXT: do not blind-retry the same external capacity failure or repeat accepted
-commit. Retain public rollback as unverified pending a later changed external
-condition. Documentation now records accepted commit and all refused attempts in
-docs/RELEASES.md; publish/review the docs-only evidence PR before later runtime work. User was asked asynchronously for a later short workstation window;
-no dependent Mac transaction is authorized by lack of reply and none started.
+Public rollback41896398249/1 SUCCESS and root/independently ACCEPTED.
+Observer67ceb1c0, producta0a60e080 unchanged. Actual successor stopped/killed
+before ACK and deadlines; durable aborted decision, exact .33 app and daemon
+restored, heartbeat6->7, watchdog exit0, free lock/exact5paths absent, cleanup[].
+Initial/final12asset inventories and public tags unchanged; no feed override.
+Artifact13355762694,131469bytes, ZIP SHA223d1fe6920534967c77f00ab4103a424108ef485506bc3701cd01a9b1bd6ca0.
+Evidence ROOT/public-update34/public-rollback-capacity-recovered/:
+verification SHA4b84492ba0759825b7271a4ae1bd4f5b4aba7915588a644bb0bc90719e1177bd;
+independent-review SHAc1eefae7ed94ab782b02459983306fbbd82e0bd53ab557dfaad05d4276013da4;
+root-acceptance.json binds these to authenticated source/run/report.
+Separate offline-verifier-main67ceb changes only expected observer SHA;
+pins SHAa571ff1592f82ff10fea1d120d2c0e7c570818af624cb57424680b4679ea04a8;
+checker unchanged17398b90637109a90897517ae5b5ead0c49c5d5801c342b3e33e41ba98846a19.
+All observers terminal; accepted commit/G/P/R/publication and failures retained.
+Do not rerun any of these gates. Heartbeat slipstream-34 has delivered its result;
+the one-shot automation was deleted after verification. No new workflow dispatch needed.
+Previous handoff: requested ordinary Check Updates -> Install .34/admin action;
+the user has now attempted it, with the failed recovery recorded above.
+Window authorized today2026-11-05 Asia/Yekaterinburg; public rollback prerequisite met.
+Local baseline at19:44UTC: .31 app stopped, owned service absent; external Geph active.
+Durable .31 ZIP backup verified plus signed official .34 archive/sig downloaded;
+verify_updater_artifacts.py and GitHub attestation PASS, canonical staged app-tree
+8806356c96cdeb4ea309760e7bc654001fa561bf1d3ef37270bd38c545892d98 matches manifest.
+CUA launched .31 PID50553 but app/SystemUIServer AX timed out -10005; Finder works.
+At19:53UTC pre-replacement guard found owned .31 service running PID50967 and
+owned Geph51120. Cause of activation not yet attributed; external Geph PIDs
+574/594/738/56311 remained present. No signal, app rename or manual replacement
+occurred: guard refused first. On disk remains .31. Do not rerun manual swap.
+ROOT/public-update34/workstation-20261105 retains baseline, backup, signature/
+attestation/staged proofs, installation preparation and baseline-change-refusal.json.
+Existing root runtime /usr/local/slipstream is root-only, retained unchanged by
+our file operations; no claim of full runtime backup. User now asked for ordinary
+public menu update because native tool cannot click it. The subsequent check
+above found failed recovery; no blind reinstall/re-arm. No CI harness on Mac.
+Workstation .34 installation, ordinary Quit and sustained media/voice remain open.
 Independent commit review saved public-commit-after-reset/independent-review.json
 SHA58ae7badb6dc64bab4c8cb9da11dda098cf7906d0677c6b0201b8d2193213e0b.
 The frozen rollback verifier already binds the root deadline to the prepare
@@ -112,7 +207,7 @@ before that deadline and the successor deadline. An explicit comparison with
 fault_stopped_window.root.deadline_unix would be redundant, not a missing gate.
 The first independent review overstated this point; no verifier change or
 qualification rerun is required.
-One-off heartbeat slipstream-34 completed its purpose and was deleted successfully.
+The earlier commit heartbeat was deleted; the separate rollback follow-up was also deleted after accepted rollback.
 No user Mac apps/services/network/account changes or local app downloads.
 Read-only workstation snapshot in public-update34/workstation-readonly-snapshot.json:
 /Applications/Slipstream.app reports preview.31; launchctl print of owned system
@@ -136,7 +231,7 @@ not serialized. Loaded exit0 branch remains strictly checked. Do not weaken UI,
 Cancel/ACK/kill/deadline/visibility/final-public or cleanup evidence.
 Accept real public commit BEFORE dispatching separate pre-ACK rollback.
 
-Git post-commit session68613 ended0 but Entire PID25510 ended signal9; causeunknown,
+Git post-commit sessions68613,27706,28226 ended0, but Entire PIDs25510,43091,43727 ended signal9; cause unknown,
 Entire history checkpoint success unproven. Source commit intact; don't restart hook.
 Pin OLD .33 CI41302269258/1/source9eccd1ddf691aef5f76d493103513f2fada2fd5c,
 manifest e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0;
