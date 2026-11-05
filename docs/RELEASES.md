@@ -1,5 +1,26 @@
 # Release Policy
 
+## Preview .35 in preparation — 2026-11-05
+
+The next preview includes [PR #464](https://github.com/aiwaki/slipstream/pull/464).
+When the kernel has already lost Slipstream's saved PF reference, ordinary Stop
+and update recovery can now retire that obsolete record after proving that all
+owned writers stopped, the installer lock is held and no PF references remain.
+Unknown evidence, another live reference or a changed record still prevents
+cleanup. The repair does not disable PF or change another application's rules.
+
+Final PR source f85d5c39 passed CI42017506255/1 and audit42017505491/1. The real
+source and packaged-app Stop tests both rejected the synthetic invalid token,
+removed its record and preserved the global PF snapshot. They started with PF
+disabled; enabled-PF preservation is covered by effect-free tests. These results
+qualify the fix, not a .35 release candidate or a workstation update.
+
+The version preparation keeps Geph 0.4.3-r4 and all dependencies and routing
+unchanged. Build and qualify one exact-main .35 candidate before publication;
+do not relabel or replace published .34 assets. The restored workstation remains
+on .31. A new workstation update requires separate authorization after the failed
+.31 -> .34 transaction; the approved restoration is complete.
+
 ## Workstation update failure and .31 restoration — 2026-11-05
 
 The ordinary `.31 -> .34` menu attempt on the user's Mac did not complete.
@@ -25,7 +46,8 @@ tests and160 updater/PF regressions. It is not in published .34 or installed .31
 The first PR464 revision also passed native source and packaged-app lifecycle
 checks in CI42014542528/1, including real invalid-token rejection, ordinary stop
 and an unchanged PF snapshot. A follow-up explicitly excludes unlocked foreground
-cleanup; its130 stop/adapter and138 updater/lock tests pass, with native CI pending.
+cleanup; its130 stop/adapter and138 updater/lock tests pass. Final source and
+packaged native reports passed in CI42017506255/1, and PR464 is merged.
 The separate one-operation receipt repair passed8 isolated fixtures. After the
 user explicitly approved .31 restoration, it ran once with administrator
 authorization, saved the proven stale token privately, and removed only that
