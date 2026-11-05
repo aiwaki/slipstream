@@ -1,10 +1,10 @@
 # Current Project State
 
-## Current continuation — 2026-11-05, .35 observer merged; main Stop-Quit gate failed
+## Current continuation — 2026-11-06, exact-main passed; readiness failed at Chrome
 
 Qualified main/candidate baseline: `82b3c2a77b22657524c28678422342799fdf1745`.
-Main is now adf6521c4bcb853e2beb5aef6a1eb9ea1cb2876b after the reviewed
-observer correction below; the old candidate acceptance does not cover it.
+Main is now `7a827fcbd8789b45d2ff4a280bd93b0f49e1df7c` after PR467.
+The old candidate acceptance below does not cover the new source.
 PR465 is merged. Exact-main CI42027514369/1 and audit42027514435/1 are
 SUCCESS, including all12 required common consumers. E/main-ci/watcher-receipt.json
 SHAbe23f249aefe414e3d1dc60e5ffe698556be1fd669475313298dfeb71d83bacb binds
@@ -54,7 +54,7 @@ E/safari-diagnosis/pr466-transport/verification.json
 SHA784b7893739d5f4a93f7957f6b09e66255bff754ac2f732a9aac71e220376114
 binds their exact terminal metadata. merge-verification.json confirms the fetched
 main tree equals the reviewed source tree. The merge introduced no production routing change. The current physical branch
-is codex/native-authorization-evidence, based on that merged SHA.
+is codex/preview35-native-qualified, based on PR467 merged main below.
 The prior PR observer79672 exited0 and must not be restarted.
 
 Exact-main CI42080793003/1 FAILED; audit42080793122/1 SUCCESS.
@@ -72,15 +72,55 @@ E/main-observer-ci/failed-ui-verification.json SHA
 binds the report: native_cancel passed; root_lock_failure submitted once,
 then176 pending observations; cleanup_errors=[]; final snapshot is post-unwind.
 
-NEXT: Publish/review the focused native-authorization-evidence patch and observe
-its fresh PR CI. It preserves safe timeout/deadline classification and the first
-snapshot/primary error before fixture cleanup, and validates temporary admin
-credentials once before UI use. Focused50 tests and8 review followups passed;
-independent review found no new blocker. E/main-observer-ci/auth-review/ contains
-the deterministic old-behavior reproduction and review. Runtime routing, UI actions,
-one-submit and90s acceptance deadline are unchanged. The cause of the native
-window remaining pending is still unknown; this is not release acceptance.
-No protected readiness/account-backed dispatch or workstation retry occurred.
+PR467 merged as `7a827fcbd8789b45d2ff4a280bd93b0f49e1df7c` after exact-head
+CI42088386134/1 and audit42088386229/1 passed at2c2f4facd. All8 required PR
+jobs and4 audit jobs passed;5 expected skips matched. The authenticated native
+report has7 passing cases,4 confirmed/completed authorizations, verified fixture
+credentials and no cleanup errors. Tested PR merge31c6c3d6e, reviewed head and
+fetched main have the same tree. E/native-auth-pr467/verification.json SHA
+952d137a63b0ead1ab79e438ab9288231a2e9ccd590afe52b7aba3f33394ee42 and
+merge-verification.json bind the result. Observer83540 finished; do not restart.
+
+Exact-main CI42092036501/1 and audit42092036658/1 are SUCCESS at7a827fcbd.
+All12 required common consumers passed. E/main-native-evidence-ci/watcher-receipt.json
+SHA734a43c123b72276921c561f0531f2c547c5eca20ab414c26523ecf263f827b4 binds
+terminal metadata; observer31110 exited0. native-proof.json independently binds
+the exact-main Stop-Quit report:7 cases,4 completed native submissions, verified
+temporary credentials, no cleanup errors. E/observer-7a827fcbd/producer-receipt.json
+binds artifact13447090845 / ZIP383ebb94504768755963cfa426f6346b27705a07ce5ff92cefc18a543c033087,
+manifest024bdd101028be08fb0021663c07987195be1284b3a2c7f2fe528792d3938bd8,
+1988bytes,6 payload artifacts. No app ZIP was downloaded locally.
+
+R42095886020/1 FAILED at7a827fcbd, candidateCI42092036501. Safari xpersonatoy.com
+passed in8036ms; Chrome rejected navigation in188ms with ERR_CONNECTION_CLOSED.
+The other3 sites passed both browsers. Direct control returned a usable HTTP200
+prefix; owned-Geph control returned curl7/connect/status0. Its process/listener
+state at that instant was not recorded, so a restart race is not a proven cause.
+E/readiness-native-r/failed-run-verification.json SHA
+0be485318034e12032b6d77e025b4ab36e8acb3eef94f970c62cf3ffb76019a5 binds run/job,
+successful upload, artifact13447642214 and all4 small report files. ZIP digest
+faf39238f2870d3fab475de8f046f41bca0ecf6679094ea6bf3a49378d08ad60. No soak or
+success attestation ran. Observer18508 exited1; do not restart it or rerun R.
+This was UTC2026-11-05 account-backed position2; fresh complete budget and source
+checks are required for any justified future dispatch, not an automatic repeat.
+
+NEXT: review and land codex/live-site-runtime-evidence. The live-site sidecar now
+captures bounded passive daemon/owned-listener evidence at a browser failure
+before fixture cleanup, and after its one owned control.106 focused tests passed,
+then9 followups; logs E/readiness-native-r/runtime-{focused,followup}.log. The
+existing immediate close of a new owned-route request during recovery is deliberate
+under DECISIONS.md; changing it without attribution would not establish this
+failure's cause. No production routing patch, new dispatch or workstation retry.
+
+The patch preserves safe timeout/deadline classification and the first snapshot/
+primary error before fixture cleanup, and validates temporary admin credentials
+once before UI use. Focused50 tests and8 review followups passed; independent
+review found no new blocker. E/main-observer-ci/auth-review/verification.json
+SHAc351c442cc43d52c34f299c1981721655ec0a379c500e52fc7c9410607cc07f2
+binds source hashes and checks. Runtime routing, UI actions, one-submit and90s
+acceptance deadline are unchanged. The historical pending-prompt cause is still
+unknown; the successful PR is not new-main candidate or Safari readiness acceptance.
+The justified fresh readiness dispatch failed as recorded above; no workstation retry occurred.
 
 E/observer-adf6521c4/producer-receipt.json records ONLY successful assembly:
 artifact13440253770 / ZIP56e6a793e2b5c3a43529676486ae5a9be126d1aa9883b3d98fa6fc4e1f5de648;
@@ -97,15 +137,12 @@ E/safari-diagnosis/transport-diagnostics-verification.json binds source/test has
 and output/playwright/transport-20261105/result.json. The `.35` Safari failure
 itself remains unexplained, not fixed by this telemetry.
 
-Protected readiness currently requires its observer, candidate and workflow at
-the same exact main SHA. Thus the next justified live observation requires this
-reviewed observer on main and a new canonical candidate; do not detach its source
-binding or reinterpret old R. After fresh exact-main CI, check the daily account
-budget and existing runs before one new R. Run R before renewing pair-specific
-G/P so another live-site failure does not repeat already-green unchanged runtime
-checks. The accepted82b3c2a77 candidate and its G/P proofs remain historical only;
-they cannot qualify new bytes. No new protected dispatch or local installation
-has been started; no user question is pending.
+Protected readiness requires its observer, candidate and workflow at the same
+exact main SHA. The new R above uses7a827fcbd for all three; do not detach that
+binding or reinterpret old R. R precedes new pair-specific G/P so a repeated
+live-site failure does not repeat already-green runtime checks. The accepted
+82b3c2a77 candidate and its G/P proofs are historical and cannot qualify new bytes.
+No publication or local installation has started; no user question is pending.
 
 Safari27 on restored `.31` loaded xpersonatoy.com in one navigation: decoded
 HTML838287bytes, responseEnd2746ms, DOMContentLoaded6179ms, load12466ms. At5.134s
@@ -146,8 +183,9 @@ still fail. Three new tests reproduced3 failed assertions before the fix;
 captured result also passed. E/safari-diagnosis/control-fix-verification.json
 records it; detailed findings/limits are in docs/ROUTING_RESEARCH.md. The retained
 CI controls did not save their stderr/size, so do not reinterpret that old run.
-Browser failure still blocks release. No new protected run, publication or
-local installation was started. Existing candidate acceptance applies only to82b3c2a77.
+Browser readiness still blocks release; its fresh R is listed above. At this
+historical PR466 stage no protected run/publication/local install had been started.
+Existing candidate acceptance here applies only to82b3c2a77.
 
 The workstation independently downloaded full HTML and all14 early body CSS
 files (each under2s), followed by the one Safari observation above. These are

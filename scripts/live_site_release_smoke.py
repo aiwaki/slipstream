@@ -14,9 +14,11 @@ import tempfile
 import time
 import urllib.parse
 from pathlib import Path
+from typing import Callable
 
 import chromium_semantic_packaged_smoke as chromium
 import live_site_contract
+import live_site_runtime_observation
 import pf_anchor_smoke as pf
 import pf_installed_lifecycle_smoke as lifecycle
 
@@ -75,6 +77,20 @@ InteractiveConfirmation = tuple[float, DocumentActivationId]
 
 class LiveSiteError(RuntimeError):
     pass
+
+
+def _observe_runtime(
+    observation: dict[str, object] | None,
+    observer: Callable[[], dict] | None,
+) -> None:
+    if observation is None or observer is None:
+        return
+    try:
+        observation["runtime"] = observer()
+    except BaseException:
+        # Evidence collection must neither replace the browser failure nor
+        # prevent its finally block from cleaning up the owned fixture.
+        observation["runtime"] = {"state": "unavailable"}
 
 
 def _require_protected_ci() -> None:
@@ -577,6 +593,7 @@ def _browser_evidence_expression(host: str) -> str:
 def _run_chrome(
     host: str, executable: Path, uid: int, gid: int, *,
     failure_observation: dict[str, object] | None = None,
+    runtime_observer: Callable[[], dict] | None = None,
 ) -> dict[str, object]:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -760,6 +777,8 @@ def _run_chrome(
                 )
         finished = time.monotonic()
     finally:
+        if failure is not None or outcome != "usable":
+            _observe_runtime(failure_observation, runtime_observer)
         cleanup_failed = False
         profile_cleanup_safe = not bootstrap_started
         try:
@@ -980,6 +999,7 @@ def _run_safari(
     host: str, driver_url: str, uid: int, *,
     startup_diagnostics: list[dict[str, object]] | None = None,
     failure_observation: dict[str, object] | None = None,
+    runtime_observer: Callable[[], dict] | None = None,
 ) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -1150,6 +1170,8 @@ def _run_safari(
         failure = exc
         finished = time.monotonic()
     finally:
+        if failure is not None or outcome != "usable":
+            _observe_runtime(failure_observation, runtime_observer)
         cleanup: list[BaseException] = []
         if session_id:
             try:
@@ -1210,6 +1232,7 @@ def _run_safari(
 def _control_route(
     host: str, route: str, *,
     failure_observation: dict[str, object] | None = None,
+    runtime_observer: Callable[[], dict] | None = None,
 ) -> str:
     command = [
         "/usr/bin/curl",
@@ -1232,6 +1255,7 @@ def _control_route(
         command.extend(("--socks5-hostname", "127.0.0.1:9954"))
     command.append(f"https://{host}/")
     result = subprocess.run(command, capture_output=True, check=False)
+    _observe_runtime(failure_observation, runtime_observer)
     status_marker = b"\n__SLIPSTREAM_STATUS__:"
     marker_present = status_marker in result.stdout
     body = result.stdout.rsplit(status_marker, 1)[0] if marker_present else b""
@@ -1343,6 +1367,14 @@ def run_gate(
                 failure_observations.append(observation)
                 safari_kwargs["failure_observation"] = observation["safari"]
                 chrome_kwargs["failure_observation"] = observation["chrome"]
+                # Sample only after a failed browser operation, before its
+                # cleanup can erase a disappearing owned listener. Never wait
+                # for readiness or change this one-navigation result.
+                runtime_observer = lambda: live_site_runtime_observation.capture(
+                    uid, lifecycle.STATUS_PATH,
+                )
+                safari_kwargs["runtime_observer"] = runtime_observer
+                chrome_kwargs["runtime_observer"] = runtime_observer
             failure_stage = f"safari:{host}"
             safari = _run_safari(host, driver_url, uid, **safari_kwargs)
             failure_stage = f"chrome:{host}"
@@ -1359,6 +1391,8 @@ def run_gate(
                     if observation is not None:
                         observation["controls"][route] = {}
                         control_kwargs["failure_observation"] = observation["controls"][route]
+                        if route == "owned_geph":
+                            control_kwargs["runtime_observer"] = runtime_observer
                     controls[route] = _control_route(host, route, **control_kwargs)
                 if set(controls.values()) == {"unavailable"}:
                     result = "inconclusive"

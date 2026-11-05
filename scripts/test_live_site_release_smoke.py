@@ -3237,9 +3237,9 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                         "elapsed_ms": 100, "outcome": "terminal_error" if failed else "usable",
                         "reason": reason if failed else "", "route": "slipstream_selected",
                     }
-                def safari(host, driver, uid, *, failure_observation=None):
+                def safari(host, driver, uid, *, failure_observation=None, runtime_observer=None):
                     return browser_result(host, "safari", failure_observation)
-                def chrome(host, executable, uid, gid, *, failure_observation=None):
+                def chrome(host, executable, uid, gid, *, failure_observation=None, runtime_observer=None):
                     return browser_result(host, "chrome", failure_observation)
                 with (
                     mock.patch.object(smoke, "_require_protected_ci"),
@@ -3251,6 +3251,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
                     mock.patch.object(smoke, "_run_safari", side_effect=safari) as safari_call,
                     mock.patch.object(smoke, "_run_chrome", side_effect=chrome) as chrome_call,
+                    mock.patch.object(smoke.live_site_runtime_observation, "capture", return_value={"state": "sampled"}),
                     mock.patch.object(smoke.subprocess, "run", return_value=SimpleNamespace(returncode=35, stdout=b"\n__SLIPSTREAM_STATUS__:000", stderr=b"private-token")) as curl,
                     mock.patch.object(smoke.lifecycle, "_fallback_uninstall", return_value=[]),
                     mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
@@ -3267,7 +3268,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 self.assertEqual(curl.call_count, 4 if inconclusive else 0)
                 self.assertEqual(observations[0]["controls"], {
                     route: {"curl_exit_code": 35, "http_status": 0,
-                            "status_marker_present": True, "category": "tls_handshake"}
+                            "status_marker_present": True, "category": "tls_handshake",
+                            **({"runtime": {"state": "sampled"}} if route == "owned_geph" else {})}
                     for route in ("direct", "owned_geph")
                 } if inconclusive else {})
                 self.assertLess(len(smoke.json.dumps(observations)), 4096)

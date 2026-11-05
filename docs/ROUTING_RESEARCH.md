@@ -1,5 +1,37 @@
 # Routing Research Notes
 
+## 2026-11-06: Chrome connection close without a contemporaneous backend sample
+
+R42095886020/1 at7a827fcbd passed Safari xpersonatoy.com in8036ms, but Chrome
+returned ERR_CONNECTION_CLOSED in188ms. The other3 sites passed both browsers.
+Direct curl received a usable HTTP200 prefix; the owned-Geph control returned
+curl7/connect/status0. The coordinated Geph fixture passed before and after the
+matrix, which does not prove listener availability at the failed navigation.
+The authenticated failure archive and job binding are under
+`output/continuation-20261105/preview35-release/readiness-native-r/`.
+
+Source inspection found no direct user-Geph stop in daemon install/uninstall.
+The held fixture has already crashed its tray. A separate conditional path does
+exist: failed startup payload canaries can recommend a restart; the monitor can
+perform it once active sessions drain. A new owned-route request then closes
+without switching exit, as explicitly required by the October25 decision.
+Neither that restart nor the reason for the missing control connection was
+recorded in this run. Joining recovery or changing admission is not yet justified
+as a causal fix for this failure.
+
+The live-site sidecar now samples existing StatusV2 plus the owned LaunchAgent PID
+and loopback listener after a browser failure, before browser cleanup, and after
+the single owned control. It uses bounded file reads and a shared2s budget for
+read-only launchctl/lsof calls. Status age and sample duration remain explicit;
+the snapshot is not atomic and cannot prove what happened before sampling.
+Only fixed classifications, booleans, timestamps and numbers leave the sampler;
+no raw commands/output, account settings, keychain data or page content are added.
+Missing/failed observations stay unknown; they cannot satisfy release acceptance.
+There are no new network probes, navigation retries, readiness waits or routing
+changes.106 focused tests passed, then9 focused followups passed, covering
+pre-cleanup ordering in both browsers, absent versus unobservable listener,
+successor PID mismatch, redaction, bounded reads and unchanged failure results.
+
 ## 2026-11-05: native authorization loses timeout and pre-cleanup evidence
 
 Main CI42080793003/1 at adf6521c4 failed the Stop-Quit fixture during
