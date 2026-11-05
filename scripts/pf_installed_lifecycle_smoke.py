@@ -454,6 +454,12 @@ def recovery_command(target: LifecycleTarget) -> tuple[str, ...]:
     return (*target.uninstall_command[:-1], "--recover-network")
 
 
+def source_stop_command(target: LifecycleTarget) -> tuple[str, ...]:
+    if not target.install_command or target.install_command[-1] != "--install":
+        raise LifecycleError("target has no exact source stop command")
+    return (*target.install_command[:-1], "--stop")
+
+
 def launchd_job_absent(result: subprocess.CompletedProcess[str]) -> bool:
     if result.returncode == 0:
         return False
@@ -471,6 +477,7 @@ def validate_system_command(
         target.install_command,
         target.uninstall_command,
         recovery_command(target),
+        source_stop_command(target),
         ("/bin/launchctl", "disable", LAUNCHD_LABEL),
         ("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)),
         ("/bin/launchctl", "bootout", LAUNCHD_LABEL),
@@ -2568,6 +2575,58 @@ def _run_active_worker_uninstall(
     }
 
 
+def _verify_stale_pf_receipt_stop(
+    runner: pf.PfctlRunner, system: SystemRunner, target: LifecycleTarget,
+) -> dict:
+    """Exercise real failed token release before acquiring any fixture references.
+
+    An empty kernel reference list proves this synthetic receipt is already dead.
+    No PF enable/disable or reference acquisition is needed to produce the case.
+    The normal --stop CLI takes the production installer lock and runs all native
+    service/process/listener guards. It must leave global PF exactly as found.
+    """
+    _require_disposable_ci()
+    _assert_clean_install_state(runner)
+    absent = system.run(("/bin/launchctl", "print", LAUNCHD_LABEL), check=False)
+    if not launchd_job_absent(absent):
+        raise LifecycleError("stale receipt fixture requires an absent owned job")
+    references = runner.run("-s", "References", check=True)
+    if references.stdout.strip() != "No pf starter references held":
+        raise LifecycleError("stale receipt fixture requires an empty PF reference list")
+    before = pf._pf_snapshot(runner)
+    receipt = b"18446744073709551615\n"
+    rejected = runner.run("-X", receipt.decode("ascii").strip())
+    if rejected.returncode == 0:
+        raise LifecycleError("kernel did not reject the nonexistent PF reference")
+    descriptor = os.open(PF_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    owned = os.fstat(descriptor)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(receipt)
+            handle.flush()
+            os.fsync(handle.fileno())
+        system.run(source_stop_command(target), timeout=60)
+        if os.path.lexists(PF_TOKEN_PATH):
+            raise LifecycleError("normal stop retained the dead PF receipt")
+        _assert_clean_install_state(runner)
+        pf._assert_same_snapshot(before, pf._pf_snapshot(runner))
+        return {
+            "result": "pass", "global_pf": "unchanged",
+            "initial_pf_enabled": before.enabled,
+            "invalid_release_exit_code": rejected.returncode,
+        }
+    finally:
+        # A failed regression must not contaminate the remaining CI cleanup.
+        # Remove only this fixture's unchanged dead record, never a replacement.
+        if os.path.lexists(PF_TOKEN_PATH):
+            current = PF_TOKEN_PATH.lstat()
+            if ((current.st_dev, current.st_ino) != (owned.st_dev, owned.st_ino)
+                    or not stat.S_ISREG(current.st_mode)
+                    or PF_TOKEN_PATH.read_bytes() != receipt):
+                raise LifecycleError("stale receipt fixture changed; preserving it")
+            PF_TOKEN_PATH.unlink()
+
+
 def run_lifecycle(
     target: LifecycleTarget | None = None,
     safaridriver_url: str | None = None,
@@ -2599,6 +2658,7 @@ def run_lifecycle(
     composed_navigation: dict[str, object] | str = "not_applicable"
     browser_worker_idle: dict[str, object] | str = "not_applicable"
     active_worker_uninstall: dict[str, object] | str = "not_applicable"
+    stale_pf_receipt_stop: dict[str, object] | str = "not_run"
     wake_marker_path: Path | None = None
     stage = "acquire-pf-reference"
     failure: BaseException | None = None
@@ -2638,6 +2698,8 @@ def run_lifecycle(
                 )
             _assert_clean_install_state(runner)
             pf._assert_same_snapshot(before, pf._pf_snapshot(runner))
+        stage = "stale-pf-receipt-stop"
+        stale_pf_receipt_stop = _verify_stale_pf_receipt_stop(runner, system, target)
         test_token = _acquire_test_pf_reference(runner)
         stage = "sentinel-anchor"
         rules = pf.build_redirect_rules(
@@ -2971,6 +3033,7 @@ def run_lifecycle(
         "browser_worker_idle": browser_worker_idle,
         "composed_original_navigation": composed_navigation,
         "active_worker_uninstall": active_worker_uninstall,
+        "stale_pf_receipt_stop": stale_pf_receipt_stop,
         "lifecycle_rearms": lifecycle_rearms,
         "wake_event_source": "disposable_explicit_system_marker",
         "uninstall": "clean",
@@ -2987,6 +3050,7 @@ def dry_run(target_name: str = "script") -> dict:
         "result": "dry-run",
         "target": target_name,
         "restricted_to": "disposable GitHub Actions macOS runner",
+        "stale_pf_receipt_stop": "normal stop retires a dead receipt without changing global PF",
         "privileged_attestation": (
             "commit and injected-failure daemon-free rollback"
             if target_name == "packaged-app"

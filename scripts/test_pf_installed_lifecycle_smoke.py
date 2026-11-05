@@ -136,6 +136,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             target.install_command,
             target.uninstall_command,
             lifecycle.recovery_command(target),
+            lifecycle.source_stop_command(target),
             ("/bin/launchctl", "disable", lifecycle.LAUNCHD_LABEL),
             (
                 "/bin/launchctl",
@@ -155,6 +156,87 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         )
         for command in accepted:
             lifecycle.validate_system_command(command, target)
+
+    def test_native_stale_receipt_fixture_requires_real_stop_and_preserves_replacements(self):
+        for behavior in ("retire", "leave", "error", "replace", "pf-changed"):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as directory:
+                token = Path(directory) / "pf.token"
+                snapshot = lifecycle.pf.PfSnapshot(True, "nat", "rules", True)
+                after = (lifecycle.pf.PfSnapshot(False, "nat", "rules", True)
+                         if behavior == "pf-changed" else snapshot)
+                target = lifecycle.script_target()
+                runner = mock.Mock()
+                runner.run.side_effect = [
+                    SimpleNamespace(stdout="No pf starter references held\n", returncode=0),
+                    SimpleNamespace(returncode=1),
+                ]
+                system = mock.Mock()
+
+                def run(command, **kwargs):
+                    if command == ("/bin/launchctl", "print", lifecycle.LAUNCHD_LABEL):
+                        return SimpleNamespace(returncode=113, stdout="", stderr="Could not find service")
+                    self.assertEqual(command, lifecycle.source_stop_command(target))
+                    self.assertEqual(kwargs, {"timeout": 60})
+                    self.assertEqual(token.read_bytes(), b"18446744073709551615\n")
+                    self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
+                    if behavior == "error":
+                        raise lifecycle.LifecycleError("native stop failed")
+                    if behavior in {"retire", "pf-changed"}:
+                        token.unlink()
+                    elif behavior == "replace":
+                        replacement = token.with_suffix(".new")
+                        replacement.write_bytes(b"replacement\n")
+                        replacement.replace(token)
+
+                system.run.side_effect = run
+                with mock.patch.object(lifecycle, "PF_TOKEN_PATH", token), \
+                        mock.patch.object(lifecycle, "_require_disposable_ci"), \
+                        mock.patch.object(lifecycle, "_assert_clean_install_state"), \
+                        mock.patch.object(lifecycle.pf, "_pf_snapshot", side_effect=[snapshot, after]):
+                    if behavior == "retire":
+                        report = lifecycle._verify_stale_pf_receipt_stop(runner, system, target)
+                        self.assertEqual(report["result"], "pass")
+                        self.assertEqual(report["invalid_release_exit_code"], 1)
+                        self.assertTrue(report["initial_pf_enabled"])
+                    else:
+                        with self.assertRaises((lifecycle.LifecycleError, lifecycle.pf.SmokeError)):
+                            lifecycle._verify_stale_pf_receipt_stop(runner, system, target)
+                if behavior == "replace":
+                    self.assertEqual(token.read_bytes(), b"replacement\n")
+                else:
+                    self.assertFalse(token.exists())
+                self.assertEqual(runner.run.call_args_list, [
+                    mock.call("-s", "References", check=True),
+                    mock.call("-X", "18446744073709551615"),
+                ])
+
+    def test_native_stale_receipt_fixture_refuses_live_or_unproven_state(self):
+        for refusal in ("not-disposable", "job-live", "job-unknown", "references", "release-accepted", "collision"):
+            with self.subTest(refusal=refusal), tempfile.TemporaryDirectory() as directory:
+                token = Path(directory) / "pf.token"
+                if refusal == "collision":
+                    token.write_bytes(b"preexisting\n")
+                system = mock.Mock()
+                system.run.return_value = SimpleNamespace(
+                    returncode=0 if refusal == "job-live" else 113, stdout="",
+                    stderr="permission denied" if refusal == "job-unknown" else "Could not find service",
+                )
+                runner = mock.Mock()
+                runner.run.side_effect = [
+                    SimpleNamespace(stdout="live references" if refusal == "references" else "No pf starter references held", returncode=0),
+                    SimpleNamespace(returncode=0 if refusal == "release-accepted" else 1),
+                ]
+                with mock.patch.object(lifecycle, "PF_TOKEN_PATH", token), \
+                        mock.patch.object(lifecycle, "_require_disposable_ci", side_effect=lifecycle.LifecycleError("not disposable") if refusal == "not-disposable" else None), \
+                        mock.patch.object(lifecycle, "_assert_clean_install_state"), \
+                        mock.patch.object(lifecycle.pf, "_pf_snapshot"):
+                    with self.assertRaises((lifecycle.LifecycleError, FileExistsError)):
+                        lifecycle._verify_stale_pf_receipt_stop(runner, system, lifecycle.script_target())
+                if refusal == "collision":
+                    self.assertEqual(token.read_bytes(), b"preexisting\n")
+                else:
+                    self.assertFalse(token.exists())
+                self.assertLessEqual(system.run.call_count, 1)
 
     def test_fallback_uninstall_flushes_before_bootout_then_recovers_skip(
         self,

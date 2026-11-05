@@ -9409,6 +9409,36 @@ def _pf_release_enable_token():
     return result
 
 
+def _retire_unreferenced_pf_token_after_stop(port=PROXY_PORT):
+    """Retire a dead receipt only after installed writers have been drained.
+
+    The installer lock and stopped daemon prevent an owned acquisition racing
+    this cleanup. PF may still be enabled by another product without references;
+    never disable it or alter its rules to recover our obsolete receipt.
+    """
+    global _pf_enable_token
+    token = _pf_enable_token
+    if not token or _INSTALL_OPERATION_LOCK_FD is None:
+        # Foreground cleanup_stale also reaches the common stop helper, but it
+        # does not hold the installed-writer lock and cannot retire a receipt.
+        return False
+    try:
+        if (_stop_launchd_observation()[0] != "absent"
+                or not _stop_label_disabled()
+                or _stop_owned_process_census() != set()
+                or _stop_listener_pids(port) != []):
+            return False
+        if _read_pf_token() != token or not pf_adapter.no_enable_references(_run):
+            return False
+        if _pf_enable_token != token or _read_pf_token() != token:
+            return False
+        _remove_pf_token()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    _pf_enable_token = None
+    return True
+
+
 def _pf_enabled_state():
     return pf_adapter.enabled_state(_run)
 
@@ -16990,7 +17020,8 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True, *, strict
     if not processes_clean:
         return _cleanup_install_incomplete("owned daemon process did not stop")
     pf_release_result = _pf_release_enable_token()
-    if pf_release_result is not None and pf_release_result.returncode != 0:
+    if (pf_release_result is not None and pf_release_result.returncode != 0
+            and not _retire_unreferenced_pf_token_after_stop(port)):
         return _cleanup_install_incomplete("owned PF enable token was not released")
     if strict_observation:
         if _stop_launchd_observation()[0] != "absent" or not _stop_label_disabled():

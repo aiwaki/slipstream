@@ -1,5 +1,45 @@
 # Release Policy
 
+## Workstation update failure and .31 restoration — 2026-11-05
+
+The ordinary `.31 -> .34` menu attempt on the user's Mac did not complete.
+The installed app remained `.31`. The root updater chose abort after activation
+but could not finish recovery, so launchd repeatedly restarted the same worker.
+The main owned daemon was absent; retained PID and heartbeat fields in the root
+transaction were not evidence of a running service.
+Authorized private-journal inspection proved activation began, the runtime
+snapshot was never created, and the original .31 daemon bytes remain intact.
+A subsequent read-only kernel query found no PF starter references at all,
+although Slipstream still retained its old token and PF remained enabled. The
+old stop path treats release of that nonexistent reference as incomplete cleanup.
+What invalidated the reference is not established. No new install, service
+mutation or retry was initiated during the diagnostics.
+Evidence: `output/continuation-20261101/preview34-release/post-stall-main-a0a60e080/public-update34/workstation-check-20261105/read-only-verification.json`.
+
+The independently accepted public `.33 -> .34` update and pre-ACK rollback
+remain evidence for that tested pair; they do not qualify this failed `.31`
+workstation transition. The .34 workstation update, browser and Quit verification
+are still open. Preserve the failed operation's diagnostic evidence.
+The local stopped-writer/empty-reference fix passed128 focused stop/adapter
+tests and160 updater/PF regressions. It is not in published .34 or installed .31.
+The first PR464 revision also passed native source and packaged-app lifecycle
+checks in CI42014542528/1, including real invalid-token rejection, ordinary stop
+and an unchanged PF snapshot. A follow-up explicitly excludes unlocked foreground
+cleanup; its130 stop/adapter and138 updater/lock tests pass, with native CI pending.
+The separate one-operation receipt repair passed8 isolated fixtures. After the
+user explicitly approved .31 restoration, it ran once with administrator
+authorization, saved the proven stale token privately, and removed only that
+receipt. The already-running abort completed; no new update was started.
+
+At 09:28:35 UTC, `workstation-check-20261105/recovery-acceptance.json` recorded
+RESTORED_PREVIEW31 with all16 checks true: old app/daemon hashes and versions,
+running app and service, fresh active StatusV2 with an advancing heartbeat on
+the same PID, terminal quiescent abort, and both updater workers exited0.
+The existing recovery cleaned the app journal and stage/backup transaction slots.
+The saved .31 ZIP and verified .34 archive remain; external Geph process
+identities are unchanged. Settings and learning were not changed. This proves
+restoration, not a successful .34 update or browser/media/Quit qualification.
+
 ## Preview .34 in preparation — 2026-11-01
 
 The next candidate combines the shared Geph recovery lifetime repair in
@@ -818,7 +858,9 @@ On November 4, 2026, [commit run 41823085631/1](https://github.com/aiwaki/slipst
 
 [Follow-up rollback run 41882183022/1](https://github.com/aiwaki/slipstream/actions/runs/41882183022/attempts/1) never started: GitHub could not assign a hosted runner and reported macOS ARM64 capacity constraints. The job was cancelled without executing any steps or producing an artifact.
 
-Public pre-ACK rollback remains unverified. The accepted Cancel/commit result does not qualify installation on the user's Mac, sustained YouTube or Discord media, sleep/wake, network changes, ordinary Quit or delivery of an ordinary update notification.
+[Public rollback run 41896398249/1](https://github.com/aiwaki/slipstream/actions/runs/41896398249/attempts/1) completed successfully after GitHub assigned a runner. The authenticated report and independent review verified that the `.34` successor was stopped and terminated before its acknowledgement and both deadlines. The production transaction aborted, restored the exact `.33` app and daemon, and observed the restored daemon heartbeat advance. The watchdog exited successfully, the transaction lock was free and cleanup reported no errors. Published release identities and assets were unchanged.
+
+Public Cancel, commit and pre-ACK rollback are now verified for `.33 → .34`. They do not qualify the user's `.31 → .34` transition, installation on the user's Mac, sustained YouTube or Discord media, sleep/wake, network changes, ordinary Quit or delivery of an ordinary update notification.
 
 ## Candidate and publication pipeline
 
