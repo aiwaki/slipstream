@@ -289,6 +289,8 @@ _owned_geph_runtime_recovery_lock = threading.Lock()
 _owned_geph_runtime_recovery_future = None
 _geph_backend_hold_until = 0.0
 _geph_backend_hold_reason = ""
+_geph_backend_hold_lock = threading.RLock()
+_geph_backend_hold_generation = 0
 _pf_state_lock = threading.Lock()
 _fd_pressure = False
 _fd_pressure_reason = ""
@@ -3945,18 +3947,24 @@ def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
     })
 
 
-def _clear_owned_geph_backend_hold_after_payload():
+def _clear_owned_geph_backend_hold_after_payload(*, expected_generation=None):
     global _geph_backend_hold_until, _geph_backend_hold_reason
-    if not (
-        GEPH_ENABLED
-        and _geph_up
-        and _geph_owned
-        and _geph_port == GEPH_OWNED_PORT
-    ):
-        return False
-    _geph_backend_hold_until = 0.0
-    _geph_backend_hold_reason = ""
-    return True
+    with _geph_backend_hold_lock:
+        if not (
+            GEPH_ENABLED
+            and _geph_up
+            and _geph_owned
+            and _geph_port == GEPH_OWNED_PORT
+            and not _shutdown_started.is_set()
+            and (
+                expected_generation is None
+                or expected_generation == _geph_backend_hold_generation
+            )
+        ):
+            return False
+        _geph_backend_hold_until = 0.0
+        _geph_backend_hold_reason = ""
+        return True
 
 
 def _set_socket_deadline_timeout(sock, deadline):
@@ -8553,6 +8561,11 @@ async def _run_owned_geph_payload_canaries():
         or _geph_port != GEPH_OWNED_PORT
     ):
         return None
+    with _geph_backend_hold_lock:
+        hold_generation = _geph_backend_hold_generation
+    expected_pid = _owned_geph_confirmation_pid()
+    if not expected_pid or _shutdown_started.is_set():
+        return None
     results = await asyncio.gather(
         *(
             _run_geph_payload_probe(spec["host"], spec)
@@ -8560,19 +8573,37 @@ async def _run_owned_geph_payload_canaries():
         ),
         return_exceptions=True,
     )
+    if (
+        _shutdown_started.is_set()
+        or not _owned_geph_confirmation_pid_matches(expected_pid)
+    ):
+        return None
     failures = []
     for spec, result in zip(OWNED_GEPH_PAYLOAD_CANARY_SPECS, results):
         payload_bytes = result if isinstance(result, int) else 0
         if payload_bytes >= _local_payload_min_bytes(spec):
-            clear_geph_route_failure()
-            return True
+            # A successful probe may finish before the rest of gather. Never
+            # let that older success erase a newer hold, even on the same PID.
+            with _geph_backend_hold_lock:
+                if not _clear_owned_geph_backend_hold_after_payload(
+                    expected_generation=hold_generation,
+                ):
+                    return None
+                clear_geph_route_failure()
+                return True
         reason = (
             "payload throughput below threshold"
             if payload_bytes > 0
             else "payload probe failed"
         )
         failures.append((spec["host"], reason))
-    _request_owned_geph_restart_from_payload_failures(failures)
+    with _geph_backend_hold_lock:
+        if (
+            _shutdown_started.is_set()
+            or hold_generation != _geph_backend_hold_generation
+        ):
+            return None
+        _request_owned_geph_restart_from_payload_failures(failures)
     return False
 
 
@@ -9598,13 +9629,14 @@ def geo_exit_backend_ready(now=None):
     if not GEPH_ENABLED:
         return False
     now = time.time() if now is None else now
-    ready = bool(_geph_up and _geph_port in GEPH_PORTS)
-    if not ready or now < _geph_backend_hold_until:
-        return False
-    if _geph_backend_hold_until:
-        _geph_backend_hold_until = 0.0
-        _geph_backend_hold_reason = ""
-    return True
+    with _geph_backend_hold_lock:
+        ready = bool(_geph_up and _geph_port in GEPH_PORTS)
+        if not ready or now < _geph_backend_hold_until:
+            return False
+        if _geph_backend_hold_until:
+            _geph_backend_hold_until = 0.0
+            _geph_backend_hold_reason = ""
+        return True
 
 
 def baseline_guard_snapshot(now=None):
@@ -10035,13 +10067,16 @@ def arm_private_pf_if_ready(port):
 def suspend_geo_exit_backend(reason, now=None):
     """Cool down only Geph while local routing remains available."""
     global _geph_up, _geph_backend_hold_until, _geph_backend_hold_reason
+    global _geph_backend_hold_generation
     now = time.time() if now is None else now
-    _geph_up = False
-    _geph_backend_hold_until = max(
-        _geph_backend_hold_until,
-        now + GEPH_BACKEND_FAILURE_HOLD,
-    )
-    _geph_backend_hold_reason = str(reason)[:200]
+    with _geph_backend_hold_lock:
+        _geph_up = False
+        _geph_backend_hold_generation += 1
+        _geph_backend_hold_until = max(
+            _geph_backend_hold_until,
+            now + GEPH_BACKEND_FAILURE_HOLD,
+        )
+        _geph_backend_hold_reason = str(reason)[:200]
     print(
         ">> geo-exit backend unavailable -> local routing remains active",
         file=sys.stderr,
@@ -14256,12 +14291,17 @@ def _recover_owned_geph_for_replay_blocking(host):
     if execute_owned_geph_restart(now=requested_at) != "restarted":
         return False
     try:
+        with _geph_backend_hold_lock:
+            hold_generation = _geph_backend_hold_generation
         successor_pid = _owned_geph_confirmation_pid()
         if not successor_pid:
             return False
         return bool(
             _wait_for_owned_geph_payload_ready(successor_pid) == "ready"
             and _owned_geph_confirmation_pid_matches(successor_pid)
+            and _clear_owned_geph_backend_hold_after_payload(
+                expected_generation=hold_generation,
+            )
         )
     finally:
         # Successful execute_owned_geph_restart deliberately keeps its global

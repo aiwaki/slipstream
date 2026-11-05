@@ -223,6 +223,23 @@ DNS decisions, not their local-first or ownership invariants. Endpoint identity
 and API choices are documented in ROUTING_RESEARCH.md; mocked contract tests do
 not claim live resolver reachability or workstation qualification.
 
+### 2026-11-06: commit payload recovery before reopening owned Geph admission
+
+A successful owned first-flight recovery must clear the backend hold before it
+releases the restart drain. The existing payload probe and final owned-PID check
+authorize this transition; listener liveness alone does not. The existing
+background payload-canary batch may also clear the hold after verifying the same
+owned PID before and after its probes. No additional network probe, navigation
+retry, restart or foreground wait is introduced.
+
+Every backend suspension advances an in-memory generation, even when its reason
+and deadline are unchanged. Recovery and background canaries capture that
+generation before probing. Their result cannot clear a later hold; a stale
+canary failure cannot recommend restarting a replacement backend. Hold expiry,
+suspension and these result commits use the same short lock. Shutdown, identity
+drift or missing payload preserve the hold. This refines recovery admission;
+the existing local-bypass, owned-route intent and committed-stream rules remain.
+
 
 ### 2026-10-25: preserve an opted-in owned Geph route during an outage
 

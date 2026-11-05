@@ -1,5 +1,42 @@
 # Routing Research Notes
 
+## 2026-11-06: payload-qualified recovery leaves new requests in cooldown
+
+R42111013665/1 at874472c95 failed both xpersonatoy.com browser cases: Safari
+reached an error-page context after20s, and Chrome returned ERR_CONNECTION_CLOSED
+in515ms. The other6 browser cases passed. Both bounded controls returned usable
+HTTP200 prefixes. Passive samples after each failure showed the same owned
+PID7754 in launchd and the loopback listener, fresh daemon StatusV2, Geph up,
+no conflict or restart recommendation, and zero active sessions. Thus an absent
+listener is not an explanation for this run. Samples do not record the actual
+admission decision and do not prove this run's cause. Authenticated reports are
+in `output/continuation-20261105/preview35-release/readiness-runtime-r/`;
+failed-run-verification.json SHA
+5702e28867dc36479fd15c7e35b9647c62b709b3c9c9e6ea7d44275ca17dd6d5 binds them.
+The long soak and success attestations did not run. This was the third protected
+dispatch on UTC2026-11-05; do not repeat it or bypass the daily budget.
+
+Source review and a deterministic request-level regression established a
+separate concrete defect: execute_owned_geph_restart sets a30s backend hold;
+_recover_owned_geph_for_replay_blocking then proves payload and the successor
+PID but returns success without clearing that hold. The allowed first-flight
+replay can succeed while the next request is refused. The retained RED uses the
+real suspender, restart/successor/payload logic and request handler, with bounded
+fake process/network effects: recovery=true, hold_until=130 at time100, no next
+owned dial and no client bytes. It performs no real network or service operation.
+
+The fix clears the original hold after that proof and before releasing the drain.
+Existing background payload canaries likewise commit their successful proof.
+Both pin a hold generation; canaries also pin ownership/PID across the batch.
+A newer suspension, even with identical reason/deadline, invalidates the older
+result. A short reentrant lock serializes suspension, expiry and hold commits;
+no I/O or await runs under it. A delayed canary failure cannot request a restart
+for a changed backend. The initial17 focused cases pass, including a real next
+handler request, shutdown, ownership/PID drift and changes during gather.
+These tests do not establish release readiness or installed-Mac behavior.
+Legacy semantic/preflight callers without a generation retain their prior clear
+contract; auditing those independent proof commits remains a separate follow-up.
+
 ## 2026-11-06: Chrome connection close without a contemporaneous backend sample
 
 R42095886020/1 at7a827fcbd passed Safari xpersonatoy.com in8036ms, but Chrome

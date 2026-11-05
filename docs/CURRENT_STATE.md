@@ -1,9 +1,47 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, exact-main passed; readiness failed at Chrome
+## Current continuation — 2026-11-06, owned Geph admission repair ready for PR
+
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Branch `codex/owned-geph-payload-admission`, base/main874472c952f7149206054ccb88b8e5a00e3bca17.
+Production/test/docs patch is local, not yet installed or released.
+E=`output/continuation-20261105/preview35-release`; Rdir=E/readiness-runtime-r.
+
+- Reuse exact-main CI42106603414/1 and audit42106603334/1: SUCCESS, all12 common
+  consumers. Watcher35930 exited0. Main receipt SHA
+  771f902e0f9880e3a0fa54dd35127523e4e49f07b0f563f156fa7762105b9a23.
+- Instrumented R42111013665/1 FAILED, watcher54632 exited1. xpersonatoy.com failed
+  both browsers, the other6 cases passed. Both bounded controls were usable.
+  Same owned PID7754/listener, Geph up and no restart hint were observed after
+  both failures. This does not prove the request-time decision or root cause.
+  Artifact13455470575 ZIP55432753d5ff0aa00cfab8fc5de93969c50d2dbff0129db8287a944a3f61aa52;
+  Rdir/failed-run-verification.json SHA
+  5702e28867dc36479fd15c7e35b9647c62b709b3c9c9e6ea7d44275ca17dd6d5 binds it.
+  No soak/attestation acceptance. No active observer or automatic retry remains.
+- A separate deterministic regression proves payload-qualified first-flight
+  recovery returned success while its30s hold still rejected the next request.
+  Fix clears that hold before drain release. Existing background canaries also
+  commit payload recovery, guarded by exact PID and suspension generation.
+  Newer holds/stale results/shutdown preserve denial; no extra probes/retries.
+- Local17 new regressions +44 existing recovery checks +97 traffic/drain/admission
+  checks PASS; independent static review has no blocker. Rdir/hold-local-verification.json
+  SHAdeaa0e6bf404bf3a69047920069c26acdc6b0d0b7a0e8ffad4074f06cf5983ba binds sources and logs.
+  Old semantic/preflight clear callers remain a separately documented follow-up.
+- Daily protected budget UTC2026-11-05 is3/3: R42031470021, R42095886020,
+  R42111013665. Do not dispatch again before UTC2026-11-06; then recheck full
+  live lists and active runs. Never rerun historical failures or accept stale G/P.
+
+NEXT: commit/push the reviewed repair in a PR, observe its required CI, then
+fresh exact-main candidate qualification. A live browser success is still required;
+the local regression is not a release/product acceptance. Restored .31 remains
+last verified local state; no new Mac mutation or failed update retry occurred.
+Temporary Safari Apple Events JavaScript was restored OFF after the earlier
+one-page observation. Keep old app/backups/settings/learning/external Geph intact.
+
+### Retained PR465–468 evidence (historical)
 
 Qualified main/candidate baseline: `82b3c2a77b22657524c28678422342799fdf1745`.
-Main is now `7a827fcbd8789b45d2ff4a280bd93b0f49e1df7c` after PR467.
+Main is now `874472c952f7149206054ccb88b8e5a00e3bca17` after PR468.
 The old candidate acceptance below does not cover the new source.
 PR465 is merged. Exact-main CI42027514369/1 and audit42027514435/1 are
 SUCCESS, including all12 required common consumers. E/main-ci/watcher-receipt.json
@@ -53,8 +91,8 @@ All8 required PR jobs and all4 audit jobs passed;5 expected PR skips matched.
 E/safari-diagnosis/pr466-transport/verification.json
 SHA784b7893739d5f4a93f7957f6b09e66255bff754ac2f732a9aac71e220376114
 binds their exact terminal metadata. merge-verification.json confirms the fetched
-main tree equals the reviewed source tree. The merge introduced no production routing change. The current physical branch
-is codex/preview35-native-qualified, based on PR467 merged main below.
+main tree equals the reviewed source tree. The merge introduced no production routing change.
+The current physical branch is recorded with PR468 below.
 The prior PR observer79672 exited0 and must not be restarted.
 
 Exact-main CI42080793003/1 FAILED; audit42080793122/1 SUCCESS.
@@ -104,7 +142,36 @@ success attestation ran. Observer18508 exited1; do not restart it or rerun R.
 This was UTC2026-11-05 account-backed position2; fresh complete budget and source
 checks are required for any justified future dispatch, not an automatic repeat.
 
-NEXT: review and land codex/live-site-runtime-evidence. The live-site sidecar now
+PR468 merged after CI42102833069/1 and audit42102833132/1 PASSED at
+b6ad687c294e3fd2d264763a1632991ae685c8ce. All8 required PR jobs and4 audit jobs
+passed;5 expected CI skips matched. Tested PR mergec68dc2867 and fetched main
+have the same tree2ab61bd7c026e1c45e7217c9057ea0a496c1b58b.
+E/runtime-pr468/watcher-receipt.json SHA
+de53a0b476f38fa50fbc962d3838e6285c1d936c793016dddb28f0a7c8dd3b33 and
+merge-verification.json bind the result. Observer43441 exited0.
+Exact-main CI42106603414/1 and audit42106603334/1 are SUCCESS at
+874472c952f7149206054ccb88b8e5a00e3bca17. All12 common consumers passed;
+observer35930 exited0. E/main-runtime-evidence-ci/watcher-receipt.json SHA
+771f902e0f9880e3a0fa54dd35127523e4e49f07b0f563f156fa7762105b9a23 binds them.
+Physical branch: codex/preview35-runtime-qualified. Candidate artifact13453510219
+has ZIP SHA47d2647860af8b4671418d1d14a128c6144d5e887c2cea8abbd0d5594880b455
+and manifest50b9a152617a35ee754aea4b7403fadc76a690b538c58b573c1dec626fc11651
+(1988bytes,6 payloads). E/observer-874472c95/producer-receipt.json SHA
+1f0dfc4818064e437be9ddd24cd0c529d95ca84613b0f83c9500471d79e42e37 binds producer
+metadata; no app archive was downloaded locally. This is not protected acceptance.
+NEXT: one justified R with the reviewed passive runtime evidence. Full-paginated
+live account-backed lists show UTC2026-11-05 positions1/2 above, no active run and
+no existing dispatch for874472c95. Live main and local tracked source match;
+E/readiness-runtime-r/dispatch-preflight.json SHA
+651d4dc27b99fe10aef4c11125e88f1833787fea88e309b07d538b1ec38b4f38 binds the check.
+R42111013665/1 was dispatched once at21:15:44UTC, exact874472c95 and
+candidate42106603414. It FAILED; the authenticated result and repair are at the
+compact checkpoint above. Observer54632 exited1 and must not be restarted.
+This is daily position3; no further account-backed dispatch today. Never rerun
+green main checks or either failed historical R. New G/P remain pair-specific follow-up gates;
+their old82b evidence cannot qualify these bytes. No workstation retry authorized.
+Independent review's lsof rc1/stderr ambiguity was fixed;9 tests and65 build/docs
+contract cases passed. The live-site sidecar now
 captures bounded passive daemon/owned-listener evidence at a browser failure
 before fixture cleanup, and after its one owned control.106 focused tests passed,
 then9 followups; logs E/readiness-native-r/runtime-{focused,followup}.log. The
