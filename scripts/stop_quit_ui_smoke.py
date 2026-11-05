@@ -51,13 +51,17 @@ class QualificationError(RuntimeError):
     pass
 
 
+class PrivateOperationTimeout(QualificationError):
+    """A safe timeout classification without subprocess arguments or output."""
+
+
 def run(args, *, input=None, check=True, timeout=30, sensitive=False):
     try:
         result = subprocess.run(args, input=input, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, timeout=timeout)
     except subprocess.TimeoutExpired as error:
         if sensitive:
-            raise QualificationError(f"{Path(args[0]).name} timed out during private fixture operation") from None
+            raise PrivateOperationTimeout(f"{Path(args[0]).name} timed out during private fixture operation") from None
         raise error
     if check and result.returncode:
         # Never echo command arguments: fixture authorization uses a random secret.
@@ -98,13 +102,18 @@ AUTH_RETRY_CODES = frozenset({-1728, -25204})
 
 def authorize_until(done, observe_auth, *, result, prompt=STOP_PROMPT, timeout=90, require_submission=False):
     """Retry only known pre-click AX failures; never replay an uncertain click."""
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
     attempt = {"state": "waiting", "submitted": False, "submission_attempted": False,
                "submission_uncertain": False, "prompt_disappeared": False,
                "operation_completed": False, "transient_errors": 0}
     result.setdefault("authorization_attempts", []).append(attempt)
 
     def failure(message):
+        now = time.monotonic()
+        attempt["elapsed_ms"] = min(600_000, max(0, round((now - started) * 1000)))
+        attempt["remaining_ms"] = min(600_000, max(0, round((deadline - now) * 1000)))
+        attempt["deadline_expired"] = now >= deadline
         detail = attempt.get("submission_error", attempt.get("last_error"))
         if detail:
             message += f'; stage={detail["stage"]} code={detail["code"]}'
@@ -120,13 +129,20 @@ def authorize_until(done, observe_auth, *, result, prompt=STOP_PROMPT, timeout=9
         try:
             response = observe_auth(prompt, submit=submit,
                                     timeout=min(15, remaining))
-        except QualificationError:
+        except QualificationError as error:
             # Compile/transport/timeout or malformed output has no certified
             # stage. A click may already have happened; never retry this action.
+            attempt["last_state"] = attempt["state"]
             attempt["state"] = "unobserved"
             attempt["last_error"] = {"stage": "script", "code": None}
             if submit:
                 attempt["submission_attempted"] = attempt["submission_uncertain"] = True
+            if isinstance(error, PrivateOperationTimeout):
+                expired = time.monotonic() >= deadline
+                attempt["failure_kind"] = "authorization_deadline" if expired else "observer_timeout"
+                raise failure("native authorization deadline expired" if expired
+                              else "native authorization observation timed out") from None
+            attempt["failure_kind"] = "observer_unavailable"
             raise failure("native authorization observation unavailable") from None
         if isinstance(response, dict):
             if (set(response) != {"state", "stage", "code"} or response["state"] != "ax_error"
@@ -539,6 +555,36 @@ def failure_snapshot(tray, intent, prompt, secrets_to_hide):
     return snapshot
 
 
+def record_failure_snapshot(result, capture, stage):
+    # The first observation belongs to the failing operation. A later context
+    # exit may delete its account or release its lock; never overwrite it then.
+    if "diagnostics" in result:
+        return
+    result["diagnostics_capture"] = {"stage": stage, "phase": result.get("phase")}
+    try:
+        result["diagnostics"] = capture()
+    except Exception:
+        result["diagnostics"] = {"observation": "unavailable"}
+
+
+def record_failure(result, error, secrets_to_hide):
+    detail = redacted_text(str(error), secrets_to_hide)[:1000]
+    if "failure" not in result:
+        result["failure"] = detail
+    elif detail != result["failure"]:
+        result["fixture_unwind_failure"] = detail
+
+
+@contextmanager
+def capture_failure_before_cleanup(result, capture, *, secrets_to_hide=()):
+    try:
+        yield
+    except BaseException as error:
+        record_failure(result, error, secrets_to_hide)
+        record_failure_snapshot(result, capture, "before_fixture_cleanup")
+        raise
+
+
 def status_observation():
     try:
         status = json.loads(STATUS.read_bytes())
@@ -831,6 +877,9 @@ def fixture_admin():
         membership = run(["/usr/sbin/dseditgroup", "-o", "checkmember", "-m", username, "admin"], sensitive=True)
         if username not in account_names() or not membership.stdout.startswith(b"yes "):
             raise QualificationError("temporary administrator creation was not confirmed")
+        # Membership does not prove that the random fixture password is usable.
+        # Authenticate once against the local node before any native UI action.
+        run(["/usr/bin/dscl", ".", "-authonly", username, password], sensitive=True, timeout=15)
         yield username, password
     finally:
         if attempted:
@@ -889,6 +938,8 @@ def run_qualification(bundle, report):
         counts = result.setdefault("authorization_results", {})
         counts[category] = counts.get(category, 0) + 1
         return response
+    def capture_diagnostics():
+        return failure_snapshot(tray, intent, active_prompt, redactions)
     try:
         if config.exists():
             config.rename(backup)
@@ -906,8 +957,10 @@ def run_qualification(bundle, report):
         log = tempfile.TemporaryFile()
         tray = Tray(executable, log)
         sentinel = ExternalListenerSentinel()
-        with fixture_admin() as (username, password):
+        with fixture_admin() as (username, password), \
+                capture_failure_before_cleanup(result, capture_diagnostics, secrets_to_hide=redactions):
             redactions.extend((username, password))
+            result["fixture_admin_credentials_verified"] = True
             root_attempted = True
             run(["/usr/bin/sudo", "-n", str(daemon), "--install"], timeout=180)
             initial = wait_progress()
@@ -935,7 +988,8 @@ def run_qualification(bundle, report):
                     return observe_auth(prompt, username=username, password=password, timeout=timeout)
                 return observe_auth(prompt, submit=False, timeout=timeout)
 
-            with installer_lock():
+            with installer_lock(), \
+                    capture_failure_before_cleanup(result, capture_diagnostics, secrets_to_hide=redactions):
                 result["phase"] = "root_lock_failure"
                 before = wait_progress()
                 checkpoint = tray.checkpoint()
@@ -1012,8 +1066,8 @@ def run_qualification(bundle, report):
             result["phase"] = "complete"
     except BaseException as error:
         result["result"] = "fail"
-        result["failure"] = redacted_text(str(error), redactions)[:1000]
-        result["diagnostics"] = failure_snapshot(tray, intent, active_prompt, redactions)
+        record_failure(result, error, redactions)
+        record_failure_snapshot(result, capture_diagnostics, "after_fixture_cleanup")
         raise
     finally:
         def restore_user_state():

@@ -1,5 +1,49 @@
 # Routing Research Notes
 
+## 2026-11-05: native authorization loses timeout and pre-cleanup evidence
+
+Main CI42080793003/1 at adf6521c4 failed the Stop-Quit fixture during
+`root_lock_failure`. Authenticated artifact13440838699 (ZIP SHA
+5de4bbc10176dd80f56d513a4c450fe9272ce16c2ecb48c215d596559e71cc79)
+records one confirmed AX submission followed by176 pending observations, then
+`native authorization observation unavailable; stage=script code=None`.
+The native Cancel case passed; cleanup reported no errors. This is a failed
+release gate, not evidence that the application or new Safari observer caused it.
+
+Two source defects are established independently. A private subprocess timeout
+was reduced to the same generic exception as malformed or unavailable script
+output. A deterministic execution through run/applescript/auth_action/authorize_until
+reproduced the exact reported failure when the last read consumed the remaining
+0.5s of the original90s budget. This demonstrates lost classification; the old
+CI report cannot prove that its own terminal exception was that timeout. Also,
+the failure snapshot ran after the enclosing contexts had released the installer
+lock and deleted the temporary admin account. It described post-cleanup state.
+
+The correction retains a private timeout type without arguments or output and
+reports observer timeout versus exhausted authorization budget, elapsed/remaining
+time and the previous state. The first snapshot now runs inside both fixture
+contexts before cleanup and is not overwritten during unwind. The primary redacted
+failure is retained separately from a later fixture-unwind error. Cleanup still
+executes, and a cleanup exception remains the propagated Python exception; both
+causes are preserved in the report. The temporary account's random password is
+verified once against the local Directory Service node with dscl authonly before
+any native UI action. Admin membership alone did not prove usable credentials.
+
+The original90s deadline, one-submit rule, permitted AX retries and acceptance
+predicates are unchanged. No confirmation replay, product routing change or native
+harness execution on the workstation is introduced. A possible Cancel-window
+turnover race and whether the native UI accepted the password remain unproven.
+The existing lock-failure case's generic admin-error predicate also does not by
+itself prove that root reached lock acquisition; this remains a coverage limit.
+
+Focused50 tests passed, then8 focused followups passed after review added primary
+failure preservation. Seven new regression cases cover private timeouts, original
+deadlines, no action replay, snapshot ordering, cleanup, redaction and rejected
+fixture credentials. Independent review found no new blocker. Native CI is still
+required. Evidence and the deterministic reproducer are retained under
+`output/continuation-20261105/preview35-release/main-observer-ci/auth-review/`;
+`failed-ui-verification.json` binds the original failed artifact and job metadata.
+
 ## 2026-11-05: retain transport and parser-resource evidence in the same observation
 
 The failed hosted Safari report cannot distinguish an incomplete document fetch
