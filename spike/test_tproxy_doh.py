@@ -8319,6 +8319,10 @@ def test_owned_geph_backend_canaries_require_three_distinct_payload_hosts():
 def test_owned_geph_backend_canaries_restart_only_after_all_payloads_fail(
     monkeypatch,
 ):
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid", lambda: 101)
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid_matches", lambda pid: pid == 101)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
     original_geph_up = tproxy._geph_up
     original_geph_owned = tproxy._geph_owned
     original_geph_port = tproxy._geph_port
@@ -8356,6 +8360,10 @@ def test_owned_geph_backend_canaries_restart_only_after_all_payloads_fail(
 
 
 def test_owned_geph_backend_canary_success_clears_failed_batch(monkeypatch):
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid", lambda: 101)
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid_matches", lambda pid: pid == 101)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
     original_geph_up = tproxy._geph_up
     original_geph_owned = tproxy._geph_owned
     original_geph_port = tproxy._geph_port
