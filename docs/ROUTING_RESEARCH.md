@@ -1,5 +1,112 @@
 # Routing Research Notes
 
+## 2026-11-05: retain transport and parser-resource evidence in the same observation
+
+The failed hosted Safari report cannot distinguish an incomplete document fetch
+from a parser waiting on another resource. The observer now records navigation
+encoded/decoded/transfer byte counts separately from DOM serialization, plus
+bounded script/stylesheet timing and attachment evidence. It examines at most 128
+nodes and 1024 Resource Timing entries, retains at most 16 missing-evidence rows
+and the last examined node, and explicitly reports truncation. Node ordinals,
+fixed enums, booleans and bounded numbers are retained; URLs, page text, CSS,
+exception messages and URL-derived identifiers are not. An unavailable optional
+API returns unknown without changing the independent readiness decision.
+
+A second evidence loss was present in the Python recorder: a timeout or pending
+request overwrote the final snapshot with unknown fields. The report now also
+keeps the last completed observation with its original elapsed time, distinct
+from the final timeout. It never presents older evidence as a fresh observation.
+Routing, navigation count, polling deadline and usable-page criteria are unchanged.
+
+Local Chromium loopback fixtures exercised normal loading, a deliberately held
+stylesheet followed by release in the same navigation, and a short stylesheet
+response with `net::ERR_CONTENT_LENGTH_MISMATCH`. While CSS was held, the browser
+reported 240251 received HTML bytes but only 141 serialized DOM bytes, readyState
+loading and no inline-script execution. Releasing that one CSS response completed
+the same document. The short CSS response produced a browser network failure even
+though a stylesheet object existed. This agrees with the limits of
+[Resource Timing](https://www.w3.org/TR/resource-timing/#sec-resources-included)
+and the [HTML parser](https://html.spec.whatwg.org/multipage/parsing.html#pending-parsing-blocking-script):
+timing/attachment observations are evidence, not proof of a usable response.
+They neither identify the earlier hosted fault nor qualify the new release.
+
+Focused 105 Python tests and eight executed JavaScript VM cases passed, covering
+unknown/zero/malformed values, exceptions, collection/output bounds, privacy,
+unchanged classification and preservation across a later timeout. Review added
+ordinal-bound and attached-partial-stylesheet cases; only those focused tests
+were repeated. The three real Chromium paths used an isolated profile and a
+loopback fixture; both owned processes exited. Two initial fixture waits required
+the pending inline script to already exist in the DOM and timed out; the corrected
+fixture observes the actual stylesheet boundary. All attempts are retained under
+`output/playwright/transport-20261105/`; the source/result hashes are bound by
+`output/continuation-20261105/preview35-release/safari-diagnosis/transport-diagnostics-verification.json`.
+
+## 2026-11-05: bounded curl control reports its size cap as receive error 56
+
+Readiness `42031470021/1` for source `82b3c2a77` stopped before the soak:
+Safari `xpersonatoy.com` stayed loading with 15 visible text characters and no
+DOMContentLoaded through its existing 20-second deadline. Chrome and the other
+three sites passed. Both bounded curl controls reported HTTP 200 and exit 56;
+the retained sidecar contains neither their byte counts nor raw stderr. That
+evidence remains inconclusive; it cannot retrospectively establish the cause
+of either control failure or of Safari's incomplete document.
+
+One execution of the same bounded control command on the unchanged workstation
+network reproduced a separate classification defect. System curl 8.7.1 over h2
+returned HTTP 200, exactly 131072 response bytes and exit 56 with:
+
+```text
+curl: (56) Exceeded the maximum allowed file size (131072) with 131072 bytes
+```
+
+The observer had accepted exit 63 for its deliberate size cap, but treated every
+56 as an unavailable route. The correction accepts 56 only when the entire local
+diagnostic matches the configured cap, the returned prefix is exactly that size,
+and the status marker is present. Ordinary resets/EOF, missing or mixed stderr,
+short/oversized bodies and mismatched limits remain unavailable. Existing status,
+denial and challenge classification still applies. A usable bounded control is
+not a complete document or a usable browser; browser failure continues to block
+the release. No routing, deadlines, retries or protected-run policy changes.
+
+Three new tests reproduced three failing assertions before the correction;
+99 focused live-site/readiness tests then passed, including nine rejection
+fixtures. Offline replay of the actual captured body/status/stderr now yields
+`size_limit` and usable control evidence. Private evidence is in
+`output/continuation-20261105/preview35-release/safari-diagnosis/`, notably
+`bounded-control-request/` and `control-fix-verification.json`. The old protected
+report has not been rewritten or accepted, and no fresh protected run was started.
+
+The same workstation obtained a full anonymous document and all 14 stylesheets
+before its first inline body script; each stylesheet completed in under two
+seconds. This is a different network/version observation, not a `.35` Safari
+reproduction. `resource-structure.json` counts newline-normalized UTF-8: 837796
+bytes; the saved response has 838295 decoded bytes including 499 CRLF pairs.
+Neither number measures the failing CI response. Its early stylesheet/inline
+script boundary is a hypothesis to inspect, not a routing diagnosis.
+
+A private read-only Safari expression retains navigation byte counts and bounded
+script/stylesheet timing and attachment state, without page text or URLs. Nine
+offline fixtures and syntax checks passed. After the user unlocked the Mac and
+authorized temporary JavaScript from Apple Events, one normal Safari27 navigation
+completed on the restored `.31` and current network. It received838287 decoded
+HTML bytes by2746ms, reached DOMContentLoaded at6179ms and load at12466ms.
+At5.134s the DOM serialization was47662bytes while the navigation already reported
+the full decoded body; at10.186s it was interactive with all38 observed stylesheet
+objects attached. A screenshot at30s visibly confirms styled content and images.
+This demonstrates why DOM size cannot substitute for network body size; it does
+not establish the cause of the earlier `.35` failure on a different machine.
+
+The test window was closed and the JavaScript permission restored to off, including
+an independent read after reopening settings. Remote automation remained off.
+The earlier WebDriver session and two AppleEvents setup attempts navigated zero
+times; their reports remain separate. One setup read preceded the asynchronous
+checkbox change, so its immediate restoration claim was invalidated and superseded
+by the later confirmed off state. `safari-observation-summary.json` binds the final
+report, expression and screenshot in the same private evidence directory. Missing
+resource timing or a missing stylesheet object remains ambiguous, not proof of a
+pending or failed request. The installed `.31`, external Geph and network were
+not changed. The failed CI result remains failed; this was not release qualification.
+
 ## 2026-11-03: Safari visibility failure with insufficient document evidence
 
 Readiness run `41624356058/1` for candidate `0b4cc942b` failed its live-site

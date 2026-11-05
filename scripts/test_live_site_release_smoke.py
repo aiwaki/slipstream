@@ -2788,6 +2788,64 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 self.assertIn("--socks5-hostname", run.call_args.args[0])
                 self.assertNotIn("private", smoke.json.dumps(observation))
 
+    def test_control_http2_size_limit_is_not_a_receive_failure(self) -> None:
+        # Actual macOS curl 8.7.1 h2 diagnostic at the requested 128-KiB cap.
+        body = b"x" * 131072
+        for route in ("direct", "owned_geph"):
+            with self.subTest(route=route):
+                response = SimpleNamespace(
+                    returncode=56,
+                    stdout=body + b"\n__SLIPSTREAM_STATUS__:200",
+                    stderr=b"curl: (56) Exceeded the maximum allowed file size (131072) with 131072 bytes\n",
+                )
+                observation = {}
+                with mock.patch.object(smoke.subprocess, "run", return_value=response) as run:
+                    result = smoke._control_route(
+                        "capacitorjs.com", route, failure_observation=observation
+                    )
+                self.assertEqual(result, "usable")
+                self.assertEqual(observation, {
+                    "curl_exit_code": 56, "http_status": 200,
+                    "status_marker_present": True, "category": "size_limit",
+                })
+                run.assert_called_once()
+                self.assertNotIn("Exceeded", smoke.json.dumps(observation))
+
+    def test_control_receive_failure_requires_exact_size_limit_evidence(self) -> None:
+        body = b"x" * 131072
+        marker = b"\n__SLIPSTREAM_STATUS__:200"
+        message = b"curl: (56) Exceeded the maximum allowed file size (131072) with 131072 bytes\n"
+        for output, stderr in (
+            (body + marker, b"curl: (56) Recv failure: Connection reset by peer\n"),
+            (body + marker, b"curl: (56) SSL read: error: unexpected eof\n"),
+            (body + marker, b""),
+            (body[:-1] + marker, message),
+            (body + b"x" + marker, message),
+            (body, message),
+            (body + marker, message.replace(b"(131072)", b"(262144)")),
+            (body + marker, message.replace(b"with 131072", b"with 512")),
+            (body + marker, message + b"curl: (56) receive error\n"),
+        ):
+            with self.subTest(length=len(output), stderr=stderr):
+                response = SimpleNamespace(returncode=56, stdout=output, stderr=stderr)
+                observation = {}
+                with mock.patch.object(smoke.subprocess, "run", return_value=response):
+                    result = smoke._control_route(
+                        "xpersonatoy.com", "direct", failure_observation=observation
+                    )
+                self.assertEqual(result, "unavailable")
+                self.assertEqual(observation["category"], "receive")
+
+    def test_control_size_limited_denial_is_not_usable(self) -> None:
+        denial = b"sorry, you have been blocked"
+        body = denial + b"x" * (131072 - len(denial))
+        response = SimpleNamespace(
+            returncode=56, stdout=body + b"\n__SLIPSTREAM_STATUS__:200",
+            stderr=b"curl: (56) Exceeded the maximum allowed file size (131072) with 131072 bytes\n",
+        )
+        with mock.patch.object(smoke.subprocess, "run", return_value=response):
+            self.assertEqual(smoke._control_route("capacitorjs.com", "direct"), "denial")
+
     def test_chrome_failure_observation_keeps_only_net_token_or_exception_class(self) -> None:
         for response, expected in (
             ({"errorText": "net::ERR_CONNECTION_CLOSED https://secret/?cookie=private"},
