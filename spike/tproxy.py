@@ -9418,7 +9418,9 @@ def _retire_unreferenced_pf_token_after_stop(port=PROXY_PORT):
     """
     global _pf_enable_token
     token = _pf_enable_token
-    if not token:
+    if not token or _INSTALL_OPERATION_LOCK_FD is None:
+        # Foreground cleanup_stale also reaches the common stop helper, but it
+        # does not hold the installed-writer lock and cannot retire a receipt.
         return False
     try:
         if (_stop_launchd_observation()[0] != "absent"

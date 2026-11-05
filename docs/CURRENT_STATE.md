@@ -39,9 +39,9 @@ the installed-stop path, after strict job/disabled/process/listener checks and
 an explicit successful empty-reference response; changed token, foreign/live
 references or uncertain evidence retain the record and fail cleanup. It never
 disables PF or changes external rules. The failure was reproduced before the fix
-(`stale-pf-baseline-test.txt`). Final focused verification:128 stop/adapter tests
-and160 updater/PF regressions passed; no unchanged full suite/CI was repeated.
-This source patch is NOT merged, packaged, published or installed. The installed
+(`stale-pf-baseline-test.txt`). Initial focused verification:128 stop/adapter tests
+and160 updater/PF regressions passed. This fix is NOT merged, published or
+installed. The installed
 old worker cannot acquire the fix merely by downloading a new app.
 
 The executed guard `workstation-check-20261105/recover_stale_receipt.py` has SHA
@@ -54,13 +54,26 @@ fixture PF reference is acquired. On a disposable runner, after absent-job and
 empty-reference checks, a real `pfctl -X` must reject the synthetic dead receipt.
 The normal source/frozen `--stop` CLI must then retire it and preserve the full
 global PF snapshot. Replacement records are retained on fixture failure.
-99 lifecycle/anchor harness tests and64 subtests passed locally; these are
-effect-free tests, not the pending native result. The earlier128 +160 production
-test results are reused because those production files have not changed again.
+99 lifecycle/anchor harness tests and64 subtests passed locally. Source9740915a9
+then passed CI42014542528/1 and dependency-audit42014542616/1. Actual source and
+frozen-app native reports both prove invalid_release_exit_code=1, receipt cleanup
+and unchanged global PF (initially disabled). Logs are retained as
+`workstation-check-20261105/ci464-{product-checks,packaged-lifecycle}.log`.
+No native enabled-PF/no-reference fixture result is claimed; effect-free tests
+cover preservation of that state.
+
+Caller review found unlocked foreground cleanup_stale also enters the shared
+cleanup helper. Two new regressions reproduced unwanted receipt retirement
+without the installer lock. The follow-up now explicitly requires the installed
+lock context. Final scoped checks:130 stop/adapter and138 updater/lock tests pass;
+the native fixture and its99 harness tests are unchanged. This small production
+follow-up still needs its own required CI; do not rerun the completed old run.
 Graph tools were unavailable; review used bounded direct source reads.
 
-NEXT: submit the scoped fix for native CI and review before including it in
-a future package. Existing .31 restoration is accepted; .34 workstation update
+PR464 is open; the first revision9740915a9 is a verified baseline. NEXT: push
+the explicit lock guard and observe its automatically created required CI, then
+finish PR review before including the fix in a future package.
+Existing .31 restoration is accepted; .34 workstation update
 and browser/media/Quit qualification remain open. No browser qualification is
 claimed by the recovery report. Accepted public .33 -> .34 commit/rollback below
 remain evidence for that tested pair, not this failed .31 -> .34 transition.

@@ -14,7 +14,8 @@ enabled. The global enabled state and external rules are never changed.
 Missing, failed, malformed or nonempty reference observations, unfamiliar
 diagnostics, a changed token value, or uncertain quiescence preserve
 the receipt and report incomplete cleanup. Active-daemon acquisition/teardown
-continues to use its existing rules. The installer lock and drained daemon
+continues to use its existing rules. Retirement explicitly requires the installer
+lock context; unlocked foreground cleanup cannot use it. The lock and drained daemon
 exclude a concurrent owned acquisition in this cleanup path. No workstation
 reinstall or new update is authorized merely by this source change.
 

@@ -22,6 +22,10 @@ workstation transition. The .34 workstation update, browser and Quit verificatio
 are still open. Preserve the failed operation's diagnostic evidence.
 The local stopped-writer/empty-reference fix passed128 focused stop/adapter
 tests and160 updater/PF regressions. It is not in published .34 or installed .31.
+The first PR464 revision also passed native source and packaged-app lifecycle
+checks in CI42014542528/1, including real invalid-token rejection, ordinary stop
+and an unchanged PF snapshot. A follow-up explicitly excludes unlocked foreground
+cleanup; its130 stop/adapter and138 updater/lock tests pass, with native CI pending.
 The separate one-operation receipt repair passed8 isolated fixtures. After the
 user explicitly approved .31 restoration, it ran once with administrator
 authorization, saved the proven stale token privately, and removed only that

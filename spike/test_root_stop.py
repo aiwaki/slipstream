@@ -110,6 +110,7 @@ def stopped_runtime(monkeypatch, tmp_path):
     (result(stdout='No pf starter references held\n'), 'job-reappeared', False),
     (result(stdout='No pf starter references held\n'), 'census-unknown', False),
     (result(stdout='No pf starter references held\n'), 'listener-reappeared', False),
+    (result(stdout='No pf starter references held\n'), 'unlocked', False),
 ])
 def test_stop_handles_stale_pf_reference_without_disabling_pf(
     stopped_runtime, monkeypatch, tmp_path, observation, interference, expected_clean,
@@ -120,6 +121,7 @@ def test_stop_handles_stale_pf_reference_without_disabling_pf(
     token_file.write_text('123456\n')
     monkeypatch.setattr(tproxy, 'PF_TOKEN_PATH', str(token_file))
     monkeypatch.setattr(tproxy, '_pf_enable_token', None)
+    monkeypatch.setattr(tproxy, '_INSTALL_OPERATION_LOCK_FD', None if interference == 'unlocked' else 123)
     monkeypatch.setattr(tproxy, '_pf_release_enable_token', state.release_token)
     original_run = tproxy._run
     pf_calls = []
@@ -148,7 +150,7 @@ def test_stop_handles_stale_pf_reference_without_disabling_pf(
              tproxy._disable_and_cleanup_install(remove_runtime=False))
     assert clean is expected_clean
     expected_calls = [('pfctl', '-X', '123456')]
-    if interference not in {'job-reappeared', 'census-unknown', 'listener-reappeared'}:
+    if interference not in {'job-reappeared', 'census-unknown', 'listener-reappeared', 'unlocked'}:
         expected_calls.append(('pfctl', '-s', 'References'))
     assert pf_calls == expected_calls
     assert {p.name: p.read_bytes() for p in paths['INSTALL_DIR'].iterdir()} == runtime_before
