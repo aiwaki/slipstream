@@ -34,8 +34,25 @@ no I/O or await runs under it. A delayed canary failure cannot request a restart
 for a changed backend. The initial17 focused cases pass, including a real next
 handler request, shutdown, ownership/PID drift and changes during gather.
 These tests do not establish release readiness or installed-Mac behavior.
-Legacy semantic/preflight callers without a generation retain their prior clear
-contract; auditing those independent proof commits remains a separate follow-up.
+The follow-up review found that all four legacy semantic/preflight commits could
+erase a newer hold with an older positive payload. No PID replacement is needed:
+another active reviewed-geo stream can fail, suspend the backend and advance its
+generation; a monitor control probe can then restore liveness on the same PID.
+The old caller's identity checks still pass. Its later unbound clear erased the
+new hold and persisted stale route authorization. The learning mutex does not
+serialize that failure path; session/drain ownership only prevents a restart.
+
+The deterministic RED at a8bae54b6 exercises the real semantic, incomplete,
+stable and TLS-preflight paths plus a delayed preflight commit. All five stale
+cases fail while four fresh-proof controls pass: generation1 becomes2 with
+identical PID/reason/deadline, yet hold130 becomes0 and one route write occurs.
+No network, system process or private storage operation is allowed. Evidence is
+under `output/continuation-20261105/preview35-release/semantic-hold-generation/`.
+Generation now travels with the positive result from before the probe/batch
+through its commit, including recovered probes and all three preflight factories.
+The hold guard and in-memory learning commit together; disk persistence is outside
+the hold lock. Fresh proofs retain the existing behavior. This causal local
+regression does not attribute the previous external-site failure to this race.
 
 ## 2026-11-06: Chrome connection close without a contemporaneous backend sample
 

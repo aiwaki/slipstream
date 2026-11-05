@@ -1,42 +1,61 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, owned Geph admission repair ready for PR
+## Current continuation — 2026-11-06, semantic Geph generation race fixed locally
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/owned-geph-payload-admission`, base/main874472c952f7149206054ccb88b8e5a00e3bca17.
-Production/test/docs patch is local, not yet installed or released.
-E=`output/continuation-20261105/preview35-release`; Rdir=E/readiness-runtime-r.
+Branch `codex/geph-proof-generation`, based on maina8bae54b6007359f550d1166bc76d37df452b399.
+E=`output/continuation-20261105/preview35-release`; H=E/semantic-hold-generation.
+No source from this follow-up is installed or released.
 
-- Reuse exact-main CI42106603414/1 and audit42106603334/1: SUCCESS, all12 common
-  consumers. Watcher35930 exited0. Main receipt SHA
-  771f902e0f9880e3a0fa54dd35127523e4e49f07b0f563f156fa7762105b9a23.
-- Instrumented R42111013665/1 FAILED, watcher54632 exited1. xpersonatoy.com failed
-  both browsers, the other6 cases passed. Both bounded controls were usable.
-  Same owned PID7754/listener, Geph up and no restart hint were observed after
-  both failures. This does not prove the request-time decision or root cause.
-  Artifact13455470575 ZIP55432753d5ff0aa00cfab8fc5de93969c50d2dbff0129db8287a944a3f61aa52;
-  Rdir/failed-run-verification.json SHA
-  5702e28867dc36479fd15c7e35b9647c62b709b3c9c9e6ea7d44275ca17dd6d5 binds it.
-  No soak/attestation acceptance. No active observer or automatic retry remains.
-- A separate deterministic regression proves payload-qualified first-flight
-  recovery returned success while its30s hold still rejected the next request.
-  Fix clears that hold before drain release. Existing background canaries also
-  commit payload recovery, guarded by exact PID and suspension generation.
-  Newer holds/stale results/shutdown preserve denial; no extra probes/retries.
-- Local17 new regressions +44 existing recovery checks +97 traffic/drain/admission
-  checks PASS; independent static review has no blocker. Rdir/hold-local-verification.json
-  SHAdeaa0e6bf404bf3a69047920069c26acdc6b0d0b7a0e8ffad4074f06cf5983ba binds sources and logs.
-  Old semantic/preflight clear callers remain a separately documented follow-up.
-- Daily protected budget UTC2026-11-05 is3/3: R42031470021, R42095886020,
-  R42111013665. Do not dispatch again before UTC2026-11-06; then recheck full
-  live lists and active runs. Never rerun historical failures or accept stale G/P.
+- PR469 is merged: runtime recovery now clears its own30s hold before releasing
+  the drain; background payload canaries bind the hold generation. PR CI42116113704/1
+  and audit42116113642/1 passed. E/hold-pr469/merge-verification.json binds reviewed
+  head37bb92b16, tested mergee6d5dedab and fetched main to tree6acd95e63b.
+- Exact-main CI42120437137/1 is terminal FAILURE. Watcher77797 exited1; do not
+  restart it. Audit42120436857/1 passed. Two jobs (chromium-webrequest-contract
+  127571146650 and product-checks127571146756) were abandoned before any step or
+  runner allocation. GitHub annotations explicitly cite hosted macOS ARM64
+  capacity; checks127578495316 then failed on abandoned prerequisites. All9
+  other common consumers passed, including native lifecycle/browser/notifications.
+  E/main-hold-ci/watcher-receipt.json SHA
+  12fd33c2fd67d5c6fd92d9324a9d48bc15d88aea0ace2c0a379f47fc7ba51152 binds terminal state;
+  capacity-failure-verification.json SHA
+  57fdc3a78d4d06d8c5a8aeba8827d1e1c6767136358117e598e4c3b91a83aabe binds the cause.
+  No rerun issued: the independently confirmed source repair below supersedes
+  that candidate. Prepared E/hold-qualification/native-g has guarded G=0, never run.
+- Follow-up causal RED at a8bae54b6: all4 semantic/learning/preflight commits and
+  a delayed preflight proof could clear a newer hold despite identical PID,
+  reason and deadline.5 stale cases failed,4 fresh controls passed. The patch
+  carries generation from before each probe/batch (including recovered probes
+  and all3 preflight factories) through commit. Hold clear and memory learning
+  are atomic; persistence runs outside the hold lock. No unbound clear remains.
+- Local21 new regressions +121 existing Geph/preflight checks +114 recovery,
+  drain, admission and traffic contracts PASS. Independent review found no new
+  blocker. H/local-verification.json SHA
+  989d4d29e6947cbded13a96e802a67a0535cd25789b4d18a492ac1bf2803a1ce binds source/test/log hashes.
+  Retained RED, late failure during persistence, shutdown and real retry callback
+  cases are network/system/storage isolated. This is not release acceptance.
 
-NEXT: commit/push the reviewed repair in a PR, observe its required CI, then
-fresh exact-main candidate qualification. A live browser success is still required;
-the local regression is not a release/product acceptance. Restored .31 remains
-last verified local state; no new Mac mutation or failed update retry occurred.
+NEXT: submit this scoped fix, require exact-head PR CI and dependency audit,
+then merge and observe its exact-main candidate checks. Only after all12 common
+consumers pass may the candidate enter fresh G/P/R. Previous82b G/P cannot qualify
+new bytes. G=native-root-update-qualification.yml and P=packaged-update-commit-qualification.yml
+use no Geph account secret or daily broker budget. R/owned-geph-qualification
+budget on UTC2026-11-05 is3/3 (42031470021,42095886020,42111013665); no further
+account-backed dispatch before UTC2026-11-06, then check complete live lists and
+active runs. Protected reruns and blind retries remain prohibited.
+
+Instrumented R42111013665/1 failed both xpersonatoy.com cases; the other6 passed.
+Both bounded controls were usable. Same owned PID7754/listener, Geph up and no
+restart hint were observed after the failures; no request-time decision was
+recorded. These deterministic source defects are not proven causes of that R.
+E/readiness-runtime-r/failed-run-verification.json SHA
+5702e28867dc36479fd15c7e35b9647c62b709b3c9c9e6ea7d44275ca17dd6d5 authenticates the reports.
+No soak/attestation acceptance. Restored .31 remains last verified local state.
 Temporary Safari Apple Events JavaScript was restored OFF after the earlier
-one-page observation. Keep old app/backups/settings/learning/external Geph intact.
+one-page observation. No workstation mutation or failed local update retry.
+Keep old app/backups/settings/learning/external Geph intact; a fresh local window
+is needed after the candidate is ready.
 
 ### Retained PR465–468 evidence (historical)
 

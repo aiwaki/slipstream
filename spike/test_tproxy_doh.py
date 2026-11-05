@@ -9643,7 +9643,7 @@ def _enable_owned_geph_preflight(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_clear_owned_geph_backend_hold_after_payload",
-        lambda: None,
+        lambda **_kwargs: True,
     )
     monkeypatch.setattr(
         tproxy,
@@ -9830,6 +9830,7 @@ def test_safe_incomplete_root_can_use_bound_headless_owned_geph_proof(
             deadline_unix_ms=job.deadline_unix_ms,
             confirmed_pid=41,
             reason="fixture headless proof",
+            hold_generation=tproxy._geph_backend_hold_generation,
             bytes_read=1,
         )
 
@@ -10341,7 +10342,7 @@ def test_late_preflight_worker_cannot_learn_or_clear_backend_hold(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_clear_owned_geph_backend_hold_after_payload",
-        lambda: cleared.append(True),
+        lambda **_kwargs: cleared.append(True) or True,
     )
 
     proof = tproxy._prove_preflight_owned_geph_route(
@@ -11996,7 +11997,7 @@ def test_semantic_recovery_performs_two_successful_in_incident_replacements(
         "two-replacements.example",
         lambda _host: next(probe_results),
         on_drain_blocked=lambda: blocked_callbacks.append(True),
-        on_success=lambda bytes_read, pinned_pid: success_observations.append(
+        on_success=lambda bytes_read, pinned_pid, _generation: success_observations.append(
             (bytes_read, pinned_pid, tproxy._geph_restart_draining)
         ),
     )
@@ -12271,7 +12272,9 @@ def test_auto_geph_learns_before_releasing_stable_session(monkeypatch):
     )
     def stable_probe(_host, _probe, **kwargs):
         bytes_read = tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
-        kwargs["on_success"](bytes_read, 4242)
+        kwargs["on_success"](
+            bytes_read, 4242, tproxy._geph_backend_hold_generation
+        )
         return bytes_read
 
     monkeypatch.setattr(tproxy, "_stable_owned_geph_payload_probe", stable_probe)
@@ -13161,7 +13164,9 @@ def test_authorized_post_drain_confirmation_can_learn_after_candidate_expires(
 
     def stable_probe(_host, _probe, **kwargs):
         bytes_read = tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
-        kwargs["on_success"](bytes_read, 4242)
+        kwargs["on_success"](
+            bytes_read, 4242, tproxy._geph_backend_hold_generation
+        )
         return bytes_read
 
     monkeypatch.setattr(tproxy, "_stable_owned_geph_payload_probe", stable_probe)
@@ -13174,7 +13179,7 @@ def test_authorized_post_drain_confirmation_can_learn_after_candidate_expires(
     monkeypatch.setattr(
         tproxy,
         "_clear_owned_geph_backend_hold_after_payload",
-        lambda: None,
+        lambda **_kwargs: True,
     )
     monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
