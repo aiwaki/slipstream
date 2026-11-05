@@ -2398,6 +2398,7 @@ class _RoutePreflightOwnedGephProof:
     deadline_unix_ms: int
     confirmed_pid: int
     reason: str
+    hold_generation: int
     bytes_read: int = 0
 
 
@@ -3947,7 +3948,7 @@ def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
     })
 
 
-def _clear_owned_geph_backend_hold_after_payload(*, expected_generation=None):
+def _clear_owned_geph_backend_hold_after_payload(*, expected_generation):
     global _geph_backend_hold_until, _geph_backend_hold_reason
     with _geph_backend_hold_lock:
         if not (
@@ -3956,10 +3957,8 @@ def _clear_owned_geph_backend_hold_after_payload(*, expected_generation=None):
             and _geph_owned
             and _geph_port == GEPH_OWNED_PORT
             and not _shutdown_started.is_set()
-            and (
-                expected_generation is None
-                or expected_generation == _geph_backend_hold_generation
-            )
+            and type(expected_generation) is int
+            and expected_generation == _geph_backend_hold_generation
         ):
             return False
         _geph_backend_hold_until = 0.0
@@ -4784,6 +4783,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
                 if on_backend_unavailable is not None:
                     on_backend_unavailable()
                 return 0
+            with _geph_backend_hold_lock:
+                hold_generation = _geph_backend_hold_generation
             bytes_read = probe(h)
             if not _owned_geph_confirmation_pid_matches(successor_pid):
                 if on_backend_unavailable is not None:
@@ -4791,7 +4792,7 @@ def _retry_semantic_geph_probe_after_owned_restart(
                 return 0
             if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
                 if on_success is not None:
-                    on_success(bytes_read, successor_pid)
+                    on_success(bytes_read, successor_pid, hold_generation)
                 print(
                     ">> owned Geph replacement "
                     f"{replacement}/{AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX} "
@@ -4933,6 +4934,8 @@ def _stable_owned_geph_payload_probe(
         pinned_pid = _owned_geph_confirmation_pid()
         if not pinned_pid:
             return 0
+        with _geph_backend_hold_lock:
+            hold_generation = _geph_backend_hold_generation
         bytes_read = 0
         for _attempt in range(AUTO_GEPH_CONFIRM_STABLE_PROBES):
             if (
@@ -4950,7 +4953,7 @@ def _stable_owned_geph_payload_probe(
         if not _owned_geph_confirmation_pid_matches(pinned_pid):
             return 0
         if on_success is not None:
-            on_success(bytes_read, pinned_pid)
+            on_success(bytes_read, pinned_pid, hold_generation)
         return bytes_read
     finally:
         if session_reserved:
@@ -4967,9 +4970,12 @@ def _confirm_semantic_geo_exit(host):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
     confirmed_pid = _owned_geph_confirmation_pid()
+    confirmed_generation = None
     if not confirmed_pid:
         bytes_read = 0
     else:
+        with _geph_backend_hold_lock:
+            confirmed_generation = _geph_backend_hold_generation
         bytes_read = _semantic_geph_payload_probe(h)
         if not _owned_geph_confirmation_pid_matches(confirmed_pid):
             bytes_read = 0
@@ -4977,9 +4983,10 @@ def _confirm_semantic_geo_exit(host):
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
         confirmed_pid = None
 
-        def capture_recovered_pid(_bytes_read, pinned_pid):
-            nonlocal confirmed_pid
+        def capture_recovered_pid(_bytes_read, pinned_pid, hold_generation):
+            nonlocal confirmed_pid, confirmed_generation
             confirmed_pid = pinned_pid
+            confirmed_generation = hold_generation
 
         bytes_read = _retry_semantic_geph_probe_after_owned_restart(
             h,
@@ -5007,15 +5014,20 @@ def _confirm_semantic_geo_exit(host):
         ):
             _set_auto_geph_status("skipped", h, "route changed or noise visible")
             return False
-        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
-        _auto_fail.pop(h, None)
-        _local_partial_stalls.pop(h, None)
-        _local_zero_payload_failures.pop(h, None)
-        _local_payload_idle_failures.pop(h, None)
-        _transport_incomplete_server_first_evidence.pop(h, None)
-        _transport_incomplete_client_first_evidence.pop(h, None)
+        with _geph_backend_hold_lock:
+            if not _clear_owned_geph_backend_hold_after_payload(
+                expected_generation=confirmed_generation,
+            ):
+                _set_auto_geph_status("skipped", h, "owned Geph proof expired")
+                return False
+            _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+            _auto_fail.pop(h, None)
+            _local_partial_stalls.pop(h, None)
+            _local_zero_payload_failures.pop(h, None)
+            _local_payload_idle_failures.pop(h, None)
+            _transport_incomplete_server_first_evidence.pop(h, None)
+            _transport_incomplete_client_first_evidence.pop(h, None)
         save_auto_geph()
-        _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
             "learned",
             h,
@@ -5040,9 +5052,12 @@ def _confirm_incomplete_response_geo_exit(host):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
     confirmed_pid = _owned_geph_confirmation_pid()
+    confirmed_generation = None
     if not confirmed_pid:
         bytes_read = 0
     else:
+        with _geph_backend_hold_lock:
+            confirmed_generation = _geph_backend_hold_generation
         bytes_read = _incomplete_response_geph_payload_probe(h)
         if not _owned_geph_confirmation_pid_matches(confirmed_pid):
             bytes_read = 0
@@ -5050,9 +5065,10 @@ def _confirm_incomplete_response_geo_exit(host):
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
         confirmed_pid = None
 
-        def capture_recovered_pid(_bytes_read, pinned_pid):
-            nonlocal confirmed_pid
+        def capture_recovered_pid(_bytes_read, pinned_pid, hold_generation):
+            nonlocal confirmed_pid, confirmed_generation
             confirmed_pid = pinned_pid
+            confirmed_generation = hold_generation
 
         bytes_read = _retry_semantic_geph_probe_after_owned_restart(
             h,
@@ -5080,14 +5096,19 @@ def _confirm_incomplete_response_geo_exit(host):
         ):
             _set_auto_geph_status("skipped", h, "route changed or noise visible")
             return False
-        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
-        _auto_fail.pop(h, None)
-        _local_partial_stalls.pop(h, None)
-        _local_zero_payload_failures.pop(h, None)
-        _local_payload_idle_failures.pop(h, None)
-        _transport_incomplete_server_first_evidence.pop(h, None)
+        with _geph_backend_hold_lock:
+            if not _clear_owned_geph_backend_hold_after_payload(
+                expected_generation=confirmed_generation,
+            ):
+                _set_auto_geph_status("skipped", h, "owned Geph proof expired")
+                return False
+            _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+            _auto_fail.pop(h, None)
+            _local_partial_stalls.pop(h, None)
+            _local_zero_payload_failures.pop(h, None)
+            _local_payload_idle_failures.pop(h, None)
+            _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
-        _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
             "learned",
             h,
@@ -5127,6 +5148,7 @@ def _remember_auto_geph_host(
     *,
     candidate_authorized=False,
     expected_geph_pid=None,
+    expected_generation=None,
 ):
     h = normalize_host(host)
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
@@ -5152,16 +5174,21 @@ def _remember_auto_geph_host(
         ):
             _set_auto_geph_status("skipped", h, "owned Geph changed")
             return False
-        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
-        _auto_fail.pop(h, None)
-        _auto_geph_candidates.pop(h, None)
-        _auto_geph_noise_invalidated.discard(h)
-        _local_partial_stalls.pop(h, None)
-        _local_zero_payload_failures.pop(h, None)
-        _local_payload_idle_failures.pop(h, None)
-        _transport_incomplete_server_first_evidence.pop(h, None)
+        with _geph_backend_hold_lock:
+            if not _clear_owned_geph_backend_hold_after_payload(
+                expected_generation=expected_generation,
+            ):
+                _set_auto_geph_status("skipped", h, "owned Geph proof expired")
+                return False
+            _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+            _auto_fail.pop(h, None)
+            _auto_geph_candidates.pop(h, None)
+            _auto_geph_noise_invalidated.discard(h)
+            _local_partial_stalls.pop(h, None)
+            _local_zero_payload_failures.pop(h, None)
+            _local_payload_idle_failures.pop(h, None)
+            _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
-        _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status("learned", h, reason, bytes_read)
     print(
         f">> auto-route: {h} works through Geph after bounded local routes "
@@ -5190,13 +5217,14 @@ def _confirm_auto_geph(
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
 
-    def remember(bytes_read, pinned_pid):
+    def remember(bytes_read, pinned_pid, hold_generation):
         return _remember_auto_geph_host(
             h,
             bytes_read,
             "stable Geph payload confirmed",
             candidate_authorized=candidate_authorized,
             expected_geph_pid=pinned_pid,
+            expected_generation=hold_generation,
         )
 
     learned = False
@@ -5205,9 +5233,9 @@ def _confirm_auto_geph(
         suspend_geo_exit_backend("owned Geph confirmation backend unavailable")
         _restore_auto_geph_retry_after_drain(h)
 
-    def learn_pinned(bytes_read, pinned_pid):
+    def learn_pinned(bytes_read, pinned_pid, hold_generation):
         nonlocal learned
-        learned = remember(bytes_read, pinned_pid)
+        learned = remember(bytes_read, pinned_pid, hold_generation)
 
     if drain_reserved:
         bytes_read = _stable_owned_geph_payload_probe(
@@ -6186,6 +6214,8 @@ async def _run_headless_owned_geph_preflight(
             return None
     if not provenance_ok or deadline_monotonic <= time.monotonic():
         return None
+    with _geph_backend_hold_lock:
+        hold_generation = _geph_backend_hold_generation
     confirmed_pid = _owned_geph_confirmation_pid()
     if (
         not confirmed_pid
@@ -6240,6 +6270,7 @@ async def _run_headless_owned_geph_preflight(
             deadline_unix_ms=job.deadline_unix_ms,
             confirmed_pid=confirmed_pid,
             reason="browser-complete response verified through owned Geph",
+            hold_generation=hold_generation,
             bytes_read=0,
         )
     except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
@@ -6291,6 +6322,8 @@ def _prove_preflight_owned_geph_route(
     confirmed_pid = _owned_geph_confirmation_pid()
     if not confirmed_pid:
         return None
+    with _geph_backend_hold_lock:
+        hold_generation = _geph_backend_hold_generation
     probe = _semantic_geph_payload_probe if probe is None else probe
     bytes_read = probe(
         h,
@@ -6319,6 +6352,7 @@ def _prove_preflight_owned_geph_route(
         deadline_unix_ms=job.deadline_unix_ms,
         confirmed_pid=confirmed_pid,
         reason="semantic denial cleared through owned Geph",
+        hold_generation=hold_generation,
         bytes_read=bytes_read,
     )
 
@@ -6371,15 +6405,19 @@ def _commit_preflight_owned_geph_proof(proof, owner_epoch):
         ):
             return False
         h = proof.host
-        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
-        _auto_fail.pop(h, None)
-        _local_partial_stalls.pop(h, None)
-        _local_zero_payload_failures.pop(h, None)
-        _local_payload_idle_failures.pop(h, None)
-        _transport_incomplete_server_first_evidence.pop(h, None)
-        _transport_incomplete_client_first_evidence.pop(h, None)
+        with _geph_backend_hold_lock:
+            if not _clear_owned_geph_backend_hold_after_payload(
+                expected_generation=proof.hold_generation,
+            ):
+                return False
+            _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+            _auto_fail.pop(h, None)
+            _local_partial_stalls.pop(h, None)
+            _local_zero_payload_failures.pop(h, None)
+            _local_payload_idle_failures.pop(h, None)
+            _transport_incomplete_server_first_evidence.pop(h, None)
+            _transport_incomplete_client_first_evidence.pop(h, None)
         save_auto_geph()
-        _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
             "learned",
             h,
@@ -6499,6 +6537,8 @@ def _bootstrap_asset_preflight_blocking(
             if geph_probe is None
             else geph_probe
         )
+        with _geph_backend_hold_lock:
+            hold_generation = _geph_backend_hold_generation
         geph_evidence = geph_probe(h, request, final_deadline)
         if (
             not isinstance(
@@ -6529,6 +6569,7 @@ def _bootstrap_asset_preflight_blocking(
                 reason=(
                     "critical bootstrap asset completed through owned Geph"
                 ),
+                hold_generation=hold_generation,
                 bytes_read=geph_evidence.received_body_bytes,
             ),
             "owned_geph",

@@ -240,6 +240,15 @@ suspension and these result commits use the same short lock. Shutdown, identity
 drift or missing payload preserve the hold. This refines recovery admission;
 the existing local-bypass, owned-route intent and committed-stream rules remain.
 
+The same generation binding applies to regional-denial and incomplete-response
+confirmation, stable exact-host learning, and all preflight proofs (TLS, browser
+and bootstrap asset). Capture it before the corresponding payload probe or batch,
+including after an owned restart. A positive result from a prior generation may
+neither clear the current hold nor persist new route authorization. Validation,
+hold clearing and in-memory learning are one short critical section; persistence
+runs after releasing the hold lock. A failure arriving during persistence must
+retain its newer hold. No payload-based hold clear accepts an unbound generation.
+
 
 ### 2026-10-25: preserve an opted-in owned Geph route during an outage
 
