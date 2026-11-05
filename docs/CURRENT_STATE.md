@@ -1,114 +1,140 @@
 # Current Project State
 
-## Current continuation — 2026-11-05, .31 restored; .35 preparation
+## Current continuation — 2026-11-05, .35 CI/G/P accepted; Safari diagnosis open
 
-The user explicitly approved completing restoration of .31. The scoped repair
-ran ONCE, with administrator authorization, at 09:19:37–09:20:41 UTC. Under the
-existing installer lock it rechecked the exact abort, old daemon bytes, absent
-disabled service, empty listener/process census, empty PF references and unchanged
-receipt; it saved the stale receipt privately and removed only that record.
-The existing abort then restored the old service and app. No new .34 installation
-was attempted; settings, learning and external Geph were not changed.
+Qualified main/candidate baseline: `82b3c2a77b22657524c28678422342799fdf1745`.
+The continuation branch adds the focused control-observation correction below;
+its source is not covered by the baseline's candidate acceptance.
+PR465 is merged. Exact-main CI42027514369/1 and audit42027514435/1 are
+SUCCESS, including all12 required common consumers. E/main-ci/watcher-receipt.json
+SHAbe23f249aefe414e3d1dc60e5ffe698556be1fd669475313298dfeb71d83bacb binds
+terminal metadata. E/main35-packaged-native-proof.json confirms the real packaged
+stale-receipt Stop fixture passed with global PF unchanged (initial PF disabled).
+E/receipt.json SHA1ae1c002fa3c958f640d132ff565179d380726c88b23fdb6c57bb1cebc000a65
+binds producer/candidate and exact CI evidence. No candidate acceptance is inferred
+from a partial run.
+The single .35 candidate is artifact13415420856,
+`release-candidate-82b3c2a77b22657524c28678422342799fdf1745`, archive digest
+`af37055810a3532ff297e88a68dcd2a0bbf432e860927650dec68a30ce413dc0`.
+The successful canonical assembly job127248827787 printed manifest SHA
+`ce0d63b516b9a7b4f043caf148aba1f89d15c8c5be8a43c56ed005984a546af4`
+(1988 bytes,6 payload artifacts, producer42027514369/1). Its full log is retained
+in E/main35-assembly.log. These are producer bindings, not release qualification.
+E=`output/continuation-20261105/preview35-release`.
 
-`ROOT/public-update34/workstation-check-20261105/recovery-acceptance.json` records
-RESTORED_PREVIEW31 at 09:28:35 UTC, all 16 checks true. Installed app and live daemon
-are .31 with the expected old hashes; launchd PID91087 matches fresh active
-StatusV2, the abort receipt and attestation. Heartbeat advanced 37 -> 272 on that
-PID; status age was 0.92s. App PID91171 is running. Root operation
-`ca941b66fa411f74ed882a5f4468ab6a` is terminal aborted, writer_quiescent=true,
-error=null. Root worker and user watchdog are registered but exited successfully
-(exit0), with no running process. App journal and transaction stage/backup slots
-were cleaned by the existing recovery; the saved .31 ZIP and verified .34 archive
-remain. External Geph has exactly the same process identities as before repair.
-The private retired receipt is retained inside this operation's private directory.
-`recovery-apply-result.json`, `recovery-observer.jsonl` and
-`recovery-final-local-state.json` are bound by the acceptance report's hashes.
+G42031462763/1 SUCCESS and independently ACCEPTED for exact .34 -> .35.
+E/native-g/verification.json SHAcdcd848720bd307c1824e5782ad4747bf6e110b44250845738b7c125377f18ee
+binds75 checks, both small report archives, source/job/upload windows, canonical
+prerequisite, daemon heartbeat, durable commit and kill/abort/late-commit refusal.
+Full payload authentication ran on the disposable hosted materializer; local
+verification downloaded only small JSON reports. P42033637214/1 SUCCESS and
+independently ACCEPTED for the same G/pair. E/packaged-p/verification.json SHAd89f278538c0d4d24246210bad2d23a6726bf7701f85efcd9d29ce9728c940bf
+binds13 checks: real successor ACK/committed root, pre-ACK kill/aborted root,
+restored old app/daemon, advancing heartbeats and terminal watchdog/path cleanup.
+The first private collector refused because its file allowlist omitted three
+workflow-declared trigger logs/receipts. Corrected to the exact8 declared members;
+original refusal retained; no hosted rerun or relaxed runtime predicate.
 
-Failure history: the ordinary .31 -> .34 menu attempt stopped the old daemon,
-then entered repeated abort/recovery_incomplete before a runtime snapshot or app
-replacement. `read-only-verification.json` and `root-private-diagnostic.json`
-retain that state. `owned-pf-reference.json` proved successful
-`pfctl -s References` returned `No pf starter references held` while the owned
-receipt persisted and PF remained enabled. Releasing that nonexistent reference
-prevented cleanup. What invalidated it is unknown. .31 source3eb32bd has identical
-relevant original cleanup/update functions. The worker also discards the original
-exception and sends stderr to /dev/null; that observability defect remains open.
+R42031470021/1 FAILED before soak. Its authenticated diagnostics report7/8 usable
+browser cases: Safari xpersonatoy.com reached the expected secure HTTPS/h2 document,
+but stayed readyState=loading without DOMContentLoaded through20s. Serialized DOM
+was142202bytes, visible body text length15, no visible app. Chrome passed in3684ms;
+other3 sites passed both browsers. Both curl controls got HTTP200 then receive56,
+so the report is inconclusive, not a confirmed origin or routing fault. All Safari
+starts and their cleanup passed. E/readiness-r/failed-run-verification.json binds
+run/job/artifact13416164015 and ZIP4254a76c78068354a434a60661771ffebcbc502133d5180264d91596ec84af24.
+No long soak, success attestations or publication; do not retry blindly. This is
+today's first combined account-backed dispatch. Check complete live budget before
+any justified fresh run; never rerun R.
 
-Local source fix in pf_adapter.py/tproxy.py retires this stale receipt only in
-the installed-stop path, after strict job/disabled/process/listener checks and
-an explicit successful empty-reference response; changed token, foreign/live
-references or uncertain evidence retain the record and fail cleanup. It never
-disables PF or changes external rules. The failure was reproduced before the fix
-(`stale-pf-baseline-test.txt`). Initial focused verification:128 stop/adapter tests
-and160 updater/PF regressions passed. The final fix is now merged in PR464;
-it is not in published .34 or installed .31. The installed old worker cannot
-acquire the fix merely by downloading a new app.
+NEXT: One read-only native Safari observation after the user unlocks the Mac.
+The unlock question is pending; the last console observation was locked. Do not
+repeat the question or infer permission/state from elapsed time. Private
+E/safari-diagnosis/observe_safari_once.py refuses a locked console and preserves
+one new session/report; it does not enable automation or change preferences,
+user tabs/cookies, services or network. Its expression passed9 offline fixtures
+and both syntax checks, but has NOT run in Safari. A successful `.31` observation
+would not qualify `.35`. No native CI harness is allowed on this workstation.
 
-The executed guard `workstation-check-20261105/recover_stale_receipt.py` has SHA
-b74ea69d47a2d8eaa970177b450b7dc6709936e0906a93910834e790e0a521c4 and passed
-8 isolated refusal/success fixtures. Do NOT execute it again, re-arm the update,
-or delete transaction state. This approval covered restoration only.
+Branch codex/safari-control-size-boundary now contains a focused
+observer correction, not a newly qualified candidate. One real execution of the
+bounded control on the unchanged workstation returned200/exactly131072bytes with
+curl56 and the exact maximum-file-size message. This exposed misclassification
+of curl8.7.1's h2 size-cap exit as a receive failure. The patch admits only the
+exact local message plus exact prefix length; resets/EOF and ambiguous evidence
+still fail. Three new tests reproduced3 failed assertions before the fix;
+99 focused live-site/readiness tests passed afterwards. Offline replay of the
+captured result also passed. E/safari-diagnosis/control-fix-verification.json
+records it; detailed findings/limits are in docs/ROUTING_RESEARCH.md. The retained
+CI controls did not save their stderr/size, so do not reinterpret that old run.
+Browser failure still blocks release. No new CI/protected run, publication or
+local installation was started. Keep main/candidate pinned until diagnosis
+determines the next justified action; existing acceptance applies only to82b3c2a77.
 
-Native coverage is now wired into both installed-lifecycle targets before any
-fixture PF reference is acquired. On a disposable runner, after absent-job and
-empty-reference checks, a real `pfctl -X` must reject the synthetic dead receipt.
-The normal source/frozen `--stop` CLI must then retire it and preserve the full
-global PF snapshot. Replacement records are retained on fixture failure.
-99 lifecycle/anchor harness tests and64 subtests passed locally. Source9740915a9
-then passed CI42014542528/1 and dependency-audit42014542616/1. Actual source and
-frozen-app native reports both prove invalid_release_exit_code=1, receipt cleanup
-and unchanged global PF (initially disabled). Logs are retained as
-`workstation-check-20261105/ci464-{product-checks,packaged-lifecycle}.log`.
-No native enabled-PF/no-reference fixture result is claimed; effect-free tests
-cover preservation of that state.
+The workstation independently downloaded full HTML and all14 early body CSS
+files (each under2s), but these are another network/version observation, not
+Safari or `.35` reproduction/acceptance. G/P/R are terminal; no active observer.
+The GitHub connector lacks workflow dispatch/listing support; normal gh is used.
+No local app archive downloads, workstation installation retry, service mutation
+or external Geph change is authorized by the .31 restoration approval.
+OLD .34 remains the published and previously qualified source
+`a0a60e080cc97214cebd7491f4ea5d56dff66e0e`, CI41634434348/1, manifest
+`e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb`.
+Read-only E/old34-candidate-availability.json verified release433775703 and
+artifact13229144546/digest60483c70999b7986dcee9ea640456c5a4a345d65c48f4613881a02bb679151d6,
+unexpired until2026-11-17. No applications were downloaded locally. Existing .34
+G/P/R and .33 -> .34 public reports below qualify only those original bytes.
+Published .34 assets must remain unchanged; .35 needs its own evidence and later
+public-update/rollback checks. The publisher is pinned to preview_sequence35.
 
-Caller review found unlocked foreground cleanup_stale also enters the shared
-cleanup helper. Two new regressions reproduced unwanted receipt retirement
-without the installer lock. The follow-up now explicitly requires the installed
-lock context. Final scoped checks:130 stop/adapter and138 updater/lock tests pass;
-the native fixture and its99 harness tests are unchanged. Final source
-`f85d5c39ca326debde1ee756813f55f86c1e47ee` passed CI42017506255/1 and
-dependency-audit42017505491/1; all17 check contexts are green or expected skipped.
-Both actual native reports again prove stale-receipt cleanup with unchanged PF.
-`workstation-check-20261105/ci464-final-native-proof.json` binds the full reports,
-logs, run/attempt and job IDs; its SHA is
-dfe3ebba8cb1b07feb1c9355f977b721276e40c591fb067ddb2ae3ddf88502be.
-PR464 merged as `b0e1724e5675cd6613b4f563ab45bbf8af0413f9`; fetched main has
-identical production/test bytes. Graph tools were unavailable; review used
-bounded direct source reads. Do not rerun these accepted tests.
+Accepted source changes: PR464 fixed installed-stop cleanup of a proven dead PF
+receipt while holding the installer lock; ambiguous/foreign references and
+unlocked foreground callers still refuse retirement. CI42017506255/1 and
+audit42017505491/1 passed at final sourcef85d5c39, with real source and packaged
+Stop proofs (initial PF disabled, global PF unchanged). Focused checks:130
+stop/adapter,138 updater/lock,99 harness tests with64 subtests. PR464 merged as
+b0e1724e5; its separate main CI42021590721/1 and audit42021591004/1 also passed.
+Those proofs remain accepted. Graph tools were unavailable; bounded direct reads
+were used.
 
-Preparing .35 from that merge changes version metadata, the publisher's exact
-sequence pin, the packaged gate's reviewed .34 -> .35 pair and documentation;
-dependencies, routing and the verified stop fix are unchanged. PR465 is open. Initial source
-`b6d1158eef781d4cbf48400e6cd72941aac562b2` passed audit42022986190/1, but
-CI42022986292/1 product-checks failed one of971 metadata tests: build-app.yml
-still admitted preview sequence34. The complete job127230184492 log is retained
-under `output/continuation-20261105/preview35-release/pr465-product-checks-failed.log`.
-The follow-up sets the publisher's default and strict guard to35. Its existing
-shell-execution test derives current/neighbor/mismatched cases from VERSION;
-57 build-config tests now pass, including those acceptance/refusal cases.
-The packaged prerequisite now admits only .34 -> .35, with its two source hashes
-updated after reviewing the exact version-guard/workflow-description-only diff.
-140 packaged prerequisite/source-boundary/workflow tests pass, including rejection
-of historical, reversed, identical and unreviewed pairs. Candidate authentication,
-root evidence, transaction handling and cleanup are unchanged. Evidence is in
-`output/continuation-20261105/preview35-release/{build-config-tests,pair35-contract-tests}.txt`.
-Version synchronization, project-state continuity and diff whitespace checks pass.
-NEXT: push the scoped release-pair follow-up, observe its new exact-head CI, then obtain the
-exact-main .35 candidate and qualify it before publication. Do not rerun the old
-failed attempt or dispatch duplicates. Published .34 and its assets
-must remain unchanged. Main CI42021590721/1 belongs to b0e1724e5
-(still version .34); it is not the .35 candidate. Its audit42021591004/1 passed.
-Existing .31 restoration is accepted; .34 workstation update
-and browser/media/Quit qualification remain open. No browser qualification is
-claimed by the recovery report. Accepted public .33 -> .34 commit/rollback below
-remain evidence for that tested pair, not this failed .31 -> .34 transition.
-Preserve external Geph, learning, backups and all earlier evidence.
+PR465 synchronizes .35 metadata, publisher admission and the reviewed .34 -> .35
+packaged prerequisite. Candidate authentication, transaction handling, routing,
+dependencies and the verified daemon fix are unchanged. Initial b6d1158 failed
+one of971 metadata tests in CI42022986292/1 because the publisher still admitted
+sequence34; E/pr465-product-checks-failed.log preserves the cause. The corrected
+publisher guard passed57 configuration tests. The reviewed pair/hash updates
+passed140 prerequisite/source-boundary/workflow tests, including refusal of old,
+reversed, identical and unreviewed pairs. Final source396ba362 passed
+CI42025027322/1 and audit42025027364/1, all17 contexts green/expected skipped.
+E/pr465-packaged-native-proof.json (SHA3510b654f4dd6fa27f53735aa9126ebdcbff29716615599d760b47a621c0bc8b)
+binds the native packaged report and full log. The fetched merge tree matches it.
+
+Workstation restoration is COMPLETE, not a .35 installation. With the user's
+explicit approval, the one-operation guarded repair ran once at09:19:37–09:20:41
+UTC and saved the invalid PF receipt privately before removing only that record.
+The already-running .31 -> .34 abort then restored .31. At09:28:35 UTC,
+ROOT/public-update34/workstation-check-20261105/recovery-acceptance.json reported
+RESTORED_PREVIEW31 with all16 checks true: expected old app/daemon bytes, running
+app PID91171 and daemon PID91087, fresh active StatusV2 and advancing heartbeat,
+terminal quiescent root abort and exited0 workers. Settings, learning and external
+Geph identities were unchanged; backups remain. The existing recovery cleaned
+its journal/stage slots. Browser/media/Quit qualification is still open.
+
+Cause proved: a saved token no longer existed in the kernel; successful
+pfctl -s References returned No pf starter references held while PF stayed enabled.
+The old worker repeatedly refused cleanup. What invalidated the reference is
+unknown; discarding the original worker exception is a separate open observability
+issue. The fixed code is not installed in .31, and downloading a successor cannot
+retrofit its old worker. Details and evidence are retained in docs/RELEASES.md
+and ROOT/public-update34/workstation-check-20261105. Do NOT run that directory's
+recover_stale_receipt.py again, re-arm the failed operation or delete transaction
+state. Its SHA is b74ea69d47a2d8eaa970177b450b7dc6709936e0906a93910834e790e0a521c4;
+the approved restoration and its8 guard fixtures are complete.
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/preview35-stale-pf-recovery` is based on main
-`b0e1724e5675cd6613b4f563ab45bbf8af0413f9` (PR464 merged after verified
-final source and packaged lifecycle checks).
+Branch `codex/safari-control-size-boundary` is based on main
+`82b3c2a77b22657524c28678422342799fdf1745` (PR465 merged after verified
+release configuration, source, packaged lifecycle and browser checks).
 The accepted .33 -> .34 public proof below binds14 observer helpers and workflow
 to0a451afe6; those historical pins do not qualify the new candidate.
 Published .34 qualified product source is `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,

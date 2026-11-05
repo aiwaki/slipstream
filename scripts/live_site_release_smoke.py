@@ -47,6 +47,7 @@ SITES = {
     },
 }
 MIN_DOCUMENT_BYTES = 512
+CONTROL_MAX_BYTES = 128 * 1024
 ALLOWED_PROTOCOLS = {"h2", "http/1.1", "h3"}
 INTERACTIVE_SETTLE_SECONDS = 0.5
 DOCUMENT_ACTIVATION_WORDS = 4
@@ -1100,9 +1101,9 @@ def _control_route(
         "20",
         "--ignore-content-length",
         "--max-filesize",
-        "131072",
+        str(CONTROL_MAX_BYTES),
         "--range",
-        "0-131071",
+        f"0-{CONTROL_MAX_BYTES - 1}",
         "--write-out",
         "\n__SLIPSTREAM_STATUS__:%{http_code}",
     ]
@@ -1111,13 +1112,31 @@ def _control_route(
     command.append(f"https://{host}/")
     result = subprocess.run(command, capture_output=True, check=False)
     status_marker = b"\n__SLIPSTREAM_STATUS__:"
+    marker_present = status_marker in result.stdout
+    body = result.stdout.rsplit(status_marker, 1)[0] if marker_present else b""
+    # macOS curl 8.7.1 can report its HTTP/2 size cap as receive error 56,
+    # rather than 63. Accept only the exact local diagnostic AND the full
+    # requested prefix. An ordinary reset/EOF, mixed stderr or short response
+    # remains unavailable. This is a bounded control, not browser readiness.
+    h2_size_limit = (
+        result.returncode == 56
+        and marker_present
+        and len(body) == CONTROL_MAX_BYTES
+        and isinstance(result.stderr, bytes)
+        and re.fullmatch(
+            rb"curl: \(56\) Exceeded the maximum allowed file size \("
+            + str(CONTROL_MAX_BYTES).encode("ascii")
+            + rb"\) with " + str(CONTROL_MAX_BYTES).encode("ascii")
+            + rb" bytes\r?\n?",
+            result.stderr,
+        ) is not None
+    )
     if failure_observation is not None:
         # Keep only scalar facts already returned by this one curl call. Its
         # body and stderr can contain URLs, cookies or credentials.
-        marker_present = status_marker in result.stdout
         status_bytes = result.stdout.rsplit(status_marker, 1)[-1].strip() if marker_present else b""
         http_status = int(status_bytes) if re.fullmatch(rb"[0-9]{3}", status_bytes) else None
-        category = {
+        category = "size_limit" if h2_size_limit else {
             5: "proxy_dns", 6: "host_dns", 7: "connect", 28: "timeout",
             35: "tls_handshake", 60: "tls_certificate",
             52: "empty_reply", 55: "send", 56: "receive", 97: "proxy_handshake",
@@ -1136,7 +1155,7 @@ def _control_route(
             "status_marker_present": marker_present,
             "category": category,
         })
-    if result.returncode not in (0, 63) or status_marker not in result.stdout:
+    if (result.returncode not in (0, 63) and not h2_size_limit) or not marker_present:
         return "unavailable"
     body, code_bytes = result.stdout.rsplit(status_marker, 1)
     try:

@@ -1,5 +1,55 @@
 # Routing Research Notes
 
+## 2026-11-05: bounded curl control reports its size cap as receive error 56
+
+Readiness `42031470021/1` for source `82b3c2a77` stopped before the soak:
+Safari `xpersonatoy.com` stayed loading with 15 visible text characters and no
+DOMContentLoaded through its existing 20-second deadline. Chrome and the other
+three sites passed. Both bounded curl controls reported HTTP 200 and exit 56;
+the retained sidecar contains neither their byte counts nor raw stderr. That
+evidence remains inconclusive; it cannot retrospectively establish the cause
+of either control failure or of Safari's incomplete document.
+
+One execution of the same bounded control command on the unchanged workstation
+network reproduced a separate classification defect. System curl 8.7.1 over h2
+returned HTTP 200, exactly 131072 response bytes and exit 56 with:
+
+```text
+curl: (56) Exceeded the maximum allowed file size (131072) with 131072 bytes
+```
+
+The observer had accepted exit 63 for its deliberate size cap, but treated every
+56 as an unavailable route. The correction accepts 56 only when the entire local
+diagnostic matches the configured cap, the returned prefix is exactly that size,
+and the status marker is present. Ordinary resets/EOF, missing or mixed stderr,
+short/oversized bodies and mismatched limits remain unavailable. Existing status,
+denial and challenge classification still applies. A usable bounded control is
+not a complete document or a usable browser; browser failure continues to block
+the release. No routing, deadlines, retries or protected-run policy changes.
+
+Three new tests reproduced three failing assertions before the correction;
+99 focused live-site/readiness tests then passed, including nine rejection
+fixtures. Offline replay of the actual captured body/status/stderr now yields
+`size_limit` and usable control evidence. Private evidence is in
+`output/continuation-20261105/preview35-release/safari-diagnosis/`, notably
+`bounded-control-request/` and `control-fix-verification.json`. The old protected
+report has not been rewritten or accepted, and no fresh protected run was started.
+
+The same workstation obtained a full anonymous document and all 14 stylesheets
+before its first inline body script; each stylesheet completed in under two
+seconds. This is a different network/version observation, not a `.35` Safari
+reproduction. `resource-structure.json` counts newline-normalized UTF-8: 837796
+bytes; the saved response has 838295 decoded bytes including 499 CRLF pairs.
+Neither number measures the failing CI response. Its early stylesheet/inline
+script boundary is a hypothesis to inspect, not a routing diagnosis.
+
+A private read-only Safari observer is prepared to retain navigation byte counts
+and bounded script/stylesheet timing and attachment state, without page text or
+URLs. Nine offline fixtures and syntax checks passed. It has not run in Safari:
+the workstation is locked and the unlock question is pending. Missing resource
+timing or a missing stylesheet object is ambiguous, not proof of a pending or
+failed request. The installed `.31`, external Geph and network remain unchanged.
+
 ## 2026-11-03: Safari visibility failure with insufficient document evidence
 
 Readiness run `41624356058/1` for candidate `0b4cc942b` failed its live-site
