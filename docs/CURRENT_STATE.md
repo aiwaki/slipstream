@@ -1,6 +1,6 @@
 # Current Project State
 
-## Current continuation — 2026-11-05, .35 CI/G/P accepted; Safari diagnosis open
+## Current continuation — 2026-11-05, .35 Safari gate open; observer expanded
 
 Qualified main/candidate baseline: `82b3c2a77b22657524c28678422342799fdf1745`.
 The continuation branch adds the focused control-observation correction below;
@@ -47,17 +47,56 @@ No long soak, success attestations or publication; do not retry blindly. This is
 today's first combined account-backed dispatch. Check complete live budget before
 any justified fresh run; never rerun R.
 
-NEXT: One read-only native Safari observation after the user unlocks the Mac.
-The unlock question is pending; the last console observation was locked. Do not
-repeat the question or infer permission/state from elapsed time. Private
-E/safari-diagnosis/observe_safari_once.py refuses a locked console and preserves
-one new session/report; it does not enable automation or change preferences,
-user tabs/cookies, services or network. Its expression passed9 offline fixtures
-and both syntax checks, but has NOT run in Safari. A successful `.31` observation
-would not qualify `.35`. No native CI harness is allowed on this workstation.
+NEXT: Publish the expanded observer in the existing draft PR466 and verify its
+fresh CI before review/merge. It now retains navigation body sizes, bounded
+script/stylesheet evidence and the last completed observation when the terminal
+observation times out. Focused105 Python tests, eight JS VM cases and three real
+Chromium loopback paths passed. The unchanged99-test/PR baseline is reused;
+only the two affected followups were rerun after review. The owned fixture browser
+and server exited. E/safari-diagnosis/transport-diagnostics-verification.json
+binds source/test hashes and output/playwright/transport-20261105/result.json.
+The `.35` Safari failure itself remains unexplained, not fixed by this telemetry.
 
-Branch codex/safari-control-size-boundary now contains a focused
-observer correction, not a newly qualified candidate. One real execution of the
+Protected readiness currently requires its observer, candidate and workflow at
+the same exact main SHA. Thus the next justified live observation requires this
+reviewed observer on main and a new canonical candidate; do not detach its source
+binding or reinterpret old R. After fresh exact-main CI, check the daily account
+budget and existing runs before one new R. Run R before renewing pair-specific
+G/P so another live-site failure does not repeat already-green unchanged runtime
+checks. The accepted82b3c2a77 candidate and its G/P proofs remain historical only;
+they cannot qualify new bytes. No new protected dispatch or local installation
+has been started; no user question is pending.
+
+Safari27 on restored `.31` loaded xpersonatoy.com in one navigation: decoded
+HTML838287bytes, responseEnd2746ms, DOMContentLoaded6179ms, load12466ms. At5.134s
+the serialized DOM was only47662bytes despite the complete response; by10.186s
+the document was interactive and all38 observed stylesheet objects were attached.
+The30s screenshot visibly shows styled content and product images. This is a
+successful workstation observation, NOT `.35` CI acceptance or proof of the old
+stall's cause. E/safari-diagnosis/safari-observation-summary.json binds the
+sanitized report, expression and screenshot. The test window was closed; JavaScript
+from Apple Events was temporarily enabled with explicit user permission, restored
+off and verified off after reopening settings. Remote automation stayed off.
+No user tabs/cookies, applications, services, network or external Geph were changed.
+
+The earlier SafariDriver session attempt returned500/session-not-created, made
+zero navigations and left no driver. Two AppleEvents setup attempts also made
+zero navigations; the first read the checkbox before its delayed change settled.
+Its premature restoration claim is explicitly invalidated in the private report;
+the final independent settings observation confirms off. Do not repeat these
+attempts. No native CI qualification harness ran on the workstation.
+
+Draft PR466's original revision98418b2133fa1f3869cac3db44af04127b48d8ca on
+codex/safari-control-size-boundary contains the focused curl observer correction.
+CI42043712587/1 and audit42043712597/1 are SUCCESS for that revision, not the
+new transport diagnostics. Metadata verified the exact source, eight required CI jobs,
+five expected PR skips and all terminal check contexts. Observer session69614
+exited0 after observing terminal GitHub success; it must not be restarted.
+E/safari-diagnosis/pr466/verification.json binds the saved run/job/PR metadata.
+This is PR CI evidence, not live-site/readiness acceptance. Earlier main stayed
+pinned while the workstation observation was pending. That observation is now
+complete; the expanded observer is the reason for the next source change and
+live measurement, not a blind rerun. One real execution of the
 bounded control on the unchanged workstation returned200/exactly131072bytes with
 curl56 and the exact maximum-file-size message. This exposed misclassification
 of curl8.7.1's h2 size-cap exit as a receive failure. The patch admits only the
@@ -67,13 +106,13 @@ still fail. Three new tests reproduced3 failed assertions before the fix;
 captured result also passed. E/safari-diagnosis/control-fix-verification.json
 records it; detailed findings/limits are in docs/ROUTING_RESEARCH.md. The retained
 CI controls did not save their stderr/size, so do not reinterpret that old run.
-Browser failure still blocks release. No new CI/protected run, publication or
-local installation was started. Keep main/candidate pinned until diagnosis
-determines the next justified action; existing acceptance applies only to82b3c2a77.
+Browser failure still blocks release. No new protected run, publication or
+local installation was started. Existing candidate acceptance applies only to82b3c2a77.
 
 The workstation independently downloaded full HTML and all14 early body CSS
-files (each under2s), but these are another network/version observation, not
-Safari or `.35` reproduction/acceptance. G/P/R are terminal; no active observer.
+files (each under2s), followed by the one Safari observation above. These are
+another network/version observation, not `.35` reproduction/acceptance.
+G/P/R are terminal; no active observer.
 The GitHub connector lacks workflow dispatch/listing support; normal gh is used.
 No local app archive downloads, workstation installation retry, service mutation
 or external Geph change is authorized by the .31 restoration approval.

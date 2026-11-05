@@ -455,6 +455,72 @@ DOCUMENT_DIAGNOSTICS_EXPRESSION = r"""
 """
 
 
+TRANSPORT_DIAGNOSTICS_EXPRESSION = r"""
+(() => {
+  // Optional evidence, never readiness. Missing Resource Timing / sheet objects
+  // do not prove that a fetch is pending or failed (cache/TAO/buffer limits apply).
+  const count = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.min(16777216, Math.floor(value)) : null;
+  const ms = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.min(60000, Math.floor(value)) : null;
+  const timing = entry => entry ? {
+    encoded_bytes: count(entry.encodedBodySize), decoded_bytes: count(entry.decodedBodySize),
+    transfer_bytes: count(entry.transferSize), response_end_ms: ms(entry.responseEnd),
+    dom_content_loaded_end_ms: ms(entry.domContentLoadedEventEnd),
+    load_event_end_ms: ms(entry.loadEventEnd)
+  } : null;
+  try {
+    const resources = performance.getEntriesByType('resource');
+    const navigation = performance.getEntriesByType('navigation')[0];
+    const nodes = document.querySelectorAll('link[rel~="stylesheet"], script');
+    const byURL = new Map();
+    for (let i = 0; i < Math.min(resources.length, 1024); i++) {
+      byURL.set(resources[i].name, resources[i]);
+    }
+    let styles = 0, attached = 0, scripts = 0, timedScripts = 0, missing = 0;
+    const missingNodes = [];
+    let lastNode = null;
+    for (let i = 0; i < Math.min(nodes.length, 128); i++) {
+      const node = nodes[i];
+      try {
+        const isStyle = node.tagName === 'LINK';
+        const rawURL = isStyle ? node.href : node.src;
+        const url = rawURL ? new URL(rawURL, document.baseURI) : null;
+        const entry = url ? byURL.get(url.href) : null;
+        const type = (node.type || '').toLowerCase();
+        lastNode = {
+          ordinal: i, kind: isStyle ? 'stylesheet' : 'script',
+          in_body: Boolean(document.body && document.body.contains(node)),
+          external: Boolean(url), same_origin: url ? url.origin === location.origin : null,
+          async: isStyle ? null : Boolean(node.async), defer: isStyle ? null : Boolean(node.defer),
+          classic_script: isStyle ? null : !type || /^(application|text)\/(x-)?(java|ecma)script$/.test(type),
+          sheet_attached: isStyle ? Boolean(node.sheet) : null,
+          disabled: isStyle ? Boolean(node.disabled) : null,
+          media_matches: isStyle ? (!node.media || matchMedia(node.media).matches) : null,
+          timing: timing(entry)
+        };
+        if (isStyle) { styles++; if (lastNode.sheet_attached) attached++; }
+        if (!isStyle && url) { scripts++; if (entry) timedScripts++; }
+        if ((isStyle && !lastNode.sheet_attached && !lastNode.disabled && lastNode.media_matches)
+            || (!isStyle && url && !entry)) {
+          missing++;
+          if (missingNodes.length < 16) missingNodes.push(lastNode);
+        }
+      } catch (_) { lastNode = {ordinal: i, observation_unavailable: true}; }
+    }
+    return {
+      navigation: timing(navigation), resource_count: count(resources.length),
+      node_count: count(nodes.length), resources_truncated: resources.length > 1024,
+      nodes_truncated: nodes.length > 128, stylesheets_observed: styles,
+      stylesheets_attached: attached, external_scripts_observed: scripts,
+      external_scripts_with_timing: timedScripts, missing_nodes: missingNodes,
+      missing_nodes_truncated: missing > missingNodes.length, last_scanned_node: lastNode
+    };
+  } catch (_) { return null; }
+})()
+"""
+
+
 def _browser_evidence_expression(host: str) -> str:
     denials = json.dumps(SITES[host]["denials"])
     challenges = json.dumps(CHALLENGE_MARKERS)
@@ -496,6 +562,7 @@ def _browser_evidence_expression(host: str) -> str:
   const lowered = documentSource.toLowerCase();
   const signals = ({_readiness_expression(host)});
   signals.document_diagnostics = ({DOCUMENT_DIAGNOSTICS_EXPRESSION});
+  signals.transport_diagnostics = ({TRANSPORT_DIAGNOSTICS_EXPRESSION});
   return {{
     challenge_detected: {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true,
     denial_detected: {denials}.some((marker) => lowered.includes(marker)),
@@ -803,6 +870,55 @@ def _safari_exception_class(error: BaseException) -> str:
     return "Exception"
 
 
+def _bounded_transport_diagnostics(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+
+    def number(value: object, maximum: int = 16 * 1024 * 1024) -> int | None:
+        return min(maximum, value) if type(value) is int and value >= 0 else None
+
+    def boolean(value: object) -> bool | None:
+        return value if type(value) is bool else None
+
+    def timing(value: object) -> dict[str, object] | None:
+        if not isinstance(value, dict):
+            return None
+        return {
+            **{key: number(value.get(key)) for key in
+               ("encoded_bytes", "decoded_bytes", "transfer_bytes")},
+            **{key: number(value.get(key), 60_000) for key in
+               ("response_end_ms", "dom_content_loaded_end_ms", "load_event_end_ms")},
+        }
+
+    def node(value: object) -> dict[str, object] | None:
+        if not isinstance(value, dict):
+            return None
+        kind = value.get("kind")
+        return {
+            "ordinal": value.get("ordinal") if type(value.get("ordinal")) is int
+                and 0 <= value["ordinal"] < 128 else None,
+            "kind": kind if isinstance(kind, str) and kind in {"stylesheet", "script"} else None,
+            **{key: boolean(value.get(key)) for key in
+               ("in_body", "external", "same_origin", "async", "defer", "classic_script",
+                "sheet_attached", "disabled", "media_matches", "observation_unavailable")},
+            "timing": timing(value.get("timing")),
+        }
+
+    missing = value.get("missing_nodes")
+    return {
+        "navigation": timing(value.get("navigation")),
+        **{key: number(value.get(key)) for key in
+           ("resource_count", "node_count", "stylesheets_observed", "stylesheets_attached",
+            "external_scripts_observed", "external_scripts_with_timing")},
+        **{key: boolean(value.get(key)) for key in ("resources_truncated", "nodes_truncated")},
+        "missing_nodes": [node(row) for row in missing[:16] if isinstance(row, dict)]
+            if isinstance(missing, list) else None,
+        "missing_nodes_truncated": True if isinstance(missing, list) and len(missing) > 16
+            else boolean(value.get("missing_nodes_truncated")),
+        "last_scanned_node": node(value.get("last_scanned_node")),
+    }
+
+
 def _record_safari_observation(
     observation: dict[str, object] | None, stage: str, elapsed_ms: object,
     evidence: object = None,
@@ -845,6 +961,7 @@ def _record_safari_observation(
             for key in ("body_present", "body_display_none", "body_visibility_hidden",
                         "body_opacity_nonpositive", "body_rect_positive")
         },
+        "transport_diagnostics": _bounded_transport_diagnostics(signals.get("transport_diagnostics")),
         **{key: signals.get(key) if type(signals.get(key)) is bool else None
            for key in ("dom_content_loaded", "response_started", "response_complete",
                        "visible_body", "visible_app", "preloader_visible")},
@@ -852,6 +969,10 @@ def _record_safari_observation(
     observation["context"] = context
     if stage == "observed" and progress["first"] is None:
         progress["first"] = snapshot
+    if stage == "observed":
+        # Keep its own timestamp: a later timeout is not a fresh observation of
+        # this DOM, but must not erase the last evidence we actually collected.
+        progress["last_observed"] = snapshot
     progress["final"] = snapshot
 
 
