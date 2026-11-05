@@ -18,8 +18,14 @@ qualify the fix, not a .35 release candidate or a workstation update.
 The version preparation synchronizes the package metadata and publisher's strict
 preview-sequence guard. Its shell test checks the current version plus neighboring,
 mismatched and malformed inputs; all57 build-configuration tests passed.
-Geph 0.4.3-r4, dependencies and routing remain unchanged. Build and qualify one
-exact-main .35 candidate before publication;
+The packaged-update prerequisite is pinned to the new .34 -> .35 candidate pair;
+the previous pair's accepted reports remain historical evidence. Candidate
+authentication and terminal cleanup checks are unchanged. The two reviewed
+observer-source hashes cover only the pair-version guard and matching workflow
+input description changes. All140 prerequisite, source-boundary and workflow tests
+passed, including refusal of historical and unreviewed pairs.
+Geph 0.4.3-r4, dependencies and routing remain unchanged.
+Build and qualify one exact-main .35 candidate before publication;
 do not relabel or replace published .34 assets. The restored workstation remains
 on .31. A new workstation update requires separate authorization after the failed
 .31 -> .34 transaction; the approved restoration is complete.
@@ -981,10 +987,10 @@ Public Cancel, commit and pre-ACK rollback are now verified for `.33 → .34`. T
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.34`, with
-  `VERSION` and `preview_sequence=34` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.35`, with
+  `VERSION` and `preview_sequence=35` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.34`; the new preview requires its own
+  `.23` source and is rejected for `.35`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact

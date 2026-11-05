@@ -78,8 +78,8 @@ identical production/test bytes. Graph tools were unavailable; review used
 bounded direct source reads. Do not rerun these accepted tests.
 
 Preparing .35 from that merge changes version metadata, the publisher's exact
-sequence pin and release/checkpoint documentation; dependencies, routing and
-the verified stop fix are unchanged. PR465 is open. Initial source
+sequence pin, the packaged gate's reviewed .34 -> .35 pair and documentation;
+dependencies, routing and the verified stop fix are unchanged. PR465 is open. Initial source
 `b6d1158eef781d4cbf48400e6cd72941aac562b2` passed audit42022986190/1, but
 CI42022986292/1 product-checks failed one of971 metadata tests: build-app.yml
 still admitted preview sequence34. The complete job127230184492 log is retained
@@ -87,8 +87,14 @@ under `output/continuation-20261105/preview35-release/pr465-product-checks-faile
 The follow-up sets the publisher's default and strict guard to35. Its existing
 shell-execution test derives current/neighbor/mismatched cases from VERSION;
 57 build-config tests now pass, including those acceptance/refusal cases.
+The packaged prerequisite now admits only .34 -> .35, with its two source hashes
+updated after reviewing the exact version-guard/workflow-description-only diff.
+140 packaged prerequisite/source-boundary/workflow tests pass, including rejection
+of historical, reversed, identical and unreviewed pairs. Candidate authentication,
+root evidence, transaction handling and cleanup are unchanged. Evidence is in
+`output/continuation-20261105/preview35-release/{build-config-tests,pair35-contract-tests}.txt`.
 Version synchronization, project-state continuity and diff whitespace checks pass.
-NEXT: push the scoped follow-up, observe its new exact-head CI, then obtain the
+NEXT: push the scoped release-pair follow-up, observe its new exact-head CI, then obtain the
 exact-main .35 candidate and qualify it before publication. Do not rerun the old
 failed attempt or dispatch duplicates. Published .34 and its assets
 must remain unchanged. Main CI42021590721/1 belongs to b0e1724e5
@@ -103,8 +109,9 @@ Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstr
 Branch `codex/preview35-stale-pf-recovery` is based on main
 `b0e1724e5675cd6613b4f563ab45bbf8af0413f9` (PR464 merged after verified
 final source and packaged lifecycle checks).
-All14 observer helpers and workflow remain byte-identical to0a451afe6.
-Qualified product source remains `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,
+The accepted .33 -> .34 public proof below binds14 observer helpers and workflow
+to0a451afe6; those historical pins do not qualify the new candidate.
+Published .34 qualified product source is `a0a60e080cc97214cebd7491f4ea5d56dff66e0e`,
 tree79dfb9c10f9196c1b7520ba6f76bd65d0604aeb8; never substitute a new CI build.
 Historical Developer checkout is different; preserve user changes.
 ROOT=`output/continuation-20261101/preview34-release/post-stall-main-a0a60e080`.
