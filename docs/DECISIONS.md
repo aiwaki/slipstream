@@ -1,5 +1,20 @@
 # Decisions
 
+### 2026-11-06: preserve verified ownership through Geph liveness hysteresis
+
+A negative control-RPC liveness sample is not loss of process ownership. If the
+same owned listener PID and exact command are verified before and after that
+sample, keep ownership for the previously selected port while the existing
+three-miss reducer decides readiness. A cold-start miss does not create a
+selected port or ready backend. Loss or replacement of the sampled owner during
+the RPC invalidates its result, including a positive liveness result; an owned
+successor cannot inherit that sample's proof.
+
+The handler still requires route intent, readiness, cooldown/circuit admission
+and the existing first-payload proof. This change adds no dial, retry, restart,
+foreground wait or fallback to another exit. Explicit external-port behavior,
+Discord/YouTube local routing and user-owned network settings remain unchanged.
+
 ### 2026-11-05: retire a proven dead PF receipt only after installed writers stop
 
 Local source change, pending review and disposable qualification. The installed

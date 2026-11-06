@@ -1,12 +1,11 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, Safari comparison prepared
+## Current continuation — 2026-11-06, verified ownership hysteresis fix
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/safari-parser-tail-control`; base HEAD/main
-`b80d8aec587d0ec1f1430a102e8f5313ebeeb5e3`, tree
-`4319bd79cd50ebda0de836c725b5aa3c91d0ebdc` (merged PR470).
-Live GitHub main and failed R were reconciled on this continuation.
+Branch `codex/geph-owned-probe-continuity`; base/main
+`c5af92365b3d8d6040919c0429f1085e8e3d9a87`, tree
+`6ee881267d1c4342df4fe00370d49231a68d5b31` after merged PR471.
 E=`output/continuation-20261105/preview35-release`; Q=E/semantic-qualification;
 D=E/safari-parser-control. No source from this follow-up is installed or released.
 
@@ -67,12 +66,55 @@ node error coverage were fixed before the final pass. D/local-verification.json
 binds changed source and retained RED/final logs. VM/mocked WebDriver tests do
 not establish native Safari behavior. No broad suite or protected run repeated.
 
-NEXT: finish scoped review/docs checks, commit this observer patch in a PR and
-verify its required checks. If merged, qualify the new exact-main candidate with
-R first; repeat final G/P only after R passes for those new bytes. Before any R,
-reconcile full paginated live budget/active runs and source; at last check2 of3
-Nov6 slots remain. No protected rerun, blind retry, publication or local install.
-All old watchers are terminal; do not restart them.
+PR471 CI42140616354/1 and audit42140616234/1 passed. All8 required PR
+consumers/5 expected skips and4 audit jobs verified, no review comments.
+D/pr471/watcher-receipt.json SHA
+1fc791e0060623ee2eb71baac1d0da2dd1782b3f8001ae961488291b0bc8f064.
+Guarded squash succeeded at01:15:41UTC. Fetched main matches tested tree6ee881267;
+D/pr471/merge-verification.json SHA
+6b3ffe4bc408823deb72966ce9380c954d86a2ad61fcee58b5fc3801d1267067.
+PR watcher74750 exited0; do not restart. Code/tests committed; only this checkpoint
+is dirty, with the pre-switch copy retained in D/pr471.
+
+Exact-main CI42142627860/1 and audit42142627809/1 PASS for c5af92365;
+all12 common consumers and4 audit jobs verified. Main watcher17366 exited0.
+D/main-ci/watcher-receipt.json SHA
+d1b617a2c1427a1a1732436a7d22237da79ae9865b39e941f21cd342f3a41191.
+Candidate artifact13469660717, manifest SHA
+00786209741f1910ee7d460709422c24ba103a8a63d84ea17b6b45577fe0acfa;
+producer log/job/upload metadata and terminal CI bind candidate-receipt.json.
+No app archive downloaded. Independent review confirms R has no G/P prerequisite;
+publisher does not automatically enforce separate G/P, so retain both as explicit
+final gates. R42144912276/1 was dispatched once at01:36:02UTC after the complete
+paginated inventory found no active/duplicate attempt; UTC Nov6 position2/3.
+D/qualification/readiness-r contains its preflight, intent and terminal evidence.
+R failed before soak; watcher97553 exited1. Its failed-run-verification.json SHA
+2b20a2202cb03740962d3a6640ad80153c3ba2266eec5688e8cf49af6493e28e authenticates
+artifact13470350432 and4 reports. Hosted cleanup passed. System Safari control
+was usable7851ms with both absence/proxy/PF guards verified. Selected Safari failed
+readiness_context_invalid20104ms:47/47 samples, final other document1205bytes,
+164 body characters, host/HTTPS false and no navigation timing. Chrome usable5315ms;
+all other6 browser cases passed. A mode/time dependency is observed, not a proven
+request-time transport cause. No soak or success attestations, no final G/P.
+
+The probe_geph defect is independently reproduced: one negative liveness probe
+resets _geph_owned while reduce_geph_probe_state keeps _geph_up through hysteresis;
+handler ownership eligibility closes without dialing. The actual probe, reducer,
+ownership matcher and handler produce RED:0 dials/0 bytes, same PID4242, up=True,
+strikes1/hold0;10 negative/healthy controls passed. Effect-free RED is retained in
+D/qualification/readiness-r/owned-probe-hysteresis-red.log. The local fix pins and
+rechecks the owner across RPC, preserves ownership only for its selected port,
+and leaves readiness/three-strike/cooldown rules unchanged. Ownership drift also
+rejects positive RPC results. Now20 new cases plus43 admission/recovery cases PASS;
+9 legacy probe/recovery cases PASS. Independent source review found no blocker.
+No network/process/storage effects in the regression and no causal attribution
+of R to this defect. Eight docs tests, continuity contract and diff whitespace
+checks also pass. D/owned-probe-local-verification.json binds local evidence.
+NEXT: commit/review this narrow fix and verify its exact PR/main CI before
+considering the last UTC account-backed slot.
+Graph tools are unavailable; narrow direct reads used. Never repeat unchanged R. Earlier G/P
+remain accepted for b80d bytes only. Recompute any later budget; no protected rerun,
+blind retry, publication or workstation install.
 
 Restored .31 remains last verified local state. Temporary Safari Apple Events
 JavaScript was restored OFF after the earlier one-page observation. Keep backups,

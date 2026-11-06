@@ -14139,19 +14139,37 @@ def probe_geph():
     order = GEPH_PORTS
     if _geph_port in GEPH_PORTS and _geph_port != GEPH_PORTS[0]:
         order = [_geph_port] + [p for p in GEPH_PORTS if p != _geph_port]
+    retained_owned_port = None
     for p in order:
-        owned = p == GEPH_OWNED_PORT and geph_listener_owned(p)
+        owned_pid = (
+            _owned_geph_confirmation_pid() if p == GEPH_OWNED_PORT else None
+        )
+        owned = owned_pid is not None
         if _env_geph_port is None and not owned:
             if _tcp_listener_present(p):
                 _geph_port_conflict = True
                 _geph_port = None
             _geph_owned = False
             continue
-        if _geph_live(p):
+        probe_ok = _geph_live(p)
+        # The control RPC can block while the listener disappears or changes.
+        # Neither its success nor hysteresis may publish the old owner's proof
+        # for a replacement process, even if that successor is also ours.
+        if owned and not _owned_geph_confirmation_pid_matches(owned_pid):
+            if _geph_port == p:
+                _geph_port = None
+            _geph_owned = False
+            continue
+        if probe_ok:
             _geph_port = p
             _geph_owned = owned
             return True
-    _geph_owned = False
+        if owned and _geph_port == p:
+            retained_owned_port = p
+    # A transient liveness miss is not loss of independently verified ownership.
+    # Preserve only the already selected port; the existing reducer still owns
+    # cold-start readiness and the three-miss threshold. No new dial or wait.
+    _geph_owned = bool(retained_owned_port and _geph_port == retained_owned_port)
     if _geph_port_conflict:
         _geph_port = None
     return False    # transient miss -> keep last good _geph_port; hysteresis decides

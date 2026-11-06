@@ -1,5 +1,62 @@
 # Routing Research Notes
 
+## 2026-11-06: a transient Geph probe bypasses ownership hysteresis
+
+The real `probe_geph → reduce_geph_probe_state → handle` path independently
+reproduces a request loss. After one negative control-RPC sample, the reducer
+keeps `_geph_up=True` for the established port, as designed. But `probe_geph`
+unconditionally cleared `_geph_owned`; the handler's separate ownership check
+then rejected the request before dialing. The saved owner, PID and command still
+matched. Tests of the reducer and ownership probe in isolation had missed this
+composition error.
+
+On unchanged c5af92365 the new effect-free regression failed with0 owned dials,
+0 downstream bytes, strikes1 and hold0; its10 healthy/negative controls passed.
+The corrected probe pins the owner PID before RPC and revalidates it afterward.
+A missed liveness sample may retain that verified identity for the previously
+selected port. The miss remains negative: cold-start and the three-miss threshold
+still govern readiness. An owner change during RPC invalidates either result,
+including a nominally successful RPC from a replaced process.
+
+The focused result is63 passing cases:20 new cases covering the first two misses,
+missing/foreign/replaced ownership, positive and negative RPCs, cold start, the
+third miss and an explicit external-port control;43 existing admission/recovery
+cases. Nine legacy probe/recovery cases also pass. There are no new waits, restarts,
+route choices or network probes. Actual socket, subprocess, storage and executor
+effects are forbidden in the new fixture; the real ownership matcher and request
+handler run against deterministic inputs. The independent review found no blocker.
+Evidence is retained under the paired comparison's `readiness-r/owned-probe-*`
+files. This establishes a source defect, not its occurrence during R42144912276;
+that run did not retain the request-time admission decision.
+
+## 2026-11-06: paired Safari control succeeds before selected-route failure
+
+R42144912276/1 at c5af92365 ran the guarded system comparison introduced in
+PR471. Safari reached usable content in7851ms before Slipstream install, with
+owned service/files/anchors absent, PF disabled and system proxies disabled
+before and after. The selected-route navigation then failed at20104ms: its last
+sample was a1205-byte `other` document,164 visible body characters, HTTPS and
+expected-host flags false, and no navigation/resource timings. All47 samples
+completed. This is a different symptom from the earlier partial expected-host
+document; the private browser error text was not retained and cannot be inferred.
+Chrome reached usable content in5315ms; the other six browser cases also passed.
+
+The post-failure sample showed the same owned listener/launchd PID8981, daemon8421,
+Geph up, recovery rearmed, no restart/conflict and zero active sessions. It does
+not show the admission decision made when Safari connected. Both curl controls
+again prove only bounded HTTP200 prefixes. A single ordered pair identifies a
+mode/time dependency, not a causal routing defect: external network/origin
+variation and DNS/CDN cache effects remain uncontrolled.
+
+The report archive13470350432 has digest
+18c34d61ba69f30e77c41196182e54ad50536eba88674219d11366519f18d640.
+Source/job/upload windows and the four member hashes are independently bound by
+`output/continuation-20261105/preview35-release/safari-parser-control/qualification/readiness-r/failed-run-verification.json`
+(SHA2b20a2202cb03740962d3a6640ad80153c3ba2266eec5688e8cf49af6493e28e).
+The hosted cleanup passed; no soak or success attestations ran. This is UTC Nov6
+account-backed position2/3, not permission for an unchanged retry. Code graph
+tools were unavailable, so the subsequent source review uses narrow direct reads.
+
 ## 2026-11-06: Safari parser delay and an unobserved resource tail
 
 R42134381208/1 at b80d8aec5 passed seven of eight browser cases. Safari on

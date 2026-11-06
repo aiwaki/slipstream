@@ -3465,6 +3465,7 @@ def test_probe_geph_rejects_unknown_owned_port_and_only_detects_external(monkeyp
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
     monkeypatch.setattr(tproxy, "_external_geph_detected", False)
     monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: False)
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid", lambda: None)
     monkeypatch.setattr(
         tproxy,
         "_tcp_listener_present",
@@ -3501,6 +3502,8 @@ def test_probe_geph_accepts_verified_owned_listener(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_port", None)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
     monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid", lambda: 4242)
+    monkeypatch.setattr(tproxy, "_owned_geph_confirmation_pid_matches", lambda pid: pid == 4242)
     monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda _port: False)
     monkeypatch.setattr(tproxy, "_geph_live", lambda port: port == tproxy.GEPH_OWNED_PORT)
 
