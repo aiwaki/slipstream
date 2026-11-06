@@ -1,125 +1,95 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, verified ownership hysteresis fix
+## Current continuation — 2026-11-06, Safari failure diagnostics
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/geph-owned-probe-continuity`; base/main
-`c5af92365b3d8d6040919c0429f1085e8e3d9a87`, tree
-`6ee881267d1c4342df4fe00370d49231a68d5b31` after merged PR471.
-E=`output/continuation-20261105/preview35-release`; Q=E/semantic-qualification;
-D=E/safari-parser-control. No source from this follow-up is installed or released.
+Branch `codex/live-site-failure-causes`; base/main
+`03760fe5c0ac86e0a7f5c9b5772c90e56864a3c6`, tree
+`c0fe7779b43a00af8c5b02736633422bdc7c787a` after merged PR472.
+Live GitHub reconciliation confirms that main, terminal green CI/audit and failed
+R below; no existing PR for this follow-up. Diagnostic source is local pending PR.
+E=`output/continuation-20261105/preview35-release`;
+D=E/safari-parser-control; R=D/owned-probe-qualification/readiness-r;
+F=R/diagnostic-followup. No `.35` publication or workstation installation.
 
-### Accepted baseline at b80d8aec5 — reuse, do not repeat
+### Current source and failed native gate
 
-- PR469 fixed payload-qualified recovery leaving its own30s hold. PR470 bound
-  all4 legacy semantic/preflight commits to the originating hold generation;
-  the retained causal RED has5 stale failures and4 fresh controls. Local21 new,
-  121 existing and114 recovery/admission tests passed. H=E/semantic-hold-generation;
-  H/local-verification.json SHA
-  989d4d29e6947cbded13a96e802a67a0535cd25789b4d18a492ac1bf2803a1ce.
-- PR470 CI42126204505/1 and audit42126204449/1 passed; guarded squash fetched
-  main with the tested merge tree. E/semantic-pr470/merge-verification.json SHA
-  da62f86d17cd1199fb40cfc3205156f09cdf99681e8d23940ce2d37751eaac1f.
-- Exact-main CI42129277795/1 and audit42129277858/1 PASS, all12 common consumers
-  and4 audit jobs. E/main-semantic-ci/watcher-receipt.json SHA
-  acf016380af31346fd023539bd58b6c20427566bafad9440c5ae33593bd42760;
-  candidate-receipt.json SHA
-  323c91282bd5d76e7fc77afbf71a77ae1f5f38be63fae510a5ba3ee779ea4cd6.
-  Artifact13463147700, manifest SHA
-  2fccbaea5b1b33b9e9db30d96454f0f60be3d7c0c93adbb3991074f17b5d03de.
-- Native G42131959745/1 ACCEPTED,75 independent checks, exact .34/.35 payloads,
-  durable commit, worker kill, OLD restore and advancing daemon heartbeats.
-  Q/native-g/verification.json SHA
-  040638c2290443d8a11bd716568806e989cb50d3a6f8724b56ba712a73393cad.
-- Packaged P42132780497/1 ACCEPTED,13 checks: real ACK, pre-ACK kill, restored OLD,
-  heartbeat advancement and terminal cleanup. Q/packaged-p/verification.json SHA
-  ee59d0843bcb2760c6d6e9e0cd17ca911fea02a1960dcb83ed0e104d311cd631.
-  These qualify b80d bytes only; new-source final gates need their own bindings.
+PR472 fixed a reproduced ownership hysteresis defect: a negative Geph RPC probe
+cleared ownership while readiness still retained the same verified PID. Owner
+identity is now checked before and after the probe; a replacement cannot inherit
+its result. Existing readiness/cold-start/hold rules remain unchanged. Retained
+RED and focused proof are in D/owned-probe-local-verification.json, SHA
+f65e3b8f743dc7125791890533a87d3aec829f796e69cd146fc47a8cae5152ec.
+This defect is not established as the cause of Safari's live failure.
 
-### Current failure and scoped follow-up
+- PR472 CI42148664085/1 and audit42148664185/1 passed; guarded squash has the
+  tested tree. D/pr472/merge-verification.json SHA
+  a8394b608464b0873099c75042a4896d6ef57bfc0f6ca1aca77205253dbc6cbe.
+- Main CI42150528780/1 and audit42150528788/1 passed all12 common consumers and
+  all4 audit jobs. D/owned-probe-main-ci/watcher-receipt.json SHA
+  0192e67e9700533b2ab0d2b17d13e6d242ee1c9e95d4541e102b8374157c4d28.
+- Candidate artifact13471659846, manifest SHA
+  2a0a9593351908307e71a454de25c46471113e3422c9f3437a796c29665c2d99.
+  D/owned-probe-main-ci/candidate-receipt.json SHA
+  95455bdad972d7accd54ff46f505d964ab5cb7c1b3e5d8e3a68395fa52c1aaa1
+  binds producer metadata/full log and CI only; no app archive downloaded.
+- R42152828184/1 failed before soak. Authenticated diagnostic artifact13472952760
+  has four exact members, ZIP SHA
+  c52bbcbe07eb06c410c0a10b0a716e4fe0b3af9e23fc7cf45b6a313bf814b6a4.
+  R/failed-run-verification.json SHA
+  0aeef4b533758b17a985afe5e26f6edb503b8a2e8701575844957cc239a21756.
 
-R42134381208/1 failed before soak at the live-site gate. UTC2026-11-06 rank1/3
-consumed; no unchanged retry. Q/readiness-r/failed-run-verification.json SHA
-e3235267b616ae76f6fa28240ae1d2f8f4112cd52038a3ebddf12a85144cffc5 authenticates
-artifact13465860308 and its4 reports. Hosted cleanup passed.
+Seven of eight browser cases passed. For xpersonatoy.com, system Safari was usable
+in8060ms with absence/proxy/PF guards verified. Selected Safari failed after20140ms:
+other document1205B, body164 characters, host/HTTPS false, no navigation timing.
+Chrome was usable4862ms. Post-Safari PID8086/up became PID9038/down18.105s later;
+controls did not restart Geph. Product recovery versus exit/KeepAlive is unresolved.
+Curl HTTP200 controls prove only bounded128KiB prefixes. Hosted cleanup passed;
+soak and success attestations were skipped. Initial probe precedes PF/active, so
+source review rejected a speculative ordering fix. Full investigation and limits
+are in ROUTING_RESEARCH.md.
 
-Seven of eight cases usable; only Safari xpersonatoy.com document_pending20009ms.
-Chrome same host usable5380ms. Last Safari sample18876ms: HTTPS/h2, navigation
-839468 decoded bytes/responseEnd3785ms, DOM596672bytes, loading/DCLfalse. The old
-observer covered128/167 nodes, so40/40 attached styles describe only that prefix.
-Its14 untimed scripts were async. Same owned PID7323/listener remained up, no
-restart hint; curl controls prove bounded HTTP200 prefixes only. No causal routing
-failure established. Details and public-response limitations: ROUTING_RESEARCH.md.
+### Scoped follow-up, locally verified
 
-Local observer patch covers at most256 prefix plus actual last8 nodes, preserves
-unreadable/omitted counts, prioritizes unresolved styles over async scripts and
-measures collection cost. One additional Safari system_without_slipstream
-navigation runs before install only after verified owned-job/files/anchor absence
-and disabled system proxies. The after-guard checks PF/proxy stability. Same20s
-criterion and fresh sessions; no gate weakening, route/settings change or retry.
-External VPN/routing and ordered DNS/CDN cache effects remain limitations.
-The diagnostic stays outside the schema2 selected-route report.
+The observer now retains bounded Safari error-category hints, separate health and
+heartbeat freshness, and fixed failure/restart enums from current daemon log plus
+`.1`. No raw text/URLs/secrets are exported. This does not change runtime routing,
+readiness criteria, timeouts or retry count. Log rotation and the two-second
+filesystem observation budget are cooperative, not atomic/hard cancellation;
+missing events cannot prove no dial or distinguish every admission denial.
 
-126 focused tests PASS, including14 JavaScript VM cases and17 paired-control
-cases. Independent review complete; strict producer/consumer schema and middle-
-node error coverage were fixed before the final pass. D/local-verification.json
-binds changed source and retained RED/final logs. VM/mocked WebDriver tests do
-not establish native Safari behavior. No broad suite or protected run repeated.
+Combined focused verification:140 tests and158 subtests PASS, including14 transport
+and17 error-hint JavaScript VM cases. F/combined-focused.json binds command, source
+hashes and log; receipt SHA
+1f94454e6c589a3fa52c9d6a1083e37e2c5c9f35d0d41af9bada87b68e6cc633.
+Independent review found no blocker. Eight documentation tests, continuity and
+whitespace checks passed. Native Safari still fails on main; observer fixtures
+are not proof of a browser fix. Graph tools unavailable; bounded direct source
+reads used. The reviewed delta is ready for its PR and source-bound CI.
 
-PR471 CI42140616354/1 and audit42140616234/1 passed. All8 required PR
-consumers/5 expected skips and4 audit jobs verified, no review comments.
-D/pr471/watcher-receipt.json SHA
-1fc791e0060623ee2eb71baac1d0da2dd1782b3f8001ae961488291b0bc8f064.
-Guarded squash succeeded at01:15:41UTC. Fetched main matches tested tree6ee881267;
-D/pr471/merge-verification.json SHA
-6b3ffe4bc408823deb72966ce9380c954d86a2ad61fcee58b5fc3801d1267067.
-PR watcher74750 exited0; do not restart. Code/tests committed; only this checkpoint
-is dirty, with the pre-switch copy retained in D/pr471.
+### Budget, reused evidence and next verified action
 
-Exact-main CI42142627860/1 and audit42142627809/1 PASS for c5af92365;
-all12 common consumers and4 audit jobs verified. Main watcher17366 exited0.
-D/main-ci/watcher-receipt.json SHA
-d1b617a2c1427a1a1732436a7d22237da79ae9865b39e941f21cd342f3a41191.
-Candidate artifact13469660717, manifest SHA
-00786209741f1910ee7d460709422c24ba103a8a63d84ea17b6b45577fe0acfa;
-producer log/job/upload metadata and terminal CI bind candidate-receipt.json.
-No app archive downloaded. Independent review confirms R has no G/P prerequisite;
-publisher does not automatically enforce separate G/P, so retain both as explicit
-final gates. R42144912276/1 was dispatched once at01:36:02UTC after the complete
-paginated inventory found no active/duplicate attempt; UTC Nov6 position2/3.
-D/qualification/readiness-r contains its preflight, intent and terminal evidence.
-R failed before soak; watcher97553 exited1. Its failed-run-verification.json SHA
-2b20a2202cb03740962d3a6640ad80153c3ba2266eec5688e8cf49af6493e28e authenticates
-artifact13470350432 and4 reports. Hosted cleanup passed. System Safari control
-was usable7851ms with both absence/proxy/PF guards verified. Selected Safari failed
-readiness_context_invalid20104ms:47/47 samples, final other document1205bytes,
-164 body characters, host/HTTPS false and no navigation timing. Chrome usable5315ms;
-all other6 browser cases passed. A mode/time dependency is observed, not a proven
-request-time transport cause. No soak or success attestations, no final G/P.
+UTC2026-11-06 account-backed slots are exhausted:42134381208/1,
+42144912276/1,42152828184/1 (ranks1–3/3). All are terminal; observers18614,28016,
+72012 and earlier ones exited. Do not restart observers, repeat unchanged green
+suites, dispatch another protected run today, or retry an unchanged R later.
+Prepare the reviewed diagnostic PR, then reconcile its source/CI. A later new-source
+R requires a fresh paginated budget/duplicate check; do not infer tomorrow's quota.
+Order CI/audit → R → native G → packaged P → publication remains valid. G/P are
+explicit final gates even though the publisher does not enforce them automatically.
 
-The probe_geph defect is independently reproduced: one negative liveness probe
-resets _geph_owned while reduce_geph_probe_state keeps _geph_up through hysteresis;
-handler ownership eligibility closes without dialing. The actual probe, reducer,
-ownership matcher and handler produce RED:0 dials/0 bytes, same PID4242, up=True,
-strikes1/hold0;10 negative/healthy controls passed. Effect-free RED is retained in
-D/qualification/readiness-r/owned-probe-hysteresis-red.log. The local fix pins and
-rechecks the owner across RPC, preserves ownership only for its selected port,
-and leaves readiness/three-strike/cooldown rules unchanged. Ownership drift also
-rejects positive RPC results. Now20 new cases plus43 admission/recovery cases PASS;
-9 legacy probe/recovery cases PASS. Independent source review found no blocker.
-No network/process/storage effects in the regression and no causal attribution
-of R to this defect. Eight docs tests, continuity contract and diff whitespace
-checks also pass. D/owned-probe-local-verification.json binds local evidence.
-NEXT: commit/review this narrow fix and verify its exact PR/main CI before
-considering the last UTC account-backed slot.
-Graph tools are unavailable; narrow direct reads used. Never repeat unchanged R. Earlier G/P
-remain accepted for b80d bytes only. Recompute any later budget; no protected rerun,
-blind retry, publication or workstation install.
+Accepted older G42131959745/1 (75 checks) and P42132780497/1 (13 checks) qualify
+b80d8aec5 bytes only. E/semantic-qualification/native-g/verification.json SHA
+040638c2290443d8a11bd716568806e989cb50d3a6f8724b56ba712a73393cad;
+packaged-p/verification.json SHA
+ee59d0843bcb2760c6d6e9e0cd17ca911fea02a1960dcb83ed0e104d311cd631.
+Earlier causal fixes and observer PR471 retain their proofs under E; do not rerun
+them merely for reassurance or treat their acceptance as new-source qualification.
 
-Restored .31 remains last verified local state. Temporary Safari Apple Events
-JavaScript was restored OFF after the earlier one-page observation. Keep backups,
-settings/learning and external Geph intact. A fresh local window is needed after
-the candidate is ready; no failed workstation transaction is retried implicitly.
+Restored `.31` remains the last verified local state. Temporary Safari Apple Events
+JavaScript was restored OFF after the earlier one-page observation. Preserve
+backups, settings/learning and external Geph. A fresh local window is needed after
+a candidate is qualified; no failed workstation transaction is retried implicitly.
 
 ### Retained PR465–468 evidence (historical)
 

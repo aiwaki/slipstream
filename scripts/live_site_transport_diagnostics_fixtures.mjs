@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
-const {expression, browser_expression} = JSON.parse(readFileSync(0, 'utf8'));
+const {expression, browser_expression, error_hint_expression} = JSON.parse(readFileSync(0, 'utf8'));
 let passed = 0;
 const asset = 'https://fixture.invalid/style.css?private-token';
 const entry = (name = asset) => Object.freeze({
@@ -222,4 +222,60 @@ for (const clockUnavailable of [false, true]) {
   browserEvidence.push(evidence);
   passed++;
 }
-console.log(JSON.stringify({cases_passed: passed, browser_evidence: browserEvidence}));
+let errorHintCases = 0;
+const errorHint = (protocol, body, extra = {}) => {
+  const document = Object.defineProperties({title: 'Safari', body: {innerText: body}},
+    Object.getOwnPropertyDescriptors(extra));
+  return JSON.parse(JSON.stringify(vm.runInNewContext(error_hint_expression, {
+    location: {protocol}, document,
+  }, {timeout: 1000})));
+};
+for (const [body, reason] of [
+  ['Safari can\u2019t find the server https://private.invalid/token', 'host_dns'],
+  ["Safari can't establish a secure connection", 'tls_handshake'],
+  ['The server unexpectedly dropped the connection', 'connection_lost'],
+  ['The request timed out', 'timeout'],
+  ['The Internet connection appears to be offline', 'offline'],
+  ['Navigation failed with HTTPS-Only enabled', 'https_only'],
+]) {
+  const hint = errorHint('safari-resource:', body);
+  assert.deepEqual(hint, {state: 'observed', scheme: 'safari_resource', reason, text_truncated: false});
+  assert.equal(JSON.stringify(hint).includes('private'), false);
+  errorHintCases++;
+}
+// Ordinary content and known non-error document kinds must not be inspected.
+for (const protocol of ['http:', 'https:', 'about:', 'file:', 'data:', 'blob:']) {
+  const hint = errorHint(protocol, '', {get body() { throw new Error('private'); }});
+  assert.deepEqual(hint, {state: 'not_applicable', scheme: protocol.slice(0, -1)});
+  errorHintCases++;
+}
+{
+  const hint = errorHint('private-scheme:', 'Private content in an unsupported language');
+  assert.deepEqual(hint, {state: 'observed', scheme: 'other', reason: 'unknown', text_truncated: false});
+  errorHintCases++;
+}
+{
+  const hint = errorHint('webkit-error:', "Can't find the server; request timed out");
+  assert.equal(hint.reason, 'ambiguous');
+  errorHintCases++;
+}
+{
+  const hint = errorHint('safari-resource:', 'x'.repeat(4096) + 'timed out', {
+    title: 'x'.repeat(256) + 'not connected to the internet',
+  });
+  assert.equal(hint.reason, 'unknown');
+  assert.equal(hint.text_truncated, true);
+  errorHintCases++;
+}
+{
+  const hint = errorHint('safari-resource:', '', {body: {get innerText() {throw new Error('private');}}});
+  assert.deepEqual(hint, {state: 'unavailable'});
+  errorHintCases++;
+}
+{
+  const hint = errorHint('safari-resource:', {private: 'secret'});
+  assert.deepEqual(hint, {state: 'unavailable', scheme: 'safari_resource'});
+  errorHintCases++;
+}
+console.log(JSON.stringify({cases_passed: passed, error_hint_cases_passed: errorHintCases,
+  browser_evidence: browserEvidence}));

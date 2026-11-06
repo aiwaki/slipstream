@@ -449,6 +449,44 @@ def _readiness_expression(host: str) -> str:
     )
 
 
+BROWSER_ERROR_HINT_EXPRESSION = r"""
+(() => {
+  // Diagnostic hints from non-web documents only, never readiness authority.
+  // English phrases are deliberately incomplete; unknown/localized pages stay
+  // unknown. Return no title, body, URL, exception text or arbitrary scheme.
+  try {
+    const protocol = location.protocol;
+    const scheme = new Map([['http:', 'http'], ['https:', 'https'], ['about:', 'about'],
+      ['file:', 'file'], ['data:', 'data'], ['blob:', 'blob'],
+      ['safari-resource:', 'safari_resource'], ['webkit-error:', 'webkit_error']]).get(protocol) || 'other';
+    if (!['safari_resource', 'webkit_error', 'other'].includes(scheme))
+      return {state: 'not_applicable', scheme};
+    const rawTitle = document.title;
+    const rawBody = document.body ? document.body.innerText : '';
+    if (typeof rawTitle !== 'string' || typeof rawBody !== 'string')
+      return {state: 'unavailable', scheme};
+    const text = (rawTitle.slice(0, 256) + '\n' + rawBody.slice(0, 4096))
+      .toLowerCase().replace(/[\u2018\u2019]/g, "'");
+    const matches = [];
+    const hints = {
+      host_dns: ["can't find the server", 'cannot find the server',
+        'server with the specified hostname could not be found'],
+      tls_handshake: ["can't establish a secure connection", 'could not establish a secure connection'],
+      connection_lost: ['server unexpectedly dropped the connection', 'network connection was lost'],
+      timeout: ['timed out', 'server stopped responding'],
+      offline: ['not connected to the internet', 'internet connection appears to be offline'],
+      https_only: ['https-only', 'does not support connecting securely over https'],
+    };
+    for (const [reason, phrases] of Object.entries(hints))
+      if (phrases.some(phrase => text.includes(phrase))) matches.push(reason);
+    return {state: 'observed', scheme,
+      reason: matches.length === 1 ? matches[0] : matches.length > 1 ? 'ambiguous' : 'unknown',
+      text_truncated: rawTitle.length > 256 || rawBody.length > 4096};
+  } catch (_) { return {state: 'unavailable'}; }
+})()
+"""
+
+
 DOCUMENT_DIAGNOSTICS_EXPRESSION = r"""
 (() => {
   // Optional observations only. A failed style/layout read must not invalidate
@@ -599,6 +637,7 @@ def _browser_evidence_expression(host: str) -> str:
   const documentSource = root ? root.outerHTML : '';
   const lowered = documentSource.toLowerCase();
   const signals = ({_readiness_expression(host)});
+  signals.browser_error_hint = ({BROWSER_ERROR_HINT_EXPRESSION});
   signals.document_diagnostics = ({DOCUMENT_DIAGNOSTICS_EXPRESSION});
   signals.transport_diagnostics = ({TRANSPORT_DIAGNOSTICS_EXPRESSION});
   const challengeDetected = {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true;
@@ -976,6 +1015,24 @@ def _bounded_transport_diagnostics(value: object) -> dict[str, object] | None:
     }
 
 
+def _bounded_browser_error_hint(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = {
+        "state": {"observed", "not_applicable", "unavailable"},
+        "scheme": {"http", "https", "about", "file", "data", "blob",
+                   "safari_resource", "webkit_error", "other"},
+        "reason": {"host_dns", "tls_handshake", "connection_lost", "timeout",
+                   "offline", "https_only", "ambiguous", "unknown"},
+    }
+    return {
+        **{key: value.get(key) if isinstance(value.get(key), str)
+           and value[key] in choices else None for key, choices in allowed.items()},
+        "text_truncated": value.get("text_truncated")
+            if type(value.get("text_truncated")) is bool else None,
+    }
+
+
 def _record_safari_observation(
     observation: dict[str, object] | None, stage: str, elapsed_ms: object,
     evidence: object = None,
@@ -1021,6 +1078,7 @@ def _record_safari_observation(
             for key in ("body_present", "body_display_none", "body_visibility_hidden",
                         "body_opacity_nonpositive", "body_rect_positive")
         },
+        "browser_error_hint": _bounded_browser_error_hint(signals.get("browser_error_hint")),
         "transport_diagnostics": _bounded_transport_diagnostics(signals.get("transport_diagnostics")),
         **{key: signals.get(key) if type(signals.get(key)) is bool else None
            for key in ("dom_content_loaded", "response_started", "response_complete",
@@ -1581,7 +1639,7 @@ def run_gate(
                 # cleanup can erase a disappearing owned listener. Never wait
                 # for readiness or change this one-navigation result.
                 runtime_observer = lambda: live_site_runtime_observation.capture(
-                    uid, lifecycle.STATUS_PATH,
+                    uid, lifecycle.STATUS_PATH, host=host,
                 )
                 safari_kwargs["runtime_observer"] = runtime_observer
                 chrome_kwargs["runtime_observer"] = runtime_observer

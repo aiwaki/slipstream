@@ -1,5 +1,69 @@
 # Routing Research Notes
 
+## 2026-11-06: retain bounded causes for a later Safari failure
+
+The disposable live-site observer now preserves three diagnostic sources without
+changing its readiness classifier, 20-second criterion, routes or retry count:
+
+| Source | Retained evidence | Limit |
+|---|---|---|
+| Safari non-web document | Fixed scheme, error-category hint and truncation flag | English phrase matching only; unknown, ambiguous and unavailable are explicit. A hint is not a native network error code. |
+| Existing StatusV2 | Separate heartbeat and health ages, health timestamp, recovery action/time/count | These are post-operation snapshots, not request-time admission proof. |
+| Existing daemon log | Exact-host connect/first-payload/remote-close markers and daemon-owned restart timestamps | Last 64 KiB of the current log and `.1`, at most 32 events; no raw lines or arbitrary fields. |
+
+The log reader uses fixed gate hosts, opens only regular non-symlink files,
+deduplicates the same inode across rotation and discards partial lines. Coverage
+flags expose truncation, missing sources and cooperative deadline expiry. Reads
+share the existing two-second observation budget; a blocking filesystem syscall
+cannot be force-cancelled. Rotation is not atomic, markers may be rate limited,
+and older events are not scoped to the failing request. Missing events cannot
+prove that no dial occurred or distinguish every hold/drain/circuit denial.
+No production daemon logging or public status schema changes are introduced.
+
+Safari title/body text stays inside the expression; the output and Python
+sanitizer allow only fixed enums and booleans. Normal HTTP(S) documents do not
+read title/body for this optional hint. Getter exceptions return unavailable.
+The report contains no copied text, URL, hostname, log line or exception string
+from these new fields. Readiness and complete-content checks remain unchanged.
+
+Combined local verification: 140 tests and 158 subtests passed, including 14
+transport VM cases and 17 error-hint VM cases. Tests cover byte/event bounds,
+rotation, missing or malformed data, symlinks/FIFO, expired observation budgets,
+privacy boundaries and unchanged readiness decisions. Independent review found
+no blocker. This is observer validation only, not a native Safari fix or release
+qualification. Reuse main03760fe5c's green baseline; UTC Nov6's three account-backed
+attempts are exhausted. Retained command, hashes and log:
+`output/continuation-20261105/preview35-release/safari-parser-control/owned-probe-qualification/readiness-r/diagnostic-followup/combined-focused.json`.
+
+## 2026-11-06: ownership fix passes CI but Safari failure remains
+
+PR472/main03760fe5c passes all12 common CI consumers and4 audit jobs. Its single
+new-source R42152828184/1 still fails7/8 at the live-site gate: system Safari is
+usable8060ms, selected Safari reports readiness_context_invalid20140ms. The last
+sample is a1205-byte other document with164 body characters, no expected host,
+HTTPS or navigation timing. Chrome on the same host is usable4862ms. The earlier
+ownership defect is fixed independently; this run does not establish its role in
+the browser failure. The diagnostic ZIP13472952760 and its4 exact members are
+bound to the run/job/upload window and archive digest in the private receipt.
+
+The owned PID changes from8086 after Safari to9038 after the curl controls,
+18.105s later. The first status says up; the later one says down despite curl's
+bounded HTTP200 prefix. The controls perform no restart; the holding lifecycle
+fixture's intentional kill occurs only after release, outside this interval.
+These snapshots cannot distinguish product recovery from Geph exit/KeepAlive.
+The existing status_age_ms is heartbeat freshness, not health freshness.
+
+Independent source review rejects a speculative initial-probe ordering fix:
+amain runs the initial probe before PF/active. Active intentionally covers local
+routing, while cold-start/hold/drain/circuit may deny a new owned route. Existing
+no-dial tests specify that behavior; no new causal RED was established. Existing
+daemon stderr has bounded failure/restart markers, but this run did not retain
+it, and neither that log nor public status fully separates all admission denials.
+Next diagnostics should preserve only existing fixed marker enums and health
+age, plus a bounded Safari error classification. Do not infer TLS success from
+server-first bytes or complete HTTP content from curl's128KiB control prefix.
+
+
 ## 2026-11-06: a transient Geph probe bypasses ownership hysteresis
 
 The real `probe_geph → reduce_geph_probe_state → handle` path independently

@@ -40,6 +40,42 @@ class RuntimeObservationTests(unittest.TestCase):
                 path.write_text(text)
                 self.assertEqual(runtime._status(path, 10), {"state": "unavailable"})
 
+    def test_heartbeat_does_not_make_cached_health_fresh(self):
+        status = {
+            "schema_version": 2,
+            "daemon": {"updated_at": 1793933700, "heartbeat_at": "2026-11-06T02:55:00Z",
+                       "health_updated_at": "2026-11-06T02:54:40+00:00"},
+            "backends": {"geph": {}},
+            "recovery": {"last_action": "geph_restart", "updated_at": 1793933698, "count": 2},
+        }
+        with mock.patch.object(runtime, "_json_file", return_value=status):
+            value = runtime._status(Path("unused"), 1793933700.5)
+        self.assertEqual(value["status_age_ms"], 500)
+        self.assertEqual(value["heartbeat_age_ms"], 500)
+        self.assertEqual(value["health_age_ms"], 20500)
+        self.assertEqual(value["health_updated_at"], 1793933680)
+        self.assertEqual(value["recovery_last_action"], "geph_restart")
+        self.assertEqual(value["recovery_updated_at"], 1793933698)
+        self.assertEqual(value["recovery_count"], 2)
+
+    def test_malformed_health_and_recovery_fields_stay_unknown(self):
+        for invalid in (None, True, "private-secret", "2026-11-06T02:54:40",
+                        "2026-11-06T02:54:40+0060", float("nan"), float("inf"), -1, 10**500):
+            with self.subTest(value_type=type(invalid).__name__):
+                status = {"schema_version": 2,
+                          "daemon": {"updated_at": 10, "health_updated_at": invalid},
+                          "backends": {"geph": {}},
+                          "recovery": {"last_action": "private-secret", "updated_at": invalid, "count": True}}
+                with mock.patch.object(runtime, "_json_file", return_value=status):
+                    value = runtime._status(Path("unused"), 11)
+                self.assertEqual(value["heartbeat_age_ms"], 1000)
+                self.assertIsNone(value["health_age_ms"])
+                self.assertIsNone(value["health_updated_at"])
+                self.assertIsNone(value["recovery_updated_at"])
+                self.assertIsNone(value["recovery_count"])
+                self.assertEqual(value["recovery_last_action"], "unknown")
+                self.assertNotIn("private-secret", json.dumps(value, allow_nan=False))
+
     def test_json_reader_refuses_symlink_size_and_nonprivate_ownership(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "status"
@@ -175,6 +211,161 @@ class RuntimeObservationTests(unittest.TestCase):
                 self.assertEqual(sum(path.endswith("/url") for _, path in events), 1)
                 self.assertEqual(sum(method == "DELETE" for method, _ in events), 1)
                 stop.assert_called_once()
+
+
+class DaemonLogObservationTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name)
+        self.log = self.home / "slipstream.log"
+        patcher = mock.patch.object(runtime, "DAEMON_LOG_PATH", self.log)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def line(message, second=0):
+        return f"2026-11-06T02:55:{second:02d}+0000 >> {message}\n".encode()
+
+    def observe(self, host="xpersonatoy.com"):
+        return runtime._daemon_log(host, runtime.time.monotonic() + 2)
+
+    def test_only_exact_host_markers_and_daemon_restart_are_exported(self):
+        self.assertEqual(runtime.FIXED_LOG_HOSTS, frozenset(smoke.SITES))
+        self.log.write_bytes(b"".join([
+            self.line("geph route retry for xpersonatoy.com: SOCKS connect failed", 1),
+            self.line("geph route retry for xpersonatoy.com: first payload timeout", 2),
+            self.line("geph route retry for xpersonatoy.com: remote closed without response", 3),
+            self.line("owned Geph LaunchAgent restarted after routing became idle", 4),
+            self.line("geph route retry for private-secret.example: first payload timeout"),
+            self.line("geph route retry for xpersonatoy.com.evil: first payload timeout"),
+            self.line("geph route retry for xpersonatoy.com: SOCKS connect failed private-secret"),
+            self.line("owned Geph recovery unavailable: https://private-secret.example/path"),
+            b"2026-99-99T02:55:00+0000 >> geph route retry for xpersonatoy.com: first payload timeout\n",
+            b"2026-11-06T02:55:00+0060 >> geph route retry for xpersonatoy.com: first payload timeout\n",
+            b"private-secret\n\x00\xff\n",
+        ]))
+        value = self.observe()
+        self.assertEqual(value["state"], "sampled")
+        self.assertEqual(value["counts"], {"connect_failed": 1, "first_payload_timeout": 1,
+                                         "remote_closed": 1, "owned_restart": 1})
+        self.assertEqual([event["at"] for event in value["events"]],
+                         [1793933701, 1793933702, 1793933703, 1793933704])
+        self.assertEqual([event["scope"] for event in value["events"]], ["host"] * 3 + ["daemon"])
+        encoded = json.dumps(value, allow_nan=False)
+        for forbidden in ("private-secret", "xpersonatoy", "https://", str(self.home)):
+            self.assertNotIn(forbidden, encoded)
+        self.assertFalse(value["request_window_scoped"])
+        self.assertFalse(value["absence_proves_no_dial"])
+        self.assertTrue(value["rate_limited"])
+        self.assertFalse(value["rotation_atomic"])
+
+    def test_none_and_nonallowlisted_hosts_do_not_open_files(self):
+        for host in (None, "private-secret", "XPERSONATOY.COM", "xpersonatoy.com/", [], True):
+            with self.subTest(host_type=type(host).__name__), mock.patch.object(runtime.os, "open") as opened:
+                value = self.observe(host)
+            opened.assert_not_called()
+            self.assertEqual(value["state"], "not_requested" if host is None else "unavailable")
+            self.assertEqual(value["events"], [])
+            self.assertNotIn("private-secret", json.dumps(value))
+
+    def test_missing_logs_are_not_proof_of_no_dial(self):
+        value = self.observe()
+        self.assertEqual(value["state"], "missing")
+        self.assertEqual([part["state"] for part in value["sources"].values()], ["missing", "missing"])
+        self.assertFalse(value["absence_proves_no_dial"])
+
+    def test_refuses_symlink_directory_and_fifo(self):
+        target = self.home / "target"
+        target.write_bytes(self.line("owned Geph LaunchAgent restarted after routing became idle"))
+        for kind in ("symlink", "directory", "fifo"):
+            with self.subTest(kind=kind):
+                if kind == "symlink":
+                    self.log.symlink_to(target)
+                elif kind == "directory":
+                    self.log.mkdir()
+                else:
+                    os.mkfifo(self.log)
+                try:
+                    value = self.observe()
+                finally:
+                    self.log.rmdir() if kind == "directory" else self.log.unlink()
+                self.assertEqual(value["sources"]["current"]["state"], "unavailable")
+                self.assertEqual(value["events"], [])
+
+    def test_tail_reads_have_fixed_byte_bounds_and_discard_fragments(self):
+        valid = self.line("geph route retry for xpersonatoy.com: SOCKS connect failed")
+        fragment = self.line("geph route retry for xpersonatoy.com: first payload timeout")
+        self.log.write_bytes(b"private-secret" * 800 + fragment + valid + fragment.rstrip(b"\n"))
+        with (mock.patch.object(runtime, "MAX_LOG_TAIL_BYTES", 512),
+              mock.patch.object(runtime.os, "read", wraps=os.read) as read):
+            value = self.observe()
+        self.assertEqual([call.args[1] for call in read.call_args_list], [512])
+        self.assertTrue(value["tail_truncated"])
+        self.assertTrue(value["sources"]["current"]["partial_line_discarded"])
+        self.assertEqual(value["sources"]["current"]["bytes_read"], 512)
+        self.assertEqual(value["counts"]["connect_failed"], 1)
+        self.assertEqual(value["counts"]["first_payload_timeout"], 0)
+
+    def test_reads_only_dot_one_archive_and_deduplicates_rotation_inode(self):
+        self.log.write_bytes(self.line("owned Geph LaunchAgent restarted after routing became idle"))
+        os.link(self.log, Path(f"{self.log}.1"))
+        Path(f"{self.log}.2").write_bytes(self.line("geph route retry for xpersonatoy.com: first payload timeout"))
+        with mock.patch.object(runtime.os, "open", wraps=os.open) as opened:
+            value = self.observe()
+        self.assertEqual([call.args[0] for call in opened.call_args_list],
+                         [self.log, Path(f"{self.log}.1")])
+        for call in opened.call_args_list:
+            self.assertTrue(call.args[1] & os.O_NOFOLLOW)
+            self.assertTrue(call.args[1] & os.O_NONBLOCK)
+        self.assertEqual(value["archive_limit"], 1)
+        self.assertEqual(value["sources"]["archive"]["state"], "duplicate")
+        self.assertEqual(value["state"], "partial")
+        self.assertEqual(value["counts"]["owned_restart"], 1)
+        self.assertEqual(value["counts"]["first_payload_timeout"], 0)
+
+    def test_archive_events_are_bounded_and_sorted_with_current(self):
+        Path(f"{self.log}.1").write_bytes(b"".join(
+            self.line("geph route retry for xpersonatoy.com: SOCKS connect failed", second)
+            for second in range(40)
+        ))
+        self.log.write_bytes(self.line("owned Geph LaunchAgent restarted after routing became idle", 50))
+        value = self.observe()
+        self.assertEqual(value["counts"]["connect_failed"], 40)
+        self.assertEqual(len(value["events"]), runtime.MAX_LOG_EVENTS)
+        self.assertTrue(value["events_truncated"])
+        self.assertEqual(value["events"][-1]["kind"], "owned_restart")
+        self.assertEqual(value["events"][0]["at"], 1793933709)
+
+    def test_deadline_prevents_open_and_discards_a_late_read(self):
+        self.log.write_bytes(self.line("owned Geph LaunchAgent restarted after routing became idle"))
+        with (mock.patch.object(runtime.time, "monotonic", return_value=2),
+              mock.patch.object(runtime.os, "open") as opened):
+            value = runtime._daemon_log("xpersonatoy.com", 1)
+        opened.assert_not_called()
+        self.assertTrue(value["time_limited"])
+        self.assertEqual(value["events"], [])
+        with mock.patch.object(runtime.time, "monotonic", side_effect=[0, 0, 2]):
+            source, raw = runtime._log_tail(self.log, 1, set())
+        self.assertEqual(source["state"], "timed_out")
+        self.assertGreater(source["bytes_read"], 0)
+        self.assertEqual(raw, b"")
+
+    def test_read_error_does_not_escape_or_publish_exception_text(self):
+        self.log.write_bytes(b"private-secret")
+        with mock.patch.object(runtime.os, "read", side_effect=OSError("private-secret")):
+            value = self.observe()
+        self.assertEqual(value["sources"]["current"]["state"], "unavailable")
+        self.assertNotIn("private-secret", json.dumps(value))
+
+    def test_capture_keeps_status_when_log_inspection_is_unavailable(self):
+        self.log.mkdir()
+        with (mock.patch.object(runtime, "_status", return_value={"state": "sampled", "geph_state": "up"}),
+              mock.patch.object(runtime.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(self.home))),
+              mock.patch.object(runtime, "_command", return_value=None)):
+            value = runtime.capture(os.getuid(), self.home / "status", host="xpersonatoy.com")
+        self.assertEqual(value["status"]["geph_state"], "up")
+        self.assertEqual(value["daemon_log"]["sources"]["current"]["state"], "unavailable")
 
 
 if __name__ == "__main__":

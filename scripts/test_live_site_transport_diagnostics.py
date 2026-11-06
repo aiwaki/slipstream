@@ -122,7 +122,33 @@ class LiveSiteTransportDiagnosticsTests(unittest.TestCase):
             before = smoke._classify_browser_evidence("xpersonatoy.com", evidence)
             for diagnostic in (None, "private", {"navigation": {"decoded_bytes": 838287}}):
                 signals["transport_diagnostics"] = diagnostic
+                signals["browser_error_hint"] = {"state": "observed", "reason": "connection_lost"}
                 self.assertEqual(smoke._classify_browser_evidence("xpersonatoy.com", evidence), before)
+
+    def test_browser_error_hint_only_retains_fixed_scalars(self):
+        observation = {}
+        smoke._record_safari_observation(observation, "observed", 800, {
+            "signals": {"browser_error_hint": {
+                "state": "observed", "scheme": "safari_resource", "reason": "connection_lost",
+                "text_truncated": False, "body": "private-session", "url": "https://private/",
+            }},
+        })
+        hint = observation["observations"]["final"]["browser_error_hint"]
+        self.assertEqual(hint, {"state": "observed", "scheme": "safari_resource",
+                               "reason": "connection_lost", "text_truncated": False})
+        smoke._record_safari_observation(observation, "timeout", 2000)
+        self.assertIsNone(observation["observations"]["final"]["browser_error_hint"])
+        self.assertEqual(observation["observations"]["last_observed"]["browser_error_hint"], hint)
+
+    def test_malformed_browser_hints_never_export_free_text(self):
+        for value in (None, [], "private", 1):
+            self.assertIsNone(smoke._bounded_browser_error_hint(value))
+        for bad in ("private-token", [], {}, True, 0, float("nan")):
+            value = smoke._bounded_browser_error_hint({
+                "state": bad, "scheme": bad, "reason": bad,
+                "text_truncated": "private-token", "raw": "private-token",
+            })
+            self.assertEqual(set(value.values()), {None})
 
     def test_javascript_collection_is_bounded_read_only_and_exception_isolated(self):
         node = shutil.which("node")
@@ -131,6 +157,7 @@ class LiveSiteTransportDiagnosticsTests(unittest.TestCase):
             [node, str(Path(__file__).with_name("live_site_transport_diagnostics_fixtures.mjs"))],
             input=json.dumps({
                 "expression": smoke.TRANSPORT_DIAGNOSTICS_EXPRESSION,
+                "error_hint_expression": smoke.BROWSER_ERROR_HINT_EXPRESSION,
                 "browser_expression": smoke._browser_evidence_expression("xpersonatoy.com"),
             }),
             text=True, capture_output=True, timeout=10,
@@ -138,6 +165,7 @@ class LiveSiteTransportDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(report["cases_passed"], 14)
+        self.assertEqual(report["error_hint_cases_passed"], 17)
         for evidence in report["browser_evidence"]:
             self.assertEqual(smoke._classify_browser_evidence("xpersonatoy.com", evidence),
                              ("usable", ""))
