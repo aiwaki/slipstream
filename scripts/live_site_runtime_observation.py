@@ -7,18 +7,35 @@ This is diagnostic evidence, never a route-ownership or readiness authority.
 from __future__ import annotations
 
 import json
+import math
 import os
 import pwd
 import re
 import stat
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 import geph_owned_lifecycle_smoke as geph
 
 MAX_JSON_BYTES = 64 * 1024
 SAMPLE_TIMEOUT = 2.0
+DAEMON_LOG_PATH = Path("/var/log/slipstream.log")
+MAX_LOG_TAIL_BYTES = 64 * 1024
+MAX_LOG_EVENTS = 32
+FIXED_LOG_HOSTS = frozenset({
+    "xpersonatoy.com", "app.aikido.dev", "weather.com", "capacitorjs.com",
+})
+_LOG_REASONS = {
+    "SOCKS connect failed": "connect_failed",
+    "first payload timeout": "first_payload_timeout",
+    "remote closed without response": "remote_closed",
+}
+_LOG_LINE = re.compile(
+    rb"(?P<at>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{4}) "
+    rb">> (?P<message>[^\r\n]{1,240})"
+)
 
 
 def _json_file(path: Path, *, owner: int | None = None) -> dict:
@@ -48,6 +65,28 @@ def _choice(value: object, choices: set[str]) -> str:
     return value if isinstance(value, str) and value in choices else "unknown"
 
 
+def _timestamp(value: object) -> float | None:
+    if isinstance(value, str):
+        if not re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+            r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):?[0-5][0-9])", value,
+        ):
+            return None
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except (ValueError, OverflowError, OSError):
+            return None
+    if type(value) not in (int, float):
+        return None
+    # Unix timestamps through year 9999; reject bool, NaN and infinities.
+    return float(value) if 0 <= value <= 253402300799 and math.isfinite(value) else None
+
+
+def _age_ms(timestamp: float | None, now: float) -> int | None:
+    age = now - timestamp if timestamp is not None else None
+    return round(age * 1000) if age is not None and 0 <= age <= 86400 else None
+
+
 def _status(path: Path, now: float) -> dict:
     try:
         value = _json_file(path)
@@ -56,13 +95,19 @@ def _status(path: Path, now: float) -> dict:
         daemon = value["daemon"]
         backend = value["backends"]["geph"]
         recovery = value["recovery"]
-        updated = daemon.get("updated_at")
-        age = now - updated if type(updated) in (int, float) else None
+        updated = _timestamp(daemon.get("updated_at"))
+        heartbeat = _timestamp(daemon.get("heartbeat_at"))
+        health = _timestamp(daemon.get("health_updated_at"))
         return {
             "state": "sampled",
             "daemon_pid": _integer(daemon.get("pid")),
             "daemon_state": _choice(daemon.get("state"), {"active", "dormant", "starting", "stopped"}),
-            "status_age_ms": round(age * 1000) if age is not None and 0 <= age <= 86400 else None,
+            # Keep the existing publication-age field for sidecar consumers.
+            # A fresh heartbeat republishes cached health; it is not a new probe.
+            "status_age_ms": _age_ms(updated, now),
+            "heartbeat_age_ms": _age_ms(heartbeat if heartbeat is not None else updated, now),
+            "health_updated_at": health,
+            "health_age_ms": _age_ms(health, now),
             "geph_state": _choice(backend.get("state"), {"up", "down", "off"}),
             "geph_owned": backend.get("owned") if type(backend.get("owned")) is bool else None,
             "port_conflict": backend.get("port_conflict") if type(backend.get("port_conflict")) is bool else None,
@@ -70,9 +115,125 @@ def _status(path: Path, now: float) -> dict:
             "active_sessions": _integer(backend.get("active_sessions")),
             "recovery_state": _choice(recovery.get("state"), {"idle", "recovering", "waiting", "paused", "rearmed"}),
             "recovery_reason": _choice(recovery.get("reason"), {"", "owned_geph_restart_waiting_for_idle", "owned_geph_restart_pending", "resource_pressure"}),
+            "recovery_last_action": _choice(recovery.get("last_action"), {"none", "pause_private_pf", "wake", "network_change", "geph_restart"}),
+            "recovery_updated_at": _timestamp(recovery.get("updated_at")),
+            "recovery_count": _integer(recovery.get("count")),
         }
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return {"state": "unavailable"}
+
+
+def _log_tail(path: Path, deadline: float, seen: set[tuple[int, int]]) -> tuple[dict, bytes]:
+    evidence = {"state": "unavailable", "bytes_read": 0,
+                "truncated": False, "partial_line_discarded": False}
+    if time.monotonic() >= deadline:
+        evidence["state"] = "timed_out"
+        return evidence, b""
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            return evidence, b""
+        identity = (metadata.st_dev, metadata.st_ino)
+        if identity in seen:
+            evidence["state"] = "duplicate"
+            return evidence, b""
+        seen.add(identity)
+        size = metadata.st_size
+        start = max(0, size - MAX_LOG_TAIL_BYTES)
+        evidence["truncated"] = bool(start)
+        os.lseek(fd, start, os.SEEK_SET)
+        if time.monotonic() >= deadline:
+            evidence["state"] = "timed_out"
+            return evidence, b""
+        # Read only the sampled size, even if the daemon appends concurrently.
+        raw = os.read(fd, min(size, MAX_LOG_TAIL_BYTES))
+        evidence["bytes_read"] = len(raw)
+        if time.monotonic() >= deadline:
+            evidence["state"] = "timed_out"
+            return evidence, b""
+        if len(raw) != min(size, MAX_LOG_TAIL_BYTES):
+            return evidence, b""  # truncated/replaced during the read
+        if start:
+            # The first fragment may be the tail of an unrelated raw log line.
+            raw = raw.partition(b"\n")[2]
+            evidence["partial_line_discarded"] = True
+        if raw and not raw.endswith(b"\n"):
+            raw = raw.rpartition(b"\n")[0]
+            evidence["partial_line_discarded"] = True
+        evidence["state"] = "sampled"
+        return evidence, raw
+    except FileNotFoundError:
+        evidence["state"] = "missing"
+        return evidence, b""
+    except OSError:
+        return evidence, b""
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _log_event(line: bytes, host: str) -> dict | None:
+    matched = _LOG_LINE.fullmatch(line.removesuffix(b"\r"))
+    if matched is None:
+        return None
+    message = matched["message"]
+    if message == b"owned Geph LaunchAgent restarted after routing became idle":
+        kind, scope = "owned_restart", "daemon"
+    else:
+        prefix = f"geph route retry for {host}: ".encode("ascii")
+        if not message.startswith(prefix):
+            return None
+        kind = _LOG_REASONS.get(message[len(prefix):].decode("ascii", errors="replace"))
+        if kind is None:
+            return None
+        scope = "host"
+    timestamp = _timestamp(matched["at"].decode("ascii"))
+    return {"kind": kind, "scope": scope, "at": timestamp} if timestamp is not None else None
+
+
+def _daemon_log(host: str | None, deadline: float) -> dict:
+    observation = {
+        "state": "not_requested" if host is None else "unavailable",
+        "request_window_scoped": False, "absence_proves_no_dial": False,
+        "rate_limited": True, "archive_limit": 1, "rotation_atomic": False,
+        "tail_truncated": False, "events_truncated": False, "time_limited": False,
+        "sources": {}, "events": [],
+        "counts": {kind: 0 for kind in (*_LOG_REASONS.values(), "owned_restart")},
+    }
+    if not isinstance(host, str) or host not in FIXED_LOG_HOSTS:
+        return observation
+    seen: set[tuple[int, int]] = set()
+    events = []
+    # RotatingLogWriter uses path + '.1', not a suffix replacement or glob.
+    for label, path in (("current", DAEMON_LOG_PATH), ("archive", Path(f"{DAEMON_LOG_PATH}.1"))):
+        evidence, raw = _log_tail(path, deadline, seen)
+        observation["sources"][label] = evidence
+        observation["tail_truncated"] |= evidence["truncated"]
+        observation["time_limited"] |= evidence["state"] == "timed_out"
+        for line in raw.split(b"\n"):
+            if time.monotonic() >= deadline:
+                evidence["state"] = "partial"
+                observation["time_limited"] = True
+                break
+            event = _log_event(line, host)
+            if event is not None:
+                observation["counts"][event["kind"]] += 1
+                events.append(event)
+    states = [value["state"] for value in observation["sources"].values()]
+    if all(state == "missing" for state in states):
+        observation["state"] = "missing"
+    elif "sampled" in states or "partial" in states:
+        observation["state"] = "sampled" if states[0] == "sampled" and all(
+            state in {"sampled", "missing"} for state in states
+        ) else "partial"
+    observation["events_truncated"] = len(events) > MAX_LOG_EVENTS
+    observation["events"] = sorted(events, key=lambda event: event["at"])[-MAX_LOG_EVENTS:]
+    return observation
 
 
 def _command(command: tuple[str, ...], deadline: float) -> tuple[int, str] | None:
@@ -90,7 +251,7 @@ def _command(command: tuple[str, ...], deadline: float) -> tuple[int, str] | Non
         return None
 
 
-def capture(uid: int, status_path: Path) -> dict:
+def capture(uid: int, status_path: Path, *, host: str | None = None) -> dict:
     """Sample once after a failed operation and before fixture cleanup."""
     started = time.monotonic()
     observed_at = time.time()
@@ -98,6 +259,7 @@ def capture(uid: int, status_path: Path) -> dict:
     sample: dict = {
         "observed_at": observed_at,
         "status": _status(status_path, observed_at),
+        "daemon_log": _daemon_log(host, deadline),
         "ownership_record": "unavailable",
         "launchd": "unavailable",
         "listener": "unavailable",
