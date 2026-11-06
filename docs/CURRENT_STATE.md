@@ -1,61 +1,83 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, semantic Geph generation race fixed locally
+## Current continuation — 2026-11-06, Safari comparison prepared
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/geph-proof-generation`, based on maina8bae54b6007359f550d1166bc76d37df452b399.
-E=`output/continuation-20261105/preview35-release`; H=E/semantic-hold-generation.
-No source from this follow-up is installed or released.
+Branch `codex/safari-parser-tail-control`; base HEAD/main
+`b80d8aec587d0ec1f1430a102e8f5313ebeeb5e3`, tree
+`4319bd79cd50ebda0de836c725b5aa3c91d0ebdc` (merged PR470).
+Live GitHub main and failed R were reconciled on this continuation.
+E=`output/continuation-20261105/preview35-release`; Q=E/semantic-qualification;
+D=E/safari-parser-control. No source from this follow-up is installed or released.
 
-- PR469 is merged: runtime recovery now clears its own30s hold before releasing
-  the drain; background payload canaries bind the hold generation. PR CI42116113704/1
-  and audit42116113642/1 passed. E/hold-pr469/merge-verification.json binds reviewed
-  head37bb92b16, tested mergee6d5dedab and fetched main to tree6acd95e63b.
-- Exact-main CI42120437137/1 is terminal FAILURE. Watcher77797 exited1; do not
-  restart it. Audit42120436857/1 passed. Two jobs (chromium-webrequest-contract
-  127571146650 and product-checks127571146756) were abandoned before any step or
-  runner allocation. GitHub annotations explicitly cite hosted macOS ARM64
-  capacity; checks127578495316 then failed on abandoned prerequisites. All9
-  other common consumers passed, including native lifecycle/browser/notifications.
-  E/main-hold-ci/watcher-receipt.json SHA
-  12fd33c2fd67d5c6fd92d9324a9d48bc15d88aea0ace2c0a379f47fc7ba51152 binds terminal state;
-  capacity-failure-verification.json SHA
-  57fdc3a78d4d06d8c5a8aeba8827d1e1c6767136358117e598e4c3b91a83aabe binds the cause.
-  No rerun issued: the independently confirmed source repair below supersedes
-  that candidate. Prepared E/hold-qualification/native-g has guarded G=0, never run.
-- Follow-up causal RED at a8bae54b6: all4 semantic/learning/preflight commits and
-  a delayed preflight proof could clear a newer hold despite identical PID,
-  reason and deadline.5 stale cases failed,4 fresh controls passed. The patch
-  carries generation from before each probe/batch (including recovered probes
-  and all3 preflight factories) through commit. Hold clear and memory learning
-  are atomic; persistence runs outside the hold lock. No unbound clear remains.
-- Local21 new regressions +121 existing Geph/preflight checks +114 recovery,
-  drain, admission and traffic contracts PASS. Independent review found no new
-  blocker. H/local-verification.json SHA
-  989d4d29e6947cbded13a96e802a67a0535cd25789b4d18a492ac1bf2803a1ce binds source/test/log hashes.
-  Retained RED, late failure during persistence, shutdown and real retry callback
-  cases are network/system/storage isolated. This is not release acceptance.
+### Accepted baseline at b80d8aec5 — reuse, do not repeat
 
-NEXT: submit this scoped fix, require exact-head PR CI and dependency audit,
-then merge and observe its exact-main candidate checks. Only after all12 common
-consumers pass may the candidate enter fresh G/P/R. Previous82b G/P cannot qualify
-new bytes. G=native-root-update-qualification.yml and P=packaged-update-commit-qualification.yml
-use no Geph account secret or daily broker budget. R/owned-geph-qualification
-budget on UTC2026-11-05 is3/3 (42031470021,42095886020,42111013665); no further
-account-backed dispatch before UTC2026-11-06, then check complete live lists and
-active runs. Protected reruns and blind retries remain prohibited.
+- PR469 fixed payload-qualified recovery leaving its own30s hold. PR470 bound
+  all4 legacy semantic/preflight commits to the originating hold generation;
+  the retained causal RED has5 stale failures and4 fresh controls. Local21 new,
+  121 existing and114 recovery/admission tests passed. H=E/semantic-hold-generation;
+  H/local-verification.json SHA
+  989d4d29e6947cbded13a96e802a67a0535cd25789b4d18a492ac1bf2803a1ce.
+- PR470 CI42126204505/1 and audit42126204449/1 passed; guarded squash fetched
+  main with the tested merge tree. E/semantic-pr470/merge-verification.json SHA
+  da62f86d17cd1199fb40cfc3205156f09cdf99681e8d23940ce2d37751eaac1f.
+- Exact-main CI42129277795/1 and audit42129277858/1 PASS, all12 common consumers
+  and4 audit jobs. E/main-semantic-ci/watcher-receipt.json SHA
+  acf016380af31346fd023539bd58b6c20427566bafad9440c5ae33593bd42760;
+  candidate-receipt.json SHA
+  323c91282bd5d76e7fc77afbf71a77ae1f5f38be63fae510a5ba3ee779ea4cd6.
+  Artifact13463147700, manifest SHA
+  2fccbaea5b1b33b9e9db30d96454f0f60be3d7c0c93adbb3991074f17b5d03de.
+- Native G42131959745/1 ACCEPTED,75 independent checks, exact .34/.35 payloads,
+  durable commit, worker kill, OLD restore and advancing daemon heartbeats.
+  Q/native-g/verification.json SHA
+  040638c2290443d8a11bd716568806e989cb50d3a6f8724b56ba712a73393cad.
+- Packaged P42132780497/1 ACCEPTED,13 checks: real ACK, pre-ACK kill, restored OLD,
+  heartbeat advancement and terminal cleanup. Q/packaged-p/verification.json SHA
+  ee59d0843bcb2760c6d6e9e0cd17ca911fea02a1960dcb83ed0e104d311cd631.
+  These qualify b80d bytes only; new-source final gates need their own bindings.
 
-Instrumented R42111013665/1 failed both xpersonatoy.com cases; the other6 passed.
-Both bounded controls were usable. Same owned PID7754/listener, Geph up and no
-restart hint were observed after the failures; no request-time decision was
-recorded. These deterministic source defects are not proven causes of that R.
-E/readiness-runtime-r/failed-run-verification.json SHA
-5702e28867dc36479fd15c7e35b9647c62b709b3c9c9e6ea7d44275ca17dd6d5 authenticates the reports.
-No soak/attestation acceptance. Restored .31 remains last verified local state.
-Temporary Safari Apple Events JavaScript was restored OFF after the earlier
-one-page observation. No workstation mutation or failed local update retry.
-Keep old app/backups/settings/learning/external Geph intact; a fresh local window
-is needed after the candidate is ready.
+### Current failure and scoped follow-up
+
+R42134381208/1 failed before soak at the live-site gate. UTC2026-11-06 rank1/3
+consumed; no unchanged retry. Q/readiness-r/failed-run-verification.json SHA
+e3235267b616ae76f6fa28240ae1d2f8f4112cd52038a3ebddf12a85144cffc5 authenticates
+artifact13465860308 and its4 reports. Hosted cleanup passed.
+
+Seven of eight cases usable; only Safari xpersonatoy.com document_pending20009ms.
+Chrome same host usable5380ms. Last Safari sample18876ms: HTTPS/h2, navigation
+839468 decoded bytes/responseEnd3785ms, DOM596672bytes, loading/DCLfalse. The old
+observer covered128/167 nodes, so40/40 attached styles describe only that prefix.
+Its14 untimed scripts were async. Same owned PID7323/listener remained up, no
+restart hint; curl controls prove bounded HTTP200 prefixes only. No causal routing
+failure established. Details and public-response limitations: ROUTING_RESEARCH.md.
+
+Local observer patch covers at most256 prefix plus actual last8 nodes, preserves
+unreadable/omitted counts, prioritizes unresolved styles over async scripts and
+measures collection cost. One additional Safari system_without_slipstream
+navigation runs before install only after verified owned-job/files/anchor absence
+and disabled system proxies. The after-guard checks PF/proxy stability. Same20s
+criterion and fresh sessions; no gate weakening, route/settings change or retry.
+External VPN/routing and ordered DNS/CDN cache effects remain limitations.
+The diagnostic stays outside the schema2 selected-route report.
+
+126 focused tests PASS, including14 JavaScript VM cases and17 paired-control
+cases. Independent review complete; strict producer/consumer schema and middle-
+node error coverage were fixed before the final pass. D/local-verification.json
+binds changed source and retained RED/final logs. VM/mocked WebDriver tests do
+not establish native Safari behavior. No broad suite or protected run repeated.
+
+NEXT: finish scoped review/docs checks, commit this observer patch in a PR and
+verify its required checks. If merged, qualify the new exact-main candidate with
+R first; repeat final G/P only after R passes for those new bytes. Before any R,
+reconcile full paginated live budget/active runs and source; at last check2 of3
+Nov6 slots remain. No protected rerun, blind retry, publication or local install.
+All old watchers are terminal; do not restart them.
+
+Restored .31 remains last verified local state. Temporary Safari Apple Events
+JavaScript was restored OFF after the earlier one-page observation. Keep backups,
+settings/learning and external Geph intact. A fresh local window is needed after
+the candidate is ready; no failed workstation transaction is retried implicitly.
 
 ### Retained PR465–468 evidence (historical)
 

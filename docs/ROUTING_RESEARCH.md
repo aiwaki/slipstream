@@ -1,5 +1,55 @@
 # Routing Research Notes
 
+## 2026-11-06: Safari parser delay and an unobserved resource tail
+
+R42134381208/1 at b80d8aec5 passed seven of eight browser cases. Safari on
+`xpersonatoy.com` remained `loading` without DOMContentLoaded at the 20-second
+deadline; Chrome reached usable content in 5380ms. The last completed Safari
+sample at 18876ms had HTTPS/h2, navigation responseEnd3785ms and839468 decoded
+bytes, but a596672-byte serialized DOM. Navigation bytes and serialized DOM
+are different quantities; this does not establish a truncated response.
+All40 observed stylesheets were attached, but the observer inspected only
+the first128 of167 stylesheet/script nodes. Its14 untimed scripts were async.
+Neither those missing timings nor the unobserved tail establishes a fetch stall.
+The same owned PID/listener remained present after failure, with fresh status
+and no restart hint. The two curl controls proved only bounded HTTP200 prefixes.
+
+The authenticated report, independent review and public-page inventory are in
+`output/continuation-20261105/preview35-release/semantic-qualification/readiness-r/`.
+`failed-run-verification.json` SHA
+e3235267b616ae76f6fa28240ae1d2f8f4112cd52038a3ebddf12a85144cffc5 binds the failed
+run/artifact. A separate public response had167 static nodes too, but its prefix
+contained56 styles and30 external scripts, versus40 and46 in the runtime sample.
+Dynamic insertion and different response bytes prevent transferring ordinals
+between these documents. The analytics `document.write` reference merely replaces
+that function within a callback; it is not evidence of the parser's blocker.
+
+The observer now inspects at most256 prefix nodes plus the actual last8 nodes,
+de-duplicated. It reports coverage and the tail, and prioritizes unresolved active
+styles and untimed classic synchronous candidates over untimed async scripts.
+Those are observations, never claims that a request is pending or successful.
+Collection duration is measured inside the page, excluding WebDriver transport
+and JSON serialization. No URLs, script text, new requests or timers are added.
+The retained RED omitted a late stylesheet; the new bounded fixtures cover that
+case, an overflowing async prefix, an unreadable tail and private-string removal.
+
+The next discriminating control is one Safari navigation before installing the
+owned daemon, using the same observer and20-second readiness criterion. It is
+called `system_without_slipstream`, not a guarantee of an unproxied Internet.
+Owned-job/install/anchor absence and unchanged PF state must be observed before
+and after. Enabled or unreadable system HTTP/HTTPS/SOCKS/PAC/autodiscovery refuses
+the control; its raw settings never enter the report. External VPNs/routes remain
+unobserved. A failure in both modes proves that Slipstream is not necessary to
+reproduce this symptom; a difference only identifies a mode/time dependency.
+One navigation per mode cannot exclude an intermittent origin or network problem.
+
+[Apple documents isolated Safari WebDriver sessions](https://developer.apple.com/documentation/safari-developer-tools/webdriver/),
+which the existing session lifecycle recreates for each navigation. This does
+not isolate DNS/CDN caches or remove the order effect of the earlier navigation.
+The control is separate diagnostic evidence and cannot satisfy, relax or replace
+any selected-route release result. No deadline, route policy or workstation
+configuration changes are part of this investigation.
+
 ## 2026-11-06: payload-qualified recovery leaves new requests in cooldown
 
 R42111013665/1 at874472c95 failed both xpersonatoy.com browser cases: Safari

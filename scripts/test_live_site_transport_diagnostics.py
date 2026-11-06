@@ -69,8 +69,31 @@ class LiveSiteTransportDiagnosticsTests(unittest.TestCase):
         self.assertTrue(snapshot["missing_nodes_truncated"])
         for value in (None, [], "private", 1):
             self.assertIsNone(self.record(value))
-        for value in (-1, 128, True, 1.5, "private"):
+        for value in (-1, 16 * 1024 * 1024, True, 1.5, "private"):
             self.assertIsNone(self.record({"last_scanned_node": {"ordinal": value}})["last_scanned_node"]["ordinal"])
+
+    def test_tail_survives_python_boundary_with_its_actual_ordinals(self):
+        value = self.record({
+            "nodes_attempted": 264, "nodes_observed": 263, "nodes_unavailable": 1,
+            "nodes_truncated": True,
+            "tail_nodes": [{"ordinal": n, "kind": "stylesheet", "url": "private"}
+                           for n in range(290, 300)],
+        })
+        self.assertEqual(value["nodes_attempted"], 264)
+        self.assertEqual(value["nodes_observed"], 263)
+        self.assertEqual(value["nodes_unavailable"], 1)
+        self.assertTrue(value["nodes_truncated"])
+        self.assertEqual([node["ordinal"] for node in value["tail_nodes"]], list(range(292, 300)))
+        self.assertNotIn("private", json.dumps(value))
+
+    def test_observer_duration_does_not_turn_unknown_into_zero(self):
+        for duration, expected in ((0, 0), (19, 19), (100000, 60000),
+                                   (-1, None), (True, None), ("private", None)):
+            observation = {}
+            smoke._record_safari_observation(observation, "observed", 500, {
+                "signals": {"sample_duration_ms": duration},
+            })
+            self.assertEqual(observation["observations"]["final"]["sample_duration_ms"], expected)
 
     def test_timeout_keeps_last_completed_observation_separate(self):
         observation = {}
@@ -106,11 +129,18 @@ class LiveSiteTransportDiagnosticsTests(unittest.TestCase):
         self.assertIsNotNone(node, "Node.js is required for browser-observer contract tests")
         result = subprocess.run(
             [node, str(Path(__file__).with_name("live_site_transport_diagnostics_fixtures.mjs"))],
-            input=json.dumps({"expression": smoke.TRANSPORT_DIAGNOSTICS_EXPRESSION}),
+            input=json.dumps({
+                "expression": smoke.TRANSPORT_DIAGNOSTICS_EXPRESSION,
+                "browser_expression": smoke._browser_evidence_expression("xpersonatoy.com"),
+            }),
             text=True, capture_output=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["cases_passed"], 8)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["cases_passed"], 14)
+        for evidence in report["browser_evidence"]:
+            self.assertEqual(smoke._classify_browser_evidence("xpersonatoy.com", evidence),
+                             ("usable", ""))
 
 
 if __name__ == "__main__":

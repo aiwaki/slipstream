@@ -493,10 +493,18 @@ TRANSPORT_DIAGNOSTICS_EXPRESSION = r"""
     for (let i = 0; i < Math.min(resources.length, 1024); i++) {
       byURL.set(resources[i].name, resources[i]);
     }
-    let styles = 0, attached = 0, scripts = 0, timedScripts = 0, missing = 0;
+    // Keep a bounded prefix AND the actual tail: a parser can be waiting beyond
+    // a long, healthy head full of scripts/styles. DOM ordinals are only valid
+    // for this snapshot, not identifiers across mutation or another response.
+    const prefixLength = Math.min(nodes.length, 256);
+    const tailStart = Math.max(0, nodes.length - 8);
+    const indices = Array.from({length: prefixLength}, (_, i) => i);
+    for (let i = Math.max(prefixLength, tailStart); i < nodes.length; i++) indices.push(i);
+    let styles = 0, attached = 0, scripts = 0, timedScripts = 0, unavailable = 0;
     const missingNodes = [];
+    const tailNodes = [];
     let lastNode = null;
-    for (let i = 0; i < Math.min(nodes.length, 128); i++) {
+    for (const i of indices) {
       const node = nodes[i];
       try {
         const isStyle = node.tagName === 'LINK';
@@ -519,18 +527,30 @@ TRANSPORT_DIAGNOSTICS_EXPRESSION = r"""
         if (!isStyle && url) { scripts++; if (entry) timedScripts++; }
         if ((isStyle && !lastNode.sheet_attached && !lastNode.disabled && lastNode.media_matches)
             || (!isStyle && url && !entry)) {
-          missing++;
-          if (missingNodes.length < 16) missingNodes.push(lastNode);
+          missingNodes.push(lastNode);
         }
-      } catch (_) { lastNode = {ordinal: i, observation_unavailable: true}; }
+      } catch (_) {
+        unavailable++;
+        lastNode = {ordinal: i, observation_unavailable: true};
+      }
+      if (i >= tailStart) tailNodes.push(lastNode);
     }
+    // Untimed async scripts must not crowd unresolved active styles out of the
+    // bounded report. A classic !async/!defer script is only a candidate, not
+    // proof of a parser block: it may have been dynamically inserted.
+    const priority = node => node.kind === 'stylesheet' ? 0 :
+      node.classic_script && !node.async && !node.defer ? 1 : 2;
+    missingNodes.sort((a, b) => priority(a) - priority(b) || a.ordinal - b.ordinal);
     return {
       navigation: timing(navigation), resource_count: count(resources.length),
       node_count: count(nodes.length), resources_truncated: resources.length > 1024,
-      nodes_truncated: nodes.length > 128, stylesheets_observed: styles,
+      nodes_attempted: indices.length, nodes_observed: indices.length - unavailable,
+      nodes_unavailable: unavailable, nodes_truncated: nodes.length > indices.length,
+      stylesheets_observed: styles,
       stylesheets_attached: attached, external_scripts_observed: scripts,
-      external_scripts_with_timing: timedScripts, missing_nodes: missingNodes,
-      missing_nodes_truncated: missing > missingNodes.length, last_scanned_node: lastNode
+      external_scripts_with_timing: timedScripts, missing_nodes: missingNodes.slice(0, 16),
+      missing_nodes_truncated: missingNodes.length > 16, last_scanned_node: lastNode,
+      tail_nodes: tailNodes
     };
   } catch (_) { return null; }
 })()
@@ -546,6 +566,8 @@ def _browser_evidence_expression(host: str) -> str:
     # content never crosses either transport.
     return f"""
 (() => {{
+  let sampleStarted = null;
+  try {{ sampleStarted = performance.now(); }} catch (_) {{}}
   const root = document.documentElement;
   const activationStateKey = Symbol.for(
     'com.slipstream.release-readiness.document-activation-v1'
@@ -579,11 +601,23 @@ def _browser_evidence_expression(host: str) -> str:
   const signals = ({_readiness_expression(host)});
   signals.document_diagnostics = ({DOCUMENT_DIAGNOSTICS_EXPRESSION});
   signals.transport_diagnostics = ({TRANSPORT_DIAGNOSTICS_EXPRESSION});
+  const challengeDetected = {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true;
+  const denialDetected = {denials}.some((marker) => lowered.includes(marker));
+  const documentBytes = new TextEncoder().encode(documentSource).length;
+  // This measures collection inside the page, not WebDriver round-trip time
+  // or JSON serialization, and is never used by readiness classification.
+  let sampleDuration = null;
+  try {{
+    const elapsed = performance.now() - sampleStarted;
+    if (sampleStarted !== null && Number.isFinite(elapsed) && elapsed >= 0)
+      sampleDuration = Math.min(60000, Math.floor(elapsed));
+  }} catch (_) {{}}
+  signals.sample_duration_ms = sampleDuration;
   return {{
-    challenge_detected: {challenges}.some((marker) => lowered.includes(marker)) || signals.visible_challenge_marker === true,
-    denial_detected: {denials}.some((marker) => lowered.includes(marker)),
+    challenge_detected: challengeDetected,
+    denial_detected: denialDetected,
     document_activation_id: root ? activationState.token : null,
-    document_bytes: new TextEncoder().encode(documentSource).length,
+    document_bytes: documentBytes,
     signals
   }};
 }})()
@@ -915,7 +949,7 @@ def _bounded_transport_diagnostics(value: object) -> dict[str, object] | None:
         kind = value.get("kind")
         return {
             "ordinal": value.get("ordinal") if type(value.get("ordinal")) is int
-                and 0 <= value["ordinal"] < 128 else None,
+                and 0 <= value["ordinal"] < 16 * 1024 * 1024 else None,
             "kind": kind if isinstance(kind, str) and kind in {"stylesheet", "script"} else None,
             **{key: boolean(value.get(key)) for key in
                ("in_body", "external", "same_origin", "async", "defer", "classic_script",
@@ -924,10 +958,12 @@ def _bounded_transport_diagnostics(value: object) -> dict[str, object] | None:
         }
 
     missing = value.get("missing_nodes")
+    tail = value.get("tail_nodes")
     return {
         "navigation": timing(value.get("navigation")),
         **{key: number(value.get(key)) for key in
-           ("resource_count", "node_count", "stylesheets_observed", "stylesheets_attached",
+           ("resource_count", "node_count", "nodes_attempted", "nodes_observed", "nodes_unavailable",
+            "stylesheets_observed", "stylesheets_attached",
             "external_scripts_observed", "external_scripts_with_timing")},
         **{key: boolean(value.get(key)) for key in ("resources_truncated", "nodes_truncated")},
         "missing_nodes": [node(row) for row in missing[:16] if isinstance(row, dict)]
@@ -935,6 +971,8 @@ def _bounded_transport_diagnostics(value: object) -> dict[str, object] | None:
         "missing_nodes_truncated": True if isinstance(missing, list) and len(missing) > 16
             else boolean(value.get("missing_nodes_truncated")),
         "last_scanned_node": node(value.get("last_scanned_node")),
+        "tail_nodes": [node(row) for row in tail[-8:] if isinstance(row, dict)]
+            if isinstance(tail, list) else None,
     }
 
 
@@ -973,6 +1011,9 @@ def _record_safari_observation(
         "next_hop_protocol": choice("next_hop_protocol", ALLOWED_PROTOCOLS),
         "context": context,
         "document_bytes": bounded_count(evidence.get("document_bytes")) if isinstance(evidence, dict) else None,
+        "sample_duration_ms": min(60_000, signals["sample_duration_ms"])
+            if type(signals.get("sample_duration_ms")) is int
+            and signals["sample_duration_ms"] >= 0 else None,
         **{key: bounded_count(signals.get(key))
            for key in ("body_text_length", "main_text_length", "app_text_length")},
         "document_diagnostics": {
@@ -1324,6 +1365,160 @@ def _control_route(
     return "origin_error"
 
 
+def _system_proxy_control_snapshot() -> tuple[dict[str, object], bytes | None]:
+    """Read proxy enable flags at every scope; never retain addresses in evidence."""
+    keys = {
+        "HTTPEnable": "http", "HTTPSEnable": "https", "SOCKSEnable": "socks",
+        "ProxyAutoConfigEnable": "auto_config",
+        "ProxyAutoDiscoveryEnable": "auto_discovery",
+    }
+    unavailable = {"state": "unavailable", **{key: None for key in keys.values()}}
+    try:
+        result = subprocess.run(
+            ("/usr/sbin/scutil", "--proxy"), capture_output=True, check=False,
+            timeout=3,
+        )
+        if (
+            result.returncode != 0 or result.stderr
+            or not isinstance(result.stdout, bytes)
+            or len(result.stdout) > 16 * 1024
+        ):
+            return unavailable, None
+        lines = [line.strip() for line in result.stdout.decode("utf-8").splitlines()
+                 if line.strip()]
+        if not lines or lines[0] != "<dictionary> {":
+            return unavailable, None
+        flags = {key: False for key in keys.values()}
+        depth = 1
+        for index, line in enumerate(lines[1:], 1):
+            if line == "}":
+                depth -= 1
+                if depth < 0 or (depth == 0 and index != len(lines) - 1):
+                    return unavailable, None
+                continue
+            if depth <= 0:
+                return unavailable, None
+            field = re.fullmatch(r"([^:{}]+?)\s+:\s+(.*)", line)
+            if field is None:
+                return unavailable, None
+            key, value = field[1].strip(), field[2].strip()
+            if key in keys:
+                if value not in {"0", "1"}:
+                    return unavailable, None
+                flags[keys[key]] = flags[keys[key]] or value == "1"
+            elif value in {"<dictionary> {", "<array> {"}:
+                depth += 1
+                if depth > 16:
+                    return unavailable, None
+            elif not value or value.startswith("<") or value.endswith("{"):
+                return unavailable, None
+        if depth != 0:
+            return unavailable, None
+        # Missing enable keys mean disabled in a valid scutil proxy dictionary.
+        # Keep raw bytes only for in-memory before/after equality, never JSON.
+        return {"state": "enabled" if any(flags.values()) else "disabled", **flags}, result.stdout
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+        return unavailable, None
+
+
+def _system_without_slipstream_snapshot(
+    runner: pf.PfctlRunner, system: lifecycle.SystemRunner, before: pf.PfSnapshot,
+) -> tuple[dict[str, object], bytes | None]:
+    snapshot: dict[str, object] = {
+        "state": "unavailable", "daemon_job": "unavailable",
+        "owned_install_state": "unavailable", "owned_anchors": "unavailable",
+        "pf_matches_preflight": None, "pf_enabled": None,
+        "system_proxy": {"state": "unavailable"},
+    }
+    try:
+        job = system.run(
+            ("/bin/launchctl", "print", lifecycle.LAUNCHD_LABEL),
+            check=False, timeout=3,
+        )
+        if job.returncode == 0:
+            snapshot["daemon_job"] = "present"
+            return snapshot, None
+        if (
+            job.returncode != 113 or not isinstance(job.stdout, str)
+            or not isinstance(job.stderr, str)
+            or len(job.stdout) + len(job.stderr) > 4096
+        ):
+            return snapshot, None
+        detail = "\n".join(part.strip() for part in (job.stdout, job.stderr) if part.strip())
+        if re.fullmatch(
+            r'(?:Bad request\.\n)?Could not find service '
+            r'(?:"dev\.slipstream\.tproxy"|dev\.slipstream\.tproxy) in domain for system',
+            detail,
+        ) is None:
+            return snapshot, None
+        snapshot["daemon_job"] = "absent"
+        lifecycle._assert_clean_install_state(runner)
+        pf._assert_empty_anchor(runner, pf.SENTINEL_ANCHOR)
+        snapshot["owned_install_state"] = "absent"
+        snapshot["owned_anchors"] = "empty"
+        current = pf._pf_snapshot(runner)
+        if type(current.enabled) is not bool:
+            return snapshot, None
+        snapshot["pf_enabled"] = current.enabled
+        snapshot["pf_matches_preflight"] = False
+        pf._assert_same_snapshot(before, current)
+        snapshot["pf_matches_preflight"] = True
+        proxy, signature = _system_proxy_control_snapshot()
+        snapshot["system_proxy"] = proxy
+        if proxy["state"] != "disabled":
+            return snapshot, None
+        snapshot["state"] = "verified"
+        return snapshot, signature
+    except Exception:
+        # A failed inspection never proves absence and never exposes raw output.
+        return snapshot, None
+
+
+def _run_system_without_slipstream_control(
+    runner: pf.PfctlRunner, system: lifecycle.SystemRunner, before: pf.PfSnapshot,
+    driver_url: str, uid: int, observation: dict[str, object],
+) -> None:
+    observation.update({
+        "state": "unavailable", "reason": "before_guard_unavailable",
+        "limitations": ["external_vpn_unobserved", "external_routing_unobserved",
+                        "ordered_pair_may_share_network_cache"],
+    })
+    initial, initial_proxy = _system_without_slipstream_snapshot(runner, system, before)
+    observation["before"] = initial
+    if initial["state"] != "verified":
+        return
+    browser_observation: dict[str, object] = {}
+    startup: list[dict[str, object]] = []
+    observation["safari"] = browser_observation
+    observation["startup"] = startup
+    observation["reason"] = "browser_execution_failed"
+    completed = False
+    try:
+        result = _run_safari(
+            "xpersonatoy.com", driver_url, uid,
+            startup_diagnostics=startup, failure_observation=browser_observation,
+        )
+        # This separate diagnostic is not a schema-2 selected-route result.
+        observation["browser"] = {
+            key: result[key] for key in
+            ("browser", "deadline_ms", "elapsed_ms", "outcome", "reason")
+        }
+        completed = True
+    finally:
+        # _run_safari owns fresh-session cleanup. Its cleanup exceptions must
+        # propagate to run_gate's existing finally, even for this diagnostic.
+        final, final_proxy = _system_without_slipstream_snapshot(runner, system, before)
+        observation["after"] = final
+        unchanged = initial_proxy == final_proxy if final_proxy is not None else None
+        observation["proxy_unchanged"] = unchanged
+        if completed:
+            if final["state"] == "verified" and unchanged is True:
+                observation["state"] = "observed"
+                observation["reason"] = ""
+            else:
+                observation["reason"] = "after_guard_unavailable"
+
+
 def run_gate(
     app_bundle: Path, chrome: Path, driver_url: str, *,
     startup_diagnostics: list[dict[str, object]] | None = None,
@@ -1349,7 +1544,19 @@ def run_gate(
         ) from None
     results: list[dict[str, object]] = []
     failure: BaseException | None = None
+    baseline_observation = None
     try:
+        if failure_observations is not None and len(failure_observations) < len(SITES):
+            baseline_observation = {
+                "host": "xpersonatoy.com", "safari": {}, "chrome": {}, "controls": {},
+                "system_without_slipstream": {},
+            }
+            failure_observations.append(baseline_observation)
+            failure_stage = "system_without_slipstream:xpersonatoy.com"
+            _run_system_without_slipstream_control(
+                runner, system, before, driver_url, uid,
+                baseline_observation["system_without_slipstream"],
+            )
         failure_stage = "install"
         system.run(target.install_command)
         failure_stage = "wait_for_active"
@@ -1362,9 +1569,12 @@ def run_gate(
             chrome_kwargs = {}
             if startup_diagnostics is not None:
                 safari_kwargs["startup_diagnostics"] = startup_diagnostics
-            if failure_observations is not None and len(failure_observations) < len(SITES):
+            if baseline_observation is not None and host == "xpersonatoy.com":
+                observation = baseline_observation
+            elif failure_observations is not None and len(failure_observations) < len(SITES):
                 observation = {"host": host, "safari": {}, "chrome": {}, "controls": {}}
                 failure_observations.append(observation)
+            if observation is not None:
                 safari_kwargs["failure_observation"] = observation["safari"]
                 chrome_kwargs["failure_observation"] = observation["chrome"]
                 # Sample only after a failed browser operation, before its
