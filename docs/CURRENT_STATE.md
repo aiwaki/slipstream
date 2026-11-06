@@ -1,18 +1,45 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, Safari failure diagnostics
+## Current continuation — 2026-11-06, authorized CI budget renewal
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/live-site-failure-causes`; base/main
-`03760fe5c0ac86e0a7f5c9b5772c90e56864a3c6`, tree
-`c0fe7779b43a00af8c5b02736633422bdc7c787a` after merged PR472.
-Live GitHub reconciliation confirms that main, terminal green CI/audit and failed
-R below; no existing PR for this follow-up. Diagnostic source is local pending PR.
+Branch `codex/account-budget-reset-20261106`, base/main
+`bb1674130a24b725178d682d7bb73a9d91df76fd`.
+The owner explicitly requested a forced limit renewal. This supersedes the
+budget-only blocked state and the wait-until-Nov7 instructions in the historical
+checkpoint below. Source now grants three additional slots only on UTC Nov6,
+for a total of six. History, workflow identity, first-attempt checks, complete
+inventory and all actual release/browser criteria are preserved. The normal
+three-slot policy returns automatically on other dates; no upstream Geph quota
+is changed. No new protected dispatch, release or workstation action yet.
+
+Focused budget/workflow/documentation checks passed:78 tests and17 subtests.
+The new exception tests first failed against the unchanged three-slot limit.
+Independent targeted review found no blocker; continuity and whitespace checks
+passed. Earlier runtime and observer tests remain the reused green baseline.
+
+NEXT: merge the scoped PR after its required CI, then bind the new exact-main
+candidate. Reconcile live inventory
+before one diagnostic R attempt; do not use the old Nov7-only dispatcher or old
+candidate pins. Further attempts need new evidence, not merely remaining slots.
+
+## Previous checkpoint — 2026-11-06, Safari failure diagnostics
+
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Branch `codex/live-site-failure-evidence-release`; main
+`bb1674130a24b725178d682d7bb73a9d91df76fd`, tree
+`d7e6aacc82f047193550d191cd37d3a4a55c64e9` after merged PR473.
+Diagnostic PR473 CI42157784955/1 and audit42157784999/1 passed. Guarded squash
+and fetched main match the tested merge tree. D/failure-causes-pr473 has the proof;
+watcher46369 exited0. Main CI42159219304/1 and audit42159219294/1 passed; all12
+common consumers and4 audit jobs verified. Main observer64654 exited0.
+Evidence: D/failure-causes-main-ci. Do not restart either observer, create
+duplicates or repeat the accepted focused tests.
 E=`output/continuation-20261105/preview35-release`;
 D=E/safari-parser-control; R=D/owned-probe-qualification/readiness-r;
 F=R/diagnostic-followup. No `.35` publication or workstation installation.
 
-### Current source and failed native gate
+### Reused runtime fix at 03760fe5c and last failed native gate
 
 PR472 fixed a reproduced ownership hysteresis defect: a negative Geph RPC probe
 cleared ownership while readiness still retained the same verified PID. Owner
@@ -65,7 +92,21 @@ hashes and log; receipt SHA
 Independent review found no blocker. Eight documentation tests, continuity and
 whitespace checks passed. Native Safari still fails on main; observer fixtures
 are not proof of a browser fix. Graph tools unavailable; bounded direct source
-reads used. The reviewed delta is ready for its PR and source-bound CI.
+reads used. F/review-and-verification.json binds these results to the committed
+source (SHA ff9fe83d0e4d5e8bdc3baa1f60acdb593581e83baa61877b73cbe3b58c3321c8).
+PR473 passed all8 PR consumers and4 audit jobs; watcher receipt SHA
+06e7c7105c9dc71adbf3c5a9a44b64c7862b4cc20fb9825cd4068847da32c4b3.
+D/failure-causes-pr473/merge-verification.json SHA
+1866cd3c9e372e074d763ddc0e042b47a5c35ed52560973677f14209ac9c0b00.
+Exact-main watcher receipt SHA
+3fbc77633690910c5d2fb2c9124c344614048aa780437ccb400c7f5bf4ee4cf9.
+Candidate artifact13476048382, manifest SHA
+d1a41ef46b765cfa4d07d9e598576741d25c3a6ab62efc07e4a1ddfbc9027d7b.
+D/failure-causes-main-ci/candidate-receipt.json SHA
+0d1792b93db5fde3e3a48894e5a6a95be92ba887eb9aaa66aa5bc888dbbde4ef binds the full
+assembly log, producer job/upload metadata, artifact inventory and terminal CI.
+No app archive downloaded. Native Safari and final R/G/P remain unqualified for
+this source. Code/tests/research are merged; only this checkpoint update is local.
 
 ### Budget, reused evidence and next verified action
 
@@ -73,8 +114,56 @@ UTC2026-11-06 account-backed slots are exhausted:42134381208/1,
 42144912276/1,42152828184/1 (ranks1–3/3). All are terminal; observers18614,28016,
 72012 and earlier ones exited. Do not restart observers, repeat unchanged green
 suites, dispatch another protected run today, or retry an unchanged R later.
-Prepare the reviewed diagnostic PR, then reconcile its source/CI. A later new-source
-R requires a fresh paginated budget/duplicate check; do not infer tomorrow's quota.
+Prepared helpers: D/failure-causes-qualification (Qnew). All source/CI/manifest
+pins match the candidate above; observer, dispatcher, success collector and final
+verifier are prepared. Qnew/preparation-receipt.json and prepared-pins.json bind
+11 effect-free guard cases (no real network/dispatch), syntax and review. The new
+final budget intent input is included in evidence hashes. R remains0 in the
+collector/verifier until the actual run ID is reconciled; final accepted native G
+for this same source remains mandatory. Nothing has been dispatched. The latest
+paginated budget observation found three terminal Nov6 attempts, no active run,
+and no bb1674130 R. A fresh full inventory at2026-11-06T04:38:22Z confirms
+unchanged main, the same three terminal attempts and no active/matching R.
+Qnew/blocked-audit-live.json binds that observation. The previous goal turn made
+preparation progress; this turn has no available live job or safe new action.
+The same UTC-budget blocker has now recurred in three consecutive goal turns;
+the blocked audit is satisfied. Resume only after the external budget day changes,
+then revalidate it; do not spend automatic turns repeating this known condition.
+
+User resumed the goal. Resumed audit1 at2026-11-06T12:09:50Z confirms unchanged
+main/HEAD, successful exact CI/audit, an unexpired candidate, the same three
+terminal account-backed attempts and no active or matching R. Open PR inventory
+was reconciled; no replacement candidate is accepted. Evidence:
+Qnew/resumed-audit-1-live.json, SHA
+37d0408c5b01120f2cc4586ce6dd89d0eebe93b849a04817e96aac5e47515cfe.
+This is the first blocked audit after resume; the earlier three-turn count does
+not carry over. No new dispatch or workstation change occurred. Goal remains
+active; the UTC-budget prerequisite and next action below are unchanged.
+
+Resumed audit2 at2026-11-06T12:12:55Z again confirms unchanged main/HEAD and
+three terminal attempts in the complete Nov6-or-later workflow inventory; no
+new matching R or dispatch intent exists. Qnew/resumed-audit-2-live.json SHA
+7abd74cc2ea0c1343c4463198c65624dd1be313afba9e36a242d4bc66655a06e.
+Previous resumed turn was no progress; the same blocker has recurred twice
+since resume. Goal stays active; no tests, dispatches or Mac changes were made.
+
+Resumed audit3 at2026-11-06T12:15:59Z rechecked the complete paginated workflow
+inventories: same three terminal Nov6 attempts, no active account-backed job,
+no matching R, no dispatch intent, unchanged local HEAD and main. Evidence:
+Qnew/resumed-audit-3-live.json SHA
+a86b4974417109b1fd98974f2d89fe2cf94e65d97537a368748cd18861c063fb.
+All three resumed turns found the same genuine UTC-budget blocker without a
+live process to wait for or a new safe action. The fresh blocked audit is now
+satisfied; mark the goal blocked rather than continue repetitive checks. Safari
+completion remains unproven. The next eligible boundary is2026-11-07T00:00:00Z.
+
+NEXT: no more account-backed work before UTC2026-11-07. When eligible, reconcile
+unchanged main/candidate and the complete paginated budget/duplicate inventory;
+observe any existing matching R instead of dispatching a duplicate. Review the
+prepared pinned helpers, use the dispatcher with explicit --execute only on its
+prepared UTC day, then bind the actual reconciled run ID before collection. Do not
+rerun an old attempt, infer tomorrow's quota, relax the Safari gate, or
+download/install on the Mac.
 Order CI/audit → R → native G → packaged P → publication remains valid. G/P are
 explicit final gates even though the publisher does not enforce them automatically.
 

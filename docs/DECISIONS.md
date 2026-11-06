@@ -1,5 +1,21 @@
 # Decisions
 
+### 2026-11-06: owner-authorized renewal of the account-backed CI budget
+
+The owner explicitly requested a forced budget renewal after today's three
+account-backed runs. For UTC 2026-11-06 only, the shared limit is six dispatches:
+the usual three plus three additional slots. Existing run history and positions
+are retained. The exception expires at 2026-11-07T00:00:00Z; all other UTC days
+keep the normal limit of three. This dated exception supersedes the fixed-three
+portion of the August 24 contract below only for its authorized date.
+
+Both exact workflows still share one ordered inventory. Reruns, incomplete API
+evidence, non-main execution and an exceeded effective daily limit still refuse
+before account-secret access. This changes our CI allowance, not any upstream
+Geph quota. It does not authorize blind retries, weaker browser acceptance or
+workstation changes. Use the newly instrumented candidate for one diagnostic
+readiness attempt, then base further work on its actual evidence.
+
 ### 2026-11-06: preserve verified ownership through Geph liveness hysteresis
 
 A negative control-RPC liveness sample is not loss of process ownership. If the
