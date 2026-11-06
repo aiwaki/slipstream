@@ -41,14 +41,68 @@ def payloads(*runs: dict) -> dict[str, dict]:
 
 
 class AccountBackedRunBudgetTests(unittest.TestCase):
-    def verify(self, current_run_id: int, runs: dict[str, dict]) -> dict:
+    def verify(
+        self,
+        current_run_id: int,
+        runs: dict[str, dict],
+        *,
+        utc_day: date = UTC_DAY,
+        current_run_attempt: int = 1,
+    ) -> dict:
         return budget.verify_daily_budget(
             repository=REPOSITORY,
-            utc_day=UTC_DAY,
+            utc_day=utc_day,
             current_run_id=current_run_id,
-            current_run_attempt=1,
+            current_run_attempt=current_run_attempt,
             payloads=runs,
         )
+
+    def mixed_daily_runs(self, utc_day: date, count: int) -> dict[str, dict]:
+        return payloads(
+            *[
+                workflow_run(
+                    100 + index,
+                    budget.ACCOUNT_BACKED_WORKFLOWS[index % 2],
+                    f"{utc_day.isoformat()}T{index:02d}:00:00Z",
+                )
+                for index in range(1, count + 1)
+            ]
+        )
+
+    def test_authorized_november_6_reset_adds_three_slots_without_erasing_history(
+        self,
+    ) -> None:
+        utc_day = date(2026, 11, 6)
+        runs = self.mixed_daily_runs(utc_day, 6)
+        for position in range(1, 7):
+            with self.subTest(position=position):
+                result = self.verify(100 + position, runs, utc_day=utc_day)
+                self.assertEqual(result["current_position"], position)
+                self.assertEqual(result["limit"], 6)
+                self.assertEqual(result["observed_dispatches"], 6)
+                self.assertEqual(result["utc_date"], "2026-11-06")
+
+    def test_authorized_reset_still_rejects_seventh_dispatch(self) -> None:
+        utc_day = date(2026, 11, 6)
+        with self.assertRaisesRegex(ValueError, "position 7, limit is 6"):
+            self.verify(107, self.mixed_daily_runs(utc_day, 7), utc_day=utc_day)
+
+    def test_authorized_reset_does_not_apply_on_other_dates(self) -> None:
+        for utc_day in (date(2026, 11, 5), date(2026, 11, 7), date(2027, 11, 6)):
+            with self.subTest(utc_day=utc_day):
+                runs = self.mixed_daily_runs(utc_day, 4)
+                self.assertEqual(self.verify(103, runs, utc_day=utc_day)["limit"], 3)
+                with self.assertRaisesRegex(ValueError, "position 4, limit is 3"):
+                    self.verify(104, runs, utc_day=utc_day)
+
+    def test_authorized_reset_still_rejects_rerun_and_incomplete_evidence(self) -> None:
+        utc_day = date(2026, 11, 6)
+        runs = self.mixed_daily_runs(utc_day, 4)
+        with self.assertRaisesRegex(ValueError, "reruns are prohibited"):
+            self.verify(104, runs, utc_day=utc_day, current_run_attempt=2)
+        runs[budget.RELEASE_READINESS_WORKFLOW]["total_count"] += 1
+        with self.assertRaisesRegex(ValueError, "response is incomplete"):
+            self.verify(104, runs, utc_day=utc_day)
 
     def test_first_three_mixed_dispatches_are_allowed(self) -> None:
         runs = payloads(

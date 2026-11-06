@@ -10,6 +10,9 @@ from pathlib import Path
 
 
 MAX_ACCOUNT_BACKED_DISPATCHES_PER_UTC_DAY = 3
+# The owner explicitly renewed the budget on 2026-11-06. Keep all earlier runs
+# in the rank, grant three more slots for that UTC day, and expire automatically.
+ADDITIONAL_DISPATCHES_BY_UTC_DAY = {date(2026, 11, 6): 3}
 RELEASE_READINESS_WORKFLOW = ".github/workflows/release-readiness.yml"
 OWNED_GEPH_DIAGNOSTIC_WORKFLOW = (
     ".github/workflows/owned-geph-qualification.yml"
@@ -18,6 +21,13 @@ ACCOUNT_BACKED_WORKFLOWS = (
     RELEASE_READINESS_WORKFLOW,
     OWNED_GEPH_DIAGNOSTIC_WORKFLOW,
 )
+
+
+def daily_dispatch_limit(utc_day: date) -> int:
+    return (
+        MAX_ACCOUNT_BACKED_DISPATCHES_PER_UTC_DAY
+        + ADDITIONAL_DISPATCHES_BY_UTC_DAY.get(utc_day, 0)
+    )
 
 
 def _positive_integer(value: object, label: str) -> int:
@@ -141,16 +151,16 @@ def verify_daily_budget(
         raise ValueError("current workflow run attempt does not match GitHub metadata")
 
     position = observed.index(matching[0]) + 1
-    if position > MAX_ACCOUNT_BACKED_DISPATCHES_PER_UTC_DAY:
+    limit = daily_dispatch_limit(utc_day)
+    if position > limit:
         raise ValueError(
             "daily account-backed workflow budget exhausted: "
-            f"run is position {position}, limit is "
-            f"{MAX_ACCOUNT_BACKED_DISPATCHES_PER_UTC_DAY}"
+            f"run is position {position}, limit is {limit}"
         )
 
     return {
         "current_position": position,
-        "limit": MAX_ACCOUNT_BACKED_DISPATCHES_PER_UTC_DAY,
+        "limit": limit,
         "observed_dispatches": len(observed),
         "result": "allowed",
         "utc_date": utc_day.isoformat(),

@@ -975,8 +975,11 @@ Public Cancel, commit and pre-ACK rollback are now verified for `.33 → .34`. T
 - A Linux preflight with only the read-scoped ephemeral GitHub token and no
   protected account/broker secret limits `release-readiness` and the standalone
   diagnostic-only owned-Geph workflow to three fresh `main` dispatches combined
-  per UTC day. It counts every outcome, rejects workflow reruns, and fails closed
-  on incomplete API evidence; a fourth dispatch stops before the protected
+  per UTC day by default. The owner's one-time renewal grants three additional
+  slots on UTC 2026-11-06 only, without removing earlier runs from the count;
+  the normal limit resumes automatically the next day. It counts every outcome,
+  rejects workflow reruns, and fails closed on incomplete API evidence. A
+  dispatch exceeding the effective daily limit stops before the protected
   environment, candidate download, broker authentication, or the measured soak.
   This budget does not justify retrying unchanged failures or omitting any
   release gate. The shared `queue: max` concurrency group serializes retained

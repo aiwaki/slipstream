@@ -553,7 +553,7 @@ class BuildConfigTests(unittest.TestCase):
                 r"(?m)^\s+!\s+security\s+find-generic-password\b",
             )
 
-    def test_account_backed_workflows_share_a_three_dispatch_daily_budget(
+    def test_account_backed_workflows_share_a_daily_budget(
         self,
     ) -> None:
         workflows = {
@@ -588,7 +588,7 @@ class BuildConfigTests(unittest.TestCase):
             self.assertNotIn("continue-on-error", budget_job)
             self.assertNotIn("always()", budget_job)
             self.assertIn(
-                "Reserve one of three daily account-backed dispatches",
+                "Reserve a daily account-backed dispatch",
                 budget_job,
             )
             self.assertIn(
