@@ -8,9 +8,9 @@ use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, OnceLock,
@@ -232,6 +232,45 @@ struct ChromeSession {
     profile: PathBuf,
     launcher: Option<Child>,
     rooted_process_groups: BTreeSet<u32>,
+    startup_failure: Option<ChromeStartupObservation>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum LauncherObservation {
+    Unknown,
+    Running,
+    Exited { code: i32 },
+    Signaled { signal: i32 },
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+struct ChromeStartupObservation {
+    schema_version: u8,
+    start_budget_ms: u32,
+    wait_ms: u32,
+    polls: u32,
+    owned_seen: bool,
+    owned_last: bool,
+    devtools_seen: bool,
+    devtools_last: &'static str,
+    launcher: LauncherObservation,
+}
+
+fn launcher_observation(status: io::Result<Option<ExitStatus>>) -> LauncherObservation {
+    match status {
+        Ok(None) => LauncherObservation::Running,
+        Ok(Some(status)) => match (status.code(), status.signal()) {
+            (Some(code @ 0..=255), _) => LauncherObservation::Exited { code },
+            (_, Some(signal @ 1..=127)) => LauncherObservation::Signaled { signal },
+            _ => LauncherObservation::Unknown,
+        },
+        Err(_) => LauncherObservation::Unknown,
+    }
+}
+
+fn diagnostic_millis(duration: Duration) -> u32 {
+    duration.as_millis().min(u128::from(u32::MAX)) as u32
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1104,9 +1143,18 @@ impl ChromeSession {
             profile,
             launcher: None,
             rooted_process_groups: BTreeSet::new(),
+            startup_failure: None,
         };
         if let Err(failure) = session.start(classification_deadline) {
-            return match session.cleanup() {
+            let cleanup = session.cleanup();
+            // Emit only fixed fields after cleanup. No paths, arguments, URLs,
+            // capabilities or raw Chromium output leave the private profile.
+            if let Some(observation) = session.startup_failure {
+                if let Ok(encoded) = serde_json::to_string(&observation) {
+                    eprintln!("slipstream browser startup: {encoded}");
+                }
+            }
+            return match cleanup {
                 Ok(()) => Err(failure),
                 Err(cleanup_failure) => Err(cleanup_failure),
             };
@@ -1143,10 +1191,16 @@ impl ChromeSession {
         );
 
         let deadline = classification_deadline;
+        let started = Instant::now();
+        let start_budget_ms = diagnostic_millis(deadline.saturating_duration_since(started));
+        let mut polls: u32 = 0;
+        let mut devtools_seen = false;
+        let mut devtools_last = "unobserved";
         let mut observed_owned_main = false;
         let mut owned_main_alive = false;
         let mut devtools_file_failure = None;
         while Instant::now() < deadline {
+            polls = polls.saturating_add(1);
             let processes = owned_chrome_processes(
                 self.uid,
                 &self.config.executable,
@@ -1160,11 +1214,37 @@ impl ChromeSession {
             owned_main_alive = owned_main_count == 1;
             observed_owned_main |= owned_main_alive;
             match read_devtools_port(&self.profile, self.uid) {
-                Ok(Some(_)) if owned_main_alive => return Ok(()),
-                Ok(_) => devtools_file_failure = None,
-                Err(failure) => devtools_file_failure = Some(failure),
+                Ok(Some(_)) => {
+                    devtools_seen = true;
+                    devtools_last = "ready";
+                    if owned_main_alive {
+                        return Ok(());
+                    }
+                    devtools_file_failure = None;
+                }
+                Ok(None) => {
+                    devtools_last = "missing";
+                    devtools_file_failure = None;
+                }
+                Err(failure) => {
+                    devtools_last = "invalid";
+                    devtools_file_failure = Some(failure);
+                }
             }
             std::thread::sleep(Duration::from_millis(100));
+        }
+        if disposable_ci() {
+            self.startup_failure = Some(ChromeStartupObservation {
+                schema_version: 1,
+                start_budget_ms,
+                wait_ms: diagnostic_millis(started.elapsed()),
+                polls,
+                owned_seen: observed_owned_main,
+                owned_last: owned_main_alive,
+                devtools_seen,
+                devtools_last,
+                launcher: LauncherObservation::Unknown,
+            });
         }
         if let Some(failure) = devtools_file_failure {
             Err(failure)
@@ -1333,6 +1413,16 @@ impl ChromeSession {
             &mut self.rooted_process_groups,
         ) {
             Ok(processes) => {
+                // Only a failed disposable-CI startup records child status.
+                // Observe after capturing rooted groups, before TERM. Reaping
+                // in start() could hide a zombie root from cleanup's census.
+                if let Some(observation) = self.startup_failure.as_mut() {
+                    observation.launcher = self
+                        .launcher
+                        .as_mut()
+                        .map(|child| launcher_observation(child.try_wait()))
+                        .unwrap_or(LauncherObservation::Unknown);
+                }
                 for process in processes.iter().rev() {
                     signal_owned_process(process, self.uid, "TERM");
                 }
@@ -2449,6 +2539,63 @@ mod tests {
             MAX_HTTP_BYTES
         );
         assert!(http_response_extent(oversized.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn startup_observation_distinguishes_pre_cleanup_exit_signal_and_liveness() {
+        let cases = [
+            (Ok(None), json!({"state": "running"})),
+            (
+                Ok(Some(ExitStatus::from_raw(7 << 8))),
+                json!({"state": "exited", "code": 7}),
+            ),
+            (
+                Ok(Some(ExitStatus::from_raw(9))),
+                json!({"state": "signaled", "signal": 9}),
+            ),
+            (
+                Err(io::Error::other("private diagnostic")),
+                json!({"state": "unknown"}),
+            ),
+        ];
+        for (status, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(launcher_observation(status)).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn startup_observation_is_small_and_contains_only_fixed_fields() {
+        let observation = ChromeStartupObservation {
+            schema_version: 1,
+            start_budget_ms: u32::MAX,
+            wait_ms: u32::MAX,
+            polls: u32::MAX,
+            owned_seen: false,
+            owned_last: false,
+            devtools_seen: false,
+            devtools_last: "unobserved",
+            launcher: LauncherObservation::Signaled { signal: 127 },
+        };
+        let value = serde_json::to_value(observation).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "schema_version": 1, "start_budget_ms": u32::MAX, "wait_ms": u32::MAX,
+                "polls": u32::MAX, "owned_seen": false, "owned_last": false,
+                "devtools_seen": false, "devtools_last": "unobserved",
+                "launcher": {"state": "signaled", "signal": 127},
+            })
+        );
+        let encoded = serde_json::to_string(&observation).unwrap();
+        let combined = format!(
+            "slipstream browser startup: {encoded}\nslipstream browser probe failed: {}",
+            "x".repeat(80),
+        );
+        assert!(combined.len() <= 512);
+        assert_eq!(diagnostic_millis(Duration::MAX), u32::MAX);
     }
 
     #[test]
