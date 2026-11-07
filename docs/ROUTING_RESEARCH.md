@@ -1,5 +1,44 @@
 # Routing Research Notes
 
+## 2026-11-07: distinguish packaged Chrome startup failures before navigation
+
+Main CI42221917459/1 failed in packaged-browser-qualification, before navigation,
+with `chrome_start_failed`. All other common jobs, including native Stop-Quit,
+passed; the required lifecycle aggregate reflected the browser failure. The
+budget-only PR474 did not change this runtime, fixture or CI workflow. Its
+512-character failure output retained only the static category, so the run does
+not establish a Chromium crash, runner issue or causal runtime defect.
+
+The diagnostic patch retains the remaining startup budget after spawn, wait
+elapsed time, poll count, observed/last owned-root and DevTools states. It also
+samples the direct child's exit code, signal, running or unknown state after
+cleanup's first successful process-group census and before TERM. Reaping before
+that census could erase a zombie root needed to discover surviving children.
+This child snapshot is later than the last startup poll; running does not prove
+successful initialization. A failed census leaves it unknown.
+
+The snapshot is created only on a disposable-CI startup deadline failure and
+emitted after existing cleanup. The original failure and cleanup-error precedence
+remain. Eight-second classification, capability admission, readiness, process
+ownership and all signal/cleanup bounds are unchanged. The report contains only
+fixed fields, enums, booleans and bounded integers. The fixture validates the
+exact schema and retains its 512-character input bound; unstructured/extra output,
+unknown fields, wrong types and invalid ranges remain redacted. No stderr text,
+path, URL, hostname, PID or capability is copied into the report.
+
+Local evidence: the Python retention regression failed before the patch; 144
+fixture/build checks plus eight subtests and 31 browser-worker Rust tests pass.
+Rust tests use a command-local empty Tauri resource/external-binary list because
+the worktree has no installed Geph sidecar; these are unit tests, not packaging
+proof. Independent review found no blocker. Real packaged CI and Safari/Geph
+qualification remain required. Evidence is retained under
+`output/continuation-20261107/browser-start-evidence`.
+
+A consumer-only rerun of the failed main CI would make the latest CI attempt2
+while its existing candidate manifest still declares attempt1. The readiness
+consumer checks that exact match, so such a rerun alone cannot admit the package.
+No old run was retried and no candidate/run identity check was relaxed.
+
 ## 2026-11-06: retain bounded causes for a later Safari failure
 
 The disposable live-site observer now preserves three diagnostic sources without

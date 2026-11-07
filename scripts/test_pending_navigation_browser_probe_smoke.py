@@ -123,6 +123,65 @@ def test_worker_failure_diagnostic_redacts_unstructured_output() -> None:
     assert len(diagnostic) <= smoke.WORKER_DIAGNOSTIC_MAX_CHARS + 32
 
 
+def _startup_failure_output(**changes):
+    observation = {
+        "schema_version": 1,
+        "start_budget_ms": 1200,
+        "wait_ms": 1203,
+        "polls": 12,
+        "owned_seen": True,
+        "owned_last": True,
+        "devtools_seen": False,
+        "devtools_last": "missing",
+        "launcher": {"state": "exited", "code": 7},
+    }
+    observation.update(changes)
+    return (
+        "slipstream browser startup: " + json.dumps(observation) + "\n"
+        "slipstream browser probe failed: chrome_start_failed\n"
+    )
+
+
+def test_worker_failure_retains_bounded_startup_observations():
+    worker = subprocess.CompletedProcess(
+        ("slipstream",), 1, stdout="", stderr=_startup_failure_output()
+    )
+    diagnostic = smoke._worker_failure_diagnostic(worker)
+    assert "chrome_start_failed" in diagnostic
+    assert '"start_budget_ms":1200' in diagnostic
+    assert '"state":"exited"' in diagnostic and '"code":7' in diagnostic
+    assert "\n" not in diagnostic
+    assert len(diagnostic) <= smoke.WORKER_DIAGNOSTIC_MAX_CHARS + 32
+
+
+@pytest.mark.parametrize("changes", [
+    {"host": "private.example"},
+    {"devtools_last": "private.example"},
+    {"start_budget_ms": True},
+    {"start_budget_ms": -1},
+    {"polls": 2**32},
+    {"owned_seen": 1},
+    {"launcher": {"state": "exited", "code": "private"}},
+    {"launcher": {"state": "running", "code": 0}},
+    {"launcher": {"state": "signaled", "signal": True}},
+    {"launcher": {"state": "signaled", "signal": 0}},
+    {"schema_version": True},
+])
+def test_worker_failure_rejects_untrusted_startup_fields(changes):
+    worker = subprocess.CompletedProcess(
+        ("slipstream",), 1, stdout="", stderr=_startup_failure_output(**changes)
+    )
+    assert smoke._worker_failure_diagnostic(worker) == "exit=1; detail=<redacted>"
+
+
+@pytest.mark.parametrize("extra", ["private payload\n", "{}\n", "x" * 1200])
+def test_worker_failure_rejects_extra_output_around_startup_summary(extra):
+    worker = subprocess.CompletedProcess(
+        ("slipstream",), 1, stdout="", stderr=_startup_failure_output() + extra
+    )
+    assert smoke._worker_failure_diagnostic(worker) == "exit=1; detail=<redacted>"
+
+
 def test_profile_residue_matches_only_exact_worker_nonce() -> None:
     with tempfile.TemporaryDirectory() as raw_directory:
         root = Path(raw_directory)

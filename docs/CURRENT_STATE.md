@@ -1,27 +1,85 @@
 # Current Project State
 
-## Current continuation — 2026-11-06, authorized CI budget renewal
+## Current continuation — 2026-11-07, packaged Chrome startup evidence
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/account-budget-reset-20261106`, base/main
-`bb1674130a24b725178d682d7bb73a9d91df76fd`.
+Branch `codex/browser-startup-evidence-20261107`; base/main
+`a9fdac98f0d07e953770097be08fe4fddc0d1f65`. Live GitHub reconciled: main unchanged,
+CI42221917459/1 terminal failure, audit42221917506/1 success; no duplicate PR for
+this work. Previous goal turn made progress (budget PR merged, new CI failure
+preserved); this continuation is diagnosing that failure, not repeating a wait.
+The dated Nov6 allowance expired; normal three/day account-backed policy applies.
+
+Working patch: disposable-CI-only Chrome startup summary from existing readiness
+observations, with child status sampled only after cleanup captures owned groups
+and before TERM. Exact bounded Python sanitizer retains the summary; private raw
+output remains redacted. Deadline, route/ownership decisions, cleanup precedence
+and browser/release acceptance are unchanged. This fixes lost failure evidence;
+it does not yet establish or repair the original Chrome/Safari failure cause.
+
+B=output/continuation-20261107/browser-start-evidence. B/local-evidence.json binds
+initial RED, 144 Python tests plus8 subtests, independent review and source hashes.
+31 Rust browser-worker tests pass with command-local empty Tauri resources for
+unit testing only. Initial ordinary cargo invocation stopped at missing sidecar
+before tests; no app was built/installed or network/service setting changed.
+Focused Clippy with warnings denied, eight docs tests, continuity and whitespace
+checks pass. Earlier unchanged runtime suites are reused. New-source CI is pending.
+
+NEXT: submit the diagnostic PR, review exact CI
+and merge only with required checks. Then verify a fresh consistently bound main
+candidate before one new readiness R. Do not run stale Nov6 helper pins, rerun
+failed protected attempts, lower criteria or claim release readiness from unit
+checks. Record actual startup observations if the packaged gate fails again.
+
+## Previous checkpoint — 2026-11-06, budget renewed; CI browser startup blocked
+
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Branch `codex/account-budget-renewal-release`; main/HEAD
+`a9fdac98f0d07e953770097be08fe4fddc0d1f65`, tree
+`073e65f8ab0011883eb65849316621ea14dfcb40` after merged PR474.
 The owner explicitly requested a forced limit renewal. This supersedes the
-budget-only blocked state and the wait-until-Nov7 instructions in the historical
-checkpoint below. Source now grants three additional slots only on UTC Nov6,
-for a total of six. History, workflow identity, first-attempt checks, complete
-inventory and all actual release/browser criteria are preserved. The normal
-three-slot policy returns automatically on other dates; no upstream Geph quota
-is changed. No new protected dispatch, release or workstation action yet.
+budget-only blocked state and wait-until-Nov7 instructions below. Committed
+policy grants three extra slots only on UTC Nov6, total six; other dates return
+to three. History, first-attempt checks, complete inventory and release/browser
+criteria remain. No upstream Geph quota changed. Three slots used; no additional
+protected dispatch, release or workstation action was performed this turn.
 
-Focused budget/workflow/documentation checks passed:78 tests and17 subtests.
-The new exception tests first failed against the unchanged three-slot limit.
-Independent targeted review found no blocker; continuity and whitespace checks
-passed. Earlier runtime and observer tests remain the reused green baseline.
+Focused checks:78 tests and17 subtests PASS after initial RED, independent review,
+continuity and whitespace PASS. Earlier runtime/observer tests remain reused.
+PR474 CI42218340792/2 and audit42218341020/1 passed; guarded squash/fetched main
+matches tested merge tree. Attempt1 failed before tray startup with dscl exit10,
+zero cases and no outer cleanup errors; exact operation/cause unknown. One
+failed-job retry passed, preserving unchanged green jobs. All PR observers ended.
 
-NEXT: merge the scoped PR after its required CI, then bind the new exact-main
-candidate. Reconcile live inventory
-before one diagnostic R attempt; do not use the old Nov7-only dispatcher or old
-candidate pins. Further attempts need new evidence, not merely remaining slots.
+B=output/continuation-20261106/account-budget-renewal.
+B/focused-verification.json and B/pr474 contain focused/retry/pre-merge/merge proof.
+Main audit42221917506/1 PASS. Main CI42221917459/1 is terminal FAILURE:
+packaged-browser-qualification job127913258448 failed with worker exit1 and
+chrome_start_failed; dependent lifecycle aggregate127916835845 also failed.
+All other common jobs passed, including native Stop-Quit. Observer90863 exited1;
+do not restart it. B/main-ci/watcher-receipt.json SHA
+3661e97688175836a0f557b252b377c33789fbeee1be2dd16cead9724b4d651d
+binds final run/jobs/artifacts. Browser failure is preserved in
+B/main-ci/browser-qualification.log and browser-failure-evidence.json.
+
+The worker failed before navigation: owned main plus DevTools readiness did not
+arrive by the existing deadline. chrome_start_failed is a generic category from
+nonempty readable UTF-8 stderr; the raw private stderr was not retained. Exact
+cause (runtime versus runner condition) is unresolved. Browser source, fixture
+and ci.yml are unchanged since prior green bb167. Independent review agrees no
+causal timeout/source change is justified yet. Rerunning only this consumer
+would set latest CI attempt2 while candidate manifest stays attempt1, rejected
+by current R admission; no such rerun was made and no acceptance was relaxed.
+
+B/qualification contains repinned private helpers and independent helper-review.
+Run IDs remain0, manifest is deliberately PENDING; no intent/dispatch exists.
+Fresh inventory at preparation had three Nov6 attempts, no active protected run,
+no exact-source R. The three extra slots expire at 2026-11-07 00:00 UTC.
+NEXT: resolve the Chrome startup failure with bounded retained launch evidence,
+then obtain a fully passing, consistently bound candidate before one new R.
+Do not run old Nov7-only helpers, pending pins, or repeat protected failures.
+The user-requested internal budget renewal itself is complete; Safari/release
+qualification remains incomplete. No .35 publication or Mac changes.
 
 ## Previous checkpoint — 2026-11-06, Safari failure diagnostics
 

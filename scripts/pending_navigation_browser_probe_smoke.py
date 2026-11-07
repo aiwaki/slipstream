@@ -40,6 +40,7 @@ MAX_FRAME_BYTES = probe_runtime.MAX_IPC_BYTES
 MAX_END_TO_END_MS = 25_000
 WORKER_DIAGNOSTIC_MAX_CHARS = 512
 WORKER_FAILURE_RE = re.compile(r"\Aslipstream browser probe failed: [a-z0-9_]{1,80}\Z")
+WORKER_STARTUP_PREFIX = "slipstream browser startup: "
 WORKER_PROFILE_GLOB = "slipstream-browser-probe-" + "[0-9a-f]" * 32
 PACKAGED_BROWSER_WORKER_RELATIVE = Path("Contents/MacOS/slipstream-browser-probe")
 LSAPPINFO = "/usr/bin/lsappinfo"
@@ -144,11 +145,55 @@ def _verify_console_browser_access(app_bundle: Path) -> None:
 
 def _worker_failure_diagnostic(worker: subprocess.CompletedProcess[str]) -> str:
     output = (worker.stderr or worker.stdout or "").strip()
-    output = re.sub(r"\s+", " ", output)
-    if len(output) > WORKER_DIAGNOSTIC_MAX_CHARS:
-        output = output[: WORKER_DIAGNOSTIC_MAX_CHARS - 3] + "..."
-    detail = output if WORKER_FAILURE_RE.fullmatch(output) else "<redacted>"
+    detail = "<redacted>"
+    if len(output) <= WORKER_DIAGNOSTIC_MAX_CHARS:
+        lines = output.splitlines()
+        if len(lines) == 1 and WORKER_FAILURE_RE.fullmatch(output):
+            detail = output
+        elif (
+            len(lines) == 2
+            and lines[0].startswith(WORKER_STARTUP_PREFIX)
+            and WORKER_FAILURE_RE.fullmatch(lines[1])
+        ):
+            observation = _validated_startup_observation(lines[0][len(WORKER_STARTUP_PREFIX):])
+            if observation is not None:
+                detail = lines[1] + "; startup=" + json.dumps(observation, separators=(",", ":"))
     return f"exit={worker.returncode}; detail={detail}"
+
+
+def _validated_startup_observation(raw: str) -> dict | None:
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    keys = {"schema_version", "start_budget_ms", "wait_ms", "polls", "owned_seen",
+            "owned_last", "devtools_seen", "devtools_last", "launcher"}
+    if type(value) is not dict or value.keys() != keys:
+        return None
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        return None
+    if any(type(value[k]) is not int or not 0 <= value[k] <= 2**32 - 1
+           for k in ("start_budget_ms", "wait_ms", "polls")):
+        return None
+    if any(type(value[k]) is not bool for k in ("owned_seen", "owned_last", "devtools_seen")):
+        return None
+    if value["devtools_last"] not in ("unobserved", "missing", "invalid", "ready"):
+        return None
+    launcher = value["launcher"]
+    if type(launcher) is not dict:
+        return None
+    state = launcher.get("state")
+    if state in ("unknown", "running"):
+        valid = launcher.keys() == {"state"}
+    elif state == "exited":
+        valid = (launcher.keys() == {"state", "code"}
+                 and type(launcher["code"]) is int and 0 <= launcher["code"] <= 255)
+    elif state == "signaled":
+        valid = (launcher.keys() == {"state", "signal"}
+                 and type(launcher["signal"]) is int and 1 <= launcher["signal"] <= 127)
+    else:
+        valid = False
+    return value if valid else None
 
 
 @dataclass(frozen=True)
