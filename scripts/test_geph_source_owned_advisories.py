@@ -165,6 +165,62 @@ class SourceOwnedAdvisoryTests(unittest.TestCase):
         backend = next(p for p in result["packages"] if p["name"] == "slipstream-rsa-client")
         self.assertEqual(backend["manual_findings"][0]["id"], "LOCAL-1")
 
+    def test_four_packages_require_third_archive_osv_and_explicit_review(self):
+        package = embedded.sqlx_package()
+        self.f.source["embedded_packages"]["packages"].append(package)
+        files = {f["path"]: f["content"].encode() for f in package["files"]}
+        contents = {name: files["provenance/Cargo.toml"] if name == "Cargo.toml" else files[name]
+                    for name in package["provenance"]["original_files"]}
+        self.f.replace_archive(package, contents)
+        self.f.evidence("review-sqlx", "reviews/sqlx.md", b"Synthetic SQLx fixture review, not release evidence.\n", "review")
+        self.f.review["ancestors"].append({"name": "sqlx-sqlite", "version": "0.8.6", "archive_evidence": "archive-sqlx-sqlite"})
+        self.f.review["packages"].append({"path": package["path"],
+            "source_review": {"disposition": "reviewed", "files": sorted(files), "evidence": ["review-sqlx"]},
+            "inherited_findings": [], "manual_findings": []})
+        self.f.raw["results"][0]["packages"].append({"package": {"ecosystem": "crates.io", "name": "sqlx-sqlite", "version": "0.8.6"}, "vulnerabilities": []})
+        self.f.save_raw()
+        # The fixture is intentionally tiny: only the archive checksum changes
+        # in this scope. The registry manifest, licenses and closed file set stay
+        # real. Separate contract tests reject a production checksum mutation.
+        with mock.patch.dict(vendor.SQLX_SQLITE_SPEC, upstream_sha256=package["provenance"]["sha256"]):
+            self.f.rebind_source()
+            result = self.f.validate()
+            self.assertEqual(result["summary"], {"packages": 4, "unresolved": 0, "affected": 0})
+            self.assertEqual(len(result["package_ids"]), 4)
+            original_source = copy.deepcopy(self.f.source)
+            changed = next(f for f in package["files"] if f["path"] == "src/lib.rs")
+            changed["content"] += "// unreviewed runtime change\n"
+            package["provenance"]["original_files"]["src/lib.rs"] = sha(changed["content"].encode())
+            self.f.rebind_source()
+            with self.assertRaisesRegex(ValueError, "original source hash"):
+                self.f.validate()
+            self.f.source = original_source
+            self.f.rebind_source()
+            original_review, original_raw = copy.deepcopy(self.f.review), copy.deepcopy(self.f.raw)
+            for field in ("ancestors", "packages"):
+                self.f.review = copy.deepcopy(original_review)
+                self.f.review[field].pop()
+                self.f.save_review()
+                with self.subTest(missing=field), self.assertRaisesRegex(ValueError, "coverage"):
+                    self.f.validate()
+            self.f.review = copy.deepcopy(original_review)
+            self.f.raw["results"][0]["packages"].pop()
+            self.f.save_raw()
+            self.f.save_review()
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                self.f.validate()
+            self.f.raw = original_raw
+            self.f.raw["results"][0]["packages"][-1]["vulnerabilities"] = [{"id": "RUSTSEC-TEST-SQLX", "aliases": []}]
+            self.f.save_raw()
+            self.f.save_review()
+            with self.assertRaisesRegex(ValueError, "coverage"):
+                self.f.validate()
+            self.f.review["packages"][-1]["inherited_findings"] = [{"id": "RUSTSEC-TEST-SQLX", "aliases": [], "disposition": "affected", "evidence": ["review-sqlx"]}]
+            self.f.save_review()
+            result = self.f.validate()
+            self.assertEqual(result["status"], "fail")
+            self.assertEqual(result["summary"]["affected"], 1)
+
     def test_empty_vulnerability_lists_do_not_replace_explicit_source_review(self):
         for entry in self.f.raw["results"][0]["packages"]:
             entry["vulnerabilities"] = []

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "scope": "Two exact direct package coordinates, not full transitive closure or a compiled-binary acceptance.",
+  "queries": [
+    {
+      "request": {
+        "package": {
+          "ecosystem": "crates.io",
+          "name": "sqlx-sqlite"
+        },
+        "version": "0.8.6"
+      },
+      "method": "POST",
+      "url": "https://api.osv.dev/v1/query",
+      "requested_at": "2026-11-10T15:34:27.171156+00:00",
+      "received_at": "2026-11-10T15:34:28.730975+00:00",
+      "http_status": 200,
+      "path": "sqlx-sqlite-0.8.6.json",
+      "size": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "advisories": [],
+      "request_path": "sqlx-sqlite-0.8.6-request.json",
+      "request_sha256": "2235fc93a6d9ae960745095d2a46bdffcb0600ff18d57cc0c5f7eaf7398b772b"
+    },
+    {
+      "request": {
+        "package": {
+          "ecosystem": "crates.io",
+          "name": "libsqlite3-sys"
+        },
+        "version": "0.39.1"
+      },
+      "method": "POST",
+      "url": "https://api.osv.dev/v1/query",
+      "requested_at": "2026-11-10T15:34:27.171738+00:00",
+      "received_at": "2026-11-10T15:34:28.818357+00:00",
+      "http_status": 200,
+      "path": "libsqlite3-sys-0.39.1.json",
+      "size": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "advisories": [],
+      "request_path": "libsqlite3-sys-0.39.1-request.json",
+      "request_sha256": "35b9f9b055581ce8ed9f114bf0744127578d85bdeb18a7070f1c3cdfc84d8846"
+    }
+  ]
+}

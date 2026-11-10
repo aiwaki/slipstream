@@ -1,4 +1,4 @@
-"""Offline, exact-source review of the three owned Geph packages.
+"""Offline, exact-source review of the closed owned Geph package sets.
 
 The trusted policy pins review bytes, not a future Git commit or SPDX hash.
 Ancestor OSV results remain ancestor identities; they never manufacture registry
@@ -153,8 +153,8 @@ def _inventory(sbom: dict, source: dict, source_hash: str, source_commit: str) -
     if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("source-owned source commit is invalid")
     expected, files, contains = _source_owned_inventory(source, source_commit, source_hash)
-    if len(expected) != 3:
-        raise ValueError("source-owned review requires exactly three known packages")
+    if len(expected) != len(vendor.embedded_package_specs(source["embedded_packages"])):
+        raise ValueError("source-owned review requires the exact known package set")
     contains += [{"spdxElementId": ROOT_SPDX_ID, "relationshipType": "CONTAINS",
                   "relatedSpdxElement": p["SPDXID"]} for p in expected]
     if not isinstance(sbom, dict):
@@ -261,7 +261,7 @@ def _osv(payload: bytes, ancestors: set[tuple[str, str]]) -> dict:
     for group in results:
         if not isinstance(group, dict) or group.get("error") or group.get("errors"):
             raise ValueError("source-owned ancestor OSV result is invalid")
-        for entry in _list(group.get("packages"), "OSV packages", 2, nonempty=True):
+        for entry in _list(group.get("packages"), "OSV packages", 3, nonempty=True):
             if not isinstance(entry, dict) or not isinstance(entry.get("package"), dict) or entry.get("error") or entry.get("errors"):
                 raise ValueError("source-owned ancestor OSV package is invalid")
             package = entry["package"]
@@ -322,19 +322,19 @@ def validate_source_owned_review(policy_entry: dict, *, sbom: dict, source_path:
     descriptors = {p["path"]: p for p in source["embedded_packages"]["packages"]}
     derivatives = {(p["provenance"]["name"], p["provenance"]["version"]): p for p in descriptors.values() if p["provenance"]["kind"] == "derivative"}
     used, ancestors = set(), set()
-    for ancestor in _list(review["ancestors"], "ancestors", 2, nonempty=True):
+    for ancestor in _list(review["ancestors"], "ancestors", 3, nonempty=True):
         _keys(ancestor, {"name", "version", "archive_evidence"}, "ancestor")
         identity = (_text(ancestor["name"], "ancestor name"), _text(ancestor["version"], "ancestor version"))
         if identity not in derivatives or identity in ancestors:
             raise ValueError("source-owned ancestor identities are duplicate/unexpected")
         ancestors.add(identity)
         _ancestor_archive(derivatives[identity], payloads[_ref(ancestor["archive_evidence"], "archive", records, used)])
-    if ancestors != set(derivatives) or len(ancestors) != 2:
+    if ancestors != set(derivatives):
         raise ValueError("source-owned ancestor coverage is incomplete")
     inherited = _osv(payloads[_ref(review["osv_evidence"], "osv", records, used)], ancestors)
     packages = {}
     unresolved = affected = 0
-    for package in _list(review["packages"], "packages", 3, nonempty=True):
+    for package in _list(review["packages"], "packages", 4, nonempty=True):
         _keys(package, {"path", "source_review", "inherited_findings", "manual_findings"}, "package review")
         path = _text(package["path"], "package path")
         if path not in descriptors or path in packages:
@@ -366,7 +366,7 @@ def validate_source_owned_review(policy_entry: dict, *, sbom: dict, source_path:
     return {"schema_version": 1, "package_ids": sorted(p["SPDXID"] for p in expected_owned),
             "review_sha256": policy_entry["review_sha256"], "binding": binding,
             "packages": [packages[path] for path in sorted(packages)],
-            "summary": {"packages": 3, "unresolved": unresolved, "affected": affected},
+            "summary": {"packages": len(packages), "unresolved": unresolved, "affected": affected},
             "status": "fail" if unresolved or affected else "pass"}
 
 

@@ -1,5 +1,38 @@
 # Routing Research Notes
 
+## 2026-11-10: current dependency audit identified a separate SQLite defect
+
+PR476's ordinary product CI42842890680 passed. Its authenticated dependency audit
+42842890479 found libsqlite3-sys0.30.1 affected by CVE-2026-119375 (aliases
+RUSTSEC-2026-0459 and GHSA-72w2-rjgg-q729). A crafted local database and sibling WAL
+with different page sizes can leave uninitialized bytes in a returned cache page.
+This was not a source-owned review failure or evidence that this defect caused the
+reported browsing stalls. The advisory was updated on November9; prior green
+reports remain historical evidence.
+
+An ordinary SQLx update cannot currently select the fixed wrapper: published
+SQLx0.8.6 requires0.30.1 and0.9.0 still excludes0.39. The selected repair preserves
+all SQLx0.8.6 Rust source and patches only its manifest to official wrapper0.39.1,
+which bundles SQLite3.54.1. The complete Geph lock changes exactly two records;
+all488 others, including dependency edges, are unchanged. Both macOS metadata
+graphs pass --locked with bundled SQLite and no SQLCipher. The larger native
+SQLite implementation remains disabled.
+
+An isolated one-job SQLx build passed three cache/WAL/reopen, transaction/metadata
+and SQL-error recovery cases. A separate fixture compiled the complete unmodified
+old/new SQLite amalgamations and exercised the real sqlite3WalReadFrame through a
+synthetic VFS. Six cases per engine detected the vulnerable old tail and verified
+zeroing in the fixed engine, with unchanged payload, bounds and I/O errors. This
+is a positive-control engine-function test, not a full database exploit or an
+installed-app result. The two direct OSV queries returned no findings; a fresh
+full dependency audit is still required.
+
+The source review retains exact archive/license/manifest/FFI/test evidence under
+security/geph-source-owned-review/sqlite-20261110. Workstation paths in retained
+reports are redacted with original and transformed hashes recorded. The existing
+Geph producer adds three SQLite checks to its same sandboxed test build; their
+fresh execution, immutable r5 publication and all app gates remain required.
+
 ## 2026-11-10: refresh the exact source-owned Geph review before publication
 
 The review bound to the unchanged Geph 0.4.3-r4 source expired on November7.

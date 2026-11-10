@@ -1,0 +1,250 @@
+{
+  ".github/workflows/build-geph.yml": [
+    "f7e49e1aac5360fc7764616b5343290819591932ec5aa57aba374cc977ebcfa7",
+    "8ca9b62121a7a8f421ea68950267dd670da940f7f2df4d0c00c3aac4d289069c"
+  ],
+  "scripts/fixtures/geph-sqlite-engine/closure.json": [
+    null,
+    "97e6a0c8914961d455c16dc7628ff88c332881d0f451adce35d9be2ae10ece20"
+  ],
+  "scripts/fixtures/geph-sqlite-engine/sqlite_wrapper_tests.rs": [
+    null,
+    "83e537b0cc32eb047e751ca2cc19afcbe2bb9a132909f82e9413db260522c860"
+  ],
+  "scripts/fixtures/geph-sqlite-repair-policy-r5.json": [
+    null,
+    "e72f9b34d872a1b741b5e13f4d540979a4df5ca12df5e0703c262dcd12f76877"
+  ],
+  "scripts/fixtures/sqlx-sqlite-0.8.6/Cargo.toml": [
+    null,
+    "8dc33d0ee8972b11a855b02c72f0ddbfddf8a07d14f3d8ca8ab54aa4774dc425"
+  ],
+  "scripts/fixtures/sqlx-sqlite-0.8.6/LICENSE-APACHE": [
+    null,
+    "9be39331309bc958aab10457c1a8459c038ae95662f26dfcf6c9088e2b3d653f"
+  ],
+  "scripts/fixtures/sqlx-sqlite-0.8.6/LICENSE-MIT": [
+    null,
+    "44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179"
+  ],
+  "scripts/geph_rsa_fixture.py": [
+    "a0039ad6a2e222ee7df4321718bd03d51d4635dd0be8ba2296c0836b29cabc58",
+    "2c6d75a1d6af37e60f4c4bf10ea5861e1f4e8e6257bccad78fad0bebdcde967a"
+  ],
+  "scripts/geph_source_owned_advisories.py": [
+    "e1631c585228ac6525f1e151d6bc1e476e4f7ab42fdd6dd99745627f7673423b",
+    "c887c1573da1f7d1fc23e44826dd8e668d7832509cce1dc0d4c997cb28640dc4"
+  ],
+  "scripts/geph_vendor_source.py": [
+    "b3374b9f9183d2caa1e9bcd0e2b38a1199c60631e1d84eea4b8d693b0927767e",
+    "ff2e229ff0a3f44fe474b271e62c4191d1420f622fb90cad0eebc6deecfb6208"
+  ],
+  "scripts/make_geph_vendor_sbom.py": [
+    "04e12e94b9eda9927a304510113669fb9fb2f11c45c95150c8892cbc02d70adb",
+    "98c65a69930362c8410f3075405af33b38bb95aa403778600333d5cc0dab3fd8"
+  ],
+  "scripts/run_geph_synthetic_tests.py": [
+    "fffcfc943279b35747cc4ebb20a1d9955ac2980f84352e60e64b5e4c2f30f700",
+    "0977dba8f06d8c7ec914e6780809ff0c1631f57d027487ae3ff2f2cb138b7b41"
+  ],
+  "scripts/test_geph_embedded_source.py": [
+    "9ae61d85136dc6891a353bc3a5b7ed7736344e7e4a2d38d5c95f23999eafd0a1",
+    "9fe05cd40991b4adcbabc187fd5bf1147da0f139327b186dc6687db8953b535e"
+  ],
+  "scripts/test_geph_source_owned_advisories.py": [
+    "2c42280b8a0ff960a0dca5f81f9d8153efa0c713275acdef939879bb92575feb",
+    "4584501051a82bd2d5bbb6936b217fc2b2b2c7f6fe991133a4cb99a5b21266ba"
+  ],
+  "scripts/test_geph_source_owned_sbom.py": [
+    "a0e8798e8c271a7c24010291b8c10d67748fc23c481cf9396964b4062e9597e7",
+    "39d9b21877b3c0c2b759e0d30f5819d4499553e5b73dbe5f13a885a9e5052396"
+  ],
+  "scripts/test_geph_source_owned_workflows.py": [
+    "b306261984a672e639d472e19bb0dc399c068cc4d4c6d156da426696f3e5a212",
+    "9f93da07d14d1daa03734b14a23d666ffcb01db99c9552623bab3a72619aa129"
+  ],
+  "scripts/test_geph_sqlite_repair_transition.py": [
+    null,
+    "6f584ec7b21f8d783d20b42a9ece46718ac3bbf56e26a5d0e0cffab5d97d1af2"
+  ],
+  "scripts/test_run_geph_synthetic_tests.py": [
+    "7ef22dfd3be19cb0c2f178140027b5d8fa8b829544e2be1f4b5321dc87a5ce4d",
+    "c6bc8ea95bb9f19208f1b881104acfcdb741205e67d1846f3176f6129b77d872"
+  ],
+  "security/geph-dependency-audit-policy.json": [
+    "30cae8c4bbacfea24294bfaacc6cc8b45145e089511ebdd2c223820992907ae2",
+    "e72f9b34d872a1b741b5e13f4d540979a4df5ca12df5e0703c262dcd12f76877"
+  ],
+  "security/geph-source-owned-review/osv/20261110/ancestors.json": [
+    null,
+    "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2"
+  ],
+  "security/geph-source-owned-review/osv/20261110/geph5-broker-protocol.json": [
+    null,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  ],
+  "security/geph-source-owned-review/osv/20261110/mizaru2.json": [
+    null,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  ],
+  "security/geph-source-owned-review/osv/20261110/receipt.json": [
+    null,
+    "d3b373276e9e8c3802a1ebbe0f3e67ae8d48ec1c1d8ab7a4f3e5bdf4877d7161"
+  ],
+  "security/geph-source-owned-review/review.json": [
+    "ce1a0e85d537cf499e895f078627ef33f78e5aaa331962adb1c25d8577e18bf4",
+    "0eaa5bd108091193a0aa8399b422798e13389e56344014f5c255f33e3c817bb4"
+  ],
+  "security/geph-source-owned-review/reviews/source-review-20261110.json": [
+    null,
+    "b7eaff1d46024a14f4f2dae23b22d62837fc21f770d8052ba412c2b0cf99aaba"
+  ],
+  "security/geph-source-owned-review/reviews/source-review-20261110.md": [
+    null,
+    "069d14089605e0a776ac089e52415ec3e8374ba351ac980cb9d25af0804e6856"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/ancestors.json": [
+    null,
+    "637587678aa07da3d4549a2ee6d2bc9d2d69e763cb099e212ab12ba6577bf42a"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/archive-receipt.json": [
+    null,
+    "a60300ed721ecc8cf6d67d8a5ececd94739dbf83f27b7d9ae0dacfc600ed9496"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/archives/libsqlite3-sys-0.30.1.crate": [
+    null,
+    "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/archives/libsqlite3-sys-0.39.1.crate": [
+    null,
+    "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/archives/sqlx-sqlite-0.8.6.crate": [
+    null,
+    "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/ffi-import-comparison.json": [
+    null,
+    "91dd528835e34b5468ee6310857273527680c1f74a87d8396751136036a1e716"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/libsqlite3-sys-0.39.1-request.json": [
+    null,
+    "35b9f9b055581ce8ed9f114bf0744127578d85bdeb18a7070f1c3cdfc84d8846"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/libsqlite3-sys-0.39.1.json": [
+    null,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/minimal-lock-delta.json": [
+    null,
+    "f6fb5abed2a977ed4590c95b3eaa8c3c31d428109778d21f709d44e58fc6399e"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/minimal-lock.diff": [
+    null,
+    "49015ed8295f9fc8be2bff5ed27530cfee33aeec7d6342b80bed1d994d949000"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/osv-query-receipt.json": [
+    null,
+    "d5380a72bb9d08efbe6d73bf57170554d7d7b4d05cbc959e859d652df0b1525b"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/owned-Cargo.toml": [
+    null,
+    "98fa82799151b9d68d2fef982fec81772612ac4190eac3f127c2ead6df693190"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/owned-SOURCE-NOTICE.md": [
+    null,
+    "378a54f67e01771a003fb5f767d732ce66e1c2db8ff60be8ce6e98002f508cb6"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/release-graph-results.json": [
+    null,
+    "dcdc30f6d01d7aa9682d079b7269a1b7cf220c2d557508cac3e4ebee75f8aaa6"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/run-wal-read-regression.py": [
+    null,
+    "5c9334833ad537102fbd4f2004b4958eae310a432d168bf62f29be7b837bae37"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/source-fix-verification.json": [
+    null,
+    "069602a466ebfd1a62648541c3a53f271f7ca7be51718dadc120ab14f209ae2f"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/source-review.json": [
+    null,
+    "2ab38a9a9d71409fe29101ab5832c7024be69dbffc100a0b863c21333ba58616"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/source-review.md": [
+    null,
+    "2a53bf36f0493e9c0c6218f5b29e16b04b7b2292fa95584be9ba5ddf9f2dd3a2"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/spike/Cargo.lock": [
+    null,
+    "a8bf9909971af7a9d0656057a2c4b4709e370f1cab9e885c679e4a3d579adce7"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/spike/Cargo.toml": [
+    null,
+    "c28c1ce9f9648eb4274739b770f2acc64cae519137411a1bdc0943b052b322c2"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/spike/cargo-test.log": [
+    null,
+    "4fb11b446f1b30833f2c24692acc85eb8cf310c8268ac9da4cf9cb90d95a67b3"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/spike/command-result.json": [
+    null,
+    "018fea3cb4efbef57dff0536250888818c4873784813d0f0181158f105a9e19e"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/spike/sqlx-manifest.diff": [
+    null,
+    "6c1f9d51053f0d8706eafe03fe39e26df43d504c11a665e109f947024f483f84"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/spike/tests.rs": [
+    null,
+    "bf4d034d799dbf34e7228746d55c349efa4a258ef4c9ae5cf753ac4d708bbcc8"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/sqlite3WalReadFrame-0.30.1.txt": [
+    null,
+    "64db8bd716d398f250bf4319c9a73f6f3f8c1be646c3f7dabb01749727d6569f"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/sqlite3WalReadFrame-0.39.1.txt": [
+    null,
+    "81c4334bb274460f2117b5cdfa5c409b87c400001dd8410ac8b1bfb5909ef86d"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/sqlx-sqlite-0.8.6-request.json": [
+    null,
+    "2235fc93a6d9ae960745095d2a46bdffcb0600ff18d57cc0c5f7eaf7398b772b"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/sqlx-sqlite-0.8.6.json": [
+    null,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/transformations.json": [
+    null,
+    "58e61054504f4219d3e94d254da6edaecb3f899d63e41f9b106152f9ed8deb65"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/wal-read-0.30.1.jsonl": [
+    null,
+    "e206b884189ab822beca954a1e97712f9ce8003e751da70788b2d2d769a5ff7c"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/wal-read-0.39.1.jsonl": [
+    null,
+    "703c464623ab3095b84c0a392da63c78a2899c2fe7dfd75b04e752914968a3ef"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/wal-read-regression-receipt.json": [
+    null,
+    "6e5bbe22fe40c7f921a5b56a9115e4a7e085712e11d5a35081b5cde2ab9f7608"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/wal-read-regression.c": [
+    null,
+    "d93fd751767d9ae2bc28e4bf52fa0a7787da87c3b219f1e7019a172ee0d98c72"
+  ],
+  "security/geph-source-owned-review/sqlite-20261110/wrapper-build-script.diff": [
+    null,
+    "089bc4bd9a8461ae1195b6e2a0f120d0110248ddbc24a3ae14bd8e617d99a471"
+  ],
+  "vendor/geph/Cargo.lock": [
+    "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    "2d017b845167e97d0a2178acc589851aeffa2269809fca8c63de0d0c925d4143"
+  ],
+  "vendor/geph/SOURCE.json": [
+    "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    "1fdd3e49418c7a47e06e092dbac411cb8c41022e6688b7115a071bd89c81f9c8"
+  ]
+}

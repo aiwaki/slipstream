@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "evaluated_at": "2026-11-10T15:36:06.254045+00:00",
+  "status": "PASS",
+  "checks": [
+    "0.30.1:sqlite3/sqlite3.c:archive-bytes-match",
+    "0.30.1:build.rs:archive-bytes-match",
+    "0.30.1:Cargo.toml:archive-bytes-match",
+    "0.39.1:sqlite3/sqlite3.c:archive-bytes-match",
+    "0.39.1:build.rs:archive-bytes-match",
+    "0.39.1:Cargo.toml:archive-bytes-match",
+    "actual-new-C-has-upstream-zero-tail-patch",
+    "old-control-does-not-initialize-tail",
+    "new-C-source-ID-matches-official-release",
+    "new-C-SHA3-matches-official-release"
+  ],
+  "package_evidence": [
+    {
+      "crate_version": "0.30.1",
+      "archive_sha256": "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
+      "C_sha256": "c01235302fe80da901fb70c7622c39147e29d9f29b7f6eb746b23517f320c90d",
+      "C_sha3_256": "094429ea827fcd32275e767134bc6c7b9ea394a2c5a9e653dd0a0690b2c11358",
+      "sqlite_version": "3.46.0",
+      "source_id": "2024-05-23 13:25:27 96c92aba00c8375bc32fafcdf12429c58bd8aabfcadab6683e35bbb9cdebf19e",
+      "rust_version": null
+    },
+    {
+      "crate_version": "0.39.1",
+      "archive_sha256": "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3",
+      "C_sha256": "0c657666d819f261cc4007526ad57e1669de9949df7a8ea847aa284a2bf0ee52",
+      "C_sha3_256": "e2b869d3003b33c942b7dd7063604fbc53553e1b66609570df39b9b7b558ee81",
+      "sqlite_version": "3.54.1",
+      "source_id": "2026-10-16 14:45:20 555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76",
+      "rust_version": "1.88.0"
+    }
+  ],
+  "fix": {
+    "upstream_commit": "e5bf119821f25be1d7f10ef0a2edbe175289166e",
+    "raw_patch_sha256": "91ea262dede60c5fd9fa3a290e8011ae9618262d59ec501f22770c73c677f032",
+    "prerequisite": "Victim opens a database plus sibling WAL controlled by a less-trusted party, with differing page sizes. Local attack; no assumption that Slipstream is unreachable.",
+    "old_behavior": "Reads only min(requested, WAL page) bytes, leaving the remaining destination page untouched.",
+    "new_behavior": "Zeros destination tail before the short frame read and preserves original read/error behavior."
+  },
+  "bundled_build_options": {
+    "unconditional": {
+      "0.30.1": [
+        "-DSQLITE_CORE",
+        "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+        "-DSQLITE_ENABLE_API_ARMOR",
+        "-DSQLITE_ENABLE_COLUMN_METADATA",
+        "-DSQLITE_ENABLE_DBSTAT_VTAB",
+        "-DSQLITE_ENABLE_FTS3",
+        "-DSQLITE_ENABLE_FTS3_PARENTHESIS",
+        "-DSQLITE_ENABLE_FTS5",
+        "-DSQLITE_ENABLE_JSON1",
+        "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+        "-DSQLITE_ENABLE_MEMORY_MANAGEMENT",
+        "-DSQLITE_ENABLE_RTREE",
+        "-DSQLITE_ENABLE_STAT4",
+        "-DSQLITE_SOUNDEX",
+        "-DSQLITE_THREADSAFE=1",
+        "-DSQLITE_USE_URI",
+        "-DHAVE_USLEEP=1",
+        "-DHAVE_ISNAN",
+        "-D_POSIX_THREAD_SAFE_FUNCTIONS"
+      ],
+      "0.39.1": [
+        "-DSQLITE_CORE",
+        "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+        "-DSQLITE_ENABLE_API_ARMOR",
+        "-DSQLITE_ENABLE_COLUMN_METADATA",
+        "-DSQLITE_ENABLE_DBSTAT_VTAB",
+        "-DSQLITE_ENABLE_FTS3",
+        "-DSQLITE_ENABLE_FTS3_PARENTHESIS",
+        "-DSQLITE_ENABLE_FTS5",
+        "-DSQLITE_ENABLE_JSON1",
+        "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+        "-DSQLITE_ENABLE_RTREE",
+        "-DSQLITE_ENABLE_STAT4",
+        "-DSQLITE_SOUNDEX",
+        "-DSQLITE_THREADSAFE=1",
+        "-DSQLITE_USE_URI",
+        "-DHAVE_USLEEP=1",
+        "-DHAVE_ISNAN",
+        "-D_POSIX_THREAD_SAFE_FUNCTIONS"
+      ]
+    },
+    "removed": [
+      "-DSQLITE_ENABLE_MEMORY_MANAGEMENT"
+    ],
+    "added": [],
+    "qualification": "Conditional feature/platform/environment branches are not a proof of actual compiled feature closure. SQLCipher and pkg-config system overrides must remain excluded by final build evidence.",
+    "memory_management_effect": "sqlite3_release_memory becomes ineffective without this compile option; none of the51SQLx0.8.6 Rustfiles calls it or heap-limit APIs. This is a documented upstream build behavior change, not claimed identical behavior.",
+    "sqlx_matching_calls": []
+  },
+  "scope": "Exact package source/fix and direct OSV queries. This is not a Geph/app build, complete dependency scan, arbitrary database compatibility proof, or installed runtime acceptance."
+}

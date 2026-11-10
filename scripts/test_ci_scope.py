@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import hashlib
 import io
+import json
 import os
 from unittest.mock import patch
 import unittest
@@ -12,6 +13,69 @@ import ci_scope
 
 
 class CiScopeTests(unittest.TestCase):
+    def sqlite_repair_fixture(self):
+        delta = {
+            "vendor/geph/SOURCE.json": (b"r4", b"r5"),
+            "vendor/geph/Cargo.lock": (b"sqlite vulnerable", b"sqlite fixed"),
+            "scripts/geph_source_owned_advisories.py": (b"legacy three", b"closed three or four"),
+            "security/geph-source-owned-review/sqlite/receipt.json": (None, b"exact review"),
+        }
+        bindings = {name: tuple(None if v is None else hashlib.sha256(v).hexdigest()
+                                for v in pair) for name, pair in delta.items()}
+        paths = [*delta, ci_scope.SQLITE_REPAIR_BINDINGS_PATH,
+                 "scripts/ci_scope.py", "scripts/test_ci_scope.py"]
+        return paths, delta, bindings
+
+    def test_sqlite_repair_bootstrap_requires_complete_exact_delivery_and_pr(self):
+        paths, delta, bindings = self.sqlite_repair_fixture()
+        with patch.object(ci_scope, "sqlite_repair_bindings", return_value=bindings):
+            scope = ci_scope.classify_paths(paths, event_name="pull_request", sqlite_repair_delta=delta)
+            self.assertTrue(scope.geph_bootstrap)
+            self.assertTrue(scope.product)
+            self.assertFalse(ci_scope.classify_paths(paths, event_name="push", sqlite_repair_delta=delta).geph_bootstrap)
+            self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request").geph_bootstrap)
+            for missing in paths:
+                with self.subTest(missing=missing):
+                    self.assertFalse(ci_scope.classify_paths([p for p in paths if p != missing],
+                        event_name="pull_request", sqlite_repair_delta=delta).geph_bootstrap)
+            for extra in ("spike/tproxy.py", "app-tauri/src-tauri/Cargo.lock", ".github/workflows/ci.yml"):
+                with self.subTest(extra=extra):
+                    self.assertFalse(ci_scope.classify_paths(paths + [extra],
+                        event_name="pull_request", sqlite_repair_delta=delta).geph_bootstrap)
+
+    def test_sqlite_repair_refuses_altered_base_head_and_missing_new_file(self):
+        paths, delta, bindings = self.sqlite_repair_fixture()
+        with patch.object(ci_scope, "sqlite_repair_bindings", return_value=bindings):
+            for name, pair in delta.items():
+                for side in (0, 1):
+                    changed = dict(delta)
+                    changed[name] = tuple(b"unreviewed" if i == side else v for i, v in enumerate(pair))
+                    with self.subTest(path=name, side=side):
+                        self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request",
+                            sqlite_repair_delta=changed).geph_bootstrap)
+                changed = dict(delta)
+                del changed[name]
+                self.assertFalse(ci_scope.classify_paths(paths, event_name="pull_request",
+                    sqlite_repair_delta=changed).geph_bootstrap)
+            self.assertFalse(ci_scope.reviewed_sqlite_repair_delta({}, {}))
+            self.assertFalse(ci_scope.reviewed_sqlite_repair_delta(None, bindings))
+
+    def test_sqlite_repair_inventory_is_hash_pinned_and_closed(self):
+        _, _, bindings = self.sqlite_repair_fixture()
+        payload = json.dumps(bindings).encode()
+        with patch.object(Path, "read_bytes", return_value=payload), \
+                patch.object(ci_scope, "SQLITE_REPAIR_BINDINGS_SHA256", hashlib.sha256(payload).hexdigest()):
+            self.assertEqual(ci_scope.sqlite_repair_bindings(), bindings)
+        with patch.object(Path, "read_bytes", return_value=payload + b" "), \
+                patch.object(ci_scope, "SQLITE_REPAIR_BINDINGS_SHA256", hashlib.sha256(payload).hexdigest()):
+            self.assertEqual(ci_scope.sqlite_repair_bindings(), {})
+        for malformed in ({}, {"../escape": [None, "a" * 64]},
+                          {**bindings, "scripts/ci_scope.py": [None, "a" * 64]}):
+            content = json.dumps(malformed).encode()
+            with self.subTest(malformed=malformed), patch.object(Path, "read_bytes", return_value=content), \
+                    patch.object(ci_scope, "SQLITE_REPAIR_BINDINGS_SHA256", hashlib.sha256(content).hexdigest()):
+                self.assertEqual(ci_scope.sqlite_repair_bindings(), {})
+
     def physical_root_fixture(self):
         files = {
             ".github/workflows/build-geph.yml": (b"logical root", b"physical root"),

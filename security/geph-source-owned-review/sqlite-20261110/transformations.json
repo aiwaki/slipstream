@@ -1,0 +1,301 @@
+{
+  "files": [
+    {
+      "evidence_id": "sqlite-ancestor-sqlx-sqlite",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/sqlx-sqlite-0.8.6.crate",
+      "original_sha256": "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea",
+      "original_size": 82039,
+      "public_sha256": "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea",
+      "public_size": 82039,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-archives-libsqlite3-sys-0-30-1-crate",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/libsqlite3-sys-0.30.1.crate",
+      "original_sha256": "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
+      "original_size": 5122296,
+      "public_sha256": "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
+      "public_size": 5122296,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-archives-libsqlite3-sys-0-39-1-crate",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/libsqlite3-sys-0.39.1.crate",
+      "original_sha256": "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3",
+      "original_size": 2759388,
+      "public_sha256": "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3",
+      "public_size": 2759388,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-archive-receipt-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/receipt.json",
+      "original_sha256": "a60300ed721ecc8cf6d67d8a5ececd94739dbf83f27b7d9ae0dacfc600ed9496",
+      "original_size": 13987,
+      "public_sha256": "a60300ed721ecc8cf6d67d8a5ececd94739dbf83f27b7d9ae0dacfc600ed9496",
+      "public_size": 13987,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-ffi-import-comparison-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/ffi-import-comparison.json",
+      "original_sha256": "d23bb2c7f40e1b612078db26d9e875edd92e4f78d45fb22268d85af08c710719",
+      "original_size": 13475,
+      "public_sha256": "91dd528835e34b5468ee6310857273527680c1f74a87d8396751136036a1e716",
+      "public_size": 14495,
+      "transforms": [
+        {
+          "after_sha256": "91dd528835e34b5468ee6310857273527680c1f74a87d8396751136036a1e716",
+          "before_sha256": "d23bb2c7f40e1b612078db26d9e875edd92e4f78d45fb22268d85af08c710719",
+          "fields_added": [
+            "option_callback_declarations",
+            "inline_helpers"
+          ],
+          "fields_changed": [
+            "method",
+            "limits"
+          ],
+          "operation": "explicit_editorial_method_clarification",
+          "reason": "Independent source recheck confirmed Option namespace changes in ten callbacks and trailing generic commas; SQLITE_TRANSIENT is an inline helper. The original description named only primitive aliases. Import lists and comparison outcomes were not changed."
+        }
+      ]
+    },
+    {
+      "evidence_id": "sqlite-wrapper-build-script-diff",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/build.rs.diff",
+      "original_sha256": "089bc4bd9a8461ae1195b6e2a0f120d0110248ddbc24a3ae14bd8e617d99a471",
+      "original_size": 21121,
+      "public_sha256": "089bc4bd9a8461ae1195b6e2a0f120d0110248ddbc24a3ae14bd8e617d99a471",
+      "public_size": 21121,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-osv-query-receipt-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/osv-query-receipt.json",
+      "original_sha256": "d5380a72bb9d08efbe6d73bf57170554d7d7b4d05cbc959e859d652df0b1525b",
+      "original_size": 1550,
+      "public_sha256": "d5380a72bb9d08efbe6d73bf57170554d7d7b4d05cbc959e859d652df0b1525b",
+      "public_size": 1550,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-sqlx-sqlite-0-8-6-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/sqlx-sqlite-0.8.6.json",
+      "original_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "original_size": 2,
+      "public_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "public_size": 2,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-sqlx-sqlite-0-8-6-request-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/sqlx-sqlite-0.8.6-request.json",
+      "original_sha256": "2235fc93a6d9ae960745095d2a46bdffcb0600ff18d57cc0c5f7eaf7398b772b",
+      "original_size": 77,
+      "public_sha256": "2235fc93a6d9ae960745095d2a46bdffcb0600ff18d57cc0c5f7eaf7398b772b",
+      "public_size": 77,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-libsqlite3-sys-0-39-1-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/libsqlite3-sys-0.39.1.json",
+      "original_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "original_size": 2,
+      "public_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "public_size": 2,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-libsqlite3-sys-0-39-1-request-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/libsqlite3-sys-0.39.1-request.json",
+      "original_sha256": "35b9f9b055581ce8ed9f114bf0744127578d85bdeb18a7070f1c3cdfc84d8846",
+      "original_size": 81,
+      "public_sha256": "35b9f9b055581ce8ed9f114bf0744127578d85bdeb18a7070f1c3cdfc84d8846",
+      "public_size": 81,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-source-fix-verification-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/source-fix-verification.json",
+      "original_sha256": "069602a466ebfd1a62648541c3a53f271f7ca7be51718dadc120ab14f209ae2f",
+      "original_size": 4342,
+      "public_sha256": "069602a466ebfd1a62648541c3a53f271f7ca7be51718dadc120ab14f209ae2f",
+      "public_size": 4342,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-wal-read-regression-receipt-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-regression-receipt.json",
+      "original_sha256": "e3c87a58c254aaa7eaac21c3149a024cfd49e9d3c03ffbd6f0f404ba9d088db7",
+      "original_size": 6057,
+      "public_sha256": "6e5bbe22fe40c7f921a5b56a9115e4a7e085712e11d5a35081b5cde2ab9f7608",
+      "public_size": 5595,
+      "transforms": [
+        {
+          "occurrences": 6,
+          "operation": "literal_prefix_replacement",
+          "original_prefix_sha256": "aa4fe8ddf717bfdd85f05c189d5fdd54f1676d9b2f0b4e75600590cb71c856be",
+          "replacement": "<CHECKOUT>"
+        }
+      ]
+    },
+    {
+      "evidence_id": "sqlite-wal-read-regression-c",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-regression.c",
+      "original_sha256": "d93fd751767d9ae2bc28e4bf52fa0a7787da87c3b219f1e7019a172ee0d98c72",
+      "original_size": 2115,
+      "public_sha256": "d93fd751767d9ae2bc28e4bf52fa0a7787da87c3b219f1e7019a172ee0d98c72",
+      "public_size": 2115,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-run-wal-read-regression-py",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/run-wal-read-regression.py",
+      "original_sha256": "5c9334833ad537102fbd4f2004b4958eae310a432d168bf62f29be7b837bae37",
+      "original_size": 2898,
+      "public_sha256": "5c9334833ad537102fbd4f2004b4958eae310a432d168bf62f29be7b837bae37",
+      "public_size": 2898,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-wal-read-0-30-1-jsonl",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-0.30.1.jsonl",
+      "original_sha256": "e206b884189ab822beca954a1e97712f9ce8003e751da70788b2d2d769a5ff7c",
+      "original_size": 734,
+      "public_sha256": "e206b884189ab822beca954a1e97712f9ce8003e751da70788b2d2d769a5ff7c",
+      "public_size": 734,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-wal-read-0-39-1-jsonl",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-0.39.1.jsonl",
+      "original_sha256": "703c464623ab3095b84c0a392da63c78a2899c2fe7dfd75b04e752914968a3ef",
+      "original_size": 734,
+      "public_sha256": "703c464623ab3095b84c0a392da63c78a2899c2fe7dfd75b04e752914968a3ef",
+      "public_size": 734,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-sqlite3WalReadFrame-0-30-1-txt",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/sqlite3WalReadFrame-0.30.1.txt",
+      "original_sha256": "64db8bd716d398f250bf4319c9a73f6f3f8c1be646c3f7dabb01749727d6569f",
+      "original_size": 627,
+      "public_sha256": "64db8bd716d398f250bf4319c9a73f6f3f8c1be646c3f7dabb01749727d6569f",
+      "public_size": 627,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-sqlite3WalReadFrame-0-39-1-txt",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/sqlite3WalReadFrame-0.39.1.txt",
+      "original_sha256": "81c4334bb274460f2117b5cdfa5c409b87c400001dd8410ac8b1bfb5909ef86d",
+      "original_size": 679,
+      "public_sha256": "81c4334bb274460f2117b5cdfa5c409b87c400001dd8410ac8b1bfb5909ef86d",
+      "public_size": 679,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-spike-Cargo-toml",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/Cargo.toml",
+      "original_sha256": "c28c1ce9f9648eb4274739b770f2acc64cae519137411a1bdc0943b052b322c2",
+      "original_size": 394,
+      "public_sha256": "c28c1ce9f9648eb4274739b770f2acc64cae519137411a1bdc0943b052b322c2",
+      "public_size": 394,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-spike-Cargo-lock",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/Cargo.lock",
+      "original_sha256": "a8bf9909971af7a9d0656057a2c4b4709e370f1cab9e885c679e4a3d579adce7",
+      "original_size": 28173,
+      "public_sha256": "a8bf9909971af7a9d0656057a2c4b4709e370f1cab9e885c679e4a3d579adce7",
+      "public_size": 28173,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-spike-tests-rs",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/src/lib.rs",
+      "original_sha256": "bf4d034d799dbf34e7228746d55c349efa4a258ef4c9ae5cf753ac4d708bbcc8",
+      "original_size": 4276,
+      "public_sha256": "bf4d034d799dbf34e7228746d55c349efa4a258ef4c9ae5cf753ac4d708bbcc8",
+      "public_size": 4276,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-spike-command-result-json",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/command-result.json",
+      "original_sha256": "90ba3c94ba893dec56d18b8abb2cfd8bba3d03a34e2cc2da193e89aeeed09f67",
+      "original_size": 655,
+      "public_sha256": "018fea3cb4efbef57dff0536250888818c4873784813d0f0181158f105a9e19e",
+      "public_size": 578,
+      "transforms": [
+        {
+          "occurrences": 1,
+          "operation": "literal_prefix_replacement",
+          "original_prefix_sha256": "aa4fe8ddf717bfdd85f05c189d5fdd54f1676d9b2f0b4e75600590cb71c856be",
+          "replacement": "<CHECKOUT>"
+        }
+      ]
+    },
+    {
+      "evidence_id": "sqlite-spike-cargo-test-log",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/cargo-test.log",
+      "original_sha256": "76fd859073dd988cf2b2fb7296015c217f4ded143d8fe3ddd71935c4b883f66d",
+      "original_size": 4945,
+      "public_sha256": "4fb11b446f1b30833f2c24692acc85eb8cf310c8268ac9da4cf9cb90d95a67b3",
+      "public_size": 4791,
+      "transforms": [
+        {
+          "occurrences": 2,
+          "operation": "literal_prefix_replacement",
+          "original_prefix_sha256": "aa4fe8ddf717bfdd85f05c189d5fdd54f1676d9b2f0b4e75600590cb71c856be",
+          "replacement": "<CHECKOUT>"
+        }
+      ]
+    },
+    {
+      "evidence_id": "sqlite-spike-sqlx-manifest-diff",
+      "original_repository_relative_path": "output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/sqlx-manifest.diff",
+      "original_sha256": "6c1f9d51053f0d8706eafe03fe39e26df43d504c11a665e109f947024f483f84",
+      "original_size": 293,
+      "public_sha256": "6c1f9d51053f0d8706eafe03fe39e26df43d504c11a665e109f947024f483f84",
+      "public_size": 293,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-minimal-lock-delta-json",
+      "original_repository_relative_path": "output/continuation-20261110/sqlite-repair/materialized/minimal-lock-delta.json",
+      "original_sha256": "f6fb5abed2a977ed4590c95b3eaa8c3c31d428109778d21f709d44e58fc6399e",
+      "original_size": 2370,
+      "public_sha256": "f6fb5abed2a977ed4590c95b3eaa8c3c31d428109778d21f709d44e58fc6399e",
+      "public_size": 2370,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-minimal-lock-diff",
+      "original_repository_relative_path": "output/continuation-20261110/sqlite-repair/materialized/minimal-lock.diff",
+      "original_sha256": "49015ed8295f9fc8be2bff5ed27530cfee33aeec7d6342b80bed1d994d949000",
+      "original_size": 730,
+      "public_sha256": "49015ed8295f9fc8be2bff5ed27530cfee33aeec7d6342b80bed1d994d949000",
+      "public_size": 730,
+      "transforms": []
+    },
+    {
+      "evidence_id": "sqlite-release-graph-results-json",
+      "original_repository_relative_path": "output/continuation-20261110/sqlite-repair/materialized/release-graph-results.json",
+      "original_sha256": "7a14efa3f1387c5b83942853da0a9c9216896e34e447610509f58476c68e1ef1",
+      "original_size": 8005,
+      "public_sha256": "dcdc30f6d01d7aa9682d079b7269a1b7cf220c2d557508cac3e4ebee75f8aaa6",
+      "public_size": 7697,
+      "transforms": [
+        {
+          "occurrences": 4,
+          "operation": "literal_prefix_replacement",
+          "original_prefix_sha256": "aa4fe8ddf717bfdd85f05c189d5fdd54f1676d9b2f0b4e75600590cb71c856be",
+          "replacement": "<CHECKOUT>"
+        }
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "scope": "Public copy transformations; original SHA256 and sizes retained. Prefix values are hashed to avoid publishing local account/worktree names. One explicit editorial method correction is recorded for the FFI report; original import lists/comparison results and command semantics are unchanged."
+}

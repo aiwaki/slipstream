@@ -1,0 +1,20 @@
+{
+  "started_at": "2026-11-10T15:32:34.200581+00:00",
+  "finished_at": "2026-11-10T15:33:43.356101+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "<CHECKOUT>/output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/spike/Cargo.toml",
+    "--jobs",
+    "1",
+    "--",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "resource_limits": {
+    "CARGO_BUILD_JOBS": 1,
+    "CARGO_INCREMENTAL": 0
+  },
+  "environment": "No SQLITE/SQLCIPHER/LIBSQLITE/RUSTFLAGS override inherited; isolated output target dir"
+}

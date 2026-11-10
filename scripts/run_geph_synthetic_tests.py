@@ -116,6 +116,8 @@ def reviewed_tests(source: Path, contract_path: Path) -> tuple[str, tuple[str, .
         if version != "0.4.3" or "native_sqlite" in contract:
             raise QualificationError("no reviewed RSA fixture for this source-owned client")
         tests += geph_rsa_fixture.RSA_TESTS
+        if geph_rsa_fixture.has_sqlite_derivative(contract):
+            tests += geph_rsa_fixture.SQLITE_WRAPPER_TESTS
     return version, tests
 
 

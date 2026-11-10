@@ -518,6 +518,70 @@ def geph_physical_root_delta_from_git() -> dict | None:
         return None
 
 
+# One reviewed r4 -> r5 SQLite repair. The pinned inventory binds the complete
+# source/tooling/review delivery, including newly added files. It cannot admit
+# unrelated changes or authorize packaged qualification on main.
+SQLITE_REPAIR_BINDINGS_PATH = "scripts/fixtures/geph-sqlite-repair-bootstrap.json"
+SQLITE_REPAIR_BINDINGS_SHA256 = "1e36750c17cda1a5c38c219a6046297bac1221cc70e4e5b27d0bd43508dabf53"
+SQLITE_REPAIR_SUPPORT_PATHS = frozenset({
+    SQLITE_REPAIR_BINDINGS_PATH, "scripts/ci_scope.py", "scripts/test_ci_scope.py",
+    "docs/CURRENT_STATE.md", "docs/DECISIONS.md", "docs/ROUTING_RESEARCH.md",
+    "docs/RELEASES.md", "vendor/geph/README.md", "THIRD_PARTY_NOTICES.md",
+})
+
+
+def sqlite_repair_bindings() -> dict:
+    try:
+        payload = (Path(__file__).resolve().parent.parent / SQLITE_REPAIR_BINDINGS_PATH).read_bytes()
+        if len(payload) > 128 * 1024 or hashlib.sha256(payload).hexdigest() != SQLITE_REPAIR_BINDINGS_SHA256:
+            return {}
+        raw = json.loads(payload)
+        if not isinstance(raw, dict) or not GEPH_BOOTSTRAP_REQUIRED <= raw.keys() or not 3 <= len(raw) <= 256:
+            return {}
+        for path, pair in raw.items():
+            if _validate_path(path) in SQLITE_REPAIR_SUPPORT_PATHS or not isinstance(pair, list) or len(pair) != 2:
+                return {}
+            if (pair[0] is not None and (not isinstance(pair[0], str) or not re.fullmatch(r"[0-9a-f]{64}", pair[0]))) or not isinstance(pair[1], str) or not re.fullmatch(r"[0-9a-f]{64}", pair[1]):
+                return {}
+        return {path: tuple(pair) for path, pair in raw.items()}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def reviewed_sqlite_repair_delta(deltas: dict | None, bindings: dict) -> bool:
+    if not bindings or not isinstance(deltas, dict) or deltas.keys() != bindings.keys():
+        return False
+    for path, expected in bindings.items():
+        pair = deltas[path]
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            return False
+        before, after = pair
+        if (before is not None and not isinstance(before, bytes)) or not isinstance(after, bytes):
+            return False
+        actual = (None if before is None else hashlib.sha256(before).hexdigest(),
+                  hashlib.sha256(after).hexdigest())
+        if actual != expected:
+            return False
+    return True
+
+
+def sqlite_repair_delta_from_git(bindings: dict) -> dict | None:
+    refs = (os.environ.get("BASE_SHA", ""), os.environ.get("GITHUB_SHA", ""))
+    if not bindings or not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs):
+        return None
+    try:
+        trees = [set(subprocess.check_output(
+            ["git", "ls-tree", "-r", "--name-only", ref, "--", *bindings],
+            text=True, stderr=subprocess.DEVNULL, timeout=10).splitlines()) for ref in refs]
+        if not bindings.keys() <= trees[1]:
+            return None
+        return {path: tuple(subprocess.check_output(
+            ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL, timeout=10)
+            if path in tree else None for ref, tree in zip(refs, trees)) for path in bindings}
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 # One coordinated delivery repair. Exact file bytes keep this from becoming a
 # general app/policy exemption. Full packaged checks still run on main, after
 # its producer publishes the reviewed Geph dependency; both audits run on PRs.
@@ -739,7 +803,8 @@ def classify_paths(paths: list[str], *, event_name: str,
                    delivery_delta: dict[str, tuple[bytes, bytes]] | None = None,
                    python_lock_delta: dict[str, tuple[bytes, bytes]] | None = None,
                    rsa_only_delta: dict | None = None,
-                   geph_physical_root_delta: dict | None = None) -> CiScope:
+                   geph_physical_root_delta: dict | None = None,
+                   sqlite_repair_delta: dict | None = None) -> CiScope:
     if event_name not in {"pull_request", "push"}:
         raise ValueError(f"unsupported CI event: {event_name}")
     changed = {_validate_path(path) for path in paths if path}
@@ -795,8 +860,17 @@ def classify_paths(paths: list[str], *, event_name: str,
         and ("scripts/ci_scope.py" not in changed or "scripts/test_ci_scope.py" in changed)
         and reviewed_geph_physical_root_delta(geph_physical_root_delta)
     )
+    sqlite_bindings = sqlite_repair_bindings() if sqlite_repair_delta is not None else {}
+    sqlite_repair_bootstrap = (
+        event_name == "pull_request"
+        and bool(sqlite_bindings)
+        and sqlite_bindings.keys() <= changed
+        and changed <= sqlite_bindings.keys() | SQLITE_REPAIR_SUPPORT_PATHS
+        and {SQLITE_REPAIR_BINDINGS_PATH, "scripts/ci_scope.py", "scripts/test_ci_scope.py"} <= changed
+        and reviewed_sqlite_repair_delta(sqlite_repair_delta, sqlite_bindings)
+    )
     return CiScope(
-        geph_bootstrap=geph_bootstrap or rsa_only_bootstrap or physical_root_bootstrap,
+        geph_bootstrap=geph_bootstrap or rsa_only_bootstrap or physical_root_bootstrap or sqlite_repair_bootstrap,
         product=product,
         windows=windows,
     )
@@ -828,10 +902,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.event_name == "pull_request" and RSA_ONLY_REVIEW in paths else None)
     physical_root_delta = (geph_physical_root_delta_from_git()
         if args.event_name == "pull_request" and GEPH_PHYSICAL_ROOT_REQUIRED <= set(paths) else None)
+    sqlite_delta = (sqlite_repair_delta_from_git(sqlite_repair_bindings())
+        if args.event_name == "pull_request" and SQLITE_REPAIR_BINDINGS_PATH in paths else None)
     scope = classify_paths(paths, event_name=args.event_name, app_lock_delta=delta,
                            delivery_delta=delivery_delta, python_lock_delta=python_lock_delta,
                            rsa_only_delta=rsa_only_delta,
-                           geph_physical_root_delta=physical_root_delta)
+                           geph_physical_root_delta=physical_root_delta,
+                           sqlite_repair_delta=sqlite_delta)
     write_github_output(args.github_output, scope)
     print(json.dumps(asdict(scope), sort_keys=True, separators=(",", ":")))
     return 0

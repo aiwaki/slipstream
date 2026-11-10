@@ -8,13 +8,20 @@ apply to those components independently of Slipstream's MIT license.
 - Project: <https://github.com/geph-official/geph5>
 - Crate: <https://crates.io/crates/geph5-client>
 - License: Mozilla Public License 2.0
-- Distribution: unmodified headless client binary built by Slipstream CI
+- Distribution: headless client built by Slipstream CI with reviewed source patches
 
 Release artifacts include the MPL-2.0 text, a reference to the canonical
 crates.io archive and its SHA-256, reviewed `Cargo.lock`, full transitive SPDX
 inventory, vulnerability audit, SHA-256 manifest, and GitHub provenance/SBOM
 attestations next to the binary. The reviewed source contract is stored in
 [`vendor/geph/SOURCE.json`](vendor/geph/SOURCE.json).
+
+The source contract includes an exact local copy of the SQLx SQLite driver
+0.8.6 (MIT OR Apache-2.0). Its Rust source is unchanged; its manifest selects
+the fixed official `libsqlite3-sys` 0.39.1 package and bundled SQLite 3.54.1.
+Both original SQLx license texts and the upstream archive are retained in the
+source/review evidence. SQLite's original public-domain notice remains in the
+official wrapper archive. The release SPDX inventory records both components.
 
 ## Chromium headless shell
 
