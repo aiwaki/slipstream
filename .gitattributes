@@ -7,3 +7,9 @@ security/geph-source-owned-review/sources/slipstream-vendor/aws-lc-backend/src/l
 security/geph-source-owned-review/sources/slipstream-vendor/aws-lc-backend/src/owned.rs whitespace=-blank-at-eof
 security/geph-source-owned-review/sources/slipstream-vendor/geph5-broker-protocol/src/lib.rs whitespace=-blank-at-eof
 security/geph-source-owned-review/sources/slipstream-vendor/geph5-broker-protocol/src/puzzle.rs whitespace=-blank-at-eof
+
+# Preserve raw SQLite review diffs and command output; their hashes are evidence.
+security/geph-source-owned-review/sqlite-20261110/minimal-lock.diff whitespace=-blank-at-eol
+security/geph-source-owned-review/sqlite-20261110/spike/sqlx-manifest.diff whitespace=-blank-at-eol,-blank-at-eof
+security/geph-source-owned-review/sqlite-20261110/wrapper-build-script.diff whitespace=-blank-at-eol
+security/geph-source-owned-review/sqlite-20261110/spike/cargo-test.log whitespace=-blank-at-eof

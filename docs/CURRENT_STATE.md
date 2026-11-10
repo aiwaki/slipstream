@@ -53,11 +53,13 @@ reviews completed without blockers; FFI normalization wording was corrected and
 semantic admission/bundle roundtrip rechecked. Final review SHA
 0eaa5bd108091193a0aa8399b422798e13389e56344014f5c255f33e3c817bb4; canonical
 policy SHA deb290704898b1555e7a584a0d64191e3e6a43886c69faef4a968850ab544523.
-The frozen PR bootstrap binds 62 files (map SHA
-1e36750c17cda1a5c38c219a6046297bac1221cc70e4e5b27d0bd43508dabf53). Final
+The frozen PR bootstrap binds 63 files (map SHA
+d22a46e7c3d8296e4c26d623a3bed93a88e4aac4869d981d593bee07fb5f5524). Final
 transition checks (3), actual r4-to-r5 admission and CI-scope checks (31) passed.
 Independent final evidence review SHA
 d5406ba81bd4f010a2e20a401994bd82d284816fb4e62d2477bfc849655925f6.
+Raw machine-generated diffs/logs retain their evidence hashes; only their exact
+paths have whitespace attributes, following the existing retained-evidence rule.
 NEXT: commit the reviewed delivery, verify its real Git delta, push the updated
 PR476 head, then observe its CI/audits. Aftermerge require immutableGephr5 producer,
 exactappCI/candidate/R/G/P and ordinary public update/rollback. Preserve .31,

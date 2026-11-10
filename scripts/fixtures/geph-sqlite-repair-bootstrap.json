@@ -1,4 +1,8 @@
 {
+  ".gitattributes": [
+    "a49cd52c99ef219da14bbad6a64b192b01265de7504c996596b12eacd5da2c28",
+    "d9d581c267da52cab39bb164559e8ee05d9904678605b2464aef9862f654dadd"
+  ],
   ".github/workflows/build-geph.yml": [
     "f7e49e1aac5360fc7764616b5343290819591932ec5aa57aba374cc977ebcfa7",
     "8ca9b62121a7a8f421ea68950267dd670da940f7f2df4d0c00c3aac4d289069c"
