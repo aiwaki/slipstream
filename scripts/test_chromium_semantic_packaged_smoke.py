@@ -126,6 +126,61 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             with self.subTest(state=state, uid=uid, observed=observed), self.assertRaisesRegex(smoke.QualificationError, "wrong identity"):
                 self._bootstrap_with_startup_observations([(state, 4242, uid, observed)])
 
+    def test_command_mismatch_diagnostic_is_bounded_and_never_contains_argv(self):
+        expected = " ".join(TEST_LAUNCH_ARGV)
+        secret = "synthetic-secret-do-not-log"
+        observed = expected + " " + secret
+        diagnostic = smoke._command_mismatch_diagnostic(TEST_LAUNCH_ARGV, observed)
+        self.assertEqual(diagnostic["expected_length"], len(expected))
+        self.assertEqual(diagnostic["observed_length"], len(observed))
+        self.assertEqual(diagnostic["first_difference"], len(expected))
+        self.assertEqual(diagnostic["common_suffix_length"], 0)
+        self.assertEqual(diagnostic["observed_sha256"], smoke.hashlib.sha256(observed.encode()).hexdigest())
+        self.assertEqual(diagnostic["argv0_category"], "fullopen")
+        self.assertNotIn(secret, repr(diagnostic))
+        self.assertNotIn(expected, repr(diagnostic))
+        self.assertLess(len(json.dumps(diagnostic)), 1200)
+
+    def test_command_mismatch_display_variants_are_diagnostic_only(self):
+        import shlex
+        arguments = (*TEST_LAUNCH_ARGV, "--flag=value with spaces")
+        expected = " ".join(arguments)
+        variants = {
+            "matches_basename_argv0": " ".join(("open", *arguments[1:])),
+            "matches_shlex_display": shlex.join(arguments),
+            "matches_bracketed_display": f"[{expected}]",
+            "matches_open_suffix_display": expected + " (open)",
+        }
+        for field, observed in variants.items():
+            with self.subTest(field=field):
+                self.assertTrue(smoke._command_mismatch_diagnostic(arguments, observed)[field])
+        for argv0, category in (("open", "open"), ("/usr/bin/open", "fullopen"),
+                                ("xpcproxy", "xpcproxy"), ("/usr/libexec/xpcproxy", "fullxpcproxy"),
+                                ("synthetic-secret-token", "other")):
+            with self.subTest(category=category):
+                diagnostic = smoke._command_mismatch_diagnostic(arguments, argv0 + " private-argument")
+                self.assertEqual(diagnostic["argv0_category"], category)
+                self.assertNotIn("private-argument", repr(diagnostic))
+                self.assertNotIn("synthetic-secret-token", repr(diagnostic))
+
+    def test_bootstrap_mismatch_reports_fresh_snapshot_without_leaking_command(self):
+        secret = "/synthetic-secret-program --token=synthetic-secret-value"
+        with self.assertRaisesRegex(smoke.QualificationError, "wrong identity") as raised:
+            self._bootstrap_with_startup_observations([
+                ("running", 4242, 501, secret), ("running", 4243, 501, secret)])
+        message = str(raised.exception)
+        self.assertIn("'command_diagnostic':", message)
+        self.assertIn("'argv0_category': 'other'", message)
+        self.assertIn("'snapshot_after': {'state': 'running', 'pid': 4243, 'same_pid': False}", message)
+        self.assertNotIn("synthetic-secret", message)
+
+    def test_bootstrap_mismatch_diagnostic_failure_remains_closed(self):
+        with mock.patch.object(smoke, "_command_mismatch_diagnostic", side_effect=RuntimeError("synthetic-secret-error")):
+            with self.assertRaisesRegex(smoke.QualificationError, "wrong identity") as raised:
+                self._bootstrap_with_startup_observations([("running", 4242, 501, "wrong-command")])
+        self.assertIn("'diagnostic_error': True", str(raised.exception))
+        self.assertNotIn("synthetic-secret-error", str(raised.exception))
+
     def test_bootstrap_rejects_pid_replacement_during_or_after_startup(self):
         command = " ".join(TEST_LAUNCH_ARGV)
         for state, first_uid in (("running", 0), ("running", 501), ("xpcproxy", 501)):

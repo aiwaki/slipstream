@@ -23,6 +23,7 @@ import json
 import os
 import plistlib
 import pwd
+import shlex
 import shutil
 import signal
 import socket
@@ -1686,6 +1687,35 @@ def _process_identity(pid: int) -> tuple[int, int, str]:
     return uid, process_group, fields[2]
 
 
+def _command_mismatch_diagnostic(arguments: Sequence[str], observed: str) -> dict[str, object]:
+    """Describe rendered-command differences without retaining either argv."""
+    expected = " ".join(arguments)
+    prefix = 0
+    for left, right in zip(expected, observed):
+        if left != right:
+            break
+        prefix += 1
+    suffix = 0
+    remaining = min(len(expected), len(observed)) - prefix
+    while suffix < remaining and expected[-suffix - 1] == observed[-suffix - 1]:
+        suffix += 1
+    argv0 = observed.split(None, 1)[0] if observed.strip() else ""
+    category = {"open": "open", "/usr/bin/open": "fullopen",
+                "xpcproxy": "xpcproxy", "/usr/libexec/xpcproxy": "fullxpcproxy"}.get(argv0, "other")
+    return {
+        "expected_length": len(expected), "observed_length": len(observed),
+        "expected_sha256": hashlib.sha256(expected.encode("utf-8")).hexdigest(),
+        "observed_sha256": hashlib.sha256(observed.encode("utf-8")).hexdigest(),
+        "first_difference": prefix if expected != observed else None,
+        "common_suffix_length": suffix, "argv0_category": category,
+        # These comparisons are evidence only, never alternate admission rules.
+        "matches_basename_argv0": observed == " ".join((Path(arguments[0]).name, *arguments[1:])),
+        "matches_shlex_display": observed == shlex.join(arguments),
+        "matches_bracketed_display": observed == f"[{expected}]",
+        "matches_open_suffix_display": observed == expected + " (open)",
+    }
+
+
 def _owned_chrome_processes(
     uid: int,
     executable: Path,
@@ -2056,6 +2086,18 @@ def _bootstrap_chrome_launch_agent(
                         break
                     return ChromeLaunch(target, pid, process_group)
                 if not pre_exec and not (exact_command and observed_uid == 0):
+                    if not exact_command:
+                        try:
+                            last_observation["command_diagnostic"] = _command_mismatch_diagnostic(arguments, command)
+                            after_pid, after_state = _launch_agent_snapshot(target)
+                            last_observation["snapshot_after"] = {
+                                "state": after_state if after_state in (None, "running", "xpcproxy", "waiting", "exited", "not running") else "other",
+                                "pid": after_pid, "same_pid": after_pid == pid,
+                            }
+                        except Exception:
+                            # Diagnostic failure never replaces the original
+                            # refusal or discloses an arbitrary exception text.
+                            last_observation["diagnostic_error"] = True
                     raise QualificationError(
                         "Chrome LaunchAgent started with the wrong identity: "
                         f"expected uid={uid}, observation={last_observation!r}"

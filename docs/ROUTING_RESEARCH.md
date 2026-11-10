@@ -34,6 +34,13 @@ PID in xpcproxy with root/expected UID only waits; it cannot be admitted even if
 its command already looks final. After the phase, exact final command/UID and
 unchanged PID/deadline remain mandatory.11 focused tests passed after recorded
 RED, including persistent pre-exec, foreign UID and PID replacement.
+The next actual job130011813167 on head df64b6e observed running/PID1512/UID501
+but command-match=false and failed before page observation. No raw command was
+retained, so its cause is still unproven. The preceding green baseline did not
+have the new full command-equality guard. Do not infer a product browser defect
+or relax the guard from this boolean alone. Bounded mismatch evidence is needed
+before another behavioral change. Diagnosis and actual job log are retained in
+output/continuation-20261110/source-review-refresh/pr476-preexec/chromium-failure.
 A fresh actual Chromium contract run remains required; fixture results alone
 do not qualify the browser. Its two exact harness/test files are included in the
 PR-only repair map, while the Chromium job remains mandatory and main still

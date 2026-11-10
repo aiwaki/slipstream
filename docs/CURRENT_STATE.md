@@ -4,7 +4,7 @@
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
-272a9006b7beb8bcc9f207d5888eb42d0709a795; main/base remains
+df64b6e62932cd84e3ca008157f5b795b552ddbd; main/base remains
 1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is committed and pushed; fresh exact-head CI/audit running. No workstation app/service/
 network changes or app downloads. Active goal remains incomplete.
 
@@ -101,8 +101,25 @@ even with an apparently final command. Exact command/UID/same PID/deadline are
 required after the phase.11 focused regression tests passed after RED; root
 reviewed the two-file diff.34 scope/transition checks passed, final map66/74 SHA
 7a452fb553fbdb9c67466452eb853cd2a3b3e6919cdd67f4ee87ef4c21e3ca15.
-NEXT: commit/push this narrow phase correction and observe exact-head checks.
-Do not rerun the prior failure or merge before actual Chromium PASS.
+Phase fix committed/pushed df64b6e62932cd84e3ca008157f5b795b552ddbd; actual Git delta
+66/74 verified, receipt78475aea9ca975209be58ede4fecdadc3ca40dc2d4851fb61320188c66a74a43.
+New exact runs CI42867899775/1 and audit42867899682/1.
+Observer/evidence: pr476-preexec.
+Audit42867899682/1 authenticated PASS, artifact13788810463; root verified receipt
+05b3f1a3e9172ce93e3e02b08948c0f3bd84e7466c270184e2fffaf46a7e75f1 and file pins.
+Chromium job130011813167 failed before observation: running/PID1512/UID501, but
+expected_command=false. The actual command is absent; the mismatch cause is not
+proven. Diagnosis4a33f00a8cd1ebb4954de1dae520cefa4f98109d391c51264b40bb37bfbeb42e
+is in pr476-preexec/chromium-failure. The previous green baseline had no full
+command-equality guard; it does not validate this new guard. No blind retry.
+Bounded mismatch diagnostics now retain lengths/hashes/first mismatch, safe argv0
+category, diagnostic-only rendered-command comparisons and one fresh exact-target
+snapshot. No arbitrary argv or exception text is exposed; admission unchanged.
+15 focused tests passed after RED;34 scope/transition tests passed with PYTHONPATH=
+scripts (initial missing-PYTHONPATH import failure retained separately). Frozen
+map66/74 SHAe8d4553b233b70f18df7dfc8f6fe7a2d8a99388a30c7edd867d811ba4329fa97.
+NEXT: push this diagnostic-only follow-up and observe its automatic exact-head
+CI. Require an explained cause and actual Chromium PASS before guarded merge.
 After merge observe the existing main Geph producer; S/producer-r5 is prepared
 with fresh file pins and PENDING run/source guards. Require33 synthetic cases,
 universal binary, audit and immutable r5 assets/attestations before app CI.
