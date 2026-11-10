@@ -3,11 +3,14 @@
 ## Current continuation — 2026-11-11 local / November 10 UTC, .35 published
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Observer branch `codex/public-preview35-qualification` is based on published product
-source `5a3e64b534affc865826fbd20ac67f1af328629e`, tree
-`25398071982a3072e7c01df5581e693092938b8f`. PR476 merged18:19:53UTC.
-Observer-only follow-up is being prepared:3new public35 observer files, focused
-test changes, docs/RELEASES.md and this checkpoint. output/ is retained evidence.
+Fix branch `codex/public-menu-visibility-wait` is based on failed-run/main observer
+`1c6ddcfcd49c6c44edea0390708d1ee364036197`, tree
+`663ab405cd14167a7114aeabe4fc24a7c0a6fff2`. PR477 merged20:50:15UTC;
+its CI42894766197/1 and audit42894766080/1 passed. Read live git for the fix HEAD. Actual checkout97088529
+of both jobs has exactly this merged tree. Product remains published source
+`5a3e64b534affc865826fbd20ac67f1af328629e` (PR476). This checkpoint update
+is local pending the public result; do not move main or rewrite observer history.
+output/ is retained evidence. Prior goal turn made progress (PR477 and evidence).
 No workstation app/service/network changes or app-archive downloads. Goal incomplete.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
@@ -102,7 +105,7 @@ The patch adds ONLY3newobserver files plus the existing focused test
 matrix using actual .35assets and preserved .34title/inventory. Root owns docs.
 240module tests passed. The actual workflow/driver invocation contract now covers
 32/33/34/35 in both modes:8changed cases passed; the240baseline was reused.
-No real public run yet.
+Public commit42899876525/1 FAILED before installation, created20:54:50UTC at observer1c6dd.
 8sharedhelpers remain byte-equal; publicworkflow uses qualified product source5a.
 No new CI bypass: existing classifier treats observer/test files as product, so
 normal required CI/audit will run; R/G/P need not be repeated on observerSHA.
@@ -114,13 +117,65 @@ accepted public34 verifier main67ceb, independently reviewed. verify.py SHA
 17pure functions unchanged;4PENDING guard checks passed. Commit/rollback semantics unchanged; new
 observerSHA and publicrunIDs stay PENDING. NEW bundle_tree comes from accepted G
 expected.json and is distinct from candidate app_tree; never substitute hashes.
-No app downloads or real publicworkflow yet. Newobserver and final focused test
-diffs reviewed with no blocker. NEXT: commit/push PR with current docs, pass
-requiredCI and merge, bind the
-actualobserverSHA, then publiccommit followed by pre-ACK rollback. Preserve old
-publicproof; no token/feed override or blind retry of anonymous API quota errors.
+The actual observer is bound to1c6dd and commit run42899876525/1; rollback remains
+PENDING. Frozen checker code is unchanged; current pins SHA
+`aae50fe56aa9b0f18ac5b86e064e0307dae39f8fcd4d956f01454ceac45fcbb2`.
+`public-commit/dispatch.py` made exactly one POST after source/release/expiry
+and duplicate checks. Two earlier preflight refusals were before intent/POST:
+actual proof uses checked_out_commit/tree; GitHub clears pull_requests after merge.
+The corrected guard retains hashed pre-merge association plus exact live run/PR/tree.
+Independent review passed. Prepared helpers/backups and corrections are retained.
+No repeated main packaging gate is needed for this observer: exact PR tested tree
+matches merged tree; the existing product candidate/G/P/R remain authoritative.
+This follows DECISIONS503–519 / RELEASES626–635; normal main CI was not cancelled.
 
-Workstation last verified/restored .31 on Nov5; this is stale until checked.
+Public commit42899876525/1 is terminal FAILURE, evidence upload succeeded.
+Artifact13802392333 (113385bytes), digest026ab27dd472be31aefa2e4e30c11752dc486bf54f4c92d53c9f76d940d841e6.
+The original collector refused artifact creation20:58:28 versus uploadstep end20:58:27;
+job ended20:58:35. Its metadata/failure remain preserved, no context/acceptance created.
+Root retrieved only the exact bounded diagnostic ZIP, enforcing source/run/digest,
+job window and safe extraction; receipt explicitly DIAGNOSTIC_ONLY with no acceptance.
+Actual report: one AXPress menu-open returned-25204; exact .35 Install was enabled,
+owner/ancestry passed, but supported AXVisibleChildren=[] and shadow frame invalid.
+Install was never pressed, transaction_observed=false,cleanup[]. Feed prelaunch200,
+anonymous remaining28. This proves an observer menu-interaction failure, not an
+updater transaction defect or that delay caused the native timeout.
+`public-commit/failure-analysis.json` binds report/AX/diagnostic receipt hashes.
+
+Narrow source repair is ready on this branch: scripts/public_update_ax.py and
+scripts/test_public_update_observer.py. After exactly one -25204 menu-open action,
+up to8 fresh read-only observations (250ms spacing) retain the initial20s deadline.
+Only supported empty visible-children plus validated owner/ancestry and exact-owned
+shadow or finite zero geometry may be observed again. Foreign/ambiguous/malformed/
+read errors fail immediately; only a fresh strict positive postcondition succeeds.
+Native agent and independent public35 review found no blocker; root reviewed diff.
+RED-before delayed-menu case failed, affected module121PASS plus3 newly added boundary
+cases PASS (not a claimed single124case rerun). Reconstructed tool-result record
+`M/public-update35/visibility-wait/test-execution-record.json` SHA
+7abf357cacbbcd6f7bead4a5b1b9d4ad46454ddfdd7746e3eaa79784b32bc964;
+full original stdout was not redirected. No CI/native validation of this patch yet.
+This addresses one-shot observation fragility, not a proven explanation of the
+native timeout. Persistent hidden menus still fail. Product/released app unchanged.
+
+Separate output-only collector-repair/template57ae1a954369169a4f788b76bf579ff583e1a9e623742ba307bb23c5299d61b4
+replaces the disproven step-end timestamp assumption with exact upload log
+identity(name/id/size/digest/URL), bounded step timestamps and unchanged job window.
+21pure fixtures passed, including real metadata-gap RED and negative bindings;
+no API/native calls, no changes to original failed collector or offline verifier.
+Root and independent review passed. Its auth receipt has a new explicit upload-identity
+field and raw joblog hash; future rollback consumer must verify that closure too.
+
+NEXT: commit/push reviewed AX source+docs patch as a PR and await existing required
+checks. Do not rerun42899876525 or dispatch rollback. After reviewed merged repair,
+prepare one separately reconciled public attempt with a NEW output directory,
+new observer/source/checker pins and retained failed proof. The public workflow
+still uses immutable .34/.35 product bytes. Rollback helpers remain PENDING;
+only accepted real public commit permits a rollback. Fresh Mac window still needed.
+
+
+Read-only Mac check20:42:43UTC Nov10 found /Applications/Slipstream.app version.31
+and launchctl print system/dev.slipstream.tproxy returned113/service absent.
+This is not full installed qualification. `M/public-update35/workstation-readonly.json`.
 No .35 local install attempted. New workstation update requires a fresh agreed
 window after failed .31→.34; old Nov5 permission window expired. Preserve backups,
 settings/learning and external Geph. No app/CI harness on workstation. Before any

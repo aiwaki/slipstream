@@ -285,6 +285,7 @@ def ax_actor_fixture(monkeypatch, *, error=-25204, kind="open_menu", post=None, 
     class Client:
         def __init__(self, _pid):
             self.nodes, self.reads = [], 0
+            self.deadline = ax.time.monotonic() + 20
         def inspect(self):
             self.reads += 1
             calls.append("read")
@@ -583,7 +584,7 @@ def test_actor_visibility_shadow_positive_keeps_single_press_and_no_install(monk
     def actual_visibility(_self, _item, _tray, observation):
         return client.menu_visibility(client.nodes[-1], client.nodes[0], observation)
     monkeypatch.setattr(ax.AX, "menu_visibility", actual_visibility)
-    with pytest.raises(ax.Blocked, match="^exact update item is not uniquely visible$"):
+    with pytest.raises(ax.Blocked, match="observation limit"):
         ax.run(args, report)
     assert len(report["actions"]) == 1
     action = report["actions"][0]
@@ -591,4 +592,109 @@ def test_actor_visibility_shadow_positive_keeps_single_press_and_no_install(monk
     assert action["observation"]["shadow_hit_test"]["status"] == "matched"
     assert "postcondition" not in action and report["installation_attempted"] is False
     assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
-    assert [call for call in native_calls if call[0] == "hit"] == [("hit", 99, 50.0, 28.0)]
+    assert [call for call in native_calls if call[0] == "hit"] == [("hit", 99, 50.0, 28.0)] * 8
+
+
+def menu_observation_sequence(monkeypatch, snapshots, *, budget=20):
+    """Synthetic post-action timing; not evidence of the cause of a CI timeout."""
+    clients = [visibility_client(**snapshot)[0] for snapshot in snapshots]
+    visibility = ax.AX.menu_visibility
+    args, report, calls, original = ax_actor_fixture(monkeypatch)
+    clock, observations = Clock(), []
+    monkeypatch.setattr(ax.time, "monotonic", clock)
+    monkeypatch.setattr(ax.time, "sleep", clock.sleep)
+    initial = ax.AX.__init__
+    def initialize(self, pid):
+        initial(self, pid)
+        self.deadline = clock() + budget
+    def observe(self, item, tray, observation):
+        observations.append(clock())
+        client = clients[min(len(observations) - 1, len(clients) - 1)]
+        return visibility(client, client.nodes[-1], client.nodes[0], observation)
+    monkeypatch.setattr(ax.AX, "__init__", initialize)
+    monkeypatch.setattr(ax.AX, "menu_visibility", observe)
+    return args, report, calls, original, clock, observations
+
+
+def test_timeout_waits_for_delayed_visible_menu_without_replaying_press(monkeypatch):
+    args, report, calls, original, clock, observations = menu_observation_sequence(
+        monkeypatch, [{"children": (), "frame": (0, 0, 0, 0)}, {}])
+    ax.run(args, report)
+    assert report["status"] == "menu_observed_after_timeout"
+    assert observations == [0.25, 0.5]
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert calls.count("read") == 3 and report["installation_attempted"] is False
+    assert [sample["status"] for sample in report["actions"][0]["visibility_observations"]] == ["pending", "visible"]
+    menu.validate_ax(report, {key: original[key] for key in ("pid", "uid", "started")}, args.executable, "a" * 64)
+
+
+@pytest.mark.parametrize("budget,expected_reads,reason", [(0.6, 2, "deadline"), (20, 8, "observation limit")])
+def test_timeout_empty_menu_stays_bounded_and_never_installs(monkeypatch, budget, expected_reads, reason):
+    args, report, calls, _, clock, observations = menu_observation_sequence(
+        monkeypatch, [{"children": (), "frame": (0, 0, 0, 0)}], budget=budget)
+    with pytest.raises(ax.Blocked, match=reason):
+        ax.run(args, report)
+    assert len(observations) == expected_reads and clock() <= budget
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert calls.count("read") == expected_reads + 1
+    assert "postcondition" not in report["actions"][0] and report["installation_attempted"] is False
+    assert len(report["actions"][0]["visibility_observations"]) == expected_reads
+
+
+@pytest.mark.parametrize("snapshot", [
+    {"children": (13, 13)}, {"children": (14,)}, {"visible_value": 41}, {"error": -25204},
+    {"forward_error": -25204}, {"children": (), "hit": 14}, {"children": (), "hit": 12},
+    {"children": (), "hit_error": -25204}, {"children": (), "frame": (float("nan"), 0, 0, 0)},
+    {"children": (), "frame": (0, 0, -1, 0)},
+])
+def test_timeout_wait_does_not_retry_malformed_ambiguous_foreign_or_read_failure(monkeypatch, snapshot):
+    args, report, calls, _, _, observations = menu_observation_sequence(monkeypatch, [snapshot, {}])
+    with pytest.raises(ax.Blocked):
+        ax.run(args, report)
+    assert len(observations) == 1
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert "postcondition" not in report["actions"][0] and report["installation_attempted"] is False
+
+
+def test_timeout_wait_rechecks_identity_before_next_observation(monkeypatch):
+    args, report, calls, original, _, observations = menu_observation_sequence(
+        monkeypatch, [{"children": (), "frame": (0, 0, 0, 0)}, {}])
+    monkeypatch.setattr(ax, "identity", lambda *_args: {**original, "started": "replacement"} if observations else original)
+    with pytest.raises(ax.Blocked, match="process identity changed"):
+        ax.run(args, report)
+    assert len(observations) == 1 and calls.count("read") == 2
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert [sample["status"] for sample in report["actions"][0]["visibility_observations"]] == ["pending", "failed"]
+    assert "postcondition" not in report["actions"][0]
+
+
+def test_timeout_wait_rejects_positive_result_that_arrives_after_original_deadline(monkeypatch):
+    args, report, calls, _, clock, observations = menu_observation_sequence(monkeypatch, [{}], budget=0.5)
+    observe = ax.AX.menu_visibility
+    def late(self, item, tray, observation):
+        proof = observe(self, item, tray, observation)
+        clock.now = 0.5
+        return proof
+    monkeypatch.setattr(ax.AX, "menu_visibility", late)
+    with pytest.raises(ax.Blocked, match="deadline"):
+        ax.run(args, report)
+    assert len(observations) == 1
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert report["actions"][0]["visibility_observations"][-1]["status"] == "failed"
+    assert "postcondition" not in report["actions"][0] and report["installation_attempted"] is False
+
+
+def test_timeout_wait_does_not_restart_budget_after_slow_open_action(monkeypatch):
+    args, report, calls, _, clock, observations = menu_observation_sequence(monkeypatch, [{}], budget=0.5)
+    press = ax.AX.press
+    def slow(self, node):
+        result = press(self, node)
+        clock.now = 0.5
+        return result
+    monkeypatch.setattr(ax.AX, "press", slow)
+    with pytest.raises(ax.Blocked, match="deadline"):
+        ax.run(args, report)
+    assert not observations and calls.count("read") == 1
+    assert [call for call in calls if isinstance(call, tuple)] == [("press", 11)]
+    assert report["actions"][0]["visibility_observations"] == []
+    assert "postcondition" not in report["actions"][0]
