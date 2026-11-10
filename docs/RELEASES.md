@@ -24,6 +24,19 @@ The public `.34 -> .35` discovery/update path and its forced rollback still need
 their own observation. These results do not qualify an update on the user's Mac,
 arbitrary websites, Discord calls, media continuity or sleep/wake.
 
+The first [public `.34 -> .35` attempt](https://github.com/aiwaki/slipstream/actions/runs/42899876525)
+stopped before installation. Public discovery returned HTTP 200 and OLD exposed
+the enabled `.35` install item, but one macOS Accessibility menu-open action
+timed out and its immediate observation did not prove the menu visible. Install
+was never pressed, no update transaction started, and cleanup reported no errors.
+This is a failed observer interaction, not evidence of a failed updater transaction.
+The observer repair performs up to eight fresh read-only observations after the
+single timed-out menu-open action, within the existing deadline. It still refuses
+hidden, ambiguous or foreign-owned items and never repeats the click. A delayed
+visibility regression failed before the repair; 121 module tests and three new
+boundary checks passed after it. The native timeout's cause is not established,
+and public update/rollback remain unqualified until the real path passes.
+
 This preview includes [PR #464](https://github.com/aiwaki/slipstream/pull/464).
 When the kernel has already lost Slipstream's saved PF reference, ordinary Stop
 and update recovery can now retire that obsolete record after proving that all

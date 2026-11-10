@@ -20,6 +20,14 @@ class Blocked(RuntimeError):
     pass
 
 
+class MenuVisibilityPending(Blocked):
+    """An exact owned menu has a supported, empty visible-children array."""
+
+
+MENU_VISIBILITY_READS = 8
+MENU_VISIBILITY_INTERVAL = 0.25
+
+
 class Point(C.Structure):
     _fields_ = [("x", C.c_double), ("y", C.c_double)]
 
@@ -220,7 +228,10 @@ class AX:
                 raise Blocked("update item frame unavailable")
         diagnostic["stage"] = "frame"
         values = (position.x, position.y, size.width, size.height)
-        if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values) or size.width <= 0 or size.height <= 0:
+        finite = all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values)
+        diagnostic["empty_frame"] = (finite and size.width >= 0 and size.height >= 0
+                                     and (size.width == 0 or size.height == 0))
+        if not finite or size.width <= 0 or size.height <= 0:
             raise Blocked("update item frame is not finite and positive")
         diagnostic["frame_valid"] = True
         diagnostic["stage"] = "system_wide"
@@ -339,6 +350,11 @@ class AX:
                         self._visibility_hit_test(item, shadow)
                     except Exception as error:
                         shadow.update(status="failed", error_type=type(error).__name__)
+                    if count == 0 and (shadow.get("status") == "matched"
+                                       or shadow.get("empty_frame") is True):
+                        # Only a later fresh positive observation can admit the menu.
+                        # Foreign hits, malformed geometry and read errors stay fatal.
+                        raise MenuVisibilityPending("exact update item is not uniquely visible")
                 raise Blocked("exact update item is not uniquely visible")
             visible["status"] = "matched"
             method = "visible_children"
@@ -411,20 +427,53 @@ def run(args, report):
                               and node["title"] in {"", "Slipstream"}]
             tray = unique(candidates, "owned tray item")
             action = press(tray, "open_menu")
-            time.sleep(0.25)
-            inspect()
-            if not report["owned_menu_present"]:
-                raise Blocked("opened tray does not expose an update menu item")
             if action["ax_error"] == -25204:
                 if not args.expected_version:
                     raise Blocked("timeout observation requires an exact update version")
                 titles = {f"Install Slipstream {args.expected_version}…", f"Установить Slipstream {args.expected_version}…"}
-                item = unique([node for node in client.nodes if node["role"] == "AXMenuItem"
-                               and node["title"] in titles and node["enabled"] is True], "fresh enabled exact-version offer")
-                action["observation"] = {"stage": "menu_selection", "edges": []}
-                action["postcondition"] = {**client.menu_visibility(item, tray, action["observation"]),
-                                           "expected_version": args.expected_version}
-                recheck()
+                started = time.monotonic()
+                timeline = action["visibility_observations"] = []
+                for index in range(MENU_VISIBILITY_READS):
+                    # The deadline began at AX construction, before inspection/action.
+                    # Neither polling nor an uncertain press grants another budget.
+                    if client.deadline - time.monotonic() <= MENU_VISIBILITY_INTERVAL:
+                        raise Blocked("menu visibility deadline exhausted")
+                    time.sleep(MENU_VISIBILITY_INTERVAL)
+                    sample = {"read": index + 1, "status": "reading"}
+                    timeline.append(sample)
+                    observation = action["observation"] = {"stage": "inspection", "edges": []}
+                    try:
+                        if time.monotonic() >= client.deadline:
+                            raise Blocked("menu visibility deadline exhausted")
+                        inspect()
+                        observation["stage"] = "menu_selection"
+                        item = unique([node for node in client.nodes if node["role"] == "AXMenuItem"
+                                       and node["title"] in titles and node["enabled"] is True],
+                                      "fresh enabled exact-version offer")
+                        proof = client.menu_visibility(item, tray, observation)
+                        recheck()
+                        if time.monotonic() >= client.deadline:
+                            raise Blocked("menu visibility deadline exhausted")
+                    except MenuVisibilityPending:
+                        sample["status"] = "pending"
+                    except Exception as error:
+                        sample.update(status="failed", error_type=type(error).__name__)
+                        raise
+                    else:
+                        sample["status"] = "visible"
+                        action["postcondition"] = {**proof, "expected_version": args.expected_version}
+                        break
+                    finally:
+                        sample.update(after_seconds=round(time.monotonic() - started, 6), stage=observation["stage"],
+                                      visible_children=observation.get("visible_children"),
+                                      shadow_stage=observation.get("shadow_hit_test", {}).get("stage"))
+                else:
+                    raise Blocked("menu visibility observation limit exhausted")
+            else:
+                time.sleep(0.25)
+                inspect()
+                if not report["owned_menu_present"]:
+                    raise Blocked("opened tray does not expose an update menu item")
         if args.press_update:
             exact_titles = {f"Install Slipstream {args.expected_version}…", f"Установить Slipstream {args.expected_version}…"}
             node = unique([node for node in client.nodes if node["role"] == "AXMenuItem" and node["title"] in exact_titles
