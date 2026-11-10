@@ -9,7 +9,7 @@
   ],
   "scripts/chromium_semantic_packaged_smoke.py": [
     "99f1c51dd1727d8ebe83dbe5b6b643056bd07cd56e42a40efcc31b2a96571ba7",
-    "9d7a3543b642ac94553cb5927a9fa976a19fd63de9056df4bf69fe899e942d0b"
+    "5646e2e7aa6b98613f270dd380815260e12e3b4f70f106fef153fb96947913f4"
   ],
   "scripts/fixtures/geph-sqlite-engine/closure.json": [
     null,
@@ -57,7 +57,7 @@
   ],
   "scripts/test_chromium_semantic_packaged_smoke.py": [
     "2cb1558d713bcc4e5841e639e878f252df705ab86338c614d0a2e4f7fa497a43",
-    "8e103456f5278ae020cf40ca6457f94d77a78b17d5737cb1aa88b4693ad6d39a"
+    "18312ccdf66934e0e56a88d08bcd0e0971184021fc5831b3b80be50a7bd1fe5d"
   ],
   "scripts/test_geph_embedded_source.py": [
     "9ae61d85136dc6891a353bc3a5b7ed7736344e7e4a2d38d5c95f23999eafd0a1",

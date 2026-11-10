@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import errno
 import hashlib
 import http.server
@@ -1687,6 +1688,32 @@ def _process_identity(pid: int) -> tuple[int, int, str]:
     return uid, process_group, fields[2]
 
 
+def _process_executable_path(pid: int) -> str:
+    """Read the kernel executable path, independently of mutable argv display."""
+    if type(pid) is not int or pid <= 0:
+        raise QualificationError("invalid pid for executable path query")
+    try:
+        lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        lib.proc_pidpath.restype = ctypes.c_int
+        buffer = ctypes.create_string_buffer(4096)
+        length = lib.proc_pidpath(pid, buffer, len(buffer))
+    except (AttributeError, OSError, TypeError, ValueError, ctypes.ArgumentError) as exc:
+        raise QualificationError("process executable path unavailable") from exc
+    raw = buffer.raw
+    if (type(length) is not int or not 0 < length < len(buffer)
+            or raw.find(b"\x00") != length):
+        raise QualificationError("invalid or unavailable process executable path")
+    try:
+        path = raw[:length].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise QualificationError("invalid process executable path encoding") from exc
+    if (not path.startswith("/") or ".." in Path(path).parts
+            or any(ord(char) < 32 or ord(char) == 127 for char in path)):
+        raise QualificationError("malformed process executable path")
+    return path
+
+
 def _command_mismatch_diagnostic(arguments: Sequence[str], observed: str) -> dict[str, object]:
     """Describe rendered-command differences without retaining either argv."""
     expected = " ".join(arguments)
@@ -2077,15 +2104,20 @@ def _bootstrap_chrome_launch_agent(
                 # Its xpcproxy argv is not a final-command contract. Wait for
                 # that phase to end; neither root nor xpcproxy can be admitted.
                 pre_exec = state == "xpcproxy" and observed_uid in (0, uid)
+                # argv is presentation, not executable identity. The private
+                # plist binds launch arguments; libproc binds the running image.
+                exact_executable = (not pre_exec and observed_uid in (0, uid)
+                                    and _process_executable_path(pid) == "/usr/bin/open")
                 last_observation = {"state": state, "pid": pid, "uid": observed_uid,
-                                    "expected_command": exact_command, "pre_exec": pre_exec}
-                if not pre_exec and exact_command and observed_uid == uid:
+                                    "expected_command": exact_command, "pre_exec": pre_exec,
+                                    "expected_executable": exact_executable}
+                if not pre_exec and exact_executable and observed_uid == uid:
                     if _launch_agent_pid(target) != pid:
                         raise QualificationError("Chrome LaunchAgent PID changed during startup admission")
                     if time.monotonic() >= deadline:
                         break
                     return ChromeLaunch(target, pid, process_group)
-                if not pre_exec and not (exact_command and observed_uid == 0):
+                if not pre_exec and not (exact_executable and observed_uid == 0):
                     if not exact_command:
                         try:
                             last_observation["command_diagnostic"] = _command_mismatch_diagnostic(arguments, command)

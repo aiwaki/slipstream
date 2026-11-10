@@ -43,7 +43,7 @@ def _fake_extensionless_chrome_for_testing(root: Path) -> Path:
 
 
 class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
-    def _bootstrap_with_startup_observations(self, observations, *, timeout=0.3):
+    def _bootstrap_with_startup_observations(self, observations, *, timeout=0.3, kernel_path="/usr/bin/open"):
         """Run only fake launchctl/ps and a fake clock, never a native process."""
         label = "dev.slipstream.chromium-semantic.4242"
         target = f"gui/501/{label}"
@@ -76,6 +76,9 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         payload = smoke.plistlib.dumps({"Label": label, "ProgramArguments": list(TEST_LAUNCH_ARGV)})
         with mock.patch.object(smoke, "_run", side_effect=command), \
                 mock.patch.object(smoke, "_read_private_bytes", return_value=payload), \
+                mock.patch.object(smoke, "_process_executable_path",
+                                  side_effect=kernel_path if isinstance(kernel_path, Exception) else None,
+                                  return_value=kernel_path), \
                 mock.patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
                 mock.patch.object(smoke.time, "sleep", side_effect=sleep), \
                 mock.patch.object(smoke, "_wait_for_launch_agent_absence") as cleanup:
@@ -124,7 +127,65 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                                      ("running", 502, command),
                                      ("xpcproxy", 502, "synthetic pre-exec argv")]:
             with self.subTest(state=state, uid=uid, observed=observed), self.assertRaisesRegex(smoke.QualificationError, "wrong identity"):
-                self._bootstrap_with_startup_observations([(state, 4242, uid, observed)])
+                self._bootstrap_with_startup_observations([(state, 4242, uid, observed)],
+                                                         kernel_path="/usr/bin/false" if observed == "/usr/bin/false" else "/usr/bin/open")
+
+    def test_bootstrap_accepts_mutable_argv_only_with_exact_kernel_executable(self):
+        # Synthetic argv mutation, not a reconstruction of the CI command.
+        launch = self._bootstrap_with_startup_observations([
+            ("running", 4242, 501, "/usr/bin/open changed display arguments")])
+        self.assertEqual(launch.pid, 4242)
+
+    def test_bootstrap_rejects_wrong_kernel_executable_even_with_matching_argv(self):
+        with self.assertRaisesRegex(smoke.QualificationError, "wrong identity"):
+            self._bootstrap_with_startup_observations([
+                ("running", 4242, 501, " ".join(TEST_LAUNCH_ARGV))], kernel_path="/usr/bin/false")
+
+    def test_bootstrap_executable_api_failure_never_admits(self):
+        with self.assertRaisesRegex(smoke.QualificationError, "executable path unavailable"):
+            self._bootstrap_with_startup_observations([
+                ("running", 4242, 501, " ".join(TEST_LAUNCH_ARGV))],
+                kernel_path=smoke.QualificationError("executable path unavailable"))
+
+    def test_bootstrap_xpcproxy_does_not_use_executable_api_to_admit(self):
+        with self.assertRaisesRegex(smoke.QualificationError, "deadline"):
+            self._bootstrap_with_startup_observations([
+                ("xpcproxy", 4242, 501, " ".join(TEST_LAUNCH_ARGV))],
+                kernel_path=smoke.QualificationError("executable path unavailable"))
+
+    def test_process_executable_path_uses_bounded_native_query(self):
+        import ctypes
+        lib = mock.Mock()
+        def query(pid, buffer, size):
+            self.assertEqual((pid, size), (4242, 4096))
+            buffer.value = b"/usr/bin/open"
+            return len(buffer.value)
+        lib.proc_pidpath.side_effect = query
+        with mock.patch("ctypes.CDLL", return_value=lib) as load:
+            self.assertEqual(smoke._process_executable_path(4242), "/usr/bin/open")
+        load.assert_called_once_with("/usr/lib/libproc.dylib", use_errno=True)
+        self.assertEqual(lib.proc_pidpath.argtypes, [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32])
+        self.assertIs(lib.proc_pidpath.restype, ctypes.c_int)
+
+    def test_process_executable_path_rejects_failed_malformed_or_truncated_result(self):
+        cases = [(0, b""), (-1, b""), (4096, b"a" * 4096),
+                 (4095, b"a" * 4096), (12, b"/short"), (4, b"/usr/bin/open"),
+                 (7, b"/a\x00junk"), (12, b"usr/bin/open"), (4, b"/x\nq"),
+                 (3, b"/\xffx")]
+        for count, data in cases:
+            with self.subTest(count=count, data=data[:16]):
+                lib = mock.Mock()
+                def query(pid, buffer, size):
+                    buffer.raw = data.ljust(size, b"\x00")
+                    return count
+                lib.proc_pidpath.side_effect = query
+                with mock.patch("ctypes.CDLL", return_value=lib):
+                    with self.assertRaises(smoke.QualificationError):
+                        smoke._process_executable_path(4242)
+        with mock.patch("ctypes.CDLL", side_effect=OSError("synthetic-private-error")):
+            with self.assertRaises(smoke.QualificationError) as raised:
+                smoke._process_executable_path(4242)
+        self.assertNotIn("synthetic-private-error", str(raised.exception))
 
     def test_command_mismatch_diagnostic_is_bounded_and_never_contains_argv(self):
         expected = " ".join(TEST_LAUNCH_ARGV)
@@ -167,7 +228,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         secret = "/synthetic-secret-program --token=synthetic-secret-value"
         with self.assertRaisesRegex(smoke.QualificationError, "wrong identity") as raised:
             self._bootstrap_with_startup_observations([
-                ("running", 4242, 501, secret), ("running", 4243, 501, secret)])
+                ("running", 4242, 501, secret), ("running", 4243, 501, secret)], kernel_path="/usr/bin/false")
         message = str(raised.exception)
         self.assertIn("'command_diagnostic':", message)
         self.assertIn("'argv0_category': 'other'", message)
@@ -177,7 +238,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def test_bootstrap_mismatch_diagnostic_failure_remains_closed(self):
         with mock.patch.object(smoke, "_command_mismatch_diagnostic", side_effect=RuntimeError("synthetic-secret-error")):
             with self.assertRaisesRegex(smoke.QualificationError, "wrong identity") as raised:
-                self._bootstrap_with_startup_observations([("running", 4242, 501, "wrong-command")])
+                self._bootstrap_with_startup_observations([("running", 4242, 501, "wrong-command")], kernel_path="/usr/bin/false")
         self.assertIn("'diagnostic_error': True", str(raised.exception))
         self.assertNotIn("synthetic-secret-error", str(raised.exception))
 
@@ -197,6 +258,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 mock.patch.object(smoke, "_run", side_effect=(absent, success, success, success)) as run, \
                 mock.patch.object(smoke, "_launch_agent_snapshot", return_value=(4242, "running")), \
                 mock.patch.object(smoke, "_process_identity", return_value=(501, 4242, " ".join(TEST_LAUNCH_ARGV))), \
+                mock.patch.object(smoke, "_process_executable_path", return_value="/usr/bin/open"), \
                 mock.patch.object(smoke.time, "monotonic", side_effect=(0.0, 0.0, 10.001)), \
                 mock.patch.object(smoke, "_wait_for_launch_agent_absence") as cleanup:
             with self.assertRaisesRegex(smoke.QualificationError, "deadline"):
@@ -1443,7 +1505,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
         success = smoke.subprocess.CompletedProcess((), 0, "", "")
         payload = smoke.plistlib.dumps({"Label": "dev.slipstream.chromium-semantic.4242", "ProgramArguments": list(TEST_LAUNCH_ARGV)})
-        with mock.patch.object(smoke, "_read_private_bytes", return_value=payload), mock.patch.object(
+        with mock.patch.object(smoke, "_process_executable_path", return_value="/usr/bin/open"), mock.patch.object(smoke, "_read_private_bytes", return_value=payload), mock.patch.object(
             smoke,
             "_run",
             side_effect=(absent, success),

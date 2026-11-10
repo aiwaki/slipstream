@@ -4,7 +4,7 @@
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
-df64b6e62932cd84e3ca008157f5b795b552ddbd; main/base remains
+84438bcbecec00188e67e92058a776e17a99c3a8; main/base remains
 1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is committed and pushed; fresh exact-head CI/audit running. No workstation app/service/
 network changes or app downloads. Active goal remains incomplete.
 
@@ -118,8 +118,31 @@ snapshot. No arbitrary argv or exception text is exposed; admission unchanged.
 15 focused tests passed after RED;34 scope/transition tests passed with PYTHONPATH=
 scripts (initial missing-PYTHONPATH import failure retained separately). Frozen
 map66/74 SHAe8d4553b233b70f18df7dfc8f6fe7a2d8a99388a30c7edd867d811ba4329fa97.
-NEXT: push this diagnostic-only follow-up and observe its automatic exact-head
-CI. Require an explained cause and actual Chromium PASS before guarded merge.
+Diagnostic follow-up committed/pushed84438bcbecec00188e67e92058a776e17a99c3a8.
+Actual delta66/74 proof6bac77358052cb0476e2e40ce809df9b8d3ac16458a3de59b4b7a819683e200e.
+Previous CI42867899775 ended failure only for Chromium and aggregate; product
+checks passed. Watcherreceipt2225d1ad6ba8fd2e942e60f7eb07aa9cdc9d4cac596fb5e425ce3f78fe33816e.
+New automatic CI42870072229/1 and audit42870072078/1; observer/evidence under
+pr476-command-diagnostic. No workflow rerun.
+Audit42870072078/1 authenticated PASS (artifact13788134762), root-rechecked
+receipt8b05a31bb62670eb34e1419cd2125930705da91121fcf356b6c42937fa9a1a99.
+Chromium job130018746723 now retains actual mismatch shape: same running PID1607,
+UID501, argv0 fullopen, expected893 vs observed571 chars, firstdiff342. The exact
+mechanism shortening argv is not proven; diagnosis751627d938d7afec295a5f1634f4f38313221596d91a5da6cdc877f3fc2e2344.
+An isolated native C child confirmed argv can change while kernel executable
+identity remains exact; result under pr476-command-diagnostic/native-identity.
+Child exited; no browser/launchd/app/network mutation. SDK and Apple XNU bind
+proc_pidpath to executable vnode, and public_update_ax already uses this API.
+Implemented exact kernel-path /usr/bin/open identity; private plist, target/
+PID/UID, deadline and downstream Chrome/profile checks unchanged. New helper
+requires a bounded successful native result with exact NUL length, UTF-8 absolute
+path; unavailable/malformed/truncated results fail closed. Independent review
+found no blocker.21 focused tests and all87 affected module tests passed after
+RED; root verified the actual helper against only its native child.34 scope/
+transition checks passed; map66/74 SHAa71cd54bf10dbc250f74fff452f333bb2bb50e4ed51d34f5851aed42e511bc77.
+NEXT: push the kernel-identity correction and require actual Chromium PASS,
+exact CI/audit and live PR checks before guarded merge. No specific open-argv
+mutation mechanism or product networking repair claimed.
 After merge observe the existing main Geph producer; S/producer-r5 is prepared
 with fresh file pins and PENDING run/source guards. Require33 synthetic cases,
 universal binary, audit and immutable r5 assets/attestations before app CI.

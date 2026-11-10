@@ -41,6 +41,24 @@ have the new full command-equality guard. Do not infer a product browser defect
 or relax the guard from this boolean alone. Bounded mismatch evidence is needed
 before another behavioral change. Diagnosis and actual job log are retained in
 output/continuation-20261110/source-review-refresh/pr476-preexec/chromium-failure.
+The diagnostic job130018746723 then established same running PID1607/UID501,
+fullopen argv0, expected893 versus observed571 characters and first mismatch342.
+The exact mechanism is still unknown. A native owned-child probe independently
+confirmed that changing one argv character preserves the kernel executable path.
+The new full rendered-argv equality is therefore not a reliable executable
+identity predicate. Its replacement uses exact proc_pidpath output, with the
+existing private plist, target/PID/UID, deadline and downstream Chrome/profile
+checks retained. This API is already used in public_update_ax; SDK libproc.h
+and [Apple XNU libproc](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
+define the call. [The kernel implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c)
+resolves the executable vnode rather than rendered argv. Evidence is under
+output/continuation-20261110/source-review-refresh/pr476-command-diagnostic.
+No workstation browser or launchd job was started for the native child probe.
+The exact kernel-path correction passed21 focused cases after RED and all87
+affected module tests. A direct read against only the owned synthetic child
+validated the new strict FFI wrapper, followed by clean child exit. Independent
+review found no blocker. Invalid/empty/truncated native responses, foreign
+executable even with matching argv, and API failure remain closed.
 A fresh actual Chromium contract run remains required; fixture results alone
 do not qualify the browser. Its two exact harness/test files are included in the
 PR-only repair map, while the Chromium job remains mandatory and main still
