@@ -1,6 +1,135 @@
 # Current Project State
 
-## Current continuation — 2026-11-10, r5 SQLite and OSV evidence repair
+## Current continuation — 2026-11-11 local / November 10 UTC, .35 published
+
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Observer branch `codex/public-preview35-qualification` is based on published product
+source `5a3e64b534affc865826fbd20ac67f1af328629e`, tree
+`25398071982a3072e7c01df5581e693092938b8f`. PR476 merged18:19:53UTC.
+Observer-only follow-up is being prepared:3new public35 observer files, focused
+test changes, docs/RELEASES.md and this checkpoint. output/ is retained evidence.
+No workstation app/service/network changes or app-archive downloads. Goal incomplete.
+
+M=`output/continuation-20261110/source-review-refresh/main-r5`;
+Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.
+All following run IDs are attempt1 except CI42874103966/2.
+
+Merged source replaces vulnerable bundled SQLite with libsqlite3-sys0.39.1 /
+SQLite3.54.1 using a manifest-only SQLx derivative. Schema2 binds raw OSV
+receipts to projections. Disposable Chromium launcher verifies kernel executable
+identity and bounded pre-exec transition instead of mutable argv. These changes
+alone do not establish the cause/fix of every reported browser/Discord failure.
+Prior focused test and PR evidence below remains reusable; no broad suite repeated.
+
+### Accepted exact-source evidence
+
+- PR476 CI42872342720 and audit42872342955 passed;5 required checks and4 resolved
+  review threads before merge. Equal PR/main tree proved. Evidence under
+  `output/continuation-20261110/source-review-refresh/pr476-kernel-identity`.
+- Geph r5 automatic producer42874104205 accepted.9release assets,3artifacts,
+  10actual crypto checks,33synthetic cases, exact raw OSV recomputation/SBOM,
+  arm64+x86_64. `S/producer-r5/acceptance.json` SHA
+  `1ab76996ba77b2c265090935744a0ca0f800ecb9f160351058b2b378fefe8299`.
+  r5 tag binds main5a; GitHub immutable-release protection is false, so do not
+  claim platform immutability. Binary was statically checked, never executed.
+- Main CI42874103966/1 hit only r5-not-yet-published404 during packaging.
+  After r5 acceptance ONE failed-job rerun produced CI42874103966/2 SUCCESS;
+  unchanged green tests were reused,8packaging jobs executed. All12consumers pass.
+  `M/ci-attempt2/watcher-receipt.json` SHA
+  `f004c07416b9d8ee892d00a0ad9b0626a49e9a4b52e03cc0bc59313653f2e6ed`;
+  candidate receipt `0452cdf10302438ed552e520f51e21e321c1758bdf021f48712c1c1c0069c666`.
+  Candidate artifact13793810157, manifest
+  `65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d`,
+  ZIP metadata digestdc62d0260ab1c9cc887a72f7a68d66abe57ca95cea76b8eea2cd39aad1027fbe,
+  expiresNov24. Initial local metadata receipt honestly says candidate_authenticated=false;
+  actual six-file verification was subsequently performed in R/G/P hosted consumers.
+- Main audit42874103977 accepted. `M/geph-audit/verified-receipt.json` SHA
+  `c54cb98ee863d4536260fd4be33e43c82e99930feb3c644d7ad3c6adcddcf895`.
+  407scanned+4owned; blocking/exceptions/affected/unresolved0, informational4.
+  Root rechecked16pins; raw OSV report recomputed byte-identically. No rescan.
+- R42880931292 SUCCESS.6signed reports authenticated with actual gh verification.
+  All4hosts x Safari/Chrome usable within deadline. Soak1800.112s,3600samples,
+  maxgap.659s,11counters0, stable daemonPID/advancing heartbeat,cleanup[].
+  Normal UTCNov10 budgetposition1/3; no budget exception or rerun.
+  Pre-G140checks receipt d6f4218e139302f16a7aab55317e6dabd8ab60020032dff05c06f26a454627ce
+  was superseded by unchanged full verifier AFTER accepted G:93checks PASS,
+  `Q/readiness-r/verification.json` SHA
+  `4b2c444862444d3963c134fb73d1a610e68609f9999456d667e5a2d631aab734`.
+- G42887546582 SUCCESS,75checks. Real commit and crash-before-commit cases.
+  `Q/native-g/verification.json` SHA
+  `63610e105c6c2692beb305aa9756762996a54b9122ce08849ec4aebd893d889d`;
+  root-acceptance `5f012fb5eca07240c66e3357a5aa2570a4e027a70faf88dcb94967cee3998da9`.
+  Root rehashed36evidence/4source files. Independently materialized app-tree
+  `5af7673d1314c60e70e23c8d9618408e5ee78c3dd888ab589cb96f304d0996ec`
+  equals signed R tree. Exact OLD41634434348/1 sourcea0a60e080, manifest
+  e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb;
+  NEWCI42874103966/2 as above. Old app audit uses reviewed historical-policy path;
+  this does not renew expired Geph r4 source review.
+- P42888475035 SUCCESS,13checks. Real successor ACK/committed/sequence2/quiescent;
+  real pre-ACK stop+kill/noACK/aborted/sequence2/quiescent and OLD restored.
+  Both daemon heartbeats advance, watchdog successfully exits, transaction paths
+  absent,cleanup[]. `Q/packaged-p/verification.json` SHA
+  `9c86808a1c75da70489ffa424910c803b76d598467b3233e961af5323b9a743a`.
+  Root rehashed14case/5source files. Actual submitted10inputs retained.
+
+### Active publication and next action
+
+Root reviewed guarded publisher, bound actual P receipt ONLY, then made ONE
+POST after fresh main/CI2/audit/R/G/P, artifact expiry and complete no-collision
+checks. Exec36103exit0. Actual build-app42890549828/1,source5a3e64b,
+created19:58:11UTC, completed20:02:29UTC SUCCESS. Inputs:version0.1.9-preview.35,
+preview_sequence35,release_candidate_run_id42874103966,
+dependency_audit_run_id42874103977,readiness_run_id42880931292. No deprecated
+qualification input or historical release_source override. No duplicate/retry.
+`M/publication/dispatch-preview35.py` bound SHA
+`e3f1277b0f477c5d9b4a14e160c2ed1f8862b7fe0a841f2ca6eeb05d39721eb4`.
+Original preparation,pins,intent,preflight,response,discovery all retained.
+
+Publisher42890549828/1 completed SUCCESS. Watcher28659 and one bounded
+postpublication verifier54145 exited0. All12assets/tag/source match;3smallJSONs
+were downloaded and their actual gh attestations verified (93checks). .34assets
+preserved and title archived. `M/publication/publication-verification.json` SHA
+`e9f6b0aa3e4d104741f17bd51518cee134ef4a7419f9d088f13b707ef9896752`,
+release440846924, published v0.1.9-preview.35. Root rehashed21retained+1external
+files. No app payload downloaded locally. Do NOT dispatch publisher again.
+README.md/README.en.md and live About/topics reviewed: stable release-list links,
+macOS Apple Silicon preview scope/limitations remain accurate; no edits needed.
+RELEASES.md now records .35 publication and real gates, leaving public/Mac checks open.
+
+Public .34→.35 updater remains UNQUALIFIED. No matching branch/openPR existed;
+root created `codex/public-preview35-qualification` in the SAMEphysicalcheckout.
+The patch adds ONLY3newobserver files plus the existing focused test
+matrix using actual .35assets and preserved .34title/inventory. Root owns docs.
+240module tests passed. The actual workflow/driver invocation contract now covers
+32/33/34/35 in both modes:8changed cases passed; the240baseline was reused.
+No real public run yet.
+8sharedhelpers remain byte-equal; publicworkflow uses qualified product source5a.
+No new CI bypass: existing classifier treats observer/test files as product, so
+normal required CI/audit will run; R/G/P need not be repeated on observerSHA.
+
+`M/public-update35/offline-verifier` was prepared from
+accepted public34 verifier main67ceb, independently reviewed. verify.py SHA
+0ac890bb931c18e0867fd6ff13bc2318adeb6ae4d8685150390afe1b7c03265e; pins SHA
+259dd88350addc46cbd3a0269e0eff8e59d6adb4b4818d40d36b1100297083af.
+17pure functions unchanged;4PENDING guard checks passed. Commit/rollback semantics unchanged; new
+observerSHA and publicrunIDs stay PENDING. NEW bundle_tree comes from accepted G
+expected.json and is distinct from candidate app_tree; never substitute hashes.
+No app downloads or real publicworkflow yet. Newobserver and final focused test
+diffs reviewed with no blocker. NEXT: commit/push PR with current docs, pass
+requiredCI and merge, bind the
+actualobserverSHA, then publiccommit followed by pre-ACK rollback. Preserve old
+publicproof; no token/feed override or blind retry of anonymous API quota errors.
+
+Workstation last verified/restored .31 on Nov5; this is stale until checked.
+No .35 local install attempted. New workstation update requires a fresh agreed
+window after failed .31→.34; old Nov5 permission window expired. Preserve backups,
+settings/learning and external Geph. No app/CI harness on workstation. Before any
+install follow canonical bundle verifier and after install verify:local-install;
+then real browser/media/Quit validation. Do not claim all-site or Discord success
+from the hosted fixed-site/soak checks. Normal account-backed budget3/UTCday;
+Nov6 exception expired. Existing goal must remain incomplete.
+
+## Previous source repair evidence — 2026-11-10
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
