@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "status": "PASS",
+  "scope": "Full unmodified SQLite amalgamation compiled into test; actual internal sqlite3WalReadFrame and sqlite3OsRead call with deterministic synthetic VFS. Not a public SQL parser/database-file exploit or compiled Geph/app qualification.",
+  "test_sha256": "d93fd751767d9ae2bc28e4bf52fa0a7787da87c3b219f1e7019a172ee0d98c72",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "cases_per_version": 6,
+  "vulnerable_control": "0.30.1 retains 0xA5 outside smaller WAL frame; 0.39.1 zeroes the complete requested tail. Both preserve payload/offset/count/bounds and propagate I/O error.",
+  "records": [
+    {
+      "wrapper": "0.30.1",
+      "source_sha256": "c01235302fe80da901fb70c7622c39147e29d9f29b7f6eb746b23517f320c90d",
+      "binary_sha256": "a8478166178d56850a7adc405c539abab101574606a993ad91815dc5c387e1af",
+      "compile_command": [
+        "/usr/bin/clang",
+        "-O0",
+        "-g0",
+        "-DSQLITE_THREADSAFE=1",
+        "-DSQLITE_ENABLE_API_ARMOR",
+        "-DSQLITE_ENABLE_COLUMN_METADATA",
+        "-DSQLITE_ENABLE_UNLOCK_NOTIFY",
+        "-DSOURCE_SQLITE=\"<CHECKOUT>/output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/libsqlite3-sys-0.30.1/sqlite3/sqlite3.c\"",
+        "<CHECKOUT>/output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-regression.c",
+        "-o",
+        "<CHECKOUT>/output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-0.30.1"
+      ],
+      "started_at": "2026-11-10T15:35:22.887408+00:00",
+      "compile_seconds": 1.354,
+      "child_max_rss_bytes": 162643968,
+      "result": [
+        {
+          "version": "3.46.0",
+          "source_id": "2024-05-23 13:25:27 96c92aba00c8375bc32fafcdf12429c58bd8aabfcadab6683e35bbb9cdebf19e"
+        },
+        {
+          "wal_page": 512,
+          "requested": 4096,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 3584
+        },
+        {
+          "wal_page": 512,
+          "requested": 512,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 4096,
+          "requested": 512,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 65536,
+          "requested": 65536,
+          "io_error": false,
+          "read_bytes": 65536,
+          "tail_zeros": 0,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 512,
+          "requested": 65536,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 65024
+        },
+        {
+          "wal_page": 512,
+          "requested": 4096,
+          "io_error": true,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 3584
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "wrapper": "0.39.1",
+      "source_sha256": "0c657666d819f261cc4007526ad57e1669de9949df7a8ea847aa284a2bf0ee52",
+      "binary_sha256": "8238775b507d0053c51c84536b90b8367b964b7776e026aed222a9b695f60cc6",
+      "compile_command": [
+        "/usr/bin/clang",
+        "-O0",
+        "-g0",
+        "-DSQLITE_THREADSAFE=1",
+        "-DSQLITE_ENABLE_API_ARMOR",
+        "-DSQLITE_ENABLE_COLUMN_METADATA",
+        "-DSQLITE_ENABLE_UNLOCK_NOTIFY",
+        "-DSOURCE_SQLITE=\"<CHECKOUT>/output/continuation-20261110/source-review-refresh/pr476/geph-audit/official/sqlx-wrapper-compatibility/libsqlite3-sys-0.39.1/sqlite3/sqlite3.c\"",
+        "<CHECKOUT>/output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-regression.c",
+        "-o",
+        "<CHECKOUT>/output/continuation-20261110/source-review-refresh/sqlite-fix-evidence/wal-read-0.39.1"
+      ],
+      "started_at": "2026-11-10T15:35:26.466616+00:00",
+      "compile_seconds": 1.135,
+      "child_max_rss_bytes": 166756352,
+      "result": [
+        {
+          "version": "3.54.1",
+          "source_id": "2026-10-16 14:45:20 555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76"
+        },
+        {
+          "wal_page": 512,
+          "requested": 4096,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 3584,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 512,
+          "requested": 512,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 4096,
+          "requested": 512,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 0,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 65536,
+          "requested": 65536,
+          "io_error": false,
+          "read_bytes": 65536,
+          "tail_zeros": 0,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 512,
+          "requested": 65536,
+          "io_error": false,
+          "read_bytes": 512,
+          "tail_zeros": 65024,
+          "tail_markers": 0
+        },
+        {
+          "wal_page": 512,
+          "requested": 4096,
+          "io_error": true,
+          "read_bytes": 512,
+          "tail_zeros": 3584,
+          "tail_markers": 0
+        }
+      ],
+      "returncode": 0
+    }
+  ]
+}

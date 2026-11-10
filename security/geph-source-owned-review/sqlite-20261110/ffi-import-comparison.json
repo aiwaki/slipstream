@@ -1,0 +1,556 @@
+{
+  "changed_constants": {},
+  "changed_function_declarations": {},
+  "identifiers": {
+    "SQLITE_BLOB": [
+      "src/type_info.rs"
+    ],
+    "SQLITE_CONSTRAINT_CHECK": [
+      "src/error.rs"
+    ],
+    "SQLITE_CONSTRAINT_FOREIGNKEY": [
+      "src/error.rs"
+    ],
+    "SQLITE_CONSTRAINT_NOTNULL": [
+      "src/error.rs"
+    ],
+    "SQLITE_CONSTRAINT_PRIMARYKEY": [
+      "src/error.rs"
+    ],
+    "SQLITE_CONSTRAINT_UNIQUE": [
+      "src/error.rs"
+    ],
+    "SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_DELETE": [
+      "src/connection/mod.rs"
+    ],
+    "SQLITE_DESERIALIZE_FREEONCLOSE": [
+      "src/connection/serialize.rs"
+    ],
+    "SQLITE_DESERIALIZE_READONLY": [
+      "src/connection/serialize.rs"
+    ],
+    "SQLITE_DESERIALIZE_RESIZEABLE": [
+      "src/connection/serialize.rs"
+    ],
+    "SQLITE_DONE": [
+      "src/statement/handle.rs"
+    ],
+    "SQLITE_ERROR": [
+      "src/error.rs"
+    ],
+    "SQLITE_FLOAT": [
+      "src/type_info.rs"
+    ],
+    "SQLITE_INSERT": [
+      "src/connection/mod.rs"
+    ],
+    "SQLITE_INTEGER": [
+      "src/type_info.rs"
+    ],
+    "SQLITE_LOCKED_SHAREDCACHE": [
+      "src/connection/handle.rs",
+      "src/statement/handle.rs"
+    ],
+    "SQLITE_MISUSE": [
+      "src/statement/handle.rs"
+    ],
+    "SQLITE_NOMEM": [
+      "src/connection/serialize.rs"
+    ],
+    "SQLITE_NULL": [
+      "src/type_info.rs",
+      "src/value.rs"
+    ],
+    "SQLITE_OK": [
+      "src/arguments.rs",
+      "src/arguments.rs",
+      "src/connection/collation.rs",
+      "src/connection/establish.rs",
+      "src/connection/handle.rs",
+      "src/connection/serialize.rs",
+      "src/connection/preupdate_hook.rs",
+      "src/statement/unlock_notify.rs",
+      "src/statement/handle.rs",
+      "src/statement/virtual.rs"
+    ],
+    "SQLITE_OPEN_CREATE": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_FULLMUTEX": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_MEMORY": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_NOMUTEX": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_PRIVATECACHE": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_READONLY": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_READWRITE": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_SHAREDCACHE": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_OPEN_URI": [
+      "src/connection/establish.rs"
+    ],
+    "SQLITE_PREPARE_PERSISTENT": [
+      "src/statement/virtual.rs"
+    ],
+    "SQLITE_ROW": [
+      "src/statement/handle.rs"
+    ],
+    "SQLITE_TEXT": [
+      "src/type_info.rs"
+    ],
+    "SQLITE_TRANSIENT": [
+      "src/statement/handle.rs"
+    ],
+    "SQLITE_UPDATE": [
+      "src/connection/mod.rs"
+    ],
+    "SQLITE_UTF8": [
+      "src/connection/collation.rs",
+      "src/statement/handle.rs"
+    ],
+    "sqlite3": [
+      "src/error.rs",
+      "src/connection/establish.rs",
+      "src/connection/handle.rs",
+      "src/connection/mod.rs",
+      "src/connection/preupdate_hook.rs",
+      "src/statement/unlock_notify.rs",
+      "src/statement/handle.rs",
+      "src/statement/virtual.rs"
+    ],
+    "sqlite3_bind_blob64": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_double": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_int": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_int64": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_null": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_parameter_count": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_parameter_name": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_bind_text64": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_busy_timeout": [
+      "src/connection/establish.rs"
+    ],
+    "sqlite3_changes": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_clear_bindings": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_close": [
+      "src/connection/handle.rs"
+    ],
+    "sqlite3_column_blob": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_bytes": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_count": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_database_name": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_decltype": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_double": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_int": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_int64": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_name": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_origin_name": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_table_name": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_type": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_column_value": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_commit_hook": [
+      "src/connection/mod.rs"
+    ],
+    "sqlite3_create_collation_v2": [
+      "src/connection/collation.rs"
+    ],
+    "sqlite3_db_config": [
+      "src/connection/establish.rs"
+    ],
+    "sqlite3_db_handle": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_deserialize": [
+      "src/connection/serialize.rs"
+    ],
+    "sqlite3_errmsg": [
+      "src/error.rs"
+    ],
+    "sqlite3_errstr": [
+      "src/error.rs"
+    ],
+    "sqlite3_exec": [
+      "src/connection/handle.rs"
+    ],
+    "sqlite3_extended_errcode": [
+      "src/error.rs"
+    ],
+    "sqlite3_extended_result_codes": [
+      "src/connection/establish.rs"
+    ],
+    "sqlite3_finalize": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_free": [
+      "src/connection/establish.rs",
+      "src/connection/serialize.rs"
+    ],
+    "sqlite3_get_autocommit": [
+      "src/connection/mod.rs"
+    ],
+    "sqlite3_last_insert_rowid": [
+      "src/connection/handle.rs"
+    ],
+    "sqlite3_load_extension": [
+      "src/connection/establish.rs"
+    ],
+    "sqlite3_malloc64": [
+      "src/connection/serialize.rs"
+    ],
+    "sqlite3_open_v2": [
+      "src/connection/establish.rs"
+    ],
+    "sqlite3_prepare_v3": [
+      "src/statement/virtual.rs"
+    ],
+    "sqlite3_preupdate_count": [
+      "src/connection/preupdate_hook.rs"
+    ],
+    "sqlite3_preupdate_depth": [
+      "src/connection/preupdate_hook.rs"
+    ],
+    "sqlite3_preupdate_hook": [
+      "src/connection/mod.rs",
+      "src/connection/mod.rs"
+    ],
+    "sqlite3_preupdate_new": [
+      "src/connection/preupdate_hook.rs"
+    ],
+    "sqlite3_preupdate_old": [
+      "src/connection/preupdate_hook.rs"
+    ],
+    "sqlite3_progress_handler": [
+      "src/connection/mod.rs"
+    ],
+    "sqlite3_reset": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_rollback_hook": [
+      "src/connection/mod.rs"
+    ],
+    "sqlite3_serialize": [
+      "src/connection/serialize.rs"
+    ],
+    "sqlite3_sql": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_step": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_stmt": [
+      "src/statement/handle.rs",
+      "src/statement/virtual.rs"
+    ],
+    "sqlite3_stmt_readonly": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_table_column_metadata": [
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_unlock_notify": [
+      "src/statement/unlock_notify.rs"
+    ],
+    "sqlite3_update_hook": [
+      "src/connection/mod.rs"
+    ],
+    "sqlite3_value": [
+      "src/value.rs",
+      "src/connection/preupdate_hook.rs",
+      "src/statement/handle.rs"
+    ],
+    "sqlite3_value_blob": [
+      "src/value.rs"
+    ],
+    "sqlite3_value_bytes": [
+      "src/value.rs"
+    ],
+    "sqlite3_value_double": [
+      "src/value.rs"
+    ],
+    "sqlite3_value_dup": [
+      "src/value.rs"
+    ],
+    "sqlite3_value_free": [
+      "src/value.rs"
+    ],
+    "sqlite3_value_int64": [
+      "src/value.rs"
+    ],
+    "sqlite3_value_type": [
+      "src/value.rs",
+      "src/connection/preupdate_hook.rs"
+    ]
+  },
+  "imports": {
+    "src/any.rs": [],
+    "src/arguments.rs": [
+      "SQLITE_OK",
+      "SQLITE_OK"
+    ],
+    "src/column.rs": [],
+    "src/connection/collation.rs": [
+      "sqlite3_create_collation_v2",
+      "SQLITE_OK",
+      "SQLITE_UTF8"
+    ],
+    "src/connection/describe.rs": [],
+    "src/connection/establish.rs": [
+      "sqlite3",
+      "sqlite3_busy_timeout",
+      "sqlite3_db_config",
+      "sqlite3_extended_result_codes",
+      "sqlite3_free",
+      "sqlite3_load_extension",
+      "sqlite3_open_v2",
+      "SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION",
+      "SQLITE_OK",
+      "SQLITE_OPEN_CREATE",
+      "SQLITE_OPEN_FULLMUTEX",
+      "SQLITE_OPEN_MEMORY",
+      "SQLITE_OPEN_NOMUTEX",
+      "SQLITE_OPEN_PRIVATECACHE",
+      "SQLITE_OPEN_READONLY",
+      "SQLITE_OPEN_READWRITE",
+      "SQLITE_OPEN_SHAREDCACHE",
+      "SQLITE_OPEN_URI"
+    ],
+    "src/connection/execute.rs": [],
+    "src/connection/executor.rs": [],
+    "src/connection/explain.rs": [],
+    "src/connection/handle.rs": [
+      "sqlite3",
+      "sqlite3_close",
+      "sqlite3_exec",
+      "sqlite3_last_insert_rowid",
+      "SQLITE_LOCKED_SHAREDCACHE",
+      "SQLITE_OK"
+    ],
+    "src/connection/intmap.rs": [],
+    "src/connection/mod.rs": [
+      "sqlite3",
+      "sqlite3_commit_hook",
+      "sqlite3_get_autocommit",
+      "sqlite3_progress_handler",
+      "sqlite3_rollback_hook",
+      "sqlite3_update_hook",
+      "SQLITE_DELETE",
+      "SQLITE_INSERT",
+      "SQLITE_UPDATE",
+      "sqlite3_preupdate_hook",
+      "sqlite3_preupdate_hook"
+    ],
+    "src/connection/preupdate_hook.rs": [
+      "sqlite3",
+      "sqlite3_preupdate_count",
+      "sqlite3_preupdate_depth",
+      "sqlite3_preupdate_new",
+      "sqlite3_preupdate_old",
+      "sqlite3_value",
+      "sqlite3_value_type",
+      "SQLITE_OK"
+    ],
+    "src/connection/serialize.rs": [
+      "sqlite3_deserialize",
+      "sqlite3_free",
+      "sqlite3_malloc64",
+      "sqlite3_serialize",
+      "SQLITE_DESERIALIZE_FREEONCLOSE",
+      "SQLITE_DESERIALIZE_READONLY",
+      "SQLITE_DESERIALIZE_RESIZEABLE",
+      "SQLITE_NOMEM",
+      "SQLITE_OK"
+    ],
+    "src/connection/worker.rs": [],
+    "src/database.rs": [],
+    "src/error.rs": [
+      "sqlite3",
+      "sqlite3_errmsg",
+      "sqlite3_errstr",
+      "sqlite3_extended_errcode",
+      "SQLITE_CONSTRAINT_CHECK",
+      "SQLITE_CONSTRAINT_FOREIGNKEY",
+      "SQLITE_CONSTRAINT_NOTNULL",
+      "SQLITE_CONSTRAINT_PRIMARYKEY",
+      "SQLITE_CONSTRAINT_UNIQUE",
+      "SQLITE_ERROR"
+    ],
+    "src/lib.rs": [],
+    "src/logger.rs": [],
+    "src/migrate.rs": [],
+    "src/options/auto_vacuum.rs": [],
+    "src/options/connect.rs": [],
+    "src/options/journal_mode.rs": [],
+    "src/options/locking_mode.rs": [],
+    "src/options/mod.rs": [],
+    "src/options/parse.rs": [],
+    "src/options/synchronous.rs": [],
+    "src/query_result.rs": [],
+    "src/regexp.rs": [],
+    "src/row.rs": [],
+    "src/statement/handle.rs": [
+      "sqlite3",
+      "sqlite3_bind_blob64",
+      "sqlite3_bind_double",
+      "sqlite3_bind_int",
+      "sqlite3_bind_int64",
+      "sqlite3_bind_null",
+      "sqlite3_bind_parameter_count",
+      "sqlite3_bind_parameter_name",
+      "sqlite3_bind_text64",
+      "sqlite3_changes",
+      "sqlite3_clear_bindings",
+      "sqlite3_column_blob",
+      "sqlite3_column_bytes",
+      "sqlite3_column_count",
+      "sqlite3_column_database_name",
+      "sqlite3_column_decltype",
+      "sqlite3_column_double",
+      "sqlite3_column_int",
+      "sqlite3_column_int64",
+      "sqlite3_column_name",
+      "sqlite3_column_origin_name",
+      "sqlite3_column_table_name",
+      "sqlite3_column_type",
+      "sqlite3_column_value",
+      "sqlite3_db_handle",
+      "sqlite3_finalize",
+      "sqlite3_reset",
+      "sqlite3_sql",
+      "sqlite3_step",
+      "sqlite3_stmt",
+      "sqlite3_stmt_readonly",
+      "sqlite3_table_column_metadata",
+      "sqlite3_value",
+      "SQLITE_DONE",
+      "SQLITE_LOCKED_SHAREDCACHE",
+      "SQLITE_MISUSE",
+      "SQLITE_OK",
+      "SQLITE_ROW",
+      "SQLITE_TRANSIENT",
+      "SQLITE_UTF8"
+    ],
+    "src/statement/mod.rs": [],
+    "src/statement/unlock_notify.rs": [
+      "sqlite3",
+      "sqlite3_unlock_notify",
+      "SQLITE_OK"
+    ],
+    "src/statement/virtual.rs": [
+      "sqlite3",
+      "sqlite3_prepare_v3",
+      "sqlite3_stmt",
+      "SQLITE_OK",
+      "SQLITE_PREPARE_PERSISTENT"
+    ],
+    "src/testing/mod.rs": [],
+    "src/transaction.rs": [],
+    "src/type_checking.rs": [],
+    "src/type_info.rs": [
+      "SQLITE_BLOB",
+      "SQLITE_FLOAT",
+      "SQLITE_INTEGER",
+      "SQLITE_NULL",
+      "SQLITE_TEXT"
+    ],
+    "src/types/bool.rs": [],
+    "src/types/bytes.rs": [],
+    "src/types/chrono.rs": [],
+    "src/types/float.rs": [],
+    "src/types/int.rs": [],
+    "src/types/json.rs": [],
+    "src/types/mod.rs": [],
+    "src/types/str.rs": [],
+    "src/types/text.rs": [],
+    "src/types/time.rs": [],
+    "src/types/uint.rs": [],
+    "src/types/uuid.rs": [],
+    "src/value.rs": [
+      "sqlite3_value",
+      "sqlite3_value_blob",
+      "sqlite3_value_bytes",
+      "sqlite3_value_double",
+      "sqlite3_value_dup",
+      "sqlite3_value_free",
+      "sqlite3_value_int64",
+      "sqlite3_value_type",
+      "SQLITE_NULL"
+    ]
+  },
+  "inline_helpers": {
+    "SQLITE_TRANSIENT": "SQLITE_TRANSIENT is an inline Rust helper, not an extern declaration. Both inspected versions retain the -1 destructor sentinel and unsafe extern C function signature; the mem import and c_void reference move from std to core. This source comparison is not an ABI proof."
+  },
+  "limits": "Does not prove compile/link, complete ABI or runtime behavior. Optional features are included in the lexical inventory. Types and inline helpers in the 104 identifiers are not counted as extern declarations; the compared declarations/constants remain unchanged under the explicit normalization above.",
+  "method": "All explicit libsqlite3_sys imports and qualified identifiers. Used extern function declarations were compared after normalizing std/core C primitive aliases, std::option::Option versus core::option::Option, whitespace, and trailing argument/generic commas. Constants were compared separately; inline helpers are not extern declarations.",
+  "missing": [],
+  "option_callback_declarations": [
+    "sqlite3_create_collation_v2",
+    "sqlite3_exec",
+    "sqlite3_commit_hook",
+    "sqlite3_progress_handler",
+    "sqlite3_rollback_hook",
+    "sqlite3_update_hook",
+    "sqlite3_preupdate_hook",
+    "sqlite3_unlock_notify",
+    "sqlite3_bind_blob64",
+    "sqlite3_bind_text64"
+  ]
+}

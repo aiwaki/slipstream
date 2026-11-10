@@ -1,0 +1,14 @@
+[package]
+name = "slipstream-sqlite-compatibility-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[dependencies]
+sqlx = { version = "=0.8.6", default-features = false, features = ["sqlite", "runtime-tokio"] }
+tokio = { version = "=1.53.2", features = ["rt", "macros", "time"] }
+[patch.crates-io]
+sqlx-sqlite = { path = "sqlx-sqlite" }
+[profile.dev]
+debug = 0
+[profile.test]
+debug = 0

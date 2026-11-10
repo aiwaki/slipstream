@@ -77,7 +77,9 @@ def _read_owned_file(root_fd: int, relative: str, limit: int) -> bytes:
         os.close(descriptor)
 
 
-def _owned_tree_files(root_fd: int, relative: str) -> set[str]:
+def _owned_tree_files(root_fd: int, relative: str, expected_files: set[str]) -> set[str]:
+    expected_directories = {str(parent) for name in expected_files for parent in Path(name).parents if str(parent) != "."}
+    maximum_entries = len(expected_files) + len(expected_directories)
     descriptor = os.dup(root_fd)
     try:
         for part in relative.split("/"):
@@ -90,8 +92,8 @@ def _owned_tree_files(root_fd: int, relative: str) -> set[str]:
             nonlocal visited
             for name in os.listdir(directory):
                 visited += 1
-                if visited > 64:
-                    raise ValueError("embedded source tree exceeds reviewed inventory size")
+                if visited > maximum_entries:
+                    raise ValueError("embedded source tree file set exceeds reviewed inventory size")
                 info = os.stat(name, dir_fd=directory, follow_symlinks=False)
                 path = prefix + name
                 if stat.S_ISREG(info.st_mode):
@@ -131,10 +133,7 @@ def _materialized_embedded_source(source: dict, source_root: Path, cargo_lock: P
         if manifest_edits and hashlib.sha256(manifest_bytes).hexdigest() != manifest_edits[-1]["after_sha256"]:
             raise ValueError("materialized root manifest disagrees with final reviewed edit")
         # Validate the local dependency declarations from the bytes already read.
-        expected_edges = {
-            ("dependencies", "mizaru2"): ("mizaru2-slipstream-client", "slipstream-vendor/mizaru-client"),
-            ("patch", "crates-io", "geph5-broker-protocol"): ("geph5-broker-protocol", "slipstream-vendor/geph5-broker-protocol"),
-        }
+        expected_edges = geph_vendor_source.embedded_root_edges(source["embedded_packages"])
         found_edges = {}
         def visit(value: object, location: tuple[str, ...]) -> None:
             if isinstance(value, dict):
@@ -157,11 +156,11 @@ def _materialized_embedded_source(source: dict, source_root: Path, cargo_lock: P
         if sorted(local_lock) != sorted(local_identities):
             raise ValueError("local Cargo.lock package identities disagree with SOURCE")
         all_files = {package["path"].removeprefix("slipstream-vendor/") + "/" + entry["path"] for package in descriptors for entry in package["files"]}
-        if _owned_tree_files(descriptor, "slipstream-vendor") != all_files:
+        if _owned_tree_files(descriptor, "slipstream-vendor", all_files) != all_files:
             raise ValueError("materialized embedded namespace file set disagrees with SOURCE")
         for package in descriptors:
             expected = {entry["path"] for entry in package["files"]}
-            if _owned_tree_files(descriptor, package["path"]) != expected:
+            if _owned_tree_files(descriptor, package["path"], expected) != expected:
                 raise ValueError("materialized embedded file set disagrees with SOURCE")
             for entry in package["files"]:
                 payload = _read_owned_file(descriptor, package["path"] + "/" + entry["path"], geph_vendor_source.MAX_EMBEDDED_FILE_BYTES)

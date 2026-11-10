@@ -80,6 +80,18 @@ RSA_REMOVAL_REVIEW_POLICY_BINDING = (
     "5886209fdaf1059b02051993ab56181e6ad93c4e36363b69f2c53547c1800a02",
     "9a7bbd5d240c14d921bb7d31f4be4a5e4f0c309db217a14815a33c1a1bfe166f",
 )
+# Exact r4 -> r5 repair for CVE-2026-119375. Existing source-owned packages
+# are unchanged; only SQLx's manifest is patched to the fixed registry wrapper.
+SQLITE_REPAIR_REVIEW_SOURCE_BINDING = (
+    "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    "1fdd3e49418c7a47e06e092dbac411cb8c41022e6688b7115a071bd89c81f9c8",
+    "2d017b845167e97d0a2178acc589851aeffa2269809fca8c63de0d0c925d4143",
+)
+SQLITE_REPAIR_REVIEW_POLICY_BINDING = (
+    "9a7bbd5d240c14d921bb7d31f4be4a5e4f0c309db217a14815a33c1a1bfe166f",
+    "2d1f4f4e70d4a7a354d5f5d22fc00552e0a61067d1131ea286d30df0e8d4eef0",
+)
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
 MAX_EMBEDDED_FILE_BYTES = 256 * 1024
 MAX_EMBEDDED_BYTES = 1024 * 1024
@@ -110,6 +122,70 @@ EMBEDDED_PACKAGES = {
         "local_dependency": ("mizaru2", "mizaru2-slipstream-client", "../mizaru-client"),
     },
 }
+
+# Exact manifest-only SQLite compatibility patch; the original three-package
+# closure remains valid for immutable r4 artifacts. This is not an open registry
+# of local packages or build scripts.
+SQLX_SQLITE_PATH = "slipstream-vendor/sqlx-sqlite"
+SQLX_SQLITE_SPEC = {
+    "name": "sqlx-sqlite", "version": "0.8.6", "license": "MIT OR Apache-2.0",
+    "upstream": ("sqlx-sqlite", "0.8.6"), "local_dependency": None,
+    "upstream_sha256": "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea",
+    "manifest_sha256": "8dc33d0ee8972b11a855b02c72f0ddbfddf8a07d14f3d8ca8ab54aa4774dc425",
+    "notices": {
+        "LICENSE-MIT": "44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179",
+        "LICENSE-APACHE": "9be39331309bc958aab10457c1a8459c038ae95662f26dfcf6c9088e2b3d653f",
+    },
+    "sources": {
+        "src/any.rs", "src/arguments.rs", "src/column.rs",
+        "src/connection/collation.rs", "src/connection/describe.rs",
+        "src/connection/establish.rs", "src/connection/execute.rs",
+        "src/connection/executor.rs", "src/connection/explain.rs",
+        "src/connection/handle.rs", "src/connection/intmap.rs",
+        "src/connection/mod.rs", "src/connection/preupdate_hook.rs",
+        "src/connection/serialize.rs", "src/connection/worker.rs",
+        "src/database.rs", "src/error.rs", "src/lib.rs", "src/logger.rs",
+        "src/migrate.rs", "src/options/auto_vacuum.rs", "src/options/connect.rs",
+        "src/options/journal_mode.rs", "src/options/locking_mode.rs",
+        "src/options/mod.rs", "src/options/parse.rs", "src/options/synchronous.rs",
+        "src/query_result.rs", "src/regexp.rs", "src/row.rs",
+        "src/statement/handle.rs", "src/statement/mod.rs",
+        "src/statement/unlock_notify.rs", "src/statement/virtual.rs",
+        "src/testing/mod.rs", "src/transaction.rs", "src/type_checking.rs",
+        "src/type_info.rs", "src/types/bool.rs", "src/types/bytes.rs",
+        "src/types/chrono.rs", "src/types/float.rs", "src/types/int.rs",
+        "src/types/json.rs", "src/types/mod.rs", "src/types/str.rs",
+        "src/types/text.rs", "src/types/time.rs", "src/types/uint.rs",
+        "src/types/uuid.rs", "src/value.rs",
+    },
+}
+
+
+def embedded_package_specs(section: dict) -> dict:
+    """Select either the exact historical closure or its reviewed SQLx addition."""
+    packages = section.get("packages")
+    if not isinstance(packages, list) or any(not isinstance(p, dict) for p in packages):
+        raise ValueError("embedded packages must be reviewed package objects")
+    paths = [p.get("path") for p in packages]
+    if any(not isinstance(path, str) for path in paths) or len(paths) != len(set(paths)):
+        raise ValueError("unknown or duplicate embedded package path")
+    specs = dict(EMBEDDED_PACKAGES)
+    if set(paths) == set(specs) | {SQLX_SQLITE_PATH}:
+        specs[SQLX_SQLITE_PATH] = SQLX_SQLITE_SPEC
+    elif set(paths) != set(specs):
+        raise ValueError("exact legacy three or reviewed SQLite four packages are required")
+    return specs
+
+
+def embedded_root_edges(section: dict) -> dict:
+    specs = embedded_package_specs(section)
+    edges = {
+        ("dependencies", "mizaru2"): ("mizaru2-slipstream-client", "slipstream-vendor/mizaru-client"),
+        ("patch", "crates-io", "geph5-broker-protocol"): ("geph5-broker-protocol", "slipstream-vendor/geph5-broker-protocol"),
+    }
+    if SQLX_SQLITE_PATH in specs:
+        edges[("patch", "crates-io", "sqlx-sqlite")] = ("sqlx-sqlite", SQLX_SQLITE_PATH)
+    return edges
 
 
 def hash_file(path: Path) -> str:
@@ -290,6 +366,18 @@ def _validate_embedded_manifest(manifest: dict, spec: dict) -> None:
         raise ValueError("embedded local dependency edges do not match reviewed packages")
 
 
+def _validate_sqlx_sqlite_manifest(contents: dict[str, str]) -> None:
+    original = contents["provenance/Cargo.toml"].encode()
+    if hashlib.sha256(original).hexdigest() != SQLX_SQLITE_SPEC["manifest_sha256"]:
+        raise ValueError("SQLx original manifest differs from the exact registry package")
+    expected = _manifest_text(original.decode(), "SQLx upstream manifest")
+    expected["package"]["publish"] = False
+    expected["dependencies"]["libsqlite3-sys"]["version"] = "=0.39.1"
+    expected["dependencies"]["libsqlite3-sys"]["features"].append("column_metadata")
+    if _manifest_text(contents["Cargo.toml"], "SQLx embedded manifest") != expected:
+        raise ValueError("SQLx manifest must contain only the reviewed wrapper/feature/publication changes")
+
+
 def _validate_embedded_packages(section: object) -> None:
     if not isinstance(section, dict):
         raise ValueError("embedded packages must be an object")
@@ -297,8 +385,7 @@ def _validate_embedded_packages(section: object) -> None:
     if type(section["schema_version"]) is not int or section["schema_version"] != 1:
         raise ValueError("unsupported embedded packages schema")
     packages = section["packages"]
-    if not isinstance(packages, list) or len(packages) != len(EMBEDDED_PACKAGES):
-        raise ValueError("exactly three reviewed embedded packages are required")
+    specs = embedded_package_specs(section)
     seen = set()
     total_bytes = 0
     for package in packages:
@@ -307,10 +394,10 @@ def _validate_embedded_packages(section: object) -> None:
         _require_exact_keys(package, {"path", "name", "version", "license", "provenance",
                                       "files", "sha256"}, "embedded package")
         path = package["path"]
-        if not isinstance(path, str) or path not in EMBEDDED_PACKAGES or path in seen:
+        if not isinstance(path, str) or path not in specs or path in seen:
             raise ValueError("unknown or duplicate embedded package path")
         seen.add(path)
-        spec = EMBEDDED_PACKAGES[path]
+        spec = specs[path]
         if any(package[key] != spec[key] for key in ("name", "version", "license")):
             raise ValueError("embedded package identity is not reviewed")
         descriptor = {key: value for key, value in package.items() if key != "sha256"}
@@ -318,7 +405,8 @@ def _validate_embedded_packages(section: object) -> None:
             raise ValueError("embedded package descriptor digest mismatch")
         file_list = package["files"]
         mandatory = {"Cargo.toml"} | spec["sources"]
-        mandatory |= {"SOURCE-NOTICE.md", "provenance/Cargo.toml", "LICENSE-ISC.txt"} if spec["upstream"] else {"LICENSE"}
+        notices = spec.get("notices", {"LICENSE-ISC.txt": ISC_STANDARD_TEXT_SHA256})
+        mandatory |= {"SOURCE-NOTICE.md", "provenance/Cargo.toml", *notices} if spec["upstream"] else {"LICENSE"}
         if not isinstance(file_list, list) or len(file_list) != len(mandatory):
             raise ValueError("embedded package file set is incomplete or unreviewed")
         contents = {}
@@ -342,13 +430,18 @@ def _validate_embedded_packages(section: object) -> None:
             if entry["sha256"] != hashlib.sha256(payload).hexdigest():
                 raise ValueError("embedded file digest mismatch")
             contents[name] = content
-        _validate_embedded_manifest(_manifest_text(contents["Cargo.toml"], "embedded manifest"), spec)
+        if path == SQLX_SQLITE_PATH:
+            _validate_sqlx_sqlite_manifest(contents)
+        else:
+            _validate_embedded_manifest(_manifest_text(contents["Cargo.toml"], "embedded manifest"), spec)
         provenance = package["provenance"]
         if not isinstance(provenance, dict):
             raise ValueError("embedded provenance must be an object")
         if spec["upstream"]:
-            if hashlib.sha256(contents["LICENSE-ISC.txt"].encode()).hexdigest() != ISC_STANDARD_TEXT_SHA256:
-                raise ValueError("embedded derivative must preserve the standard ISC license text")
+            for notice, digest in notices.items():
+                if hashlib.sha256(contents[notice].encode()).hexdigest() != digest:
+                    description = "standard ISC license text" if notice == "LICENSE-ISC.txt" else "exact license text"
+                    raise ValueError(f"embedded derivative must preserve the {description}")
             _require_exact_keys(provenance, {"kind", "name", "version", "url", "sha256",
                                              "original_files"}, "embedded derivative provenance")
             name, version = spec["upstream"]
@@ -356,10 +449,14 @@ def _validate_embedded_packages(section: object) -> None:
                     or provenance["version"] != version
                     or provenance["url"] != CRATE_URL.format(name=name, version=version)
                     or not isinstance(provenance["sha256"], str)
-                    or not SHA256_PATTERN.fullmatch(provenance["sha256"])):
+                    or not SHA256_PATTERN.fullmatch(provenance["sha256"])
+                    or ("upstream_sha256" in spec and provenance["sha256"] != spec["upstream_sha256"])):
                 raise ValueError("embedded upstream identity is invalid")
             originals = provenance["original_files"]
-            if not isinstance(originals, dict) or set(originals) != {"Cargo.toml"} | spec["sources"]:
+            original_paths = {"Cargo.toml"} | spec["sources"]
+            if path == SQLX_SQLITE_PATH:
+                original_paths |= set(notices)
+            if not isinstance(originals, dict) or set(originals) != original_paths:
                 raise ValueError("embedded original source file set is invalid")
             if any(not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest)
                    for digest in originals.values()):
@@ -367,8 +464,13 @@ def _validate_embedded_packages(section: object) -> None:
             if originals["Cargo.toml"] != hashlib.sha256(contents["provenance/Cargo.toml"].encode()).hexdigest():
                 raise ValueError("embedded upstream manifest digest mismatch")
             original = _manifest_text(contents["provenance/Cargo.toml"], "upstream manifest").get("package", {})
-            if not isinstance(original, dict) or (original.get("name"), original.get("version"), original.get("license")) != (name, version, "ISC"):
+            if not isinstance(original, dict) or (original.get("name"), original.get("version"), original.get("license")) != (name, version, spec["license"]):
                 raise ValueError("embedded upstream license declaration/identity mismatch")
+            if path == SQLX_SQLITE_PATH and any(
+                hashlib.sha256(contents[name].encode()).hexdigest() != originals[name]
+                for name in spec["sources"] | set(notices)
+            ):
+                raise ValueError("SQLx runtime and licenses must be byte-identical to the upstream originals")
         else:
             if provenance != {"kind": "first-party", "repository": "https://github.com/aiwaki/slipstream"}:
                 raise ValueError("embedded first-party provenance is invalid")
@@ -585,6 +687,13 @@ def _verify_policy_transition(
         hashlib.sha256(previous_canonical.encode("utf-8")).hexdigest(),
         hashlib.sha256(current_canonical.encode("utf-8")).hexdigest(),
     )
+    if (
+        not previous_h2_present
+        and not current_h2_present
+        and verified_source_binding == SQLITE_REPAIR_REVIEW_SOURCE_BINDING
+        and policy_binding == SQLITE_REPAIR_REVIEW_POLICY_BINDING
+    ):
+        return "fixed-sqlite-with-reviewed-manifest-only-driver"
     if (
         not previous_h2_present
         and not current_h2_present
@@ -938,12 +1047,9 @@ def _materialize_embedded_packages(root: Path, section: dict) -> None:
                 raise ValueError("materialized embedded file digest mismatch")
 
 
-def _verify_embedded_root_edges(root: Path) -> None:
+def _verify_embedded_root_edges(root: Path, section: dict) -> None:
     manifest = _manifest_text((root / "Cargo.toml").read_text(encoding="utf-8"), "Geph manifest")
-    expected = {
-        ("dependencies", "mizaru2"): ("mizaru2-slipstream-client", "slipstream-vendor/mizaru-client"),
-        ("patch", "crates-io", "geph5-broker-protocol"): ("geph5-broker-protocol", "slipstream-vendor/geph5-broker-protocol"),
-    }
+    expected = embedded_root_edges(section)
     found = {}
 
     def visit(value: object, location: tuple[str, ...]) -> None:
@@ -988,7 +1094,7 @@ def materialize_source(
     # Dependency-only manifest edits cannot rewrite the attested crate identity.
     _verify_manifest(root, summary["version"])
     if "embedded_packages" in source:
-        _verify_embedded_root_edges(root)
+        _verify_embedded_root_edges(root, source["embedded_packages"])
         _materialize_embedded_packages(root, source["embedded_packages"])
     if "native_sqlite" in source:
         geph_native_sqlite.materialize(source["native_sqlite"], native_sqlite_archive, root)

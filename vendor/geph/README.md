@@ -36,6 +36,21 @@ review reasons bind the new source/lock identities with the same October 30
 expiry. The new immutable vendor release and its verified consumer are still
 required before this source repair reaches an app build.
 
+Revision 4 replaces the RSA client implementation with three reviewed local
+packages and retains the session/cache repairs. Its source review does not clear
+the remaining registry dependencies or prove installed behavior.
+
+Revision 5 fixes CVE-2026-119375 in the bundled SQLite engine. It retains all
+SQLx 0.8.6 Rust source bytes and changes its local manifest to select the official
+`libsqlite3-sys` 0.39.1 package, explicitly enable column metadata, and disable
+publication of the local copy. The wrapper bundles SQLite 3.54.1. Only these two
+lock records change; every other version, checksum and edge is retained.
+The exact four-package review extends the historical three-package contract,
+while the registry wrapper remains subject to the full vulnerability scan.
+No system SQLite, native SQLite lane, or new advisory exception is used. The
+existing producer build adds three engine/cache/WAL/error checks to its thirty
+session/auth/cache cases before packaging the new immutable dependency release.
+
 Revisions 3 through 5 of `0.3.9` carry explicit `source_edits` in `SOURCE.json`.
 Each edit binds the complete input and output file SHA-256 and exactly one
 literal replacement; extraction fails on drift. The contract shipped with the

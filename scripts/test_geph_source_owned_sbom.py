@@ -81,6 +81,37 @@ class SourceOwnedGephSbomTests(unittest.TestCase):
             payload = (self.root / file["fileName"]).read_bytes()
             self.assertEqual(file["checksums"][1]["checksumValue"], hashlib.sha256(payload).hexdigest())
 
+    def test_sqlx_owned_patch_keeps_fixed_wrapper_in_registry_inventory(self):
+        descriptor = embedded_fixture.add_sqlx(self.fixture)
+        with self.lock.open("a") as handle:
+            handle.write('\n[[package]]\nname="sqlx-sqlite"\nversion="0.8.6"\n'
+                         '\n[[package]]\nname="libsqlite3-sys"\nversion="0.39.1"\n'
+                         'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                         'checksum="' + 'b' * 64 + '"\n')
+        self.source["lock_sha256"] = hashlib.sha256(self.lock.read_bytes()).hexdigest()
+        self.fixture.save()
+        self.root = self.fixture.materialize("sqlx-materialized").resolve()
+        self.source_hash = hashlib.sha256(self.fixture.contract_path.read_bytes()).hexdigest()
+        graph = self.graph()
+        graph["packages"].append({"id": "libsqlite3-sys", "name": "libsqlite3-sys", "version": "0.39.1", "license": "MIT", "source": "registry+https://github.com/rust-lang/crates.io-index"})
+        graph["resolve"]["nodes"].append({"id": "libsqlite3-sys", "deps": []})
+        next(node for node in graph["resolve"]["nodes"] if node["id"] == "sqlx-sqlite")["deps"] = [{"pkg": "libsqlite3-sys", "dep_kinds": [{"kind": None, "target": None}]}]
+        for _, path in self.metadata:
+            path.write_text(json.dumps(graph))
+        self.assertEqual({item.name for item in self.collect()}, {"direct-registry", "local-transitive", "libsqlite3-sys"})
+        document = self.document()
+        self.assertEqual(self.verify(document)["package_count"], 8)
+        sqlx = next(p for p in document["packages"] if p["name"] == "sqlx-sqlite")
+        wrapper = next(p for p in document["packages"] if p["name"] == "libsqlite3-sys")
+        self.assertNotIn("externalRefs", sqlx)
+        self.assertTrue(any(ref["referenceLocator"] == "pkg:cargo/libsqlite3-sys@0.39.1" for ref in wrapper["externalRefs"]))
+        for name in ("LICENSE-MIT", "LICENSE-APACHE", "src/connection/worker.rs"):
+            self.assertTrue(any(f["fileName"] == f'./{descriptor["path"]}/{name}' for f in document["files"]))
+        manifest = self.root / "Cargo.toml"
+        manifest.write_text(manifest.read_text().split('[patch.crates-io.sqlx-sqlite]')[0])
+        with self.assertRaisesRegex(ValueError, "root embedded edges"):
+            self.collect()
+
     def test_isc_standard_text_is_inventoried_and_tampering_fails_closed(self):
         document = self.document()
         license_files = [file for file in document["files"] if file["fileName"].endswith("/LICENSE-ISC.txt")]

@@ -1,4 +1,4 @@
-"""Offline, exact-source review of the three owned Geph packages.
+"""Offline, exact-source review of the closed owned Geph package sets.
 
 The trusted policy pins review bytes, not a future Git commit or SPDX hash.
 Ancestor OSV results remain ancestor identities; they never manufacture registry
@@ -7,7 +7,7 @@ not the truth of a reviewer-authored security conclusion or legal clearance.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 import hashlib
 import io
 import json
@@ -28,6 +28,15 @@ MAX_EVIDENCE_TOTAL = 128 * 1024 * 1024
 MAX_EVIDENCE_FILES = 128
 MAX_FINDINGS = 4096
 DECISIONS = {"code_fixed", "code_not_present", "rejected", "unknown", "affected"}
+# Only this immutable, already published review predates explicit raw-query
+# bindings. Its expired policy remains verifiable at its historical date;
+# schema 1 is not an opt-out available to a new review or renewed policy.
+LEGACY_REVIEW_POLICY = {
+    "schema_version": 1,
+    "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    "review_sha256": "ce1a0e85d537cf499e895f078627ef33f78e5aaa331962adb1c25d8577e18bf4",
+    "expires": "2026-11-07",
+}
 
 
 def _sha(payload: bytes) -> str:
@@ -109,9 +118,13 @@ def _bundle(policy: dict, evidence_root: Path, evaluated_on: date | None) -> tup
     if _sha(review_bytes) != policy["review_sha256"]:
         raise ValueError("source-owned review SHA256 differs from policy")
     review = _json(review_bytes)
-    _keys(review, {"schema_version", "binding", "evidence", "ancestors", "osv_evidence", "packages"}, "review")
-    if type(review["schema_version"]) is not int or review["schema_version"] != 1:
+    version = review.get("schema_version")
+    if type(version) is not int or version not in (1, 2):
         raise ValueError("source-owned review schema is invalid")
+    if version == 1 and policy != LEGACY_REVIEW_POLICY:
+        raise ValueError("source-owned schema 1 requires the exact historical policy")
+    _keys(review, {"schema_version", "binding", "evidence", "ancestors", "osv_evidence", "packages"}
+          | ({"osv_queries"} if version == 2 else set()), "review")
     records, paths, total = {}, {"review.json"}, 0
     for entry in _list(review["evidence"], "evidence", MAX_EVIDENCE_FILES, nonempty=True):
         _keys(entry, {"id", "path", "size", "sha256", "kind"}, "evidence")
@@ -153,8 +166,8 @@ def _inventory(sbom: dict, source: dict, source_hash: str, source_commit: str) -
     if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("source-owned source commit is invalid")
     expected, files, contains = _source_owned_inventory(source, source_commit, source_hash)
-    if len(expected) != 3:
-        raise ValueError("source-owned review requires exactly three known packages")
+    if len(expected) != len(vendor.embedded_package_specs(source["embedded_packages"])):
+        raise ValueError("source-owned review requires the exact known package set")
     contains += [{"spdxElementId": ROOT_SPDX_ID, "relationshipType": "CONTAINS",
                   "relatedSpdxElement": p["SPDXID"]} for p in expected]
     if not isinstance(sbom, dict):
@@ -252,6 +265,19 @@ def _ancestor_archive(descriptor: dict, payload: bytes) -> None:
         raise ValueError("source-owned original manifest differs from retained bytes")
 
 
+def _osv_findings(values: object) -> dict:
+    findings = {}
+    for finding in _list(values, "OSV vulnerabilities", MAX_FINDINGS):
+        if not isinstance(finding, dict):
+            raise ValueError("source-owned ancestor OSV finding is invalid")
+        identity = _text(finding.get("id"), "OSV advisory ID", 160)
+        aliases = [_text(v, "OSV alias", 160) for v in _list(finding.get("aliases", []), "OSV aliases", 256)]
+        if identity in findings or len(aliases) != len(set(aliases)) or identity in aliases:
+            raise ValueError("source-owned ancestor OSV findings/aliases are duplicated")
+        findings[identity] = {"id": identity, "aliases": sorted(aliases)}
+    return findings
+
+
 def _osv(payload: bytes, ancestors: set[tuple[str, str]]) -> dict:
     raw = _json(payload)
     if raw.get("error") or raw.get("errors"):
@@ -261,7 +287,7 @@ def _osv(payload: bytes, ancestors: set[tuple[str, str]]) -> dict:
     for group in results:
         if not isinstance(group, dict) or group.get("error") or group.get("errors"):
             raise ValueError("source-owned ancestor OSV result is invalid")
-        for entry in _list(group.get("packages"), "OSV packages", 2, nonempty=True):
+        for entry in _list(group.get("packages"), "OSV packages", 3, nonempty=True):
             if not isinstance(entry, dict) or not isinstance(entry.get("package"), dict) or entry.get("error") or entry.get("errors"):
                 raise ValueError("source-owned ancestor OSV package is invalid")
             package = entry["package"]
@@ -270,19 +296,138 @@ def _osv(payload: bytes, ancestors: set[tuple[str, str]]) -> dict:
                 raise ValueError("source-owned ancestor OSV ecosystem must be crates.io")
             if identity not in ancestors or identity in found:
                 raise ValueError("source-owned ancestor OSV identities are missing/duplicate/unexpected")
-            findings = {}
-            for finding in _list(entry.get("vulnerabilities", []), "OSV vulnerabilities", MAX_FINDINGS):
-                if not isinstance(finding, dict):
-                    raise ValueError("source-owned ancestor OSV finding is invalid")
-                identity_id = _text(finding.get("id"), "OSV advisory ID", 160)
-                aliases = [_text(v, "OSV alias", 160) for v in _list(finding.get("aliases", []), "OSV aliases", 256)]
-                if identity_id in findings or len(aliases) != len(set(aliases)) or identity_id in aliases:
-                    raise ValueError("source-owned ancestor OSV findings/aliases are duplicated")
-                findings[identity_id] = {"id": identity_id, "aliases": sorted(aliases)}
-            found[identity] = findings
+            found[identity] = _osv_findings(entry.get("vulnerabilities", []))
     if set(found) != ancestors:
         raise ValueError("source-owned ancestor OSV identities are incomplete")
     return found
+
+
+def _query_identity(query: object) -> tuple[str, str]:
+    _keys(query, {"package", "version"}, "OSV query")
+    _keys(query["package"], {"ecosystem", "name"}, "OSV query package")
+    if query["package"]["ecosystem"] != "crates.io":
+        raise ValueError("source-owned OSV query ecosystem must be crates.io")
+    return (_text(query["package"]["name"], "OSV query name"),
+            _text(query["version"], "OSV query version"))
+
+
+def _query_time(value: object, evaluated_on: date) -> datetime:
+    stamp = datetime.fromisoformat(_text(value, "OSV query timestamp", 64))
+    if stamp.tzinfo is None or stamp.utcoffset() != timedelta(0) or stamp.date() > evaluated_on:
+        raise ValueError("source-owned OSV query timestamp is not UTC or follows evaluation")
+    return stamp
+
+
+def _raw_query_findings(payload: bytes) -> dict:
+    raw = _json(payload)
+    if (set(raw) - {"vulns", "next_page_token"}
+            or not isinstance(raw.get("next_page_token", ""), str)
+            or raw.get("next_page_token")):
+        raise ValueError("source-owned raw OSV query contains errors or incomplete pagination")
+    return _osv_findings(raw.get("vulns", []))
+
+
+def _query_receipt(receipt_id: str, records: dict, payloads: dict, used: set,
+                   evaluated_on: date) -> dict:
+    """Validate both retained direct-query receipt formats, including extra rows.
+
+    The receipt and its byte hashes are review-bound evidence, not a signature
+    from OSV. Only selected derivative identities enter inherited findings;
+    supplemental registry queries never substitute for the full registry audit.
+    """
+    receipt = _json(payloads[receipt_id])
+    is_records = "records" in receipt
+    _keys(receipt, ({"schema_version", "scope", "recorded_at_utc", "projection", "records"}
+                   if is_records else {"schema_version", "scope", "queries"}), "OSV receipt")
+    if type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1:
+        raise ValueError("source-owned OSV receipt schema is invalid")
+    _text(receipt["scope"], "OSV receipt scope", 2048)
+    paths = {entry["path"]: identity for identity, entry in records.items()}
+    parent = PurePosixPath(records[receipt_id]["path"]).parent
+
+    size_missing = object()
+
+    def evidence(relative, digest, size=size_missing, *, allow_osv=False):
+        path = _relative(str(parent / _relative(relative)))
+        identity = paths.get(path)
+        if identity is None:
+            raise ValueError("source-owned OSV receipt path is not retained evidence")
+        # A receipt can name the primary OSV projection or a retained copy.
+        # Raw responses and request bytes remain strictly kind=review.
+        kind = "osv" if allow_osv and records[identity]["kind"] == "osv" else "review"
+        _ref(identity, kind, records, used)
+        _digest(digest)
+        if records[identity]["sha256"] != digest:
+            raise ValueError("source-owned OSV receipt hash differs from raw evidence")
+        if size is not size_missing and (type(size) is not int or size != records[identity]["size"]):
+            raise ValueError("source-owned OSV receipt size differs from raw evidence")
+        return identity
+
+    found, completed = {}, []
+    for record in _list(receipt["records" if is_records else "queries"], "OSV receipt records", 3, nonempty=True):
+        common = {"method", "url", "http_status", "path", "sha256"}
+        _keys(record, common | ({"query", "size_bytes", "findings", "started_at_utc", "completed_at_utc"}
+              if is_records else {"request", "size", "advisories", "request_path", "request_sha256", "requested_at", "received_at"}),
+              "OSV receipt record")
+        query = record["query" if is_records else "request"]
+        identity = _query_identity(query)
+        if identity in found:
+            raise ValueError("source-owned OSV receipt query identities are duplicated")
+        if (record["method"] != "POST" or record["url"] != "https://api.osv.dev/v1/query"
+                or type(record["http_status"]) is not int or record["http_status"] != 200):
+            raise ValueError("source-owned OSV receipt request was not a successful official query")
+        start = _query_time(record["started_at_utc" if is_records else "requested_at"], evaluated_on)
+        end = _query_time(record["completed_at_utc" if is_records else "received_at"], evaluated_on)
+        if start > end:
+            raise ValueError("source-owned OSV query timestamps are reversed")
+        completed.append(end)
+        response_id = evidence(record["path"], record["sha256"], record["size_bytes" if is_records else "size"])
+        findings = _raw_query_findings(payloads[response_id])
+        claimed = [_text(v, "OSV receipt advisory ID", 160)
+                   for v in _list(record["findings" if is_records else "advisories"], "OSV receipt findings", MAX_FINDINGS)]
+        if len(claimed) != len(set(claimed)) or set(claimed) != set(findings):
+            raise ValueError("source-owned OSV receipt findings differ from raw response")
+        request_id = None
+        if not is_records:
+            request_id = evidence(record["request_path"], record["request_sha256"])
+            request = _json(payloads[request_id])
+            if _query_identity(request) != identity or request != query:
+                raise ValueError("source-owned OSV request bytes differ from receipt query")
+        found[identity] = {"response_evidence": response_id, "request_evidence": request_id, "findings": findings}
+    if is_records:
+        if _query_time(receipt["recorded_at_utc"], evaluated_on) < max(completed):
+            raise ValueError("source-owned OSV receipt predates its completed queries")
+        projection = receipt["projection"]
+        _keys(projection, {"path", "sha256", "size_bytes"}, "OSV receipt projection")
+        projection_id = evidence(projection["path"], projection["sha256"], projection["size_bytes"], allow_osv=True)
+        if _osv(payloads[projection_id], set(found)) != {key: value["findings"] for key, value in found.items()}:
+            raise ValueError("source-owned OSV receipt projection differs from raw responses")
+    return found
+
+
+def _query_bindings(review: dict, inherited: dict, records: dict, payloads: dict,
+                    used: set, evaluated_on: date) -> None:
+    selected, receipts = set(), {}
+    for query in _list(review["osv_queries"], "OSV query bindings", 3, nonempty=True):
+        _keys(query, {"name", "version", "response_evidence", "receipt_evidence", "request_evidence"}, "OSV query binding")
+        identity = (_text(query["name"], "OSV query name"), _text(query["version"], "OSV query version"))
+        if identity not in inherited or identity in selected:
+            raise ValueError("source-owned OSV query identities are duplicate or unexpected")
+        selected.add(identity)
+        response_id = _ref(query["response_evidence"], "review", records, used)
+        request_id = _ref(query["request_evidence"], "review", records, used) if query["request_evidence"] is not None else None
+        receipt_id = _ref(query["receipt_evidence"], "review", records, used)
+        if receipt_id not in receipts:
+            receipts[receipt_id] = _query_receipt(receipt_id, records, payloads, used, evaluated_on)
+        expected = {"response_evidence": response_id, "request_evidence": request_id, "findings": inherited[identity]}
+        if receipts[receipt_id].get(identity) != expected:
+            raise ValueError("source-owned OSV raw query/receipt differs from ancestor projection or binding")
+    if selected != set(inherited):
+        raise ValueError("source-owned OSV query binding coverage is incomplete")
+    for receipt in receipts.values():
+        for identity, row in receipt.items():
+            if identity in inherited and row["findings"] != inherited[identity]:
+                raise ValueError("source-owned OSV receipt contains contradictory ancestor findings")
 
 
 def _findings(values: object, expected: dict | None, records: dict, used: set) -> list[dict]:
@@ -322,19 +467,21 @@ def validate_source_owned_review(policy_entry: dict, *, sbom: dict, source_path:
     descriptors = {p["path"]: p for p in source["embedded_packages"]["packages"]}
     derivatives = {(p["provenance"]["name"], p["provenance"]["version"]): p for p in descriptors.values() if p["provenance"]["kind"] == "derivative"}
     used, ancestors = set(), set()
-    for ancestor in _list(review["ancestors"], "ancestors", 2, nonempty=True):
+    for ancestor in _list(review["ancestors"], "ancestors", 3, nonempty=True):
         _keys(ancestor, {"name", "version", "archive_evidence"}, "ancestor")
         identity = (_text(ancestor["name"], "ancestor name"), _text(ancestor["version"], "ancestor version"))
         if identity not in derivatives or identity in ancestors:
             raise ValueError("source-owned ancestor identities are duplicate/unexpected")
         ancestors.add(identity)
         _ancestor_archive(derivatives[identity], payloads[_ref(ancestor["archive_evidence"], "archive", records, used)])
-    if ancestors != set(derivatives) or len(ancestors) != 2:
+    if ancestors != set(derivatives):
         raise ValueError("source-owned ancestor coverage is incomplete")
     inherited = _osv(payloads[_ref(review["osv_evidence"], "osv", records, used)], ancestors)
+    if review["schema_version"] == 2:
+        _query_bindings(review, inherited, records, payloads, used, evaluated_on)
     packages = {}
     unresolved = affected = 0
-    for package in _list(review["packages"], "packages", 3, nonempty=True):
+    for package in _list(review["packages"], "packages", 4, nonempty=True):
         _keys(package, {"path", "source_review", "inherited_findings", "manual_findings"}, "package review")
         path = _text(package["path"], "package path")
         if path not in descriptors or path in packages:
@@ -366,7 +513,7 @@ def validate_source_owned_review(policy_entry: dict, *, sbom: dict, source_path:
     return {"schema_version": 1, "package_ids": sorted(p["SPDXID"] for p in expected_owned),
             "review_sha256": policy_entry["review_sha256"], "binding": binding,
             "packages": [packages[path] for path in sorted(packages)],
-            "summary": {"packages": 3, "unresolved": unresolved, "affected": affected},
+            "summary": {"packages": len(packages), "unresolved": unresolved, "affected": affected},
             "status": "fail" if unresolved or affected else "pass"}
 
 

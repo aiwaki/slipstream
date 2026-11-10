@@ -42,17 +42,19 @@ class SyntheticRunnerTests(unittest.TestCase):
         contract.pop("embedded_packages", None)
         self.contract.write_text(json.dumps(contract))
 
-    def orchestration(self, version="0.3.9", fault=None, *, rsa=False):
+    def orchestration(self, version="0.3.9", fault=None, *, rsa=False, sqlite=False):
         self.configure(version)
         self.commands = []
         self.command_timeouts = []
         expected = runner.ALLOWLIST.get(version, ())
         prepare = runner.geph_rsa_fixture.prepare
         if rsa:
-            self.configure_rsa()
+            self.configure_rsa(sqlite=sqlite)
             expected += runner.geph_rsa_fixture.RSA_TESTS
+            if sqlite:
+                expected += runner.geph_rsa_fixture.SQLITE_WRAPPER_TESTS
             prepare = lambda source, contract, root: self.original_prepare(
-                source, contract, root, fixtures=self.fixtures)
+                source, contract, root, fixtures=self.fixtures, sqlite_fixtures=self.sqlite_fixtures)
             if fault == "prepare-source":
                 (self.source / "src/auth.rs").write_text("unreviewed production content")
 
@@ -123,10 +125,17 @@ class SyntheticRunnerTests(unittest.TestCase):
                 probe.side_effect = runner.QualificationError("denial probe failed")
             return runner.qualify(self.source, self.contract, self.evidence)
 
-    def configure_rsa(self):
+    def configure_rsa(self, *, sqlite=False):
         contract = json.loads(self.contract.read_text())
         contract["embedded_packages"] = json.loads(
             (ROOT / "vendor/geph/SOURCE.json").read_text())["embedded_packages"]
+        # Keep r4 coverage explicit after the production contract moves to r5.
+        contract["embedded_packages"]["packages"] = [
+            p for p in contract["embedded_packages"]["packages"]
+            if p["path"] != runner.geph_rsa_fixture.SQLX_SQLITE_PATH]
+        if sqlite:
+            from test_geph_embedded_source import sqlx_package
+            contract["embedded_packages"]["packages"].append(sqlx_package())
         self.contract.write_text(json.dumps(contract))
         for name in ("auth", "bw_token"):
             (self.source / f"src/{name}.rs").write_text("// current production body\n")
@@ -142,6 +151,19 @@ class SyntheticRunnerTests(unittest.TestCase):
                        lock_sha256=runner.digest(self.source / "Cargo.lock"),
                        production_files=runner.geph_rsa_fixture.snapshot(self.source))
         catalog_path.write_text(json.dumps(catalog))
+        self.sqlite_fixtures = self.root / "sqlite-fixtures"
+        if self.sqlite_fixtures.exists():
+            shutil.rmtree(self.sqlite_fixtures)
+        self.sqlite_fixtures.mkdir()
+        if sqlite:
+            shutil.copyfile(runner.geph_rsa_fixture.SQLITE_FIXTURES / "sqlite_wrapper_tests.rs",
+                            self.sqlite_fixtures / "sqlite_wrapper_tests.rs")
+            binding = {"schema_version": 1, "source_sha256": runner.digest(self.contract),
+                       "lock_sha256": runner.digest(self.source / "Cargo.lock"),
+                       "production_files": runner.geph_rsa_fixture.snapshot(self.source),
+                       "rsa_catalog_sha256": runner.digest(catalog_path),
+                       "fixture_files": {"sqlite_wrapper_tests.rs": runner.digest(self.sqlite_fixtures / "sqlite_wrapper_tests.rs")}}
+            (self.sqlite_fixtures / "closure.json").write_text(json.dumps(binding))
         self.original_prepare = runner.geph_rsa_fixture.prepare
 
     def test_rsa_current_copy_and_separate_oracle_run_exact_thirty_cases(self):
@@ -157,6 +179,66 @@ class SyntheticRunnerTests(unittest.TestCase):
         self.assertNotEqual(Path(builds[1][builds[1].index("--manifest-path") + 1]).parent, self.source)
         self.assertNotIn("composition_refresh", (self.source / "src/auth.rs").read_text())
         self.assertFalse(self.built_source.exists(), "temporary test tree must be removed")
+
+    def test_sqlite_derivative_runs_thirty_three_in_same_existing_build(self):
+        result = self.orchestration("0.4.3", rsa=True, sqlite=True)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(len(result["expected_tests"]), 33)
+        self.assertEqual(result["passed_tests"], result["expected_tests"])
+        self.assertEqual(result["expected_tests"][-3:], list(runner.geph_rsa_fixture.SQLITE_WRAPPER_TESTS))
+        self.assertTrue(result["rsa_fixture"]["production_unchanged"])
+        self.assertEqual([command[1] for command in self.commands if command[0] == "cargo"], ["build", "test"])
+        self.assertIn("src/sqlite_wrapper_tests.rs", result["rsa_fixture"]["test_copy_files"])
+        self.assertNotIn("src/sqlite_wrapper_tests.rs", result["rsa_fixture"]["production_files"])
+        self.assertEqual(result["rsa_fixture"]["catalog_sha256"], runner.digest(self.sqlite_fixtures / "closure.json"))
+        self.evidence = self.root / "sqlite-missing-case"
+        with self.assertRaises(runner.QualificationError):
+            self.orchestration("0.4.3", fault="missing-case", rsa=True, sqlite=True)
+
+    def test_sqlite_closure_rejects_stale_identity_fixture_and_changed_rsa_catalog(self):
+        for fault in ("source", "lock", "rsa", "missing", "extra", "bytes", "allowlist"):
+            with self.subTest(fault=fault):
+                self.configure("0.4.3")
+                self.configure_rsa(sqlite=True)
+                closure_path = self.sqlite_fixtures / "closure.json"
+                closure = json.loads(closure_path.read_text())
+                if fault in {"source", "lock"}:
+                    closure[f"{fault}_sha256"] = "0" * 64
+                elif fault == "rsa":
+                    (self.fixtures / "closure.json").write_text((self.fixtures / "closure.json").read_text() + " ")
+                elif fault == "extra":
+                    (self.sqlite_fixtures / "unexpected.rs").write_text("not reviewed")
+                else:
+                    module = self.sqlite_fixtures / "sqlite_wrapper_tests.rs"
+                    if fault == "missing":
+                        module.unlink()
+                    elif fault == "bytes":
+                        module.write_text(module.read_text() + "\n// not reviewed\n")
+                    else:
+                        module.write_text(module.read_text().replace("failed_cache_write_releases_worker_for_next_request", "not_allowlisted"))
+                        closure["fixture_files"][module.name] = runner.digest(module)
+                closure_path.write_text(json.dumps(closure))
+                with self.assertRaises((ValueError, OSError)):
+                    self.original_prepare(self.source, self.contract, self.root / ("sqlite-reject-" + fault),
+                                          fixtures=self.fixtures, sqlite_fixtures=self.sqlite_fixtures)
+
+    def test_sqlite_fixture_change_between_inventory_and_read_is_rejected(self):
+        self.configure("0.4.3")
+        self.configure_rsa(sqlite=True)
+        original_read = runner.geph_rsa_fixture._read
+        reads = 0
+        def changed_read(path):
+            nonlocal reads
+            data = original_read(path)
+            if path == self.sqlite_fixtures / "sqlite_wrapper_tests.rs":
+                reads += 1
+                if reads == 2:
+                    return data + b"\n// changed after inventory\n"
+            return data
+        with mock.patch.object(runner.geph_rsa_fixture, "_read", side_effect=changed_read):
+            with self.assertRaisesRegex(ValueError, "changed while reading"):
+                self.original_prepare(self.source, self.contract, self.root / "sqlite-raced",
+                                      fixtures=self.fixtures, sqlite_fixtures=self.sqlite_fixtures)
 
     def test_rsa_compilers_share_the_existing_deadline(self):
         with mock.patch.object(runner.time, "monotonic", side_effect=[10, 20, 35]):
@@ -235,7 +317,8 @@ class SyntheticRunnerTests(unittest.TestCase):
         _, names = runner.reviewed_tests(self.source, self.contract)
         self.assertIn("rsa_composition_tests::auth_wrong_level_uses_fresh_blind_and_request_selected_free_root", names)
         self.assertIn("rsa_composition_tests::auth_current_next_epoch_configured_root_and_exact_legacy_sqlite_roundtrip", names)
-        self.assertEqual(len(names), 30)
+        expected_count = 33 if runner.geph_rsa_fixture.has_sqlite_derivative(source) else 30
+        self.assertEqual(len(names), expected_count)
 
     def test_workflow_never_executes_unfiltered_libtest(self):
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text()

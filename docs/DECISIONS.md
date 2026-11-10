@@ -1,5 +1,40 @@
 # Decisions
 
+### 2026-11-10: repair bundled SQLite without opening the native SQLite lane
+
+Geph 0.4.3-r5 keeps the existing SQLx0.8.6 runtime and adds one exact local
+manifest derivative of sqlx-sqlite0.8.6. All51 Rust files and both original
+MIT/Apache license notices must match its canonical crates.io archive. The only
+manifest changes select registry libsqlite3-sys=0.39.1, explicitly enable
+column_metadata, and disable publication. SQLite3.54.1 contains the fix for
+CVE-2026-119375. No assumption about an attacker being unable to modify the
+private DB/WAL substitutes for that code fix. No advisory exception is added.
+
+The source and SPDX contracts accept either the unchanged historical three-package
+closure or exactly those three plus this driver. The official wrapper remains a
+registry component subject to the complete audit. Source review binds the third
+ancestor, exact source/lock/files, actual fix/positive-control evidence and its
+existing December10 expiry. The native SQLite lane remains disabled; the October31
+separation decision continues to apply. No old PR384 implementation is imported.
+
+New source-owned reviews use schema2 with explicit ancestor query, raw-response
+and receipt references. Admission checks the official endpoint/status, exact
+query coordinates, response size/hash/path, optional retained request bytes and
+lossless advisory ID/alias equality with the ancestor projection. Missing,
+malformed, errored or paginated evidence fails closed. Nonempty results require
+the existing explicit inherited finding dispositions; they are not discarded.
+Schema1 survives only for the exact published r4 policy/review binding and its
+original November7 expiry, so it cannot be used to downgrade fresh admission.
+
+The PR-only bootstrap admits only the complete pinned source/tooling/review delta.
+It still runs product checks and both dependency audits. Main must build and attest
+the new immutable Geph revision before ordinary app packaging and qualification.
+The same producer test build retains thirty cases and adds three exact-engine,
+cache/WAL, transaction and error-recovery cases. Historical r4 verification remains
+valid for its recorded evaluation date. No route, system DNS/proxy/PF, external
+Geph, app update transaction or workstation state changes are authorized by this
+source repair alone.
+
 ### 2026-11-06: owner-authorized renewal of the account-backed CI budget
 
 The owner explicitly requested a forced budget renewal after today's three

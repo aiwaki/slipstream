@@ -30,6 +30,7 @@ on:
       - "scripts/run_geph_synthetic_tests.py"
       - "scripts/geph_rsa_fixture.py"
       - "scripts/fixtures/geph-rsa-auth/**"
+      - "scripts/fixtures/geph-sqlite-engine/**"
       - "scripts/make_geph_vendor_sbom.py"
       - "security/geph-dependency-audit-policy.json"
       - "vendor/geph/**"

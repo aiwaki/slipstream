@@ -1,35 +1,211 @@
 # Current Project State
 
-## Current continuation — 2026-11-07, packaged Chrome startup evidence
+## Current continuation — 2026-11-10, r5 SQLite and OSV evidence repair
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/browser-startup-evidence-20261107`; base/main
-`a9fdac98f0d07e953770097be08fe4fddc0d1f65`. Live GitHub reconciled: main unchanged,
-CI42221917459/1 terminal failure, audit42221917506/1 success; no duplicate PR for
-this work. Previous goal turn made progress (budget PR merged, new CI failure
-preserved); this continuation is diagnosing that failure, not repeating a wait.
-The dated Nov6 allowance expired; normal three/day account-backed policy applies.
+Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
+84438bcbecec00188e67e92058a776e17a99c3a8; main/base remains
+1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is committed and pushed; fresh exact-head CI/audit running. No workstation app/service/
+network changes or app downloads. Active goal remains incomplete.
 
-Working patch: disposable-CI-only Chrome startup summary from existing readiness
-observations, with child status sampled only after cleanup captures owned groups
-and before TERM. Exact bounded Python sanitizer retains the summary; private raw
-output remains redacted. Deadline, route/ownership decisions, cleanup precedence
-and browser/release acceptance are unchanged. This fixes lost failure evidence;
-it does not yet establish or repair the original Chrome/Safari failure cause.
+The original refreshed review passed, but audit42842890479 failed for bundled
+libsqlite3-sys0.30.1 CVE-2026-119375/RUSTSEC-2026-0459/GHSA-72w2-rjgg-q729.
+The repair selects official libsqlite3-sys0.39.1/SQLite3.54.1 through an exact
+sqlx-sqlite0.8.6 manifest derivative. All51 Rust files are unchanged; exactly two
+lock records change,488 others stay. Native SQLite remains disabled; no exception.
+SOURCE1fdd3e49418c7a47e06e092dbac411cb8c41022e6688b7115a071bd89c81f9c8;
+lock2d017b845167e97d0a2178acc589851aeffa2269809fca8c63de0d0c925d4143.
+Geph0.4.3-r5 is not built/published yet; r4 remains immutable. Producer extends
+its existing30 synthetic cases with3 SQLite cases in the same build.
+
+Evidence S=output/continuation-20261110/sqlite-repair;
+A=output/continuation-20261110/source-review-refresh/pr476-r5.
+Reuse the unchanged287 affected-area tests, both macOS locked metadata graphs,
+3 isolated SQLx cases and6 old/new engine cases each. The old engine reproduces
+the disclosed defect; fixed engine zeroes the tail. Peak spike RSS167MB. This is
+not evidence that SQLite caused the user's network symptoms or a compiled-Geph claim.
+
+For pushed8b933fb1, CI42853411066/1 and audit42853411197/1 both passed. Watcher
+receiptffff603ee19c3d9c50d0c1e0c2f41e11b239e259e954b2439d8dce6c3cf67e75.
+Geph artifact13780224091 authenticated; canonical report/SPDX/source checks and
+raw OSV recomputation passed:407scanned+4owned, blocking/exceptions/affected/
+unresolved=0, informational4. Receipt1a85517285e5e02a0ae85f29f8be87eb616bcc7542f32a735b27291c9cd52393.
+PR merge2cbc4e1b has the same treeb44da550 ashead8b933fb1. Packaged app jobs
+intentionally skipped under exact PR-only source bootstrap; no candidate claim.
+
+Real PR review PRRT_kwDOTLueX861wvKZ found that hashed raw ancestor OSV evidence
+could contradict the separately admitted projection. Synthetic RED confirmed it;
+current production raw responses were empty and consistent. Schema2 now requires
+explicit raw/receipt/request bindings, exact official query coordinates and HTTP
+success, strict paths/hashes/sizes/timestamps, complete IDs/aliases and inherited
+dispositions. Cross-receipt contradictions and null required sizes reject. Only
+the exact historical r4 schema1 binding survives, with original Nov7 expiry.
+Two subprocess scanner comments were independently reviewed as false positives
+and resolved: fixed argv/path/version, shell disabled; no external command input.
+Details and evidence paths are in ROUTING_RESEARCH and A/osv-query-regression.
+
+Verification:72 affected consumer tests,24 raw-query tests,2 additional projection/
+cross-receipt regressions and34 scope/transition tests passed. Each discovered
+semantic defect has RED evidence. Final actual SOURCE/metadata -> SPDX -> review ->
+canonical pack/unpack passed with109 existing payloads unchanged and expired-review
+rejection. Exact historical r4 accepts Nov7 and rejects Nov10 or extended expiry.
+Final local receipt S/osv-final-local-receipt.json; roundtrip in
+S/actual-review-verification-queries-sentinel/result.json. No broad suite repeated.
+Review9e9c629f87efd1f9e19fddbafa6bc32a6c3b1bdf5b8913cc4fc86a63bd5b8eb4;
+canonical policy2d1f4f4e70d4a7a354d5f5d22fc00552e0a61067d1131ea286d30df0e8d4eef0.
+Final frozen bootstrap64 files/72 changed, SHA
+29fec216a78c57c7bfa9cf19c873e965c16cfcc4f4703719db4d8fdc39afa272.
+
+Committed Git delta proof passed:64 mapped files/72 changed, PR bootstrap=true,
+main bootstrap=false, missing bytes rejected, full diff check passed. Receipt
+5453498a594b024a92e1d5a4361a3c874401cbe70400352910291a683313ccd8
+in S/actual-git-delta-schema2.json. New exact runs: CI42860064822/1 and
+audit42860064809/1; watcher and metadata under
+output/continuation-20261110/source-review-refresh/pr476-schema2.
+New audit42860064809/1 passed and artifact13784417328 was authenticated.
+Canonical report/SPDX and raw-OSV recomputation passed with schema2; blocking/
+exceptions/affected/unresolved0. Receiptc4dcbebeece876faa67cbaefb7745d03013a768d7aaecfca9aaa5b3765c8a0cb,
+root rechecked tracked/evidence/report hashes. CI chromium-webrequest-contract job129983590163 failed its browser observation
+step; all product-checks passed. Final watcher ended1 with receipt
+bd8fc84c22b435397cf2d840ea789439d8b70324c2e2d9599ddd528ec124f8c5. Failure investigation is in
+pr476-schema2/chromium-failure. No rerun or merge. Exact failure: initial LaunchAgent PID observed UID0 instead
+of501; page observation never began. The harness is unchanged from the preceding
+green run and samples UID once; production already handles the documented
+xpcproxy/root-to-console transition. This single failed sample cannot distinguish
+a transient from persistent root. The disposable launcher now waits only for exact target/command pre-exec or
+root-to-console transition inside the original10s deadline, requires final
+non-root UID/command and unchanged PID, and rejects late admission. First-job
+state/PID fields cannot be overwritten by nested coalition fields. Startup and
+deadline RED evidence is retained;83 affected Chromium tests and11 subsequent
+bootstrap tests passed. One parser regression (two subcases) also passed after recorded RED.
+Final frozen map66 files/74 changed, SHA
+6c0321fa6ca8bbbd459b411153855e83ae33ea5ad7a18504778d5aa66fecffbb.
+34 scope/transition tests passed; root readback and independent review agree.
+The addressed raw-OSV review was resolved after pushed/real-audit verification.
+Launcher fix committed/pushed as272a9006b7beb8bcc9f207d5888eb42d0709a795.
+Actual Git delta verified66 mapped/74 changed, PR-only bootstrap and mandatory
+product checks; receipt130366a87577254f31773c89c152137d27ec9a159c49b05b2da59d8f234ddd6e.
+New exact automatic CI42865472926/1 and audit42865472658/1;
+observer/evidence under pr476-launcher.
+CI42865472926/1 ended failure only for Chromium and its aggregate checks;
+product-checks passed. Watcher10786 ended1, receipt
+e8180573ac9ed726bbd79b3846b225958e9ea8735db8c954b0fa6f8b48f94a71.
+Audit42865472658/1 authenticated PASS, artifact13787690804; receipt
+264d64bd68121e852c0f75fe7a0f5b012abf147e0bf973edd9733c687c2d3637.
+Chromium job130002668089 failed again before observation, nowwith state=xpcproxy,
+UID501, expected_command=false,pre_exec=false. The assumed xpcproxy argv shape
+was unproven. Actual argv was not retained. Diagnosis68577570021d004107cf0b18cdd394c847444061248c86ad770fc431b84795ef.
+The correction now follows the existing production phase contract: xpcproxy
+with exact target/PID and root/expected UID only waits; it never qualifies,
+even with an apparently final command. Exact command/UID/same PID/deadline are
+required after the phase.11 focused regression tests passed after RED; root
+reviewed the two-file diff.34 scope/transition checks passed, final map66/74 SHA
+7a452fb553fbdb9c67466452eb853cd2a3b3e6919cdd67f4ee87ef4c21e3ca15.
+Phase fix committed/pushed df64b6e62932cd84e3ca008157f5b795b552ddbd; actual Git delta
+66/74 verified, receipt78475aea9ca975209be58ede4fecdadc3ca40dc2d4851fb61320188c66a74a43.
+New exact runs CI42867899775/1 and audit42867899682/1.
+Observer/evidence: pr476-preexec.
+Audit42867899682/1 authenticated PASS, artifact13788810463; root verified receipt
+05b3f1a3e9172ce93e3e02b08948c0f3bd84e7466c270184e2fffaf46a7e75f1 and file pins.
+Chromium job130011813167 failed before observation: running/PID1512/UID501, but
+expected_command=false. The actual command is absent; the mismatch cause is not
+proven. Diagnosis4a33f00a8cd1ebb4954de1dae520cefa4f98109d391c51264b40bb37bfbeb42e
+is in pr476-preexec/chromium-failure. The previous green baseline had no full
+command-equality guard; it does not validate this new guard. No blind retry.
+Bounded mismatch diagnostics now retain lengths/hashes/first mismatch, safe argv0
+category, diagnostic-only rendered-command comparisons and one fresh exact-target
+snapshot. No arbitrary argv or exception text is exposed; admission unchanged.
+15 focused tests passed after RED;34 scope/transition tests passed with PYTHONPATH=
+scripts (initial missing-PYTHONPATH import failure retained separately). Frozen
+map66/74 SHAe8d4553b233b70f18df7dfc8f6fe7a2d8a99388a30c7edd867d811ba4329fa97.
+Diagnostic follow-up committed/pushed84438bcbecec00188e67e92058a776e17a99c3a8.
+Actual delta66/74 proof6bac77358052cb0476e2e40ce809df9b8d3ac16458a3de59b4b7a819683e200e.
+Previous CI42867899775 ended failure only for Chromium and aggregate; product
+checks passed. Watcherreceipt2225d1ad6ba8fd2e942e60f7eb07aa9cdc9d4cac596fb5e425ce3f78fe33816e.
+New automatic CI42870072229/1 and audit42870072078/1; observer/evidence under
+pr476-command-diagnostic. No workflow rerun.
+Audit42870072078/1 authenticated PASS (artifact13788134762), root-rechecked
+receipt8b05a31bb62670eb34e1419cd2125930705da91121fcf356b6c42937fa9a1a99.
+Chromium job130018746723 now retains actual mismatch shape: same running PID1607,
+UID501, argv0 fullopen, expected893 vs observed571 chars, firstdiff342. The exact
+mechanism shortening argv is not proven; diagnosis751627d938d7afec295a5f1634f4f38313221596d91a5da6cdc877f3fc2e2344.
+An isolated native C child confirmed argv can change while kernel executable
+identity remains exact; result under pr476-command-diagnostic/native-identity.
+Child exited; no browser/launchd/app/network mutation. SDK and Apple XNU bind
+proc_pidpath to executable vnode, and public_update_ax already uses this API.
+Implemented exact kernel-path /usr/bin/open identity; private plist, target/
+PID/UID, deadline and downstream Chrome/profile checks unchanged. New helper
+requires a bounded successful native result with exact NUL length, UTF-8 absolute
+path; unavailable/malformed/truncated results fail closed. Independent review
+found no blocker.21 focused tests and all87 affected module tests passed after
+RED; root verified the actual helper against only its native child.34 scope/
+transition checks passed; map66/74 SHAa71cd54bf10dbc250f74fff452f333bb2bb50e4ed51d34f5851aed42e511bc77.
+NEXT: push the kernel-identity correction and require actual Chromium PASS,
+exact CI/audit and live PR checks before guarded merge. No specific open-argv
+mutation mechanism or product networking repair claimed.
+After merge observe the existing main Geph producer; S/producer-r5 is prepared
+with fresh file pins and PENDING run/source guards. Require33 synthetic cases,
+universal binary, audit and immutable r5 assets/attestations before app CI.
+Then require exact app candidate/R/G/P and ordinary update/rollback. Historical
+R42367078722/1 (86 checks,4 sites/8 observations,1800.146s soak) and G42367845720/1
+(75 checks) belong to source1edbe80c, not the new candidate. No P or .35 publication.
+Preserve .31/settings/learning/external Geph. The Nov5 local window is expired;
+no new local update is authorized by this source repair. Normal protected CI
+budget remains3 per UTC day; the Nov6 exception expired.
+
+## Previous checkpoint — 2026-11-07, Chrome startup evidence merged
+
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Branch `codex/browser-startup-evidence-release`; HEAD/main
+`1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5`, tree
+`7bbacd913cc619b8f9d5fe3ec2b8edc371dd0a32`, merged PR475. Exact guarded squash
+matches the PR-tested tree. This goal turn made progress: retained bounded startup
+evidence, passed local and packaged checks, merged. No original Chrome/Safari
+cause is claimed fixed, and no workstation app/service/network change occurred.
 
 B=output/continuation-20261107/browser-start-evidence. B/local-evidence.json binds
-initial RED, 144 Python tests plus8 subtests, independent review and source hashes.
-31 Rust browser-worker tests pass with command-local empty Tauri resources for
-unit testing only. Initial ordinary cargo invocation stopped at missing sidecar
-before tests; no app was built/installed or network/service setting changed.
-Focused Clippy with warnings denied, eight docs tests, continuity and whitespace
-checks pass. Earlier unchanged runtime suites are reused. New-source CI is pending.
+initial RED, 144 Python tests plus8 subtests, 31 Rust browser-worker unit tests,
+Clippy with warnings denied, eight docs tests, continuity and independent review.
+Unit commands used empty Tauri resource lists only to avoid a missing sidecar;
+packaging was separately qualified on CI. No original deadlines, ownership,
+routing or browser/release acceptance changed. Detailed scope is in ROUTING_RESEARCH.
 
-NEXT: submit the diagnostic PR, review exact CI
-and merge only with required checks. Then verify a fresh consistently bound main
-candidate before one new readiness R. Do not run stale Nov6 helper pins, rerun
-failed protected attempts, lower criteria or claim release readiness from unit
-checks. Record actual startup observations if the packaged gate fails again.
+PR475 CI42364569190/1 and audit42364569121/1 passed; the packaged browser failure
+did not recur. B/pr475 contains complete run/job evidence, pre-merge and merge proof.
+Its observer24722 ended0; do not repeat it. Main CI42365774666/1 and
+audit42365774651/1 pass; observer7569 ended0. All12 common consumers and4 audit
+jobs are verified. Candidate artifact13571253899, manifest SHA
+2496328f64999b4ee861c7b1dd0b3efd4cbf59da60fd4184911c15df434b426d.
+B/main-ci/candidate-receipt.json SHA
+38b98460e51e6b8b6f599ca6389df36c952115d3db90841c7f2c0e7f650e84f7
+binds exact-main producer metadata, not local app bytes. No app downloaded. Do not dispatch duplicate CI or retry old
+failed protected runs. Source/candidate/run identity must remain consistent.
+
+Fresh UTC Nov7 budget inventory at10:37 found zero account-backed runs today,
+no active protected run; normal limit3 applies. The dispatcher will recheck
+immediately before its single POST. B/qualification holds repinned helpers,
+independent review and12 offline guard simulations (all passed; no dispatch).
+The Nov6 allowance/helpers are expired. R42367078722/1 is submitted once at
+normal Nov7 budget position1 of3. Its canonical live report passed all8 browser
+observations on4 sites; xpersonatoy Safari6013ms/Chrome3071ms. The 1800s measured
+background soak is running. Its four small diagnostic members are ZIP-digest
+verified; B/qualification/readiness-r/live-intermediate-verification.json is
+partial evidence only, not final R acceptance. Exact source/candidate matched.
+B/qualification/readiness-r holds intent, preflight, initial metadata and observer;
+G42367845720/1 is also running once during R soak, after canonical live PASS.
+This native root update workflow has no R/account-backed prerequisite and uses
+separate hosted Macs; P still requires accepted matching G. B/qualification/native-g
+contains exact .34 OLD/.35 NEW pins and atomic dispatch intent. No .35 publication
+or local installation. Existing .31/settings/learning and
+external Geph remain untouched.
+
+NEXT: observe existing R42367078722/1 and G42367845720/1, no duplicate/rerun.
+Accept G only through its exact two-case collector/verifier, then one matching P. If it fails,
+authenticate its bounded failure reports before changing code. If successful,
+collect/verify the six small proof subjects and qualify new-source G/P.
+R final acceptance intentionally waits for accepted matching G materialization. Use the
+new Safari/Geph failure hints if it fails. Keep criteria and first-attempt rules;
+new-source G/P and proof verification remain required before publication.
 
 ## Previous checkpoint — 2026-11-06, budget renewed; CI browser startup blocked
 

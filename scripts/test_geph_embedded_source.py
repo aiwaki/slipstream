@@ -30,6 +30,41 @@ def bind(package: dict) -> None:
     ).encode())
 
 
+def sqlx_package() -> dict:
+    """Tiny synthetic runtime, real registry manifest/notices; not release proof."""
+    spec = source.SQLX_SQLITE_SPEC
+    fixture = Path(__file__).parent / "fixtures/sqlx-sqlite-0.8.6"
+    original = (fixture / "Cargo.toml").read_text()
+    manifest = original.replace('[package]\n', '[package]\npublish = false\n')
+    manifest = manifest.replace('version = "0.30.1"', 'version = "=0.39.1"')
+    manifest = manifest.replace('    "unlock_notify",', '    "unlock_notify",\n    "column_metadata",')
+    files = {name: f"// synthetic SQLx test module: {name}\n" for name in spec["sources"]}
+    files.update({name: (fixture / name).read_text() for name in spec["notices"]})
+    originals = {name: digest(content.encode()) for name, content in files.items()}
+    originals["Cargo.toml"] = digest(original.encode())
+    files.update({"Cargo.toml": manifest, "provenance/Cargo.toml": original,
+                  "SOURCE-NOTICE.md": "Synthetic test derivative; runtime is not upstream SQLx.\n"})
+    package = {"path": source.SQLX_SQLITE_PATH,
+               **{key: spec[key] for key in ("name", "version", "license")},
+               "provenance": {"kind": "derivative", "name": spec["name"], "version": spec["version"],
+                              "url": source.CRATE_URL.format(name=spec["name"], version=spec["version"]),
+                              "sha256": spec["upstream_sha256"], "original_files": originals},
+               "files": [{"path": name, "content": text} for name, text in sorted(files.items())]}
+    bind(package)
+    return package
+
+
+def add_sqlx(fixture) -> dict:
+    package = sqlx_package()
+    fixture.contract["embedded_packages"]["packages"].append(package)
+    fixture.manifest += ('[patch.crates-io.sqlx-sqlite]\n'
+                         'path = "slipstream-vendor/sqlx-sqlite"\n')
+    fixture.make_archive()
+    fixture.contract["crate"]["sha256"] = digest(fixture.crate_path.read_bytes())
+    fixture.save()
+    return package
+
+
 class EmbeddedGephSourceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -458,6 +493,115 @@ class EmbeddedGephSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already exists"):
             source.extract_crate(crate_path=self.crate_path, version="0.4.3", output=self.root / "private")
         self.assertEqual((extracted / "Cargo.toml").read_text(), "keep sentinel")
+
+
+class SqlxEmbeddedSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = EmbeddedGephSourceTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.package = add_sqlx(self.fixture)
+
+    def test_four_package_materialization_preserves_exact_sqlx_files(self):
+        root = self.fixture.materialize()
+        self.assertEqual(len(source.embedded_package_specs(self.fixture.contract["embedded_packages"])), 4)
+        self.assertEqual(len(source.SQLX_SQLITE_SPEC["sources"]), 51)
+        self.assertEqual(len(self.package["files"]), 56)
+        self.assertEqual(len(self.package["provenance"]["original_files"]), 54)
+        for entry in self.package["files"]:
+            self.assertEqual((root / self.package["path"] / entry["path"]).read_bytes(), entry["content"].encode())
+
+    def test_exact_original_manifest_and_only_three_reviewed_changes_are_allowed(self):
+        original = copy.deepcopy(self.package)
+        mutations = (
+            lambda p: self.fixture.entry(p, "provenance/Cargo.toml").update(content='[package]\nname="sqlx-sqlite"\n'),
+            lambda p: self.fixture.entry(p, "Cargo.toml").update(content=self.fixture.entry(p, "Cargo.toml")["content"].replace('=0.39.1', '^0.39.1')),
+            lambda p: self.fixture.entry(p, "Cargo.toml").update(content=self.fixture.entry(p, "Cargo.toml")["content"].replace('publish = false', 'publish = true')),
+            lambda p: self.fixture.entry(p, "Cargo.toml").update(content=self.fixture.entry(p, "Cargo.toml")["content"].replace('    "column_metadata",\n', '')),
+            lambda p: self.fixture.entry(p, "Cargo.toml").update(content=self.fixture.entry(p, "Cargo.toml")["content"] + '\n[build-dependencies]\nnew-code="1"\n'),
+            lambda p: self.fixture.entry(p, "Cargo.toml").update(content=self.fixture.entry(p, "Cargo.toml")["content"].replace('[package]\n', '[package]\nbuild="build.rs"\n')),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                package = copy.deepcopy(original)
+                mutate(package)
+                bind(package)
+                self.fixture.contract["embedded_packages"]["packages"][-1] = package
+                self.fixture.save()
+                with self.assertRaisesRegex(ValueError, "SQLx"):
+                    source.load_source_contract(self.fixture.contract_path)
+
+    def test_changed_runtime_license_or_archive_fails_after_descriptor_rebinding(self):
+        original = copy.deepcopy(self.package)
+        for name in ("src/lib.rs", "LICENSE-MIT", "LICENSE-APACHE"):
+            with self.subTest(name=name):
+                package = copy.deepcopy(original)
+                self.fixture.entry(package, name)["content"] += "tampered\n"
+                bind(package)
+                self.fixture.contract["embedded_packages"]["packages"][-1] = package
+                self.fixture.save()
+                with self.assertRaises(ValueError):
+                    source.load_source_contract(self.fixture.contract_path)
+        package = copy.deepcopy(original)
+        package["provenance"]["sha256"] = "a" * 64
+        bind(package)
+        self.fixture.contract["embedded_packages"]["packages"][-1] = package
+        self.fixture.save()
+        with self.assertRaisesRegex(ValueError, "upstream identity"):
+            source.load_source_contract(self.fixture.contract_path)
+
+    def test_sqlx_file_closure_and_original_notices_are_required(self):
+        original = copy.deepcopy(self.package)
+        for name in ("src/connection/worker.rs", "LICENSE-MIT", "LICENSE-APACHE", "provenance/Cargo.toml"):
+            with self.subTest(name=name):
+                package = copy.deepcopy(original)
+                package["files"].remove(self.fixture.entry(package, name))
+                bind(package)
+                self.fixture.contract["embedded_packages"]["packages"][-1] = package
+                self.fixture.save()
+                with self.assertRaisesRegex(ValueError, "file set"):
+                    source.load_source_contract(self.fixture.contract_path)
+        for name in ("build.rs", ".cargo/config.toml", "src/extra.rs"):
+            package = copy.deepcopy(original)
+            package["files"].append({"path": name, "content": "injected"})
+            bind(package)
+            self.fixture.contract["embedded_packages"]["packages"][-1] = package
+            self.fixture.save()
+            with self.assertRaisesRegex(ValueError, "file set"):
+                source.load_source_contract(self.fixture.contract_path)
+        package = copy.deepcopy(original)
+        del package["provenance"]["original_files"]["LICENSE-MIT"]
+        bind(package)
+        self.fixture.contract["embedded_packages"]["packages"][-1] = package
+        self.fixture.save()
+        with self.assertRaisesRegex(ValueError, "original source file set"):
+            source.load_source_contract(self.fixture.contract_path)
+
+    def test_fourth_package_cannot_replace_an_original_or_authorize_a_fifth(self):
+        original = copy.deepcopy(self.fixture.contract)
+        for mutation in (lambda ps: ps.pop(0), lambda ps: ps.append(copy.deepcopy(ps[-1]))):
+            self.fixture.contract = copy.deepcopy(original)
+            mutation(self.fixture.contract["embedded_packages"]["packages"])
+            self.fixture.save()
+            with self.assertRaises(ValueError):
+                source.load_source_contract(self.fixture.contract_path)
+
+    def test_root_sqlx_edge_is_required_only_with_matching_fourth_descriptor(self):
+        self.fixture.manifest = self.fixture.manifest.split('[patch.crates-io.sqlx-sqlite]')[0]
+        self.fixture.make_archive()
+        self.fixture.contract["crate"]["sha256"] = digest(self.fixture.crate_path.read_bytes())
+        self.fixture.save()
+        with self.assertRaisesRegex(ValueError, "reviewed embedded"):
+            self.fixture.materialize("missing-edge")
+        self.fixture.contract["embedded_packages"]["packages"].pop()
+        self.fixture.save()
+        self.assertTrue(self.fixture.materialize("legacy").is_dir())
+        self.fixture.manifest += '[patch.crates-io.sqlx-sqlite]\npath="slipstream-vendor/sqlx-sqlite"\n'
+        self.fixture.make_archive()
+        self.fixture.contract["crate"]["sha256"] = digest(self.fixture.crate_path.read_bytes())
+        self.fixture.save()
+        with self.assertRaisesRegex(ValueError, "reviewed embedded"):
+            self.fixture.materialize("extra-edge")
 
 
 if __name__ == "__main__":

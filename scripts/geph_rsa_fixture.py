@@ -7,8 +7,15 @@ from pathlib import Path
 import re
 import shutil
 import stat
+from geph_vendor_source import SQLX_SQLITE_PATH, embedded_package_specs
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/geph-rsa-auth"
+SQLITE_FIXTURES = Path(__file__).resolve().parent / "fixtures/geph-sqlite-engine"
+SQLITE_WRAPPER_TESTS = tuple("sqlite_wrapper_tests::" + name for name in (
+    "fixed_engine_identity_and_actual_cache_wal_roundtrip",
+    "transaction_rollback_commit_and_column_metadata",
+    "failed_cache_write_releases_worker_for_next_request",
+))
 RSA_TESTS = tuple("rsa_composition_tests::" + name for name in (
     "actual_auth_and_bandwidth_futures_are_send",
     "auth_current_next_epoch_configured_root_and_exact_legacy_sqlite_roundtrip",
@@ -62,22 +69,38 @@ def assert_unchanged(source: Path, expected: dict[str, str]) -> None:
         raise ValueError("production Geph input tree changed during synthetic qualification")
 
 
-def prepare(source: Path, contract: Path, root: Path, *, fixtures: Path = FIXTURES) -> dict:
+def has_sqlite_derivative(description: dict) -> bool:
+    return SQLX_SQLITE_PATH in embedded_package_specs(description["embedded_packages"])
+
+
+def prepare(source: Path, contract: Path, root: Path, *, fixtures: Path = FIXTURES,
+            sqlite_fixtures: Path = SQLITE_FIXTURES) -> dict:
     """Copy current inputs; never copy an older implementation or resolve a lock."""
     catalog_bytes = _read(fixtures / "closure.json")
     catalog = json.loads(catalog_bytes)
     if not isinstance(catalog, dict) or catalog.get("schema_version") != 1:
         raise ValueError("invalid RSA fixture closure schema")
     source_bytes = _read(contract)
-    if hashlib.sha256(source_bytes).hexdigest() != catalog.get("source_sha256"):
-        raise ValueError("RSA fixture catalog does not bind current SOURCE")
     description = json.loads(source_bytes)
     if "native_sqlite" in description or not description.get("embedded_packages"):
         raise ValueError("RSA fixture requires the reviewed source-owned SQLx client")
-    if hashlib.sha256(_read(source / "Cargo.lock")).hexdigest() != catalog.get("lock_sha256"):
+    sqlite = has_sqlite_derivative(description)
+    binding = catalog
+    binding_bytes = catalog_bytes
+    if sqlite:
+        binding_bytes = _read(sqlite_fixtures / "closure.json")
+        binding = json.loads(binding_bytes)
+        if (not isinstance(binding, dict) or binding.get("schema_version") != 1
+                or set(binding) != {"schema_version", "source_sha256", "lock_sha256", "production_files",
+                                   "rsa_catalog_sha256", "fixture_files"}
+                or binding["rsa_catalog_sha256"] != hashlib.sha256(catalog_bytes).hexdigest()):
+            raise ValueError("SQLite fixture does not bind the unchanged RSA catalog")
+    if hashlib.sha256(source_bytes).hexdigest() != binding.get("source_sha256"):
+        raise ValueError("RSA fixture catalog does not bind current SOURCE")
+    if hashlib.sha256(_read(source / "Cargo.lock")).hexdigest() != binding.get("lock_sha256"):
         raise ValueError("RSA fixture catalog does not bind current lock")
     production = snapshot(source)
-    if production != catalog.get("production_files"):
+    if production != binding.get("production_files"):
         raise ValueError("materialized production bytes differ from reviewed RSA fixture inputs")
     available = snapshot(fixtures)
     selected = {name: value for name, value in available.items() if name not in {"closure.json", "README.md"}}
@@ -87,6 +110,17 @@ def prepare(source: Path, contract: Path, root: Path, *, fixtures: Path = FIXTUR
     names = re.findall(r"#\[(?:test|tokio::test)\]\s*(?:async\s+)?fn\s+(\w+)", text)
     if tuple("rsa_composition_tests::" + name for name in names) != RSA_TESTS:
         raise ValueError("RSA fixture exact-case allowlist differs from retained source")
+    sqlite_module = None
+    if sqlite:
+        extra = {name: value for name, value in snapshot(sqlite_fixtures).items() if name != "closure.json"}
+        if set(extra) != {"sqlite_wrapper_tests.rs"} or extra != binding["fixture_files"]:
+            raise ValueError("SQLite fixture closure is missing, altered or contains extra files")
+        sqlite_module = _read(sqlite_fixtures / "sqlite_wrapper_tests.rs")
+        if hashlib.sha256(sqlite_module).hexdigest() != extra["sqlite_wrapper_tests.rs"]:
+            raise ValueError("SQLite fixture changed while reading")
+        names = re.findall(r"#\[(?:test|tokio::test)\]\s*(?:async\s+)?fn\s+(\w+)", sqlite_module.decode())
+        if tuple("sqlite_wrapper_tests::" + name for name in names) != SQLITE_WRAPPER_TESTS:
+            raise ValueError("SQLite fixture exact-case allowlist differs from retained source")
     root.mkdir(parents=True, exist_ok=False)
     for name in selected:
         target = root / name
@@ -100,6 +134,8 @@ def prepare(source: Path, contract: Path, root: Path, *, fixtures: Path = FIXTUR
     expected_copy = dict(production)
     for name, addition in APPENDS.items():
         path = copy / name
+        if sqlite and name == "src/lib.rs":
+            addition += '\n#[cfg(test)]\nmod sqlite_wrapper_tests;\n'
         data = _read(path) + addition.encode()
         path.write_bytes(data)
         expected_copy[name] = hashlib.sha256(data).hexdigest()
@@ -113,10 +149,14 @@ def prepare(source: Path, contract: Path, root: Path, *, fixtures: Path = FIXTUR
     fixture = root / "rsa_composition_tests.rs"
     shutil.copyfile(fixture, copy / "src/rsa_composition_tests.rs")
     expected_copy["src/rsa_composition_tests.rs"] = selected["rsa_composition_tests.rs"]
+    if sqlite_module is not None:
+        (copy / "src/sqlite_wrapper_tests.rs").write_bytes(sqlite_module)
+        selected["sqlite_wrapper_tests.rs"] = hashlib.sha256(sqlite_module).hexdigest()
+        expected_copy["src/sqlite_wrapper_tests.rs"] = selected["sqlite_wrapper_tests.rs"]
     assert_unchanged(copy, expected_copy)
     assert_unchanged(source, production)
     (root / "composition/tmp").mkdir()
     return {"source": copy, "oracle": root / "legacy-oracle", "root": root,
             "production_files": production, "test_files": expected_copy,
-            "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+            "catalog_sha256": hashlib.sha256(binding_bytes).hexdigest(),
             "fixture_files": selected}

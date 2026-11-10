@@ -1,5 +1,155 @@
 # Routing Research Notes
 
+## 2026-11-10: disposable Chromium startup sampled before final identity
+
+PR476 head0b13edf passed all product checks and its authenticated dependency
+audit. Chromium contract job129983590163 in run42860064822 failed before page
+observation: its first LaunchAgent process sample reported UID0, expected501.
+The workflow, launcher and Chrome151.0.7922.77 were unchanged from the preceding
+green job129960015497 on the same macOS runner image. This failed sample lacks
+command/state evidence, so it cannot prove a transient rather than persistent
+wrong-UID execution. No retry or successful content observation is claimed.
+
+The disposable launcher previously treated the first PID as a final process.
+The production worker already handles a documented xpcproxy/root-to-console
+transition. The harness now waits only for the exact target's recognized
+pre-exec or exact open-command root phase within its original10s admission
+deadline. Acceptance requires the expected non-root UID, exact command and
+unchanged job PID, before that deadline; foreign UID/command, PID replacement
+and persistent startup failure retain exact cleanup and fail qualification.
+Diagnostics expose bounded state/PID/UID/command-match, not full argv. This
+changes no routing, production launcher or browser readiness/memory budgets.
+
+Evidence is retained in
+output/continuation-20261110/source-review-refresh/pr476-schema2/chromium-failure.
+Startup and late-observation RED cases preceded the fixes.83 affected Chromium
+tests passed, then11 bootstrap cases passed after the deadline correction.
+The first job state/PID fields remain authoritative over nested coalition fields;
+a two-case synthetic parser regression failed before this fix and passed after.
+The next actual job130002668089 exposed state=xpcproxy with the correct UID501
+but a command outside our assumed trampoline argv. The actual argv was not
+retained. Requiring a fabricated xpcproxy argv shape caused another early refusal.
+The final correction follows the existing production phase contract: exact job/
+PID in xpcproxy with root/expected UID only waits; it cannot be admitted even if
+its command already looks final. After the phase, exact final command/UID and
+unchanged PID/deadline remain mandatory.11 focused tests passed after recorded
+RED, including persistent pre-exec, foreign UID and PID replacement.
+The next actual job130011813167 on head df64b6e observed running/PID1512/UID501
+but command-match=false and failed before page observation. No raw command was
+retained, so its cause is still unproven. The preceding green baseline did not
+have the new full command-equality guard. Do not infer a product browser defect
+or relax the guard from this boolean alone. Bounded mismatch evidence is needed
+before another behavioral change. Diagnosis and actual job log are retained in
+output/continuation-20261110/source-review-refresh/pr476-preexec/chromium-failure.
+The diagnostic job130018746723 then established same running PID1607/UID501,
+fullopen argv0, expected893 versus observed571 characters and first mismatch342.
+The exact mechanism is still unknown. A native owned-child probe independently
+confirmed that changing one argv character preserves the kernel executable path.
+The new full rendered-argv equality is therefore not a reliable executable
+identity predicate. Its replacement uses exact proc_pidpath output, with the
+existing private plist, target/PID/UID, deadline and downstream Chrome/profile
+checks retained. This API is already used in public_update_ax; SDK libproc.h
+and [Apple XNU libproc](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
+define the call. [The kernel implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c)
+resolves the executable vnode rather than rendered argv. Evidence is under
+output/continuation-20261110/source-review-refresh/pr476-command-diagnostic.
+No workstation browser or launchd job was started for the native child probe.
+The exact kernel-path correction passed21 focused cases after RED and all87
+affected module tests. A direct read against only the owned synthetic child
+validated the new strict FFI wrapper, followed by clean child exit. Independent
+review found no blocker. Invalid/empty/truncated native responses, foreign
+executable even with matching argv, and API failure remain closed.
+A fresh actual Chromium contract run remains required; fixture results alone
+do not qualify the browser. Its two exact harness/test files are included in the
+PR-only repair map, while the Chromium job remains mandatory and main still
+requires full packaging after the immutable Geph producer.
+
+## 2026-11-10: bind ancestor OSV responses to source-owned review
+
+PR476 review identified a validator gap: evidence hashes bound the raw OSV
+responses and receipts, but admission consumed only the separately retained
+ancestor projection. A deliberately inconsistent fixture passed the old checker
+even after a raw advisory was added and all outer hashes were updated. The
+current retained production responses are all empty and consistent; this finding
+does not establish an ignored advisory in the present candidate.
+
+Schema2 explicitly connects each derivative ancestor to its raw response and
+receipt. The checker compares advisory IDs and aliases with the projection and
+requires the ordinary finding dispositions. The only legacy schema1 acceptance
+is the previously published r4 review with its unchanged expiry. Raw payloads
+and source/lock bytes stay unchanged. Regression evidence is in
+output/continuation-20261110/source-review-refresh/pr476-r5/osv-query-regression.
+
+Two scanner comments on the retained WAL fixture subprocess calls were reviewed
+as false positives: both use argv lists with shell disabled; the executable,
+versions, flags and local paths are fixed. No external command input reaches
+either call. This does not claim a sandbox against an actor already controlling
+the local checkout/filesystem. The original evidence bytes remain unchanged.
+
+## 2026-11-10: current dependency audit identified a separate SQLite defect
+
+PR476's ordinary product CI42842890680 passed. Its authenticated dependency audit
+42842890479 found libsqlite3-sys0.30.1 affected by CVE-2026-119375 (aliases
+RUSTSEC-2026-0459 and GHSA-72w2-rjgg-q729). A crafted local database and sibling WAL
+with different page sizes can leave uninitialized bytes in a returned cache page.
+This was not a source-owned review failure or evidence that this defect caused the
+reported browsing stalls. The advisory was updated on November9; prior green
+reports remain historical evidence.
+
+An ordinary SQLx update cannot currently select the fixed wrapper: published
+SQLx0.8.6 requires0.30.1 and0.9.0 still excludes0.39. The selected repair preserves
+all SQLx0.8.6 Rust source and patches only its manifest to official wrapper0.39.1,
+which bundles SQLite3.54.1. The complete Geph lock changes exactly two records;
+all488 others, including dependency edges, are unchanged. Both macOS metadata
+graphs pass --locked with bundled SQLite and no SQLCipher. The larger native
+SQLite implementation remains disabled.
+
+An isolated one-job SQLx build passed three cache/WAL/reopen, transaction/metadata
+and SQL-error recovery cases. A separate fixture compiled the complete unmodified
+old/new SQLite amalgamations and exercised the real sqlite3WalReadFrame through a
+synthetic VFS. Six cases per engine detected the vulnerable old tail and verified
+zeroing in the fixed engine, with unchanged payload, bounds and I/O errors. This
+is a positive-control engine-function test, not a full database exploit or an
+installed-app result. The two direct OSV queries returned no findings; a fresh
+full dependency audit is still required.
+
+The source review retains exact archive/license/manifest/FFI/test evidence under
+security/geph-source-owned-review/sqlite-20261110. Workstation paths in retained
+reports are redacted with original and transformed hashes recorded. The existing
+Geph producer adds three SQLite checks to its same sandboxed test build; their
+fresh execution, immutable r5 publication and all app gates remain required.
+
+## 2026-11-10: refresh the exact source-owned Geph review before publication
+
+The review bound to the unchanged Geph 0.4.3-r4 source expired on November7.
+Current-date publication admission correctly rejected it on November10; historical
+artifact verification continued to work. The existing successful R42367078722/1
+and G42367845720/1 remain evidence for source1edbe80c, not permission to publish
+under an expired review. No P was dispatched for this superseded source.
+
+Fresh official OSV queries for `mizaru2@0.2.21` and
+`geph5-broker-protocol@0.4.3` returned HTTP200 with no listed findings. Dated raw
+responses and query receipts are retained in
+`security/geph-source-owned-review/osv/20261110/`. A bounded manual review and
+independent review found no new confirmed defect in the same three embedded
+packages and production auth/bandwidth composition. All69 retained payloads,
+20 embedded files, five final production files and16 source-edit chains matched.
+Historical fixture results remain historical; no native fixture was repeated.
+
+The new report and evidence catalog bind a review window through December10,
+a 30-day maximum for these unchanged adapters. Changes to SOURCE, lock,
+descriptors or file bodies invalidate that binding; a relevant new advisory or
+source finding requires immediate reassessment. Full application/Geph dependency
+audits and current-date publication admission remain mandatory. No package
+exception was renewed, and no SOURCE, lock, runtime, feature, or vendor revision
+changed. Prior allocation, cancellation, cryptographic and native-runtime limits
+are preserved in the report. This is not an all-dependencies security clearance.
+
+The policy-only refresh takes normal product CI. The immutable Geph r4 artifact
+can be verified under its recorded policy while fresh audits assess the updated
+review. After merge the new app source still needs its exact candidate and
+required R/G/P; no old passing result is relabelled as a new-source pass.
+
 ## 2026-11-07: distinguish packaged Chrome startup failures before navigation
 
 Main CI42221917459/1 failed in packaged-browser-qualification, before navigation,

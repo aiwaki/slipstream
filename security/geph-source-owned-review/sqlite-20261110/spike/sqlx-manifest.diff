@@ -1,0 +1,16 @@
+--- upstream/Cargo.toml
++++ candidate/Cargo.toml
+@@ -79,11 +79,12 @@
+ default-features = false
+ 
+ [dependencies.libsqlite3-sys]
+-version = "0.30.1"
++version = "=0.39.1"
+ features = [
+     "pkg-config",
+     "vcpkg",
+     "unlock_notify",
++    "column_metadata",
+ ]
+ default-features = false
+ 

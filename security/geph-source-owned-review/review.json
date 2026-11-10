@@ -9,10 +9,15 @@
       "archive_evidence": "ancestor-geph5-broker-protocol",
       "name": "geph5-broker-protocol",
       "version": "0.4.3"
+    },
+    {
+      "archive_evidence": "sqlite-ancestor-sqlx-sqlite",
+      "name": "sqlx-sqlite",
+      "version": "0.8.6"
     }
   ],
   "binding": {
-    "lock_sha256": "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    "lock_sha256": "2d017b845167e97d0a2178acc589851aeffa2269809fca8c63de0d0c925d4143",
     "packages": [
       {
         "descriptor_sha256": "ca128627b932eb5cb5f80e7de0524d70c9068aff31689b94db8b871c63bc3592",
@@ -51,9 +56,71 @@
           "src/lib.rs": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8"
         },
         "path": "slipstream-vendor/mizaru-client"
+      },
+      {
+        "descriptor_sha256": "4960c176be9c485192b893d03841a747ce9e522e0086e49d889149dd11e63164",
+        "files": {
+          "Cargo.toml": "98fa82799151b9d68d2fef982fec81772612ac4190eac3f127c2ead6df693190",
+          "LICENSE-APACHE": "9be39331309bc958aab10457c1a8459c038ae95662f26dfcf6c9088e2b3d653f",
+          "LICENSE-MIT": "44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179",
+          "SOURCE-NOTICE.md": "378a54f67e01771a003fb5f767d732ce66e1c2db8ff60be8ce6e98002f508cb6",
+          "provenance/Cargo.toml": "8dc33d0ee8972b11a855b02c72f0ddbfddf8a07d14f3d8ca8ab54aa4774dc425",
+          "src/any.rs": "ca3e3119fbdb2254362227330859bd6eff8abda1076bd2996fe7a89b76fb966b",
+          "src/arguments.rs": "6b848a4a3da506d7289f128d02039251e2e6b9d64d615cc3afb181fbfdb94193",
+          "src/column.rs": "20da4ff78604da4488136afe944b7a2528cacd57335cfd6ada9c78503dab3d37",
+          "src/connection/collation.rs": "144ab46d49f2eb107cbc7bf6dfc0e57cf26b0a67714bd22c7e3f6c095c710659",
+          "src/connection/describe.rs": "dd49e2d75b77ac0d9e709cf93d1b4a36a8beafe877b69ecd320884468218e3e0",
+          "src/connection/establish.rs": "11713a58a8b02d64dde678f6df4c744bbc914e896e7c89994638ce96f91d88ce",
+          "src/connection/execute.rs": "a13e43653c539e38559bb7c53a07ed34994659298b1c9be540c4c02dd8bbec51",
+          "src/connection/executor.rs": "97d156d8829ce67650ad1064a3cb5c8a8882890dfaef4c15ab3d5d8b0d62bfc9",
+          "src/connection/explain.rs": "cb3148fba4f5894f0c27bc1b3b01b4e216b92668c34c976bc3b7da0df3c3a863",
+          "src/connection/handle.rs": "f40e0ec66cf4a030969635889941fa82040647af3c45f1e7ce0cd7af1eea6d57",
+          "src/connection/intmap.rs": "b2521cd9f5108e68f8a85728f3a883ac31db6e5ba46a36f75c1e213ac4a00d52",
+          "src/connection/mod.rs": "257459ec82510c6e90d0a56fa168dbf4cb162c246229d5c1d8b8d0ea3de593ff",
+          "src/connection/preupdate_hook.rs": "e2bf7e49f5eafbc546295dc8fc9f4872da233c2c59af6e814d0ec68eecead14f",
+          "src/connection/serialize.rs": "6971ace77a53d3cc6e371eae3ac93f2c577da28e89e58ea6c24e58d5f37ac63a",
+          "src/connection/worker.rs": "f1c9fc4d8015c0694b0961cc79789ec4e2073be0d941ff4352c03c09d2380dce",
+          "src/database.rs": "d0171864f61f25f27e65abc678e92f141e848d9fe10956b1b345258bee2062b3",
+          "src/error.rs": "fd16dc2ea81c3c4f081136f24c3e911057751ec742b2e2685932a09f0215a0be",
+          "src/lib.rs": "405c0ddff6812130ed9ca32247f0dbf041f449f55a637a4c440694328b5751c3",
+          "src/logger.rs": "65893f829b323161e0c81798262992a555d565af72e35fd3b398c74294f0e0ba",
+          "src/migrate.rs": "02a0b9b81a7b4a313927b295d3722b7947176d16024f76873733a9b950da073e",
+          "src/options/auto_vacuum.rs": "0669bc62f9d0600e106443eeb1521635032ac48c123cbc232540fa3822aaaafd",
+          "src/options/connect.rs": "25912e8b528d872a22c1e7a264a1d52d964111f0b88b2acfdd77966464bff767",
+          "src/options/journal_mode.rs": "73fd87ed1e830a127a5765ca5f7c22c717e5dec45c0c39fd33256348a4e1e695",
+          "src/options/locking_mode.rs": "41e10ca2b5cb8f53306676aa29c884d4bc22be8cc0c9b2540aa191ed1c25ecb4",
+          "src/options/mod.rs": "6a9f98f89820c0147e7ca2a89e61bc99bc0940febbbae2a2ad2fb8d7a825fb00",
+          "src/options/parse.rs": "d94008fcdd7e03e2df1c6c0d788cc55cde42e772a83efb6e5f4839249154e156",
+          "src/options/synchronous.rs": "08b2ca83c2ed6781040d3cf49871cd45fc16321aad9c78ac0ab63ab0e2117d81",
+          "src/query_result.rs": "228e6a059828ca9413881334ec891d33b8ef08062743917929447722ef8bf4bb",
+          "src/regexp.rs": "39c0a673cf67ca749732567021649340318c0f1ba3f25cc44ddc8c2e86c4342c",
+          "src/row.rs": "5e424bed7cc0c96c47b5e4d1afce2fd5b56a973886cbb8dba744f043472bae51",
+          "src/statement/handle.rs": "fc01828d31322b9e590c9d4bffbf3d11c98335cc6703999c1f39f304fd02c119",
+          "src/statement/mod.rs": "470987bd5ae2e72d65ea8a31be72f10ca01060485205a53665be678fbf89b0cb",
+          "src/statement/unlock_notify.rs": "3c57283b3a1e3ad8a77263f59f2fcd50046db01c425d286d2ce346f4a89639de",
+          "src/statement/virtual.rs": "f34b04422dbf420b056bbe3a6f95fdb94040f73d50080208989f6452f14ffa3d",
+          "src/testing/mod.rs": "ec81b9d67afdeea9ff35c6e6847c138a9e6db7a6f493e75b05b12f4564372954",
+          "src/transaction.rs": "6dae9e4478c9bfb6ebeab5e6cacc810771bbc1d1ad481e59310e537962e88e53",
+          "src/type_checking.rs": "5d16aa012fdb423d3cc97acb046f220f432a98da22269b40b4908e934265dc21",
+          "src/type_info.rs": "648170984482d66f22e48f5229dc959355a7bc4a34725e58c43eb2335ff9e19a",
+          "src/types/bool.rs": "b13c6cc948066618de8adee3751d62c834fe095e35d0b080107a9be226b59c7a",
+          "src/types/bytes.rs": "cb4535fec074141746feaee24455cac93f1e37992ddebbfc2e53074a8766076d",
+          "src/types/chrono.rs": "cbad293e17e1734795a71338711ed0352df1a47f8b73bc337a009d0e5c701d29",
+          "src/types/float.rs": "6af25a42c15ebf9ef0617907c72f9f912c9a842fb222fede0fd8a1596e0d2c65",
+          "src/types/int.rs": "fc0dd473fa0c63ccdfcf101c4d79772f162710b84f8a82f48bb92cded891db64",
+          "src/types/json.rs": "e981276c51b748c0e1eb6860407ba57817528af4a3ac11d4e74c65cf30b336c5",
+          "src/types/mod.rs": "82afc7e421a685cf14d21eeb9a058f335c594e99d861c4ccf0158b03276a7292",
+          "src/types/str.rs": "0415a1f8911378891e5ac64c9eb9713772292b7e63ca08a399f4ac1c65e35733",
+          "src/types/text.rs": "bc676ff0451fe4329fcd445bb364b0857b6b3bb24fa3abe4f702d6e9efe87fa3",
+          "src/types/time.rs": "bf23083c1710ce52d0058fb2407605c40a97c23c720e9ddc6d7bd8326922c9d7",
+          "src/types/uint.rs": "338b56d53d744da17cec74ee2cc87a5a82104731886b3f3caa949b3963bdbb46",
+          "src/types/uuid.rs": "5b0e23a51696d1b7f08e469d8af1013541915f610c93d8ddad60ec9676e9a76b",
+          "src/value.rs": "e03d4f63306c17f7dd8d52646bc368d485859811d3ce7a8b3e437a0a8a18ecfe"
+        },
+        "path": "slipstream-vendor/sqlx-sqlite"
       }
     ],
-    "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7"
+    "source_sha256": "1fdd3e49418c7a47e06e092dbac411cb8c41022e6688b7115a071bd89c81f9c8"
   },
   "evidence": [
     {
@@ -463,8 +530,8 @@
       "size": 224357
     },
     {
-      "id": "ancestor-osv",
-      "kind": "osv",
+      "id": "historical-ancestor-osv-20261031",
+      "kind": "review",
       "path": "osv/ancestors.json",
       "sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
       "size": 495
@@ -538,9 +605,312 @@
       "path": "reviews/portable-evidence.json",
       "sha256": "5259f0348825871e5f7aba756d40c0ac432df773c3426625f30a2f5b0277fcfc",
       "size": 4528
+    },
+    {
+      "id": "ancestor-osv",
+      "kind": "review",
+      "path": "osv/20261110/ancestors.json",
+      "sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
+      "size": 495
+    },
+    {
+      "id": "osv-20261110-mizaru2",
+      "kind": "review",
+      "path": "osv/20261110/mizaru2.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "osv-20261110-geph5-broker-protocol",
+      "kind": "review",
+      "path": "osv/20261110/geph5-broker-protocol.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "osv-20261110-receipt",
+      "kind": "review",
+      "path": "osv/20261110/receipt.json",
+      "sha256": "d3b373276e9e8c3802a1ebbe0f3e67ae8d48ec1c1d8ab7a4f3e5bdf4877d7161",
+      "size": 1504
+    },
+    {
+      "id": "source-review-20261110-json",
+      "kind": "review",
+      "path": "reviews/source-review-20261110.json",
+      "sha256": "b7eaff1d46024a14f4f2dae23b22d62837fc21f770d8052ba412c2b0cf99aaba",
+      "size": 18583
+    },
+    {
+      "id": "source-review-20261110-md",
+      "kind": "review",
+      "path": "reviews/source-review-20261110.md",
+      "sha256": "069d14089605e0a776ac089e52415ec3e8374ba351ac980cb9d25af0804e6856",
+      "size": 4246
+    },
+    {
+      "id": "sqlite-ancestor-sqlx-sqlite",
+      "kind": "archive",
+      "path": "sqlite-20261110/archives/sqlx-sqlite-0.8.6.crate",
+      "sha256": "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea",
+      "size": 82039
+    },
+    {
+      "id": "sqlite-archives-libsqlite3-sys-0-30-1-crate",
+      "kind": "review",
+      "path": "sqlite-20261110/archives/libsqlite3-sys-0.30.1.crate",
+      "sha256": "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
+      "size": 5122296
+    },
+    {
+      "id": "sqlite-archives-libsqlite3-sys-0-39-1-crate",
+      "kind": "review",
+      "path": "sqlite-20261110/archives/libsqlite3-sys-0.39.1.crate",
+      "sha256": "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3",
+      "size": 2759388
+    },
+    {
+      "id": "sqlite-archive-receipt-json",
+      "kind": "review",
+      "path": "sqlite-20261110/archive-receipt.json",
+      "sha256": "a60300ed721ecc8cf6d67d8a5ececd94739dbf83f27b7d9ae0dacfc600ed9496",
+      "size": 13987
+    },
+    {
+      "id": "sqlite-ffi-import-comparison-json",
+      "kind": "review",
+      "path": "sqlite-20261110/ffi-import-comparison.json",
+      "sha256": "91dd528835e34b5468ee6310857273527680c1f74a87d8396751136036a1e716",
+      "size": 14495
+    },
+    {
+      "id": "sqlite-wrapper-build-script-diff",
+      "kind": "review",
+      "path": "sqlite-20261110/wrapper-build-script.diff",
+      "sha256": "089bc4bd9a8461ae1195b6e2a0f120d0110248ddbc24a3ae14bd8e617d99a471",
+      "size": 21121
+    },
+    {
+      "id": "sqlite-osv-query-receipt-json",
+      "kind": "review",
+      "path": "sqlite-20261110/osv-query-receipt.json",
+      "sha256": "d5380a72bb9d08efbe6d73bf57170554d7d7b4d05cbc959e859d652df0b1525b",
+      "size": 1550
+    },
+    {
+      "id": "sqlite-sqlx-sqlite-0-8-6-json",
+      "kind": "review",
+      "path": "sqlite-20261110/sqlx-sqlite-0.8.6.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "sqlite-sqlx-sqlite-0-8-6-request-json",
+      "kind": "review",
+      "path": "sqlite-20261110/sqlx-sqlite-0.8.6-request.json",
+      "sha256": "2235fc93a6d9ae960745095d2a46bdffcb0600ff18d57cc0c5f7eaf7398b772b",
+      "size": 77
+    },
+    {
+      "id": "sqlite-libsqlite3-sys-0-39-1-json",
+      "kind": "review",
+      "path": "sqlite-20261110/libsqlite3-sys-0.39.1.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "sqlite-libsqlite3-sys-0-39-1-request-json",
+      "kind": "review",
+      "path": "sqlite-20261110/libsqlite3-sys-0.39.1-request.json",
+      "sha256": "35b9f9b055581ce8ed9f114bf0744127578d85bdeb18a7070f1c3cdfc84d8846",
+      "size": 81
+    },
+    {
+      "id": "sqlite-source-fix-verification-json",
+      "kind": "review",
+      "path": "sqlite-20261110/source-fix-verification.json",
+      "sha256": "069602a466ebfd1a62648541c3a53f271f7ca7be51718dadc120ab14f209ae2f",
+      "size": 4342
+    },
+    {
+      "id": "sqlite-wal-read-regression-receipt-json",
+      "kind": "review",
+      "path": "sqlite-20261110/wal-read-regression-receipt.json",
+      "sha256": "6e5bbe22fe40c7f921a5b56a9115e4a7e085712e11d5a35081b5cde2ab9f7608",
+      "size": 5595
+    },
+    {
+      "id": "sqlite-wal-read-regression-c",
+      "kind": "review",
+      "path": "sqlite-20261110/wal-read-regression.c",
+      "sha256": "d93fd751767d9ae2bc28e4bf52fa0a7787da87c3b219f1e7019a172ee0d98c72",
+      "size": 2115
+    },
+    {
+      "id": "sqlite-run-wal-read-regression-py",
+      "kind": "review",
+      "path": "sqlite-20261110/run-wal-read-regression.py",
+      "sha256": "5c9334833ad537102fbd4f2004b4958eae310a432d168bf62f29be7b837bae37",
+      "size": 2898
+    },
+    {
+      "id": "sqlite-wal-read-0-30-1-jsonl",
+      "kind": "review",
+      "path": "sqlite-20261110/wal-read-0.30.1.jsonl",
+      "sha256": "e206b884189ab822beca954a1e97712f9ce8003e751da70788b2d2d769a5ff7c",
+      "size": 734
+    },
+    {
+      "id": "sqlite-wal-read-0-39-1-jsonl",
+      "kind": "review",
+      "path": "sqlite-20261110/wal-read-0.39.1.jsonl",
+      "sha256": "703c464623ab3095b84c0a392da63c78a2899c2fe7dfd75b04e752914968a3ef",
+      "size": 734
+    },
+    {
+      "id": "sqlite-sqlite3WalReadFrame-0-30-1-txt",
+      "kind": "review",
+      "path": "sqlite-20261110/sqlite3WalReadFrame-0.30.1.txt",
+      "sha256": "64db8bd716d398f250bf4319c9a73f6f3f8c1be646c3f7dabb01749727d6569f",
+      "size": 627
+    },
+    {
+      "id": "sqlite-sqlite3WalReadFrame-0-39-1-txt",
+      "kind": "review",
+      "path": "sqlite-20261110/sqlite3WalReadFrame-0.39.1.txt",
+      "sha256": "81c4334bb274460f2117b5cdfa5c409b87c400001dd8410ac8b1bfb5909ef86d",
+      "size": 679
+    },
+    {
+      "id": "sqlite-spike-Cargo-toml",
+      "kind": "review",
+      "path": "sqlite-20261110/spike/Cargo.toml",
+      "sha256": "c28c1ce9f9648eb4274739b770f2acc64cae519137411a1bdc0943b052b322c2",
+      "size": 394
+    },
+    {
+      "id": "sqlite-spike-Cargo-lock",
+      "kind": "review",
+      "path": "sqlite-20261110/spike/Cargo.lock",
+      "sha256": "a8bf9909971af7a9d0656057a2c4b4709e370f1cab9e885c679e4a3d579adce7",
+      "size": 28173
+    },
+    {
+      "id": "sqlite-spike-tests-rs",
+      "kind": "review",
+      "path": "sqlite-20261110/spike/tests.rs",
+      "sha256": "bf4d034d799dbf34e7228746d55c349efa4a258ef4c9ae5cf753ac4d708bbcc8",
+      "size": 4276
+    },
+    {
+      "id": "sqlite-spike-command-result-json",
+      "kind": "review",
+      "path": "sqlite-20261110/spike/command-result.json",
+      "sha256": "018fea3cb4efbef57dff0536250888818c4873784813d0f0181158f105a9e19e",
+      "size": 578
+    },
+    {
+      "id": "sqlite-spike-cargo-test-log",
+      "kind": "review",
+      "path": "sqlite-20261110/spike/cargo-test.log",
+      "sha256": "4fb11b446f1b30833f2c24692acc85eb8cf310c8268ac9da4cf9cb90d95a67b3",
+      "size": 4791
+    },
+    {
+      "id": "sqlite-spike-sqlx-manifest-diff",
+      "kind": "review",
+      "path": "sqlite-20261110/spike/sqlx-manifest.diff",
+      "sha256": "6c1f9d51053f0d8706eafe03fe39e26df43d504c11a665e109f947024f483f84",
+      "size": 293
+    },
+    {
+      "id": "sqlite-minimal-lock-delta-json",
+      "kind": "review",
+      "path": "sqlite-20261110/minimal-lock-delta.json",
+      "sha256": "f6fb5abed2a977ed4590c95b3eaa8c3c31d428109778d21f709d44e58fc6399e",
+      "size": 2370
+    },
+    {
+      "id": "sqlite-minimal-lock-diff",
+      "kind": "review",
+      "path": "sqlite-20261110/minimal-lock.diff",
+      "sha256": "49015ed8295f9fc8be2bff5ed27530cfee33aeec7d6342b80bed1d994d949000",
+      "size": 730
+    },
+    {
+      "id": "sqlite-release-graph-results-json",
+      "kind": "review",
+      "path": "sqlite-20261110/release-graph-results.json",
+      "sha256": "dcdc30f6d01d7aa9682d079b7269a1b7cf220c2d557508cac3e4ebee75f8aaa6",
+      "size": 7697
+    },
+    {
+      "id": "sqlite-owned-Cargo-toml",
+      "kind": "review",
+      "path": "sqlite-20261110/owned-Cargo.toml",
+      "sha256": "98fa82799151b9d68d2fef982fec81772612ac4190eac3f127c2ead6df693190",
+      "size": 3318
+    },
+    {
+      "id": "sqlite-owned-SOURCE-NOTICE-md",
+      "kind": "review",
+      "path": "sqlite-20261110/owned-SOURCE-NOTICE.md",
+      "sha256": "378a54f67e01771a003fb5f767d732ce66e1c2db8ff60be8ce6e98002f508cb6",
+      "size": 652
+    },
+    {
+      "id": "sqlite-three-ancestor-osv",
+      "kind": "osv",
+      "path": "sqlite-20261110/ancestors.json",
+      "sha256": "637587678aa07da3d4549a2ee6d2bc9d2d69e763cb099e212ab12ba6577bf42a",
+      "size": 728
+    },
+    {
+      "id": "sqlite-source-review-json",
+      "kind": "review",
+      "path": "sqlite-20261110/source-review.json",
+      "sha256": "2ab38a9a9d71409fe29101ab5832c7024be69dbffc100a0b863c21333ba58616",
+      "size": 32172
+    },
+    {
+      "id": "sqlite-source-review-md",
+      "kind": "review",
+      "path": "sqlite-20261110/source-review.md",
+      "sha256": "2a53bf36f0493e9c0c6218f5b29e16b04b7b2292fa95584be9ba5ddf9f2dd3a2",
+      "size": 3686
+    },
+    {
+      "id": "sqlite-evidence-transformations",
+      "kind": "review",
+      "path": "sqlite-20261110/transformations.json",
+      "sha256": "58e61054504f4219d3e94d254da6edaecb3f899d63e41f9b106152f9ed8deb65",
+      "size": 15714
     }
   ],
-  "osv_evidence": "ancestor-osv",
+  "osv_evidence": "sqlite-three-ancestor-osv",
+  "osv_queries": [
+    {
+      "name": "mizaru2",
+      "receipt_evidence": "osv-20261110-receipt",
+      "request_evidence": null,
+      "response_evidence": "osv-20261110-mizaru2",
+      "version": "0.2.21"
+    },
+    {
+      "name": "geph5-broker-protocol",
+      "receipt_evidence": "osv-20261110-receipt",
+      "request_evidence": null,
+      "response_evidence": "osv-20261110-geph5-broker-protocol",
+      "version": "0.4.3"
+    },
+    {
+      "name": "sqlx-sqlite",
+      "receipt_evidence": "sqlite-osv-query-receipt-json",
+      "request_evidence": "sqlite-sqlx-sqlite-0-8-6-request-json",
+      "response_evidence": "sqlite-sqlx-sqlite-0-8-6-json",
+      "version": "0.8.6"
+    }
+  ],
   "packages": [
     {
       "inherited_findings": [],
@@ -614,7 +984,16 @@
           "current-osv-receipt",
           "current-source-review-json",
           "current-source-review-md",
-          "portable-evidence"
+          "portable-evidence",
+          "historical-ancestor-osv-20261031",
+          "osv-20261110-mizaru2",
+          "osv-20261110-geph5-broker-protocol",
+          "osv-20261110-receipt",
+          "source-review-20261110-json",
+          "source-review-20261110-md",
+          "ancestor-osv",
+          "sqlite-source-review-json",
+          "sqlite-source-review-md"
         ],
         "files": [
           "Cargo.toml",
@@ -697,7 +1076,16 @@
           "current-osv-receipt",
           "current-source-review-json",
           "current-source-review-md",
-          "portable-evidence"
+          "portable-evidence",
+          "historical-ancestor-osv-20261031",
+          "osv-20261110-mizaru2",
+          "osv-20261110-geph5-broker-protocol",
+          "osv-20261110-receipt",
+          "source-review-20261110-json",
+          "source-review-20261110-md",
+          "ancestor-osv",
+          "sqlite-source-review-json",
+          "sqlite-source-review-md"
         ],
         "files": [
           "Cargo.toml",
@@ -779,7 +1167,16 @@
           "current-osv-receipt",
           "current-source-review-json",
           "current-source-review-md",
-          "portable-evidence"
+          "portable-evidence",
+          "historical-ancestor-osv-20261031",
+          "osv-20261110-mizaru2",
+          "osv-20261110-geph5-broker-protocol",
+          "osv-20261110-receipt",
+          "source-review-20261110-json",
+          "source-review-20261110-md",
+          "ancestor-osv",
+          "sqlite-source-review-json",
+          "sqlite-source-review-md"
         ],
         "files": [
           "Cargo.toml",
@@ -795,7 +1192,107 @@
           "src/signed.rs"
         ]
       }
+    },
+    {
+      "inherited_findings": [],
+      "manual_findings": [],
+      "path": "slipstream-vendor/sqlx-sqlite",
+      "source_review": {
+        "disposition": "reviewed",
+        "evidence": [
+          "sqlite-archives-libsqlite3-sys-0-30-1-crate",
+          "sqlite-archives-libsqlite3-sys-0-39-1-crate",
+          "sqlite-archive-receipt-json",
+          "sqlite-ffi-import-comparison-json",
+          "sqlite-wrapper-build-script-diff",
+          "sqlite-osv-query-receipt-json",
+          "sqlite-sqlx-sqlite-0-8-6-json",
+          "sqlite-sqlx-sqlite-0-8-6-request-json",
+          "sqlite-libsqlite3-sys-0-39-1-json",
+          "sqlite-libsqlite3-sys-0-39-1-request-json",
+          "sqlite-source-fix-verification-json",
+          "sqlite-wal-read-regression-receipt-json",
+          "sqlite-wal-read-regression-c",
+          "sqlite-run-wal-read-regression-py",
+          "sqlite-wal-read-0-30-1-jsonl",
+          "sqlite-wal-read-0-39-1-jsonl",
+          "sqlite-sqlite3WalReadFrame-0-30-1-txt",
+          "sqlite-sqlite3WalReadFrame-0-39-1-txt",
+          "sqlite-spike-Cargo-toml",
+          "sqlite-spike-Cargo-lock",
+          "sqlite-spike-tests-rs",
+          "sqlite-spike-command-result-json",
+          "sqlite-spike-cargo-test-log",
+          "sqlite-spike-sqlx-manifest-diff",
+          "sqlite-minimal-lock-delta-json",
+          "sqlite-minimal-lock-diff",
+          "sqlite-release-graph-results-json",
+          "sqlite-owned-Cargo-toml",
+          "sqlite-owned-SOURCE-NOTICE-md",
+          "sqlite-source-review-json",
+          "sqlite-source-review-md",
+          "sqlite-evidence-transformations"
+        ],
+        "files": [
+          "Cargo.toml",
+          "LICENSE-APACHE",
+          "LICENSE-MIT",
+          "SOURCE-NOTICE.md",
+          "provenance/Cargo.toml",
+          "src/any.rs",
+          "src/arguments.rs",
+          "src/column.rs",
+          "src/connection/collation.rs",
+          "src/connection/describe.rs",
+          "src/connection/establish.rs",
+          "src/connection/execute.rs",
+          "src/connection/executor.rs",
+          "src/connection/explain.rs",
+          "src/connection/handle.rs",
+          "src/connection/intmap.rs",
+          "src/connection/mod.rs",
+          "src/connection/preupdate_hook.rs",
+          "src/connection/serialize.rs",
+          "src/connection/worker.rs",
+          "src/database.rs",
+          "src/error.rs",
+          "src/lib.rs",
+          "src/logger.rs",
+          "src/migrate.rs",
+          "src/options/auto_vacuum.rs",
+          "src/options/connect.rs",
+          "src/options/journal_mode.rs",
+          "src/options/locking_mode.rs",
+          "src/options/mod.rs",
+          "src/options/parse.rs",
+          "src/options/synchronous.rs",
+          "src/query_result.rs",
+          "src/regexp.rs",
+          "src/row.rs",
+          "src/statement/handle.rs",
+          "src/statement/mod.rs",
+          "src/statement/unlock_notify.rs",
+          "src/statement/virtual.rs",
+          "src/testing/mod.rs",
+          "src/transaction.rs",
+          "src/type_checking.rs",
+          "src/type_info.rs",
+          "src/types/bool.rs",
+          "src/types/bytes.rs",
+          "src/types/chrono.rs",
+          "src/types/float.rs",
+          "src/types/int.rs",
+          "src/types/json.rs",
+          "src/types/mod.rs",
+          "src/types/str.rs",
+          "src/types/text.rs",
+          "src/types/time.rs",
+          "src/types/uint.rs",
+          "src/types/uuid.rs",
+          "src/value.rs"
+        ]
+      }
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }
