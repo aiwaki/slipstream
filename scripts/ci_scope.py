@@ -522,7 +522,7 @@ def geph_physical_root_delta_from_git() -> dict | None:
 # source/tooling/review delivery, including newly added files. It cannot admit
 # unrelated changes or authorize packaged qualification on main.
 SQLITE_REPAIR_BINDINGS_PATH = "scripts/fixtures/geph-sqlite-repair-bootstrap.json"
-SQLITE_REPAIR_BINDINGS_SHA256 = "d22a46e7c3d8296e4c26d623a3bed93a88e4aac4869d981d593bee07fb5f5524"
+SQLITE_REPAIR_BINDINGS_SHA256 = "29fec216a78c57c7bfa9cf19c873e965c16cfcc4f4703719db4d8fdc39afa272"
 SQLITE_REPAIR_SUPPORT_PATHS = frozenset({
     SQLITE_REPAIR_BINDINGS_PATH, "scripts/ci_scope.py", "scripts/test_ci_scope.py",
     "docs/CURRENT_STATE.md", "docs/DECISIONS.md", "docs/ROUTING_RESEARCH.md",

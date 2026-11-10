@@ -1,5 +1,27 @@
 # Routing Research Notes
 
+## 2026-11-10: bind ancestor OSV responses to source-owned review
+
+PR476 review identified a validator gap: evidence hashes bound the raw OSV
+responses and receipts, but admission consumed only the separately retained
+ancestor projection. A deliberately inconsistent fixture passed the old checker
+even after a raw advisory was added and all outer hashes were updated. The
+current retained production responses are all empty and consistent; this finding
+does not establish an ignored advisory in the present candidate.
+
+Schema2 explicitly connects each derivative ancestor to its raw response and
+receipt. The checker compares advisory IDs and aliases with the projection and
+requires the ordinary finding dispositions. The only legacy schema1 acceptance
+is the previously published r4 review with its unchanged expiry. Raw payloads
+and source/lock bytes stay unchanged. Regression evidence is in
+output/continuation-20261110/source-review-refresh/pr476-r5/osv-query-regression.
+
+Two scanner comments on the retained WAL fixture subprocess calls were reviewed
+as false positives: both use argv lists with shell disabled; the executable,
+versions, flags and local paths are fixed. No external command input reaches
+either call. This does not claim a sandbox against an actor already controlling
+the local checkout/filesystem. The original evidence bytes remain unchanged.
+
 ## 2026-11-10: current dependency audit identified a separate SQLite defect
 
 PR476's ordinary product CI42842890680 passed. Its authenticated dependency audit

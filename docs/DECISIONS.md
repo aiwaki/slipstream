@@ -17,6 +17,15 @@ ancestor, exact source/lock/files, actual fix/positive-control evidence and its
 existing December10 expiry. The native SQLite lane remains disabled; the October31
 separation decision continues to apply. No old PR384 implementation is imported.
 
+New source-owned reviews use schema2 with explicit ancestor query, raw-response
+and receipt references. Admission checks the official endpoint/status, exact
+query coordinates, response size/hash/path, optional retained request bytes and
+lossless advisory ID/alias equality with the ancestor projection. Missing,
+malformed, errored or paginated evidence fails closed. Nonempty results require
+the existing explicit inherited finding dispositions; they are not discarded.
+Schema1 survives only for the exact published r4 policy/review binding and its
+original November7 expiry, so it cannot be used to downgrade fresh admission.
+
 The PR-only bootstrap admits only the complete pinned source/tooling/review delta.
 It still runs product checks and both dependency audits. Main must build and attest
 the new immutable Geph revision before ordinary app packaging and qualification.

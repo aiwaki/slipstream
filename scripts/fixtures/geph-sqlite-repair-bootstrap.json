@@ -17,7 +17,7 @@
   ],
   "scripts/fixtures/geph-sqlite-repair-policy-r5.json": [
     null,
-    "e72f9b34d872a1b741b5e13f4d540979a4df5ca12df5e0703c262dcd12f76877"
+    "f3dd676c2de1faf4d5cb2eca455de4b752a84b885fc06fb580a43d1351b75855"
   ],
   "scripts/fixtures/sqlx-sqlite-0.8.6/Cargo.toml": [
     null,
@@ -37,11 +37,11 @@
   ],
   "scripts/geph_source_owned_advisories.py": [
     "e1631c585228ac6525f1e151d6bc1e476e4f7ab42fdd6dd99745627f7673423b",
-    "c887c1573da1f7d1fc23e44826dd8e668d7832509cce1dc0d4c997cb28640dc4"
+    "362771d5c30d894e91c22d2b6534e1e3d0632b87d4f239f39d8e73ea04cc851e"
   ],
   "scripts/geph_vendor_source.py": [
     "b3374b9f9183d2caa1e9bcd0e2b38a1199c60631e1d84eea4b8d693b0927767e",
-    "ff2e229ff0a3f44fe474b271e62c4191d1420f622fb90cad0eebc6deecfb6208"
+    "e20b7e533c5b639f7c9d124cc5514d8cb10cdca7319049fc7c85aaf94471a40a"
   ],
   "scripts/make_geph_vendor_sbom.py": [
     "04e12e94b9eda9927a304510113669fb9fb2f11c45c95150c8892cbc02d70adb",
@@ -57,7 +57,11 @@
   ],
   "scripts/test_geph_source_owned_advisories.py": [
     "2c42280b8a0ff960a0dca5f81f9d8153efa0c713275acdef939879bb92575feb",
-    "4584501051a82bd2d5bbb6936b217fc2b2b2c7f6fe991133a4cb99a5b21266ba"
+    "674a139a5d31829e5a22c3fa0f3de8cb9f3ffdb63d817426bf49524d09d5e4c4"
+  ],
+  "scripts/test_geph_source_owned_osv_queries.py": [
+    null,
+    "abfce318d666b24e43807a82f1afa9a1e6f35900ecbabc533dac36eb46134e5d"
   ],
   "scripts/test_geph_source_owned_sbom.py": [
     "a0e8798e8c271a7c24010291b8c10d67748fc23c481cf9396964b4062e9597e7",
@@ -77,7 +81,7 @@
   ],
   "security/geph-dependency-audit-policy.json": [
     "30cae8c4bbacfea24294bfaacc6cc8b45145e089511ebdd2c223820992907ae2",
-    "e72f9b34d872a1b741b5e13f4d540979a4df5ca12df5e0703c262dcd12f76877"
+    "f3dd676c2de1faf4d5cb2eca455de4b752a84b885fc06fb580a43d1351b75855"
   ],
   "security/geph-source-owned-review/osv/20261110/ancestors.json": [
     null,
@@ -97,7 +101,7 @@
   ],
   "security/geph-source-owned-review/review.json": [
     "ce1a0e85d537cf499e895f078627ef33f78e5aaa331962adb1c25d8577e18bf4",
-    "0eaa5bd108091193a0aa8399b422798e13389e56344014f5c255f33e3c817bb4"
+    "9e9c629f87efd1f9e19fddbafa6bc32a6c3b1bdf5b8913cc4fc86a63bd5b8eb4"
   ],
   "security/geph-source-owned-review/reviews/source-review-20261110.json": [
     null,

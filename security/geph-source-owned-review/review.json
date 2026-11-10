@@ -888,6 +888,29 @@
     }
   ],
   "osv_evidence": "sqlite-three-ancestor-osv",
+  "osv_queries": [
+    {
+      "name": "mizaru2",
+      "receipt_evidence": "osv-20261110-receipt",
+      "request_evidence": null,
+      "response_evidence": "osv-20261110-mizaru2",
+      "version": "0.2.21"
+    },
+    {
+      "name": "geph5-broker-protocol",
+      "receipt_evidence": "osv-20261110-receipt",
+      "request_evidence": null,
+      "response_evidence": "osv-20261110-geph5-broker-protocol",
+      "version": "0.4.3"
+    },
+    {
+      "name": "sqlx-sqlite",
+      "receipt_evidence": "sqlite-osv-query-receipt-json",
+      "request_evidence": "sqlite-sqlx-sqlite-0-8-6-request-json",
+      "response_evidence": "sqlite-sqlx-sqlite-0-8-6-json",
+      "version": "0.8.6"
+    }
+  ],
   "packages": [
     {
       "inherited_findings": [],
@@ -1271,5 +1294,5 @@
       }
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

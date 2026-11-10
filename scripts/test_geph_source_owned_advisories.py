@@ -66,7 +66,7 @@ class SourceOwnedReviewFixture:
         self.source["lock_sha256"] = sha(self.lock_path.read_bytes())
         self.evidence_root = self.root / "review-evidence"
         self.evidence_root.mkdir()
-        self.review = {"schema_version": 1, "binding": {}, "evidence": [], "ancestors": [], "osv_evidence": "ancestor-osv", "packages": []}
+        self.review = {"schema_version": 2, "binding": {}, "evidence": [], "ancestors": [], "osv_evidence": "ancestor-osv", "osv_queries": [], "packages": []}
         self.raw = {"results": [{"source": {"type": "sbom", "path": "synthetic-ancestors.json"}, "packages": []}]}
         self.original_contents = {}
         self.policy = {"schema_version": 1, "source_sha256": "", "review_sha256": "", "expires": (date.today() + timedelta(days=7)).isoformat()}
@@ -103,7 +103,34 @@ class SourceOwnedReviewFixture:
         self.evidence(f"archive-{provenance['name']}", f"archives/{provenance['name']}.crate", payload, "archive")
 
     def save_raw(self):
+        """Rebuild consistent synthetic query evidence from the projection.
+
+        Negative raw/receipt tests should edit evidence() then save_review(),
+        without calling this repair helper. Dates intentionally predate the
+        historical year-2000 fixtures; these are never real query receipts.
+        """
         self.evidence("ancestor-osv", "ancestors.osv.json", json.dumps(self.raw).encode(), "osv")
+        self.review["evidence"] = [entry for entry in self.review["evidence"]
+                                   if not entry["id"].startswith(("query-response-", "query-request-", "query-receipt-"))]
+        self.review["osv_queries"] = []
+        entries = [entry for group in self.raw["results"] for entry in group["packages"]]
+        for index, entry in enumerate(entries):
+            package = entry["package"]
+            query = {"package": {"ecosystem": package["ecosystem"], "name": package["name"]}, "version": package["version"]}
+            response = json.dumps({"vulns": entry.get("vulnerabilities", [])}).encode()
+            request = json.dumps(query).encode()
+            response_id, request_id, receipt_id = (f"query-{kind}-{index}" for kind in ("response", "request", "receipt"))
+            self.evidence(response_id, f"queries/response-{index}.json", response, "review")
+            self.evidence(request_id, f"queries/request-{index}.json", request, "review")
+            receipt = {"schema_version": 1, "scope": "Synthetic fixture only; no OSV request performed.", "queries": [{
+                "request": query, "method": "POST", "url": "https://api.osv.dev/v1/query", "http_status": 200,
+                "requested_at": "1999-12-31T12:00:00+00:00", "received_at": "1999-12-31T12:00:01+00:00",
+                "path": f"response-{index}.json", "size": len(response), "sha256": sha(response),
+                "advisories": [v["id"] for v in entry.get("vulnerabilities", [])],
+                "request_path": f"request-{index}.json", "request_sha256": sha(request)}]}
+            self.evidence(receipt_id, f"queries/receipt-{index}.json", json.dumps(receipt).encode(), "review")
+            self.review["osv_queries"].append({"name": package["name"], "version": package["version"],
+                "response_evidence": response_id, "receipt_evidence": receipt_id, "request_evidence": request_id})
 
     def save_review(self):
         payload = json.dumps(self.review, sort_keys=True, ensure_ascii=False).encode()
@@ -231,6 +258,50 @@ class SourceOwnedAdvisoryTests(unittest.TestCase):
         self.f.save_review()
         self.assertEqual(self.f.validate()["status"], "fail")
         self.f.review["packages"][1]["source_review"]["disposition"] = "reviewed"
+        self.f.save_review()
+        self.assertEqual(self.f.validate()["status"], "pass")
+
+    def test_receipt_may_reference_primary_osv_projection(self):
+        records = {entry["id"]: entry for entry in self.f.review["evidence"]}
+        rows = []
+        for binding in self.f.review["osv_queries"]:
+            receipt = json.loads((self.f.evidence_root / records[binding["receipt_evidence"]]["path"]).read_bytes())
+            row = receipt["queries"][0]
+            rows.append({"query": row["request"], "method": row["method"], "url": row["url"],
+                "http_status": row["http_status"], "path": records[binding["response_evidence"]]["path"],
+                "sha256": row["sha256"], "size_bytes": row["size"], "findings": row["advisories"],
+                "started_at_utc": row["requested_at"], "completed_at_utc": row["received_at"]})
+            binding["receipt_evidence"], binding["request_evidence"] = "combined-query-receipt", None
+        projection = records[self.f.review["osv_evidence"]]
+        receipt = {"schema_version": 1, "scope": "Synthetic records-format fixture.",
+            "recorded_at_utc": "1999-12-31T12:00:02+00:00", "records": rows,
+            "projection": {"path": projection["path"], "sha256": projection["sha256"], "size_bytes": projection["size"]}}
+        self.f.review["evidence"] = [entry for entry in self.f.review["evidence"]
+            if not entry["id"].startswith(("query-request-", "query-receipt-"))]
+        self.f.evidence("combined-query-receipt", "records-receipt.json", json.dumps(receipt).encode(), "review")
+        self.f.save_review()
+        self.assertEqual(self.f.validate()["status"], "pass")
+
+    def test_other_selected_receipt_cannot_contradict_ancestor_findings(self):
+        records = {entry["id"]: entry for entry in self.f.review["evidence"]}
+        first, second = self.f.review["osv_queries"]
+        original = json.loads((self.f.evidence_root / records[first["receipt_evidence"]]["path"]).read_bytes())["queries"][0]
+        receipt_entry = records[second["receipt_evidence"]]
+        receipt = json.loads((self.f.evidence_root / receipt_entry["path"]).read_bytes())
+        # This fully hash-bound extra row claims no findings for the ancestor
+        # whose primary binding still selects the other, nonempty receipt.
+        response = b"{}"
+        self.f.evidence("conflicting-response", "queries/conflicting-response.json", response, "review")
+        receipt["queries"].append(dict(original, path="conflicting-response.json",
+            sha256=sha(response), size=len(response), advisories=[]))
+        self.f.evidence(receipt_entry["id"], receipt_entry["path"], json.dumps(receipt).encode(), "review")
+        self.f.save_review()
+        with self.assertRaisesRegex(ValueError, "ancestor"):
+            self.f.validate()
+        response = (self.f.evidence_root / records[first["response_evidence"]]["path"]).read_bytes()
+        self.f.evidence("conflicting-response", "queries/conflicting-response.json", response, "review")
+        receipt["queries"][-1].update(sha256=sha(response), size=len(response), advisories=original["advisories"])
+        self.f.evidence(receipt_entry["id"], receipt_entry["path"], json.dumps(receipt).encode(), "review")
         self.f.save_review()
         self.assertEqual(self.f.validate()["status"], "pass")
 

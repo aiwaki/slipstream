@@ -1,69 +1,74 @@
 # Current Project State
 
-## Current continuation — 2026-11-10, r5 SQLite repair prepared
+## Current continuation — 2026-11-10, r5 SQLite and OSV evidence repair
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
-5eabf61fabf34f7542503e73934fda35a392b4a4; main/base remains
-1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Working-tree r5 repair is not yet
-committed. No workstation app/service/network changes or app downloads.
+8b933fb1176d4eb356098df5b0e6e51b332970b4; main/base remains
+1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is locally verified,
+pending commit/push and fresh exact-head CI/audit. No workstation app/service/
+network changes or app downloads. Active goal remains incomplete.
 
-Previous candidate source1edbe80c: R42367078722/1 and G42367845720/1 are accepted.
-R report authentication +86 checks passed; four sites/eight Safari/Chrome
-observations and1800.146s background invisibility soak. G75-check report/root
-acceptance independently rechecked (32 evidence/four source hashes, commit/crash
-transitions). Q=output/continuation-20261107/browser-start-evidence/qualification.
-R receipt SHA cafb28c608f83687e5ea54b18488e0b9bdaf537073b885bea99d94b2aaf2ee03;
-G receipt SHA c8e09e0a46d518e6ceabc5a3d9570867958031a82b3bf74cc0e783c53595b820.
-Do not repeat/relabel these unchanged historical gates. No P exists for that
-superseded source; no .35 published. The four-site result is not all-sites/media
-or evidence of the original intermittent failure's cause.
-
-PR476 first refreshed the Nov7-expired source-owned review through Dec10.
-Exact-head CI42842890680/1 passed. Audit42842890479/1 failed for
-libsqlite3-sys0.30.1 CVE-2026-119375/RUSTSEC-2026-0459/GHSA-72w2-rjgg-q729;
-source-owned review passed. Artifact13775843557 authenticated. Observer71710
-ended1; retained receipt82e5fc683681b27b7265e9003a54418fbb354e770127484d56179c03c3df9137.
-Do not rerun the unchanged audit or merge the failing source.
-
-Repair: Geph0.4.3-r5, exact owned sqlx-sqlite0.8.6 manifest selects official
-registry libsqlite3-sys0.39.1 (bundled SQLite3.54.1). All51SQLx Rustfiles and old
-three owned packages unchanged; exactly two lock records change,488others retained.
+The original refreshed review passed, but audit42842890479 failed for bundled
+libsqlite3-sys0.30.1 CVE-2026-119375/RUSTSEC-2026-0459/GHSA-72w2-rjgg-q729.
+The repair selects official libsqlite3-sys0.39.1/SQLite3.54.1 through an exact
+sqlx-sqlite0.8.6 manifest derivative. All51 Rust files are unchanged; exactly two
+lock records change,488 others stay. Native SQLite remains disabled; no exception.
 SOURCE1fdd3e49418c7a47e06e092dbac411cb8c41022e6688b7115a071bd89c81f9c8;
 lock2d017b845167e97d0a2178acc589851aeffa2269809fca8c63de0d0c925d4143.
-Native SQLite lane disabled; no exception or system-library workaround. Immutable
-r5 release is currently absent (verified404). Existingr4 remains immutable.
+Geph0.4.3-r5 is not built/published yet; r4 remains immutable. Producer extends
+its existing30 synthetic cases with3 SQLite cases in the same build.
 
-Evidence under output/continuation-20261110/sqlite-repair and
-output/continuation-20261110/source-review-refresh/{pr476/geph-audit/official/sqlx-wrapper-compatibility,sqlite-fix-evidence,native-sqlite-review}.
-One-job isolated SQLx build:3 cache/WAL/transaction/error tests passed. Independent
-engine-function positive-control test:6cases each on old/newSQLite, old leak
-reproduced, fixed tailzeroed; peakRSS167MB. Both macOS --locked metadata graphs
-passed. Actual SPDX/review/bundle roundtrip passed:4owned/406registry/76ownedfiles.
-All75prior evidence payloads preserved,109catalog entries. No compiledGeph claim.
-Focused affected-area suites passed287tests; initial consumer import failure was
-only missing rootPYTHONPATH, corrected17-test invocation passed. One trigger
-assertion additionally passed. No full suite repeated.
+Evidence S=output/continuation-20261110/sqlite-repair;
+A=output/continuation-20261110/source-review-refresh/pr476-r5.
+Reuse the unchanged287 affected-area tests, both macOS locked metadata graphs,
+3 isolated SQLx cases and6 old/new engine cases each. The old engine reproduces
+the disclosed defect; fixed engine zeroes the tail. Peak spike RSS167MB. This is
+not evidence that SQLite caused the user's network symptoms or a compiled-Geph claim.
 
-New exact PR-only source/bootstrap guards and backward-compatible legacy3/new4
-closure are prepared. Existing producer sandbox/build gets33cases (old30+3SQLite),
-with exact source/engine identity, cache/WAL/reopen and error recovery. Fresh Rust
-execution remains required on the producer. Independent evidence and CI/bootstrap
-reviews completed without blockers; FFI normalization wording was corrected and
-semantic admission/bundle roundtrip rechecked. Final review SHA
-0eaa5bd108091193a0aa8399b422798e13389e56344014f5c255f33e3c817bb4; canonical
-policy SHA deb290704898b1555e7a584a0d64191e3e6a43886c69faef4a968850ab544523.
-The frozen PR bootstrap binds 63 files (map SHA
-d22a46e7c3d8296e4c26d623a3bed93a88e4aac4869d981d593bee07fb5f5524). Final
-transition checks (3), actual r4-to-r5 admission and CI-scope checks (31) passed.
-Independent final evidence review SHA
-d5406ba81bd4f010a2e20a401994bd82d284816fb4e62d2477bfc849655925f6.
-Raw machine-generated diffs/logs retain their evidence hashes; only their exact
-paths have whitespace attributes, following the existing retained-evidence rule.
-NEXT: commit the reviewed delivery, verify its real Git delta, push the updated
-PR476 head, then observe its CI/audits. Aftermerge require immutableGephr5 producer,
-exactappCI/candidate/R/G/P and ordinary public update/rollback. Preserve .31,
-settings/learning and externalGeph. Active goal remains incomplete.
+For pushed8b933fb1, CI42853411066/1 and audit42853411197/1 both passed. Watcher
+receiptffff603ee19c3d9c50d0c1e0c2f41e11b239e259e954b2439d8dce6c3cf67e75.
+Geph artifact13780224091 authenticated; canonical report/SPDX/source checks and
+raw OSV recomputation passed:407scanned+4owned, blocking/exceptions/affected/
+unresolved=0, informational4. Receipt1a85517285e5e02a0ae85f29f8be87eb616bcc7542f32a735b27291c9cd52393.
+PR merge2cbc4e1b has the same treeb44da550 ashead8b933fb1. Packaged app jobs
+intentionally skipped under exact PR-only source bootstrap; no candidate claim.
+
+Real PR review PRRT_kwDOTLueX861wvKZ found that hashed raw ancestor OSV evidence
+could contradict the separately admitted projection. Synthetic RED confirmed it;
+current production raw responses were empty and consistent. Schema2 now requires
+explicit raw/receipt/request bindings, exact official query coordinates and HTTP
+success, strict paths/hashes/sizes/timestamps, complete IDs/aliases and inherited
+dispositions. Cross-receipt contradictions and null required sizes reject. Only
+the exact historical r4 schema1 binding survives, with original Nov7 expiry.
+Two subprocess scanner comments were independently reviewed as false positives
+and resolved: fixed argv/path/version, shell disabled; no external command input.
+Details and evidence paths are in ROUTING_RESEARCH and A/osv-query-regression.
+
+Verification:72 affected consumer tests,24 raw-query tests,2 additional projection/
+cross-receipt regressions and34 scope/transition tests passed. Each discovered
+semantic defect has RED evidence. Final actual SOURCE/metadata -> SPDX -> review ->
+canonical pack/unpack passed with109 existing payloads unchanged and expired-review
+rejection. Exact historical r4 accepts Nov7 and rejects Nov10 or extended expiry.
+Final local receipt S/osv-final-local-receipt.json; roundtrip in
+S/actual-review-verification-queries-sentinel/result.json. No broad suite repeated.
+Review9e9c629f87efd1f9e19fddbafa6bc32a6c3b1bdf5b8913cc4fc86a63bd5b8eb4;
+canonical policy2d1f4f4e70d4a7a354d5f5d22fc00552e0a61067d1131ea286d30df0e8d4eef0.
+Final frozen bootstrap64 files/72 changed, SHA
+29fec216a78c57c7bfa9cf19c873e965c16cfcc4f4703719db4d8fdc39afa272.
+
+NEXT: commit the schema2 follow-up, verify actual committed Git delta, push and
+observe its existing automatic CI/audit. Authenticate its new report; resolve
+addressed review only after pushed verification, then guarded exact-head merge.
+After merge observe the existing main Geph producer; S/producer-r5 is prepared
+with fresh file pins and PENDING run/source guards. Require33 synthetic cases,
+universal binary, audit and immutable r5 assets/attestations before app CI.
+Then require exact app candidate/R/G/P and ordinary update/rollback. Historical
+R42367078722/1 (86 checks,4 sites/8 observations,1800.146s soak) and G42367845720/1
+(75 checks) belong to source1edbe80c, not the new candidate. No P or .35 publication.
+Preserve .31/settings/learning/external Geph. The Nov5 local window is expired;
+no new local update is authorized by this source repair. Normal protected CI
+budget remains3 per UTC day; the Nov6 exception expired.
 
 ## Previous checkpoint — 2026-11-07, Chrome startup evidence merged
 
