@@ -1,35 +1,100 @@
 # Current Project State
 
-## Current continuation — 2026-11-07, packaged Chrome startup evidence
+## Current continuation — 2026-11-10, reports accepted; source review refresh
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/browser-startup-evidence-20261107`; base/main
-`a9fdac98f0d07e953770097be08fe4fddc0d1f65`. Live GitHub reconciled: main unchanged,
-CI42221917459/1 terminal failure, audit42221917506/1 success; no duplicate PR for
-this work. Previous goal turn made progress (budget PR merged, new CI failure
-preserved); this continuation is diagnosing that failure, not repeating a wait.
-The dated Nov6 allowance expired; normal three/day account-backed policy applies.
+Branch `codex/source-review-refresh-20261110`, HEAD/main still
+`1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5`, tree `7bbacd913cc619b8f9d5fe3ec2b8edc371dd0a32`.
+Live GitHub confirms R42367078722/1 and G42367845720/1 completed successfully.
+The previous turn checked usage but did not advance release work; this turn
+completes retained report verification. No workflow rerun or Mac changes.
 
-Working patch: disposable-CI-only Chrome startup summary from existing readiness
-observations, with child status sampled only after cleanup captures owned groups
-and before TERM. Exact bounded Python sanitizer retains the summary; private raw
-output remains redacted. Deadline, route/ownership decisions, cleanup precedence
-and browser/release acceptance are unchanged. This fixes lost failure evidence;
-it does not yet establish or repair the original Chrome/Safari failure cause.
+Q=output/continuation-20261107/browser-start-evidence/qualification.
+R small report ZIPs and all six signed subjects were authenticated and the
+existing exact-source verifier passed 86 checks. Q/readiness-r/verification.json
+SHA `cafb28c608f83687e5ea54b18488e0b9bdaf537073b885bea99d94b2aaf2ee03`.
+The four-site Safari/Chrome matrix passed all eight observations; background
+invisibility soak measured 1800.146 seconds. These are bounded browser/transport/
+background results, not arbitrary sites, media, calls, or a user-Mac update.
+G's existing 75-check report and root acceptance were independently rechecked:
+all 32 evidence and four source hashes match live run/artifact identities. Real
+commit and crash-before-commit daemon transitions passed. Do not recreate G
+acceptance or repeat unchanged R/G. No packaged P run exists for this source.
+
+Current admission rejects the source-owned Geph review after 2026-11-07.
+This is reproduced and retained in
+output/continuation-20261110/source-review-refresh/pre-refresh-expiry.json.
+Historical R/G remain valid; publication requires a current review. P could
+technically consume this historical pair, but its source would be superseded by
+the necessary review refresh, so do not spend it now. SOURCE/lock/runtime and
+immutable Geph r4 remain unchanged. A bounded re-review of the same three
+embedded packages, fresh ancestor OSV responses and exact evidence rebinding
+are completed locally. The review is bound through 2026-12-10 after independent
+review, with all prior limits preserved; full dependency admission remains pending.
+
+Local review/admission/bundle suites passed54 tests; exact-data verification
+passed81 checks, including canonical pack/unpack, retained historical bytes,
+current/expired admission and normal-product CI classification. Independent final
+review found no blockers. Evidence: output/continuation-20261110/source-review-refresh.
+Review SHA `3b94182efea3ec60b624074c94a7150414137afe6140f5433bd65e336b2ce160`.
+NEXT: push the reviewed refresh and observe normal PR/audit CI. Reuse old native Geph artifact under historical verification;
+new app-source candidate and required R/G/P follow the reviewed policy change.
+No .35 publication or workstation installation yet. Preserve .31/settings/learning
+and external Geph. The active goal remains incomplete.
+
+## Previous checkpoint — 2026-11-07, Chrome startup evidence merged
+
+Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
+Branch `codex/browser-startup-evidence-release`; HEAD/main
+`1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5`, tree
+`7bbacd913cc619b8f9d5fe3ec2b8edc371dd0a32`, merged PR475. Exact guarded squash
+matches the PR-tested tree. This goal turn made progress: retained bounded startup
+evidence, passed local and packaged checks, merged. No original Chrome/Safari
+cause is claimed fixed, and no workstation app/service/network change occurred.
 
 B=output/continuation-20261107/browser-start-evidence. B/local-evidence.json binds
-initial RED, 144 Python tests plus8 subtests, independent review and source hashes.
-31 Rust browser-worker tests pass with command-local empty Tauri resources for
-unit testing only. Initial ordinary cargo invocation stopped at missing sidecar
-before tests; no app was built/installed or network/service setting changed.
-Focused Clippy with warnings denied, eight docs tests, continuity and whitespace
-checks pass. Earlier unchanged runtime suites are reused. New-source CI is pending.
+initial RED, 144 Python tests plus8 subtests, 31 Rust browser-worker unit tests,
+Clippy with warnings denied, eight docs tests, continuity and independent review.
+Unit commands used empty Tauri resource lists only to avoid a missing sidecar;
+packaging was separately qualified on CI. No original deadlines, ownership,
+routing or browser/release acceptance changed. Detailed scope is in ROUTING_RESEARCH.
 
-NEXT: submit the diagnostic PR, review exact CI
-and merge only with required checks. Then verify a fresh consistently bound main
-candidate before one new readiness R. Do not run stale Nov6 helper pins, rerun
-failed protected attempts, lower criteria or claim release readiness from unit
-checks. Record actual startup observations if the packaged gate fails again.
+PR475 CI42364569190/1 and audit42364569121/1 passed; the packaged browser failure
+did not recur. B/pr475 contains complete run/job evidence, pre-merge and merge proof.
+Its observer24722 ended0; do not repeat it. Main CI42365774666/1 and
+audit42365774651/1 pass; observer7569 ended0. All12 common consumers and4 audit
+jobs are verified. Candidate artifact13571253899, manifest SHA
+2496328f64999b4ee861c7b1dd0b3efd4cbf59da60fd4184911c15df434b426d.
+B/main-ci/candidate-receipt.json SHA
+38b98460e51e6b8b6f599ca6389df36c952115d3db90841c7f2c0e7f650e84f7
+binds exact-main producer metadata, not local app bytes. No app downloaded. Do not dispatch duplicate CI or retry old
+failed protected runs. Source/candidate/run identity must remain consistent.
+
+Fresh UTC Nov7 budget inventory at10:37 found zero account-backed runs today,
+no active protected run; normal limit3 applies. The dispatcher will recheck
+immediately before its single POST. B/qualification holds repinned helpers,
+independent review and12 offline guard simulations (all passed; no dispatch).
+The Nov6 allowance/helpers are expired. R42367078722/1 is submitted once at
+normal Nov7 budget position1 of3. Its canonical live report passed all8 browser
+observations on4 sites; xpersonatoy Safari6013ms/Chrome3071ms. The 1800s measured
+background soak is running. Its four small diagnostic members are ZIP-digest
+verified; B/qualification/readiness-r/live-intermediate-verification.json is
+partial evidence only, not final R acceptance. Exact source/candidate matched.
+B/qualification/readiness-r holds intent, preflight, initial metadata and observer;
+G42367845720/1 is also running once during R soak, after canonical live PASS.
+This native root update workflow has no R/account-backed prerequisite and uses
+separate hosted Macs; P still requires accepted matching G. B/qualification/native-g
+contains exact .34 OLD/.35 NEW pins and atomic dispatch intent. No .35 publication
+or local installation. Existing .31/settings/learning and
+external Geph remain untouched.
+
+NEXT: observe existing R42367078722/1 and G42367845720/1, no duplicate/rerun.
+Accept G only through its exact two-case collector/verifier, then one matching P. If it fails,
+authenticate its bounded failure reports before changing code. If successful,
+collect/verify the six small proof subjects and qualify new-source G/P.
+R final acceptance intentionally waits for accepted matching G materialization. Use the
+new Safari/Geph failure hints if it fails. Keep criteria and first-attempt rules;
+new-source G/P and proof verification remain required before publication.
 
 ## Previous checkpoint — 2026-11-06, budget renewed; CI browser startup blocked
 

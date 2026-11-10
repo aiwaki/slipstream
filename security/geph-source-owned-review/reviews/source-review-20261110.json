@@ -1,0 +1,421 @@
+{
+  "expiry_proposal": {
+    "expires": "2026-12-10",
+    "rationale": "A 30-day maximum review cycle for unchanged source-owned adapters. Exact SOURCE, lock, package descriptors and file hashes invalidate this review when changed. Full registry/native dependency audits remain fresh and independently blocking; current-date publication admission and expiry remain enforced. New relevant advisories or source findings require immediate reassessment rather than waiting for expiry.",
+    "reviewed_on": "2026-11-10",
+    "status": "accepted_by_primary_agent_after_scoped_and_independent_review"
+  },
+  "fresh_ancestor_queries": {
+    "completed_at_utc": "2026-11-10T14:55:41.838510+00:00",
+    "findings": [],
+    "matches_historical_projection_bytes": true,
+    "projection_path": "osv/20261110/ancestors.json",
+    "projection_sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
+    "receipt_path": "osv/20261110/receipt.json",
+    "receipt_sha256": "d3b373276e9e8c3802a1ebbe0f3e67ae8d48ec1c1d8ab7a4f3e5bdf4877d7161",
+    "scope": "Two direct official OSV package-version queries for the derivative ancestors; not the full registry or native dependency audit."
+  },
+  "independent_review": {
+    "canonicalization": "UTF-8 JSON with sorted keys, ensure_ascii=False, separators comma and colon, no trailing newline",
+    "result": {
+      "closure": {
+        "aws_lc_archive_bytes_rehashed": 9725710,
+        "catalog_payloads_rehashed": 69,
+        "embedded_file_bodies_matched": 20,
+        "materialized_final_root_files_matched": 5,
+        "mismatches": [],
+        "source_edit_chains_reverse_verified": 16
+      },
+      "expiry_judgment": {
+        "conditions": [
+          "Exact SOURCE, lock, package descriptors and bodies remain unchanged; any change requires a new review binding.",
+          "Current advisory and native/registry admission remain independently mandatory.",
+          "No automatic renewal and no broad safety claim."
+        ],
+        "initial_recommendation": "2026-11-24",
+        "root_selected_bounded_date": "2026-12-10"
+      },
+      "inspected": [
+        {
+          "lines": [
+            1,
+            457
+          ],
+          "path": "sources/slipstream-vendor/aws-lc-backend/src/lib.rs"
+        },
+        {
+          "lines": [
+            1,
+            62
+          ],
+          "path": "sources/slipstream-vendor/aws-lc-backend/src/owned.rs"
+        },
+        {
+          "lines": [
+            1,
+            263
+          ],
+          "path": "sources/slipstream-vendor/mizaru-client/src/lib.rs"
+        },
+        {
+          "path": "sources/slipstream-vendor/geph5-broker-protocol/src",
+          "scope": "all seven Rust modules; five byte-identical to exact upstream archive, lib.rs and puzzle.rs retain identical runtime prefixes with terminal cfg(test) modules removed"
+        },
+        {
+          "focus_lines": [
+            119,
+            187
+          ],
+          "lines": [
+            1,
+            207
+          ],
+          "path": "vendor/geph/SOURCE.json:source_edits[src/auth.rs].after"
+        },
+        {
+          "focus_ranges": [
+            [
+              30,
+              75
+            ],
+            [
+              113,
+              149
+            ]
+          ],
+          "lines": [
+            1,
+            152
+          ],
+          "path": "vendor/geph/SOURCE.json:source_edits[src/bw_token.rs].after"
+        },
+        {
+          "path": "backend/aws-lc/include/openssl/bn.h",
+          "scope": "pinned BN_mod_exp_mont and BN_mod_inverse_blinded secret-value contracts"
+        },
+        {
+          "path": "backend/aws-lc/include/openssl/rand.h",
+          "scope": "pinned insufficient-entropy abort contract"
+        }
+      ],
+      "kind": "bounded_static_source_and_composition_rereview",
+      "limitations": [
+        "This is not vulnerability-free, native AWS-LC, registry-dependency, compiled-binary, ABI, side-channel or complete memory-safety clearance.",
+        "Historical fixture tests and prior reviews were reused, not rerun.",
+        "Inherited whole RPC body and JSON allocations precede bounded DTO decoding.",
+        "Bandwidth cancellation after a submitted INSERT but before notification remains unqualified.",
+        "AWS-LC may abort on insufficient entropy; packaged recovery of that condition remains unqualified.",
+        "Secret cleanup covers inspected owned storage, not caller copies or all stack/register/allocator remnants.",
+        "Legacy key-width/exponent policy and explicit absent-broker-keys no-root mode remain unchanged.",
+        "Fresh ancestor and current full dependency security admission remain separate mandatory checks; this review makes no advisory-absence claim."
+      ],
+      "lock_sha256": "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+      "manual_findings": [],
+      "not_performed": [
+        "build",
+        "test execution",
+        "scanner",
+        "account or broker request",
+        "native process",
+        "browser",
+        "workstation mutation",
+        "policy mutation"
+      ],
+      "observations": [
+        "RAII owners release native Bn/Ctx/Mont/Rsa values on inspected error paths; borrowed n/e remain under the owning key.",
+        "No native handle crosses await; OwnedPending contains owned bytes and is consumed on finalization with response mathematical-key binding.",
+        "Mizaru bounds DER, signature representative and Merkle branch decoding and direct DTO use; expected epoch and configured root are checked before credential publication.",
+        "Auth generates a random token before untrusted subkey retrieval and preserves the request-selected Plus/Free root; malformed configured root cannot silently become no-root mode.",
+        "Bandwidth INSERT follows successful unblind with the configured original issuer key; consumer listen-before-recheck avoids the ordinary notification race.",
+        "The previously fixed is_plus != currently_plus cache invalidation remains byte-identical."
+      ],
+      "recorded_on": "2026-11-10",
+      "reviewer": "independent-native-evidence-review",
+      "schema_version": 1,
+      "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+      "verdict": "no_new_confirmed_source_defect_in_reviewed_scope"
+    },
+    "result_canonical_sha256": "e60afd56573d3f6232622a586924b274494e3b52005d13d794d91ebfd712eec0",
+    "status": "completed"
+  },
+  "limitations": [
+    {
+      "boundary": "No current registry or native dependency security admission. Independent fresh CI audit must assess the combined source, lock, enabled features and native AWS-LC/SQLite inventory; old RSA exceptions must not be extended or used.",
+      "id": "CURRENT_AUDIT"
+    },
+    {
+      "boundary": "No new side-channel, sanitizer, fuzz, custom-allocator or cross-architecture validation was run. Pinned native API contracts and bounded FFI inspection are not blanket cryptographic or memory-safety assurance.",
+      "id": "CRYPTO_ASSURANCE"
+    },
+    {
+      "boundary": "Pinned AWS-LC RNG may abort when sufficient entropy is unavailable. Packaged process containment/recovery is unqualified; returned errors are not evidence of recoverable entropy failure.",
+      "id": "ENTROPY_ABORT"
+    },
+    {
+      "boundary": "SecretBytes/BN cleanup covers inspected owned live storage, not every caller-owned token copy, stack/register copy, allocator configuration or complete erasure.",
+      "id": "SECRET_COPIES"
+    },
+    {
+      "boundary": "Inherited whole RPC body/JSON allocation occurs before bounded Mizaru DTO decoding. No transport body-size or JSON-depth hardening claim is made.",
+      "id": "BODY_ALLOCATION"
+    },
+    {
+      "boundary": "Retained cancellation checks do not establish rollback or notification recovery for a bandwidth INSERT already submitted before cancellation ahead of BW_TOKEN_SUPPLIED.notify; an actual operational failure was not reproduced.",
+      "id": "BW_CANCELLATION"
+    },
+    {
+      "boundary": "Legacy byte-width acceptance permits 2041..4096-bit modulus widths and exponents 3/65537. This is not a new strict 2048-bit minimum or complete issuer-modulus validation. Known legacy 2049-bit blind-encoding bug is intentionally not reproduced.",
+      "id": "KEY_POLICY"
+    },
+    {
+      "boundary": "Absent broker_keys retains explicit inherited unauthenticated-root mode; configured invalid roots fail rather than falling back. The review does not broaden or remove that policy.",
+      "id": "NO_ROOT_MODE"
+    },
+    {
+      "boundary": "Neither retained candidate SOURCE nor C6 SOURCE has a native_sqlite field. Preserve and freshly validate the independent current SQLite native provenance/inventory; do not infer a descriptor from these files.",
+      "id": "SQLITE_PROVENANCE"
+    },
+    {
+      "boundary": "Available upstream attribution/license declarations were retained; this source review does not provide legal clearance or assert an upstream package-specific notice was recovered.",
+      "id": "LICENSE_SCOPE"
+    }
+  ],
+  "manual_conclusion": "No new confirmed source defect found in the bounded reviewed scope; independent review reaches the same limited conclusion.",
+  "manual_scope": [
+    "FFI handle ownership, error-path Drop, borrowed public key lifetime, secret-buffer cleanup boundaries and single-use owned pending state.",
+    "Public DER/representative bounds, exact DER root membership, epoch matching and original mathematical issuer-key binding.",
+    "Production auth and bandwidth validation-before-persistence ordering and unchanged broker protocol adapter."
+  ],
+  "not_performed": [
+    "No compiler, crypto fixture, sanitizer, fuzz, side-channel or cross-architecture tests were run for this review.",
+    "No current full dependency scan or native dependency admission is established by the two ancestor queries.",
+    "No live account, browser, media, installed-app or updater qualification was run by this review."
+  ],
+  "packages": [
+    {
+      "descriptor_sha256": "b51d00b9d21979f21d5ae806f4e06b90bf87b3ce16ee9b5a802cfdb4b1b4b18a",
+      "files": [
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "Cargo.toml",
+          "sha256": "f5049e27e0c5593112a78fc4f382b091f37c4731ad93073710fe66a84bd2aaac",
+          "size_bytes": 317
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "LICENSE-ISC.txt",
+          "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "size_bytes": 740
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "SOURCE-NOTICE.md",
+          "sha256": "e820565f60826082119d890b6533a63f8f9512c5a71283284f3b71998842644a",
+          "size_bytes": 2228
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "provenance/Cargo.toml",
+          "sha256": "2e8b68ac17e6578854a6508a536bf82462f9cf51abb64657b1b4d808c7bf3162",
+          "size_bytes": 1215
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/lib.rs",
+          "sha256": "3aab2e8c9c1f4dce6a02ca5f716020f560c6b4e281a59c238051b90991e64bf8",
+          "size_bytes": 9180
+        }
+      ],
+      "manual_findings": [],
+      "name": "mizaru2-slipstream-client",
+      "path": "slipstream-vendor/mizaru-client",
+      "version": "0.1.0"
+    },
+    {
+      "descriptor_sha256": "ca128627b932eb5cb5f80e7de0524d70c9068aff31689b94db8b871c63bc3592",
+      "files": [
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "Cargo.toml",
+          "sha256": "848741648ff67d659160fe0009bb783fa7f4977247c27599dd19fa721f2c4eb0",
+          "size_bytes": 146
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "LICENSE",
+          "sha256": "418510c495b074f7466c6c3c51af379889e8c28479da0a4f2006cf08e5e60a15",
+          "size_bytes": 1063
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/lib.rs",
+          "sha256": "d6473d922426398c931dc1f0e9fb1c2d24ddb628d09bf09616c2bb6a2725994f",
+          "size_bytes": 14176
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/owned.rs",
+          "sha256": "1c81e27303f63bbd733c39936a6103e65300b7f60c4906687e814174d46b064a",
+          "size_bytes": 2288
+        }
+      ],
+      "manual_findings": [],
+      "name": "slipstream-rsa-client",
+      "path": "slipstream-vendor/aws-lc-backend",
+      "version": "0.1.0"
+    },
+    {
+      "descriptor_sha256": "5c2d8819035ca6f55da1d8cceca30fba28f274457b00c2375a1ef05abf713cde",
+      "files": [
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "Cargo.toml",
+          "sha256": "12f142680e648c4295f01a4ee0077cabc5ee1fcca3f96848e06a798cd2228733",
+          "size_bytes": 1945
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "LICENSE-ISC.txt",
+          "sha256": "242238da85b3c2178895de4294e0a43a5394e479b318762f5b2575f0af551eee",
+          "size_bytes": 740
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "SOURCE-NOTICE.md",
+          "sha256": "e6ca1999ce226e4210c925ad53a8be414d4ed097fe496bdcb5d92c71296125e6",
+          "size_bytes": 2344
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "provenance/Cargo.toml",
+          "sha256": "5ac09cf49ffc9fc1d61a1783149c26de9c31ed81c73ef46bc0167f3889ffad0e",
+          "size_bytes": 1884
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/bridge.rs",
+          "sha256": "38432a9f53b0e9c5837687f31f6461371bd5471a38b4aba3de9c6b802c523fdb",
+          "size_bytes": 277
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/exit.rs",
+          "sha256": "735958b9b6a2a9edc9f60c980d175927aa9f4f8f21cf69eaf3ff4237627f2434",
+          "size_bytes": 2891
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/lib.rs",
+          "sha256": "6d68ef992a055b6b2686f4e34cbbefe22c73c04325686dba44bbffa0e01fff8c",
+          "size_bytes": 8383
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/mac.rs",
+          "sha256": "85d60b9865609b98756efa62ab909d81b2b99e9d94515e8e9d00f02af4fbcaf8",
+          "size_bytes": 1039
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/puzzle.rs",
+          "sha256": "705c63b6458096795c935fcda28eacd9fbf2aa87351b48577ae093fcb985f92a",
+          "size_bytes": 1172
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/route.rs",
+          "sha256": "0fdeb37560789eb5418a23ac4ae2e149992e614702fbac1fee7082f5a47d5c08",
+          "size_bytes": 1007
+        },
+        {
+          "matches_SOURCE_and_retained_bytes": true,
+          "path": "src/signed.rs",
+          "sha256": "1de66fced75c78c5ce71372b2dc5200ff169cfcc6dc932559abb61ac480d27a2",
+          "size_bytes": 4095
+        }
+      ],
+      "manual_findings": [],
+      "name": "geph5-broker-protocol",
+      "path": "slipstream-vendor/geph5-broker-protocol",
+      "version": "0.4.3"
+    }
+  ],
+  "prior_review": {
+    "not_relabelled_as_new": true,
+    "path": "reviews/source-review-20261031.json",
+    "sha256": "5410e83f7e2cc1a3cc86b13c4d34fe4cc7b348bfac8acfe35d3e61bd3ca8289a"
+  },
+  "production_source": {
+    "files": [
+      {
+        "matches_prior_materialized_source": true,
+        "path": "src/session.rs",
+        "sha256": "36fd9f8187b1538836411b6e5973355a5f18b095eda16f645e9821e557ff2822",
+        "size_bytes": 33495
+      },
+      {
+        "matches_prior_materialized_source": true,
+        "path": "Cargo.toml",
+        "sha256": "2b52b2ff59bea2033504b1f94c5d05fbea35e4c875598c18e2e29e30d07212f4",
+        "size_bytes": 6217
+      },
+      {
+        "matches_prior_materialized_source": true,
+        "path": "src/database.rs",
+        "sha256": "5b6be4d78c2a9e18f9292e61198600f776d51252d3daf7835d06e732583f1961",
+        "size_bytes": 21009
+      },
+      {
+        "matches_prior_materialized_source": true,
+        "path": "src/auth.rs",
+        "sha256": "3265feb5847bef9c3dacdde4b0b0b27edfa5c751d15583b160a3d3f86595bbb5",
+        "size_bytes": 7786
+      },
+      {
+        "matches_prior_materialized_source": true,
+        "path": "src/bw_token.rs",
+        "sha256": "b7e74e8fefa04fb98e689c737d1152417b7eed9a8b957e862d2a3ba6c8fa8af9",
+        "size_bytes": 5909
+      }
+    ],
+    "observations": [
+      "The token is generated before fetching an untrusted issuer key. Auth verifies the request-selected level/root and exact epoch before unblind and only then writes conn_token. Invalid configured root decoding returns an error.",
+      "Auth retains the is_plus != currently_plus cache invalidation comparison; unchanged historical causal tests are referenced, not rerun.",
+      "Bandwidth tokens use the configured key; OwnedPending binds the original mathematical n/e, and INSERT follows verified unblind. The INSERT-versus-notification cancellation limitation remains."
+    ],
+    "retained_materialization": "continuation-20261031/rsa-source-owned-tooling/actual-inputs/materialized/geph5-client-0.4.3",
+    "reviewed_paths": [
+      "src/auth.rs",
+      "src/bw_token.rs"
+    ]
+  },
+  "recorded_utc": "2026-11-10T14:57:10.494989+00:00",
+  "release_admitted": false,
+  "retained_evidence_revalidation": {
+    "all_catalog_sizes_and_sha256_verified": true,
+    "catalog_entries": 69,
+    "includes_aws_lc_archive_rehash": true,
+    "test_execution_repeated": false,
+    "verified_payload_bytes": 10942298
+  },
+  "review_kind": "bounded_exact_source_revalidation_with_fresh_ancestor_queries",
+  "reviewed_commit": "1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5",
+  "schema_version": 1,
+  "source_binding": {
+    "features": [
+      "aws_lambda"
+    ],
+    "lock_path": "vendor/geph/Cargo.lock",
+    "lock_sha256": "560504e697c28f2114ec16414e5dc372e1903df986ba36792aab9a12c34631cb",
+    "release_revision": 4,
+    "source_edits": 16,
+    "source_path": "vendor/geph/SOURCE.json",
+    "source_sha256": "69d5de39654dea018075469d20ea7892cc35f5af0466d19a7811ef3316b60df7",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin"
+    ],
+    "unchanged_since_prior_review": true
+  },
+  "status": "review_completed_release_not_admitted"
+}

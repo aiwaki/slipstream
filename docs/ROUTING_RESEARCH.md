@@ -1,5 +1,36 @@
 # Routing Research Notes
 
+## 2026-11-10: refresh the exact source-owned Geph review before publication
+
+The review bound to the unchanged Geph 0.4.3-r4 source expired on November7.
+Current-date publication admission correctly rejected it on November10; historical
+artifact verification continued to work. The existing successful R42367078722/1
+and G42367845720/1 remain evidence for source1edbe80c, not permission to publish
+under an expired review. No P was dispatched for this superseded source.
+
+Fresh official OSV queries for `mizaru2@0.2.21` and
+`geph5-broker-protocol@0.4.3` returned HTTP200 with no listed findings. Dated raw
+responses and query receipts are retained in
+`security/geph-source-owned-review/osv/20261110/`. A bounded manual review and
+independent review found no new confirmed defect in the same three embedded
+packages and production auth/bandwidth composition. All69 retained payloads,
+20 embedded files, five final production files and16 source-edit chains matched.
+Historical fixture results remain historical; no native fixture was repeated.
+
+The new report and evidence catalog bind a review window through December10,
+a 30-day maximum for these unchanged adapters. Changes to SOURCE, lock,
+descriptors or file bodies invalidate that binding; a relevant new advisory or
+source finding requires immediate reassessment. Full application/Geph dependency
+audits and current-date publication admission remain mandatory. No package
+exception was renewed, and no SOURCE, lock, runtime, feature, or vendor revision
+changed. Prior allocation, cancellation, cryptographic and native-runtime limits
+are preserved in the report. This is not an all-dependencies security clearance.
+
+The policy-only refresh takes normal product CI. The immutable Geph r4 artifact
+can be verified under its recorded policy while fresh audits assess the updated
+review. After merge the new app source still needs its exact candidate and
+required R/G/P; no old passing result is relabelled as a new-source pass.
+
 ## 2026-11-07: distinguish packaged Chrome startup failures before navigation
 
 Main CI42221917459/1 failed in packaged-browser-qualification, before navigation,

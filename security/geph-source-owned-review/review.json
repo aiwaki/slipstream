@@ -463,8 +463,8 @@
       "size": 224357
     },
     {
-      "id": "ancestor-osv",
-      "kind": "osv",
+      "id": "historical-ancestor-osv-20261031",
+      "kind": "review",
       "path": "osv/ancestors.json",
       "sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
       "size": 495
@@ -538,6 +538,48 @@
       "path": "reviews/portable-evidence.json",
       "sha256": "5259f0348825871e5f7aba756d40c0ac432df773c3426625f30a2f5b0277fcfc",
       "size": 4528
+    },
+    {
+      "id": "ancestor-osv",
+      "kind": "osv",
+      "path": "osv/20261110/ancestors.json",
+      "sha256": "7b0e770e056d71778c1665cebb32c90d55d9b164334d2ee041b052324b2a5ad2",
+      "size": 495
+    },
+    {
+      "id": "osv-20261110-mizaru2",
+      "kind": "review",
+      "path": "osv/20261110/mizaru2.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "osv-20261110-geph5-broker-protocol",
+      "kind": "review",
+      "path": "osv/20261110/geph5-broker-protocol.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "size": 2
+    },
+    {
+      "id": "osv-20261110-receipt",
+      "kind": "review",
+      "path": "osv/20261110/receipt.json",
+      "sha256": "d3b373276e9e8c3802a1ebbe0f3e67ae8d48ec1c1d8ab7a4f3e5bdf4877d7161",
+      "size": 1504
+    },
+    {
+      "id": "source-review-20261110-json",
+      "kind": "review",
+      "path": "reviews/source-review-20261110.json",
+      "sha256": "b7eaff1d46024a14f4f2dae23b22d62837fc21f770d8052ba412c2b0cf99aaba",
+      "size": 18583
+    },
+    {
+      "id": "source-review-20261110-md",
+      "kind": "review",
+      "path": "reviews/source-review-20261110.md",
+      "sha256": "069d14089605e0a776ac089e52415ec3e8374ba351ac980cb9d25af0804e6856",
+      "size": 4246
     }
   ],
   "osv_evidence": "ancestor-osv",
@@ -614,7 +656,13 @@
           "current-osv-receipt",
           "current-source-review-json",
           "current-source-review-md",
-          "portable-evidence"
+          "portable-evidence",
+          "historical-ancestor-osv-20261031",
+          "osv-20261110-mizaru2",
+          "osv-20261110-geph5-broker-protocol",
+          "osv-20261110-receipt",
+          "source-review-20261110-json",
+          "source-review-20261110-md"
         ],
         "files": [
           "Cargo.toml",
@@ -697,7 +745,13 @@
           "current-osv-receipt",
           "current-source-review-json",
           "current-source-review-md",
-          "portable-evidence"
+          "portable-evidence",
+          "historical-ancestor-osv-20261031",
+          "osv-20261110-mizaru2",
+          "osv-20261110-geph5-broker-protocol",
+          "osv-20261110-receipt",
+          "source-review-20261110-json",
+          "source-review-20261110-md"
         ],
         "files": [
           "Cargo.toml",
@@ -779,7 +833,13 @@
           "current-osv-receipt",
           "current-source-review-json",
           "current-source-review-md",
-          "portable-evidence"
+          "portable-evidence",
+          "historical-ancestor-osv-20261031",
+          "osv-20261110-mizaru2",
+          "osv-20261110-geph5-broker-protocol",
+          "osv-20261110-receipt",
+          "source-review-20261110-json",
+          "source-review-20261110-md"
         ],
         "files": [
           "Cargo.toml",
