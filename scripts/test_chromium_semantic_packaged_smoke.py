@@ -100,21 +100,38 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(smoke.QualificationError, "deadline"):
             self._bootstrap_with_startup_observations([("running", 4242, 0, " ".join(TEST_LAUNCH_ARGV))])
 
+    def test_bootstrap_waits_for_xpcproxy_phase_without_assuming_argv(self):
+        # CI retained state=xpcproxy, uid=501, command-match=false, but not argv.
+        # This command is synthetic; only the observed mismatch shape is real.
+        command = " ".join(TEST_LAUNCH_ARGV)
+        for uid in (0, 501):
+            with self.subTest(uid=uid):
+                launch = self._bootstrap_with_startup_observations([
+                    ("xpcproxy", 4242, uid, "synthetic pre-exec argv"),
+                    ("running", 4242, 501, command)])
+                self.assertEqual(launch.pid, 4242)
+
+    def test_bootstrap_persistent_xpcproxy_is_never_admitted(self):
+        for uid in (0, 501):
+            for command in (" ".join(TEST_LAUNCH_ARGV), "/usr/libexec/xpcproxy another-job"):
+                with self.subTest(uid=uid, command=command), self.assertRaisesRegex(smoke.QualificationError, "deadline"):
+                    self._bootstrap_with_startup_observations([("xpcproxy", 4242, uid, command)])
+
     def test_bootstrap_rejects_wrong_startup_command_or_uid(self):
         command = " ".join(TEST_LAUNCH_ARGV)
         for state, uid, observed in [("running", 0, "/usr/bin/false"),
                                      ("running", 501, "/usr/bin/false"),
                                      ("running", 502, command),
-                                     ("xpcproxy", 0, "/usr/libexec/xpcproxy another-job")]:
+                                     ("xpcproxy", 502, "synthetic pre-exec argv")]:
             with self.subTest(state=state, uid=uid, observed=observed), self.assertRaisesRegex(smoke.QualificationError, "wrong identity"):
                 self._bootstrap_with_startup_observations([(state, 4242, uid, observed)])
 
     def test_bootstrap_rejects_pid_replacement_during_or_after_startup(self):
         command = " ".join(TEST_LAUNCH_ARGV)
-        for first_uid in (0, 501):
-            with self.subTest(first_uid=first_uid), self.assertRaisesRegex(smoke.QualificationError, "PID changed"):
+        for state, first_uid in (("running", 0), ("running", 501), ("xpcproxy", 501)):
+            with self.subTest(state=state, first_uid=first_uid), self.assertRaisesRegex(smoke.QualificationError, "PID changed"):
                 self._bootstrap_with_startup_observations([
-                    ("running", 4242, first_uid, command), ("running", 4243, 501, command)])
+                    (state, 4242, first_uid, command), ("running", 4243, 501, command)])
 
     def test_bootstrap_never_admits_a_final_observation_after_deadline(self):
         label = "dev.slipstream.chromium-semantic.4242"

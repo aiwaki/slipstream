@@ -26,6 +26,14 @@ Startup and late-observation RED cases preceded the fixes.83 affected Chromium
 tests passed, then11 bootstrap cases passed after the deadline correction.
 The first job state/PID fields remain authoritative over nested coalition fields;
 a two-case synthetic parser regression failed before this fix and passed after.
+The next actual job130002668089 exposed state=xpcproxy with the correct UID501
+but a command outside our assumed trampoline argv. The actual argv was not
+retained. Requiring a fabricated xpcproxy argv shape caused another early refusal.
+The final correction follows the existing production phase contract: exact job/
+PID in xpcproxy with root/expected UID only waits; it cannot be admitted even if
+its command already looks final. After the phase, exact final command/UID and
+unchanged PID/deadline remain mandatory.11 focused tests passed after recorded
+RED, including persistent pre-exec, foreign UID and PID replacement.
 A fresh actual Chromium contract run remains required; fixture results alone
 do not qualify the browser. Its two exact harness/test files are included in the
 PR-only repair map, while the Chromium job remains mandatory and main still

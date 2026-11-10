@@ -2044,12 +2044,12 @@ def _bootstrap_chrome_launch_agent(
                 exact_command = command == expected_command
                 # The exact Aqua job can publish its PID before exec/credential
                 # transition completes (also observed by the production worker).
-                # Neither root nor xpcproxy is an accepted launcher identity.
-                pre_exec = (state == "xpcproxy" and command == f"/usr/libexec/xpcproxy {label}"
-                            and observed_uid in (0, uid))
+                # Its xpcproxy argv is not a final-command contract. Wait for
+                # that phase to end; neither root nor xpcproxy can be admitted.
+                pre_exec = state == "xpcproxy" and observed_uid in (0, uid)
                 last_observation = {"state": state, "pid": pid, "uid": observed_uid,
                                     "expected_command": exact_command, "pre_exec": pre_exec}
-                if exact_command and observed_uid == uid:
+                if not pre_exec and exact_command and observed_uid == uid:
                     if _launch_agent_pid(target) != pid:
                         raise QualificationError("Chrome LaunchAgent PID changed during startup admission")
                     if time.monotonic() >= deadline:

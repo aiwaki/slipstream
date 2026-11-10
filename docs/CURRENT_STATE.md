@@ -4,7 +4,7 @@
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
-0b13edf9261360d6d9ea0e7694414a96f9307006; main/base remains
+272a9006b7beb8bcc9f207d5888eb42d0709a795; main/base remains
 1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is committed and pushed; fresh exact-head CI/audit running. No workstation app/service/
 network changes or app downloads. Active goal remains incomplete.
 
@@ -82,8 +82,27 @@ Final frozen map66 files/74 changed, SHA
 6c0321fa6ca8bbbd459b411153855e83ae33ea5ad7a18504778d5aa66fecffbb.
 34 scope/transition tests passed; root readback and independent review agree.
 The addressed raw-OSV review was resolved after pushed/real-audit verification.
-NEXT: commit/push the verified launcher/map follow-up, verify actual Git delta
-and observe its new exact-head automatic checks. No blind rerun or gate waiver.
+Launcher fix committed/pushed as272a9006b7beb8bcc9f207d5888eb42d0709a795.
+Actual Git delta verified66 mapped/74 changed, PR-only bootstrap and mandatory
+product checks; receipt130366a87577254f31773c89c152137d27ec9a159c49b05b2da59d8f234ddd6e.
+New exact automatic CI42865472926/1 and audit42865472658/1;
+observer/evidence under pr476-launcher.
+CI42865472926/1 ended failure only for Chromium and its aggregate checks;
+product-checks passed. Watcher10786 ended1, receipt
+e8180573ac9ed726bbd79b3846b225958e9ea8735db8c954b0fa6f8b48f94a71.
+Audit42865472658/1 authenticated PASS, artifact13787690804; receipt
+264d64bd68121e852c0f75fe7a0f5b012abf147e0bf973edd9733c687c2d3637.
+Chromium job130002668089 failed again before observation, nowwith state=xpcproxy,
+UID501, expected_command=false,pre_exec=false. The assumed xpcproxy argv shape
+was unproven. Actual argv was not retained. Diagnosis68577570021d004107cf0b18cdd394c847444061248c86ad770fc431b84795ef.
+The correction now follows the existing production phase contract: xpcproxy
+with exact target/PID and root/expected UID only waits; it never qualifies,
+even with an apparently final command. Exact command/UID/same PID/deadline are
+required after the phase.11 focused regression tests passed after RED; root
+reviewed the two-file diff.34 scope/transition checks passed, final map66/74 SHA
+7a452fb553fbdb9c67466452eb853cd2a3b3e6919cdd67f4ee87ef4c21e3ca15.
+NEXT: commit/push this narrow phase correction and observe exact-head checks.
+Do not rerun the prior failure or merge before actual Chromium PASS.
 After merge observe the existing main Geph producer; S/producer-r5 is prepared
 with fresh file pins and PENDING run/source guards. Require33 synthetic cases,
 universal binary, audit and immutable r5 assets/attestations before app CI.
