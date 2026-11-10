@@ -7,6 +7,10 @@
     "f7e49e1aac5360fc7764616b5343290819591932ec5aa57aba374cc977ebcfa7",
     "8ca9b62121a7a8f421ea68950267dd670da940f7f2df4d0c00c3aac4d289069c"
   ],
+  "scripts/chromium_semantic_packaged_smoke.py": [
+    "99f1c51dd1727d8ebe83dbe5b6b643056bd07cd56e42a40efcc31b2a96571ba7",
+    "d7abe11943662c5b4e00c9efc3e7378ccafcbf968ab063bbb09029c137a40f95"
+  ],
   "scripts/fixtures/geph-sqlite-engine/closure.json": [
     null,
     "97e6a0c8914961d455c16dc7628ff88c332881d0f451adce35d9be2ae10ece20"
@@ -50,6 +54,10 @@
   "scripts/run_geph_synthetic_tests.py": [
     "fffcfc943279b35747cc4ebb20a1d9955ac2980f84352e60e64b5e4c2f30f700",
     "0977dba8f06d8c7ec914e6780809ff0c1631f57d027487ae3ff2f2cb138b7b41"
+  ],
+  "scripts/test_chromium_semantic_packaged_smoke.py": [
+    "2cb1558d713bcc4e5841e639e878f252df705ab86338c614d0a2e4f7fa497a43",
+    "3b7b42bb696f479ce9f486f19366fc9ba9a7feb6920d0ea00091294ad260cc54"
   ],
   "scripts/test_geph_embedded_source.py": [
     "9ae61d85136dc6891a353bc3a5b7ed7736344e7e4a2d38d5c95f23999eafd0a1",

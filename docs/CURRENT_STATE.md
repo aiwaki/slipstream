@@ -4,9 +4,8 @@
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
 Branch `codex/source-review-refresh-20261110`, PR476. Last pushed HEAD
-8b933fb1176d4eb356098df5b0e6e51b332970b4; main/base remains
-1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is locally verified,
-pending commit/push and fresh exact-head CI/audit. No workstation app/service/
+0b13edf9261360d6d9ea0e7694414a96f9307006; main/base remains
+1edbe80c33b2c7e1f90ecae86bb8c018aca3b9d5. Schema2 follow-up is committed and pushed; fresh exact-head CI/audit running. No workstation app/service/
 network changes or app downloads. Active goal remains incomplete.
 
 The original refreshed review passed, but audit42842890479 failed for bundled
@@ -57,9 +56,34 @@ canonical policy2d1f4f4e70d4a7a354d5f5d22fc00552e0a61067d1131ea286d30df0e8d4eef0
 Final frozen bootstrap64 files/72 changed, SHA
 29fec216a78c57c7bfa9cf19c873e965c16cfcc4f4703719db4d8fdc39afa272.
 
-NEXT: commit the schema2 follow-up, verify actual committed Git delta, push and
-observe its existing automatic CI/audit. Authenticate its new report; resolve
-addressed review only after pushed verification, then guarded exact-head merge.
+Committed Git delta proof passed:64 mapped files/72 changed, PR bootstrap=true,
+main bootstrap=false, missing bytes rejected, full diff check passed. Receipt
+5453498a594b024a92e1d5a4361a3c874401cbe70400352910291a683313ccd8
+in S/actual-git-delta-schema2.json. New exact runs: CI42860064822/1 and
+audit42860064809/1; watcher and metadata under
+output/continuation-20261110/source-review-refresh/pr476-schema2.
+New audit42860064809/1 passed and artifact13784417328 was authenticated.
+Canonical report/SPDX and raw-OSV recomputation passed with schema2; blocking/
+exceptions/affected/unresolved0. Receiptc4dcbebeece876faa67cbaefb7745d03013a768d7aaecfca9aaa5b3765c8a0cb,
+root rechecked tracked/evidence/report hashes. CI chromium-webrequest-contract job129983590163 failed its browser observation
+step; all product-checks passed. Final watcher ended1 with receipt
+bd8fc84c22b435397cf2d840ea789439d8b70324c2e2d9599ddd528ec124f8c5. Failure investigation is in
+pr476-schema2/chromium-failure. No rerun or merge. Exact failure: initial LaunchAgent PID observed UID0 instead
+of501; page observation never began. The harness is unchanged from the preceding
+green run and samples UID once; production already handles the documented
+xpcproxy/root-to-console transition. This single failed sample cannot distinguish
+a transient from persistent root. The disposable launcher now waits only for exact target/command pre-exec or
+root-to-console transition inside the original10s deadline, requires final
+non-root UID/command and unchanged PID, and rejects late admission. First-job
+state/PID fields cannot be overwritten by nested coalition fields. Startup and
+deadline RED evidence is retained;83 affected Chromium tests and11 subsequent
+bootstrap tests passed. One parser regression (two subcases) also passed after recorded RED.
+Final frozen map66 files/74 changed, SHA
+6c0321fa6ca8bbbd459b411153855e83ae33ea5ad7a18504778d5aa66fecffbb.
+34 scope/transition tests passed; root readback and independent review agree.
+The addressed raw-OSV review was resolved after pushed/real-audit verification.
+NEXT: commit/push the verified launcher/map follow-up, verify actual Git delta
+and observe its new exact-head automatic checks. No blind rerun or gate waiver.
 After merge observe the existing main Geph producer; S/producer-r5 is prepared
 with fresh file pins and PENDING run/source guards. Require33 synthetic cases,
 universal binary, audit and immutable r5 assets/attestations before app CI.

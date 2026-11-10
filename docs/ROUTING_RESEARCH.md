@@ -1,5 +1,36 @@
 # Routing Research Notes
 
+## 2026-11-10: disposable Chromium startup sampled before final identity
+
+PR476 head0b13edf passed all product checks and its authenticated dependency
+audit. Chromium contract job129983590163 in run42860064822 failed before page
+observation: its first LaunchAgent process sample reported UID0, expected501.
+The workflow, launcher and Chrome151.0.7922.77 were unchanged from the preceding
+green job129960015497 on the same macOS runner image. This failed sample lacks
+command/state evidence, so it cannot prove a transient rather than persistent
+wrong-UID execution. No retry or successful content observation is claimed.
+
+The disposable launcher previously treated the first PID as a final process.
+The production worker already handles a documented xpcproxy/root-to-console
+transition. The harness now waits only for the exact target's recognized
+pre-exec or exact open-command root phase within its original10s admission
+deadline. Acceptance requires the expected non-root UID, exact command and
+unchanged job PID, before that deadline; foreign UID/command, PID replacement
+and persistent startup failure retain exact cleanup and fail qualification.
+Diagnostics expose bounded state/PID/UID/command-match, not full argv. This
+changes no routing, production launcher or browser readiness/memory budgets.
+
+Evidence is retained in
+output/continuation-20261110/source-review-refresh/pr476-schema2/chromium-failure.
+Startup and late-observation RED cases preceded the fixes.83 affected Chromium
+tests passed, then11 bootstrap cases passed after the deadline correction.
+The first job state/PID fields remain authoritative over nested coalition fields;
+a two-case synthetic parser regression failed before this fix and passed after.
+A fresh actual Chromium contract run remains required; fixture results alone
+do not qualify the browser. Its two exact harness/test files are included in the
+PR-only repair map, while the Chromium job remains mandatory and main still
+requires full packaging after the immutable Geph producer.
+
 ## 2026-11-10: bind ancestor OSV responses to source-owned review
 
 PR476 review identified a validator gap: evidence hashes bound the raw OSV

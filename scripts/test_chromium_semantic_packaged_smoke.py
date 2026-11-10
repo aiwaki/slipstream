@@ -18,6 +18,8 @@ import chromium_semantic_packaged_smoke as smoke
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_LAUNCH_ARGV = ("/usr/bin/open", "-n", "-W", "-j", "-a", "/tmp/Chrome.app",
+                    "--args", "--user-data-dir=/tmp/profile")
 
 
 def _fake_chrome_for_testing(root: Path) -> Path:
@@ -41,6 +43,110 @@ def _fake_extensionless_chrome_for_testing(root: Path) -> Path:
 
 
 class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
+    def _bootstrap_with_startup_observations(self, observations, *, timeout=0.3):
+        """Run only fake launchctl/ps and a fake clock, never a native process."""
+        label = "dev.slipstream.chromium-semantic.4242"
+        target = f"gui/501/{label}"
+        clock, started, index = [0.0], [False], [-1]
+        commands = []
+        current = [None]
+
+        def command(argv, **kwargs):
+            commands.append(argv)
+            if argv[:2] == ("/bin/launchctl", "bootstrap"):
+                started[0] = True
+            elif argv[:2] == ("/bin/launchctl", "print"):
+                if not started[0]:
+                    return subprocess.CompletedProcess(argv, 113, "", "not found")
+                index[0] = min(index[0] + 1, len(observations) - 1)
+                current[0] = observations[index[0]]
+                state, pid, _, _ = current[0]
+                return subprocess.CompletedProcess(argv, 0, f"state = {state}\npid = {pid}\n", "")
+            elif argv[0] == "/bin/ps":
+                _, pid, uid, executable = current[0]
+                fields = f"{uid} {pid}"
+                if "command=" in argv[-1]:
+                    fields += f" {executable}"
+                return subprocess.CompletedProcess(argv, 0, fields + "\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def sleep(delay):
+            clock[0] += delay
+
+        payload = smoke.plistlib.dumps({"Label": label, "ProgramArguments": list(TEST_LAUNCH_ARGV)})
+        with mock.patch.object(smoke, "_run", side_effect=command), \
+                mock.patch.object(smoke, "_read_private_bytes", return_value=payload), \
+                mock.patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(smoke.time, "sleep", side_effect=sleep), \
+                mock.patch.object(smoke, "_wait_for_launch_agent_absence") as cleanup:
+            try:
+                return smoke._bootstrap_chrome_launch_agent(501, label, Path("/tmp/profile/chrome-launch-agent.plist"), timeout=timeout)
+            except smoke.QualificationError:
+                self.assertEqual(commands[-2:], [("/bin/launchctl", "kill", "SIGKILL", target),
+                                                  ("/bin/launchctl", "bootout", target)])
+                cleanup.assert_called_once_with(target)
+                self.assertLessEqual(clock[0], timeout + 0.001)
+                raise
+
+    def test_bootstrap_waits_for_exact_xpcproxy_root_to_console_transition(self):
+        label = "dev.slipstream.chromium-semantic.4242"
+        command = " ".join(TEST_LAUNCH_ARGV)
+        launch = self._bootstrap_with_startup_observations([
+            ("xpcproxy", 4242, 0, f"/usr/libexec/xpcproxy {label}"),
+            ("running", 4242, 0, command), ("running", 4242, 501, command)])
+        self.assertEqual(launch, smoke.ChromeLaunch(f"gui/501/{label}", 4242, 4242))
+
+    def test_bootstrap_persistent_root_expires_without_acceptance_or_retry(self):
+        with self.assertRaisesRegex(smoke.QualificationError, "deadline"):
+            self._bootstrap_with_startup_observations([("running", 4242, 0, " ".join(TEST_LAUNCH_ARGV))])
+
+    def test_bootstrap_rejects_wrong_startup_command_or_uid(self):
+        command = " ".join(TEST_LAUNCH_ARGV)
+        for state, uid, observed in [("running", 0, "/usr/bin/false"),
+                                     ("running", 501, "/usr/bin/false"),
+                                     ("running", 502, command),
+                                     ("xpcproxy", 0, "/usr/libexec/xpcproxy another-job")]:
+            with self.subTest(state=state, uid=uid, observed=observed), self.assertRaisesRegex(smoke.QualificationError, "wrong identity"):
+                self._bootstrap_with_startup_observations([(state, 4242, uid, observed)])
+
+    def test_bootstrap_rejects_pid_replacement_during_or_after_startup(self):
+        command = " ".join(TEST_LAUNCH_ARGV)
+        for first_uid in (0, 501):
+            with self.subTest(first_uid=first_uid), self.assertRaisesRegex(smoke.QualificationError, "PID changed"):
+                self._bootstrap_with_startup_observations([
+                    ("running", 4242, first_uid, command), ("running", 4243, 501, command)])
+
+    def test_bootstrap_never_admits_a_final_observation_after_deadline(self):
+        label = "dev.slipstream.chromium-semantic.4242"
+        payload = smoke.plistlib.dumps({"Label": label, "ProgramArguments": list(TEST_LAUNCH_ARGV)})
+        absent = subprocess.CompletedProcess((), 113, "", "not found")
+        success = subprocess.CompletedProcess((), 0, "", "")
+        with mock.patch.object(smoke, "_read_private_bytes", return_value=payload), \
+                mock.patch.object(smoke, "_run", side_effect=(absent, success, success, success)) as run, \
+                mock.patch.object(smoke, "_launch_agent_snapshot", return_value=(4242, "running")), \
+                mock.patch.object(smoke, "_process_identity", return_value=(501, 4242, " ".join(TEST_LAUNCH_ARGV))), \
+                mock.patch.object(smoke.time, "monotonic", side_effect=(0.0, 0.0, 10.001)), \
+                mock.patch.object(smoke, "_wait_for_launch_agent_absence") as cleanup:
+            with self.assertRaisesRegex(smoke.QualificationError, "deadline"):
+                smoke._bootstrap_chrome_launch_agent(501, label, Path("/tmp/profile/chrome-launch-agent.plist"))
+        self.assertEqual([call.args[0] for call in run.call_args_list[-2:]],
+                         [("/bin/launchctl", "kill", "SIGKILL", f"gui/501/{label}"),
+                          ("/bin/launchctl", "bootout", f"gui/501/{label}")])
+        cleanup.assert_called_once_with(f"gui/501/{label}")
+
+    def test_launch_agent_snapshot_keeps_first_job_fields_before_nested_coalitions(self):
+        # Synthetic launchctl shape, not a retained snapshot from the failed CI.
+        # Match the production parsers' first-field contract, including pid=0.
+        target = "gui/501/dev.slipstream.chromium-semantic.4242"
+        for outer_pid in (4242, 0):
+            output = (f"{target} = {{\n\tstate = xpcproxy\n\tpid = {outer_pid}\n"
+                      "\tresource coalition = {\n\t\tstate = active\n\t\tpid = 9999\n\t}\n}\n")
+            result = subprocess.CompletedProcess((), 0, output, "")
+            with self.subTest(outer_pid=outer_pid), mock.patch.object(smoke, "_run", return_value=result):
+                expected_pid = outer_pid or None
+                self.assertEqual(smoke._launch_agent_snapshot(target), (expected_pid, "xpcproxy"))
+                self.assertEqual(smoke._launch_agent_pid(target), expected_pid)
+
     @staticmethod
     def _pending_navigation_signal(host: str) -> dict[str, object]:
         return {
@@ -1264,18 +1370,19 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def test_bootstrap_targets_the_exact_gui_domain_and_verifies_uid(self) -> None:
         absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
         success = smoke.subprocess.CompletedProcess((), 0, "", "")
-        with mock.patch.object(
+        payload = smoke.plistlib.dumps({"Label": "dev.slipstream.chromium-semantic.4242", "ProgramArguments": list(TEST_LAUNCH_ARGV)})
+        with mock.patch.object(smoke, "_read_private_bytes", return_value=payload), mock.patch.object(
             smoke,
             "_run",
             side_effect=(absent, success),
         ) as run, mock.patch.object(
             smoke,
-            "_launch_agent_pid",
-            return_value=4242,
+            "_launch_agent_snapshot",
+            return_value=(4242, "running"),
         ), mock.patch.object(
             smoke,
             "_process_identity",
-            return_value=(501, 4242),
+            return_value=(501, 4242, " ".join(TEST_LAUNCH_ARGV)),
         ):
             launch = smoke._bootstrap_chrome_launch_agent(
                 501,
@@ -1304,18 +1411,19 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def test_bootstrap_rejects_a_launchd_identity_mismatch(self) -> None:
         absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
         success = smoke.subprocess.CompletedProcess((), 0, "", "")
-        with mock.patch.object(
+        payload = smoke.plistlib.dumps({"Label": "dev.slipstream.chromium-semantic.4242", "ProgramArguments": list(TEST_LAUNCH_ARGV)})
+        with mock.patch.object(smoke, "_read_private_bytes", return_value=payload), mock.patch.object(
             smoke,
             "_run",
             side_effect=(absent, success, success, success),
         ) as run, mock.patch.object(
             smoke,
-            "_launch_agent_pid",
-            return_value=4242,
+            "_launch_agent_snapshot",
+            return_value=(4242, "running"),
         ), mock.patch.object(
             smoke,
             "_process_identity",
-            return_value=(0, 4242),
+            return_value=(502, 4242, " ".join(TEST_LAUNCH_ARGV)),
         ), mock.patch.object(
             smoke,
             "_wait_for_launch_agent_absence",
@@ -1347,7 +1455,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
         success = smoke.subprocess.CompletedProcess((), 0, "", "")
         bootstrap_error = smoke.QualificationError("bootstrap returned an error")
-        with mock.patch.object(
+        payload = smoke.plistlib.dumps({"Label": "dev.slipstream.chromium-semantic.4242", "ProgramArguments": list(TEST_LAUNCH_ARGV)})
+        with mock.patch.object(smoke, "_read_private_bytes", return_value=payload), mock.patch.object(
             smoke,
             "_run",
             side_effect=(absent, bootstrap_error, success, success),

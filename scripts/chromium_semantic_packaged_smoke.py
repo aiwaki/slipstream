@@ -1639,40 +1639,51 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
         )
 
 
-def _launch_agent_pid(target: str) -> int | None:
+def _launch_agent_snapshot(target: str) -> tuple[int | None, str | None]:
     result = _run(("/bin/launchctl", "print", target), check=False)
     if result.returncode != 0:
-        return None
+        return None, None
+    pid, state = None, None
+    pid_seen = False
     for raw_line in result.stdout.splitlines():
         line = raw_line.strip()
-        if line.startswith("pid = "):
+        # launchctl can print nested coalition fields later in this snapshot.
+        # Preserve the production launchd parsers' first-job-field contract.
+        if state is None and line.startswith("state = "):
+            state = line.removeprefix("state = ")
+        if not pid_seen and line.startswith("pid = "):
+            pid_seen = True
             try:
                 pid = int(line.removeprefix("pid = "))
             except ValueError as exc:
                 raise QualificationError(
                     f"Chrome LaunchAgent exposed an invalid pid: {line!r}"
                 ) from exc
-            return pid if pid > 0 else None
-    return None
+            pid = pid if pid > 0 else None
+    return pid, state
 
 
-def _process_identity(pid: int) -> tuple[int, int]:
+def _launch_agent_pid(target: str) -> int | None:
+    return _launch_agent_snapshot(target)[0]
+
+
+def _process_identity(pid: int) -> tuple[int, int, str]:
     result = _run(
-        ("/bin/ps", "-p", str(pid), "-o", "uid=,pgid="),
+        ("/bin/ps", "-p", str(pid), "-ww", "-o", "uid=,pgid=,command="),
         check=False,
     )
-    fields = result.stdout.strip().split()
-    if result.returncode != 0 or len(fields) != 2:
+    fields = result.stdout.strip().split(None, 2)
+    if result.returncode != 0 or len(fields) != 3:
         raise QualificationError(f"cannot verify Chrome process identity for pid {pid}")
     try:
-        uid, process_group = (int(field) for field in fields)
+        uid, process_group = (int(field) for field in fields[:2])
     except ValueError as exc:
         raise QualificationError(
-            f"Chrome process identity is invalid for pid {pid}: {fields!r}"
+            f"Chrome process identity is invalid for pid {pid}"
         ) from exc
     if process_group <= 0:
         raise QualificationError(f"Chrome process group is invalid for pid {pid}")
-    return uid, process_group
+    return uid, process_group, fields[2]
 
 
 def _owned_chrome_processes(
@@ -2003,6 +2014,17 @@ def _bootstrap_chrome_launch_agent(
     *,
     timeout: float = 10.0,
 ) -> ChromeLaunch:
+    try:
+        payload = plistlib.loads(_read_private_bytes(plist_path, uid))
+    except (plistlib.InvalidFileException, ValueError) as exc:
+        raise QualificationError("Chrome LaunchAgent plist is invalid") from exc
+    arguments = payload.get("ProgramArguments") if isinstance(payload, dict) else None
+    if (type(uid) is not int or uid <= 0 or not isinstance(payload, dict)
+            or payload.get("Label") != label or not isinstance(arguments, list)
+            or len(arguments) < 2 or arguments[0] != "/usr/bin/open"
+            or any(not isinstance(arg, str) or not arg or any(ord(c) < 32 for c in arg) for arg in arguments)):
+        raise QualificationError("Chrome LaunchAgent must bind its exact non-root LaunchServices command")
+    expected_command = " ".join(arguments)
     target = f"gui/{uid}/{label}"
     if _run(("/bin/launchctl", "print", target), check=False).returncode == 0:
         raise QualificationError(f"Chrome LaunchAgent already exists: {target}")
@@ -2010,18 +2032,39 @@ def _bootstrap_chrome_launch_agent(
     try:
         _run(("/bin/launchctl", "bootstrap", f"gui/{uid}", str(plist_path)))
         deadline = time.monotonic() + timeout
+        first_pid = None
+        last_observation = None
         while time.monotonic() < deadline:
-            pid = _launch_agent_pid(target)
+            pid, state = _launch_agent_snapshot(target)
+            if first_pid is not None and pid != first_pid:
+                raise QualificationError("Chrome LaunchAgent PID changed during startup")
             if pid is not None:
-                observed_uid, process_group = _process_identity(pid)
-                if observed_uid != uid:
+                first_pid = pid
+                observed_uid, process_group, command = _process_identity(pid)
+                exact_command = command == expected_command
+                # The exact Aqua job can publish its PID before exec/credential
+                # transition completes (also observed by the production worker).
+                # Neither root nor xpcproxy is an accepted launcher identity.
+                pre_exec = (state == "xpcproxy" and command == f"/usr/libexec/xpcproxy {label}"
+                            and observed_uid in (0, uid))
+                last_observation = {"state": state, "pid": pid, "uid": observed_uid,
+                                    "expected_command": exact_command, "pre_exec": pre_exec}
+                if exact_command and observed_uid == uid:
+                    if _launch_agent_pid(target) != pid:
+                        raise QualificationError("Chrome LaunchAgent PID changed during startup admission")
+                    if time.monotonic() >= deadline:
+                        break
+                    return ChromeLaunch(target, pid, process_group)
+                if not pre_exec and not (exact_command and observed_uid == 0):
                     raise QualificationError(
                         "Chrome LaunchAgent started with the wrong identity: "
-                        f"expected uid={uid}, observed uid={observed_uid}"
+                        f"expected uid={uid}, observation={last_observation!r}"
                     )
-                return ChromeLaunch(target, pid, process_group)
             time.sleep(0.1)
-        raise QualificationError(f"Chrome LaunchAgent did not publish a pid: {target}")
+        raise QualificationError(
+            f"Chrome LaunchAgent did not reach its expected identity before start deadline: {target}; "
+            f"observation={last_observation!r}"
+        )
     except BaseException:
         _run(("/bin/launchctl", "kill", "SIGKILL", target), check=False)
         _run(("/bin/launchctl", "bootout", target), check=False)
