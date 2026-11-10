@@ -1,8 +1,30 @@
 # Release Policy
 
-## Preview .35 in preparation — 2026-11-05
+## Published preview .35 — 2026-11-10 UTC
 
-The next preview includes [PR #464](https://github.com/aiwaki/slipstream/pull/464).
+[Slipstream 0.1.9-preview.35](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.35)
+is published from source `5a3e64b534affc865826fbd20ac67f1af328629e`.
+The publisher promoted the already tested candidate from
+[CI 42874103966/2](https://github.com/aiwaki/slipstream/actions/runs/42874103966/attempts/2);
+it did not rebuild the app. The exact-source dependency audit, four-site
+Safari/Chrome matrix, 30-minute background run, native update cases and packaged
+commit/pre-ACK rollback all passed. Their reports bind the same application tree.
+
+| Gate | Accepted run |
+|---|---|
+| Dependency audit | [42874103977/1](https://github.com/aiwaki/slipstream/actions/runs/42874103977/attempts/1) |
+| Browsers, transport and background run | [42880931292/1](https://github.com/aiwaki/slipstream/actions/runs/42880931292/attempts/1) |
+| Native commit and crash recovery | [42887546582/1](https://github.com/aiwaki/slipstream/actions/runs/42887546582/attempts/1) |
+| Packaged commit and pre-ACK rollback | [42888475035/1](https://github.com/aiwaki/slipstream/actions/runs/42888475035/attempts/1) |
+
+The [publisher run](https://github.com/aiwaki/slipstream/actions/runs/42890549828/attempts/1)
+and subsequent read-only verification confirmed all 12 published assets, the
+source tag, signed metadata and preservation of the previous `.34` files.
+The public `.34 -> .35` discovery/update path and its forced rollback still need
+their own observation. These results do not qualify an update on the user's Mac,
+arbitrary websites, Discord calls, media continuity or sleep/wake.
+
+This preview includes [PR #464](https://github.com/aiwaki/slipstream/pull/464).
 When the kernel has already lost Slipstream's saved PF reference, ordinary Stop
 and update recovery can now retire that obsolete record after proving that all
 owned writers stopped, the installer lock is held and no PF references remain.
@@ -24,11 +46,15 @@ authentication and terminal cleanup checks are unchanged. The two reviewed
 observer-source hashes cover only the pair-version guard and matching workflow
 input description changes. All140 prerequisite, source-boundary and workflow tests
 passed, including refusal of historical and unreviewed pairs.
-Geph 0.4.3-r4, dependencies and routing remain unchanged.
-Build and qualify one exact-main .35 candidate before publication;
-do not relabel or replace published .34 assets. The restored workstation remains
-on .31. A new workstation update requires separate authorization after the failed
-.31 -> .34 transaction; the approved restoration is complete.
+The final candidate also includes
+[PR #476](https://github.com/aiwaki/slipstream/pull/476): Geph 0.4.3-r5 replaces
+the vulnerable bundled SQLite dependency, and the audit verifies retained raw
+OSV results against their projections. Its SQLite engine and supply-chain checks
+passed; this is not evidence that SQLite caused the reported network failures.
+Published `.34` assets were neither relabelled nor replaced. The workstation was
+last verified on restored `.31` on November 5. A new workstation update requires
+separate authorization after the failed `.31 -> .34` transaction; the approved
+restoration is complete.
 
 ## Workstation update failure and .31 restoration — 2026-11-05
 

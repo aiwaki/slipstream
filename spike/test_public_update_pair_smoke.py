@@ -804,30 +804,49 @@ def test_public_preparation_downloads_both_tags_and_keeps_candidate_subsets_only
     assert all("actions/artifacts" not in " ".join(c) and "verify_release_artifacts.py" not in " ".join(c) for c in commands)
 
 
-def test_public_workflow_pins_are_current_dispatch_only_public_assets_and_no_account_gate():
+@pytest.mark.parametrize("sequence", ("32", "33", "34", "35"))
+@pytest.mark.parametrize("mode", ("commit", "kill-successor-before-ack"))
+def test_public_workflow_pins_are_current_dispatch_only_public_assets_and_no_account_gate(sequence, mode):
+    import importlib
     import re
     import shlex
-    source = (REPO / ".github/workflows/public-update-qualification.yml").read_text()
+    module = "public_update_pair_smoke" if sequence == "32" else f"public_update_preview{sequence}_pair_smoke"
+    workflow_driver = importlib.import_module(module)
+    workflow = "public-update-qualification.yml" if sequence == "32" else f"public-update-preview{sequence}-qualification.yml"
+    source = (REPO / ".github/workflows" / workflow).read_text()
+    script = Path(workflow_driver.__file__).name
     assert "  push:" not in source and "  pull_request:" not in source and "  workflow_dispatch:" in source
     assert "github.event_name == 'workflow_dispatch'" in source and "github.ref == 'refs/heads/main'" in source
     assert "runs-on: macos-15" in source and 'python-version: "3.13.14"' in source
     assert "environment:" not in source and "secrets." not in source
+    assert 'SLIPSTREAM_DISPOSABLE_CI: "1"' in source
+    assert f'ref: "{workflow_driver.NEW_SOURCE}"' in source
     assert "old_download" not in source and "name: release-candidate-" not in source
-    for side, pin in driver.PAIR.items():
+    for side, pin in workflow_driver.PAIR.items():
         if side == "schema_version": continue
         for name, key in (("RUN_ID", "run_id"), ("RUN_ATTEMPT", "run_attempt"), ("SOURCE_SHA", "source_commit"), ("MANIFEST_SHA", "candidate_manifest_sha256")):
             assert f'{side.upper()}_{name}: "{pin[key]}"' in source
-    assert f'ROOT_GATE_RUN_ID: "{driver.ROOT_GATE[0]}"' in source
-    assert f'ROOT_GATE_ATTEMPT: "{driver.ROOT_GATE[1]}"' in source
+    assert f'ROOT_GATE_RUN_ID: "{workflow_driver.ROOT_GATE[0]}"' in source
+    assert f'ROOT_GATE_ATTEMPT: "{workflow_driver.ROOT_GATE[1]}"' in source
     assert "qualified-source/scripts/materialize_pair.py" in source
     # Parse the actual executable invocation with the real driver parser. Shell
     # substitutions remain inert strings in this hermetic contract test.
-    command = re.search(r'bin/python" scripts/public_update_pair_smoke.py \\\n(.*?)\n          # The driver', source, re.S).group(1)
-    command = command.replace("$ROOT_GATE_RUN_ID", str(driver.ROOT_GATE[0])).replace("$ROOT_GATE_ATTEMPT", str(driver.ROOT_GATE[1])).replace("$CASE_MODE", "commit")
-    parsed = driver.parse_args(shlex.split(command.replace("\\\n", " ")))
+    command = re.search(r'bin/python" scripts/' + re.escape(script) + r' \\\n(.*?)\n          # The driver', source, re.S).group(1)
+    command = command.replace("$ROOT_GATE_RUN_ID", str(workflow_driver.ROOT_GATE[0])).replace("$ROOT_GATE_ATTEMPT", str(workflow_driver.ROOT_GATE[1])).replace("$CASE_MODE", mode)
+    parsed = workflow_driver.parse_args(shlex.split(command.replace("\\\n", " ")))
+    assert parsed.repo == Path("$GITHUB_WORKSPACE/qualified-source")
+    assert parsed.mode == mode
+    assert parsed.root_gate_run_id == workflow_driver.ROOT_GATE[0]
+    assert parsed.root_gate_attempt == workflow_driver.ROOT_GATE[1]
+    assert parsed.root_gate_dir == Path("$RUNNER_TEMP/root-gate-prerequisite")
     assert parsed.public_root == Path("$RUNNER_TEMP/public-releases")
     assert parsed.old_candidate_dir == Path("$RUNNER_TEMP/public-update-pair/old-candidate")
     assert parsed.new_candidate_dir == Path("$RUNNER_TEMP/public-update-pair/new-candidate")
+    assert parsed.pair_manifest == Path("$RUNNER_TEMP/public-update-pair/pair.json")
+    assert parsed.old_app == Path("$RUNNER_TEMP/public-update-pair/old-app/Slipstream.app")
+    assert parsed.new_app == Path("$RUNNER_TEMP/public-update-pair/new-app/Slipstream.app")
+    assert parsed.output_dir == Path("$RUNNER_TEMP/public-update")
+    assert parsed.repository == "aiwaki/slipstream"
     assert source.index("id: public_download") < source.index("id: materialize") < source.index("id: qualify")
     assert "commit (Cancel then confirm) first" in source
 
@@ -927,7 +946,7 @@ def test_validator_diagnostics_cannot_be_enabled_for_an_unrelated_command(tmp_pa
                                     public=tmp_path, kind="publication")
 
 
-@pytest.fixture(params=("33", "34"))
+@pytest.fixture(params=("33", "34", "35"))
 def preview33_modules(monkeypatch, request):
     import importlib
     next_driver = importlib.import_module(f"public_update_preview{request.param}_pair_smoke")
@@ -1150,11 +1169,13 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
         "33": {"source_commit": "9eccd1ddf691aef5f76d493103513f2fada2fd5c", "run_id": 41302269258, "run_attempt": 1,
                "candidate_manifest_sha256": "e2e0e5432ea12208922c775c7a6d7ea5ab87f44491d45de94524df8c41193ba0"},
         "34": {"source_commit": "a0a60e080cc97214cebd7491f4ea5d56dff66e0e", "run_id": 41634434348, "run_attempt": 1,
-               "candidate_manifest_sha256": "e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb"}}
+               "candidate_manifest_sha256": "e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb"},
+        "35": {"source_commit": "5a3e64b534affc865826fbd20ac67f1af328629e", "run_id": 42874103966, "run_attempt": 2,
+               "candidate_manifest_sha256": "65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d"}}
     sequence = menu.VERSION.rsplit(".", 1)[1]
     assert driver.PAIR == {"schema_version": 1, "old": candidates[str(int(sequence)-1)], "new": candidates[sequence]}
     assert driver.NEW_SOURCE == driver.PAIR["new"]["source_commit"]
-    assert driver.ROOT_GATE == {"33": (41303686569, 1), "34": (41808901780, 1)}[sequence]
+    assert driver.ROOT_GATE == {"33": (41303686569, 1), "34": (41808901780, 1), "35": (42887546582, 1)}[sequence]
     assert driver.PublicMenu is menu.PublicMenu and driver.VERSION == menu.VERSION
     expected = {
         "old": (429722639, "Slipstream 0.1.9-preview.32 (архивная)",
@@ -1171,6 +1192,14 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
             "new": (433775703, "Slipstream 0.1.9-preview.34",
                     "6cfee75f192ca05507d3c29b3e548874929ddfe18bfa6691e98dc6bcce66d220",
                     "e550933fd4bad5834f6b2b55d2541c7516b4f7539205d1f7db02f8c4f1c28d6b")}
+    if sequence == "35":
+        expected = {
+            "old": (433775703, "Slipstream 0.1.9-preview.34 (архивная)",
+                    "6cfee75f192ca05507d3c29b3e548874929ddfe18bfa6691e98dc6bcce66d220",
+                    "e550933fd4bad5834f6b2b55d2541c7516b4f7539205d1f7db02f8c4f1c28d6b"),
+            "new": (440846924, "Slipstream 0.1.9-preview.35",
+                    "de676b3cdc73a466d1564373d5d41469af37d6dbe206fd7597d06ea026f6be2a",
+                    "3ea2a8783bad0c2bf23ad78a8cf448a4ae6b94c6f9f0bc9b3bdd875df51ba47b")}
     for side, (release_id, title, config_sha, inventory_sha) in expected.items():
         spec = driver.PUBLIC_RELEASES[side]
         assert (spec["release_id"], spec["release_name"], spec["tauri_config_sha256"]) == (release_id, title, config_sha)
@@ -1179,7 +1208,7 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
         assert hashlib.sha256(inventory).hexdigest() == inventory_sha
 
 
-@pytest.mark.parametrize("target", ["0.1.9-preview.34", "0.1.9-preview.33", "0.1.9-preview.32"])
+@pytest.mark.parametrize("target", ["0.1.9-preview.35", "0.1.9-preview.34", "0.1.9-preview.33", "0.1.9-preview.32"])
 def test_preview33_menu_accepts_only_its_actual_successor(preview33_modules, tmp_path, target):
     process = original(tmp_path)
     executable = tmp_path / "Contents/MacOS/slipstream"
@@ -1276,3 +1305,15 @@ def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp
         assert "scripts/" + Path(menu.__file__).name in binding["sha256"]
         assert "scripts/public_update_pair_smoke.py" not in calls and "scripts/public_update_menu_smoke.py" not in calls
         assert {"scripts/" + name for name in driver.REUSED} <= set(binding["sha256"])
+
+
+@pytest.mark.parametrize("entry", ["main", "prepare_main"])
+def test_preview35_pending_pins_refuse_before_any_action(monkeypatch, entry):
+    import importlib
+    pending = importlib.import_module("public_update_preview35_pair_smoke")
+    monkeypatch.setattr(pending, "ROOT_GATE", ("PENDING_ACCEPTED_G_RUN_ID", 1))
+    monkeypatch.setattr(pending, "parse_args", lambda *_a: pytest.fail("CLI reached with pending pins"))
+    monkeypatch.setattr(pending, "guard", lambda: pytest.fail("native admission reached with pending pins"))
+    monkeypatch.setattr(pending.argparse, "ArgumentParser", lambda *_a, **_k: pytest.fail("CLI reached with pending pins"))
+    with pytest.raises(Refused, match="PENDING accepted root gate"):
+        getattr(pending, entry)([])
