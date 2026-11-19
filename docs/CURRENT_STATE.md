@@ -1,17 +1,39 @@
 # Current Project State
 
-## Current continuation — 2026-11-11 local / November 10 UTC, .35 published
+## Current continuation — 2026-11-19, dependency maintenance and updater observer
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Fix branch `codex/public-menu-visibility-wait` is based on failed-run/main observer
-`1c6ddcfcd49c6c44edea0390708d1ee364036197`, tree
-`663ab405cd14167a7114aeabe4fc24a7c0a6fff2`. PR477 merged20:50:15UTC;
-its CI42894766197/1 and audit42894766080/1 passed. Read live git for the fix HEAD. Actual checkout97088529
-of both jobs has exactly this merged tree. Product remains published source
-`5a3e64b534affc865826fbd20ac67f1af328629e` (PR476). This checkpoint update
-is local pending the public result; do not move main or rewrite observer history.
-output/ is retained evidence. Prior goal turn made progress (PR477 and evidence).
-No workstation app/service/network changes or app-archive downloads. Goal incomplete.
+Active branch `codex/chromium-158-evidence`, PR480; base/main remains
+1dd8d6d2b26dfa808fb894bc2b6746e54765f418. Reconcile live HEAD and checks before action.
+Head82591e09 adopted reviewed Chromium158 pins, removed the obsolete block-buffer
+exception and fixed Clippy's needless_bool refusal. Review44481148015/1 remains
+accepted for exact artifact identity/synthetic execution only; do not repeat it.
+The current audit44482432841/1 then found three blocking Quinn advisories.
+Minimum compatible fixes: quinn-proto0.11.19 and quinn-udp0.5.16. No exemption.
+Follow-up changes only those versions/checksums; locked offline macOS metadata
+resolution passed. Three focused Chromium catalog tests passed, including new
+Stable-only drift cases. No builds or browser/native execution occurred locally.
+Current source maintenance is unqualified until the new exact-head CI/audit pass.
+Evidence and limitations: ROUTING_RESEARCH.md, November19 Chromium/Quinn entries;
+`output/continuation-20261119/chromium158/pr480-final/dependency-findings/`.
+
+PR479 remote c97929e5 contains the public-update fixture diagnostics. Its two CI
+runs failed only on the old Chromium policy and Clippy refusal; packaged build,
+browser and lifecycle checks passed. Local commit f284c696c adds cancellation
+preservation and credential absence controls:25 fixture tests and14 binding tests
+pass (10 legacy-only skips). It is deliberately unpushed pending the fixed baseline.
+Evidence: `output/continuation-20261119/admin-fixture/pr479/review-fixes/`.
+Next: finish PR480 checks/review, reconcile that baseline into PR479, then verify
+its exact head. No fresh public update was dispatched. Its private dispatcher is
+PENDING and must be explicitly rebound to the new observer/helper before use;
+the original allowlist and old helper pin must not be widened silently.
+
+Published .35 remains source5a3e64b534affc865826fbd20ac67f1af328629e. Its previous
+R/G/P and publication receipts below remain historical accepted evidence for
+those exact bytes. Normal public update/rollback are still unqualified. The old
+dscl10 failure did not identify its operation/cause or prove an updater defect.
+No workstation app/service/network/account/learning changes or application
+payload downloads. A fresh user-approved window is required for Mac installation.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.

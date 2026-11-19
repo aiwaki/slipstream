@@ -215,7 +215,7 @@ class DependencyAuditTests(unittest.TestCase):
                 {
                     "ecosystem": "",
                     "name": "chromium-headless-shell",
-                    "version": "156.0.8078.80",
+                    "version": "158.0.8127.36",
                 },
                 vulnerabilities or [],
             )
@@ -226,7 +226,7 @@ class DependencyAuditTests(unittest.TestCase):
             sbom_package(
                 ecosystem="generic",
                 name="chromium-headless-shell",
-                version="156.0.8078.80",
+                version="158.0.8127.36",
                 sha256=sha256
                 or dependency_audit.load_policy(POLICY_PATH)["integrity_only"][0][
                     "sha256"
@@ -300,7 +300,7 @@ class DependencyAuditTests(unittest.TestCase):
             self.assertEqual(report["summary"]["packages_integrity_only"], 1)
             self.assertEqual(
                 report["integrity_only"][0]["purl"],
-                "pkg:generic/chromium-headless-shell@156.0.8078.80",
+                "pkg:generic/chromium-headless-shell@158.0.8127.36",
             )
             summary = dependency_audit.validate_audit_report(
                 report,
@@ -360,7 +360,7 @@ class DependencyAuditTests(unittest.TestCase):
             root = Path(tmp)
             invalid_policy = self._application_policy_path(
                 root,
-                purl="pkg:generic/not-chromium@156.0.8078.80",
+                purl="pkg:generic/not-chromium@158.0.8127.36",
             )
             with self.assertRaisesRegex(ValueError, "purl is invalid"):
                 dependency_audit.load_policy(invalid_policy)
@@ -374,7 +374,7 @@ class DependencyAuditTests(unittest.TestCase):
 
             invalid_purl = self._chromium_sbom()
             invalid_purl[0]["externalRefs"][0]["referenceLocator"] = (
-                "pkg:generic/not-chromium@156.0.8078.80"
+                "pkg:generic/not-chromium@158.0.8127.36"
             )
             with self.assertRaisesRegex(ValueError, "purl (?:identity does not match package|does not match policy)"):
                 self._build_report(

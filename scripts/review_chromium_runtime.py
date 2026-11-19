@@ -24,11 +24,11 @@ from pathlib import Path, PurePosixPath
 import materialize_chromium_headless_shell as materializer
 import dependency_audit
 
-VERSION = "156.0.8078.80"
-REVISION = "1706539"
-LENGTH = 103_982_159
-GENERATION = "1793229146450866"
-MD5_BASE64 = "CoXYkEUVQe/FQAUIeHtb8Q=="
+VERSION = "158.0.8127.36"
+REVISION = "1727472"
+LENGTH = 105_057_133
+GENERATION = "1794441107973562"
+MD5_BASE64 = "2DIogA0Ml0ZJYGyvmRyJbw=="
 OBJECT = f"{VERSION}/mac-arm64/chrome-headless-shell-mac-arm64.zip"
 ARCHIVE_URL = f"https://storage.googleapis.com/chrome-for-testing-public/{OBJECT}"
 CATALOG_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
@@ -36,7 +36,7 @@ VERSION_URL = f"https://googlechromelabs.github.io/chrome-for-testing/{VERSION}.
 METADATA_URL = "https://storage.googleapis.com/storage/v1/b/chrome-for-testing-public/o/" + urllib.parse.quote(OBJECT, safe="")
 MAX_JSON = 1_048_576
 MAX_UNPACKED = 1_073_741_824
-MARKER = "slipstream-chromium-review-156-dom-ready"
+MARKER = "slipstream-chromium-review-158-dom-ready"
 
 
 class RuntimeProbeError(ValueError):
