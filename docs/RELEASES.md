@@ -1,6 +1,6 @@
 # Release Policy
 
-## Unreleased Chromium maintenance — 2026-11-19
+## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in
 [44481148015/1](https://github.com/aiwaki/slipstream/actions/runs/44481148015/attempts/1).
@@ -9,6 +9,11 @@ cleanup. Its generic OSV mapping is still unsupported, so it provides no general
 vulnerability clearance. The artifact-only policy is bounded through December3.
 The obsolete block-buffer0.10.4 advisory exception is removed after fresh primary
 advisory/source review; the ordinary current dependency audit remains required.
+
+The subsequent audit found three Quinn advisories in the application lockfile.
+The follow-up pins their compatible fixed versions, quinn-proto0.11.19 and
+quinn-udp0.5.16, without adding exceptions or changing routing. Exact-head CI and
+the dependency audit must pass before this maintenance is accepted.
 
 This is pending source maintenance, not a published release or a workstation
 installation. It does not replace `.35` assets or the accepted receipts for that

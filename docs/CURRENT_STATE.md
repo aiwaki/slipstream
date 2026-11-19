@@ -1,37 +1,32 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, reviewed Chromium 158 adoption
+## Current continuation — 2026-11-19, dependency maintenance and updater observer
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Active branch `codex/chromium-158-evidence`, PR480, base/main1dd8d6d2b26dfa808fb894bc2b6746e54765f418.
-Evidence-only head0e1d59dc93469d24cf19cecae77304715e6151ef has a verified hosted
-Chromium review44481148015/1. Its59evidence checks passed; root rehashed the
-artifact/source closure. Details and limitations: ROUTING_RESEARCH.md,
-"Chromium158 review and audit policy maintenance,2026-11-19" and
-`output/continuation-20261119/chromium158/hosted-review/verification.json`.
-The review proves exact artifact identity and sandboxed synthetic execution;
-OSV generic mapping remains unsupported, not vulnerability clearance.
+Active branch `codex/chromium-158-evidence`, PR480; base/main remains
+1dd8d6d2b26dfa808fb894bc2b6746e54765f418. Reconcile live HEAD and checks before action.
+Head82591e09 adopted reviewed Chromium158 pins, removed the obsolete block-buffer
+exception and fixed Clippy's needless_bool refusal. Review44481148015/1 remains
+accepted for exact artifact identity/synthetic execution only; do not repeat it.
+The current audit44482432841/1 then found three blocking Quinn advisories.
+Minimum compatible fixes: quinn-proto0.11.19 and quinn-udp0.5.16. No exemption.
+Follow-up changes only those versions/checksums; locked offline macOS metadata
+resolution passed. Three focused Chromium catalog tests passed, including new
+Stable-only drift cases. No builds or browser/native execution occurred locally.
+Current source maintenance is unqualified until the new exact-head CI/audit pass.
+Evidence and limitations: ROUTING_RESEARCH.md, November19 Chromium/Quinn entries;
+`output/continuation-20261119/chromium158/pr480-final/dependency-findings/`.
 
-Current follow-up adopts those exact production archive/version pins, refreshes
-the artifact review through December3 and removes only the obsolete application
-block-buffer0.10.4 exception after fresh advisory/source review. A one-line
-result.is_ok() change fixes Clippy1.100's needless_bool refusal without changing
-uninstall behavior. Verify live commit/PR/CI; adoption is not yet qualified.
-Focused pin/policy checks passed:9tests plus policy load, forbidden calls0.
-Root rehashed5source/7protected/4evidence files; independent diff review CLEAR.
-Next: commit the adoption and verify exact PR480 CI/audit, then reconcile PR479.
-Do not rerun the unchanged accepted Chromium evidence job.
-
-PR479 separately retains the public-update fixture diagnostic repair at c97929e5.
-Its audit44479720126 failed on expired Chromium156 policy; CI44479720260 also
-hit the Clippy refusal. Five review threads were triaged: preserve process-control
-exceptions and strengthen credential absence tests before merge. Legacy workflow
-refusal predates that PR; arbitrary body-error text stays private. Proposed fix
-and evidence: `output/continuation-20261119/admin-fixture/pr479/thread-triage/`.
-Both PR479 runs are terminal failures; its build/browser/lifecycle jobs passed.
-Receipt: admin-fixture/pr479/receipt.json. No fresh public update was dispatched.
-The prepared public dispatcher remains PENDING and needs a new reviewed source
-binding after this baseline changes; do not widen its old allowlist blindly.
+PR479 remote c97929e5 contains the public-update fixture diagnostics. Its two CI
+runs failed only on the old Chromium policy and Clippy refusal; packaged build,
+browser and lifecycle checks passed. Local commit f284c696c adds cancellation
+preservation and credential absence controls:25 fixture tests and14 binding tests
+pass (10 legacy-only skips). It is deliberately unpushed pending the fixed baseline.
+Evidence: `output/continuation-20261119/admin-fixture/pr479/review-fixes/`.
+Next: finish PR480 checks/review, reconcile that baseline into PR479, then verify
+its exact head. No fresh public update was dispatched. Its private dispatcher is
+PENDING and must be explicitly rebound to the new observer/helper before use;
+the original allowlist and old helper pin must not be widened silently.
 
 Published .35 remains source5a3e64b534affc865826fbd20ac67f1af328629e. Its previous
 R/G/P and publication receipts below remain historical accepted evidence for

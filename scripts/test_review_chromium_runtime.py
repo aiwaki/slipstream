@@ -59,6 +59,20 @@ class ChromiumRuntimeReviewTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     review.validate_catalogs(catalog, version, metadata)
 
+    def test_stable_catalog_version_revision_and_url_drift_reject(self) -> None:
+        for field in ("version", "revision", "url"):
+            with self.subTest(field=field):
+                catalog, version, metadata = self.catalogs()
+                stable = catalog["channels"]["Stable"]
+                if field == "url":
+                    stable["downloads"]["chrome-headless-shell"][0]["url"] = "https://example.invalid/runtime.zip"
+                    error = "official mac-arm64 archive identity differs"
+                else:
+                    stable[field] = "unexpected"
+                    error = "official version/revision differs"
+                with self.assertRaisesRegex(ValueError, error):
+                    review.validate_catalogs(catalog, version, metadata)
+
     def test_duplicate_architecture_entry_rejects(self) -> None:
         catalog, version, metadata = self.catalogs()
         version["downloads"]["chrome-headless-shell"] *= 2
