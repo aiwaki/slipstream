@@ -139,9 +139,13 @@ class StopQuitFailureEvidenceTests(unittest.TestCase):
                             self.assertEqual(calls[-1][0], ["/usr/bin/dscl", ".", "-authonly", username, password])
                             self.assertTrue(calls[-1][1]["sensitive"])
                     else:
-                        with self.assertRaisesRegex(smoke.QualificationError, "credential rejected"):
+                        with self.assertRaises(smoke.FixtureAdminError) as caught:
                             with smoke.fixture_admin():
                                 self.fail("unverified credentials reached native UI")
+                        self.assertEqual(caught.exception.diagnostic, {
+                            "primary": {"stage": "authenticate", "kind": "refused", "code": None},
+                            "cleanup": {"status": "confirmed"},
+                        })
                 self.assertEqual(accounts, {"root"})
                 self.assertIn("-deleteUser", calls[-1][0])
                 self.assertEqual(sum("-authonly" in args for args, _ in calls), 1)

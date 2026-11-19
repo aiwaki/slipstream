@@ -1,17 +1,63 @@
 # Current Project State
 
-## Current continuation — 2026-11-11 local / November 10 UTC, .35 published
+## Current continuation — 2026-11-19, public .35 administrator fixture diagnostics
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Fix branch `codex/public-menu-visibility-wait` is based on failed-run/main observer
-`1c6ddcfcd49c6c44edea0390708d1ee364036197`, tree
-`663ab405cd14167a7114aeabe4fc24a7c0a6fff2`. PR477 merged20:50:15UTC;
-its CI42894766197/1 and audit42894766080/1 passed. Read live git for the fix HEAD. Actual checkout97088529
-of both jobs has exactly this merged tree. Product remains published source
-`5a3e64b534affc865826fbd20ac67f1af328629e` (PR476). This checkpoint update
-is local pending the public result; do not move main or rewrite observer history.
-output/ is retained evidence. Prior goal turn made progress (PR477 and evidence).
-No workstation app/service/network changes or app-archive downloads. Goal incomplete.
+Branch `codex/public-admin-fixture-diagnostics`, base/main
+`1dd8d6d2b26dfa808fb894bc2b6746e54765f418` (PR478).
+Live GitHub reconciled November19: main unchanged, no equivalent open PR,
+CI42903701989/1 and audit42903701341/1 still SUCCESS at exact PRhead2558c382;
+PR478 merged. All three existing public35 attempts are terminal failures:
+42899876525/1 (AX menu observation), 42908459773/1 (anonymous feed quota),
+42910934921/1 (temporary administrator fixture). No active public run exists.
+The previous goal turn made progress: one post-reset dispatch completed and its
+failed report was authenticated; this is not a repeated unchanged external block.
+
+`.35` remains published at product source5a3e64b534affc865826fbd20ac67f1af328629e.
+Its existing CI/audit/R/G/P/publication evidence below is reused; no new product
+payload or workstation install is warranted by this observer-only diagnostic fix.
+Normal public update and pre-ACK rollback remain unqualified.
+
+### Confirmed failure and current repair
+
+M/public-update35/after-quota-commit holds run42910934921/1 and authenticated
+artifact13807566772. Report SHA
+cb60f75ff9ed1f6db1eaa568b3012787aedb97150af2e8c86d28db9fabbd8f0a;
+authentication SHA17c8465115aab58f70676f0e9f094a4e06264175d6cc971f332243330a911119.
+Root rehashed33members/9retained/14source files plus archive/upload log.
+Anonymous feed returned200/remaining34, unchanged .34 launched and found its
+normal .35 offer; AX menu opened with error0. The visibility fallback was not used.
+`dscl failed (10): ` arose in fixture_admin before Install or any transaction.
+Inventory and authentication use the same redacted message; cleanup may mask the
+primary exception. Backend cleanup_errors=[] is not proof of account cleanup.
+The report cannot establish which dscl operation failed or why. It also does not
+establish an updater product defect. Runner image20261104.0514.1, macos-15-arm64,
+OS15.8.2/24H232. Exact diagnosis: root-failure-analysis.json and fixture-diagnosis.json.
+
+Current patch adds closed, secret-free stage/error evidence and preserves both
+primary and cleanup outcomes, without extra native calls, sleeps or retries.
+Public35 source_binding keeps qualified helpers pinned to product5a. Only the
+executing stop_quit_ui_smoke helper may use its explicitly reviewed full-file
+hash, also checked against its committed observer blob; the other7 helpers stay
+byte-identical. The report schema and immutable candidate identities stay intact.
+Scoped validation passed:2 causal RED regressions on the original helper, then
+23 GREEN targeted tests (0.014s, maxRSS35.4MB, forbidden native/network calls0).
+Root separately passed14source-binding cases;10old-version-only cases skipped,
+238unchanged cases deselected. Independent helper/source-contract review: CLEAR.
+Helper SHA95fe7ba89210316a3df672e3dd9be12514f2a5fb99da4da73b29d21498ca60a6.
+Agent verification.json under M/public-update35/admin-fixture-diagnostics has SHA
+8252c0b1d6d0d1b6db208061c362fb77dd1626b07db31ea1f2363d392afba1de;
+root rehashed its4source and7evidence files. Root focused receipt is under the new
+evidence directory. Project continuity and git diff --check passed.
+No new public run has been dispatched. Live OLD CI artifact13229144546 now404
+(retained expiryNov17); review its actual public-workflow dependency before
+admitting a fresh run. Do not weaken source/public-release/receipt proof or
+rebuild a different .34 to replace the published OLD payload.
+New preparation/evidence: `output/continuation-20261119/admin-fixture`.
+Next: commit/PR and required exact-source CI,
+then one source-bound public commit attempt; rollback only after accepted commit.
+No .35 installation on the user's Mac. A fresh installation window is required
+before any workstation transaction. External Geph/settings/learning/backups stay intact.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.
@@ -153,7 +199,7 @@ RED-before delayed-menu case failed, affected module121PASS plus3 newly added bo
 cases PASS (not a claimed single124case rerun). Reconstructed tool-result record
 `M/public-update35/visibility-wait/test-execution-record.json` SHA
 7abf357cacbbcd6f7bead4a5b1b9d4ad46454ddfdd7746e3eaa79784b32bc964;
-full original stdout was not redirected. No CI/native validation of this patch yet.
+full original stdout was not redirected. PR478 CI passed including packaged browser/lifecycle checks; no new public update validation yet.
 This addresses one-shot observation fragility, not a proven explanation of the
 native timeout. Persistent hidden menus still fail. Product/released app unchanged.
 
@@ -165,12 +211,15 @@ no API/native calls, no changes to original failed collector or offline verifier
 Root and independent review passed. Its auth receipt has a new explicit upload-identity
 field and raw joblog hash; future rollback consumer must verify that closure too.
 
-NEXT: commit/push reviewed AX source+docs patch as a PR and await existing required
-checks. Do not rerun42899876525 or dispatch rollback. After reviewed merged repair,
-prepare one separately reconciled public attempt with a NEW output directory,
-new observer/source/checker pins and retained failed proof. The public workflow
-still uses immutable .34/.35 product bytes. Rollback helpers remain PENDING;
-only accepted real public commit permits a rollback. Fresh Mac window still needed.
+NEXT: current quota refusal is authenticated in next-commit/failure-analysis.json.
+No runtime defect/AX result can be inferred from42908459773. Old42899876525 AX
+failure is separately preserved. Do not rerun either or dispatch rollback.
+After recorded reset2026-11-10T22:02:07Z, ONE new exact-source attempt may be
+prepared in after-quota-commit with fresh no-active-run/source/public-payload/expiry
+checks and both prior failures allowed explicitly. No token/feed override or retry
+loop. If quota refuses again, retain evidence and stop further automatic attempts.
+R/G/P/publication/PR478 green tests stay reused. Fresh Mac window remains required;
+no .35 install or external Geph/settings changes authorized by this wait.
 
 
 Read-only Mac check20:42:43UTC Nov10 found /Applications/Slipstream.app version.31

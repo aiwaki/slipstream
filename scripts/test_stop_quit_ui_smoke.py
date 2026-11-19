@@ -402,7 +402,9 @@ fn disable(app: &App, enable_h: &Check) { DISABLE }
             return subprocess.CompletedProcess(args, 0, b"yes fixture is a member", b"")
         with mock.patch.object(smoke, "run", side_effect=record), \
              mock.patch.object(smoke, "require_disposable"), \
-             mock.patch.object(smoke, "account_names", side_effect=lambda: accounts.copy()):
+             mock.patch.object(smoke, "account_names", side_effect=lambda: accounts.copy()), \
+             mock.patch.object(smoke.Path, "exists", return_value=False), \
+             mock.patch.object(smoke.Path, "is_symlink", return_value=False):
             with self.assertRaisesRegex(RuntimeError, "test failure"):
                 with smoke.fixture_admin() as (username, _password):
                     raise RuntimeError("test failure")
@@ -425,10 +427,16 @@ fn disable(app: &App, enable_h: &Check) { DISABLE }
             return subprocess.CompletedProcess(args, 0, b"", b"")
         with mock.patch.object(smoke, "run", side_effect=record), \
              mock.patch.object(smoke, "require_disposable"), \
-             mock.patch.object(smoke, "account_names", side_effect=lambda: accounts.copy()):
-            with self.assertRaisesRegex(smoke.QualificationError, "unknown"):
+             mock.patch.object(smoke, "account_names", side_effect=lambda: accounts.copy()), \
+             mock.patch.object(smoke.Path, "exists", return_value=False), \
+             mock.patch.object(smoke.Path, "is_symlink", return_value=False):
+            with self.assertRaises(smoke.FixtureAdminError) as caught:
                 with smoke.fixture_admin():
                     self.fail("unknown result cannot authorize fixture")
+        self.assertEqual(caught.exception.diagnostic, {
+            "primary": {"stage": "create", "kind": "refused", "code": None},
+            "cleanup": {"status": "confirmed"},
+        })
         self.assertEqual(accounts, {"root"})
         self.assertEqual(len(deleted), 1)
 
