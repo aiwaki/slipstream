@@ -145,6 +145,7 @@ class StopQuitFailureEvidenceTests(unittest.TestCase):
                         self.assertEqual(caught.exception.diagnostic, {
                             "primary": {"stage": "authenticate", "kind": "refused", "code": None},
                             "cleanup": {"status": "confirmed"},
+                            "create_native": {"status": "unrecognized", "error": None, "code": None},
                         })
                 self.assertEqual(accounts, {"root"})
                 self.assertIn("-deleteUser", calls[-1][0])
