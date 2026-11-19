@@ -36,7 +36,7 @@ on:
         required: true
         type: string
       root_gate_run_id:
-        description: Successful exact NEW main root-gate run ID for the same .34 to .35 pair
+        description: Successful exact NEW main root-gate run ID for the same .35 to .36 pair
         required: true
         type: string
       root_gate_attempt:

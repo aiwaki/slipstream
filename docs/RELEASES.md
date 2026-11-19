@@ -8,9 +8,22 @@ existing offer without a new release-list search or error notification. Unknown
 authorization, incomplete cleanup and metadata errors keep their existing error
 and recovery paths. A later explicit Install still rechecks the exact appcast,
 offer identity, signature and archive. The existing packaged-trigger API remains
-compatible. Five targeted Rust tests are added; hosted compilation/tests and a
-new candidate's runtime qualification are still required. This change is not in
+compatible. PR481 merged as `b75d8b25511367a86235184eb0b024569cae79cf` after
+CI 44494033363/1 and audit 44494033574/1 passed on head `c5ea7b23`. All 249 tray tests,
+including the 5 new cancellation regressions, passed; browser and lifecycle gates
+also passed. The merged tree equals the actual tested checkout. A new candidate's
+update/readiness qualification is still required. This change is not in
 the already published `.34` or `.35` payloads.
+
+The `.36` preparation synchronizes VERSION/package metadata and changes the strict
+publisher and packaged-update admission to `.35 → .36`. All 145 focused pair,
+observer-source and workflow tests, plus 3 build-configuration checks, passed.
+The next step is exact-source PR/main CI and freezing the merged candidate. Reuse the unchanged Geph r5 producer and still-current
+Chromium158 review, but require fresh candidate CI/audit, native G, packaged P
+for `.35 → .36`, and readiness R before promoting the same bytes. Do not rerun
+the failed `.34 → .35` check as a substitute. A `.35 → .36` public transition
+delivers the repair but its Cancel is still executed by OLD `.35`; it does not
+prove native Cancel behavior of `.36` acting as the initiating application.
 
 ## Unreleased dependency maintenance — 2026-11-19
 
