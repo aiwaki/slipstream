@@ -120,6 +120,10 @@ ROOT_GATE = (42887546582, 1)
 REUSED = ("native_root_update.py", "packaged_update_observer.py", "packaged_update_preack.py",
           "qualify_packaged_update_commit.py", "build_packaged_update_trigger.py", "verify_packaged_observer_source.py",
           "stop_quit_ui_smoke.py", "geph_owned_lifecycle_smoke.py")
+# Only this reviewed diagnostic revision may differ in the observer checkout.
+# The qualified copy must still equal its original NEW_SOURCE blob; candidate
+# payloads and the other shared helpers retain their existing equality checks.
+REVIEWED_DIAGNOSTIC_HELPERS = {"stop_quit_ui_smoke.py": "7bee1a005832a9d8079874e46a294e914f31dae83407db653327f0f64e62c705"}
 
 
 def require_public_pins():
@@ -154,12 +158,20 @@ def source_binding(backend):
     require(re.fullmatch(r"[a-f0-9]{40}", harness_sha) and harness_sha == os.environ.get("GITHUB_SHA")
             and not git(harness, "status", "--porcelain", "--untracked-files=no"), "harness source changed")
     hashes = {}
+    require(set(REVIEWED_DIAGNOSTIC_HELPERS) == {"stop_quit_ui_smoke.py"},
+            "unexpected reviewed diagnostic helper allowance")
     for name in REUSED:
         relative = "scripts/" + name
         expected = hashlib.sha256(git(qualified, "show", NEW_SOURCE + ":" + relative)).hexdigest()
-        require(digest(qualified / relative) == expected and digest(harness / relative) == expected,
+        executing = REVIEWED_DIAGNOSTIC_HELPERS.get(name, expected)
+        require(re.fullmatch(r"[a-f0-9]{64}", executing) is not None,
+                "PENDING reviewed diagnostic helper: " + name)
+        require(digest(qualified / relative) == expected and digest(harness / relative) == executing,
                 "shared qualification helper differs from qualified source: " + name)
-        hashes[relative] = expected
+        if name in REVIEWED_DIAGNOSTIC_HELPERS:
+            require(hashlib.sha256(git(harness, "show", harness_sha + ":" + relative)).hexdigest() == executing,
+                    "reviewed diagnostic helper differs from committed observer: " + name)
+        hashes[relative] = executing
     public = ("public_update_ax.py", "public_update_ui_preflight.py", "public_update_preview35_menu_smoke.py",
               "public_update_observer.py", "public_update_preview35_pair_smoke.py", "public_update_visibility.py")
     for name in public:

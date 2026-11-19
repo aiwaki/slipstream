@@ -12,10 +12,12 @@ advisory/source review; the ordinary current dependency audit remains required.
 
 The subsequent audit found three Quinn advisories in the application lockfile.
 The follow-up pins their compatible fixed versions, quinn-proto0.11.19 and
-quinn-udp0.5.16, without adding exceptions or changing routing. Exact-head CI and
-the dependency audit must pass before this maintenance is accepted.
+quinn-udp0.5.16, without adding exceptions or changing routing. PR480 merged as
+39b127c04698143cd7f32fbe00e2e4b81a7a8509 after CI44484666448/1 and audit44484666299/1
+passed on head58d82bd. The merged tree equals the tested tree. The audit has zero
+blocking findings and zero accepted exceptions; all required checks passed.
 
-This is pending source maintenance, not a published release or a workstation
+This is merged source maintenance, not a published release or a workstation
 installation. It does not replace `.35` assets or the accepted receipts for that
 exact version. Normal public-update and rollback qualification remain open.
 Full evidence and limitations: ROUTING_RESEARCH.md, Chromium158 review2026-11-19.
@@ -55,7 +57,12 @@ single timed-out menu-open action, within the existing deadline. It still refuse
 hidden, ambiguous or foreign-owned items and never repeats the click. A delayed
 visibility regression failed before the repair; 121 module tests and three new
 boundary checks passed after it. The native timeout's cause is not established,
-and public update/rollback remain unqualified until the real path passes.
+and public update/rollback remain unqualified until the real path passes. The repair
+merged in [PR #478](https://github.com/aiwaki/slipstream/pull/478) after CI and audit
+passed. [The next attempt](https://github.com/aiwaki/slipstream/actions/runs/42908459773)
+stopped before launching OLD: its single anonymous public-feed request returned
+HTTP 403 with no remaining quota. The authenticated report has no transaction and
+no cleanup errors. It does not test the repaired menu path or the updater itself.
 
 This preview includes [PR #464](https://github.com/aiwaki/slipstream/pull/464).
 When the kernel has already lost Slipstream's saved PF reference, ordinary Stop
@@ -1132,3 +1139,21 @@ gh attestation verify Slipstream-macos-arm64.zip \
 
 Do not repurpose or move an existing release tag. A corrected artifact requires
 a new preview tag or a new patch version.
+
+### Public .35 follow-up — 2026-11-11 local
+
+Run42910934921/1 at observer1dd8d6d2 passed anonymous feed admission (200,
+remaining34), launched unchanged .34 and discovered its normal .35 menu offer.
+It failed before Install in disposable administrator setup: `dscl failed (10): `.
+Artifact13807566772 was authenticated,33members rehashed; no transaction or
+success context exists. The redacted error lacks stage and may mask a cleanup
+failure; backend cleanup[] is not fixture cleanup proof. Add secret-free stage
+and primary/cleanup diagnostics before another observer attempt. Public update
+and public rollback remain unqualified. No workstation changes were made.
+
+The November19 observer repair preserves the failing fixture stage plus primary
+and cleanup outcomes in a compact secret-free diagnostic.25 targeted fixture
+cases and14 source-binding cases pass. Only the reviewed executing helper may
+differ from product5a; candidate payloads and the other7 shared helpers remain
+unchanged. This fixes lost diagnostic evidence, not the unproven native cause.
+The ordinary public update/rollback gates still need successful reports.

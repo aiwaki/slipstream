@@ -1,37 +1,36 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, dependency maintenance and updater observer
+## Current continuation — 2026-11-19, final public-update observer checks
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Active branch `codex/chromium-158-evidence`, PR480; base/main remains
-1dd8d6d2b26dfa808fb894bc2b6746e54765f418. Reconcile live HEAD and checks before action.
-Head82591e09 adopted reviewed Chromium158 pins, removed the obsolete block-buffer
-exception and fixed Clippy's needless_bool refusal. Review44481148015/1 remains
-accepted for exact artifact identity/synthetic execution only; do not repeat it.
-The current audit44482432841/1 then found three blocking Quinn advisories.
-Minimum compatible fixes: quinn-proto0.11.19 and quinn-udp0.5.16. No exemption.
-Follow-up changes only those versions/checksums; locked offline macOS metadata
-resolution passed. Three focused Chromium catalog tests passed, including new
-Stable-only drift cases. No builds or browser/native execution occurred locally.
-Current source maintenance is unqualified until the new exact-head CI/audit pass.
-Evidence and limitations: ROUTING_RESEARCH.md, November19 Chromium/Quinn entries;
-`output/continuation-20261119/chromium158/pr480-final/dependency-findings/`.
+Active branch `codex/public-admin-fixture-diagnostics`, PR479. Main is now
+39b127c04698143cd7f32fbe00e2e4b81a7a8509 after merged PR480. Its tree equals tested
+head58d82bd662d091409d8acf3a9c25bf9d6e857644; CI44484666448/1 and audit44484666299/1
+passed all required checks. Audit:0blocking,8informational,0exceptions. Receipt:
+`output/continuation-20261119/chromium158/pr480-quinn-followup/receipt.json`.
+Chromium158, minimal Quinn patches and the Clippy fix are source maintenance;
+published .35 bytes are unchanged. Reuse accepted Chromium review44481148015/1.
 
-PR479 remote c97929e5 contains the public-update fixture diagnostics. Its two CI
-runs failed only on the old Chromium policy and Clippy refusal; packaged build,
-browser and lifecycle checks passed. Local commit f284c696c adds cancellation
-preservation and credential absence controls:25 fixture tests and14 binding tests
-pass (10 legacy-only skips). It is deliberately unpushed pending the fixed baseline.
+PR479 integrates that verified baseline while retaining its fixture diagnostics,
+process-control exception propagation and credential absence controls. The six
+code/test files remain exactly as locally reviewed f284c696c;25fixture tests and
+14source-binding cases passed (10legacy-only skips), independent review CLEAR.
+Executing helper SHA7bee1a005832a9d8079874e46a294e914f31dae83407db653327f0f64e62c705.
 Evidence: `output/continuation-20261119/admin-fixture/pr479/review-fixes/`.
-Next: finish PR480 checks/review, reconcile that baseline into PR479, then verify
-its exact head. No fresh public update was dispatched. Its private dispatcher is
-PENDING and must be explicitly rebound to the new observer/helper before use;
-the original allowlist and old helper pin must not be widened silently.
+Only the checkpoint conflicted during integration; release notes merge normally.
+Next: publish this integrated PR479 head, verify its exact CI/audit and reviews,
+then merge. Earlier PR479 failed only on the now-fixed dependency/Clippy baseline;
+do not rerun its old jobs or repeat unchanged local tests.
 
-Published .35 remains source5a3e64b534affc865826fbd20ac67f1af328629e. Its previous
-R/G/P and publication receipts below remain historical accepted evidence for
-those exact bytes. Normal public update/rollback are still unqualified. The old
-dscl10 failure did not identify its operation/cause or prove an updater defect.
+Public .34→.35 update/rollback remain unqualified. The old dscl10 error does not
+prove its failing native operation or an updater defect. No new public run was
+dispatched. Its private dispatcher remains PENDING: after PR479 acceptance,
+explicitly bind the merged observer, helper, CI/source proof and full reviewed
+diff. Public workflow executes qualified-source5a materialization and unchanged
+published payloads; PR480's new product bytes are not installed by that test.
+Do not widen the separate packaged-observer allowlist. Preserve all candidate,
+public-asset, signature, semantic-checker and attempt-history guards.
+
 No workstation app/service/network/account/learning changes or application
 payload downloads. A fresh user-approved window is required for Mac installation.
 
@@ -175,7 +174,7 @@ RED-before delayed-menu case failed, affected module121PASS plus3 newly added bo
 cases PASS (not a claimed single124case rerun). Reconstructed tool-result record
 `M/public-update35/visibility-wait/test-execution-record.json` SHA
 7abf357cacbbcd6f7bead4a5b1b9d4ad46454ddfdd7746e3eaa79784b32bc964;
-full original stdout was not redirected. No CI/native validation of this patch yet.
+full original stdout was not redirected. PR478 CI passed including packaged browser/lifecycle checks; no new public update validation yet.
 This addresses one-shot observation fragility, not a proven explanation of the
 native timeout. Persistent hidden menus still fail. Product/released app unchanged.
 
@@ -187,12 +186,17 @@ no API/native calls, no changes to original failed collector or offline verifier
 Root and independent review passed. Its auth receipt has a new explicit upload-identity
 field and raw joblog hash; future rollback consumer must verify that closure too.
 
-NEXT: commit/push reviewed AX source+docs patch as a PR and await existing required
-checks. Do not rerun42899876525 or dispatch rollback. After reviewed merged repair,
-prepare one separately reconciled public attempt with a NEW output directory,
-new observer/source/checker pins and retained failed proof. The public workflow
-still uses immutable .34/.35 product bytes. Rollback helpers remain PENDING;
-only accepted real public commit permits a rollback. Fresh Mac window still needed.
+Historical November10 checkpoint, superseded by run42910934921/1 and the
+current continuation above: quota refusal is authenticated in next-commit/failure-analysis.json.
+No runtime defect/AX result can be inferred from42908459773. Old42899876525 AX
+failure is separately preserved. Do not rerun either or dispatch rollback.
+The one subsequent attempt after reset2026-11-10T22:02:07Z was prepared in
+after-quota-commit with fresh no-active-run/source/public-payload/expiry checks
+and both prior failures allowed explicitly. It passed feed admission and stopped
+at fixture setup; it does not authorize another automatic attempt or rollback.
+No token/feed override or retry loop was used.
+R/G/P/publication/PR478 green tests stay reused. Fresh Mac window remains required;
+no .35 install or external Geph/settings changes authorized by this wait.
 
 
 Read-only Mac check20:42:43UTC Nov10 found /Applications/Slipstream.app version.31

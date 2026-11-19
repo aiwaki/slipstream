@@ -51,6 +51,22 @@ class QualificationError(RuntimeError):
     pass
 
 
+class PrivateOperationError(QualificationError):
+    """A private command failure with a numeric status, never arguments/output."""
+
+    def __init__(self, message, returncode):
+        super().__init__(message)
+        self.returncode = returncode
+
+
+class FixtureAdminError(QualificationError):
+    """Closed, compact evidence that survives the public reason's 512-byte cap."""
+
+    def __init__(self, primary, cleanup):
+        self.diagnostic = {"primary": primary, "cleanup": cleanup}
+        super().__init__("fixture_admin " + json.dumps(self.diagnostic, separators=(",", ":")))
+
+
 class PrivateOperationTimeout(QualificationError):
     """A safe timeout classification without subprocess arguments or output."""
 
@@ -66,7 +82,10 @@ def run(args, *, input=None, check=True, timeout=30, sensitive=False):
     if check and result.returncode:
         # Never echo command arguments: fixture authorization uses a random secret.
         detail = "" if sensitive else result.stderr.decode(errors="replace")[-500:]
-        raise QualificationError(f"{Path(args[0]).name} failed ({result.returncode}): {detail}")
+        message = f"{Path(args[0]).name} failed ({result.returncode}): {detail}"
+        if sensitive:
+            raise PrivateOperationError(message, result.returncode)
+        raise QualificationError(message)
     return result
 
 
@@ -568,6 +587,12 @@ def record_failure_snapshot(result, capture, stage):
 
 
 def record_failure(result, error, secrets_to_hide):
+    if isinstance(error, FixtureAdminError):
+        result["fixture_admin"] = error.diagnostic
+    elif getattr(error, "_fixture_admin_cleanup_confirmed", False) is True:
+        result["fixture_admin"] = {
+            "primary": _fixture_admin_issue("body", error), "cleanup": {"status": "confirmed"},
+        }
     detail = redacted_text(str(error), secrets_to_hide)[:1000]
     if "failure" not in result:
         result["failure"] = detail
@@ -860,34 +885,96 @@ def account_names():
     return set(names)
 
 
+def _fixture_admin_issue(stage, error):
+    # Never inspect exception text, arguments, filenames or process output.
+    code = None
+    if isinstance(error, PrivateOperationError):
+        kind, code = "command_failed", error.returncode
+    elif isinstance(error, (PrivateOperationTimeout, subprocess.TimeoutExpired, TimeoutError)):
+        kind = "timeout"
+    elif isinstance(error, OSError):
+        kind, code = "os_error", error.errno
+    elif isinstance(error, QualificationError):
+        kind = "refused"
+    else:
+        kind = "operation_failed"
+    if type(code) is not int or not -(2 ** 31) <= code < 2 ** 31:
+        code = None
+    return {"stage": stage, "kind": kind, "code": code}
+
+
 @contextmanager
 def fixture_admin():
     require_disposable()
     username = "slipstop" + secrets.token_hex(4)
     password = secrets.token_urlsafe(32)
     user_home = Path("/Users") / username
-    if username in account_names() or user_home.exists() or user_home.is_symlink():
-        raise QualificationError("temporary admin identity is not fresh")
     attempted = False
+    primary = primary_issue = None
+    cleanup = {"status": "not_needed"}
+    cleanup_control = None
+    stage = "inventory_before"
     try:
+        if username in account_names() or user_home.exists() or user_home.is_symlink():
+            raise QualificationError("temporary admin identity is not fresh")
         # An unknown command result may already have created the account.
         attempted = True
+        stage = "create"
         run(["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-addUser", username,
              "-password", password, "-admin"], sensitive=True, timeout=60)
+        stage = "membership"
         membership = run(["/usr/sbin/dseditgroup", "-o", "checkmember", "-m", username, "admin"], sensitive=True)
-        if username not in account_names() or not membership.stdout.startswith(b"yes "):
+        stage = "inventory_after"
+        if username not in account_names():
+            raise QualificationError("temporary administrator creation was not confirmed")
+        stage = "membership"
+        if not membership.stdout.startswith(b"yes "):
             raise QualificationError("temporary administrator creation was not confirmed")
         # Membership does not prove that the random fixture password is usable.
         # Authenticate once against the local node before any native UI action.
+        stage = "authenticate"
         run(["/usr/bin/dscl", ".", "-authonly", username, password], sensitive=True, timeout=15)
+        stage = "body"
         yield username, password
+    except BaseException as error:
+        primary = error
+        primary_issue = _fixture_admin_issue(stage, error)
     finally:
         if attempted:
-            if username in account_names():
-                run(["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-deleteUser", username],
-                    sensitive=True, timeout=60)
-            if username in account_names() or user_home.exists() or user_home.is_symlink():
-                raise QualificationError("temporary administrator cleanup was not confirmed")
+            cleanup_stage = "cleanup_inventory_before"
+            try:
+                if username in account_names():
+                    cleanup_stage = "delete"
+                    run(["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-deleteUser", username],
+                        sensitive=True, timeout=60)
+                cleanup_stage = "cleanup_inventory_after"
+                if username in account_names() or user_home.exists() or user_home.is_symlink():
+                    raise QualificationError("temporary administrator cleanup was not confirmed")
+                cleanup = {"status": "confirmed"}
+            except BaseException as error:
+                cleanup = {"status": "failed", **_fixture_admin_issue(cleanup_stage, error)}
+                if not isinstance(error, Exception):
+                    cleanup_control = error
+    control = cleanup_control
+    if control is None and primary is not None and not isinstance(primary, Exception):
+        control = primary
+    if control is not None:
+        # Preserve cancellation/exit semantics and retain only the safe outcomes.
+        try:
+            control.add_note(str(FixtureAdminError(primary_issue, cleanup)))
+        except Exception:
+            pass
+        raise control
+    if cleanup["status"] == "failed" or (primary is not None and stage != "body"):
+        raise FixtureAdminError(primary_issue, cleanup) from None
+    if primary is not None:
+        # Keep the caller's exception identity when cleanup succeeded. The marker
+        # adds only a closed outcome to Stop-Quit's later failure report.
+        try:
+            primary._fixture_admin_cleanup_confirmed = True
+        except Exception:
+            pass
+        raise primary
 
 
 def run_qualification(bundle, report):

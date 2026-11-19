@@ -1263,15 +1263,31 @@ def test_preview33_workflow_invokes_the_real_clone_parser(preview33_modules, mod
     assert "commit (Cancel then confirm) first" in source and "if: always()" in source
 
 
-@pytest.mark.parametrize("drift", [None, "shared", "public"])
+@pytest.mark.parametrize("drift", [None, "shared", "public", "reviewed_qualified",
+                                   "reviewed_harness", "reviewed_commit", "unpinned_helper", "unexpected_helper"])
 def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp_path, monkeypatch, drift):
+    reviewed = getattr(driver, "REVIEWED_DIAGNOSTIC_HELPERS", {})
+    if drift and drift.startswith(("reviewed_", "unpinned_", "unexpected_")) and not reviewed:
+        pytest.skip("only the .35 observer has a reviewed diagnostic helper revision")
     qualified = tmp_path / "qualified-source"
     (qualified / "scripts").mkdir(parents=True)
+    original_helper = b"original qualified helper fixture\n"
     for name in driver.REUSED:
-        (qualified / "scripts" / name).write_bytes((REPO / "scripts" / name).read_bytes())
+        content = original_helper if name in reviewed else (REPO / "scripts" / name).read_bytes()
+        (qualified / "scripts" / name).write_bytes(content)
     if drift == "shared":
         with (qualified / "scripts" / driver.REUSED[0]).open("ab") as stream:
             stream.write(b"\n# changed helper\n")
+    if drift == "reviewed_qualified":
+        (qualified / "scripts/stop_quit_ui_smoke.py").write_bytes(b"changed qualified copy")
+    if drift == "reviewed_harness":
+        actual_digest = driver.digest
+        monkeypatch.setattr(driver, "digest", lambda path: "0" * 64
+                            if path == REPO / "scripts/stop_quit_ui_smoke.py" else actual_digest(path))
+    if drift == "unpinned_helper":
+        monkeypatch.setattr(driver, "REVIEWED_DIAGNOSTIC_HELPERS", {"stop_quit_ui_smoke.py": "PENDING"})
+    if drift == "unexpected_helper":
+        monkeypatch.setattr(driver, "REVIEWED_DIAGNOSTIC_HELPERS", {**reviewed, "native_root_update.py": "0" * 64})
     harness_sha = "a" * 40
     for key, value in {"GITHUB_REPOSITORY": "aiwaki/slipstream", "GITHUB_EVENT_NAME": "workflow_dispatch",
                        "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": harness_sha}.items():
@@ -1290,13 +1306,16 @@ def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp
             ref, relative = args[1].split(":", 1)
             assert ref == (driver.NEW_SOURCE if directory == qualified else harness_sha)
             calls.append(relative)
-            data = (REPO / relative).read_bytes()
+            data = (original_helper if directory == qualified and relative.removeprefix("scripts/") in reviewed
+                    else (REPO / relative).read_bytes())
             if drift == "public" and relative == "scripts/" + Path(driver.__file__).name:
                 data += b"\n# different committed public harness\n"
+            if drift == "reviewed_commit" and directory == REPO and relative == "scripts/stop_quit_ui_smoke.py":
+                data += b"\n# unreviewed committed helper\n"
         return SimpleNamespace(stdout=data)
     backend = SimpleNamespace(args=SimpleNamespace(repo=qualified), run=fake_git)
     if drift:
-        with pytest.raises(Refused, match="shared qualification helper|public harness bytes"):
+        with pytest.raises(Refused, match="shared qualification helper|public harness bytes|reviewed diagnostic helper"):
             driver.source_binding(backend)
     else:
         binding = driver.source_binding(backend)
@@ -1305,6 +1324,10 @@ def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp
         assert "scripts/" + Path(menu.__file__).name in binding["sha256"]
         assert "scripts/public_update_pair_smoke.py" not in calls and "scripts/public_update_menu_smoke.py" not in calls
         assert {"scripts/" + name for name in driver.REUSED} <= set(binding["sha256"])
+        if reviewed:
+            import hashlib
+            assert binding["sha256"]["scripts/stop_quit_ui_smoke.py"] == reviewed["stop_quit_ui_smoke.py"]
+            assert binding["sha256"]["scripts/stop_quit_ui_smoke.py"] != hashlib.sha256(original_helper).hexdigest()
 
 
 @pytest.mark.parametrize("entry", ["main", "prepare_main"])
