@@ -140,10 +140,11 @@ struct SuccessorAckV1 {
     heartbeat_seq: u64,
 }
 
-/// Only NotExecuted permits absence to count as no privileged operation.
+/// Only Cancelled or NotExecuted permits absence to count as no privileged operation.
 /// Uncertain retains the exact identity for an idempotent explicit retry.
 pub enum AuthorizationOutcome {
     Completed,
+    Cancelled,
     NotExecuted(String),
     Uncertain(String),
 }
@@ -151,6 +152,19 @@ pub enum AuthorizationOutcome {
 #[derive(Clone, Debug)]
 pub struct PreparedTransaction {
     pub journal_path: PathBuf,
+}
+
+#[derive(Debug)]
+pub enum PreparationOutcome {
+    Prepared(PreparedTransaction),
+    /// Root rejection/abort and all local cleanup have completed successfully.
+    Cancelled,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PreparedAuthorization {
+    Authorized,
+    Cancelled,
 }
 
 #[derive(Clone, Debug)]
@@ -1379,6 +1393,17 @@ fn authorize_prepared(
     journal: &mut UpdateJournalV1,
     authorize: impl FnOnce(&daemon_update::PrepareIdentity) -> AuthorizationOutcome,
 ) -> Result<(), String> {
+    match authorize_prepared_outcome(path, journal, authorize)? {
+        PreparedAuthorization::Authorized => Ok(()),
+        PreparedAuthorization::Cancelled => Err("update authorization cancelled".into()),
+    }
+}
+
+fn authorize_prepared_outcome(
+    path: &Path,
+    journal: &mut UpdateJournalV1,
+    authorize: impl FnOnce(&daemon_update::PrepareIdentity) -> AuthorizationOutcome,
+) -> Result<PreparedAuthorization, String> {
     let root = DaemonClient::system();
     let binding = journal
         .daemon_update
@@ -1389,7 +1414,10 @@ fn authorize_prepared(
     write_journal(path, journal)?;
     let binding = journal.daemon_update.as_ref().unwrap();
     let outcome = authorize(&binding.identity);
-    if let AuthorizationOutcome::NotExecuted(message) = &outcome {
+    if matches!(
+        outcome,
+        AuthorizationOutcome::Cancelled | AuthorizationOutcome::NotExecuted(_)
+    ) {
         // Cancelling this retry cannot cancel an earlier interrupted prompt.
         // The expired lease prevents late activation. A late sealed preparation
         // can still publish, but must abort under the installer lock.
@@ -1397,7 +1425,11 @@ fn authorize_prepared(
             !previous_authorization || unix_now() >= binding.identity.prepare_deadline_unix;
         if earlier_attempt_cannot_start && root.absent_after_rejected_authorization(binding)? {
             remove_prepared_local(path, journal)?;
-            return Err(message.clone());
+            return match outcome {
+                AuthorizationOutcome::Cancelled => Ok(PreparedAuthorization::Cancelled),
+                AuthorizationOutcome::NotExecuted(message) => Err(message),
+                _ => unreachable!(),
+            };
         }
     }
     let status = root.status(binding)?;
@@ -1405,15 +1437,19 @@ fn authorize_prepared(
     write_journal(path, journal)?;
     if !matches!(outcome, AuthorizationOutcome::Completed) || !status.prepared() {
         cancel_prepared(path, journal)?;
+        if matches!(outcome, AuthorizationOutcome::Cancelled) {
+            return Ok(PreparedAuthorization::Cancelled);
+        }
         return Err(match outcome {
             AuthorizationOutcome::NotExecuted(message)
             | AuthorizationOutcome::Uncertain(message) => message,
             AuthorizationOutcome::Completed => {
                 "root daemon did not prepare; update cancelled".into()
             }
+            AuthorizationOutcome::Cancelled => unreachable!(),
         });
     }
-    Ok(())
+    Ok(PreparedAuthorization::Authorized)
 }
 
 // The production entrypoint consumes the real flock; a drop marker lets tests
@@ -1475,6 +1511,30 @@ pub fn prepare_transaction(
     expected_version: &str,
     authorize: impl FnOnce(&daemon_update::PrepareIdentity) -> AuthorizationOutcome,
 ) -> Result<PreparedTransaction, String> {
+    // Keep the packaged qualification trigger's existing prepared-or-error API.
+    match prepare_transaction_outcome(
+        current_exe,
+        state_dir,
+        launch_agents_dir,
+        archive,
+        current_version,
+        expected_version,
+        authorize,
+    )? {
+        PreparationOutcome::Prepared(prepared) => Ok(prepared),
+        PreparationOutcome::Cancelled => Err("update authorization cancelled".into()),
+    }
+}
+
+pub fn prepare_transaction_outcome(
+    current_exe: &Path,
+    state_dir: &Path,
+    launch_agents_dir: &Path,
+    archive: &[u8],
+    current_version: &str,
+    expected_version: &str,
+    authorize: impl FnOnce(&daemon_update::PrepareIdentity) -> AuthorizationOutcome,
+) -> Result<PreparationOutcome, String> {
     let uid = current_uid();
     if uid == 0 {
         return Err("the tray updater must not run as root".into());
@@ -1584,9 +1644,15 @@ pub fn prepare_transaction(
     }
     // Root prepare is synchronous; cancellation is distinguished from an
     // unknown result before considering the absence of root-owned evidence.
-    authorize_prepared(&journal_path, &mut journal, authorize)?;
+    if authorize_prepared_outcome(&journal_path, &mut journal, authorize)?
+        == PreparedAuthorization::Cancelled
+    {
+        return Ok(PreparationOutcome::Cancelled);
+    }
     start_prepared_watchdog(&journal_path, &journal, transaction_lock)?;
-    Ok(PreparedTransaction { journal_path })
+    Ok(PreparationOutcome::Prepared(PreparedTransaction {
+        journal_path,
+    }))
 }
 
 fn process_exists(pid: u32) -> bool {
@@ -3043,6 +3109,133 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_cancel_requires_completed_root_and_local_cleanup() {
+        for root_aborted in [false, true] {
+            let directory = TempDir::new().unwrap();
+            let (path, mut journal) = coordinated_journal(directory.path());
+            let root = directory.path().join("root");
+            let requests = directory.path().join("requests");
+            if root_aborted {
+                root_status(&root, &journal, "aborted");
+            }
+            daemon_update::with_test_client(&root, &requests, || {
+                assert_eq!(
+                    authorize_prepared_outcome(&path, &mut journal, |_| {
+                        AuthorizationOutcome::Cancelled
+                    })
+                    .unwrap(),
+                    PreparedAuthorization::Cancelled
+                );
+                assert!(!path.exists());
+                assert!(!journal.stage.exists());
+                assert!(!journal.launch_agent.exists());
+                assert_eq!(
+                    sha256_file(&bundle_executable(&journal.target)).unwrap(),
+                    journal.old_executable_sha256
+                );
+                assert!(!requests.exists());
+            });
+        }
+    }
+
+    #[test]
+    fn cancellation_text_does_not_turn_other_authorization_results_into_cancel() {
+        for (outcome, retained) in [
+            (
+                AuthorizationOutcome::NotExecuted("update authorization cancelled".into()),
+                false,
+            ),
+            (
+                AuthorizationOutcome::Uncertain("update authorization cancelled".into()),
+                true,
+            ),
+        ] {
+            let directory = TempDir::new().unwrap();
+            let (path, mut journal) = coordinated_journal(directory.path());
+            daemon_update::with_test_client(
+                &directory.path().join("root"),
+                &directory.path().join("requests"),
+                || {
+                    assert!(authorize_prepared_outcome(&path, &mut journal, |_| outcome).is_err());
+                    assert_eq!(path.exists(), retained);
+                    assert_eq!(journal.stage.exists(), retained);
+                    assert!(journal.target.exists());
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn confirmed_cancel_cleanup_failure_retains_journal_and_is_an_error() {
+        let directory = TempDir::new().unwrap();
+        let (path, mut journal) = coordinated_journal(directory.path());
+        // The real cleanup removes staging, then cannot unlink a directory as a plist.
+        fs::create_dir_all(&journal.launch_agent).unwrap();
+        let requests = directory.path().join("requests");
+        daemon_update::with_test_client(&directory.path().join("root"), &requests, || {
+            assert!(authorize_prepared_outcome(&path, &mut journal, |_| {
+                AuthorizationOutcome::Cancelled
+            })
+            .is_err());
+            assert!(path.exists());
+            assert!(!journal.stage.exists());
+            assert!(journal.launch_agent.is_dir());
+            assert_eq!(
+                sha256_file(&bundle_executable(&journal.target)).unwrap(),
+                journal.old_executable_sha256
+            );
+            let retained: UpdateJournalV1 =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                retained.cleanup_intent.unwrap().kind,
+                CleanupKind::PreparedCancelled
+            );
+            assert!(!requests.exists());
+        });
+    }
+
+    #[test]
+    fn confirmed_cancel_cannot_abandon_an_earlier_authorization_lease() {
+        let directory = TempDir::new().unwrap();
+        let (path, mut journal) = coordinated_journal(directory.path());
+        let identity = journal.daemon_update.as_ref().unwrap().identity.clone();
+        daemon_update::with_test_client(
+            &directory.path().join("root"),
+            &directory.path().join("requests"),
+            || {
+                assert!(authorize_prepared_outcome(&path, &mut journal, |_| {
+                    AuthorizationOutcome::Uncertain("lost response".into())
+                })
+                .is_err());
+                assert!(authorize_prepared_outcome(&path, &mut journal, |_| {
+                    AuthorizationOutcome::Cancelled
+                })
+                .is_err());
+                assert!(path.exists());
+                assert!(journal.stage.exists());
+                assert!(journal.cleanup_intent.is_none());
+                assert_eq!(journal.daemon_update.as_ref().unwrap().identity, identity);
+
+                journal
+                    .daemon_update
+                    .as_mut()
+                    .unwrap()
+                    .identity
+                    .prepare_deadline_unix = unix_now() - 1;
+                assert_eq!(
+                    authorize_prepared_outcome(&path, &mut journal, |_| {
+                        AuthorizationOutcome::Cancelled
+                    })
+                    .unwrap(),
+                    PreparedAuthorization::Cancelled
+                );
+                assert!(!path.exists());
+                assert!(!journal.stage.exists());
+            },
+        );
+    }
+
+    #[test]
     fn cancelled_authorization_after_previous_update_releases_local_preparation() {
         let directory = TempDir::new().unwrap();
         let (path, mut journal) = coordinated_journal(directory.path());
@@ -3502,9 +3695,8 @@ mod tests {
         let lock = try_transaction_lock(path.parent().unwrap())
             .unwrap()
             .unwrap();
-        let finished = || {
-            startup_transaction_finished_locked(&lock, &context, &current_exe, &context.version)
-        };
+        let finished =
+            || startup_transaction_finished_locked(&lock, &context, &current_exe, &context.version);
         assert!(!finished().unwrap());
         fs::remove_file(path.with_file_name(format!(
             "app-update-transaction-failed-{}.json",
@@ -3714,7 +3906,8 @@ mod tests {
             )
         };
         assert!(
-            !startup_transaction_finished_at(&context, &current_exe, &value.current_version).unwrap(),
+            !startup_transaction_finished_at(&context, &current_exe, &value.current_version)
+                .unwrap(),
             "cleanup alone cannot bypass the watchdog lock"
         );
         assert!(finished().unwrap());
@@ -3819,7 +4012,12 @@ mod tests {
             .unwrap()
             .unwrap();
         let finished = || {
-            startup_transaction_finished_locked(&lock, &context, &current_exe, &value.current_version)
+            startup_transaction_finished_locked(
+                &lock,
+                &context,
+                &current_exe,
+                &value.current_version,
+            )
         };
         assert!(finished().unwrap());
         let mut incomplete = value.clone();

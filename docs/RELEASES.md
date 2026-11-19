@@ -1,5 +1,17 @@
 # Release Policy
 
+## Unreleased update-cancellation repair — 2026-11-19
+
+The source repair distinguishes a confirmed native Cancel from an installation
+failure. Only successful root/local cleanup permits cancellation to preserve the
+existing offer without a new release-list search or error notification. Unknown
+authorization, incomplete cleanup and metadata errors keep their existing error
+and recovery paths. A later explicit Install still rechecks the exact appcast,
+offer identity, signature and archive. The existing packaged-trigger API remains
+compatible. Five targeted Rust tests are added; hosted compilation/tests and a
+new candidate's runtime qualification are still required. This change is not in
+the already published `.34` or `.35` payloads.
+
 ## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in
@@ -1157,3 +1169,28 @@ cases and14 source-binding cases pass. Only the reviewed executing helper may
 differ from product5a; candidate payloads and the other7 shared helpers remain
 unchanged. This fixes lost diagnostic evidence, not the unproven native cause.
 The ordinary public update/rollback gates still need successful reports.
+
+PR479 merged as4618210128ac4265064729ff8b1675b9e04a275a after exact
+CI44487262574/1 and audit44487262491/1 passed. The actual tested merge and merged
+main have the same tree. A single new ordinary public commit check,
+[44490827068/1](https://github.com/aiwaki/slipstream/actions/runs/44490827068/attempts/1),
+started November19 at08:49UTC and failed after a successfully observed native
+Cancel. OLD found the .35 offer, pressed Install and prepared authorization;
+Cancel removed the preparation and preserved the old daemon (same PID, advancing
+heartbeat). Root hand-off/commit did not begin. The automatic post-Cancel search
+then returned HTTP403. A separate anonymous probe reported remaining0 and an
+explicit GitHub rate-limit message; the app's original response headers and page
+were not retained, so these two responses are not claimed to be identical.
+Source inspection confirms that every installation error, including known
+cancellation, discards the offer and repeats the complete release-list search.
+That code is identical in published .34/.35 and current main. The additional
+request cycle is proven; exclusive responsibility for the shared-IP quota is not.
+
+Artifact14513650063 (120247 bytes) was authenticated against the exact uploader
+and35 rehashed members. Authentication receipt SHA
+`415bc06dd6bca7b84bd70afe982be746b08ed98d1ad6f286d8b0f0422ffc2a80`;
+report SHA`f6c5e5e48962736d1171cc9bab69e4445345e8551cc04bf68f7f342154dc5594`.
+No success context was created; public commit/rollback remain unqualified.
+No automatic retry was made. The next change targets unnecessary rediscovery
+after confirmed cancellation while retaining install-time signature/identity checks.
+The qualified product source5a and all published .34/.35 assets remain unchanged.

@@ -241,6 +241,21 @@ mismatch, a replayed archive with the wrong internal version, a wrong bundle
 identity/executable, or missing `LSUIElement` all fail closed. Do not bypass
 these checks by replacing `latest.json` or the signature manually.
 
+In published previews `.34` and `.35`, cancelling the administrator prompt also
+discards the cached offer and triggers a full release-list search. A subsequent
+GitHub403 can therefore hide an update that was already found. Public run
+44490827068 proved successful native Cancel and cleanup, followed by this
+discovery failure; a separate anonymous request confirmed exhausted GitHub quota.
+The app's original response headers were not captured, so that diagnostic does
+not identify the exact cause of its403 by itself. Distinguish this boundary from
+failed authorization, a retained transaction requiring Resume, and failed
+signature verification. Repeatedly choosing Check can spend more of the shared
+anonymous quota; neither a diagnostic response nor successful Cancel proves a
+completed update. See RELEASES.md for the exact accepted evidence and open gates.
+The unreleased cancellation repair keeps the exact offer only after confirmed
+root/local cleanup. This avoids the repeated discovery while preserving all
+checks on a later explicit Install; it does not change published `.34`/`.35`.
+
 Unit and MockRuntime mechanics tests do not prove native macOS delivery or a
 complete public product transition. Preview `.24` publication follows the existing
 mandatory candidate, audit, packaged/native and protected-readiness gates,
