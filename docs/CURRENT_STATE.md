@@ -1,63 +1,46 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, public .35 administrator fixture diagnostics
+## Current continuation — 2026-11-19, two reviewed fixes and current audit blockers
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/public-admin-fixture-diagnostics`, base/main
-`1dd8d6d2b26dfa808fb894bc2b6746e54765f418` (PR478).
-Live GitHub reconciled November19: main unchanged, no equivalent open PR,
-CI42903701989/1 and audit42903701341/1 still SUCCESS at exact PRhead2558c382;
-PR478 merged. All three existing public35 attempts are terminal failures:
-42899876525/1 (AX menu observation), 42908459773/1 (anonymous feed quota),
-42910934921/1 (temporary administrator fixture). No active public run exists.
-The previous goal turn made progress: one post-reset dispatch completed and its
-failed report was authenticated; this is not a repeated unchanged external block.
+PR479 branch `codex/public-admin-fixture-diagnostics` retains the fixture repair;
+PR480 branch `codex/chromium-158-evidence` contains the dependency baseline update.
+Verify live branch/HEAD and both PRs before resuming. Main remains1dd8d6d2.
 
-`.35` remains published at product source5a3e64b534affc865826fbd20ac67f1af328629e.
-Its existing CI/audit/R/G/P/publication evidence below is reused; no new product
-payload or workstation install is warranted by this observer-only diagnostic fix.
-Normal public update and pre-ACK rollback remain unqualified.
+PR479 headc97929e5 CI44479720260/1 and audit44479720126/1 are terminal failures:
+Chromium policy expired and Clippy1.100 rejects needless_bool. Build/browser/
+lifecycle passed; actual CI/audit checkout has the exact PR-head tree. Receipt:
+`output/continuation-20261119/admin-fixture/pr479/receipt.json`.
+Local follow-up also preserves process-control exceptions after cleanup and
+asserts that all credential sentinels are absent from reports. Causal old-source
+controls failed;25fixture tests and14source-binding cases pass. Independent
+review CLEAR; root rehashed3source/7protected/7evidence files. Final helper SHA
+7bee1a005832a9d8079874e46a294e914f31dae83407db653327f0f64e62c705.
+Evidence: admin-fixture/pr479/review-fixes/verification.json. Do not push/repeat
+old-baseline CI until the dependency baseline is ready. Legacy refusal predates
+PR479; closed body-error classification is deliberate, not raw secret output.
 
-### Confirmed failure and current repair
+PR480 head82591e09a98b5abd47a9c0c2296efe33cf72dbc2 adopts Chromium158 after the
+accepted hosted review44481148015/1; report/root decision are under
+`output/continuation-20261119/chromium158/hosted-review/`. Archive/executable
+identity and synthetic sandbox DOM/cleanup passed; OSV generic mapping remains
+unsupported, not vulnerability clearance. Focused adoption checks and independent
+review passed. The Clippy boolean is simplified without changing cleanup order.
+Its fresh audit44482432841/1 passed Chromium admission but found3blocking
+advisories: quinn-proto0.11.18(two) and quinn-udp0.5.15(one). Official fixed
+patches are0.11.19 and0.5.16, compatible with locked quinn0.11.11. Evidence:
+chromium158/pr480-final/dependency-findings. Next: narrowly update those lock
+entries on PR480, validate exact new identities and required CI/audit; then
+merge that verified baseline into PR479 and run its exact final checks.
+Existing CI44482432832 is still being observed; do not create duplicate runs.
 
-M/public-update35/after-quota-commit holds run42910934921/1 and authenticated
-artifact13807566772. Report SHA
-cb60f75ff9ed1f6db1eaa568b3012787aedb97150af2e8c86d28db9fabbd8f0a;
-authentication SHA17c8465115aab58f70676f0e9f094a4e06264175d6cc971f332243330a911119.
-Root rehashed33members/9retained/14source files plus archive/upload log.
-Anonymous feed returned200/remaining34, unchanged .34 launched and found its
-normal .35 offer; AX menu opened with error0. The visibility fallback was not used.
-`dscl failed (10): ` arose in fixture_admin before Install or any transaction.
-Inventory and authentication use the same redacted message; cleanup may mask the
-primary exception. Backend cleanup_errors=[] is not proof of account cleanup.
-The report cannot establish which dscl operation failed or why. It also does not
-establish an updater product defect. Runner image20261104.0514.1, macos-15-arm64,
-OS15.8.2/24H232. Exact diagnosis: root-failure-analysis.json and fixture-diagnosis.json.
-
-Current patch adds closed, secret-free stage/error evidence and preserves both
-primary and cleanup outcomes, without extra native calls, sleeps or retries.
-Public35 source_binding keeps qualified helpers pinned to product5a. Only the
-executing stop_quit_ui_smoke helper may use its explicitly reviewed full-file
-hash, also checked against its committed observer blob; the other7 helpers stay
-byte-identical. The report schema and immutable candidate identities stay intact.
-Scoped validation passed:2 causal RED regressions on the original helper, then
-23 GREEN targeted tests (0.014s, maxRSS35.4MB, forbidden native/network calls0).
-Root separately passed14source-binding cases;10old-version-only cases skipped,
-238unchanged cases deselected. Independent helper/source-contract review: CLEAR.
-Helper SHA95fe7ba89210316a3df672e3dd9be12514f2a5fb99da4da73b29d21498ca60a6.
-Agent verification.json under M/public-update35/admin-fixture-diagnostics has SHA
-8252c0b1d6d0d1b6db208061c362fb77dd1626b07db31ea1f2363d392afba1de;
-root rehashed its4source and7evidence files. Root focused receipt is under the new
-evidence directory. Project continuity and git diff --check passed.
-No new public run has been dispatched. Live OLD CI artifact13229144546 now404
-(retained expiryNov17); review its actual public-workflow dependency before
-admitting a fresh run. Do not weaken source/public-release/receipt proof or
-rebuild a different .34 to replace the published OLD payload.
-New preparation/evidence: `output/continuation-20261119/admin-fixture`.
-Next: commit/PR and required exact-source CI,
-then one source-bound public commit attempt; rollback only after accepted commit.
-No .35 installation on the user's Mac. A fresh installation window is required
-before any workstation transaction. External Geph/settings/learning/backups stay intact.
+Published .35 remains source5a3e64b534affc865826fbd20ac67f1af328629e. Its previous
+R/G/P/publication evidence below remains valid only for those exact bytes.
+Public update and rollback remain unqualified; dscl10 still has no proved cause.
+No new public run dispatched. Prepared public dispatcher remains PENDING and
+needs a new reviewed source/helper binding after baseline changes.
+No workstation app/service/network/account/learning changes or application
+payload downloads. A fresh user-approved window is required for Mac installation.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.

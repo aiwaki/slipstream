@@ -128,7 +128,8 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
             report = {}
             smoke.record_failure(report, caught.exception, ())
             self.assertEqual(report["fixture_admin"], caught.exception.diagnostic)
-            self.assertNotIn(self.PRIVATE, json.dumps(report))
+            for secret in (self.USER, self.PASSWORD, self.PRIVATE):
+                self.assertNotIn(secret, json.dumps(report))
 
     def test_each_cleanup_command_failure_is_distinct_without_primary(self):
         for index, stage in enumerate(self.CLEANUP):
@@ -193,7 +194,7 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
                             {"status": "failed", **self.failed("cleanup_inventory_after", "refused", None)})
 
     def test_body_error_identity_survives_confirmed_cleanup(self):
-        original = RuntimeError(self.PRIVATE)
+        original = RuntimeError(self.PRIVATE + self.USER + self.PASSWORD)
         with self.fixture(self.SETUP + self.CLEANUP) as fixture:
             with self.assertRaises(RuntimeError) as caught:
                 with smoke.fixture_admin():
@@ -202,12 +203,13 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
             self.assertEqual(fixture.accounts, {"root"})
             self.assertIs(getattr(original, "_fixture_admin_cleanup_confirmed", None), True)
             report = {}
-            smoke.record_failure(report, original, (self.PRIVATE,))
+            smoke.record_failure(report, original, (self.PRIVATE, self.USER, self.PASSWORD))
             self.assertEqual(report["fixture_admin"], {
                 "primary": self.failed("body", "operation_failed", None),
                 "cleanup": {"status": "confirmed"},
             })
-            self.assertNotIn(self.PRIVATE, json.dumps(report))
+            for secret in (self.USER, self.PASSWORD, self.PRIVATE):
+                self.assertNotIn(secret, json.dumps(report))
 
     def test_body_and_cleanup_error_are_compact_safe_and_separate(self):
         original = RuntimeError(self.PRIVATE + self.PASSWORD + self.USER)
@@ -218,6 +220,44 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
             self.diagnostic(caught.exception, self.failed("body", "operation_failed", None),
                             {"status": "failed", **self.failed("delete")})
             self.assertIsNot(caught.exception, original)
+
+    def test_process_control_is_not_converted_to_a_qualification_failure(self):
+        for control_type in (KeyboardInterrupt, SystemExit):
+            for stage in ("inventory_before", "create", "authenticate", "body", "delete"):
+                control = SystemExit(42) if control_type is SystemExit else KeyboardInterrupt()
+                with self.subTest(control=control_type.__name__, stage=stage):
+                    if stage in self.SETUP:
+                        index = self.SETUP.index(stage)
+                        stages = self.SETUP[:index + 1] + (self.CLEANUP if index else [])
+                    elif stage == "delete":
+                        stages = self.SETUP + self.CLEANUP[:2]
+                    else:
+                        stages = self.SETUP + self.CLEANUP
+                    with self.fixture(stages, failures={} if stage == "body" else {stage: control}):
+                        with self.assertRaises(type(control)) as caught:
+                            with smoke.fixture_admin():
+                                if stage == "body":
+                                    raise control
+                                if stage != "delete":
+                                    self.fail("control must prevent body")
+                        self.assertIs(caught.exception, control)
+                        self.assertFalse(isinstance(caught.exception, smoke.FixtureAdminError))
+
+    def test_setup_interrupt_preserves_failed_cleanup_as_a_safe_note(self):
+        original = KeyboardInterrupt()
+        with self.fixture(self.SETUP + self.CLEANUP[:2],
+                          failures={"authenticate": original, "delete": 10}):
+            with self.assertRaises(KeyboardInterrupt) as caught:
+                with smoke.fixture_admin():
+                    self.fail("interrupted authentication must prevent body")
+            self.assertIs(caught.exception, original)
+            note = caught.exception.__notes__[-1]
+            expected = {"primary": self.failed("authenticate", "operation_failed", None),
+                        "cleanup": {"status": "failed", **self.failed("delete")}}
+            self.assertEqual(json.loads(note[len("fixture_admin "):]), expected)
+            self.assertLessEqual(len(note.encode()), 512)
+            for secret in (self.USER, self.PASSWORD, self.PRIVATE):
+                self.assertNotIn(secret, note)
 
     def test_sensitive_run_retains_safe_exit_code_without_arguments_or_stderr(self):
         args = ["/usr/bin/dscl", self.USER, self.PASSWORD]

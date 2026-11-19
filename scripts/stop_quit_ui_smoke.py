@@ -912,6 +912,7 @@ def fixture_admin():
     attempted = False
     primary = primary_issue = None
     cleanup = {"status": "not_needed"}
+    cleanup_control = None
     stage = "inventory_before"
     try:
         if username in account_names() or user_home.exists() or user_home.is_symlink():
@@ -952,6 +953,18 @@ def fixture_admin():
                 cleanup = {"status": "confirmed"}
             except BaseException as error:
                 cleanup = {"status": "failed", **_fixture_admin_issue(cleanup_stage, error)}
+                if not isinstance(error, Exception):
+                    cleanup_control = error
+    control = cleanup_control
+    if control is None and primary is not None and not isinstance(primary, Exception):
+        control = primary
+    if control is not None:
+        # Preserve cancellation/exit semantics and retain only the safe outcomes.
+        try:
+            control.add_note(str(FixtureAdminError(primary_issue, cleanup)))
+        except Exception:
+            pass
+        raise control
     if cleanup["status"] == "failed" or (primary is not None and stage != "body"):
         raise FixtureAdminError(primary_issue, cleanup) from None
     if primary is not None:

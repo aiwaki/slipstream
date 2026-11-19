@@ -123,7 +123,7 @@ REUSED = ("native_root_update.py", "packaged_update_observer.py", "packaged_upda
 # Only this reviewed diagnostic revision may differ in the observer checkout.
 # The qualified copy must still equal its original NEW_SOURCE blob; candidate
 # payloads and the other shared helpers retain their existing equality checks.
-REVIEWED_DIAGNOSTIC_HELPERS = {"stop_quit_ui_smoke.py": "95fe7ba89210316a3df672e3dd9be12514f2a5fb99da4da73b29d21498ca60a6"}
+REVIEWED_DIAGNOSTIC_HELPERS = {"stop_quit_ui_smoke.py": "7bee1a005832a9d8079874e46a294e914f31dae83407db653327f0f64e62c705"}
 
 
 def require_public_pins():
