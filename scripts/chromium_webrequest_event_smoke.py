@@ -349,6 +349,7 @@ def _qualify_automatic_original_navigation_retry(
         semantic.AUTOMATIC_RETRY_SCENARIO,
     )
     started_at = time.monotonic()
+    failure: BaseException | None = None
     try:
         fixture.start()
         snapshot = semantic._run_chrome(
@@ -376,8 +377,20 @@ def _qualify_automatic_original_navigation_retry(
             "ready_callbacks": snapshot.ready_requests,
             "elapsed_ms": int((time.monotonic() - started_at) * 1000),
         }
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
-        fixture.close()
+        try:
+            fixture.close()
+        except Exception as exc:
+            if isinstance(failure, semantic._ChromeLivenessError):
+                # Keep cleanup failure primary, retaining only the closed inner
+                # observation; its original exception remains the cause.
+                raise semantic._qualification_error(
+                    str(exc), failure, append_liveness=True,
+                ) from exc
+            raise
 
 
 def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
@@ -495,11 +508,13 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             cleanup_errors.append(f"private fixture cleanup: {exc}")
 
     if cleanup_errors:
-        raise semantic.QualificationError("; ".join(cleanup_errors)) from failure
+        raise semantic._qualification_error(
+            "; ".join(cleanup_errors), failure, append_liveness=True,
+        ) from failure
     if failure is not None:
-        raise semantic.QualificationError(
+        raise semantic._qualification_error(
             f"{failure}; sanitized webRequest trace: "
-            f"{json.dumps(trace, separators=(',', ':'), sort_keys=True)}"
+            f"{json.dumps(trace, separators=(',', ':'), sort_keys=True)}", failure,
         ) from failure
     result["automatic_original_navigation_retry"] = (
         _qualify_automatic_original_navigation_retry(

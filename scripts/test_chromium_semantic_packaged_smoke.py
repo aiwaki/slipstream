@@ -10,7 +10,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -2070,6 +2070,190 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 f"{smoke.CHROME_JOB_PREFIX}.{os.getpid()}",
             )
 
+    def _exercise_liveness_observation(self, *, launch_pid=4242, browser_state="exact", ready=False, cleanup_error=False,
+                                       launch_query=None):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            executable = _fake_chrome_for_testing(root)
+            profile = root / "PRIVATE_PROFILE_SENTINEL"
+            profile.mkdir()
+            launch = smoke.ChromeLaunch("gui/501/dev.slipstream.chromium-semantic.4242", 4242, 4242)
+            browser = smoke.ChromeProcess(4343, 4343,
+                f"{executable} --user-data-dir={profile} --private=PRIVATE_ARGV_SENTINEL https://PRIVATE_URL_SENTINEL.invalid/")
+            processes = {
+                "exact": (browser,),
+                "pid_absent": (),
+                "pgid": (smoke.ChromeProcess(browser.pid, 4444, browser.command),),
+                "command": (smoke.ChromeProcess(browser.pid, browser.process_group, browser.command + " changed"),),
+            }[browser_state]
+            initial = smoke.FixtureSnapshot(2, 1, 0, 1, int(ready), 0, "PRIVATE_URL_SENTINEL")
+            fixture = mock.Mock(port=18443, host=smoke.INCOMPLETE_FIXTURE_HOST,
+                                scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+                                snapshot=mock.Mock(return_value=initial))
+            clock = [100.0]
+            for owner, name, value in (
+                (smoke.lifecycle, "_user_environment", ({"HOME": str(root)}, root)),
+                (smoke, "_launchservices_app_bundle", executable.parents[2]),
+                (smoke.tempfile, "mkdtemp", str(profile)),
+                (smoke.os, "chown", None),
+                (smoke, "_write_owner_private_file", None),
+                (smoke, "_install_profile_native_host", None),
+                (smoke, "_install_chrome_for_testing_native_host", smoke.NativeHostRegistration(root / "native.json", ())),
+                (smoke, "_remove_chrome_for_testing_native_host", None),
+                (smoke, "_remove_owned_profile", None),
+                (smoke, "_read_owner_private_tail", b""),
+                (smoke, "_wait_for_extension_worker", 49152),
+            ):
+                stack.enter_context(mock.patch.object(owner, name, return_value=value))
+            stack.enter_context(mock.patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]))
+            stack.enter_context(mock.patch.object(smoke.time, "sleep", side_effect=AssertionError("unexpected wait")))
+            bootstrap = stack.enter_context(mock.patch.object(smoke, "_bootstrap_chrome_launch_agent", return_value=launch))
+            admitted = stack.enter_context(mock.patch.object(smoke, "_wait_for_owned_chrome_process", return_value=browser))
+            if launch_query is None:
+                launched = stack.enter_context(mock.patch.object(smoke, "_launch_agent_pid", return_value=launch_pid))
+            else:
+                # Exercise the actual snapshot -> pid -> liveness path from one
+                # launchctl result; never query the system.
+                launched = stack.enter_context(mock.patch.object(smoke, "_run", return_value=launch_query))
+            enumerated = stack.enter_context(mock.patch.object(smoke, "_owned_chrome_processes", return_value=processes))
+            navigation = stack.enter_context(mock.patch.object(smoke, "_open_fixture_with_devtools",
+                                                              side_effect=lambda *_a: clock.__setitem__(0, 102.5)))
+            def cleanup(*_args, **_kwargs):
+                # Future observations differ: first evidence must not be re-read.
+                clock[0] = 999.0
+                launched.return_value = (4242 if launch_query is None else
+                    subprocess.CompletedProcess((), 0, "state = running\npid = 4242\n", ""))
+                enumerated.return_value = (browser,)
+                fixture.snapshot.return_value = smoke.FixtureSnapshot(99, 99, 99, 99, 1)
+                if cleanup_error:
+                    raise smoke.QualificationError("cleanup refusal")
+            stop = stack.enter_context(mock.patch.object(smoke, "_stop_chrome_launch_agent", side_effect=cleanup))
+            error, result = None, None
+            try:
+                result = smoke._run_chrome(501, 20, Path("/fixture/extension"), fixture, executable,
+                                          root / "native.json", root / "native-stub", headless=True)
+            except smoke.QualificationError as exc:
+                error = exc
+            bootstrap.assert_called_once()
+            admitted.assert_called_once()
+            navigation.assert_called_once_with(49152, fixture)
+            stop.assert_called_once()
+            fixture.snapshot.assert_called_once()
+            self.assertEqual(launched.call_count, 0 if ready else 1)
+            if launch_query is not None and not ready:
+                launched.assert_called_once_with(("/bin/launchctl", "print", launch.target), check=False)
+            self.assertEqual(enumerated.call_count, 0 if ready or launch_pid != launch.pid else 1)
+            return result, error, initial
+
+    def _liveness_detail(self, error):
+        self.assertIsInstance(error, smoke.QualificationError)
+        self.assertIn("owned Chrome exited before semantic completion", str(error))
+        self.assertIn("; liveness=", str(error), "first failed liveness predicate was discarded")
+        detail = json.loads(str(error).split("; liveness=", 1)[1])
+        self.assertEqual(detail["elapsed_ms"], 2500)
+        self.assertEqual(detail["fixture"], {
+            "root_visits": 2, "css_requests": 1, "script_requests": 0,
+            "image_requests": 1, "ready_requests": 0, "pending_navigation_signals": 0,
+        })
+        for private in ("PRIVATE_PROFILE_SENTINEL", "PRIVATE_ARGV_SENTINEL", "PRIVATE_URL_SENTINEL", "https://"):
+            self.assertNotIn(private, str(error))
+        return detail
+
+    def test_liveness_failure_retains_actual_launcher_pid_before_cleanup(self):
+        for observed_pid in (None, 4243):
+            with self.subTest(observed_pid=observed_pid):
+                result, error, _ = self._exercise_liveness_observation(launch_pid=observed_pid)
+                self.assertIsNone(result)
+                detail = self._liveness_detail(error)
+                self.assertEqual(detail["predicate"], "launch_pid_mismatch")
+                self.assertEqual(detail["expected_launch_pid"], 4242)
+                self.assertEqual(detail["observed_launch_pid"], observed_pid)
+                self.assertEqual(detail["browser"], {"state": "not_checked"})
+
+    def test_liveness_failure_retains_tuple_flags_from_one_process_query(self):
+        for state, flags in (("pid_absent", (False, False, False)),
+                             ("pgid", (True, False, True)), ("command", (True, True, False))):
+            with self.subTest(state=state):
+                result, error, _ = self._exercise_liveness_observation(browser_state=state)
+                self.assertIsNone(result)
+                detail = self._liveness_detail(error)
+                self.assertEqual(detail["predicate"], "browser_identity_mismatch")
+                self.assertEqual(detail["observed_launch_pid"], detail["expected_launch_pid"])
+                self.assertEqual(detail["browser"], {
+                    "state": "pid_not_in_owned_snapshot" if state == "pid_absent" else "tuple_mismatch",
+                    "pid_match": flags[0], "pgid_match": flags[1], "command_match": flags[2], "exact_match": False,
+                })
+
+    def test_liveness_failure_retains_the_same_launcher_query_result(self):
+        cases = (
+            (113, "state = running\npid = 9999\n", None,
+             {"query_returncode": 113, "state": "query_failed", "pid_present": None}),
+            (0, "state = waiting\n", None,
+             {"query_returncode": 0, "state": "waiting", "pid_present": False}),
+            (0, "state = running\npid = 4243\n", 4243,
+             {"query_returncode": 0, "state": "running", "pid_present": True}),
+        )
+        for code, output, pid, expected in cases:
+            with self.subTest(code=code, pid=pid):
+                query = subprocess.CompletedProcess((), code, output + "raw = PRIVATE_STDOUT_SENTINEL\n",
+                                                    "PRIVATE_STDERR_SENTINEL")
+                result, error, _ = self._exercise_liveness_observation(launch_pid=pid, launch_query=query)
+                self.assertIsNone(result)
+                detail = self._liveness_detail(error)
+                self.assertIn("launcher", detail, "launchctl failure and absent PID were conflated")
+                self.assertEqual(detail["launcher"], expected)
+                self.assertEqual(detail["observed_launch_pid"], pid)
+                self.assertEqual(detail["browser"], {"state": "not_checked"})
+                for private in ("PRIVATE_STDOUT_SENTINEL", "PRIVATE_STDERR_SENTINEL", "gui/501/"):
+                    self.assertNotIn(private, str(error))
+
+    def test_launcher_query_observation_preserves_first_fields_and_closed_state(self):
+        target = "gui/501/dev.slipstream.chromium-semantic.PRIVATE_TARGET"
+        for state in ("running", "xpcproxy", "waiting", "exited", "not running", None, "PRIVATE_STATE_SENTINEL"):
+            for pid in (0, 4242):
+                with self.subTest(state=state, pid=pid):
+                    observation = {}
+                    first_state = "" if state is None else f"state = {state}\n"
+                    output = first_state + f"pid = {pid}\ncoalition = {{\npid = 9999\n}}\n"
+                    query = subprocess.CompletedProcess((), 0, output, "PRIVATE_STDERR_SENTINEL")
+                    with mock.patch.object(smoke, "_run", return_value=query) as run:
+                        self.assertEqual(smoke._launch_agent_snapshot(target, observation=observation),
+                                         (pid or None, state))
+                    run.assert_called_once_with(("/bin/launchctl", "print", target), check=False)
+                    self.assertEqual(observation, {"query_returncode": 0,
+                        "state": "missing" if state is None else "other" if state == "PRIVATE_STATE_SENTINEL" else state,
+                        "pid_present": True})
+                    self.assertNotIn("PRIVATE", json.dumps(observation))
+
+    def test_launcher_query_observation_keeps_error_policy_and_code_bounded(self):
+        target = "gui/501/dev.slipstream.chromium-semantic.PRIVATE_TARGET"
+        for code in (-255, -15, 1, 255, -256, 256, 2**100):
+            with self.subTest(code=code):
+                observation = {}
+                query = subprocess.CompletedProcess((), code, "pid = PRIVATE_INVALID_PID\n", "PRIVATE_STDERR_SENTINEL")
+                with mock.patch.object(smoke, "_run", return_value=query) as run:
+                    self.assertIsNone(smoke._launch_agent_pid(target, observation=observation))
+                run.assert_called_once_with(("/bin/launchctl", "print", target), check=False)
+                self.assertEqual(observation, {
+                    "query_returncode": code if -255 <= code <= 255 else None,
+                    "state": "query_failed", "pid_present": None})
+                self.assertNotIn("PRIVATE", json.dumps(observation))
+
+    def test_liveness_ready_success_keeps_existing_short_circuit(self):
+        result, error, initial = self._exercise_liveness_observation(ready=True, launch_pid=None, browser_state="pid_absent")
+        self.assertIsNone(error)
+        self.assertIs(result, initial)
+
+    def test_liveness_first_failure_remains_cause_of_cleanup_failure(self):
+        result, error, _ = self._exercise_liveness_observation(launch_pid=None, cleanup_error=True)
+        self.assertIsNone(result)
+        self.assertIn("Chrome LaunchAgent cleanup: cleanup refusal", str(error))
+        detail = self._liveness_detail(error.__cause__)
+        self.assertEqual(detail["predicate"], "launch_pid_mismatch")
+        self.assertIsNone(detail["observed_launch_pid"])
+        # The CLI renders only str(error), not the chained exception.
+        self.assertEqual(json.loads(str(error).split("; liveness=", 1)[1]), detail)
+
     def test_run_chrome_uses_quiet_window_after_admission_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2965,6 +3149,91 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     "profile survived cleanup",
                 ):
                     smoke._remove_owned_profile(profile)
+
+    def _exercise_semantic_outer_cli(self, failure, *, cleanup_error=True):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            target = mock.Mock(tray_executable=root / "tray", install_command=("fixture-install",),
+                               uninstall_command=("fixture-uninstall",), required_installed_paths=(root / "installed",))
+            system, runner, automatic = mock.Mock(), mock.Mock(), mock.Mock()
+            fixtures = [mock.Mock(host=host) for host in (smoke.FIXTURE_HOST, smoke.INCOMPLETE_FIXTURE_HOST,
+                                                        smoke.PENDING_NAVIGATION_FIXTURE_HOST)]
+            for owner, name, value in (
+                (smoke, "_require_disposable_ci", (501, 20)),
+                (smoke, "_validate_chrome_for_testing", root / "chrome"),
+                (smoke, "_validate_extension", root / "extension"),
+                (smoke.lifecycle, "packaged_app_target", target),
+                (smoke.pwd, "getpwuid", mock.Mock(pw_dir=str(root))),
+                (smoke.pf, "PfctlRunner", runner),
+                (smoke.lifecycle, "_preflight", ({}, 501, 20)),
+                (smoke, "_wait_for_native_host", root / "native.json"),
+                (smoke.lifecycle, "SystemRunner", system),
+                (smoke.composed, "ComposedHttpsFixture", automatic),
+                (smoke, "_prepare_automatic_navigation_runtime", None),
+                (smoke.lifecycle, "_assert_anchor_active", None),
+                (smoke, "_wait_for_semantic_socket", None),
+                (smoke, "_wait_for_owned_geph_backend", None),
+                (smoke.lifecycle, "_run_composed_navigation", {"result": "pass"}),
+                (smoke, "_remove_exact_native_host", None),
+                (smoke.lifecycle, "_assert_clean_install_state", None),
+                (smoke.pf, "_pf_snapshot", {}),
+                (smoke.pf, "_assert_same_snapshot", None),
+            ):
+                stack.enter_context(mock.patch.object(owner, name, return_value=value))
+            stack.enter_context(mock.patch.object(smoke, "AUTO_GEPH_STATE", root / "absent-geph"))
+            stack.enter_context(mock.patch.object(smoke, "SEMANTIC_SOCKET", root / "absent-socket"))
+            stack.enter_context(mock.patch.object(smoke, "SemanticHttpsFixture", side_effect=fixtures))
+            chrome = stack.enter_context(mock.patch.object(smoke, "_run_chrome", side_effect=failure))
+            cleanup = stack.enter_context(mock.patch.object(smoke, "_assert_daemon_absent_and_disabled",
+                side_effect=smoke.QualificationError("outer cleanup refusal") if cleanup_error else None))
+            output, errors = io.StringIO(), io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                status = smoke.main(["--app-bundle", str(root), "--chrome-executable", str(root / "chrome")])
+            self.assertEqual(status, 1)
+            self.assertEqual(output.getvalue(), "")
+            chrome.assert_called_once()
+            cleanup.assert_called_once_with()
+            automatic.close.assert_called_once_with()
+            for fixture in fixtures:
+                fixture.close.assert_called_once_with()
+            self.assertEqual(system.run.call_args_list,
+                             [mock.call(target.install_command), mock.call(target.uninstall_command)])
+            return errors.getvalue()
+
+    def test_semantic_cli_preserves_liveness_through_outer_cleanup(self):
+        for inner_cleanup in (False, True):
+            with self.subTest(inner_cleanup=inner_cleanup):
+                query = subprocess.CompletedProcess((), 113, "PRIVATE_QUERY_SENTINEL", "PRIVATE_STDERR_SENTINEL")
+                _, failure, _ = self._exercise_liveness_observation(launch_pid=None, launch_query=query,
+                                                                   cleanup_error=inner_cleanup)
+                expected = self._liveness_detail(failure.__cause__ if inner_cleanup else failure)
+                # Raw primary details must not be dumped by the outer cleanup wrapper.
+                failure.args = (str(failure) + " PRIVATE_PRIMARY_SENTINEL https://private.invalid/",)
+                output = self._exercise_semantic_outer_cli(failure)
+                self.assertIn("outer cleanup refusal", output)
+                self.assertIn("; liveness=", output, "outer semantic cleanup discarded liveness evidence")
+                self.assertEqual(json.loads(output.split("; liveness=", 1)[1]), expected)
+                self.assertEqual(output.count("; liveness="), 1)
+                self.assertNotIn("PRIVATE", output)
+                self.assertNotIn("https://", output)
+
+    def test_semantic_cli_liveness_without_outer_cleanup_is_not_duplicated(self):
+        _, failure, _ = self._exercise_liveness_observation(launch_pid=None)
+        expected = self._liveness_detail(failure)
+        output = self._exercise_semantic_outer_cli(failure, cleanup_error=False)
+        self.assertEqual(json.loads(output.split("; liveness=", 1)[1]), expected)
+        self.assertEqual(output.count("; liveness="), 1)
+
+    def test_semantic_cli_cleanup_does_not_expand_an_untyped_cause(self):
+        _, cause, _ = self._exercise_liveness_observation(launch_pid=None)
+        failure = smoke.QualificationError("PRIVATE_PRIMARY_SENTINEL https://private.invalid/")
+        failure.liveness_json = "PRIVATE_ATTRIBUTE_SENTINEL"
+        failure.__cause__ = cause
+        output = self._exercise_semantic_outer_cli(failure)
+        self.assertIn("outer cleanup refusal", output)
+        self.assertNotIn("; liveness=", output)
+        self.assertNotIn("PRIVATE", output)
+        self.assertNotIn("https://", output)
 
     def test_dry_run_describes_real_composition_without_production_override(self) -> None:
         output = io.StringIO()
