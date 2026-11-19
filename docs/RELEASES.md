@@ -115,6 +115,68 @@ verification SHA911574c8fb793f254bdbbdab5979e806117704d4e239baf71a1d0e80dcd3ca85
 Independent review accepted all three paths. This diagnostic repair preserves
 failure evidence; it does not establish the historical browser failure's cause.
 
+### CI capacity recovery and build-image follow-up
+
+These completed ed4 attempts are historical evidence. The live PR and observer
+belong in CURRENT_STATE.md; no retained receipt admits a different candidate.
+
+**Previous baseline failure:** final CI44530644966/4 completed FAILURE. Build135688745320
+never acquired a runner: runner_id0, steps[], 15:57:41–16:12:44Z. GitHub reports
+"The job was not acquired by Runner of type hosted even after multiple attempts"
+and three macOS ARM64 capacity notices. No checkout/build execution occurred.
+B6=`output/continuation-20261119/preview36-final-capacity-recovery` retains
+watcher receipt b343970110f33ed164a8af61e8e823c4bd0ca8ca0438ba310010db578c141e11
+and failure-build receipt adea3e9cb1235c86b23edf88dc3aead449f3a96696ed2a85f2c7c726bf549f57.
+Root rehashed all42 watcher+7 failure+10 audit closure entries; verification
+e42f3be35517d7f2523fa0633377b5b45336bc9e1b2045570a50034e8bcc5c07.
+Observer exec54928/PID11479 is terminal exit1; do not restart. No candidate
+collection/admission, G/P/R, publication, or further retry has occurred.
+
+**Accepted product3:** CI44530644966/3 SUCCESS; product135675403614 and
+checks135687297927 actually ran after its start. Product runner1000014871,
+15:47:46–15:55:30Z; checks15:55:34–15:55:43Z. Checkout ed4 confirmed by raw log.
+Daemon2360passed+10skipped, tray249passed; all26 product+2 aggregate steps passed.
+B5=`output/continuation-20261119/preview36-product-isolation`:
+`product-isolation-receipt.json` SHA31722a47a68ea12f83355c7ba90864fcb3de09b59ff3da020dab04d4f7a84b91.
+Root independently rehashed20 closure files, checked actual checkout and job
+execution. Observer93205 and collector84306 exited0; do not restart them.
+The actual final4 confirmation SHA880c858731939b06cf7a4f8820ee98cb2ca3b035f5394b3a49a9b7a793973bd3
+was obtained after the single build rerun; product3 alone did not admit candidate2.
+
+**B6 reviewed metadata:** watcher c0d0c6b74a13badf0b2797fd97518432e64a6f1354cd852247e86e28d30cacca;
+collector f2194d4dcbe160837cc3717d3dee6b4b2cab4bce47c5d1402a58fbb0f144916f.
+Preparation de1ffc8e3328ab597583ca026e16112fe55b632582e96c1fa42155e6ac5cd996
+records the earlier PENDING state. Actual binding activation
+SHA61a77e3481fcebd464947d6c947804ec58b17d772774321aac4737b38fe52d68
+copied23 original files and validated real final4/product3, without observer/API.
+8 pure methods/28 negative subcases passed; source/producer assertions unchanged.
+Qualification preparation9419bf01dfc99df42c8005709bceb72ff59946a298cf326fd85f8c7592382057
+is reviewed but still unbound. G87/shared watcher byte-identical; unknown
+manifest/receipt/G/P inputs remain fail-closed. No actual qualification dispatch.
+
+**Reused exact-main audit:** audit44530644987/1 SUCCESS, source/checkout ed4,
+tree0db8. Receipt fc22b4fc2fcb8f21d3cc78a11a57bda0538b43687c8fa961800c4b2935c49aad
+plus10 closure files copied unchanged to B6; copy proof
+3be2bf7318f0bf11a2d5964d7e28fd33d065340f811bd0a81cee467f6c7a5a7e.
+No rescan or account-backed qualification. Prior CI1/2 product refusals were
+confirmed hosted-runner acquisition failures (runner0,steps[]); isolated3 got a
+runner and passed. Preserve B3/B4 failure receipts; no scheduler cause claimed.
+
+**Reusable source evidence:** merged PR484 CI44525945746/1 and audit44525945704/1
+passed, reviews/required checks clear, actual checkout567f03b5 tree equals HEAD.
+Native Stop/Quit7/7,4 completed authorizations,cleanup[]; audit blocking0.
+PR481 cancellation repair and PR482/483 merged. Historical Chromium failure cause
+remains unknown. Detailed history: [RELEASES.md](RELEASES.md#preview-36-ci-evidence-ledger--2026-11-19).
+
+PR485 moves only `packaged-app-build` to macos-26 ARM64 and partitions its
+Cargo target cache by image. Five existing pure build-configuration tests and
+actionlint passed; independent static review found no actionable issues. Exact
+patch and validation are retained under `output/continuation-20261119/macos26-build-image`.
+The initial workflow head504c195de31142caf2835956991818629da99e25 obtained a
+macos-26 runner in CI44566206018/1; this observation alone is not completed
+build or release qualification. The docs-only follow-up compacts the checkpoint
+without changing the reviewed workflow or invalidating its focused source tests.
+
 ## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in
@@ -510,12 +572,23 @@ application and vendored dependency admissions separately from historical report
 verification. Preserve the original scan date and exact source/policy hashes;
 rechecking expiry does not imply a fresh scan of advisory data.
 
-Hosted macOS build, qualification and publication jobs use the explicit
-`macos-15` ARM64 runner label. GitHub's [macOS 14 retirement announcement](https://github.com/actions/runner-images/issues/13518)
-includes scheduled job failures before the November 2, 2026 removal; such a
-cancelled run does not qualify a candidate. The application minimum remains
-configured as macOS 13.0. A successful hosted macOS 15 run establishes the tested
-path on that image, not runtime compatibility with every earlier supported OS.
+The packaged application build uses the explicit `macos-26` ARM64 runner label.
+Its Cargo cache is partitioned by image so compiled target files are not restored
+from macOS 15. Downstream signing, assembly, native qualification and publication
+remain on `macos-15`; they consume and verify the same candidate bytes. This also
+checks the macOS 26 build on macOS 15 before release. The application target stays
+`aarch64-apple-darwin`, and its configured minimum remains macOS 13.0. Passing
+these hosted checks does not establish runtime compatibility with every earlier
+supported OS.
+
+The build image change follows a confirmed hosted-runner acquisition failure in
+[CI44530644966/4](https://github.com/aiwaki/slipstream/actions/runs/44530644966/attempts/4):
+no runner was assigned and no build steps executed. GitHub documents `macos-26`
+as a supported [standard ARM64 image](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+but using another label does not guarantee available capacity. A changed workflow
+requires a new source-bound candidate and the existing release gates; it does not
+renew an earlier candidate's evidence. Retired `macos-14` is not a fallback; see
+GitHub's [retirement announcement](https://github.com/actions/runner-images/issues/13518).
 
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|

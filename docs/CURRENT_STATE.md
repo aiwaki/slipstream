@@ -3,60 +3,36 @@
 ## Current continuation — 2026-11-19, preview .36
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch: `codex/chromium-liveness-evidence`; PR484 follow-up is based on head
-`c27985beb472da7310f8d0a45f9d296ac10240a4`, tree
-`230e91d32fcc71105ed13ad6fc035ff26c428ecf`; base/main
-`eaecd536ff827a146eff840eea9aac9f18ee2461`.
+Branch `codex/ci-build-macos26`; base/main `ed4ee9cdfa82713e30399d4a78ec76a388d63ec3`.
+[PR485](https://github.com/aiwaki/slipstream/pull/485) changes only the packaged
+build image to macos-26 ARM64 and separates its Cargo target cache. Existing
+macos-15 qualification, target/minimum OS and release gates remain unchanged.
 
-**Current PR evidence:** initial-head CI44523419189/1 and audit44523418905/1
-passed, including Chromium, product/build, browser and native lifecycle. The
-same observer session43820 exited0. Its terminal receipt under
-`output/continuation-20261119/chromium-liveness-evidence/pr` has SHA
-296563e74f4760a748ec00cd8ba59dd6ff77ebec1a0be13234d5945edf9dbe1c.
-Do not duplicate it; initial-head evidence does not qualify the review follow-up.
+**Active gate:** initial PR head504c195de31142caf2835956991818629da99e25 has
+CI44566206018/1 executing; its build acquired a macos-26 runner. Audit44566206097/1
+is SUCCESS, with report verification pending. Sole observer
+`/root/product_isolation_observer`: exec88783/PID18886, cadence60s. Evidence and
+handle: `output/continuation-20261119/macos26-build-image/pr485`.
+A docs-only follow-up addresses the checkpoint-size review; reconcile the actual
+PR head and CI inventory after it is pushed. Do not restart the existing observer
+or mistake the initial-head results for new-head evidence.
 
-**Next action:** push the reviewed follow-up, observe only its actual new CI/audit,
-then recheck review threads before merging. The follow-up now carries only the
-closed typed liveness payload through both outer cleanup handlers and the retry
-scenario's finally-close; six causal failing subcases now pass in nine focused
-tests. No raw causes, query retries, rule changes or local native execution.
-Evidence: `chromium-liveness-evidence/outer-cleanup-followup/verification.json`,
-SHA911574c8fb793f254bdbbdab5979e806117704d4e239baf71a1d0e80dcd3ca85.
-The compact checkpoint and detailed ledger in
-[RELEASES.md](RELEASES.md#preview-36-ci-evidence-ledger--2026-11-19) address both
-review threads. Resolve them only after the pushed head is verified.
-After the follow-up, inspect exact-head CI, report closure and review threads,
-then CAS-merge and bind the actual new main CI/audit. No admission or publication yet.
+**Next action:** finish that docs follow-up, then observe the exact final PR CI
+and review threads. Verify actual macos-26 build and downstream macos-15 execution
+before merge. Diagnose failures rather than retrying automatically. After accepted
+PR, merge and qualify a fresh main candidate; B6 helpers still bind failed ed4/4
+and cannot be reused unchanged. Preserve accepted earlier tests and audit.
 
-The current patch records the original launcher/query/browser identity conditions
-before cleanup without changing readiness, ownership, timeout or cleanup rules.
-92 safe affected unit tests passed before its final query-observation extension;
-7 focused tests passed on that extension. Nine real subprocess/server tests were
-left for hosted CI. The latest Chromium scenario passed; the earlier liveness
-failure's actual cause remains unknown. Evidence:
-`output/continuation-20261119/chromium-liveness-evidence`.
+**Open gates:** final PR/main candidate, native G, packaged P, readiness R,
+same-byte publication, public update/rollback, installed Mac/browser validation.
+Published .35 remains immutable. Its public Cancel path runs OLD35 and cannot
+prove .36 as the initiating app. Historical receipt details and limitations are
+in [the release ledger](RELEASES.md#ci-capacity-recovery-and-build-image-follow-up).
 
-**Completed/reuse:** PR481 cancellation repair, PR482 .36 preparation and PR483
-safe native-auth diagnostics are merged. PR483 exact CI/audit and native Stop/Quit
-passed. Do not repeat their unchanged focused checks. Main44502130642 failed at
-fixture authentication; main44519893904 failed at Chromium liveness and remaining
-work was cancelled. Both are historical failed candidates, never accepted/retried.
-Their evidence roots are `preview36-release` and `preview36-fixture-release` under
-`output/continuation-20261119`; neither has an accepted candidate/G/P/R result.
-
-**Release gates still open:** accepted exact-main candidate/audit, native G and
-packaged P for .35→.36, readiness R, publication, ordinary public commit/rollback,
-and installed Mac/browser validation. Prepared helpers under `preview36-fixture-release`
-are reusable only after checking source contracts and binding fresh real IDs;
-its old dispatchers/receipts must not be used for a new source. Published .35 remains
-unchanged: source5a3e64b534affc865826fbd20ac67f1af328629e, CI42874103966/2,
-manifest65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d.
-Reuse accepted Geph r5 and reviewed Chromium158 where their inputs are unchanged.
-Public .35→.36 Cancel runs OLD35 and cannot prove .36 as the initiating app.
-
-**Mac boundary:** no local native tests, app payload downloads/builds, application,
-service, network, account or learning changes. A fresh user-approved window is
-required for installed validation. Keep external Geph and settings intact.
+**Mac boundary:** no local native tests/builds, app payload downloads, or changes
+to apps, services, network, accounts, external Geph or learning. Installed
+validation requires a fresh user-approved window. No paid service/repository
+transfer or further ed4 rerun has been performed.
 
 ## Historical checkpoint — 2026-11-10 (superseded)
 
