@@ -1,153 +1,67 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, preview .36 repaired main candidate
+## Current continuation — 2026-11-19, preview .36
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch: `codex/chromium-liveness-evidence`, based on merged main
-`eaecd536ff827a146eff840eea9aac9f18ee2461`, tree
-`d580732c1c5052d5ffff7184fcd23a10520ff9c8`. PR483 was CAS-merged from
-`82d41492681aa106dda1e764e88010c3a5f1de4d` after whole CI44515828468/1
-and audit44515828463/1 passed, all3 required checks passed and review threads
-were resolved. Root rehashed the34-file receipt and8-file native evidence closure.
-2360 daemon tests,249 tray tests and7 native Stop/Quit scenarios passed;4 native
-authorizations completed, credentials verified and cleanup[]. Report SHA
-`c8ba1246c547717211a0b6f1ba7afc69f717755cebc0066a27a09b76f4febd3b`.
-Test checkout1467772 and merged main have the same tree. PR observer27823 exited0.
-Receipt: `fixture-auth-diagnostics/pr483-followup/receipt.json`, SHA
-`5af293eb121a3504e4f584c912978daef5d515bae66701dcb7fa34b769d80499`.
+Branch: `codex/chromium-liveness-evidence`; PR484 follow-up is based on head
+`c27985beb472da7310f8d0a45f9d296ac10240a4`, tree
+`230e91d32fcc71105ed13ad6fc035ff26c428ecf`; base/main
+`eaecd536ff827a146eff840eea9aac9f18ee2461`.
 
-Main CI44519893904/1 has a confirmed failure in
-`chromium-webrequest-contract` job135545664720. Audit44519894032/1 passed.
-The browser contract stopped with `owned Chrome exited before semantic completion`
-in the first incomplete-response scenario. This message conflates launcher PID
-mismatch and failure to find the complete stored ChromeProcess tuple; the latter
-includes mutable argv. No failed predicate/snapshot was retained. Initial browser
-ownership and DevTools readiness passed. GPU exit15 was collected after the test's
-own cleanup, so it is not established as the cause. This uses isolated CfT151,
-not the packaged Chromium158 or the installed app/Geph. Root requested cancellation of remaining queued work after preserving this failure;
-the observer confirmed terminal cancellation. No retry is authorized by
-this evidence. Prepare bounded pre-cleanup diagnostics; preserve all admission
-and single-launch rules. The actual cause remains unknown.
-Fresh evidence root: `output/continuation-20261119/preview36-fixture-release`.
-Failure receipt: `main-ci/failure-chromium/failure-receipt.json`, SHA
-`26a2cc9de0c5020a857ba304304c8004e5ff7888023d49ac63ecc04b01f9bd23`.
-Fresh small audit receipt SHA
-`21564fa853fed93bc9768e80f724dfa5edd3ab18e84573dccde9d5fa16ca1f2f`.
-Main observer session88786 exited1 after terminal cancellation. Its original
-watcher receipt stays FAILURE_OR_INCOMPLETE; no collector ran. The terminal
-disposition distinguishes primary Chromium failure from root-requested cancellation
-and consequent aggregates: main-ci/terminal-disposition.json SHA
-`e6ee3dbb8cfd0141053dceeb6b92540829c57e5b56798bdf5c3cfc9d87d6fd60`.
-Watcher SHA
-`3693682a500a8a95383fe766fdfc3130d0949fb89ab6f697803da82108d9cb69`.
-The independently reviewed liveness diagnostic patch is now applied. It captures
-the original launcher-PID or browser tuple predicate, elapsed time and6 fixture
-counters before cleanup; no additional process query or raw argv/profile/URL.
-Short-circuit, ready/ownership acceptance, single launch and cleanup are unchanged.
-Cleanup failures retain that first observation in both cause and CLI-visible text.
-Causal controls:6 failure subcases on baseline,5 passing methods on candidate;
-no native/network/process calls,45MB RSS. Final helper SHA
-`901e9cf90279236f59213462a753b798a083d645d7d8637fc79c071f1c3ed41f`.
-Evidence: `output/continuation-20261119/chromium-liveness-evidence`, patch SHA
-`9493d37cfc4a62add618421654a8a2a42f6489fbc0b8e099a0485dc3d09f476c`.
-An independently reviewed extension retains returncode, closed state and field
-presence from the SAME launchctl query, separating query failure from missing PID.
-Its3 causal RED cases and7 focused tests passed with no forbidden calls; patch SHA
-`675535afe7a05f21116c404284844c7035cd0d0cda010a482d6db4e88b01c487`.
-Before that extension,92 safe affected unit tests passed;9 actual server/subprocess
-cases were explicitly deferred to hosted CI. No whole-suite claim. Historical pins
-are unchanged. Next: PR CI with the new diagnostics; actual old cause is unknown.
-Its8 release helpers were copied byte-identically;22 contract paths are unchanged.
-No candidate collector/admission, G/P/R dispatch or publication. Prepared G/R
-bindings are inactive; G has no accepted audit pin. The former main C36
-`dd8b8373a4357e550b3133294f5bbdc36173ad53` failure below remains historical.
-PR482 merged after exact-head CI 44498697785/1 and audit 44498697808/1 passed;
-all three required contexts were green and review threads resolved. Its tested
-checkout `2ac7fb06` and head `7eeec2d1` have the same tree as C36. All 249 tray
-tests, packaged browser/lifecycle checks and 145+3 focused preparation checks passed.
-Evidence: `output/continuation-20261119/preview36-preparation/pr482`.
-`merge-verification.json` SHA `7780ba6dd3cf252d7d823dbd56a8b3d3cf77eab040bcc2f88bde7091ef30700b`.
+**Current PR evidence:** initial-head CI44523419189/1 and audit44523418905/1
+passed, including Chromium, product/build, browser and native lifecycle. The
+same observer session43820 exited0. Its terminal receipt under
+`output/continuation-20261119/chromium-liveness-evidence/pr` has SHA
+296563e74f4760a748ec00cd8ba59dd6ff77ebec1a0be13234d5945edf9dbe1c.
+Do not duplicate it; initial-head evidence does not qualify the review follow-up.
 
-Main CI **44502130642/1** completed **failure** for exact C36. Its primary failure
-is lifecycle-heavy job135490907079, native Stop-and-Quit step: temporary CI admin
-`dscl -authonly` returned code10 at fixture stage `authenticate`; cleanup was
-confirmed. Account creation/membership/inventory completed, but fixture yield,
-product installation and tray launch were not reached. The underlying credential
-rejection remains unknown because private command output was not retained. This
-does not establish a product defect or a transient infrastructure fault.
-The lifecycle aggregate failure is consequential; all other required leaves passed.
-Dependency audit **44502130820/1** passed; its small report/SBOM/upload proof is in
-`preview36-release/main-ci/audit-report` (0 blocking findings, 0 exceptions).
+**Next action:** push the reviewed follow-up, observe only its actual new CI/audit,
+then recheck review threads before merging. The follow-up now carries only the
+closed typed liveness payload through both outer cleanup handlers and the retry
+scenario's finally-close; six causal failing subcases now pass in nine focused
+tests. No raw causes, query retries, rule changes or local native execution.
+Evidence: `chromium-liveness-evidence/outer-cleanup-followup/verification.json`,
+SHA911574c8fb793f254bdbbdab5979e806117704d4e239baf71a1d0e80dcd3ca85.
+The compact checkpoint and detailed ledger in
+[RELEASES.md](RELEASES.md#preview-36-ci-evidence-ledger--2026-11-19) address both
+review threads. Resolve them only after the pushed head is verified.
+After the follow-up, inspect exact-head CI, report closure and review threads,
+then CAS-merge and bind the actual new main CI/audit. No admission or publication yet.
 
-Watcher session69641 stopped earlier with a separate GitHub API read error;
-PID49662 is now absent. Its original handle/error are retained, not retired or
-overwritten. No observer restart, CI rerun, candidate collector or G/P/R dispatch.
-Terminal evidence: `preview36-release/main-ci/terminal-failure/failure-receipt.json`
-SHA `2d89ee998da1142e4ad65b2e24622b52628c462ab768d5d710d975e1bcaa11c0`.
-The narrow diagnostic repair now retains only a closed classification of completed
-create/authenticate command output. It preserves argv, timeouts, one authentication
-attempt, return-code acceptance, cleanup and control exceptions. No raw output,
-credential, username or hash of private output is retained. Primary/cleanup plus
-creation observations fit the existing public error cap. Cause of the historical
-native failure remains unknown; there is no password-generator change or retry.
-Two causal regression cases failed before the patch; all29 focused tests pass.
-Independent review accepted patch SHA
-`578d18b919c73a10f38e99e35efa8c49c1516a3d816650b11f274dcdec07003f`;
-it is applied with helper SHA
-`9b1dc2854f419875a941f3a5a3985527161dc120cd823d0d9d1b62102a14643b`.
-Evidence: `output/continuation-20261119/fixture-auth-diagnostics`.
-Applied-source checks also passed:44 Stop/Quit tests and18 subtests; the identical
-29 diagnostic tests were reused. PR483 initial CI44512409701/1 completed failure:
-2358 daemon tests passed,10 skipped, one old public35 positive fixture failed
-because it assumed the current helper still matched the frozen historical pin.
-Its test-only correction isolates the positive fixture and separately exercises
-actual prepare_main rejection against the unchanged production pin before public
-download/authentication. It also addresses the review's missing classifier-call
-assertion.16 affected tests plus2 subtests passed;10 inapplicable cases still skip.
-The unchanged native helper passed actual hosted Stop/Quit: all7 cases,4 confirmed
-completed authorization submissions, verified temporary credentials,cleanup[].
-Report SHA `938b3f65b03f4d08c288733756682074f4044e33b73c22e962d8b27bee67f38a`;
-artifact14525965468. Test checkout63af484 has the same tree as diagnostic headed98.
-Lifecycle/composed smoke and browser/build passed; audit44512409642/1 passed.
-The earlier authentication failure did not recur; its cause is still unproven.
-Observer74452 exited0 after whole terminal state. Evidence is under
-`fixture-auth-diagnostics/pr483`; do not restart it or rerun that failed head.
-The independently reviewed test-only follow-up is applied and pushed; runtime
-helper9b1 and production public35 pin7bee are unchanged. Sourcery's classifier
-call-assertion thread was resolved after the fix. Exact-head CI44515828468/1 and audit44515828463/1 subsequently passed;
-PR483 was merged as recorded above. No old failed run was retried. Fresh .36
-main candidate bindings are required; the old C36 dispatchers must not be used.
-An additional read-only review found the native classifier sufficient to observe
-the known exit10 boundary, while generic authentication failure may still not
-identify its root cause. Other create-message patterns and a leading-dash password
-hypothesis are unconfirmed; no speculative generator/parser expansion is pending.
-Candidate assembly/signing/browser/notification jobs passed, but the whole failed
-run cannot admit G/P/R or publication. No .36 candidate acceptance is claimed.
+The current patch records the original launcher/query/browser identity conditions
+before cleanup without changing readiness, ownership, timeout or cleanup rules.
+92 safe affected unit tests passed before its final query-observation extension;
+7 focused tests passed on that extension. Nine real subprocess/server tests were
+left for hosted CI. The latest Chromium scenario passed; the earlier liveness
+failure's actual cause remains unknown. Evidence:
+`output/continuation-20261119/chromium-liveness-evidence`.
 
-The Cancel repair is already merged by PR481 (`b75d8b25`, CI 44494033363/1,
-audit 44494033574/1). Confirmed native Cancel now retains the offer after complete
-cleanup; later Install still verifies its signed inputs. Published .34/.35 lack it.
-Public .34 → .35 attempt 44490827068/1 failed after successful native Cancel at
-subsequent discovery HTTP 403. Its report is authenticated; no root commit exists.
-See [RELEASES.md](RELEASES.md#public-35-follow-up--2026-11-11-local). Do not rerun it.
-PR482 intentionally retires this old manual workflow on new main: its source
-binding refuses before payload download. This limitation was acknowledged in
-review; no automatic/new-pair/product consumer relies on it. Preserve its history.
+**Completed/reuse:** PR481 cancellation repair, PR482 .36 preparation and PR483
+safe native-auth diagnostics are merged. PR483 exact CI/audit and native Stop/Quit
+passed. Do not repeat their unchanged focused checks. Main44502130642 failed at
+fixture authentication; main44519893904 failed at Chromium liveness and remaining
+work was cancelled. Both are historical failed candidates, never accepted/retried.
+Their evidence roots are `preview36-release` and `preview36-fixture-release` under
+`output/continuation-20261119`; neither has an accepted candidate/G/P/R result.
 
-After whole main CI: fresh native G and packaged P for .35 → .36, plus exact-source
-readiness R, are required before publication. Reuse unchanged Geph r5 and reviewed
-Chromium158; keep published assets intact. OLD35 remains CI 42874103966/2,
-source `5a3e64b534affc865826fbd20ac67f1af328629e`, manifest
-`65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d`.
-The public pair delivers the fix but pre-install Cancel executes OLD .35; it does
-not prove .36 as initiator. Both ordinary public commit/rollback gates remain open.
+**Release gates still open:** accepted exact-main candidate/audit, native G and
+packaged P for .35→.36, readiness R, publication, ordinary public commit/rollback,
+and installed Mac/browser validation. Prepared helpers under `preview36-fixture-release`
+are reusable only after checking source contracts and binding fresh real IDs;
+its old dispatchers/receipts must not be used for a new source. Published .35 remains
+unchanged: source5a3e64b534affc865826fbd20ac67f1af328629e, CI42874103966/2,
+manifest65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d.
+Reuse accepted Geph r5 and reviewed Chromium158 where their inputs are unchanged.
+Public .35→.36 Cancel runs OLD35 and cannot prove .36 as the initiating app.
 
-Reviewed, unexecuted C36 main/G/P/R small-report helpers and pinned hashes are under
-`output/continuation-20261119/preview36-release`; full input map is
-`preview36-preparation/next-steps.md`. Use actual IDs only. G adds binding checks
-and expects 87 checks; P uses that exact verifier. No workstation app/service/
-network/account/learning changes or native tests. A fresh user-approved window
-is required for Mac installation. This local checkpoint edit is not a new candidate.
+**Mac boundary:** no local native tests, app payload downloads/builds, application,
+service, network, account or learning changes. A fresh user-approved window is
+required for installed validation. Keep external Geph and settings intact.
+
+## Historical checkpoint — 2026-11-10 (superseded)
+
+The following evidence remains historical; its next-action labels are not the
+current work plan. Use the compact continuation above and reconcile live state.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.

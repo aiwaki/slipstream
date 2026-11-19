@@ -10,7 +10,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
-from contextlib import ExitStack, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -3149,6 +3149,91 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     "profile survived cleanup",
                 ):
                     smoke._remove_owned_profile(profile)
+
+    def _exercise_semantic_outer_cli(self, failure, *, cleanup_error=True):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            target = mock.Mock(tray_executable=root / "tray", install_command=("fixture-install",),
+                               uninstall_command=("fixture-uninstall",), required_installed_paths=(root / "installed",))
+            system, runner, automatic = mock.Mock(), mock.Mock(), mock.Mock()
+            fixtures = [mock.Mock(host=host) for host in (smoke.FIXTURE_HOST, smoke.INCOMPLETE_FIXTURE_HOST,
+                                                        smoke.PENDING_NAVIGATION_FIXTURE_HOST)]
+            for owner, name, value in (
+                (smoke, "_require_disposable_ci", (501, 20)),
+                (smoke, "_validate_chrome_for_testing", root / "chrome"),
+                (smoke, "_validate_extension", root / "extension"),
+                (smoke.lifecycle, "packaged_app_target", target),
+                (smoke.pwd, "getpwuid", mock.Mock(pw_dir=str(root))),
+                (smoke.pf, "PfctlRunner", runner),
+                (smoke.lifecycle, "_preflight", ({}, 501, 20)),
+                (smoke, "_wait_for_native_host", root / "native.json"),
+                (smoke.lifecycle, "SystemRunner", system),
+                (smoke.composed, "ComposedHttpsFixture", automatic),
+                (smoke, "_prepare_automatic_navigation_runtime", None),
+                (smoke.lifecycle, "_assert_anchor_active", None),
+                (smoke, "_wait_for_semantic_socket", None),
+                (smoke, "_wait_for_owned_geph_backend", None),
+                (smoke.lifecycle, "_run_composed_navigation", {"result": "pass"}),
+                (smoke, "_remove_exact_native_host", None),
+                (smoke.lifecycle, "_assert_clean_install_state", None),
+                (smoke.pf, "_pf_snapshot", {}),
+                (smoke.pf, "_assert_same_snapshot", None),
+            ):
+                stack.enter_context(mock.patch.object(owner, name, return_value=value))
+            stack.enter_context(mock.patch.object(smoke, "AUTO_GEPH_STATE", root / "absent-geph"))
+            stack.enter_context(mock.patch.object(smoke, "SEMANTIC_SOCKET", root / "absent-socket"))
+            stack.enter_context(mock.patch.object(smoke, "SemanticHttpsFixture", side_effect=fixtures))
+            chrome = stack.enter_context(mock.patch.object(smoke, "_run_chrome", side_effect=failure))
+            cleanup = stack.enter_context(mock.patch.object(smoke, "_assert_daemon_absent_and_disabled",
+                side_effect=smoke.QualificationError("outer cleanup refusal") if cleanup_error else None))
+            output, errors = io.StringIO(), io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                status = smoke.main(["--app-bundle", str(root), "--chrome-executable", str(root / "chrome")])
+            self.assertEqual(status, 1)
+            self.assertEqual(output.getvalue(), "")
+            chrome.assert_called_once()
+            cleanup.assert_called_once_with()
+            automatic.close.assert_called_once_with()
+            for fixture in fixtures:
+                fixture.close.assert_called_once_with()
+            self.assertEqual(system.run.call_args_list,
+                             [mock.call(target.install_command), mock.call(target.uninstall_command)])
+            return errors.getvalue()
+
+    def test_semantic_cli_preserves_liveness_through_outer_cleanup(self):
+        for inner_cleanup in (False, True):
+            with self.subTest(inner_cleanup=inner_cleanup):
+                query = subprocess.CompletedProcess((), 113, "PRIVATE_QUERY_SENTINEL", "PRIVATE_STDERR_SENTINEL")
+                _, failure, _ = self._exercise_liveness_observation(launch_pid=None, launch_query=query,
+                                                                   cleanup_error=inner_cleanup)
+                expected = self._liveness_detail(failure.__cause__ if inner_cleanup else failure)
+                # Raw primary details must not be dumped by the outer cleanup wrapper.
+                failure.args = (str(failure) + " PRIVATE_PRIMARY_SENTINEL https://private.invalid/",)
+                output = self._exercise_semantic_outer_cli(failure)
+                self.assertIn("outer cleanup refusal", output)
+                self.assertIn("; liveness=", output, "outer semantic cleanup discarded liveness evidence")
+                self.assertEqual(json.loads(output.split("; liveness=", 1)[1]), expected)
+                self.assertEqual(output.count("; liveness="), 1)
+                self.assertNotIn("PRIVATE", output)
+                self.assertNotIn("https://", output)
+
+    def test_semantic_cli_liveness_without_outer_cleanup_is_not_duplicated(self):
+        _, failure, _ = self._exercise_liveness_observation(launch_pid=None)
+        expected = self._liveness_detail(failure)
+        output = self._exercise_semantic_outer_cli(failure, cleanup_error=False)
+        self.assertEqual(json.loads(output.split("; liveness=", 1)[1]), expected)
+        self.assertEqual(output.count("; liveness="), 1)
+
+    def test_semantic_cli_cleanup_does_not_expand_an_untyped_cause(self):
+        _, cause, _ = self._exercise_liveness_observation(launch_pid=None)
+        failure = smoke.QualificationError("PRIVATE_PRIMARY_SENTINEL https://private.invalid/")
+        failure.liveness_json = "PRIVATE_ATTRIBUTE_SENTINEL"
+        failure.__cause__ = cause
+        output = self._exercise_semantic_outer_cli(failure)
+        self.assertIn("outer cleanup refusal", output)
+        self.assertNotIn("; liveness=", output)
+        self.assertNotIn("PRIVATE", output)
+        self.assertNotIn("https://", output)
 
     def test_dry_run_describes_real_composition_without_production_override(self) -> None:
         output = io.StringIO()

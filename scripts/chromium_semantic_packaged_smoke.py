@@ -165,6 +165,26 @@ class QualificationError(RuntimeError):
     pass
 
 
+class _ChromeLivenessError(QualificationError):
+    """Carry only the closed observation serialized at its original boundary."""
+
+    def __init__(self, message: str, *, liveness_json: str):
+        super().__init__(message)
+        self.liveness_json = liveness_json
+
+
+def _qualification_error(
+    message: str, failure: BaseException | None, *, append_liveness: bool = False,
+) -> QualificationError:
+    # Never parse exception text or walk causes: arbitrary errors may contain
+    # commands, profiles or URLs. Only our typed observation can cross cleanup.
+    if isinstance(failure, _ChromeLivenessError):
+        if append_liveness:
+            message += "; liveness=" + failure.liveness_json
+        return _ChromeLivenessError(message, liveness_json=failure.liveness_json)
+    return QualificationError(message)
+
+
 @dataclass(frozen=True)
 class FixtureSnapshot:
     root_visits: int
@@ -2689,9 +2709,10 @@ def _run_chrome(
                         "ready_requests", "pending_navigation_signals",
                     )},
                 }
-                raise QualificationError(
-                    "owned Chrome exited before semantic completion; liveness="
-                    + json.dumps(liveness, separators=(",", ":"), sort_keys=True)
+                liveness_json = json.dumps(liveness, separators=(",", ":"), sort_keys=True)
+                raise _ChromeLivenessError(
+                    "owned Chrome exited before semantic completion; liveness=" + liveness_json,
+                    liveness_json=liveness_json,
                 )
             time.sleep(0.1)
         else:
@@ -2795,21 +2816,17 @@ def _run_chrome(
             )
 
     if cleanup_errors:
-        # The CLI renders str(error), so keep the first liveness observation
-        # visible even when cleanup also fails; retain the original cause too.
-        detail = (
-            "; liveness=" + json.dumps(liveness, separators=(",", ":"), sort_keys=True)
-            if liveness is not None else ""
-        )
-        raise QualificationError("; ".join(cleanup_errors) + detail) from failure
+        raise _qualification_error(
+            "; ".join(cleanup_errors), failure, append_liveness=True,
+        ) from failure
     if failure is not None:
         detail = "\n".join(
             f"{name} stderr:\n{captured.decode('utf-8', errors='replace')}"
             for name, captured in diagnostics
             if captured
         )
-        raise QualificationError(
-            f"Chrome semantic page did not qualify: {failure}\n{detail}"
+        raise _qualification_error(
+            f"Chrome semantic page did not qualify: {failure}\n{detail}", failure,
         ) from failure
     if snapshot is None:
         raise QualificationError("Chrome semantic page produced no fixture evidence")
@@ -3003,8 +3020,8 @@ def run_qualification(
                     target.tray_executable,
                 )
             except BaseException as exc:
-                raise QualificationError(
-                    f"{scenario} browser qualification failed: {exc}"
+                raise _qualification_error(
+                    f"{scenario} browser qualification failed: {exc}", exc,
                 ) from exc
             expiry = (
                 None
@@ -3093,7 +3110,9 @@ def run_qualification(
             cleanup_errors.append(f"system cleanup verification: {exc}")
 
     if cleanup_errors:
-        raise QualificationError("; ".join(cleanup_errors)) from failure
+        raise _qualification_error(
+            "; ".join(cleanup_errors), failure, append_liveness=True,
+        ) from failure
     if failure is not None:
         raise failure
     return result

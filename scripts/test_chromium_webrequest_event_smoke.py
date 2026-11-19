@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import struct
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -76,6 +78,121 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
         self.assertFalse(result["browser_extension_loaded"])
         self.assertEqual(result["root_requests"], 2)
         self.assertEqual(result["ready_callbacks"], 1)
+
+    def _exercise_webrequest_outer_cli(self, failure, *, cleanup_error=True, retry_case=False):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            root = Path(temporary)
+            fixture = mock.Mock(host=semantic.INCOMPLETE_FIXTURE_HOST)
+            fixture.close.side_effect = semantic.QualificationError("outer cleanup refusal") if cleanup_error and not retry_case else None
+            retry_fixture = mock.Mock(host=semantic.PENDING_NAVIGATION_FIXTURE_HOST)
+            retry_fixture.close.side_effect = semantic.QualificationError("retry cleanup refusal") if cleanup_error else None
+            for owner, name, value in (
+                (semantic, "_require_disposable_ci", (501, 20)),
+                (semantic, "_validate_chrome_for_testing", root / "chrome"),
+                (semantic, "_validate_extension", root / "extension"),
+                (semantic, "SemanticHttpsFixture", fixture),
+                (smoke.tempfile, "mkdtemp", str(root)),
+                (smoke.os, "chown", None),
+                (smoke, "_write_owner_file", None),
+                (smoke, "_copy_diagnostic_extension", root / "extension"),
+                (smoke, "_read_trace", []),
+            ):
+                stack.enter_context(mock.patch.object(owner, name, return_value=value))
+            if retry_case:
+                stack.enter_context(mock.patch.object(semantic, "SemanticHttpsFixture", side_effect=(fixture, retry_fixture)))
+                stack.enter_context(mock.patch.object(smoke, "_validate_signal", return_value={"schema_version": 2}))
+                stack.enter_context(mock.patch.object(smoke, "_validate_headless_performance", return_value={}))
+                chrome = stack.enter_context(mock.patch.object(semantic, "_run_chrome",
+                    side_effect=(semantic.FixtureSnapshot(2, 1, 1, 1, 1), failure)))
+            else:
+                chrome = stack.enter_context(mock.patch.object(semantic, "_run_chrome", side_effect=failure))
+                retry = stack.enter_context(mock.patch.object(smoke, "_qualify_automatic_original_navigation_retry"))
+            removal = stack.enter_context(mock.patch.object(smoke.shutil, "rmtree"))
+            output, errors = io.StringIO(), io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                status = smoke.main(["--chrome-executable", str(root / "chrome")])
+            self.assertEqual(status, 1)
+            self.assertEqual(output.getvalue(), "")
+            self.assertEqual(chrome.call_count, 2 if retry_case else 1)
+            fixture.start.assert_called_once_with()
+            fixture.close.assert_called_once_with()
+            removal.assert_called_once_with(root)
+            if retry_case:
+                retry_fixture.start.assert_called_once_with()
+                retry_fixture.close.assert_called_once_with()
+            else:
+                retry.assert_not_called()
+            return errors.getvalue()
+
+    def test_webrequest_cli_preserves_liveness_through_outer_cleanup(self):
+        import test_chromium_semantic_packaged_smoke as semantic_tests
+        case = semantic_tests.ChromiumSemanticPackagedSmokeTests()
+        for inner_cleanup in (False, True):
+            with self.subTest(inner_cleanup=inner_cleanup):
+                query = subprocess.CompletedProcess((), 113, "PRIVATE_QUERY_SENTINEL", "PRIVATE_STDERR_SENTINEL")
+                _, failure, _ = case._exercise_liveness_observation(launch_pid=None, launch_query=query,
+                                                                   cleanup_error=inner_cleanup)
+                expected = case._liveness_detail(failure.__cause__ if inner_cleanup else failure)
+                failure.args = (str(failure) + " PRIVATE_PRIMARY_SENTINEL https://private.invalid/",)
+                output = self._exercise_webrequest_outer_cli(failure)
+                self.assertIn("outer cleanup refusal", output)
+                self.assertIn("; liveness=", output, "outer webRequest cleanup discarded liveness evidence")
+                self.assertEqual(json.loads(output.split("; liveness=", 1)[1]), expected)
+                self.assertEqual(output.count("; liveness="), 1)
+                self.assertNotIn("PRIVATE", output)
+                self.assertNotIn("https://", output)
+
+    def test_webrequest_cli_liveness_without_outer_cleanup_is_not_duplicated(self):
+        import test_chromium_semantic_packaged_smoke as semantic_tests
+        case = semantic_tests.ChromiumSemanticPackagedSmokeTests()
+        _, failure, _ = case._exercise_liveness_observation(launch_pid=None)
+        expected = case._liveness_detail(failure)
+        output = self._exercise_webrequest_outer_cli(failure, cleanup_error=False)
+        self.assertEqual(json.loads(output.split("; liveness=", 1)[1].split("; sanitized webRequest trace:", 1)[0]), expected)
+        self.assertEqual(output.count("; liveness="), 1)
+
+    def test_webrequest_cli_cleanup_does_not_expand_an_untyped_cause(self):
+        import test_chromium_semantic_packaged_smoke as semantic_tests
+        case = semantic_tests.ChromiumSemanticPackagedSmokeTests()
+        _, cause, _ = case._exercise_liveness_observation(launch_pid=None)
+        failure = semantic.QualificationError("PRIVATE_PRIMARY_SENTINEL https://private.invalid/")
+        failure.liveness_json = "PRIVATE_ATTRIBUTE_SENTINEL"
+        failure.__cause__ = cause
+        output = self._exercise_webrequest_outer_cli(failure)
+        self.assertIn("outer cleanup refusal", output)
+        self.assertNotIn("; liveness=", output)
+        self.assertNotIn("PRIVATE", output)
+        self.assertNotIn("https://", output)
+
+    def test_webrequest_retry_cli_preserves_liveness_when_close_also_fails(self):
+        import test_chromium_semantic_packaged_smoke as semantic_tests
+        case = semantic_tests.ChromiumSemanticPackagedSmokeTests()
+        for inner_cleanup in (False, True):
+            with self.subTest(inner_cleanup=inner_cleanup):
+                _, failure, _ = case._exercise_liveness_observation(launch_pid=None, cleanup_error=inner_cleanup)
+                expected = case._liveness_detail(failure.__cause__ if inner_cleanup else failure)
+                failure.args = (str(failure) + " PRIVATE_PRIMARY_SENTINEL https://private.invalid/",)
+                output = self._exercise_webrequest_outer_cli(failure, retry_case=True)
+                self.assertIn("retry cleanup refusal", output)
+                self.assertIn("; liveness=", output, "automatic retry cleanup discarded liveness evidence")
+                self.assertEqual(json.loads(output.split("; liveness=", 1)[1]), expected)
+                self.assertEqual(output.count("; liveness="), 1)
+                self.assertNotIn("PRIVATE", output)
+                self.assertNotIn("https://", output)
+
+    def test_automatic_retry_cleanup_keeps_untyped_exception_identity(self):
+        for primary in (None, semantic.QualificationError("PRIVATE_PRIMARY_SENTINEL")):
+            for cleanup in (OSError("cleanup refusal"), KeyboardInterrupt("cleanup interrupt")):
+                with self.subTest(primary=type(primary).__name__, cleanup=type(cleanup).__name__):
+                    fixture = mock.Mock()
+                    fixture.close.side_effect = cleanup
+                    with mock.patch.object(semantic, "SemanticHttpsFixture", return_value=fixture), \
+                            mock.patch.object(semantic, "_run_chrome", side_effect=primary,
+                                              return_value=semantic.FixtureSnapshot(2, 1, 1, 1, 1)):
+                        with self.assertRaises(type(cleanup)) as raised:
+                            smoke._qualify_automatic_original_navigation_retry(Path("/fixture/chrome"), 501, 20)
+                    self.assertIs(raised.exception, cleanup)
+                    fixture.close.assert_called_once_with()
 
     def test_native_stub_manifest_is_complete_and_exact(self) -> None:
         stub_path = Path("/tmp/native-stub")

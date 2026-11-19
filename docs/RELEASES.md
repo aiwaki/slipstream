@@ -63,6 +63,58 @@ The same ownership, readiness, timeout and cleanup rules remain in force. A seco
 cleanup failure keeps the first observation visible in the CLI error. Scoped
 mocked tests cover those paths; actual native cause remains unknown until observed.
 
+
+## Preview .36 CI evidence ledger — 2026-11-19
+
+Detailed local evidence lives under `output/continuation-20261119`. These records
+identify completed attempts; they do not qualify a later source. The active head,
+observer and next action belong in [CURRENT_STATE.md](CURRENT_STATE.md).
+
+| Boundary | Confirmed outcome | Evidence directory / receipt |
+|---|---|---|
+| PR482: CI44498697785/1 + audit44498697808/1 | Passed; merged C36 `dd8b8373a4357e550b3133294f5bbdc36173ad53`, tree29cfde32b191e8ed464bd4e6e4c3b3a95fee37eb | `preview36-preparation/pr482/merge-verification.json`, SHA7780ba6dd3cf252d7d823dbd56a8b3d3cf77eab040bcc2f88bde7091ef30700b |
+| C36 main CI44502130642/1 | Failed in native fixture auth before product installation; audit44502130820/1 passed | `preview36-release/main-ci/terminal-failure/failure-receipt.json`, SHA2d89ee998da1142e4ad65b2e24622b52628c462ab768d5d710d975e1bcaa11c0 |
+| PR483 first head ed98fe59: CI44512409701/1 | One stale positive source-binding test failed; native Stop/Quit and lifecycle passed; audit44512409642/1 passed | `fixture-auth-diagnostics/pr483/receipt.json`, SHA729d3c25aee195174f084672e78e3b9062d85e18768ebefad6f63624ff1540a2 |
+| PR483 final82d41492681aa106dda1e764e88010c3a5f1de4d: CI44515828468/1 + audit44515828463/1 | All required checks passed, review resolved; merged eaecd536ff827a146eff840eea9aac9f18ee2461, tree d580732c1c5052d5ffff7184fcd23a10520ff9c8 | `fixture-auth-diagnostics/pr483-followup/receipt.json`, SHA5af293eb121a3504e4f584c912978daef5d515bae66701dcb7fa34b769d80499 |
+| eaecd main CI44519893904/1 | Chromium liveness failure; remaining queued work cancelled; audit44519894032/1 passed; no candidate admission | `preview36-fixture-release/main-ci/terminal-disposition.json`, SHAe6ee3dbb8cfd0141053dceeb6b92540829c57e5b56798bdf5c3cfc9d87d6fd60 |
+
+PR483 final proof binds the test checkout1467772e9296642a1fd7a5ca3dbc760aa4c3ce5a
+to the same merged tree. All2360 daemon tests,249 tray tests and7 native Stop/Quit
+cases passed;4 authorizations completed, credentials were verified and cleanup[].
+Native report SHA c8ba1246c547717211a0b6f1ba7afc69f717755cebc0066a27a09b76f4febd3b;
+root rehashed the34-file receipt and8-file native evidence closure. The historical
+exit10 cause is still unknown. Temporary diagnostic passwords/account commands,
+acceptance, retries and cleanup were not changed. The frozen public35 helper pin
+remains7bee; a corrected positive fixture plus actual negative prepare_main control
+preserves rejection of unreviewed source before any public download/authentication.
+
+The Chromium failure's original job log is bound by
+`preview36-fixture-release/main-ci/failure-chromium/failure-receipt.json`,
+SHA26a2cc9de0c5020a857ba304304c8004e5ff7888023d49ac63ecc04b01f9bd23.
+The safe initial repair and its launcher-query extension are independently reviewed:
+patch9493d37cfc4a62add618421654a8a2a42f6489fbc0b8e099a0485dc3d09f476c and
+patch675535afe7a05f21116c404284844c7035cd0d0cda010a482d6db4e88b01c487,
+under `chromium-liveness-evidence` and its `launcher-query-extension` directory.
+Six liveness subcases and three query subcases failed causally before those patches.
+92 guarded unit tests passed on the initial repair;7 focused extension tests passed.
+No local native/process/network calls were permitted;9 effectful tests were left
+to hosted CI. These tests establish diagnostic preservation, not the cause of
+the historical Chrome failure or physical user-visible application behavior.
+
+Review found three outer propagation paths that could still hide the first
+observation: semantic qualification cleanup, webRequest cleanup, and the retry
+scenario's `finally.close()`. A private exception subtype carries only the already
+serialized closed observation through those wrappers. No exception-text parsing
+or arbitrary cause traversal is used. Cleanup stays the primary failure; ordinary
+untyped errors and control exceptions preserve their behavior. Six causal failing
+subcases now pass in nine focused tests, exercising the real CLI entrypoints with
+mocked native boundaries. The review follow-up and proof are under
+`chromium-liveness-evidence/outer-cleanup-followup`; patch SHA
+7f53731b27bf119f4bcc1f2e2aef9ccbe8b82f3347c942f90cd25c977d2e8e8c and
+verification SHA911574c8fb793f254bdbbdab5979e806117704d4e239baf71a1d0e80dcd3ca85.
+Independent review accepted all three paths. This diagnostic repair preserves
+failure evidence; it does not establish the historical browser failure's cause.
+
 ## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in
