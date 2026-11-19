@@ -1,17 +1,65 @@
 # Current Project State
 
-## Current continuation — 2026-11-11 local / November 10 UTC, .35 published
+## Current continuation — 2026-11-19, Chromium review blocks observer merge
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Fix branch `codex/public-menu-visibility-wait` is based on failed-run/main observer
-`1c6ddcfcd49c6c44edea0390708d1ee364036197`, tree
-`663ab405cd14167a7114aeabe4fc24a7c0a6fff2`. PR477 merged20:50:15UTC;
-its CI42894766197/1 and audit42894766080/1 passed. Read live git for the fix HEAD. Actual checkout97088529
-of both jobs has exactly this merged tree. Product remains published source
-`5a3e64b534affc865826fbd20ac67f1af328629e` (PR476). This checkpoint update
-is local pending the public result; do not move main or rewrite observer history.
-output/ is retained evidence. Prior goal turn made progress (PR477 and evidence).
-No workstation app/service/network changes or app-archive downloads. Goal incomplete.
+Active branch `codex/chromium-158-evidence`, based on main
+`1dd8d6d2b26dfa808fb894bc2b6746e54765f418` (PR478).
+Read live HEAD/PR/CI before resuming. This branch changes only the disposable
+Chromium evidence proposal; production Chromium/source policy remain unchanged.
+No workstation app, service, network, credentials or learning changes.
+
+### Public update repair retained separately
+
+PR479 (`codex/public-admin-fixture-diagnostics`, head
+`c97929e53907adfb553a5c1bd46bd94039cfbabd`) preserves secret-free fixture stages,
+exit codes and both primary/cleanup failures after public run42910934921/1
+failed with redacted `dscl failed (10): ` before Install. The underlying dscl
+operation/cause remains unknown. Two causal RED tests preceded23focused GREEN;
+14source-binding tests passed and independent review was clear.
+Its published .35 source/payloads remain5a3e64b534affc865826fbd20ac67f1af328629e.
+Public update and rollback remain unqualified. No fresh public attempt dispatched.
+Prepared dispatcher is intentionally PENDING and must be rebound/reviewed after
+any future main/source change; never reuse it blindly after this dependency work.
+Evidence: `output/continuation-20261119/admin-fixture`, including retained helper
+review, source proofs and the guarded public preparation.
+
+PR479 audit44479720126/1 failed at application audit job135408790436 with
+`ValueError: dependency audit integrity-only policy is expired` (log917–919).
+Actual checkoutabe7c512474ac5af67c45ba67abf9c7bb8b3020f has the exact PR-head
+tree and parents1dd8+c979. Geph vendor audit passed. CI44479720260/1 was still
+running when this checkpoint was written; inspect its existing result, do not
+rerun either workflow. The audit failure is a current policy expiry, not a
+failed public updater transaction or a newly established transport defect.
+
+### Next verified action: evidence-only Chromium 158 review
+
+The application Chromium156.0.8078.80 integrity-only policy expired November13.
+Official catalog snapshot November19 selects Stable158.0.8127.36, revision1727472.
+The exact mac-arm64 object has length105057133, generation1794441107973562 and
+MD5 `2DIogA0Ml0ZJYGyvmRyJbw==`; its SHA256 is not known until the hosted review.
+Metadata/body/header receipts live under
+`output/continuation-20261119/admin-fixture/pr479/chromium-policy-diagnosis`.
+The old156object still matches its historical metadata; that does not renew its
+review. No duplicate prepared Chromium upgrade or open PR was found.
+
+Update only the disposable review proposal, then let the existing PR-triggered
+`chromium-runtime-review.yml` authenticate/download/run/clean up that exact
+candidate on its hosted Mac. Its small report must prove full archive and
+executable hashes, license/version, sandbox DOM behavior, cleanup and fresh OSV
+mapping. Unsupported generic mapping is not vulnerability clearance. Do not
+extend the old expiry or change production pins before accepting this evidence.
+Scoped helper validation passed:2causal RED cases then15GREEN, forbidden calls0,
+maxRSS33.3MB. Root reviewed the six-constant/fixture diff and rehashed2source,
+6protected and7evidence files. Receipt: chromium158/verification.json,
+SHA07f078e87f3105a12865104ec83b9b9784c313097939ed24abef0618276f6e26.
+The ordinary audit remains blocked until an evidence-backed production adoption;
+the evidence job is independent. No workflow admission or acceptance is waived.
+After adoption and exact checks, reconcile/rebase PR479 and bind fresh public
+observer evidence. Existing published .35 assets and historical accepted gates
+are preserved; a new product revision needs its own affected qualification.
+New evidence directory: `output/continuation-20261119/chromium158`.
+A fresh user-approved window is still required before workstation installation.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.
