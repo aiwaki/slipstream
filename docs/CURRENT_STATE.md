@@ -1,35 +1,44 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, final public-update observer checks
+## Current continuation — 2026-11-19, post-cancel discovery failure
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Active branch `codex/public-admin-fixture-diagnostics`, PR479. Main is now
-39b127c04698143cd7f32fbe00e2e4b81a7a8509 after merged PR480. Its tree equals tested
-head58d82bd662d091409d8acf3a9c25bf9d6e857644; CI44484666448/1 and audit44484666299/1
-passed all required checks. Audit:0blocking,8informational,0exceptions. Receipt:
-`output/continuation-20261119/chromium158/pr480-quinn-followup/receipt.json`.
-Chromium158, minimal Quinn patches and the Clippy fix are source maintenance;
-published .35 bytes are unchanged. Reuse accepted Chromium review44481148015/1.
+Active branch `codex/public-preview35-terminal-followup`; main/observer is
+4618210128ac4265064729ff8b1675b9e04a275a after merged PR479. Its tree equals tested
+head57f7caa3 and actual CI/audit checkout2d1d4e38. CI44487262574/1 and
+audit44487262491/1 passed all three required checks; all five review threads are
+resolved. Receipt: `output/continuation-20261119/admin-fixture/pr479/final-integrated/receipt.json`.
 
-PR479 integrates that verified baseline while retaining its fixture diagnostics,
-process-control exception propagation and credential absence controls. The six
-code/test files remain exactly as locally reviewed f284c696c;25fixture tests and
-14source-binding cases passed (10legacy-only skips), independent review CLEAR.
-Executing helper SHA7bee1a005832a9d8079874e46a294e914f31dae83407db653327f0f64e62c705.
-Evidence: `output/continuation-20261119/admin-fixture/pr479/review-fixes/`.
-Only the checkpoint conflicted during integration; release notes merge normally.
-Next: publish this integrated PR479 head, verify its exact CI/audit and reviews,
-then merge. Earlier PR479 failed only on the now-fixed dependency/Clippy baseline;
-do not rerun its old jobs or repeat unchanged local tests.
+PR480's Chromium158/Quinn patches and Clippy fix remain merged source maintenance;
+published .35 bytes are unchanged. Reuse CI44484666448/1, audit44484666299/1 and
+Chromium review44481148015/1. PR479 preserves fixture failure stages and cancellation
+without exposing credentials;25 fixture and14 source-binding cases passed.
+Both exact audits have0 blocking findings,8 informational and0 exceptions.
 
-Public .34→.35 update/rollback remain unqualified. The old dscl10 error does not
-prove its failing native operation or an updater defect. No new public run was
-dispatched. Its private dispatcher remains PENDING: after PR479 acceptance,
-explicitly bind the merged observer, helper, CI/source proof and full reviewed
-diff. Public workflow executes qualified-source5a materialization and unchanged
-published payloads; PR480's new product bytes are not installed by that test.
-Do not widen the separate packaged-observer allowlist. Preserve all candidate,
-public-asset, signature, semantic-checker and attempt-history guards.
+ONE ordinary public commit44490827068/1 was dispatched at08:49UTC after accepted
+PR evidence, independent binding review and two fresh source/asset/inventory
+checks. Evidence directory: `output/continuation-20261119/admin-fixture/public-commit`.
+Run completed FAILURE; watcher7184 exited and the35-member report was authenticated.
+OLD found .35, Install reached native authorization, and real Cancel successfully
+removed preparation while preserving the old daemon. Automatic post-Cancel
+discovery then returned403; a separate anonymous probe confirmed remaining0.
+The app's original response headers/page were not retained, so quota attribution
+to that403 remains correlation. No root commit, success context or retry exists.
+The narrow product fix is now prepared on this branch: a typed confirmed Cancel
+requires successful root/local cleanup, preserves the exact offer and avoids
+rediscovery/error notification. Uncertain outcomes and cleanup errors retain the
+existing guards; each later explicit Install still validates metadata/signature.
+Five Rust tests were added, not executed locally. Source review CLEAR and
+rustfmt/diff checks pass. Evidence: `admin-fixture/public-cancel-product-fix/`
+under the same November19 output directory. Next: review/publish this source PR
+and observe its exact hosted compile/tests before considering a new candidate.
+This does not repair the immutable published OLD .34 used by the failed run.
+Do not rerun this attempt or transfer evidence to a different candidate.
+Both public commit/rollback gates remain unqualified. Detailed evidence and the
+native Cancel boundary are recorded in RELEASES.md and the evidence directory.
+Public workflow installs unchanged published .34/.35 payloads from qualified
+source5a; PR480's new product bytes are not installed by this test. Preserve all
+candidate/signature/checker guards and the separate packaged-observer allowlist.
 
 No workstation app/service/network/account/learning changes or application
 payload downloads. A fresh user-approved window is required for Mac installation.

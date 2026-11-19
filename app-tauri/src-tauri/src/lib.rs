@@ -757,7 +757,7 @@ fn authorize_daemon_update(
         Ok(output)
             if output.status.success() && output.stdout == b"slipstream-update-cancelled\n" =>
         {
-            AuthorizationOutcome::NotExecuted("update authorization cancelled".into())
+            AuthorizationOutcome::Cancelled
         }
         Ok(output)
             if output.status.success() && output.stdout == b"slipstream-update-no-operation\n" =>
@@ -2651,7 +2651,31 @@ async fn discover_app_update(app: &AppHandle) -> Result<Option<AppUpdateOffer>, 
         .map(|checked| checked.map(|(offer, _)| offer))
 }
 
-async fn install_app_update(app: &AppHandle, offer: &AppUpdateOffer) -> Result<(), String> {
+#[derive(Debug, Eq, PartialEq)]
+enum AppUpdateInstallOutcome {
+    Prepared,
+    Cancelled,
+}
+
+// Cancellation is a completed no-op, not evidence that the signed offer changed.
+// Other failures still invalidate it so the caller can refresh the channel.
+fn finish_app_update_install(
+    state: &mut AppUpdateState,
+    result: Result<AppUpdateInstallOutcome, String>,
+) -> Result<AppUpdateInstallOutcome, String> {
+    if !matches!(&result, Ok(AppUpdateInstallOutcome::Prepared)) {
+        state.busy = false;
+    }
+    if result.is_err() {
+        state.offer = None;
+    }
+    result
+}
+
+async fn install_app_update(
+    app: &AppHandle,
+    offer: &AppUpdateOffer,
+) -> Result<AppUpdateInstallOutcome, String> {
     let expected_version = semver::Version::parse(&offer.version)
         .map_err(|_| "stored update version is invalid".to_string())?;
     let expected = offer
@@ -2703,7 +2727,7 @@ async fn install_app_update(app: &AppHandle, offer: &AppUpdateOffer) -> Result<(
     let current_version = update.current_version.clone();
     let version = expected_version.to_string();
     let preparation = tauri::async_runtime::spawn_blocking(move || {
-        updater_transaction::prepare_transaction(
+        updater_transaction::prepare_transaction_outcome(
             &current_exe,
             &state_dir,
             &launch_agents,
@@ -2722,11 +2746,24 @@ async fn install_app_update(app: &AppHandle, offer: &AppUpdateOffer) -> Result<(
     {
         actions.store(false, Ordering::Release);
     }
-    let prepared = result?;
+    let prepared = match result? {
+        updater_transaction::PreparationOutcome::Prepared(prepared) => prepared,
+        updater_transaction::PreparationOutcome::Cancelled => {
+            // The typed result is emitted only after root/local cleanup succeeds.
+            // A retained or uninspectable journal must still use the Resume path.
+            if !fs::symlink_metadata(&journal_path)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                return Err("cancelled update journal is not absent after cleanup".into());
+            }
+            actions.store(false, Ordering::Release);
+            return Ok(AppUpdateInstallOutcome::Cancelled);
+        }
+    };
     if prepared.journal_path != journal_path {
         return Err("durable updater returned an unexpected journal path".into());
     }
-    Ok(())
+    Ok(AppUpdateInstallOutcome::Prepared)
 }
 
 async fn refresh_app_update(
@@ -2882,8 +2919,13 @@ async fn install_or_discover_app_update(
         return;
     };
 
-    match install_app_update(&app, &offer).await {
-        Ok(()) => {
+    let result = install_app_update(&app, &offer).await;
+    let result = {
+        let mut state = state.lock().expect("update state lock poisoned");
+        finish_app_update_install(&mut state, result)
+    };
+    match result {
+        Ok(AppUpdateInstallOutcome::Prepared) => {
             notify(
                 &app,
                 if ui_ru() {
@@ -2897,12 +2939,17 @@ async fn install_or_discover_app_update(
             // not keep the old executable alive across its atomic rename.
             app.exit(0);
         }
+        Ok(AppUpdateInstallOutcome::Cancelled) => {
+            eprintln!("update authorization cancelled");
+            let state = state.lock().expect("update state lock poisoned");
+            set_update_menu_text(&item, &state);
+            // Keep the exact offer. A later explicit Install rechecks its appcast
+            // and signature; cancellation needs no new public-feed request/toast.
+        }
         Err(error) => {
             eprintln!("update installation unavailable: {error}");
             {
-                let mut state = state.lock().expect("update state lock poisoned");
-                state.busy = false;
-                state.offer = None;
+                let state = state.lock().expect("update state lock poisoned");
                 set_update_menu_text(&item, &state);
                 if app
                     .state::<DaemonActionsBlocked>()
@@ -4982,6 +5029,52 @@ mod tests {
         state.busy = true;
         assert_eq!(super::update_menu_text(&state, false), "Updating…");
         assert_eq!(super::update_menu_text(&state, true), "Обновление…");
+    }
+
+    #[test]
+    fn confirmed_install_cancel_preserves_the_exact_offer_and_notification_state() {
+        let offer = super::AppUpdateOffer {
+            version: "0.1.9-preview.35".into(),
+            endpoint: Some("https://example.invalid/v0.1.9-preview.35/latest.json".into()),
+            archive_url: "https://example.invalid/v0.1.9-preview.35/Slipstream.app.tar.gz".into(),
+        };
+        for outcome in [
+            Ok(super::AppUpdateInstallOutcome::Cancelled),
+            Ok(super::AppUpdateInstallOutcome::Prepared),
+            Err("update authorization cancelled".into()),
+            Err("selected update changed before installation".into()),
+        ] {
+            let prepared = matches!(&outcome, Ok(super::AppUpdateInstallOutcome::Prepared));
+            let failed = outcome.is_err();
+            let mut state = super::AppUpdateState {
+                offer: Some(offer.clone()),
+                busy: true,
+                last_notified_version: Some(offer.version.clone()),
+                highest_seen_version: Some(offer.version.clone()),
+                ..Default::default()
+            };
+            let result = super::finish_app_update_install(&mut state, outcome);
+            assert_eq!(result.is_err(), failed);
+            assert_eq!(state.busy, prepared);
+            assert_eq!(state.offer, (!failed).then_some(offer.clone()));
+            assert_eq!(
+                state.last_notified_version.as_deref(),
+                Some(offer.version.as_str())
+            );
+            assert_eq!(
+                state.highest_seen_version.as_deref(),
+                Some(offer.version.as_str())
+            );
+            if !prepared && !failed {
+                assert_eq!(result.unwrap(), super::AppUpdateInstallOutcome::Cancelled);
+                assert_eq!(
+                    super::update_menu_text(&state, false),
+                    "Install Slipstream 0.1.9-preview.35…"
+                );
+            } else if failed {
+                assert_eq!(super::update_menu_text(&state, false), "Check for Updates…");
+            }
+        }
     }
 
     #[test]
