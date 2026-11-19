@@ -3,60 +3,91 @@
 ## Current continuation — 2026-11-19, preview .36
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch: `codex/chromium-liveness-evidence`; PR484 follow-up is based on head
-`c27985beb472da7310f8d0a45f9d296ac10240a4`, tree
-`230e91d32fcc71105ed13ad6fc035ff26c428ecf`; base/main
-`eaecd536ff827a146eff840eea9aac9f18ee2461`.
+Branch `codex/ci-build-macos26`, base HEAD/main
+`ed4ee9cdfa82713e30399d4a78ec76a388d63ec3`, tree
+`0db8c6d6ee66713ba4ae40b1264c7fd973e6d62d` equals accepted PR484 head1fd8.
 
-**Current PR evidence:** initial-head CI44523419189/1 and audit44523418905/1
-passed, including Chromium, product/build, browser and native lifecycle. The
-same observer session43820 exited0. Its terminal receipt under
-`output/continuation-20261119/chromium-liveness-evidence/pr` has SHA
-296563e74f4760a748ec00cd8ba59dd6ff77ebec1a0be13234d5945edf9dbe1c.
-Do not duplicate it; initial-head evidence does not qualify the review follow-up.
+**Active gate:** final CI44530644966/4 completed FAILURE. Build135688745320
+never acquired a runner: runner_id0, steps[], 15:57:41–16:12:44Z. GitHub reports
+"The job was not acquired by Runner of type hosted even after multiple attempts"
+and three macOS ARM64 capacity notices. No checkout/build execution occurred.
+B6=`output/continuation-20261119/preview36-final-capacity-recovery` retains
+watcher receipt b343970110f33ed164a8af61e8e823c4bd0ca8ca0438ba310010db578c141e11
+and failure-build receipt adea3e9cb1235c86b23edf88dc3aead449f3a96696ed2a85f2c7c726bf549f57.
+Root rehashed all42 watcher+7 failure+10 audit closure entries; verification
+e42f3be35517d7f2523fa0633377b5b45336bc9e1b2045570a50034e8bcc5c07.
+Observer exec54928/PID11479 is terminal exit1; do not restart. No candidate
+collection/admission, G/P/R, publication, or further retry has occurred.
 
-**Next action:** push the reviewed follow-up, observe only its actual new CI/audit,
-then recheck review threads before merging. The follow-up now carries only the
-closed typed liveness payload through both outer cleanup handlers and the retry
-scenario's finally-close; six causal failing subcases now pass in nine focused
-tests. No raw causes, query retries, rule changes or local native execution.
-Evidence: `chromium-liveness-evidence/outer-cleanup-followup/verification.json`,
-SHA911574c8fb793f254bdbbdab5979e806117704d4e239baf71a1d0e80dcd3ca85.
-The compact checkpoint and detailed ledger in
-[RELEASES.md](RELEASES.md#preview-36-ci-evidence-ledger--2026-11-19) address both
-review threads. Resolve them only after the pushed head is verified.
-After the follow-up, inspect exact-head CI, report closure and review threads,
-then CAS-merge and bind the actual new main CI/audit. No admission or publication yet.
+**Next action:** open the reviewed infrastructure PR and observe its exact CI.
+Only `packaged-app-build` moves to supported macos-26 ARM64; its Cargo
+cache uses a separate image prefix and cannot restore macOS 15 target files.
+Downstream signing/assembly/native qualification stay on macos-15 and must
+validate the same candidate bytes. Target aarch64/minimum macOS13, pinned actions,
+producer bindings and release gates are unchanged. No local native build/tests.
+Existing CI has only PR/push triggers, no runner selector. A changed workflow
+requires a new source/main CI/candidate; do not relabel old evidence. Another
+label does not prove a separate pool or available capacity. PR/CI for this patch
+have not started. Independent static review found no actionable issues; five
+existing pure build-config tests passed, as did actionlint (external shellcheck
+and pyflakes disabled). Evidence: `output/continuation-20261119/macos26-build-image`.
+Actual macOS26 build and macOS15 candidate qualification remain unverified.
+Live repository owner is
+User/public: Depot Actions and GitHub larger macOS runners require an organization
+and additional plan/setup; no purchase, repository transfer, or local build is
+authorized by this investigation. Preserve accepted product3 and audit1.
+B6 helpers bind actual final4 and cannot be reused unchanged for another attempt.
+Their closed raw-projection whitelist preserves original CI2
+changes/Chromium/Windows-skip and actual CI3 product/checks; it never proves new
+execution of retained jobs. G/P/R preparation remains unbound pending an accepted
+new candidate. No automatic retry solely because the queue timed out.
 
-The current patch records the original launcher/query/browser identity conditions
-before cleanup without changing readiness, ownership, timeout or cleanup rules.
-92 safe affected unit tests passed before its final query-observation extension;
-7 focused tests passed on that extension. Nine real subprocess/server tests were
-left for hosted CI. The latest Chromium scenario passed; the earlier liveness
-failure's actual cause remains unknown. Evidence:
-`output/continuation-20261119/chromium-liveness-evidence`.
+**Accepted product3:** CI44530644966/3 SUCCESS; product135675403614 and
+checks135687297927 actually ran after its start. Product runner1000014871,
+15:47:46–15:55:30Z; checks15:55:34–15:55:43Z. Checkout ed4 confirmed by raw log.
+Daemon2360passed+10skipped, tray249passed; all26 product+2 aggregate steps passed.
+B5=`output/continuation-20261119/preview36-product-isolation`:
+`product-isolation-receipt.json` SHA31722a47a68ea12f83355c7ba90864fcb3de09b59ff3da020dab04d4f7a84b91.
+Root independently rehashed20 closure files, checked actual checkout and job
+execution. Observer93205 and collector84306 exited0; do not restart them.
+The actual final4 confirmation SHA880c858731939b06cf7a4f8820ee98cb2ca3b035f5394b3a49a9b7a793973bd3
+was obtained after the single build rerun; product3 alone did not admit candidate2.
 
-**Completed/reuse:** PR481 cancellation repair, PR482 .36 preparation and PR483
-safe native-auth diagnostics are merged. PR483 exact CI/audit and native Stop/Quit
-passed. Do not repeat their unchanged focused checks. Main44502130642 failed at
-fixture authentication; main44519893904 failed at Chromium liveness and remaining
-work was cancelled. Both are historical failed candidates, never accepted/retried.
-Their evidence roots are `preview36-release` and `preview36-fixture-release` under
-`output/continuation-20261119`; neither has an accepted candidate/G/P/R result.
+**B6 reviewed metadata:** watcher c0d0c6b74a13badf0b2797fd97518432e64a6f1354cd852247e86e28d30cacca;
+collector f2194d4dcbe160837cc3717d3dee6b4b2cab4bce47c5d1402a58fbb0f144916f.
+Preparation de1ffc8e3328ab597583ca026e16112fe55b632582e96c1fa42155e6ac5cd996
+records the earlier PENDING state. Actual binding activation
+SHA61a77e3481fcebd464947d6c947804ec58b17d772774321aac4737b38fe52d68
+copied23 original files and validated real final4/product3, without observer/API.
+8 pure methods/28 negative subcases passed; source/producer assertions unchanged.
+Qualification preparation9419bf01dfc99df42c8005709bceb72ff59946a298cf326fd85f8c7592382057
+is reviewed but still unbound. G87/shared watcher byte-identical; unknown
+manifest/receipt/G/P inputs remain fail-closed. No actual qualification dispatch.
 
-**Release gates still open:** accepted exact-main candidate/audit, native G and
-packaged P for .35→.36, readiness R, publication, ordinary public commit/rollback,
-and installed Mac/browser validation. Prepared helpers under `preview36-fixture-release`
-are reusable only after checking source contracts and binding fresh real IDs;
-its old dispatchers/receipts must not be used for a new source. Published .35 remains
-unchanged: source5a3e64b534affc865826fbd20ac67f1af328629e, CI42874103966/2,
+**Reused exact-main audit:** audit44530644987/1 SUCCESS, source/checkout ed4,
+tree0db8. Receipt fc22b4fc2fcb8f21d3cc78a11a57bda0538b43687c8fa961800c4b2935c49aad
+plus10 closure files copied unchanged to B6; copy proof
+3be2bf7318f0bf11a2d5964d7e28fd33d065340f811bd0a81cee467f6c7a5a7e.
+No rescan or account-backed qualification. Prior CI1/2 product refusals were
+confirmed hosted-runner acquisition failures (runner0,steps[]); isolated3 got a
+runner and passed. Preserve B3/B4 failure receipts; no scheduler cause claimed.
+
+**Reusable source evidence:** merged PR484 CI44525945746/1 and audit44525945704/1
+passed, reviews/required checks clear, actual checkout567f03b5 tree equals HEAD.
+Native Stop/Quit7/7,4 completed authorizations,cleanup[]; audit blocking0.
+PR481 cancellation repair and PR482/483 merged. Historical Chromium failure cause
+remains unknown. Detailed history: [RELEASES.md](RELEASES.md#preview-36-ci-evidence-ledger--2026-11-19).
+
+**Open gates:** accepted new candidate, G, P, R, same-byte publication, normal
+public commit/rollback, installed Mac/browser validation. Published .35 remains
+immutable: source5a3e64b534affc865826fbd20ac67f1af328629e, CI42874103966/2,
 manifest65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d.
-Reuse accepted Geph r5 and reviewed Chromium158 where their inputs are unchanged.
-Public .35→.36 Cancel runs OLD35 and cannot prove .36 as the initiating app.
+Reuse unchanged Geph r5/Chromium158 reviews. Public .35→.36 Cancel runs OLD35 and
+cannot prove .36 as initiator. Old receipts never authorize the new candidate.
 
-**Mac boundary:** no local native tests, app payload downloads/builds, application,
-service, network, account or learning changes. A fresh user-approved window is
-required for installed validation. Keep external Geph and settings intact.
+**Mac boundary:** no local native tests, app payload download/build, app/service,
+network, account or learning changes. Fresh user-approved window required for
+installed validation; external Geph and settings remain intact.
 
 ## Historical checkpoint — 2026-11-10 (superseded)
 

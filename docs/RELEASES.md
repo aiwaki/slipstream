@@ -510,12 +510,23 @@ application and vendored dependency admissions separately from historical report
 verification. Preserve the original scan date and exact source/policy hashes;
 rechecking expiry does not imply a fresh scan of advisory data.
 
-Hosted macOS build, qualification and publication jobs use the explicit
-`macos-15` ARM64 runner label. GitHub's [macOS 14 retirement announcement](https://github.com/actions/runner-images/issues/13518)
-includes scheduled job failures before the November 2, 2026 removal; such a
-cancelled run does not qualify a candidate. The application minimum remains
-configured as macOS 13.0. A successful hosted macOS 15 run establishes the tested
-path on that image, not runtime compatibility with every earlier supported OS.
+The packaged application build uses the explicit `macos-26` ARM64 runner label.
+Its Cargo cache is partitioned by image so compiled target files are not restored
+from macOS 15. Downstream signing, assembly, native qualification and publication
+remain on `macos-15`; they consume and verify the same candidate bytes. This also
+checks the macOS 26 build on macOS 15 before release. The application target stays
+`aarch64-apple-darwin`, and its configured minimum remains macOS 13.0. Passing
+these hosted checks does not establish runtime compatibility with every earlier
+supported OS.
+
+The build image change follows a confirmed hosted-runner acquisition failure in
+[CI44530644966/4](https://github.com/aiwaki/slipstream/actions/runs/44530644966/attempts/4):
+no runner was assigned and no build steps executed. GitHub documents `macos-26`
+as a supported [standard ARM64 image](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+but using another label does not guarantee available capacity. A changed workflow
+requires a new source-bound candidate and the existing release gates; it does not
+renew an earlier candidate's evidence. Retired `macos-14` is not a fallback; see
+GitHub's [retirement announcement](https://github.com/actions/runner-images/issues/13518).
 
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|
