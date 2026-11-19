@@ -41,6 +41,28 @@ cannot recover that pair. Unknown or mismatched diagnostics remain unknown.
 The historical public `.34 → .35` helper allowance remains frozen; this change
 does not authorize another run of that retired workflow.
 
+
+PR483's diagnostic repair passed CI44515828468/1 and audit44515828463/1,
+including seven native Stop/Quit cases and four confirmed authorizations with
+clean cleanup, then merged as `eaecd536ff827a146eff840eea9aac9f18ee2461`.
+The earlier fixture rejection did not recur; its cause remains unknown.
+
+The next main CI44519893904/1 failed its separate Chrome for Testing151
+webRequest contract. The message `owned Chrome exited before semantic completion`
+combines a launcher-PID mismatch with a full stored browser-process mismatch,
+including mutable argv; the log does not retain the failed predicate. Startup
+ownership and DevTools readiness passed. GPU termination messages were read after
+the harness's own cleanup and do not establish the cause. This isolated contract
+does not run the packaged app, Geph or bundled Chromium158. The failed candidate
+is not admitted; remaining queued work was cancelled after retaining the failed
+job evidence. The follow-up captures the failed predicate and fixture counters before cleanup,
+using existing observations only. Launcher return status, closed state and PID
+field presence distinguish a failed query from a successful response with no PID;
+no raw command, profile, URL or query output is retained in the added fields.
+The same ownership, readiness, timeout and cleanup rules remain in force. A second
+cleanup failure keeps the first observation visible in the CLI error. Scoped
+mocked tests cover those paths; actual native cause remains unknown until observed.
+
 ## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in

@@ -1641,9 +1641,20 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
         )
 
 
-def _launch_agent_snapshot(target: str) -> tuple[int | None, str | None]:
+def _launch_agent_snapshot(
+    target: str, *, observation: dict[str, object] | None = None,
+) -> tuple[int | None, str | None]:
     result = _run(("/bin/launchctl", "print", target), check=False)
+    if observation is not None:
+        # POSIX process status fits this range. Never coerce/clamp an unexpected
+        # value into an apparently exact observed exit status.
+        observation["query_returncode"] = (
+            result.returncode if type(result.returncode) is int
+            and -255 <= result.returncode <= 255 else None
+        )
     if result.returncode != 0:
+        if observation is not None:
+            observation.update(state="query_failed", pid_present=None)
         return None, None
     pid, state = None, None
     pid_seen = False
@@ -1662,11 +1673,19 @@ def _launch_agent_snapshot(target: str) -> tuple[int | None, str | None]:
                     f"Chrome LaunchAgent exposed an invalid pid: {line!r}"
                 ) from exc
             pid = pid if pid > 0 else None
+    if observation is not None:
+        observation.update(
+            state=(state if state in {"running", "xpcproxy", "waiting", "exited", "not running"}
+                   else "missing" if state is None else "other"),
+            pid_present=pid_seen,
+        )
     return pid, state
 
 
-def _launch_agent_pid(target: str) -> int | None:
-    return _launch_agent_snapshot(target)[0]
+def _launch_agent_pid(
+    target: str, *, observation: dict[str, object] | None = None,
+) -> int | None:
+    return _launch_agent_snapshot(target, observation=observation)[0]
 
 
 def _process_identity(pid: int) -> tuple[int, int, str]:
@@ -1958,16 +1977,21 @@ def _owned_chrome_process_alive(
     executable: Path,
     profile: Path,
     ownership: ChromeOwnership | None = None,
+    *,
+    observation: dict[str, object] | None = None,
 ) -> bool:
-    return any(
-        process == expected
-        for process in _owned_chrome_processes(
-            uid,
-            executable,
-            profile,
-            ownership,
-        )
-    )
+    processes = _owned_chrome_processes(uid, executable, profile, ownership)
+    alive = any(process == expected for process in processes)
+    if observation is not None:
+        same_pid = tuple(process for process in processes if process.pid == expected.pid)
+        observation.update({
+            "state": "exact" if alive else "tuple_mismatch" if same_pid else "pid_not_in_owned_snapshot",
+            "pid_match": bool(same_pid),
+            "pgid_match": any(process.process_group == expected.process_group for process in same_pid),
+            "command_match": any(process.command == expected.command for process in same_pid),
+            "exact_match": alive,
+        })
+    return alive
 
 
 def _signal_owned_chrome_processes(
@@ -2507,6 +2531,7 @@ def _run_chrome(
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
     launch_started_at: float | None = None
+    liveness: dict[str, object] | None = None
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
@@ -2636,18 +2661,37 @@ def _run_chrome(
                 raise QualificationError(
                     f"Chrome emitted duplicate semantic ready callbacks: {snapshot!r}"
                 )
+            launcher_observation: dict[str, object] = {}
+            observed_launch_pid = _launch_agent_pid(launch.target, observation=launcher_observation)
+            browser_observation: dict[str, object] = {"state": "not_checked"}
             if (
-                _launch_agent_pid(launch.target) != launch.pid
+                observed_launch_pid != launch.pid
                 or not _owned_chrome_process_alive(
                     browser,
                     uid,
                     executable,
                     profile,
                     ownership,
+                    observation=browser_observation,
                 )
             ):
+                # Preserve the actual failed observation before cleanup can stop
+                # processes or the page can advance. No additional process query.
+                liveness = {
+                    "predicate": "launch_pid_mismatch" if observed_launch_pid != launch.pid else "browser_identity_mismatch",
+                    "expected_launch_pid": launch.pid,
+                    "observed_launch_pid": observed_launch_pid,
+                    "launcher": launcher_observation,
+                    "browser": browser_observation,
+                    "elapsed_ms": max(0, round((time.monotonic() - launch_started_at) * 1000)),
+                    "fixture": {name: getattr(snapshot, name) for name in (
+                        "root_visits", "css_requests", "script_requests", "image_requests",
+                        "ready_requests", "pending_navigation_signals",
+                    )},
+                }
                 raise QualificationError(
-                    "owned Chrome exited before semantic completion"
+                    "owned Chrome exited before semantic completion; liveness="
+                    + json.dumps(liveness, separators=(",", ":"), sort_keys=True)
                 )
             time.sleep(0.1)
         else:
@@ -2751,7 +2795,13 @@ def _run_chrome(
             )
 
     if cleanup_errors:
-        raise QualificationError("; ".join(cleanup_errors)) from failure
+        # The CLI renders str(error), so keep the first liveness observation
+        # visible even when cleanup also fails; retain the original cause too.
+        detail = (
+            "; liveness=" + json.dumps(liveness, separators=(",", ":"), sort_keys=True)
+            if liveness is not None else ""
+        )
+        raise QualificationError("; ".join(cleanup_errors) + detail) from failure
     if failure is not None:
         detail = "\n".join(
             f"{name} stderr:\n{captured.decode('utf-8', errors='replace')}"

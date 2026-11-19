@@ -1,12 +1,66 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, preview .36 CI fixture authentication failure
+## Current continuation — 2026-11-19, preview .36 repaired main candidate
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch: `codex/fixture-auth-error-evidence`; PR483 head is
-`ed98fe59bd63797f7ec41c9b0fb59e324d03c320`, based on merged main C36
-`dd8b8373a4357e550b3133294f5bbdc36173ad53`, tree
-`29cfde32b191e8ed464bd4e6e4c3b3a95fee37eb`. This candidate is not qualified.
+Branch: `codex/chromium-liveness-evidence`, based on merged main
+`eaecd536ff827a146eff840eea9aac9f18ee2461`, tree
+`d580732c1c5052d5ffff7184fcd23a10520ff9c8`. PR483 was CAS-merged from
+`82d41492681aa106dda1e764e88010c3a5f1de4d` after whole CI44515828468/1
+and audit44515828463/1 passed, all3 required checks passed and review threads
+were resolved. Root rehashed the34-file receipt and8-file native evidence closure.
+2360 daemon tests,249 tray tests and7 native Stop/Quit scenarios passed;4 native
+authorizations completed, credentials verified and cleanup[]. Report SHA
+`c8ba1246c547717211a0b6f1ba7afc69f717755cebc0066a27a09b76f4febd3b`.
+Test checkout1467772 and merged main have the same tree. PR observer27823 exited0.
+Receipt: `fixture-auth-diagnostics/pr483-followup/receipt.json`, SHA
+`5af293eb121a3504e4f584c912978daef5d515bae66701dcb7fa34b769d80499`.
+
+Main CI44519893904/1 has a confirmed failure in
+`chromium-webrequest-contract` job135545664720. Audit44519894032/1 passed.
+The browser contract stopped with `owned Chrome exited before semantic completion`
+in the first incomplete-response scenario. This message conflates launcher PID
+mismatch and failure to find the complete stored ChromeProcess tuple; the latter
+includes mutable argv. No failed predicate/snapshot was retained. Initial browser
+ownership and DevTools readiness passed. GPU exit15 was collected after the test's
+own cleanup, so it is not established as the cause. This uses isolated CfT151,
+not the packaged Chromium158 or the installed app/Geph. Root requested cancellation of remaining queued work after preserving this failure;
+the observer confirmed terminal cancellation. No retry is authorized by
+this evidence. Prepare bounded pre-cleanup diagnostics; preserve all admission
+and single-launch rules. The actual cause remains unknown.
+Fresh evidence root: `output/continuation-20261119/preview36-fixture-release`.
+Failure receipt: `main-ci/failure-chromium/failure-receipt.json`, SHA
+`26a2cc9de0c5020a857ba304304c8004e5ff7888023d49ac63ecc04b01f9bd23`.
+Fresh small audit receipt SHA
+`21564fa853fed93bc9768e80f724dfa5edd3ab18e84573dccde9d5fa16ca1f2f`.
+Main observer session88786 exited1 after terminal cancellation. Its original
+watcher receipt stays FAILURE_OR_INCOMPLETE; no collector ran. The terminal
+disposition distinguishes primary Chromium failure from root-requested cancellation
+and consequent aggregates: main-ci/terminal-disposition.json SHA
+`e6ee3dbb8cfd0141053dceeb6b92540829c57e5b56798bdf5c3cfc9d87d6fd60`.
+Watcher SHA
+`3693682a500a8a95383fe766fdfc3130d0949fb89ab6f697803da82108d9cb69`.
+The independently reviewed liveness diagnostic patch is now applied. It captures
+the original launcher-PID or browser tuple predicate, elapsed time and6 fixture
+counters before cleanup; no additional process query or raw argv/profile/URL.
+Short-circuit, ready/ownership acceptance, single launch and cleanup are unchanged.
+Cleanup failures retain that first observation in both cause and CLI-visible text.
+Causal controls:6 failure subcases on baseline,5 passing methods on candidate;
+no native/network/process calls,45MB RSS. Final helper SHA
+`901e9cf90279236f59213462a753b798a083d645d7d8637fc79c071f1c3ed41f`.
+Evidence: `output/continuation-20261119/chromium-liveness-evidence`, patch SHA
+`9493d37cfc4a62add618421654a8a2a42f6489fbc0b8e099a0485dc3d09f476c`.
+An independently reviewed extension retains returncode, closed state and field
+presence from the SAME launchctl query, separating query failure from missing PID.
+Its3 causal RED cases and7 focused tests passed with no forbidden calls; patch SHA
+`675535afe7a05f21116c404284844c7035cd0d0cda010a482d6db4e88b01c487`.
+Before that extension,92 safe affected unit tests passed;9 actual server/subprocess
+cases were explicitly deferred to hosted CI. No whole-suite claim. Historical pins
+are unchanged. Next: PR CI with the new diagnostics; actual old cause is unknown.
+Its8 release helpers were copied byte-identically;22 contract paths are unchanged.
+No candidate collector/admission, G/P/R dispatch or publication. Prepared G/R
+bindings are inactive; G has no accepted audit pin. The former main C36
+`dd8b8373a4357e550b3133294f5bbdc36173ad53` failure below remains historical.
 PR482 merged after exact-head CI 44498697785/1 and audit 44498697808/1 passed;
 all three required contexts were green and review threads resolved. Its tested
 checkout `2ac7fb06` and head `7eeec2d1` have the same tree as C36. All 249 tray
@@ -58,10 +112,11 @@ Lifecycle/composed smoke and browser/build passed; audit44512409642/1 passed.
 The earlier authentication failure did not recur; its cause is still unproven.
 Observer74452 exited0 after whole terminal state. Evidence is under
 `fixture-auth-diagnostics/pr483`; do not restart it or rerun that failed head.
-The independently reviewed test-only follow-up is applied; runtime helper9b1
-and production public35 pin7bee are unchanged. Next: push that follow-up and bind
-only its new exact-head CI/audit runs before merge. A later .36 candidate needs fresh
-source/run bindings; the prepared C36 dispatchers must not be used for another SHA.
+The independently reviewed test-only follow-up is applied and pushed; runtime
+helper9b1 and production public35 pin7bee are unchanged. Sourcery's classifier
+call-assertion thread was resolved after the fix. Exact-head CI44515828468/1 and audit44515828463/1 subsequently passed;
+PR483 was merged as recorded above. No old failed run was retried. Fresh .36
+main candidate bindings are required; the old C36 dispatchers must not be used.
 An additional read-only review found the native classifier sufficient to observe
 the known exit10 boundary, while generic authentication failure may still not
 identify its root cause. Other create-message patterns and a leading-dash password
