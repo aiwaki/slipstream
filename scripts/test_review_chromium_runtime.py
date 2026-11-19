@@ -34,26 +34,43 @@ class ChromiumRuntimeReviewTests(unittest.TestCase):
                                                         "version": review.VERSION}}]}]}
 
     def catalogs(self) -> tuple[dict, dict, dict]:
-        version = {"version": review.VERSION, "revision": review.REVISION,
-                   "downloads": {"chrome-headless-shell": [{"platform": "mac-arm64", "url": review.ARCHIVE_URL}]}}
-        metadata = {"name": review.OBJECT, "size": str(review.LENGTH),
-                    "generation": review.GENERATION, "md5Hash": review.MD5_BASE64}
+        # Independent identities from the reviewed official metadata snapshot.
+        archive = "158.0.8127.36/mac-arm64/chrome-headless-shell-mac-arm64.zip"
+        version = {"version": "158.0.8127.36", "revision": "1727472",
+                   "downloads": {"chrome-headless-shell": [{"platform": "mac-arm64",
+                       "url": "https://storage.googleapis.com/chrome-for-testing-public/" + archive}]}}
+        metadata = {"name": archive, "size": "105057133",
+                    "generation": "1794441107973562", "md5Hash": "2DIogA0Ml0ZJYGyvmRyJbw=="}
         return {"channels": {"Stable": copy.deepcopy(version)}}, version, metadata
 
     def test_official_catalogs_agree(self) -> None:
         review.validate_catalogs(*self.catalogs())
 
     def test_catalog_version_revision_url_and_generation_drift_reject(self) -> None:
-        for field in ("version", "revision", "url", "generation"):
+        for field in ("version", "revision", "url", "generation", "size", "md5Hash"):
             with self.subTest(field=field):
                 catalog, version, metadata = self.catalogs()
                 if field == "url":
                     version["downloads"]["chrome-headless-shell"][0]["url"] = "https://example.invalid/runtime.zip"
-                elif field == "generation":
-                    metadata[field] = "other-generation"
+                elif field in ("generation", "size", "md5Hash"):
+                    metadata[field] = "unexpected"
                 else:
                     version[field] = "unexpected"
                 with self.assertRaises(ValueError):
+                    review.validate_catalogs(catalog, version, metadata)
+
+    def test_stable_catalog_version_revision_and_url_drift_reject(self) -> None:
+        for field in ("version", "revision", "url"):
+            with self.subTest(field=field):
+                catalog, version, metadata = self.catalogs()
+                stable = catalog["channels"]["Stable"]
+                if field == "url":
+                    stable["downloads"]["chrome-headless-shell"][0]["url"] = "https://example.invalid/runtime.zip"
+                    error = "official mac-arm64 archive identity differs"
+                else:
+                    stable[field] = "unexpected"
+                    error = "official version/revision differs"
+                with self.assertRaisesRegex(ValueError, error):
                     review.validate_catalogs(catalog, version, metadata)
 
     def test_duplicate_architecture_entry_rejects(self) -> None:
@@ -149,6 +166,7 @@ class ChromiumRuntimeReviewTests(unittest.TestCase):
         self.assertIn("--host-resolver-rules=MAP * ~NOTFOUND", args)
         self.assertTrue(args[-1].startswith("data:text/html,"))
         self.assertIn("document.body.textContent", review.urllib.parse.unquote(args[-1]))
+        self.assertIn("slipstream-chromium-review-158-dom-ready", review.urllib.parse.unquote(args[-1]))
 
     def test_smoke_deadline_still_runs_owned_cleanup(self) -> None:
         process = mock.Mock()

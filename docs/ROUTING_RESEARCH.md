@@ -2834,3 +2834,108 @@ production parser change. The runtime-review Popen audit has no concrete command
 injection path in its two current callers: fixed argv lists with shell disabled,
 a validated private executable path, fixed flags and synthetic HTML. No scanner
 suppression was added. Full boundary review: `output/continuation-20261030/pr426-review/`.
+
+
+### Chromium 158 review and audit policy maintenance, 2026-11-19
+
+The fresh application audit in PR479 stopped because the Chromium 156 integrity
+review expired November13. The official Chrome for Testing catalogs now select
+Stable158.0.8127.36, revision1727472. Evidence-only PR480 run44481148015/1 checked
+that exact mac-arm64 object on a disposable hosted Mac: generation1794441107973562,
+105057133bytes, archive SHA256
+`c24d40a3786322ff3a5e3ac6eed162226cbaf07ebe468715407827226b0f8897`.
+Its extracted executable SHA256 is
+`aadfb5b2866e701a4c7ca79077250c8bc8276f8e28a64bce5f91d1bf899511b7`.
+The archive hash belongs in SOURCE, the runtime archive identity constant and
+the generic SBOM policy; the executable hash remains a separate manifest check.
+
+Actual PR merge6ab674d1358a1e264755c0bb68e6628e1218b059 matched head0e1d59dc9's
+tree. The exact job, upload action, artifact14509155049, 9156-byte ZIP digest and
+all11JSON reports were authenticated before adopting these pins. Root rehashed
+22retained files,7source blobs and3independent official metadata snapshots.
+Receipt: `output/continuation-20261119/chromium158/hosted-review/verification.json`,
+SHAe1c8ed9cb6613096894ba310dd079f96085c2104350a44f8c376ca7339991aea.
+
+Version output, local script-mutated DOM with the sandbox enabled, owned-process
+exit and temporary archive/profile cleanup passed. Three CVDisplayLink errors
+were present in stderr; successful synthetic DOM execution does not establish
+real graphical browser or arbitrary-site behavior. Fresh checksum-verified OSV
+Scanner2.3.8 still reports this exact generic package with an empty ecosystem.
+Mapping remains unsupported: no findings is not vulnerability clearance. The
+new artifact-integrity review is bounded through December3, following the existing
+14-day interval. Scanner findings, expired review or identity drift still refuse.
+No runtime archive or browser was downloaded or executed on the user's Mac.
+
+Separately, the current [GitHub advisory](https://github.com/advisories/GHSA-qwgh-2vcv-g2f7)
+and [OSV record](https://osv.dev/vulnerability/GHSA-qwgh-2vcv-g2f7) now identify
+block-buffer>=0.11.0,<0.12.1, excluding the application's exact0.10.4. Both registry
+and advisory spelling queries for0.10.4 returned empty results; the0.11.0 positive
+control returned this advisory. The retained crate still matches Cargo.lock's
+`3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71`;
+source review again found a separate private cursor and no ReadBuffer. The expired
+application exception is removed rather than renewed. This is a conclusion about
+this advisory and this exact crate only; the full current audit remains required.
+Evidence: `output/continuation-20261119/admin-fixture/pr479/block-buffer-review/`,
+review SHAd643d2d45423567c325be3d4d55ee96bfb43e0820e001f1bebca8b2cf77c2cd9.
+
+New Clippy1.100 also rejects the unchanged verbose boolean return in
+signal_uninstall_ready. Returning result.is_ok() preserves both the successful
+and failed write/link results and keeps temporary-file cleanup in the same place;
+no warning is suppressed. Neither maintenance change establishes the cause of
+previous network interruptions. Published .35 payloads and accepted historical
+evidence stay unchanged; a new product candidate needs its affected checks.
+
+### Quinn lockfile findings after the Chromium refresh, 2026-11-19
+
+PR480 audit44482432841/1 at head82591e09 reached the current package audit after
+the expired Chromium policy was resolved. Its authenticated report contains
+three blocking findings (367 scanned packages, one integrity-only package,
+eight informational findings, no accepted exceptions). Exact checkout was
+c9440fe03a25550323c26a296c893bd4667c2d0b. The 39,537-byte artifact14508578990,
+upload digest, report/SBOM and source inputs were checked; root rehashed31retained
+and4source files. This workflow emits no report attestation. It retains the
+evaluated report and SBOM, not the full raw scanner result; the official RustSec
+alias records were fetched separately and bound to their GHSA identifiers.
+
+| Locked package | Confirmed advisory | Fixed version on the same branch |
+|---|---|---|
+| quinn-proto0.11.18 | [RUSTSEC-2026-0523 / GHSA-53rm-773f-4q8c](https://rustsec.org/advisories/RUSTSEC-2026-0523.html) | 0.11.19 |
+| quinn-proto0.11.18 | [RUSTSEC-2026-0524 / GHSA-wppq-2f6r-wfvm](https://rustsec.org/advisories/RUSTSEC-2026-0524.html) | 0.11.19 |
+| quinn-udp0.5.15 | [RUSTSEC-2026-0538 / GHSA-6pp4-4cxf-xf88](https://rustsec.org/advisories/RUSTSEC-2026-0538.html) | 0.5.16 |
+
+The lockfile contains two paths to reqwest0.12.28: directly from Slipstream and
+through tauri-plugin-updater2.9.0. Both reach quinn0.11.11 and these two crates.
+The exact cached Quinn manifest requires proto0.11.15 and udp0.5, admitting both
+fixed patch versions. Reqwest declares Quinn optional under HTTP/3; Slipstream's
+direct reqwest features are json, stream and rustls-tls with defaults disabled.
+This establishes lockfile exposure and a compatible repair, not actual runtime
+reachability, exploitation or a cause of the user's previous connection failures.
+No not-affected exception is proposed. The narrow repair must preserve the other
+lockfile package records and pass the fresh required dependency/build checks.
+
+Evidence: `output/continuation-20261119/chromium158/pr480-final/dependency-findings/`;
+findings SHA644ad48ccd73a5a6214ad0be5cccc05417fd361b2cb4401bb23ba265d2beeee4,
+artifact-authentication SHAeb10e0a7017e99ffaa63c5d624d1a78a1e89ec9cd178c77798445655bf31c54f.
+
+The two precise offline Cargo updates initially also reassigned eleven unrelated
+dependency edges to older already-locked versions. Each original edge was checked
+against its exact registry requirements before preserving it. The final delta is
+only the two package versions/checksums; all dependency edges and other package
+records remain unchanged. Full `cargo metadata --locked --offline` for
+aarch64-apple-darwin then succeeded without altering the lock. This resolves the
+macOS graph without building or running the application; hosted tests/audit remain
+required. Final lock SHA
+`a980474139e2cdccf24892e2c446d6c71b1e114150f754cc6bcc1ec930b0e87b`.
+Independent review confirmed the delta; root rehashed12evidence files,2source
+files and both cached crate archives, then compared the complete548-record lock
+structure after normalizing only the two version/checksum pairs. Fix receipt
+SHAe8853923b2248d9fabd825b9ab5762105f45202da132b4c1927706bc9f4eec54:
+`/Users/aiwaki/.codex/state/plugins/codex-security/scans/slipstream-codebase-audit-20260905/artifacts-aa4fe8ddf717bfdd85f05c189d5fdd54f1676d9b2f0b4e75600590cb71c856be/artifacts/20261119-pr480-quinn-fix/verification.json`.
+
+PR480 review also identified missing negative tests for the independent Stable
+catalog. The production helper already rejected mismatched Stable version,
+revision and archive URL; the new test exercises each while leaving the separate
+version endpoint and object metadata valid. Three selected tests pass with zero
+forbidden calls and unchanged production helper. Receipt:
+`output/continuation-20261119/chromium158/stable-catalog-drift/verification.json`,
+SHAd32afa7b60d2eca6b152d53b53328c0cc43d25bfae386755ad74246f5ddb166c.

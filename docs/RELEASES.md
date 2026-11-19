@@ -1,5 +1,27 @@
 # Release Policy
 
+## Unreleased dependency maintenance — 2026-11-19
+
+PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in
+[44481148015/1](https://github.com/aiwaki/slipstream/actions/runs/44481148015/attempts/1).
+The review verifies archive/executable identity, sandboxed synthetic DOM and
+cleanup. Its generic OSV mapping is still unsupported, so it provides no general
+vulnerability clearance. The artifact-only policy is bounded through December3.
+The obsolete block-buffer0.10.4 advisory exception is removed after fresh primary
+advisory/source review; the ordinary current dependency audit remains required.
+
+The subsequent audit found three Quinn advisories in the application lockfile.
+The follow-up pins their compatible fixed versions, quinn-proto0.11.19 and
+quinn-udp0.5.16, without adding exceptions or changing routing. PR480 merged as
+39b127c04698143cd7f32fbe00e2e4b81a7a8509 after CI44484666448/1 and audit44484666299/1
+passed on head58d82bd. The merged tree equals the tested tree. The audit has zero
+blocking findings and zero accepted exceptions; all required checks passed.
+
+This is merged source maintenance, not a published release or a workstation
+installation. It does not replace `.35` assets or the accepted receipts for that
+exact version. Normal public-update and rollback qualification remain open.
+Full evidence and limitations: ROUTING_RESEARCH.md, Chromium158 review2026-11-19.
+
 ## Published preview .35 — 2026-11-10 UTC
 
 [Slipstream 0.1.9-preview.35](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.35)
@@ -1130,7 +1152,7 @@ and primary/cleanup diagnostics before another observer attempt. Public update
 and public rollback remain unqualified. No workstation changes were made.
 
 The November19 observer repair preserves the failing fixture stage plus primary
-and cleanup outcomes in a compact secret-free diagnostic.23 targeted fixture
+and cleanup outcomes in a compact secret-free diagnostic.25 targeted fixture
 cases and14 source-binding cases pass. Only the reviewed executing helper may
 differ from product5a; candidate payloads and the other7 shared helpers remain
 unchanged. This fixes lost diagnostic evidence, not the unproven native cause.
