@@ -1,47 +1,36 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, post-cancel discovery failure
+## Current continuation — 2026-11-19, preview .36 prepared
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Active branch `codex/public-preview35-terminal-followup`; main/observer is
-4618210128ac4265064729ff8b1675b9e04a275a after merged PR479. Its tree equals tested
-head57f7caa3 and actual CI/audit checkout2d1d4e38. CI44487262574/1 and
-audit44487262491/1 passed all three required checks; all five review threads are
-resolved. Receipt: `output/continuation-20261119/admin-fixture/pr479/final-integrated/receipt.json`.
+Branch: `codex/preview36-cancel-recovery`, based on main
+`b75d8b25511367a86235184eb0b024569cae79cf` (merged PR481). Its tree equals tested
+head `c5ea7b2384604aa82d04dff919a3cb7fccec9146` and checkout `f8731536`.
+CI 44494033363/1, audit 44494033574/1 and all three required checks passed;
+all 249 tray tests, including 5 new cancellation regressions, passed.
+Evidence: `output/continuation-20261119/admin-fixture/public-cancel-product-fix/pr481`.
+PR479 is merged at `4618210128ac4265064729ff8b1675b9e04a275a` with accepted exact CI.
 
-PR480's Chromium158/Quinn patches and Clippy fix remain merged source maintenance;
-published .35 bytes are unchanged. Reuse CI44484666448/1, audit44484666299/1 and
-Chromium review44481148015/1. PR479 preserves fixture failure stages and cancellation
-without exposing credentials;25 fixture and14 source-binding cases passed.
-Both exact audits have0 blocking findings,8 informational and0 exceptions.
+Public commit 44490827068/1 failed after successful native Cancel, at subsequent
+discovery HTTP 403. Its report is authenticated; no root commit or success context
+exists. See [RELEASES.md](RELEASES.md#public-35-follow-up--2026-11-11-local) for
+failure/cleanup evidence and attribution limits. Do not rerun this old pair.
+The source fix preserves a validated offer after confirmed cancellation; it is
+not in published .34/.35. Both public commit/rollback gates remain unqualified.
 
-ONE ordinary public commit44490827068/1 was dispatched at08:49UTC after accepted
-PR evidence, independent binding review and two fresh source/asset/inventory
-checks. Evidence directory: `output/continuation-20261119/admin-fixture/public-commit`.
-Run completed FAILURE; watcher7184 exited and the35-member report was authenticated.
-OLD found .35, Install reached native authorization, and real Cancel successfully
-removed preparation while preserving the old daemon. Automatic post-Cancel
-discovery then returned403; a separate anonymous probe confirmed remaining0.
-The app's original response headers/page were not retained, so quota attribution
-to that403 remains correlation. No root commit, success context or retry exists.
-The narrow product fix is now prepared on this branch: a typed confirmed Cancel
-requires successful root/local cleanup, preserves the exact offer and avoids
-rediscovery/error notification. Uncertain outcomes and cleanup errors retain the
-existing guards; each later explicit Install still validates metadata/signature.
-Five Rust tests were added, not executed locally. Source review CLEAR and
-rustfmt/diff checks pass. Evidence: `admin-fixture/public-cancel-product-fix/`
-under the same November19 output directory. Next: review/publish this source PR
-and observe its exact hosted compile/tests before considering a new candidate.
-This does not repair the immutable published OLD .34 used by the failed run.
-Do not rerun this attempt or transfer evidence to a different candidate.
-Both public commit/rollback gates remain unqualified. Detailed evidence and the
-native Cancel boundary are recorded in RELEASES.md and the evidence directory.
-Public workflow installs unchanged published .34/.35 payloads from qualified
-source5a; PR480's new product bytes are not installed by this test. Preserve all
-candidate/signature/checker guards and the separate packaged-observer allowlist.
+The independently reviewed 12-file .36 version/admission patch is now applied.
+All candidate hashes match the reviewed patch. Version synchronization, 145 focused
+pair/observer/workflow tests, 3 build-configuration tests and diff checks passed.
+Evidence: `output/continuation-20261119/preview36-preparation/applied-verification.json`.
+This PR also shortens the checkpoint as agreed in the PR481 documentation review.
+Next: open the .36 PR and observe its existing exact-source CI/audit. After merge,
+freeze the new main source and built candidate; require fresh native G, packaged P
+for .35 → .36 and readiness R before publication. Reuse unchanged Geph r5/Chromium
+review. This pair delivers the fix but executes pre-install Cancel in OLD .35;
+it does not qualify .36 as the initiating app. Keep published assets intact.
 
-No workstation app/service/network/account/learning changes or application
-payload downloads. A fresh user-approved window is required for Mac installation.
+No workstation app/service/network/account/learning changes or native tests.
+A fresh user-approved window is required for Mac installation.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.

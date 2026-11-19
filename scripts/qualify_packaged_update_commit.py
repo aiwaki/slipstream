@@ -32,8 +32,8 @@ def prerequisite(metadata, directory, pair, expected, run_id, attempt):
             and metadata.get("path") == ".github/workflows/native-root-update-qualification.yml"
             and metadata.get("status") == "completed" and metadata.get("conclusion") == "success",
             "root prerequisite must be successful exact NEW main workflow/attempt")
-    require(expected["old"]["version"] == "0.1.9-preview.34"
-            and expected["new"]["version"] == "0.1.9-preview.35", "this gate requires normal .34 -> .35 candidates")
+    require(expected["old"]["version"] == "0.1.9-preview.35"
+            and expected["new"]["version"] == "0.1.9-preview.36", "this gate requires normal .35 -> .36 candidates")
     root_pair = None
     receipt_hashes = {}
     for mode in MODES:

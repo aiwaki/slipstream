@@ -27,9 +27,9 @@ ALLOWED = frozenset({
 # delta may be reused. Future changes need an explicit reviewed pin update.
 PINNED_SHA256 = {
     "scripts/qualify_packaged_update_commit.py":
-        "29642dde6bbdf1e1f065365b25881c63e80ac4aa6bfaeefec806651f02e52905",
+        "eeae17b5e4dd80f4214c55462a4477c6206fd8496898e9e591241940044028a8",
     ".github/workflows/packaged-update-commit-qualification.yml":
-        "54f62d15254a17d61fab6041bc789c06340687743bfeed5b264b7341cef7c5cf",
+        "92899b4487ccb7adb5a00d5c1ebd8f9c4814e90a3ddc4b9c534deb0feee66bcb",
 }
 
 
