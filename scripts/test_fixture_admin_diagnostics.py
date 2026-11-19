@@ -411,7 +411,7 @@ class FixtureAdminNativeOutputTests(unittest.TestCase):
             with self.subTest(failed=failed):
                 with self.fixture(self.SETUP + self.CLEANUP,
                                   failures={"authenticate": 10} if failed else {}):
-                    with mock.patch.object(smoke, "_fixture_admin_native", side_effect=ValueError(self.PRIVATE)):
+                    with mock.patch.object(smoke, "_fixture_admin_native", side_effect=ValueError(self.PRIVATE)) as classifier:
                         if failed:
                             try:
                                 with smoke.fixture_admin():
@@ -421,8 +421,13 @@ class FixtureAdminNativeOutputTests(unittest.TestCase):
                                 self.assertEqual(error.diagnostic["primary"]["native"], self.native("unrecognized"))
                                 self.assert_private(error)
                         else:
+                            body_completed = False
                             with smoke.fixture_admin():
-                                pass
+                                body_completed = True
+                            self.assertTrue(body_completed)
+                            self.assertEqual(classifier.call_args_list, [
+                                mock.call("create", b"", b""), mock.call("authenticate", b"", b""),
+                            ])
 
     def test_create_observation_survives_body_and_process_control_without_identity_change(self):
         create = b"New account password error. opaque (5402)\n"

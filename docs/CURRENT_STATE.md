@@ -3,7 +3,8 @@
 ## Current continuation — 2026-11-19, preview .36 CI fixture authentication failure
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch: `codex/fixture-auth-error-evidence`; base HEAD is merged main C36
+Branch: `codex/fixture-auth-error-evidence`; PR483 head is
+`ed98fe59bd63797f7ec41c9b0fb59e324d03c320`, based on merged main C36
 `dd8b8373a4357e550b3133294f5bbdc36173ad53`, tree
 `29cfde32b191e8ed464bd4e6e4c3b3a95fee37eb`. This candidate is not qualified.
 PR482 merged after exact-head CI 44498697785/1 and audit 44498697808/1 passed;
@@ -41,9 +42,30 @@ Independent review accepted patch SHA
 it is applied with helper SHA
 `9b1dc2854f419875a941f3a5a3985527161dc120cd823d0d9d1b62102a14643b`.
 Evidence: `output/continuation-20261119/fixture-auth-diagnostics`.
-Next: finish focused checks and the diagnostic PR, then inspect its hosted fixture
-result. Do not rerun C36 or admit its candidate. A later .36 candidate needs fresh
+Applied-source checks also passed:44 Stop/Quit tests and18 subtests; the identical
+29 diagnostic tests were reused. PR483 initial CI44512409701/1 completed failure:
+2358 daemon tests passed,10 skipped, one old public35 positive fixture failed
+because it assumed the current helper still matched the frozen historical pin.
+Its test-only correction isolates the positive fixture and separately exercises
+actual prepare_main rejection against the unchanged production pin before public
+download/authentication. It also addresses the review's missing classifier-call
+assertion.16 affected tests plus2 subtests passed;10 inapplicable cases still skip.
+The unchanged native helper passed actual hosted Stop/Quit: all7 cases,4 confirmed
+completed authorization submissions, verified temporary credentials,cleanup[].
+Report SHA `938b3f65b03f4d08c288733756682074f4044e33b73c22e962d8b27bee67f38a`;
+artifact14525965468. Test checkout63af484 has the same tree as diagnostic headed98.
+Lifecycle/composed smoke and browser/build passed; audit44512409642/1 passed.
+The earlier authentication failure did not recur; its cause is still unproven.
+Observer74452 exited0 after whole terminal state. Evidence is under
+`fixture-auth-diagnostics/pr483`; do not restart it or rerun that failed head.
+The independently reviewed test-only follow-up is applied; runtime helper9b1
+and production public35 pin7bee are unchanged. Next: push that follow-up and bind
+only its new exact-head CI/audit runs before merge. A later .36 candidate needs fresh
 source/run bindings; the prepared C36 dispatchers must not be used for another SHA.
+An additional read-only review found the native classifier sufficient to observe
+the known exit10 boundary, while generic authentication failure may still not
+identify its root cause. Other create-message patterns and a leading-dash password
+hypothesis are unconfirmed; no speculative generator/parser expansion is pending.
 Candidate assembly/signing/browser/notification jobs passed, but the whole failed
 run cannot admit G/P/R or publication. No .36 candidate acceptance is claimed.
 
