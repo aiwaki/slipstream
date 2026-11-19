@@ -62,8 +62,10 @@ class PrivateOperationError(QualificationError):
 class FixtureAdminError(QualificationError):
     """Closed, compact evidence that survives the public reason's 512-byte cap."""
 
-    def __init__(self, primary, cleanup):
+    def __init__(self, primary, cleanup, create_native=None):
         self.diagnostic = {"primary": primary, "cleanup": cleanup}
+        if create_native is not None:
+            self.diagnostic["create_native"] = create_native
         super().__init__("fixture_admin " + json.dumps(self.diagnostic, separators=(",", ":")))
 
 
@@ -593,6 +595,9 @@ def record_failure(result, error, secrets_to_hide):
         result["fixture_admin"] = {
             "primary": _fixture_admin_issue("body", error), "cleanup": {"status": "confirmed"},
         }
+        create_native = getattr(error, "_fixture_admin_create_native", None)
+        if create_native is not None:
+            result["fixture_admin"]["create_native"] = create_native
     detail = redacted_text(str(error), secrets_to_hide)[:1000]
     if "failure" not in result:
         result["failure"] = detail
@@ -885,7 +890,69 @@ def account_names():
     return set(names)
 
 
-def _fixture_admin_issue(stage, error):
+def _fixture_admin_native(stage, stdout, stderr):
+    """Closed output classification, never a credential or acceptance decision."""
+    def result(status, error=None, code=None):
+        return {"status": status, "error": error, "code": code}
+
+    if type(stdout) is not bytes or type(stderr) is not bytes:
+        return result("unrecognized")
+    if len(stdout) + len(stderr) > 8192:
+        return result("oversized")
+    try:
+        lines = (stdout.decode("utf-8") + "\n" + stderr.decode("utf-8")).splitlines()
+    except UnicodeDecodeError:
+        return result("unrecognized")
+    if not any(line.strip() for line in lines):
+        return result("absent")
+    # Apple DS enums are recognized only with their exact numeric pairing.
+    ds_errors = {
+        ("-14090", "eDSAuthFailed"): -14090,
+        ("-14096", "eDSAuthBadPassword"): -14096,
+        ("-14098", "eDSAuthUnknownUser"): -14098,
+        ("-14120", "eDSPermissionError"): -14120,
+    }
+    found, unknown_marker = set(), False
+    for line in lines:
+        if stage == "authenticate" and "<dscl_cmd> DS Error:" in line:
+            match = re.fullmatch(r"<dscl_cmd> DS Error: (-?[0-9]+) \((eDS[A-Za-z0-9]+)\)", line.strip())
+            pair = match.groups() if match else None
+            if pair in ds_errors:
+                found.add((pair[1], ds_errors[pair]))
+            else:
+                unknown_marker = True
+        elif stage == "create" and "New account password error." in line:
+            match = re.search(r"New account password error\. [^\r\n]* \((540[0-6])\)$", line)
+            if match:
+                # sysadminctl's NSError domain is unknown. Record only its fixed
+                # marker and this closed code set, not an OD cause inference.
+                found.add(("sysadminctl_password_error", int(match[1])))
+            else:
+                unknown_marker = True
+    if len(found) > 1:
+        return result("conflicting")
+    if unknown_marker or not found:
+        return result("unrecognized")
+    error, code = found.pop()
+    return result("recognized", error, code)
+
+
+def _fixture_admin_command(stage, args, native, *, timeout):
+    # Same single private command and return-code policy as run(check=True).
+    # Inspect only completed create/auth outputs before run would discard them.
+    result = run(args, check=False, sensitive=True, timeout=timeout)
+    try:
+        native[stage] = _fixture_admin_native(stage, result.stdout, result.stderr)
+    except Exception:
+        # Optional observation must not change command acceptance or its error.
+        native[stage] = {"status": "unrecognized", "error": None, "code": None}
+    if result.returncode:
+        raise PrivateOperationError(f"{Path(args[0]).name} failed ({result.returncode}): ",
+                                    result.returncode) from None
+    return result
+
+
+def _fixture_admin_issue(stage, error, native=None):
     # Never inspect exception text, arguments, filenames or process output.
     code = None
     if isinstance(error, PrivateOperationError):
@@ -900,7 +967,10 @@ def _fixture_admin_issue(stage, error):
         kind = "operation_failed"
     if type(code) is not int or not -(2 ** 31) <= code < 2 ** 31:
         code = None
-    return {"stage": stage, "kind": kind, "code": code}
+    issue = {"stage": stage, "kind": kind, "code": code}
+    if native is not None:
+        issue["native"] = native
+    return issue
 
 
 @contextmanager
@@ -913,6 +983,7 @@ def fixture_admin():
     primary = primary_issue = None
     cleanup = {"status": "not_needed"}
     cleanup_control = None
+    native = {}
     stage = "inventory_before"
     try:
         if username in account_names() or user_home.exists() or user_home.is_symlink():
@@ -920,8 +991,8 @@ def fixture_admin():
         # An unknown command result may already have created the account.
         attempted = True
         stage = "create"
-        run(["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-addUser", username,
-             "-password", password, "-admin"], sensitive=True, timeout=60)
+        _fixture_admin_command(stage, ["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-addUser", username,
+                                       "-password", password, "-admin"], native, timeout=60)
         stage = "membership"
         membership = run(["/usr/sbin/dseditgroup", "-o", "checkmember", "-m", username, "admin"], sensitive=True)
         stage = "inventory_after"
@@ -933,12 +1004,13 @@ def fixture_admin():
         # Membership does not prove that the random fixture password is usable.
         # Authenticate once against the local node before any native UI action.
         stage = "authenticate"
-        run(["/usr/bin/dscl", ".", "-authonly", username, password], sensitive=True, timeout=15)
+        _fixture_admin_command(stage, ["/usr/bin/dscl", ".", "-authonly", username, password],
+                               native, timeout=15)
         stage = "body"
         yield username, password
     except BaseException as error:
         primary = error
-        primary_issue = _fixture_admin_issue(stage, error)
+        primary_issue = _fixture_admin_issue(stage, error, native.get(stage))
     finally:
         if attempted:
             cleanup_stage = "cleanup_inventory_before"
@@ -955,23 +1027,26 @@ def fixture_admin():
                 cleanup = {"status": "failed", **_fixture_admin_issue(cleanup_stage, error)}
                 if not isinstance(error, Exception):
                     cleanup_control = error
+    # Keep a completed create observation only when reporting a later failure.
+    create_native = native.get("create") if stage != "create" else None
     control = cleanup_control
     if control is None and primary is not None and not isinstance(primary, Exception):
         control = primary
     if control is not None:
         # Preserve cancellation/exit semantics and retain only the safe outcomes.
         try:
-            control.add_note(str(FixtureAdminError(primary_issue, cleanup)))
+            control.add_note(str(FixtureAdminError(primary_issue, cleanup, create_native)))
         except Exception:
             pass
         raise control
     if cleanup["status"] == "failed" or (primary is not None and stage != "body"):
-        raise FixtureAdminError(primary_issue, cleanup) from None
+        raise FixtureAdminError(primary_issue, cleanup, create_native) from None
     if primary is not None:
         # Keep the caller's exception identity when cleanup succeeded. The marker
         # adds only a closed outcome to Stop-Quit's later failure report.
         try:
             primary._fixture_admin_cleanup_confirmed = True
+            primary._fixture_admin_create_native = create_native
         except Exception:
             pass
         raise primary

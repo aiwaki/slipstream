@@ -4,6 +4,7 @@ from contextlib import ExitStack, contextmanager
 import json
 from pathlib import Path
 import subprocess
+import traceback
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -50,16 +51,17 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
             failure = failures.get(stage)
             if isinstance(failure, BaseException):
                 raise failure
-            if failure is not None:
-                return subprocess.CompletedProcess(args, failure, b"", self.PRIVATE.encode())
-            if stage == "delete" and not delete_retains_account:
+            if stage == "delete" and failure is None and not delete_retains_account:
                 accounts.discard(self.USER)
             stdout = ("\n".join(sorted(accounts)) + "\n").encode()
             if stage == "membership":
                 stdout = b"yes member\n"
             elif stage in commands:
                 stdout = b""
-            return subprocess.CompletedProcess(args, 0, outputs.get(stage, stdout), b"")
+            default = (b"", self.PRIVATE.encode()) if failure is not None else (stdout, b"")
+            output = outputs.get(stage, default)
+            stdout, stderr = output if isinstance(output, tuple) else (output, b"")
+            return subprocess.CompletedProcess(args, failure or 0, stdout, stderr)
 
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(smoke, "require_disposable"))
@@ -82,7 +84,11 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
         # primary/cleanup evidence, not merely fail to import a new class.
         self.assertTrue(hasattr(error, "diagnostic"), "fixture failure lost its stage/cleanup diagnostic")
         self.assertIsInstance(error, smoke.FixtureAdminError)
-        expected = {"primary": primary, "cleanup": cleanup}
+        expected = {"primary": dict(primary) if primary is not None else None, "cleanup": cleanup}
+        if primary and primary["stage"] in ("create", "authenticate") and primary["kind"] == "command_failed":
+            expected["primary"]["native"] = {"status": "unrecognized", "error": None, "code": None}
+        if primary is None or primary["stage"] in ("membership", "inventory_after", "authenticate", "body"):
+            expected["create_native"] = {"status": "absent", "error": None, "code": None}
         self.assertEqual(error.diagnostic, expected)
         message = str(error)
         self.assertTrue(message.startswith("fixture_admin "))
@@ -207,6 +213,7 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
             self.assertEqual(report["fixture_admin"], {
                 "primary": self.failed("body", "operation_failed", None),
                 "cleanup": {"status": "confirmed"},
+                "create_native": {"status": "absent", "error": None, "code": None},
             })
             for secret in (self.USER, self.PASSWORD, self.PRIVATE):
                 self.assertNotIn(secret, json.dumps(report))
@@ -253,7 +260,8 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
             self.assertIs(caught.exception, original)
             note = caught.exception.__notes__[-1]
             expected = {"primary": self.failed("authenticate", "operation_failed", None),
-                        "cleanup": {"status": "failed", **self.failed("delete")}}
+                        "cleanup": {"status": "failed", **self.failed("delete")},
+                        "create_native": {"status": "absent", "error": None, "code": None}}
             self.assertEqual(json.loads(note[len("fixture_admin "):]), expected)
             self.assertLessEqual(len(note.encode()), 512)
             for secret in (self.USER, self.PASSWORD, self.PRIVATE):
@@ -271,6 +279,190 @@ class FixtureAdminDiagnosticsTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), "dscl failed (10): ")
         for private in (self.USER, self.PASSWORD, self.PRIVATE):
             self.assertNotIn(private, str(caught.exception))
+
+
+class FixtureAdminNativeOutputTests(unittest.TestCase):
+    USER = FixtureAdminDiagnosticsTests.USER
+    PASSWORD = FixtureAdminDiagnosticsTests.PASSWORD
+    PRIVATE = FixtureAdminDiagnosticsTests.PRIVATE
+    SETUP = FixtureAdminDiagnosticsTests.SETUP
+    CLEANUP = FixtureAdminDiagnosticsTests.CLEANUP
+    fixture = FixtureAdminDiagnosticsTests.fixture
+
+    @staticmethod
+    def native(status, error=None, code=None):
+        return {"status": status, "error": error, "code": code}
+
+    def assert_private(self, error, report=None):
+        rendered = str(error) + "".join(traceback.format_exception(error)) + json.dumps(report or {})
+        for secret in (self.USER, self.PASSWORD, self.PRIVATE):
+            self.assertNotIn(secret, rendered)
+        self.assertLessEqual(len(str(error).encode()), 512)
+        self.assertEqual(str(error)[:512], str(error))
+
+    def test_create_exit_zero_error_survives_later_auth_failure(self):
+        create = (f"sysadminctl[42] New account password error. {self.PRIVATE} "
+                  f"{self.USER} {self.PASSWORD} (5402)\n").encode()
+        auth = b"<dscl_cmd> DS Error: -14090 (eDSAuthFailed)\n"
+        with self.fixture(self.SETUP + self.CLEANUP, failures={"authenticate": 10},
+                          outputs={"create": (b"", create), "authenticate": (b"", auth)}) as fixture:
+            try:
+                with smoke.fixture_admin():
+                    self.fail("failed auth cannot yield")
+            except smoke.FixtureAdminError as error:
+                self.assertEqual(error.diagnostic.get("create_native"),
+                                 self.native("recognized", "sysadminctl_password_error", 5402))
+                self.assertEqual(error.diagnostic["primary"].get("native"),
+                                 self.native("recognized", "eDSAuthFailed", -14090))
+                self.assertEqual(error.diagnostic["primary"]["code"], 10)
+                self.assertEqual(error.diagnostic["cleanup"], {"status": "confirmed"})
+                report = {}
+                smoke.record_failure(report, error, ())
+                self.assertEqual(report["fixture_admin"], error.diagnostic)
+                self.assert_private(error, report)
+            self.assertEqual(fixture.accounts, {"root"})
+
+    def test_auth_native_diagnostic_survives_cleanup_failure(self):
+        auth = b"<dscl_cmd> DS Error: -14096 (eDSAuthBadPassword)\n"
+        with self.fixture(self.SETUP + self.CLEANUP[:2],
+                          failures={"authenticate": 10, "delete": 12},
+                          outputs={"authenticate": (auth, self.PRIVATE.encode())}):
+            try:
+                with smoke.fixture_admin():
+                    self.fail("failed auth cannot yield")
+            except smoke.FixtureAdminError as error:
+                self.assertEqual(error.diagnostic["primary"].get("native"),
+                                 self.native("recognized", "eDSAuthBadPassword", -14096))
+                self.assertEqual(error.diagnostic["cleanup"], {
+                    "status": "failed", "stage": "delete", "kind": "command_failed", "code": 12})
+                self.assert_private(error)
+
+    def test_auth_output_closed_pairs_unknown_conflicting_and_bounds(self):
+        cases = []
+        for code, name in ((-14090, "eDSAuthFailed"), (-14096, "eDSAuthBadPassword"),
+                           (-14098, "eDSAuthUnknownUser"), (-14120, "eDSPermissionError")):
+            cases.append(((b"", f"<dscl_cmd> DS Error: {code} ({name})\n".encode()),
+                          self.native("recognized", name, code)))
+        valid = b"<dscl_cmd> DS Error: -14090 (eDSAuthFailed)\n"
+        cases += [
+            ((b"", b""), self.native("absent")),
+            ((self.PRIVATE.encode(), b""), self.native("unrecognized")),
+            ((b"", b"<dscl_cmd> DS Error: -14090 (eDSAuthBadPassword)\n"), self.native("unrecognized")),
+            ((b"", b"<dscl_cmd> DS Error: -14090 (eDSUnknown)\n"), self.native("unrecognized")),
+            ((b"\xff", valid), self.native("unrecognized")),
+            ((b"x" * 8193, valid), self.native("oversized")),
+            ((valid, b"<dscl_cmd> DS Error: -14098 (eDSAuthUnknownUser)\n"), self.native("conflicting")),
+            ((valid, valid), self.native("recognized", "eDSAuthFailed", -14090)),
+            ((valid, b"<dscl_cmd> DS Error: -1 (eDSAuthFailed)\n"), self.native("unrecognized")),
+            ((None, valid), self.native("unrecognized")),
+        ]
+        for output, expected in cases:
+            with self.subTest(expected=expected):
+                with self.fixture(self.SETUP + self.CLEANUP, failures={"authenticate": 10},
+                                  outputs={"authenticate": output}):
+                    try:
+                        with smoke.fixture_admin():
+                            self.fail("failed auth cannot yield")
+                    except smoke.FixtureAdminError as error:
+                        self.assertEqual(error.diagnostic["primary"]["native"], expected)
+                        self.assertEqual(error.diagnostic["primary"]["code"], 10)
+                        report = {}
+                        smoke.record_failure(report, error, ())
+                        self.assert_private(error, report)
+
+    def test_create_marker_closed_code_set_and_uninterpreted_domain(self):
+        cases = []
+        for code in range(5400, 5407):
+            line = f"sysadminctl[7] New account password error. {self.PRIVATE} ({code})\n".encode()
+            cases.append((line, self.native("recognized", "sysadminctl_password_error", code)))
+        valid = b"New account password error. opaque (5402)\n"
+        cases += [
+            (b"", self.native("absent")),
+            (b"New account password error. opaque (99)\n", self.native("unrecognized")),
+            (b"New account password error. opaque (5402) private suffix\n", self.native("unrecognized")),
+            (b"\xff" + valid, self.native("unrecognized")),
+            (valid + b"x" * 8193, self.native("oversized")),
+            (valid + b"New account password error. opaque (5403)\n", self.native("conflicting")),
+        ]
+        for output, expected in cases:
+            with self.subTest(expected=expected):
+                with self.fixture(self.SETUP[:2] + self.CLEANUP, failures={"create": 1},
+                                  outputs={"create": (b"", output)}):
+                    try:
+                        with smoke.fixture_admin():
+                            self.fail("failed create cannot yield")
+                    except smoke.FixtureAdminError as error:
+                        self.assertEqual(error.diagnostic["primary"]["native"], expected)
+                        self.assertNotIn("create_native", error.diagnostic)
+                        self.assertEqual(error.diagnostic["cleanup"], {"status": "confirmed"})
+                        self.assert_private(error)
+
+    def test_observation_does_not_change_success_or_add_a_command(self):
+        outputs = {"create": b"New account password error. opaque (5402)\n",
+                   "authenticate": b"<dscl_cmd> DS Error: -14090 (eDSAuthFailed)\n"}
+        with self.fixture(self.SETUP + self.CLEANUP, outputs=outputs) as fixture:
+            with smoke.fixture_admin() as credentials:
+                self.assertEqual(credentials, (self.USER, self.PASSWORD))
+            self.assertEqual(fixture.accounts, {"root"})
+            self.assertEqual(fixture.calls.count("authenticate"), 1)
+
+    def test_classifier_error_does_not_replace_command_outcome(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                with self.fixture(self.SETUP + self.CLEANUP,
+                                  failures={"authenticate": 10} if failed else {}):
+                    with mock.patch.object(smoke, "_fixture_admin_native", side_effect=ValueError(self.PRIVATE)) as classifier:
+                        if failed:
+                            try:
+                                with smoke.fixture_admin():
+                                    self.fail("failed auth cannot yield")
+                            except smoke.FixtureAdminError as error:
+                                self.assertEqual(error.diagnostic["primary"]["code"], 10)
+                                self.assertEqual(error.diagnostic["primary"]["native"], self.native("unrecognized"))
+                                self.assert_private(error)
+                        else:
+                            body_completed = False
+                            with smoke.fixture_admin():
+                                body_completed = True
+                            self.assertTrue(body_completed)
+                            self.assertEqual(classifier.call_args_list, [
+                                mock.call("create", b"", b""), mock.call("authenticate", b"", b""),
+                            ])
+
+    def test_create_observation_survives_body_and_process_control_without_identity_change(self):
+        create = b"New account password error. opaque (5402)\n"
+        expected = self.native("recognized", "sysadminctl_password_error", 5402)
+        for original in (RuntimeError("body failed"), KeyboardInterrupt(), SystemExit(42)):
+            with self.subTest(kind=type(original).__name__):
+                with self.fixture(self.SETUP + self.CLEANUP, outputs={"create": create}):
+                    try:
+                        with smoke.fixture_admin():
+                            raise original
+                    except BaseException as error:
+                        self.assertIs(error, original)
+                        if isinstance(error, Exception):
+                            report = {}
+                            smoke.record_failure(report, error, ())
+                            self.assertEqual(report["fixture_admin"]["create_native"], expected)
+                        else:
+                            note = error.__notes__[-1]
+                            self.assertEqual(json.loads(note[len("fixture_admin "):])["create_native"], expected)
+                            self.assertLessEqual(len(note.encode()), 512)
+                        self.assert_private(error)
+
+    def test_worst_case_public_reason_contains_complete_both_outcomes(self):
+        create = b"New account password error. opaque (5406)\n"
+        auth = b"<dscl_cmd> DS Error: -14120 (eDSPermissionError)\n"
+        with self.fixture(self.SETUP + ["cleanup_inventory_before"],
+                          failures={"authenticate": -(2 ** 31), "cleanup_inventory_before": -(2 ** 31)},
+                          outputs={"create": create, "authenticate": auth}):
+            try:
+                with smoke.fixture_admin():
+                    self.fail("failed auth cannot yield")
+            except smoke.FixtureAdminError as error:
+                self.assert_private(error)
+                self.assertEqual(json.loads(str(error)[:512][len("fixture_admin "):]), error.diagnostic)
+                self.assertEqual(error.diagnostic["cleanup"]["stage"], "cleanup_inventory_before")
 
 
 if __name__ == "__main__":

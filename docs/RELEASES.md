@@ -25,6 +25,22 @@ the failed `.34 → .35` check as a substitute. A `.35 → .36` public transitio
 delivers the repair but its Cancel is still executed by OLD `.35`; it does not
 prove native Cancel behavior of `.36` acting as the initiating application.
 
+The first `.36` main CI [44502130642/1](https://github.com/aiwaki/slipstream/actions/runs/44502130642)
+failed before product installation: the disposable administrator fixture returned
+process status10 at `dscl -authonly`, with cleanup confirmed. Candidate assembly,
+signing, browser and notification jobs passed, but the failed lifecycle consumer
+blocks qualification. The underlying native error was discarded; this run does
+not establish a product defect or a transient runner fault.
+
+The follow-up retains a bounded, closed classification of create/authenticate
+output without logging credentials or private text. It does not change account
+commands, password generation, return-code acceptance, retries or cleanup.
+Apple's [dscl implementation](https://github.com/apple-oss-distributions/DSTools/blob/de856715d4e4f9c8f5de11b0e59cf9ef3c47f382/dscl/dscl.m#L953-L958)
+reports a separate numeric DS code and symbolic name; the process status alone
+cannot recover that pair. Unknown or mismatched diagnostics remain unknown.
+The historical public `.34 → .35` helper allowance remains frozen; this change
+does not authorize another run of that retired workflow.
+
 ## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in

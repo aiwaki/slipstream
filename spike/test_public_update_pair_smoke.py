@@ -1267,6 +1267,12 @@ def test_preview33_workflow_invokes_the_real_clone_parser(preview33_modules, mod
                                    "reviewed_harness", "reviewed_commit", "unpinned_helper", "unexpected_helper"])
 def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp_path, monkeypatch, drift):
     reviewed = getattr(driver, "REVIEWED_DIAGNOSTIC_HELPERS", {})
+    if reviewed:
+        # This positive fixture tests the binding mechanism, not continued
+        # admission of a historical observer on the changing current checkout.
+        reviewed = {name: hashlib.sha256((REPO / "scripts" / name).read_bytes()).hexdigest()
+                    for name in reviewed}
+        monkeypatch.setattr(driver, "REVIEWED_DIAGNOSTIC_HELPERS", reviewed)
     if drift and drift.startswith(("reviewed_", "unpinned_", "unexpected_")) and not reviewed:
         pytest.skip("only the .35 observer has a reviewed diagnostic helper revision")
     qualified = tmp_path / "qualified-source"
@@ -1325,9 +1331,55 @@ def test_preview33_source_binding_hashes_executing_clones(preview33_modules, tmp
         assert "scripts/public_update_pair_smoke.py" not in calls and "scripts/public_update_menu_smoke.py" not in calls
         assert {"scripts/" + name for name in driver.REUSED} <= set(binding["sha256"])
         if reviewed:
-            import hashlib
             assert binding["sha256"]["scripts/stop_quit_ui_smoke.py"] == reviewed["stop_quit_ui_smoke.py"]
             assert binding["sha256"]["scripts/stop_quit_ui_smoke.py"] != hashlib.sha256(original_helper).hexdigest()
+
+
+def test_preview35_production_pin_refuses_current_helper_before_public_preparation(tmp_path, monkeypatch):
+    import importlib
+    frozen = importlib.import_module("public_update_preview35_pair_smoke")
+    pinned = "7bee1a005832a9d8079874e46a294e914f31dae83407db653327f0f64e62c705"
+    assert frozen.REVIEWED_DIAGNOSTIC_HELPERS == {"stop_quit_ui_smoke.py": pinned}
+    assert hashlib.sha256((REPO / "scripts/stop_quit_ui_smoke.py").read_bytes()).hexdigest() != pinned
+    qualified = tmp_path / "qualified-source"
+    (qualified / "scripts").mkdir(parents=True)
+    for name in frozen.REUSED:
+        (qualified / "scripts" / name).write_bytes((REPO / "scripts" / name).read_bytes())
+    harness_sha = "a" * 40
+    for key, value in {"GITHUB_REPOSITORY": "aiwaki/slipstream", "GITHUB_EVENT_NAME": "workflow_dispatch",
+                       "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": harness_sha,
+                       "RUNNER_TEMP": str(tmp_path)}.items():
+        monkeypatch.setenv(key, value)
+    calls, actions = [], []
+    def fake_git(command):
+        assert command[:2] == ["/usr/bin/git", "-C"]
+        directory, args = Path(command[2]), command[3:]
+        assert directory in (qualified, REPO)
+        calls.append((directory, args))
+        if args == ["rev-parse", "HEAD"]:
+            data = (frozen.NEW_SOURCE if directory == qualified else harness_sha).encode() + b"\n"
+        elif args == ["status", "--porcelain", "--untracked-files=no"]:
+            data = b""
+        else:
+            assert len(args) == 2 and args[0] == "show"
+            ref, relative = args[1].split(":", 1)
+            assert directory == qualified and ref == frozen.NEW_SOURCE
+            data = (qualified / relative).read_bytes()
+        return SimpleNamespace(stdout=data)
+    def forbidden_public(*_args):
+        actions.append("public_preparation")
+        pytest.fail("historical helper refusal must precede public download/authentication")
+    monkeypatch.setattr(frozen, "guard", lambda: UID)
+    monkeypatch.setattr(frozen.os, "umask", lambda _value: 0o077)
+    monkeypatch.setattr(frozen, "modules", lambda _repo: (None, None))
+    monkeypatch.setattr(frozen, "Native", lambda args, *_rest: SimpleNamespace(args=args, run=fake_git))
+    monkeypatch.setattr(frozen, "prepare_public", forbidden_public)
+    with pytest.raises(Refused, match="shared qualification helper differs from qualified source: stop_quit_ui_smoke.py"):
+        frozen.prepare_main(["--repo", str(qualified), "--root", str(tmp_path / "candidate"),
+                             "--public-root", str(tmp_path / "public"), "--gh", "/fixture/gh"])
+    assert calls[-1] == (qualified, ["show", frozen.NEW_SOURCE + ":scripts/stop_quit_ui_smoke.py"])
+    assert actions == []
+    assert frozen.REVIEWED_DIAGNOSTIC_HELPERS == {"stop_quit_ui_smoke.py": pinned}
 
 
 @pytest.mark.parametrize("entry", ["main", "prepare_main"])
