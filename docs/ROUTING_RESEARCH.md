@@ -2834,3 +2834,53 @@ production parser change. The runtime-review Popen audit has no concrete command
 injection path in its two current callers: fixed argv lists with shell disabled,
 a validated private executable path, fixed flags and synthetic HTML. No scanner
 suppression was added. Full boundary review: `output/continuation-20261030/pr426-review/`.
+
+
+### Chromium 158 review and audit policy maintenance, 2026-11-19
+
+The fresh application audit in PR479 stopped because the Chromium 156 integrity
+review expired November13. The official Chrome for Testing catalogs now select
+Stable158.0.8127.36, revision1727472. Evidence-only PR480 run44481148015/1 checked
+that exact mac-arm64 object on a disposable hosted Mac: generation1794441107973562,
+105057133bytes, archive SHA256
+`c24d40a3786322ff3a5e3ac6eed162226cbaf07ebe468715407827226b0f8897`.
+Its extracted executable SHA256 is
+`aadfb5b2866e701a4c7ca79077250c8bc8276f8e28a64bce5f91d1bf899511b7`.
+The archive hash belongs in SOURCE, the runtime archive identity constant and
+the generic SBOM policy; the executable hash remains a separate manifest check.
+
+Actual PR merge6ab674d1358a1e264755c0bb68e6628e1218b059 matched head0e1d59dc9's
+tree. The exact job, upload action, artifact14509155049, 9156-byte ZIP digest and
+all11JSON reports were authenticated before adopting these pins. Root rehashed
+22retained files,7source blobs and3independent official metadata snapshots.
+Receipt: `output/continuation-20261119/chromium158/hosted-review/verification.json`,
+SHAe1c8ed9cb6613096894ba310dd079f96085c2104350a44f8c376ca7339991aea.
+
+Version output, local script-mutated DOM with the sandbox enabled, owned-process
+exit and temporary archive/profile cleanup passed. Three CVDisplayLink errors
+were present in stderr; successful synthetic DOM execution does not establish
+real graphical browser or arbitrary-site behavior. Fresh checksum-verified OSV
+Scanner2.3.8 still reports this exact generic package with an empty ecosystem.
+Mapping remains unsupported: no findings is not vulnerability clearance. The
+new artifact-integrity review is bounded through December3, following the existing
+14-day interval. Scanner findings, expired review or identity drift still refuse.
+No runtime archive or browser was downloaded or executed on the user's Mac.
+
+Separately, the current [GitHub advisory](https://github.com/advisories/GHSA-qwgh-2vcv-g2f7)
+and [OSV record](https://osv.dev/vulnerability/GHSA-qwgh-2vcv-g2f7) now identify
+block-buffer>=0.11.0,<0.12.1, excluding the application's exact0.10.4. Both registry
+and advisory spelling queries for0.10.4 returned empty results; the0.11.0 positive
+control returned this advisory. The retained crate still matches Cargo.lock's
+`3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71`;
+source review again found a separate private cursor and no ReadBuffer. The expired
+application exception is removed rather than renewed. This is a conclusion about
+this advisory and this exact crate only; the full current audit remains required.
+Evidence: `output/continuation-20261119/admin-fixture/pr479/block-buffer-review/`,
+review SHAd643d2d45423567c325be3d4d55ee96bfb43e0820e001f1bebca8b2cf77c2cd9.
+
+New Clippy1.100 also rejects the unchanged verbose boolean return in
+signal_uninstall_ready. Returning result.is_ok() preserves both the successful
+and failed write/link results and keeps temporary-file cleanup in the same place;
+no warning is suppressed. Neither maintenance change establishes the cause of
+previous network interruptions. Published .35 payloads and accepted historical
+evidence stay unchanged; a new product candidate needs its affected checks.

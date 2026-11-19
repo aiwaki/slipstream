@@ -1717,10 +1717,7 @@ fn signal_uninstall_ready(tray_pid: u32) -> bool {
         fs::hard_link(&tmp, &path)
     })();
     let _ = fs::remove_file(&tmp);
-    if result.is_err() {
-        return false;
-    }
-    true
+    result.is_ok()
 }
 
 fn uninstall_shell(app: &AppHandle) -> Option<String> {

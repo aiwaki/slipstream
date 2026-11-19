@@ -1,65 +1,44 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, Chromium review blocks observer merge
+## Current continuation — 2026-11-19, reviewed Chromium 158 adoption
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Active branch `codex/chromium-158-evidence`, based on main
-`1dd8d6d2b26dfa808fb894bc2b6746e54765f418` (PR478).
-Read live HEAD/PR/CI before resuming. This branch changes only the disposable
-Chromium evidence proposal; production Chromium/source policy remain unchanged.
-No workstation app, service, network, credentials or learning changes.
+Active branch `codex/chromium-158-evidence`, PR480, base/main1dd8d6d2b26dfa808fb894bc2b6746e54765f418.
+Evidence-only head0e1d59dc93469d24cf19cecae77304715e6151ef has a verified hosted
+Chromium review44481148015/1. Its59evidence checks passed; root rehashed the
+artifact/source closure. Details and limitations: ROUTING_RESEARCH.md,
+"Chromium158 review and audit policy maintenance,2026-11-19" and
+`output/continuation-20261119/chromium158/hosted-review/verification.json`.
+The review proves exact artifact identity and sandboxed synthetic execution;
+OSV generic mapping remains unsupported, not vulnerability clearance.
 
-### Public update repair retained separately
+Current follow-up adopts those exact production archive/version pins, refreshes
+the artifact review through December3 and removes only the obsolete application
+block-buffer0.10.4 exception after fresh advisory/source review. A one-line
+result.is_ok() change fixes Clippy1.100's needless_bool refusal without changing
+uninstall behavior. Verify live commit/PR/CI; adoption is not yet qualified.
+Focused pin/policy checks passed:9tests plus policy load, forbidden calls0.
+Root rehashed5source/7protected/4evidence files; independent diff review CLEAR.
+Next: commit the adoption and verify exact PR480 CI/audit, then reconcile PR479.
+Do not rerun the unchanged accepted Chromium evidence job.
 
-PR479 (`codex/public-admin-fixture-diagnostics`, head
-`c97929e53907adfb553a5c1bd46bd94039cfbabd`) preserves secret-free fixture stages,
-exit codes and both primary/cleanup failures after public run42910934921/1
-failed with redacted `dscl failed (10): ` before Install. The underlying dscl
-operation/cause remains unknown. Two causal RED tests preceded23focused GREEN;
-14source-binding tests passed and independent review was clear.
-Its published .35 source/payloads remain5a3e64b534affc865826fbd20ac67f1af328629e.
-Public update and rollback remain unqualified. No fresh public attempt dispatched.
-Prepared dispatcher is intentionally PENDING and must be rebound/reviewed after
-any future main/source change; never reuse it blindly after this dependency work.
-Evidence: `output/continuation-20261119/admin-fixture`, including retained helper
-review, source proofs and the guarded public preparation.
+PR479 separately retains the public-update fixture diagnostic repair at c97929e5.
+Its audit44479720126 failed on expired Chromium156 policy; CI44479720260 also
+hit the Clippy refusal. Five review threads were triaged: preserve process-control
+exceptions and strengthen credential absence tests before merge. Legacy workflow
+refusal predates that PR; arbitrary body-error text stays private. Proposed fix
+and evidence: `output/continuation-20261119/admin-fixture/pr479/thread-triage/`.
+Both PR479 runs are terminal failures; its build/browser/lifecycle jobs passed.
+Receipt: admin-fixture/pr479/receipt.json. No fresh public update was dispatched.
+The prepared public dispatcher remains PENDING and needs a new reviewed source
+binding after this baseline changes; do not widen its old allowlist blindly.
 
-PR479 audit44479720126/1 failed at application audit job135408790436 with
-`ValueError: dependency audit integrity-only policy is expired` (log917–919).
-Actual checkoutabe7c512474ac5af67c45ba67abf9c7bb8b3020f has the exact PR-head
-tree and parents1dd8+c979. Geph vendor audit passed. CI44479720260/1 was still
-running when this checkpoint was written; inspect its existing result, do not
-rerun either workflow. The audit failure is a current policy expiry, not a
-failed public updater transaction or a newly established transport defect.
-
-### Next verified action: evidence-only Chromium 158 review
-
-The application Chromium156.0.8078.80 integrity-only policy expired November13.
-Official catalog snapshot November19 selects Stable158.0.8127.36, revision1727472.
-The exact mac-arm64 object has length105057133, generation1794441107973562 and
-MD5 `2DIogA0Ml0ZJYGyvmRyJbw==`; its SHA256 is not known until the hosted review.
-Metadata/body/header receipts live under
-`output/continuation-20261119/admin-fixture/pr479/chromium-policy-diagnosis`.
-The old156object still matches its historical metadata; that does not renew its
-review. No duplicate prepared Chromium upgrade or open PR was found.
-
-Update only the disposable review proposal, then let the existing PR-triggered
-`chromium-runtime-review.yml` authenticate/download/run/clean up that exact
-candidate on its hosted Mac. Its small report must prove full archive and
-executable hashes, license/version, sandbox DOM behavior, cleanup and fresh OSV
-mapping. Unsupported generic mapping is not vulnerability clearance. Do not
-extend the old expiry or change production pins before accepting this evidence.
-Scoped helper validation passed:2causal RED cases then15GREEN, forbidden calls0,
-maxRSS33.3MB. Root reviewed the six-constant/fixture diff and rehashed2source,
-6protected and7evidence files. Receipt: chromium158/verification.json,
-SHA07f078e87f3105a12865104ec83b9b9784c313097939ed24abef0618276f6e26.
-The ordinary audit remains blocked until an evidence-backed production adoption;
-the evidence job is independent. No workflow admission or acceptance is waived.
-After adoption and exact checks, reconcile/rebase PR479 and bind fresh public
-observer evidence. Existing published .35 assets and historical accepted gates
-are preserved; a new product revision needs its own affected qualification.
-New evidence directory: `output/continuation-20261119/chromium158`.
-A fresh user-approved window is still required before workstation installation.
+Published .35 remains source5a3e64b534affc865826fbd20ac67f1af328629e. Its previous
+R/G/P and publication receipts below remain historical accepted evidence for
+those exact bytes. Normal public update/rollback are still unqualified. The old
+dscl10 failure did not identify its operation/cause or prove an updater defect.
+No workstation app/service/network/account/learning changes or application
+payload downloads. A fresh user-approved window is required for Mac installation.
 
 M=`output/continuation-20261110/source-review-refresh/main-r5`;
 Q=`M/qualification`; S=`output/continuation-20261110/sqlite-repair`.
