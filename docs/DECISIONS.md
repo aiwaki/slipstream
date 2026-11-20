@@ -1,5 +1,38 @@
 # Decisions
 
+### 2026-11-20: bounded prelaunch feed reset wait for public preview .36 tests
+
+The new `.35 -> .36` observer may prepare its disposable runner with at most two
+anonymous samples of the unchanged public feed before installing or launching
+OLD. A second sample is permitted only after an explicit HTTP403/429 with zero
+remaining quota, complete valid quota headers, a fresh server Date and a reset
+whose wait target is no more than 60 seconds away. The observer deliberately
+accepts only canonical unsigned decimal Retry-After or IMF-fixdate HTTP dates,
+matching the observed GitHub response. Other HTTP date/number representations
+remain unsupported by this narrow admission policy, even if a general HTTP client
+could parse them. Unsupported, malformed or duplicate values cannot authorize a
+retry. The target includes one
+second after reset. One monotonic wait must reach that target without a clock
+discontinuity or excessive oversleep. Each sample is bounded to 10 seconds, the
+whole preparation to 75 seconds, and its subprocess to 80 seconds. An owned POSIX
+interval timer interrupts blocking response reads; a socket inactivity timeout
+alone is insufficient. Unsupported platforms/threads or an already active timer
+refuse admission without taking over the caller's timer.
+
+Schema2 retains both original samples and the requested and observed wait. The
+offline checker must independently validate their order, timings and eligibility;
+only the final positive sample with remaining quota admits installation. Generic
+403, transport failures, long reset windows or a second refusal stop the attempt.
+No app action, workflow dispatch, credential, feed substitution or published
+payload change is part of this retry. Historical observers and accepted reports
+retain their one-sample contract.
+
+This prepares a test environment; it neither reserves future quota nor proves
+that the published application recovers from a rate-limit response. A new hosted
+attempt requires the reviewed observer and matching checker/source pins. The
+failed first `.36` attempt remains failed evidence and is never reinterpreted as
+a passing update or permission for an automatic workflow retry loop.
+
 ### 2026-11-10: repair bundled SQLite without opening the native SQLite lane
 
 Geph 0.4.3-r5 keeps the existing SQLx0.8.6 runtime and adds one exact local

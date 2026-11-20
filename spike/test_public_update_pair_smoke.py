@@ -983,7 +983,8 @@ def test_preview33_prelaunch_refusal_prevents_install_and_retains_receipt(previe
     command, options = commands[0]
     assert Path(command[1]).name == Path(menu.__file__).name
     assert command[2:] == ["--prelaunch-public-feed"]
-    assert options == {"timeout": 10, "env": backend.env}
+    expected_timeout = 80 if menu.VERSION == "0.1.9-preview.36" else 10
+    assert options == {"timeout": expected_timeout, "env": backend.env}
     assert not any(key in options["env"] for key in ("GH_TOKEN", "GITHUB_TOKEN", "HTTPS_PROXY"))
 
 

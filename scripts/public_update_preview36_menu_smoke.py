@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
+import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -129,12 +133,237 @@ def public_feed_admission(*, opener=None):
     return result
 
 
+def _canonical_http_date(value):
+    if type(value) is not str or len(value) > 256:
+        return None
+    try:
+        date = parsedate_to_datetime(value)
+        if format_datetime(date, usegmt=True) != value:
+            return None
+        return int(date.timestamp())
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _sample_clock_valid(sample):
+    values = [sample.get(key) for key in ("started_at_unix", "finished_at_unix", "elapsed_seconds")]
+    if not all(type(value) in (int, float) and math.isfinite(value) for value in values):
+        return False
+    start, end, elapsed = values
+    return start > 0 and end >= start and 0 <= elapsed <= 10 and abs(end - start - elapsed) <= 1
+
+
+class _FeedProbeOpener:
+    """Retain header multiplicity without altering the original sample report."""
+    def __init__(self, opener):
+        self.opener = opener
+        self.headers = {}
+
+    def open(self, request, **kwargs):
+        self.headers = {}
+        if self.opener is None:
+            self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        try:
+            response = self.opener.open(request, **kwargs)
+        except urllib.error.HTTPError as error:
+            self._record(error)
+            raise
+        self._record(response)
+        return response
+
+    def _record(self, response):
+        self.headers = {name: response.headers.get_all(name, []) for name in
+                        ("date", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset")}
+
+
+class _FeedProbeDeadline(TimeoutError):
+    pass
+
+
+class _FeedDeadlineUnavailable(RuntimeError):
+    pass
+
+
+def _timed_feed_probe(opener, deadline, *, not_after_monotonic=None):
+    """Interrupt even a trickling response read; never take over another timer."""
+    def refused(error):
+        class RefusingOpener:
+            def open(self, *_args, **_kwargs):
+                raise error
+        return public_feed_admission(opener=RefusingOpener()), True
+
+    required = ("SIGALRM", "ITIMER_REAL", "getitimer", "setitimer", "getsignal", "signal")
+    if (threading.current_thread() is not threading.main_thread()
+            or not all(hasattr(signal, name) for name in required)):
+        return refused(_FeedDeadlineUnavailable())
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or remaining <= 0:
+        return refused(_FeedProbeDeadline())
+    try:
+        if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+            return refused(_FeedDeadlineUnavailable())
+        previous = signal.getsignal(signal.SIGALRM)
+    except (OSError, ValueError):
+        return refused(_FeedDeadlineUnavailable())
+    expired = False
+
+    def interrupt(_signum, _frame):
+        nonlocal expired
+        expired = True
+        raise _FeedProbeDeadline()
+
+    installed = False
+    try:
+        signal.signal(signal.SIGALRM, interrupt)
+        installed = True
+        remaining = deadline - time.monotonic()
+        if not math.isfinite(remaining) or remaining <= 0:
+            return refused(_FeedProbeDeadline())
+        signal.setitimer(signal.ITIMER_REAL, min(10.0, remaining))
+        if not_after_monotonic is not None and time.monotonic() > not_after_monotonic:
+            return refused(_FeedProbeDeadline())
+        report = public_feed_admission(opener=opener)
+        return report, expired
+    except _FeedProbeDeadline as error:
+        return refused(error)
+    except (OSError, ValueError):
+        return refused(_FeedDeadlineUnavailable())
+    finally:
+        if installed:
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
+
+
+def _near_reset_target(sample, headers):
+    if ("error_type" in sample or sample.get("status") not in (403, 429)
+            or sample.get("classification") != "external_rate_limited"
+            or not _sample_clock_valid(sample)):
+        return None
+    quota = sample.get("quota")
+    if (type(quota) is not dict or set(quota) != {"limit", "remaining", "reset"}
+            or not all(type(value) is int and 0 <= value <= 2**53 - 1 for value in quota.values())
+            or quota["limit"] <= 0 or quota["remaining"] != 0 or quota["reset"] <= 0):
+        return None
+    for name in ("date", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"):
+        values = headers.get(name, [])
+        if (len(values) != 1 or type(values[0]) is not str or len(values[0]) > 256
+                or sample["headers"].get(name) != values[0]):
+            return None
+    date = _canonical_http_date(headers["date"][0])
+    if (date is None or not sample["started_at_unix"] - 1 <= date <= sample["finished_at_unix"] + 1
+            or quota["reset"] <= date):
+        return None
+    retry_values = headers.get("retry-after", [])
+    if len(retry_values) > 1:
+        return None
+    retry_after = None
+    if retry_values:
+        value = retry_values[0]
+        if type(value) is not str or len(value) > 256 or sample["headers"].get("retry-after") != value:
+            return None
+        if re.fullmatch(r"0|[1-9][0-9]{0,15}", value):
+            retry_after = sample["finished_at_unix"] + int(value)
+        else:
+            retry_after = _canonical_http_date(value)
+            if retry_after is None:
+                return None
+    target = max(quota["reset"] + 1, retry_after if retry_after is not None else 0)
+    return {"date_unix": date, "reset_unix": quota["reset"], "retry_after_unix": retry_after,
+            "target_unix": target}
+
+
+def public_feed_admission_with_reset_wait(*, opener=None):
+    """At most two unchanged anonymous probes, separated by one nearby proven reset."""
+    started, started_at = time.monotonic(), time.time()
+    deadline = started + 75
+    recorder = _FeedProbeOpener(opener)
+    result = {"kind": "prelaunch_public_feed_admission", "schema_version": 2,
+              "policy": "one_near_reset_v1", "authenticated": False, "redirects_followed": False,
+              "requests_attempted": 1, "started_at_unix": started_at, "admitted": False,
+              "classification": "external_unknown", "future_request_availability_guaranteed": False,
+              "samples": [], "reset_wait": None}
+
+    def finish():
+        result["finished_at_unix"] = time.time()
+        result["elapsed_seconds"] = time.monotonic() - started
+        result["requests_attempted"] = len(result["samples"])
+        if (not 0 <= result["elapsed_seconds"] <= 75
+                or result["finished_at_unix"] < started_at
+                or abs(result["finished_at_unix"] - started_at - result["elapsed_seconds"]) > 1
+                or not all(_sample_clock_valid(sample) for sample in result["samples"])):
+            result.update(admitted=False, classification="external_unknown")
+        return result
+
+    first, deadline_refused = _timed_feed_probe(recorder, deadline)
+    result["samples"].append(first)
+    result.update(admitted=first["admitted"], classification=first["classification"])
+    if deadline_refused:
+        result.update(admitted=False, classification="external_unknown")
+        return finish()
+    if first["admitted"] or not _sample_clock_valid(first) or time.monotonic() >= deadline:
+        return finish()
+    target = _near_reset_target(first, recorder.headers)
+    if target is None:
+        return finish()
+    wait_started, wait_started_at = time.monotonic(), time.time()
+    requested = target["target_unix"] - wait_started_at
+    if (not 0 < requested <= 60 or wait_started + requested + 10 > deadline
+            or wait_started_at < first["finished_at_unix"]
+            or abs(wait_started_at - started_at - (wait_started - started)) > 1):
+        return finish()
+    target_monotonic = wait_started + requested
+    wait = {**target, "started_at_unix": wait_started_at, "finished_at_unix": wait_started_at,
+            "requested_seconds": requested, "elapsed_seconds": 0, "completed": False,
+            "refusal_reason": None}
+    result["reset_wait"] = wait
+    try:
+        time.sleep(max(0, target_monotonic - time.monotonic()))
+    except Exception:
+        wait["refusal_reason"] = "wait_failed"
+    wait_finished, wait_finished_at = time.monotonic(), time.time()
+    wait.update(finished_at_unix=wait_finished_at, elapsed_seconds=wait_finished - wait_started)
+    if wait["refusal_reason"] is not None:
+        return finish()
+    if wait_finished < target_monotonic or wait_finished_at < target["target_unix"]:
+        wait["refusal_reason"] = "wait_incomplete"
+    elif wait_finished - target_monotonic > 2:
+        wait["refusal_reason"] = "late_wake"
+    elif abs(wait_finished_at - wait_started_at - wait["elapsed_seconds"]) > 1:
+        wait["refusal_reason"] = "clock_changed"
+    elif wait_finished + 10 > deadline:
+        wait["refusal_reason"] = "overall_deadline"
+    if wait["refusal_reason"] is not None:
+        return finish()
+    before_second, before_second_at = time.monotonic(), time.time()
+    if before_second + 10 > deadline:
+        wait["refusal_reason"] = "overall_deadline"
+        return finish()
+    if before_second - target_monotonic > 2:
+        wait["refusal_reason"] = "late_wake"
+        return finish()
+    if (before_second < wait_finished or before_second_at < wait_finished_at
+            or abs(before_second_at - started_at - (before_second - started)) > 1):
+        wait["refusal_reason"] = "clock_changed"
+        return finish()
+    wait["completed"] = True
+    second, deadline_refused = _timed_feed_probe(recorder, deadline,
+                                               not_after_monotonic=target_monotonic + 2)
+    result["samples"].append(second)
+    result.update(admitted=second["admitted"], classification=second["classification"])
+    if (deadline_refused
+            or not target["target_unix"] <= second["started_at_unix"] <= target["target_unix"] + 3):
+        result.update(admitted=False, classification="external_unknown")
+    return finish()
+
+
 def require_public_feed(backend):
     started, started_at = time.monotonic(), time.time()
     try:
         response = backend.run([sys.executable, str(Path(__file__).resolve()), "--prelaunch-public-feed"],
-                               timeout=10, env=backend.env)
-        require(len(response.stdout) <= 8192, "public feed admission output exceeded bound")
+                               timeout=80, env=backend.env)
+        require(len(response.stdout) <= 16384, "public feed admission output exceeded bound")
         report = json.loads(response.stdout)
         require(type(report) is dict and report.get("kind") == "prelaunch_public_feed_admission",
                 "public feed admission response invalid")
@@ -413,7 +642,7 @@ class PublicMenu:
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--prelaunch-public-feed"]:
-        print(json.dumps(public_feed_admission(), sort_keys=True))
+        print(json.dumps(public_feed_admission_with_reset_wait(), sort_keys=True))
     elif sys.argv[1:] == ["--diagnose-discovery"]:
         print(json.dumps(discovery_http_diagnostic(), sort_keys=True))
     else:
