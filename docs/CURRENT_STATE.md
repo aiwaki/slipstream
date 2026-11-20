@@ -1,38 +1,94 @@
 # Current Project State
 
-## Current continuation — 2026-11-19, preview .36
+## Current continuation — 2026-11-20, preview .36
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/ci-build-macos26`; base/main `ed4ee9cdfa82713e30399d4a78ec76a388d63ec3`.
-[PR485](https://github.com/aiwaki/slipstream/pull/485) changes only the packaged
-build image to macos-26 ARM64 and separates its Cargo target cache. Existing
-macos-15 qualification, target/minimum OS and release gates remain unchanged.
+Branch `codex/preview36-qualification`, HEAD/main
+`a598fe8e7d4954f0b0892e9af2d3960c00b018a4`, tree
+`acc25810dcbf1363bed63fe5b22bf3b5146b0f4d`.
+PR485 merged through expected head521e; accepted PR/main trees match.
+Only packaged building moved to macos-26; native checks stay macos-15.
+The branch switch preserved all uncommitted changes. Do not replace this checkout
+with the older dirty Developer locator.
 
-**Active gate:** initial PR head504c195de31142caf2835956991818629da99e25 has
-CI44566206018/1 executing; its build acquired a macos-26 runner. Audit44566206097/1
-is SUCCESS, with report verification pending. Sole observer
-`/root/product_isolation_observer`: exec88783/PID18886, cadence60s. Evidence and
-handle: `output/continuation-20261119/macos26-build-image/pr485`.
-A docs-only follow-up addresses the checkpoint-size review; reconcile the actual
-PR head and CI inventory after it is pushed. Do not restart the existing observer
-or mistake the initial-head results for new-head evidence.
+M=`output/continuation-20261120/preview36-main`; Q=`M/qualification`.
 
-**Next action:** finish that docs follow-up, then observe the exact final PR CI
-and review threads. Verify actual macos-26 build and downstream macos-15 execution
-before merge. Diagnose failures rather than retrying automatically. After accepted
-PR, merge and qualify a fresh main candidate; B6 helpers still bind failed ed4/4
-and cannot be reused unchanged. Preserve accepted earlier tests and audit.
+**Active gate:** all hosted qualification accepted. R44636045133/1 passed97checks;
+collector59112 and unchanged offline verifier terminated0. Verification SHA
+`bee22baba75d5f5cb3b6ede368305d12cd338094ef98029a7f7ac085300f2eeb`.
+Root and independent review checked17evidence+6source files+6attested subjects,
+ZIPs and actual crypto verification. All4hosts usable in Safari and Chrome.
+Soak1800.001s/3600samples/maxgap0.659s;11zero counters, stable daemonPID,
+advancing heartbeat,cleanup[]. Q/r-independent-review.json SHA31be09649084b82596e4e3bcc79c1bd7ef98c998139107e000c3871b60b79c1c.
+G44635969609/1 accepted87checks;30evidence+9source files; cleanup[].
+P44636842093/1 accepted13checks;14case+5source files and bothZIPs/16members;
+commit/realACK and preACK rollback/quiescence accepted, cleanup[].
+G verificationSHA109aa5d3/rootSHA37186162; P verificationSHA698ae73c.
+Independent P receiptSHAf3742600. All observers/collectors terminated0.
+G/P/R each submitted one POST only. R ordinary UTCNov19 budgetposition1/3.
+No accepted checks need repeating. Publisher44641903438/1 SUCCESS;
+dispatcher83671/observer54076/verifier13581 terminated0. Published .36 release452085648.
+Post-publication receiptSHA19207a7687192865273a98e436945ae284f1285c91757a3a5d33b19d7c97b36a
+passed109checks,12assets/3actualcrypto verifications. Root rehashed22local+4external
+files. Same6candidatepayloads; previous35assets retained, title archived only.
+No application payload downloaded/executed locally. Independent publication review
+CLEAR; receiptSHA59b3d685bd6ec941411f99e64d0d71173542c50197bdb87ebf726ff3a98fa9af.
+Do not repeat publication or accepted qualification.
 
-**Open gates:** final PR/main candidate, native G, packaged P, readiness R,
-same-byte publication, public update/rollback, installed Mac/browser validation.
-Published .35 remains immutable. Its public Cancel path runs OLD35 and cannot
-prove .36 as the initiating app. Historical receipt details and limitations are
-in [the release ledger](RELEASES.md#ci-capacity-recovery-and-build-image-follow-up).
+**Main accepted:** CI44633339140/1 and dependency-audit44633339135/1 SUCCESS.
+All12common consumers plus Windows and all4audit jobs passed.
+Watcher57048 and metadata collector61146 terminated0; do not repeat.
+Candidate artifact14583416096,455135182bytes, expires2026-12-03T23:07:28Z;
+manifest `e4d4ed65c7c4bf78036ff53afc507d2e414f52cf4a29a596273f241e2361a568`.
+Watcher SHA `f4e36d565a1cfeac6e9df3e5d4d504738407ad2c08a015f97d7f9efbf130e8ae`;
+candidate receipt SHA `6e5c40ed7e32a5df89b43c5b035280fc56132a3789fd2d25a63b8af18fb8fab3`.
+Root rehashed31evidence files. This is metadata/notification acceptance;
+local payload authentication remainsfalse. Hosted G/R authenticate actualbytes.
 
-**Mac boundary:** no local native tests/builds, app payload downloads, or changes
-to apps, services, network, accounts, external Geph or learning. Installed
-validation requires a fresh user-approved window. No paid service/repository
-transfer or further ed4 rerun has been performed.
+**Audit accepted:** `M/audit-report/verification.json` binds actual main source,
+app/Geph uploads and canonical reports; blocking0. Root checked25evidence and
+120exact Git source files. Compatibility projection `audit-evidence.json` SHA
+`eede6aeb4138925514b36e11a94775c7ff73a7f6fb24c2761efc5798fc9b12d6`
+is independently/root accepted,30file+3parent closure, flat copies byte-identical.
+Primary verification SHA `ef0e9f1397c534ea705a01d4a531a310a8bbe948da736cf6ee81683df9a8dde9`.
+App raw OSV independent recomputation is not claimed; Geph recomputation passed.
+Chromium integrity-only review expiresDec3; Geph source reviewDec10.
+
+**Next action:** deliver the narrow public36 observer PR, then bind its actual merge
+SHA to guarded public commit helpers. Four-file observer adaptation is prepared:
+new pair/menu/workflow and focused test extension, frozen product sourcea598.
+65focused puretests PASS,5historical-only skips,actionlint PASS; root verified
+both actual12asset inventories/configs and8exact sharedhelpers. Independent review
+CLEAR, no findings;13remaining pairfunctions equivalent/menu VERSION-only. Prep M/public36-preparation/preparation.json SHAc027cc927478ade13243f061c413d36c40910b8a6423b6c8171b4375f9769bea.
+No public36run yet. Agent github_recheck_guard prepares private M/public-update36/commit
+helpers; future observer/PR/run IDs remain unbound/fail-before-effects. PR evidence
+will live in M/public-update36/pr. Historical public35 files remain unchanged.
+Do not rebuild/repeat candidate G/P/R; observer merge source is separate froma598.
+Initial public36commit requires zero priorworkflow36runs; rollback only after
+acceptedcommit. Discovery stays anonymous; no feed/token substitution.
+Publication receipts under M/publication are final; never overwrite/repeat them.
+Deferred GetMac ci.yml and its RELEASES runbook stay local. Stage RELEASES without
+the deferred block while preserving working bytes; only the6intended observer/docs
+files belong in this PR. No workstation installation authorized by hosted gates.
+
+**Reusable PR result:** CI44567315717/3 SUCCESS; actual build/browser/7native
+Stop-Quit cases and4authorizations verified,cleanup[]. Evidence under
+`output/continuation-20261120/github-recheck/build-retry`; root rehashed12new+
+62reused files. Product/Windows reused attempt1,Chromium/checks attempt2.
+Observer43215/collector84099 terminal0. No repeat required.
+
+**Deferred GetMac:** eligibility confirmed, login declined, OAuth tab closed.
+No account connection/payment/repository transfer/variable activation.
+The reviewed opt-in workflow remains local/uncommitted alongside CURRENT_STATE
+and RELEASES; do not accidentally publish it. Main source checks read committed
+Git objects, never this dirty ci.yml. Preparation:
+`output/continuation-20261120/alternative-runner`.
+
+**Open gates:** ordinary public update and
+rollback, installed Mac/browser validation. Published .36 accepted; .35 assets preserved; OLD35
+candidate13793810157 expiresNov24. Fresh user-approved window is required for
+workstation validation. No local native tests/builds, app payload downloads,
+apps/services/network/account/external-Geph/learning changes occurred.
 
 ## Historical checkpoint — 2026-11-10 (superseded)
 

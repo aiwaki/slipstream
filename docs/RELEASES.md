@@ -177,6 +177,97 @@ macos-26 runner in CI44566206018/1; this observation alone is not completed
 build or release qualification. The docs-only follow-up compacts the checkpoint
 without changing the reviewed workflow or invalidating its focused source tests.
 
+The user requested a fresh GitHub capacity check instead of signing into GetMac.
+After source/base and terminal-run checks, one targeted Chromium retry produced
+CI44567315717/2: job135932266434 actually ran on macos-15 runner1000014907 at
+22:32:26–22:33:56Z on November19. Its eight steps and semantic smoke passed;
+checkout95fcd5ae753882dbe33838ba9e73786f5e83e21e has PR head521e0b0's treeacc258.
+The smoke reported no errors, respected time/memory budgets and completed cleanup.
+Evidence is under `output/continuation-20261120/github-recheck/chromium-success`;
+receipt SHA79ca04a6aaaee267f8979455c0c1fbcfd0e9926c47f687d8e8f00b639e8a6b86.
+Product/Windows results were inherited from attempt1, not reexecuted. The aggregate
+attempt2 cancellation also inherited the old build cancellation; the newly run
+`checks` job passed. This is PR Chromium evidence, not candidate admission.
+A separately guarded build-and-dependents retry is recorded in CURRENT_STATE.md;
+no account connection, paid runner, release or workstation transaction was used.
+
+The single subsequent build retry CI44567315717/3 completed SUCCESS. Build135934906288
+ran on macos26 runner1000014909; packaged-browser135939810916 and native lifecycle
+135939811034 ran on macos15 runners1000014911/1000014910. Exact checkout95fcd5ae
+and treeacc258 were established from all three new logs. The native report's
+upload ID/name/size/digest and exact ZIP were checked before accepting seven
+Stop/Quit cases, four completed authorizations and empty cleanup errors. The
+collector retains attempt1/2 identities for previously successful jobs rather
+than relabeling them as new execution. Evidence is in
+`output/continuation-20261120/github-recheck/build-retry`; `ci-evidence.json` SHA
+067cf3d8ce2fbb9d1f5a6d2afd7ba8fe316f0b4b5f6f97a09108e73578d6f244. Root verified
+12 new and 62 reused evidence files; before merge, PR485 was OPEN/CLEAN
+with all applicable checks green. Main-only signing/assembly/attestation/notification jobs were
+correctly skipped on this PR; PR evidence alone did not admit a main candidate.
+
+Before collection, review corrected one overly strict inherited report check:
+only the root-lock scenario requires a new administrator submission; later
+operations may legitimately complete with no new prompt. Six focused pure tests
+using the actual authorization waiter covered both valid paths and negative
+controls. Seven-case, exact-source and cleanup requirements were preserved.
+The correction and review are private evidence helpers, not product changes.
+
+PR485 was then merged through its expected head to main
+`a598fe8e7d4954f0b0892e9af2d3960c00b018a4`, retaining treeacc258. Automatic
+CI44633339140/1 and audit44633339135/1 passed without retries. All main consumers,
+including notification delivery/removal, passed. Metadata evidence under
+`output/continuation-20261120/preview36-main` binds candidate14583416096 to manifest
+`e4d4ed65c7c4bf78036ff53afc507d2e414f52cf4a29a596273f241e2361a568`.
+Root rehashed31metadata/report files; this does not claim local app payload execution.
+Fresh app and full Geph reports have zero blocking findings; their canonical
+verification and actual upload bindings were checked separately. The historical
+r5 producer remains bound to its original source, with unchanged vendored bytes.
+
+[Native root G44635969609/1](https://github.com/aiwaki/slipstream/actions/runs/44635969609)
+passed87checks for the exact OLD35/NEW36 pair. Commit reaches committed/commit/seq2;
+crash-before-commit reaches aborted/abort/seq1 and restoresOLD. Both cases have
+advancing heartbeat evidence and empty cleanup errors. Verification SHA
+`109aa5d3fa9d74856b4c9644c6a21fd7c97fa8c78167443bba685fc3826ed938`;
+root acceptance SHA`3718616284ca2d62a590e64e4a665dd04679ee8ee10344508534277644a935a6`.
+Root and independent review checked30evidence and9source files. P/R and publication
+were subsequently accepted as recorded below; G alone does not qualify the public
+feed, app ACK, user workstation, arbitrary sites or sustained media.
+
+
+## Preview .36 qualification accepted — 2026-11-20
+
+Exact source `a598fe8e7d4954f0b0892e9af2d3960c00b018a4`, candidate manifest
+`e4d4ed65c7c4bf78036ff53afc507d2e414f52cf4a29a596273f241e2361a568`:
+G44635969609/1 (87checks), P44636842093/1 (13checks), R44636045133/1 (97checks)
+accepted by canonical report checks and independent evidence review.
+R tested four hosts in Safari and Chrome and observed 1800.001 seconds with
+3600samples, stable daemon PID, advancing heartbeat, eleven zero counters and
+no cleanup failures. This does not establish installed-user-Mac or arbitrary-site
+behavior. Receipts and independent reviews are under
+`output/continuation-20261120/preview36-main/qualification`.
+[Publisher44641903438/1](https://github.com/aiwaki/slipstream/actions/runs/44641903438)
+then published [preview.36](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.36),
+release452085648. The same six candidate payloads were promoted without a rebuild.
+Post-publication verification passed109checks: all12remote asset sizes/digests,
+three downloaded small JSON assets with actual hosted-source crypto verification,
+exact tag/source and preservation of all12previous .35assets. The previous .35
+release was only renamed as archived. Root rehashed22local and4external evidence
+files; receiptSHA19207a7687192865273a98e436945ae284f1285c91757a3a5d33b19d7c97b36a
+is under `preview36-main/publication/publication-verification.json`.
+No application archive was downloaded or executed on the user's Mac. Ordinary
+public .35→.36 update/rollback and installed workstation behavior remain unqualified.
+Both root READMEs already link to the version-neutral Releases page; no version
+churn is needed there.
+
+The pair-specific public36 observer pins the actual `.35` and `.36` release
+inventories and G44635969609/1. It reuses qualified sourcea598 for all shared
+helpers and requires identical executing helper bytes; the historical public35
+diagnostic exception is not carried forward. The observer source will be a later
+commit, distinct from the frozen product source. Commit (Cancel then Install)
+and pre-ACK rollback require separate authenticated successful reports. Cancel
+before this update executes OLD .35 and cannot qualify the typed cancellation
+behavior introduced in .36. Preparing the observer is not a live update result.
+
 ## Unreleased dependency maintenance — 2026-11-19
 
 PR480 adopts Chromium158.0.8127.36 after the exact artifact/runtime review in
@@ -1244,10 +1335,10 @@ Public Cancel, commit and pre-ACK rollback are now verified for `.33 → .34`. T
   rotation. A dispatch still queued when the UTC broker day changes fails the
   new-day preflight and must be dispatched fresh after the reset.
 - A manual `build-app` run creates the next explicitly validated preview only
-  from `main`; the accepted tag is exactly `v0.1.9-preview.35`, with
-  `VERSION` and `preview_sequence=35` matching that version. The historical
+  from `main`; the accepted tag is exactly `v0.1.9-preview.36`, with
+  `VERSION` and `preview_sequence=36` matching that version. The historical
   `release_source_commit` repair override remains restricted to the pinned
-  `.23` source and is rejected for `.35`; the new preview requires its own
+  `.23` source and is rejected for `.36`; the new preview requires its own
   exact-source candidate and qualification evidence.
   A draft, tag-only collision or mismatched published
   release with that exact tag name fails closed. The sole exception is an exact
