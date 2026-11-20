@@ -804,7 +804,7 @@ def test_public_preparation_downloads_both_tags_and_keeps_candidate_subsets_only
     assert all("actions/artifacts" not in " ".join(c) and "verify_release_artifacts.py" not in " ".join(c) for c in commands)
 
 
-@pytest.mark.parametrize("sequence", ("32", "33", "34", "35"))
+@pytest.mark.parametrize("sequence", ("32", "33", "34", "35", "36"))
 @pytest.mark.parametrize("mode", ("commit", "kill-successor-before-ack"))
 def test_public_workflow_pins_are_current_dispatch_only_public_assets_and_no_account_gate(sequence, mode):
     import importlib
@@ -946,7 +946,7 @@ def test_validator_diagnostics_cannot_be_enabled_for_an_unrelated_command(tmp_pa
                                     public=tmp_path, kind="publication")
 
 
-@pytest.fixture(params=("33", "34", "35"))
+@pytest.fixture(params=("33", "34", "35", "36"))
 def preview33_modules(monkeypatch, request):
     import importlib
     next_driver = importlib.import_module(f"public_update_preview{request.param}_pair_smoke")
@@ -1171,11 +1171,14 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
         "34": {"source_commit": "a0a60e080cc97214cebd7491f4ea5d56dff66e0e", "run_id": 41634434348, "run_attempt": 1,
                "candidate_manifest_sha256": "e71e6ea85e821c836fdd363af1989d4cac237a47586dd45c1f7a78dcc09f9deb"},
         "35": {"source_commit": "5a3e64b534affc865826fbd20ac67f1af328629e", "run_id": 42874103966, "run_attempt": 2,
-               "candidate_manifest_sha256": "65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d"}}
+               "candidate_manifest_sha256": "65748e547a3f36abaf728fa310a41e83e53a743daf708755028d39f8fb18014d"},
+        "36": {"source_commit": "a598fe8e7d4954f0b0892e9af2d3960c00b018a4", "run_id": 44633339140, "run_attempt": 1,
+               "candidate_manifest_sha256": "e4d4ed65c7c4bf78036ff53afc507d2e414f52cf4a29a596273f241e2361a568"}}
     sequence = menu.VERSION.rsplit(".", 1)[1]
     assert driver.PAIR == {"schema_version": 1, "old": candidates[str(int(sequence)-1)], "new": candidates[sequence]}
     assert driver.NEW_SOURCE == driver.PAIR["new"]["source_commit"]
-    assert driver.ROOT_GATE == {"33": (41303686569, 1), "34": (41808901780, 1), "35": (42887546582, 1)}[sequence]
+    assert driver.ROOT_GATE == {"33": (41303686569, 1), "34": (41808901780, 1),
+                               "35": (42887546582, 1), "36": (44635969609, 1)}[sequence]
     assert driver.PublicMenu is menu.PublicMenu and driver.VERSION == menu.VERSION
     expected = {
         "old": (429722639, "Slipstream 0.1.9-preview.32 (архивная)",
@@ -1200,6 +1203,14 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
             "new": (440846924, "Slipstream 0.1.9-preview.35",
                     "de676b3cdc73a466d1564373d5d41469af37d6dbe206fd7597d06ea026f6be2a",
                     "3ea2a8783bad0c2bf23ad78a8cf448a4ae6b94c6f9f0bc9b3bdd875df51ba47b")}
+    if sequence == "36":
+        expected = {
+            "old": (440846924, "Slipstream 0.1.9-preview.35 (архивная)",
+                    "de676b3cdc73a466d1564373d5d41469af37d6dbe206fd7597d06ea026f6be2a",
+                    "3ea2a8783bad0c2bf23ad78a8cf448a4ae6b94c6f9f0bc9b3bdd875df51ba47b"),
+            "new": (452085648, "Slipstream 0.1.9-preview.36",
+                    "3d60591823c4bc01aad1b5e53471c31fbf59ef67fb03d69c7287f6935f53d58e",
+                    "fc416ef8da5f1f496d8aaf54bd09f67397e123026c52c298ee422650194f3d0c")}
     for side, (release_id, title, config_sha, inventory_sha) in expected.items():
         spec = driver.PUBLIC_RELEASES[side]
         assert (spec["release_id"], spec["release_name"], spec["tauri_config_sha256"]) == (release_id, title, config_sha)
@@ -1208,7 +1219,7 @@ def test_preview33_pins_match_the_published_pair(preview33_modules):
         assert hashlib.sha256(inventory).hexdigest() == inventory_sha
 
 
-@pytest.mark.parametrize("target", ["0.1.9-preview.35", "0.1.9-preview.34", "0.1.9-preview.33", "0.1.9-preview.32"])
+@pytest.mark.parametrize("target", ["0.1.9-preview.36", "0.1.9-preview.35", "0.1.9-preview.34", "0.1.9-preview.33", "0.1.9-preview.32"])
 def test_preview33_menu_accepts_only_its_actual_successor(preview33_modules, tmp_path, target):
     process = original(tmp_path)
     executable = tmp_path / "Contents/MacOS/slipstream"
@@ -1382,10 +1393,61 @@ def test_preview35_production_pin_refuses_current_helper_before_public_preparati
     assert frozen.REVIEWED_DIAGNOSTIC_HELPERS == {"stop_quit_ui_smoke.py": pinned}
 
 
-@pytest.mark.parametrize("entry", ["main", "prepare_main"])
-def test_preview35_pending_pins_refuse_before_any_action(monkeypatch, entry):
+@pytest.mark.parametrize("drift", [None, "qualified", "harness", "injected_legacy_allowance"])
+def test_preview36_requires_exact_qualified_diagnostic_helper(tmp_path, monkeypatch, drift):
     import importlib
-    pending = importlib.import_module("public_update_preview35_pair_smoke")
+    current = importlib.import_module("public_update_preview36_pair_smoke")
+    assert not hasattr(current, "REVIEWED_DIAGNOSTIC_HELPERS")
+    qualified = tmp_path / "qualified-source"
+    (qualified / "scripts").mkdir(parents=True)
+    original_sources = {}
+    for name in current.REUSED:
+        relative = "scripts/" + name
+        original_sources[relative] = (REPO / relative).read_bytes()
+        (qualified / relative).write_bytes(original_sources[relative])
+    diagnostic = "scripts/stop_quit_ui_smoke.py"
+    if drift == "qualified":
+        (qualified / diagnostic).write_bytes(b"unreviewed helper revision\n")
+    if drift in ("harness", "injected_legacy_allowance"):
+        actual_digest = current.digest
+        monkeypatch.setattr(current, "digest", lambda path: "0" * 64
+                            if path == REPO / diagnostic else actual_digest(path))
+    if drift == "injected_legacy_allowance":
+        monkeypatch.setattr(current, "REVIEWED_DIAGNOSTIC_HELPERS",
+                            {"stop_quit_ui_smoke.py": "0" * 64}, raising=False)
+    harness_sha = "a" * 40
+    for key, value in {"GITHUB_REPOSITORY": "aiwaki/slipstream", "GITHUB_EVENT_NAME": "workflow_dispatch",
+                       "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": harness_sha}.items():
+        monkeypatch.setenv(key, value)
+    def fake_git(command):
+        assert command[:2] == ["/usr/bin/git", "-C"]
+        directory, args = Path(command[2]), command[3:]
+        assert directory in (qualified, REPO)
+        if args == ["rev-parse", "HEAD"]:
+            data = (current.NEW_SOURCE if directory == qualified else harness_sha).encode() + b"\n"
+        elif args == ["status", "--porcelain", "--untracked-files=no"]:
+            data = b""
+        else:
+            assert len(args) == 2 and args[0] == "show"
+            ref, relative = args[1].split(":", 1)
+            assert ref == (current.NEW_SOURCE if directory == qualified else harness_sha)
+            data = original_sources[relative] if directory == qualified else (REPO / relative).read_bytes()
+        return SimpleNamespace(stdout=data)
+    backend = SimpleNamespace(args=SimpleNamespace(repo=qualified), run=fake_git)
+    if drift:
+        with pytest.raises(Refused, match="shared qualification helper differs from qualified source: stop_quit_ui_smoke.py"):
+            current.source_binding(backend)
+    else:
+        proof = current.source_binding(backend)
+        assert all(proof["sha256"][relative] == hashlib.sha256(content).hexdigest()
+                   for relative, content in original_sources.items())
+
+
+@pytest.mark.parametrize("sequence", ("35", "36"))
+@pytest.mark.parametrize("entry", ["main", "prepare_main"])
+def test_published_pair_pending_pins_refuse_before_any_action(monkeypatch, entry, sequence):
+    import importlib
+    pending = importlib.import_module(f"public_update_preview{sequence}_pair_smoke")
     monkeypatch.setattr(pending, "ROOT_GATE", ("PENDING_ACCEPTED_G_RUN_ID", 1))
     monkeypatch.setattr(pending, "parse_args", lambda *_a: pytest.fail("CLI reached with pending pins"))
     monkeypatch.setattr(pending, "guard", lambda: pytest.fail("native admission reached with pending pins"))
