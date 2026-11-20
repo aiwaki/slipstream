@@ -3,13 +3,16 @@
 ## Current continuation — 2026-11-20, preview .36
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/preview36-qualification`, HEAD/main
-`a598fe8e7d4954f0b0892e9af2d3960c00b018a4`, tree
-`acc25810dcbf1363bed63fe5b22bf3b5146b0f4d`.
-PR485 merged through expected head521e; accepted PR/main trees match.
-Only packaged building moved to macos-26; native checks stay macos-15.
-The branch switch preserved all uncommitted changes. Do not replace this checkout
-with the older dirty Developer locator.
+Branch `codex/public36-feed-reset-wait`, HEAD actual observer merge
+`e1f1a6ea5f51dd48998fa7cb27b19e41256c1345` (PR486).
+Frozen published product remains `a598fe8e7d4954f0b0892e9af2d3960c00b018a4`,
+product tree `acc25810dcbf1363bed63fe5b22bf3b5146b0f4d`.
+Observer tree `c47fc47a08f15caf6418b8148f5dbb9a1c1d947c` equals actual tested
+PR merge `ad4606db44a1b34807e3aa871b4be0f381172217` and PR head7bf5832b.
+All dirty GetMac/docs bytes were preserved at the branch switch; snapshots in
+M/public-update36/pre-merge-switch. Public commit44711034559/1 failed before OLD launch: anonymous feed403/remaining0.
+Observer55009 and collector79100 terminated0; no retry has been started.
+Do not replace this checkout with the older dirty Developer locator.
 
 M=`output/continuation-20261120/preview36-main`; Q=`M/qualification`.
 
@@ -54,22 +57,65 @@ Primary verification SHA `ef0e9f1397c534ea705a01d4a531a310a8bbe948da736cf6ee8168
 App raw OSV independent recomputation is not claimed; Geph recomputation passed.
 Chromium integrity-only review expiresDec3; Geph source reviewDec10.
 
-**Next action:** deliver the narrow public36 observer PR, then bind its actual merge
-SHA to guarded public commit helpers. Four-file observer adaptation is prepared:
-new pair/menu/workflow and focused test extension, frozen product sourcea598.
-65focused puretests PASS,5historical-only skips,actionlint PASS; root verified
-both actual12asset inventories/configs and8exact sharedhelpers. Independent review
-CLEAR, no findings;13remaining pairfunctions equivalent/menu VERSION-only. Prep M/public36-preparation/preparation.json SHAc027cc927478ade13243f061c413d36c40910b8a6423b6c8171b4375f9769bea.
-No public36run yet. Agent github_recheck_guard prepares private M/public-update36/commit
-helpers; future observer/PR/run IDs remain unbound/fail-before-effects. PR evidence
-will live in M/public-update36/pr. Historical public35 files remain unchanged.
-Do not rebuild/repeat candidate G/P/R; observer merge source is separate froma598.
-Initial public36commit requires zero priorworkflow36runs; rollback only after
-acceptedcommit. Discovery stays anonymous; no feed/token substitution.
-Publication receipts under M/publication are final; never overwrite/repeat them.
-Deferred GetMac ci.yml and its RELEASES runbook stay local. Stage RELEASES without
-the deferred block while preserving working bytes; only the6intended observer/docs
-files belong in this PR. No workstation installation authorized by hosted gates.
+**In progress:** observer-only reset-wait repair on this branch. Preserve published
+product a598 and all accepted gates. The previous goal turn made progress:
+PR486 merged and its real public attempt produced authenticated external-failure
+evidence; there is no live public run to resume. Live reconciliation confirms
+main=e1f1a6ea, exactly one terminal failed public36 run, main audit44710620439
+and automatic main CI44710620260 both successful.
+Implemented schema2 with max2anonymous samples only for explicit403/429+remaining0,
+valid fresh Date/reset/RetryAfter and at most60s wait on the same runner before
+OLD installation. Total75s/child80s; retain both responses. Focused pair/reset tests
+passed351 with15 existing skips in3.43s; no live network/native calls. Independent
+checker has10 passing focused methods; only its prelaunch admission/window ASTs
+changed, while payload/transaction/cleanup checks remain identical. NEW private
+checker is U/reset-wait/offline-verifier; observer/menu/workflow pins are unbound
+and both public run slots remain PENDING until the new reviewed source is merged.
+Do not mutate the failed commit's frozen verifier/pins/evidence or dispatch again
+before new source, tests, review and matching checker/source pins are accepted.
+No change to actual published app's API dependency is claimed by this observer fix.
+
+**Next action:** public commit is NOT accepted. Existing44711034559/1 failed
+at prelaunch anonymous feed admission before OLD launch, HTTP403/remaining0.
+One request at2026-11-20T09:30:38Z; that egress reset was09:30:46UTC. Reset time
+passing does not establish quota for another CI-IP. Do not retry automatically,
+rerun the old attempt, inject a token or substitute feed. Reconcile this concrete
+external failure before preparing any separately admitted next attempt.
+U=`M/public-update36`. Observer55009 and collector79100 terminated0. Collector
+U/commit/artifact-authentication.json authenticates failed report artifact14616623753,
+109616bytes, SHAc923df14014d6bd7bf403f38d46f02c33a90846dd6aaa55e9f8233d01970b31c.
+Root checked ZIP/extracted member hashes, metadata and uploader log. Result has
+identitynull,transaction_observedfalse,cleanup[]. No success context exists;
+unchanged success verifier was deliberately not invoked. This is external refusal,
+not an observed installation failure or accepted public update. Root failure receipt
+U/commit-failure-root-review.json SHA f0dd0afe0f3c72fea071ffe44a70827aac7a51e20a016ec0122acbd926edfda6 records the exact boundary.
+Independent review confirms38retained files, exact upload identity and two source
+files proving feed admission precedes install_old/launch. Receipt
+U/commit-failure-independent-review.json SHA7f0250b1e0e53ebc914df6a40f50190d9a12ac6bb8d858a49c30be7038a77bd8.
+Dispatcher13035 completed0 with one POST; discovery22285 proved one exactrun.
+Observer e1f1a6ea; created2026-11-20T09:28:36Z. Source/run literal-only binding
+independently CLEAR (run review230f193d). No native/user-Mac effect occurred.
+Rollback remains PENDING until a real accepted public Commit+Cancel.
+PR486 CI44708434135/1 and audit44708433978/1 completed SUCCESS; observer3709
+terminated0. CI8successful/5legitimate skips; audit4successful. Terminal receipt
+U/pr/watcher-receipt.json SHA56ba20192ad8dd2636473c4c70b00a4598689917836036246837e92fe5b6d716.
+Root rehashed18retained files and exact six-file checkout proof; independent
+review CLEAR,cdf66fe5af0bfd0ef741ace89d433a23411d1bb2f32b41abc8a9c7593a192cc8.
+Actual CI/audit checkout IDs136193806756/136193897797; proof SHA234e6fce17758029d290fd7c2adc80e3b74f80f7bad4b1d2fecdca909c90c7d9.
+PR merged with expected head; actual tree equal verified by fetched Git objects.
+U/pr486-merged.json SHA933c9c02f3181c614530f0d6d74aedaa14bf33c95429280101fb1550def20315.
+Private source binder executed once: U/commit/source-binding/receipt.json
+SHA2f489d18f93a219460611b8bc1dc33d544ce72a07357440a445b416c83817039.
+Only actual observer/PR/proof constants and exact source hashes changed;
+semantic functions and checker unchanged. Pins SHA7609a577bd7f27257ce7cd7ebeb62d0f8fcd0169e805828ef86148d2b835a0e5.
+The source-binding snapshot retains pre-dispatch PENDING pins; current commit pins
+bind actual44711034559/1. Rollback remains PENDING. Preflight proved zero priorruns.
+Source helper review receipt U/commit-preparation-review.json SHA2e7074e79d4acbfdb43f79acba4feba1026f4cc4c300aa8fbb62debe452e40d8.
+65focused tests and actionlint reused; no unchanged suites repeated.
+The one commit attempt is now authenticated failed evidence. No rollback dispatch
+is permitted from this result. Anonymousfeed remains unchanged.
+Do not rebuild/repeat candidate G/P/R or publication. No workstation installation
+is authorized by hosted gates; GetMac stays inactive and uncommitted.
 
 **Reusable PR result:** CI44567315717/3 SUCCESS; actual build/browser/7native
 Stop-Quit cases and4authorizations verified,cleanup[]. Evidence under

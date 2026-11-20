@@ -262,11 +262,43 @@ churn is needed there.
 The pair-specific public36 observer pins the actual `.35` and `.36` release
 inventories and G44635969609/1. It reuses qualified sourcea598 for all shared
 helpers and requires identical executing helper bytes; the historical public35
-diagnostic exception is not carried forward. The observer source will be a later
+diagnostic exception is not carried forward. The observer source is a later
 commit, distinct from the frozen product source. Commit (Cancel then Install)
 and pre-ACK rollback require separate authenticated successful reports. Cancel
 before this update executes OLD .35 and cannot qualify the typed cancellation
 behavior introduced in .36. Preparing the observer is not a live update result.
+
+PR486 merged as `e1f1a6ea5f51dd48998fa7cb27b19e41256c1345` after
+CI44708434135/1 and audit44708433978/1 passed. Its tree matches the actual
+checkout tested by both runs. The first public commit attempt,
+[44711034559/1](https://github.com/aiwaki/slipstream/actions/runs/44711034559),
+authenticated both published bundles but stopped before launching OLD: its one
+anonymous feed request returned HTTP403 with remaining0 at09:30:38UTC on
+November20. That shared CI egress reported reset09:30:46UTC; this timestamp
+does not establish available quota for a later runner.
+
+The authenticated report contains no transaction, no app identity and no cleanup
+errors. Its31members and uploader/metadata binding were verified; artifact14616623753,
+109616bytes, SHA`c923df14014d6bd7bf403f38d46f02c33a90846dd6aaa55e9f8233d01970b31c`.
+Evidence is in `preview36-main/public-update36/commit`. No success context or
+public-update acceptance was created, and no automatic retry or rollback was
+started. The published preview and previously accepted candidate gates remain valid.
+
+The follow-up changes only the new public observer's environment preparation.
+It preserves the first response and permits one additional anonymous sample on
+that same runner after a valid nearby reset, with at most60seconds of waiting.
+Both samples, wait timing and final positive quota must pass a separately pinned
+schema2 checker before a public update result can be accepted. Generic403,
+network failures and a second refusal do not authorize more attempts. Historical
+one-sample observers and the failed report above are unchanged. No new hosted
+attempt has yet qualified this observer.
+
+Source inspection confirms that the published `.35` and `.36` use the same
+anonymous release-list discovery and return an error on non-200 responses, with
+no alternate feed. An offer already in memory can still use its immutable
+appcast for Install, but that offer is not restored after restarting the app.
+The observer's reset wait therefore does not establish product-level recovery
+from rate limiting; a future product repair needs its own transport/UI tests.
 
 ## Unreleased dependency maintenance — 2026-11-19
 
