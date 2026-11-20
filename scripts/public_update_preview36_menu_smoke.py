@@ -8,8 +8,10 @@ import os
 import re
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
+import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -174,6 +176,66 @@ class _FeedProbeOpener:
                         ("date", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset")}
 
 
+class _FeedProbeDeadline(TimeoutError):
+    pass
+
+
+class _FeedDeadlineUnavailable(RuntimeError):
+    pass
+
+
+def _timed_feed_probe(opener, deadline, *, not_after_monotonic=None):
+    """Interrupt even a trickling response read; never take over another timer."""
+    def refused(error):
+        class RefusingOpener:
+            def open(self, *_args, **_kwargs):
+                raise error
+        return public_feed_admission(opener=RefusingOpener()), True
+
+    required = ("SIGALRM", "ITIMER_REAL", "getitimer", "setitimer", "getsignal", "signal")
+    if (threading.current_thread() is not threading.main_thread()
+            or not all(hasattr(signal, name) for name in required)):
+        return refused(_FeedDeadlineUnavailable())
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or remaining <= 0:
+        return refused(_FeedProbeDeadline())
+    try:
+        if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+            return refused(_FeedDeadlineUnavailable())
+        previous = signal.getsignal(signal.SIGALRM)
+    except (OSError, ValueError):
+        return refused(_FeedDeadlineUnavailable())
+    expired = False
+
+    def interrupt(_signum, _frame):
+        nonlocal expired
+        expired = True
+        raise _FeedProbeDeadline()
+
+    installed = False
+    try:
+        signal.signal(signal.SIGALRM, interrupt)
+        installed = True
+        remaining = deadline - time.monotonic()
+        if not math.isfinite(remaining) or remaining <= 0:
+            return refused(_FeedProbeDeadline())
+        signal.setitimer(signal.ITIMER_REAL, min(10.0, remaining))
+        if not_after_monotonic is not None and time.monotonic() > not_after_monotonic:
+            return refused(_FeedProbeDeadline())
+        report = public_feed_admission(opener=opener)
+        return report, expired
+    except _FeedProbeDeadline as error:
+        return refused(error)
+    except (OSError, ValueError):
+        return refused(_FeedDeadlineUnavailable())
+    finally:
+        if installed:
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
+
+
 def _near_reset_target(sample, headers):
     if ("error_type" in sample or sample.get("status") not in (403, 429)
             or sample.get("classification") != "external_rate_limited"
@@ -234,9 +296,12 @@ def public_feed_admission_with_reset_wait(*, opener=None):
             result.update(admitted=False, classification="external_unknown")
         return result
 
-    first = public_feed_admission(opener=recorder)
+    first, deadline_refused = _timed_feed_probe(recorder, deadline)
     result["samples"].append(first)
     result.update(admitted=first["admitted"], classification=first["classification"])
+    if deadline_refused:
+        result.update(admitted=False, classification="external_unknown")
+        return finish()
     if first["admitted"] or not _sample_clock_valid(first) or time.monotonic() >= deadline:
         return finish()
     target = _near_reset_target(first, recorder.headers)
@@ -275,14 +340,21 @@ def public_feed_admission_with_reset_wait(*, opener=None):
     if before_second + 10 > deadline:
         wait["refusal_reason"] = "overall_deadline"
         return finish()
+    if before_second - target_monotonic > 2:
+        wait["refusal_reason"] = "late_wake"
+        return finish()
     if (before_second < wait_finished or before_second_at < wait_finished_at
             or abs(before_second_at - started_at - (before_second - started)) > 1):
         wait["refusal_reason"] = "clock_changed"
         return finish()
     wait["completed"] = True
-    second = public_feed_admission(opener=recorder)
+    second, deadline_refused = _timed_feed_probe(recorder, deadline,
+                                               not_after_monotonic=target_monotonic + 2)
     result["samples"].append(second)
     result.update(admitted=second["admitted"], classification=second["classification"])
+    if (deadline_refused
+            or not target["target_unix"] <= second["started_at_unix"] <= target["target_unix"] + 3):
+        result.update(admitted=False, classification="external_unknown")
     return finish()
 
 

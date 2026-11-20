@@ -5,8 +5,11 @@ from email.utils import format_datetime
 import io
 import json
 from pathlib import Path
+import signal
 import subprocess
 import sys
+import time
+from types import SimpleNamespace
 import urllib.error
 
 import pytest
@@ -91,10 +94,40 @@ class Opener:
         return response
 
 
+class Timers:
+    SIGALRM = signal.SIGALRM
+    ITIMER_REAL = signal.ITIMER_REAL
+
+    def __init__(self):
+        self.handler = object()
+        self.timer = (0.0, 0.0)
+        self.arms = []
+
+    def getsignal(self, _signum):
+        return self.handler
+
+    def getitimer(self, _which):
+        return self.timer
+
+    def signal(self, _signum, handler):
+        previous, self.handler = self.handler, handler
+        return previous
+
+    def setitimer(self, _which, seconds, interval=0.0):
+        previous, self.timer = self.timer, (seconds, interval)
+        self.arms.append(seconds)
+        return previous
+
+    def fire(self):
+        self.timer = (0.0, 0.0)
+        self.handler(self.SIGALRM, None)
+
+
 @pytest.fixture
 def clock(monkeypatch):
     value = Clock()
     monkeypatch.setattr(menu, "time", value)
+    monkeypatch.setattr(menu, "signal", Timers())
     def forbidden(*_args, **_kwargs):
         pytest.fail("real transport/native execution forbidden")
     monkeypatch.setattr(menu.urllib.request, "build_opener", forbidden)
@@ -232,7 +265,8 @@ def test_late_wake_cannot_spend_reserved_second_sample_budget(clock):
     assert report["reset_wait"]["refusal_reason"] == "overall_deadline"
 
 
-@pytest.mark.parametrize("jump,wall,reason", [(70, 0, "overall_deadline"), (0, 2, "clock_changed")])
+@pytest.mark.parametrize("jump,wall,reason", [(70, 0, "overall_deadline"), (3, 0, "late_wake"),
+                                            (0, 2, "clock_changed")])
 def test_time_change_between_wake_validation_and_second_probe_refuses(clock, monkeypatch, jump, wall, reason):
     original = clock.monotonic
     reads_after_wake = 0
@@ -248,6 +282,37 @@ def test_time_change_between_wake_validation_and_second_probe_refuses(clock, mon
     report, opener = run(clock, [Response()])
     assert not report["admitted"] and len(opener.calls) == 1
     assert report["reset_wait"]["refusal_reason"] == reason
+
+
+def test_pause_during_second_timer_setup_refuses_before_another_http_request(clock, monkeypatch):
+    timers = menu.signal
+    previous = timers.handler
+    original = timers.setitimer
+    def setitimer(which, seconds, interval=0):
+        result = original(which, seconds, interval)
+        if seconds > 0 and clock.sleeps:
+            clock.advance(3)
+        return result
+    monkeypatch.setattr(timers, "setitimer", setitimer)
+    opener = Opener(clock, [Response()])
+    report = menu.public_feed_admission_with_reset_wait(opener=opener)
+    assert not report["admitted"] and report["classification"] == "external_unknown"
+    assert len(opener.calls) == 1 and len(report["samples"]) == 2
+    assert report["samples"][1]["error_type"] == "_FeedProbeDeadline"
+    assert timers.handler is previous and timers.timer == (0, 0)
+
+
+def test_observed_second_start_after_final_guard_cannot_admit(clock, monkeypatch):
+    original = menu.public_feed_admission
+    def sampled(**kwargs):
+        if clock.sleeps:
+            clock.advance(4)
+        return original(**kwargs)
+    monkeypatch.setattr(menu, "public_feed_admission", sampled)
+    report, opener = run(clock, [Response(), Response(200, date=EPOCH + 13)])
+    assert len(opener.calls) == 2 and report["samples"][1]["admitted"] is True
+    assert report["samples"][1]["started_at_unix"] > report["reset_wait"]["target_unix"] + 3
+    assert not report["admitted"] and report["classification"] == "external_unknown"
 
 
 def test_rate_limit_headers_then_body_transport_error_never_retry(clock):
@@ -273,3 +338,77 @@ def test_same_default_opener_and_transport_policy_for_both_calls(clock, monkeypa
     result = menu.public_feed_admission_with_reset_wait()
     assert result["admitted"] and len(builds) == 1 and len(opener.calls) == 2
     assert builds[0][0].proxies == {} and isinstance(builds[0][1], menu.NoRedirect)
+
+
+def test_probe_arms_ten_second_or_remaining_deadline_and_restores_timer(clock):
+    previous = menu.signal.handler
+    for remaining in (75, 3):
+        report, refused = menu._timed_feed_probe(Opener(clock, [Response(200)]), clock.monotonic() + remaining)
+        assert report["admitted"] and refused is False
+        assert menu.signal.arms[-2:] == [min(10, remaining), 0]
+        assert menu.signal.handler is previous and menu.signal.timer == (0, 0)
+
+
+@pytest.mark.parametrize("failure", ["active_timer", "interval_timer", "unsupported", "worker_thread"])
+def test_unavailable_deadline_guard_refuses_before_http_and_never_hijacks(clock, monkeypatch, failure):
+    timers = menu.signal
+    previous = timers.handler
+    if failure == "active_timer":
+        timers.timer = (3, 0)
+    elif failure == "interval_timer":
+        timers.timer = (0, 2)
+    elif failure == "unsupported":
+        monkeypatch.setattr(menu, "signal", SimpleNamespace())
+    else:
+        monkeypatch.setattr(menu.threading, "current_thread", lambda: object())
+    before = timers.timer
+    opener = Opener(clock, [Response(200)])
+    report = menu.public_feed_admission_with_reset_wait(opener=opener)
+    assert not report["admitted"] and not opener.calls and not clock.sleeps
+    assert report["samples"][0]["error_type"] == "_FeedDeadlineUnavailable"
+    assert timers.handler is previous and timers.timer == before and timers.arms == []
+
+
+def test_alarm_during_body_read_is_retained_and_never_admitted_or_retried(clock):
+    class InterruptedResponse(Response):
+        def read(self, _bound):
+            menu.signal.fire()
+    previous = menu.signal.handler
+    report, opener = run(clock, [InterruptedResponse(200)])
+    assert not report["admitted"] and len(opener.calls) == 1 and not clock.sleeps
+    assert report["samples"][0]["error_type"] == "_FeedProbeDeadline"
+    assert menu.signal.handler is previous and menu.signal.timer == (0, 0)
+
+
+def test_deadline_fired_after_sampler_sets_ready_cannot_admit(clock, monkeypatch):
+    original = menu.public_feed_admission
+    def sampled(**kwargs):
+        report = original(**kwargs)
+        try:
+            menu.signal.fire()
+        except menu._FeedProbeDeadline:
+            pass
+        return report
+    monkeypatch.setattr(menu, "public_feed_admission", sampled)
+    report, _ = run(clock, [Response(200)])
+    assert report["samples"][0]["admitted"] is True
+    assert not report["admitted"] and report["classification"] == "external_unknown"
+
+
+def test_real_deadline_interrupts_blocked_body_read_without_network():
+    if not hasattr(signal, "ITIMER_REAL") or signal.getitimer(signal.ITIMER_REAL) != (0, 0):
+        pytest.skip("requires an unused POSIX interval timer")
+    class BlockedResponse(Response):
+        def read(self, _bound):
+            time.sleep(5)
+            return b'[]'
+    class LocalOpener:
+        def open(self, *_args, **_kwargs):
+            return BlockedResponse(200)
+    previous = signal.getsignal(signal.SIGALRM)
+    started = time.monotonic()
+    report, refused = menu._timed_feed_probe(LocalOpener(), started + 0.05)
+    elapsed = time.monotonic() - started
+    assert refused and not report["admitted"] and report["error_type"] == "_FeedProbeDeadline"
+    assert 0.01 <= elapsed < 1, "a blocking read must be interrupted, not merely checked afterward"
+    assert signal.getsignal(signal.SIGALRM) is previous and signal.getitimer(signal.ITIMER_REAL) == (0, 0)

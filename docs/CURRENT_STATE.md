@@ -3,8 +3,9 @@
 ## Current continuation — 2026-11-20, preview .36
 
 Physical checkout: `/Users/aiwaki/.codex/worktrees/geph-route-continuity/slipstream-codebase-audit-20260905`.
-Branch `codex/public36-feed-reset-wait`, HEAD actual observer merge
-`e1f1a6ea5f51dd48998fa7cb27b19e41256c1345` (PR486).
+Branch `codex/public36-feed-reset-wait`, HEAD
+`c86f08599a61675ca949b0bac64b056e278f369b` (PR487), based on actual observer
+merge `e1f1a6ea5f51dd48998fa7cb27b19e41256c1345` (PR486).
 Frozen published product remains `a598fe8e7d4954f0b0892e9af2d3960c00b018a4`,
 product tree `acc25810dcbf1363bed63fe5b22bf3b5146b0f4d`.
 Observer tree `c47fc47a08f15caf6418b8148f5dbb9a1c1d947c` equals actual tested
@@ -57,23 +58,32 @@ Primary verification SHA `ef0e9f1397c534ea705a01d4a531a310a8bbe948da736cf6ee8168
 App raw OSV independent recomputation is not claimed; Geph recomputation passed.
 Chromium integrity-only review expiresDec3; Geph source reviewDec10.
 
-**In progress:** observer-only reset-wait repair on this branch. Preserve published
-product a598 and all accepted gates. The previous goal turn made progress:
-PR486 merged and its real public attempt produced authenticated external-failure
-evidence; there is no live public run to resume. Live reconciliation confirms
-main=e1f1a6ea, exactly one terminal failed public36 run, main audit44710620439
-and automatic main CI44710620260 both successful.
-Implemented schema2 with max2anonymous samples only for explicit403/429+remaining0,
-valid fresh Date/reset/RetryAfter and at most60s wait on the same runner before
-OLD installation. Total75s/child80s; retain both responses. Focused pair/reset tests
-passed351 with15 existing skips in3.43s; no live network/native calls. Independent
-checker has10 passing focused methods; only its prelaunch admission/window ASTs
-changed, while payload/transaction/cleanup checks remain identical. NEW private
-checker is U/reset-wait/offline-verifier; observer/menu/workflow pins are unbound
-and both public run slots remain PENDING until the new reviewed source is merged.
-Do not mutate the failed commit's frozen verifier/pins/evidence or dispatch again
-before new source, tests, review and matching checker/source pins are accepted.
-No change to actual published app's API dependency is claimed by this observer fix.
+**In progress:** PR487 source follow-up. Initial headc86 CI44713668357/1
+(8success/5expected skips) and audit44713668501/1 (4success) passed. Exact tested
+merge6793c63d20a739ec5db9f8d126dc9ab9c957ba10/tree dd67e16320d73435b8985ff8ccc4c2476a4d7cc2.
+Terminal receipt448b1e9f5193dc861cf552653826629a1d7ee58aed6956a678dbf808a224c422
+is archived under U/reset-wait/pr-c86f08599a61675ca949b0bac64b056e278f369b;
+watcher45086 terminated0. Merge was refused because review threads were unresolved;
+no merge or new public dispatch occurred.
+
+Two review findings were confirmed and repaired: socket inactivity timeout was not
+an overall read deadline; a scheduler pause could occur after the late-wake check.
+The source now uses an owned POSIX interval timer, rechecks the second-probe cutoff
+after timer setup and validates the observed start before admitting OLD. The
+original sampler and canonical date parser remain unchanged. The third finding
+requests broader HTTP parsing; this is intentionally outside the observer's
+canonical admission policy, now explicit in DECISIONS. No unsupported header can
+trigger a retry. Focused pair/reset baseline360passed/15existing skips; final reset
+suite46passed, including actual 0.05s interruption of a blocked local read and both
+late-start cases. Independent source review CLEAR; U/reset-wait/review-fix-tests.json.
+
+New schema2 checker includes the final observed-start bound; its predecessor proof
+and the failed first public attempt remain retained. U/reset-wait/attempt helpers
+remain unbound with both public run IDs PENDING. Refresh only literal source/check
+pins after fresh PR CI and actual merge; no rerun or source-discovery shortcut.
+The new attempt inventory must contain exactly failed44711034559/1 and no others.
+Published product a598 and all accepted G/P/R/publication gates are unchanged.
+This observer repair does not change product-level recovery from API rate limits.
 
 **Next action:** public commit is NOT accepted. Existing44711034559/1 failed
 at prelaunch anonymous feed admission before OLD launch, HTTP403/remaining0.

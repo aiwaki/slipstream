@@ -6,11 +6,18 @@ The new `.35 -> .36` observer may prepare its disposable runner with at most two
 anonymous samples of the unchanged public feed before installing or launching
 OLD. A second sample is permitted only after an explicit HTTP403/429 with zero
 remaining quota, complete valid quota headers, a fresh server Date and a reset
-whose wait target is no more than 60 seconds away. It must honor a valid Retry-After when present;
-malformed or duplicate values cannot authorize a retry. The target includes one
+whose wait target is no more than 60 seconds away. The observer deliberately
+accepts only canonical unsigned decimal Retry-After or IMF-fixdate HTTP dates,
+matching the observed GitHub response. Other HTTP date/number representations
+remain unsupported by this narrow admission policy, even if a general HTTP client
+could parse them. Unsupported, malformed or duplicate values cannot authorize a
+retry. The target includes one
 second after reset. One monotonic wait must reach that target without a clock
 discontinuity or excessive oversleep. Each sample is bounded to 10 seconds, the
-whole preparation to 75 seconds, and its subprocess to 80 seconds.
+whole preparation to 75 seconds, and its subprocess to 80 seconds. An owned POSIX
+interval timer interrupts blocking response reads; a socket inactivity timeout
+alone is insufficient. Unsupported platforms/threads or an already active timer
+refuse admission without taking over the caller's timer.
 
 Schema2 retains both original samples and the requested and observed wait. The
 offline checker must independently validate their order, timings and eligibility;
